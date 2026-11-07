@@ -2,7 +2,7 @@ import { useId } from "react";
 import { RIBBON_H, RIBBON_W, pulseGradientStops, pulsePaths } from "./dayPulsePaths";
 
 /** The day's delay profile as a quiet area and line along the bottom of the
- *  hero's figure column: 24 hours, ramp-coloured. Decoration for a reading
+ *  hero's figure column: the service day's hours, ramp-coloured. Decoration for a reading
  *  the heaviest-hour fact row already gives in digits, so it is hidden from
  *  assistive tech and takes no pointer. */
 export function DayPulseRibbon({ byHour }: { byHour: readonly (number | null)[] }) {

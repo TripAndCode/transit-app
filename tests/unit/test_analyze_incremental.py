@@ -200,6 +200,7 @@ def _run(
     has_static=False,
     pg_totals=(0, 0, 0),
     ch_tables=_STORE_TABLES,
+    seeded=False,
 ):
     """Run `analyze`, returning the fakes.
 
@@ -207,6 +208,9 @@ def _run(
     *stored* is what agg_feed_health holds, defaulting to the same rows.
     *has_static* gives the agency a (row-less) static schedule, which the
     builders joining it — agg_stop_routes among them — need in order to run.
+    The agency's tables stand as the last run recorded them under the current
+    builders; *seeded* leaves it instead on the agency-wide fingerprint, whose
+    tables seed at their versions of the switch (`_SEED_VERSIONS`).
     """
     conn = FakeConn(
         ledger_rows=stored if stored is not None else ledger,
@@ -214,10 +218,11 @@ def _run(
         has_static=has_static,
         pg_totals=pg_totals,
     )
-    # The agency-wide fingerprint the last build recorded, so its tables seed as current.
-    conn._fingerprint = analyze_mod._legacy_fingerprint(
-        ingest_strategy, analyze_mod._static_parts(AGENCY_ID, conn, has_static)
-    )
+    static_parts = analyze_mod._static_parts(AGENCY_ID, conn, has_static)
+    if seeded:
+        conn._fingerprint = analyze_mod._legacy_fingerprint(ingest_strategy, static_parts)
+    else:
+        conn._states = analyze_mod.table_fingerprints(ingest_strategy, has_static, static_parts)
     ch = FakeClickHouse(ledger, tables=ch_tables)
     analyze(AGENCY_ID, conn, ch)
     return conn, ch
@@ -403,9 +408,11 @@ def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
 
     from pipeline import agg_registry
 
-    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["agg_hour_daily"], version=agg_registry.TABLES["agg_hour_daily"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
-    conn, ch = _noop_run()
+    conn, ch = _noop_run(seeded=True)
     assert [s for s in conn.executed if "DELETE FROM agg_hour_daily WHERE agency_id = %s" in s] or [
         sql for sql, _ in ch.commands if sql.startswith("INSERT INTO agg_hour_daily__work_a")
     ]
@@ -459,7 +466,9 @@ def test_a_version_bump_changes_that_tables_fingerprint_alone(monkeypatch):
     from pipeline import agg_registry
 
     before = _fingerprints()
-    bumped = dataclasses.replace(agg_registry.TABLES["agg_hour_daily"], version=2)
+    bumped = dataclasses.replace(
+        agg_registry.TABLES["agg_hour_daily"], version=agg_registry.TABLES["agg_hour_daily"].version + 1
+    )
     monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
     after = _fingerprints()
 

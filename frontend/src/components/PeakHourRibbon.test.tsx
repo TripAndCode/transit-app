@@ -139,4 +139,28 @@ describe("PeakHourRibbon", () => {
       expect(onClick).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("a service day running past midnight", () => {
+    // Hours 24 and 25 are the 24:xx and 25:xx departures of the service day.
+    const by_hour = Array.from({ length: 26 }, (_, h) => (h === 25 ? 6 : 2));
+    const cellW = (W - 32) / 26;
+
+    it("draws a bar for every hour after 23 and ticks on to 24", () => {
+      const { container } = render(<PeakHourRibbon peak_hour={{ by_hour, peak_hour: 25, peak_avg_min: 6 }} />);
+      expect(container.querySelectorAll("svg rect[rx]")).toHaveLength(26);
+      const ticks = container.querySelectorAll(".ov-peak-label--tick");
+      expect(Array.from(ticks, (n) => n.textContent)).toEqual(["0", "6", "12", "18", "24"]);
+    });
+
+    it("opens the breakdown of an hour after 23", () => {
+      const onHourClick = vi.fn();
+      const { container } = render(
+        <PeakHourRibbon peak_hour={{ by_hour, peak_hour: 25, peak_avg_min: 6 }} onHourClick={onHourClick} />,
+      );
+      const svg = container.querySelector("svg")!;
+      svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: W, height: H, right: W, bottom: H, x: 0, y: 0, toJSON: () => ({}) });
+      fireEvent.click(svg, { clientX: 24 * cellW + cellW / 2, clientY: 60 });
+      expect(onHourClick).toHaveBeenCalledWith(24);
+    });
+  });
 });

@@ -22,7 +22,10 @@ them into one partition per agency, which `swap_whole_history` replaces whole.
 
 Every copied table's value equals what the Postgres builder it replaced produced,
 column for column; tests/pipeline/ch_parity.py keeps those builders as the parity
-oracle.
+oracle. The one departure from them is on purpose: a departure scheduled at
+24:00:00 or later, which they left out of every hour and band, is filed under
+its hour of the service day and its wall-clock band (api.range.scheduled_hour_ch,
+api.range.time_band_ch).
 Means are rounded half away from zero from exact integer sums, which is what
 Postgres's ROUND(numeric) does; ClickHouse's round() on a float rounds half to
 even and is never used for them.
@@ -35,7 +38,7 @@ from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timedelta
 from typing import NamedTuple
 
-from api.range import TIME_BAND_RANGES
+from api.range import scheduled_hour_ch, scheduled_sec_ch, time_band_ch
 from pipeline import static_archive
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql
@@ -194,11 +197,10 @@ def _route_daily_dist(source: str) -> str:
     """
 
 
-# scheduled_time is a time of day written as hours, minutes and optionally
-# seconds, colon-separated, the hours with or without a leading zero, and never
-# past 23 (see pipeline/strategies/_time.py). Its field before the first colon is
-# the hour Postgres's EXTRACT(HOUR FROM scheduled_time) gave.
-_HOUR = "toInt16(splitByChar(':', assumeNotNull(d.scheduled_time))[1])"
+# The departure's hour on its service day's clock (api.range.scheduled_hour_ch):
+# a departure at 24:10:00 is hour 24 of the service day it belongs to.
+_SEC = scheduled_sec_ch("d.")
+_HOUR = f"toInt16(assumeNotNull({scheduled_hour_ch('d.')}))"
 
 
 def _hour_daily(source: str) -> str:
@@ -209,21 +211,10 @@ def _hour_daily(source: str) -> str:
         FROM (
             SELECT d.date AS date, {_HOUR} AS hour, sum(assumeNotNull(d.dep_delay)) AS s, count() AS n
             FROM ({source}) AS d
-            WHERE d.scheduled_time IS NOT NULL
+            WHERE {_SEC} IS NOT NULL
             GROUP BY d.date, {_HOUR}
         )
     """
-
-
-# scheduled_time's seconds past midnight, from the same fields _HOUR reads: hours,
-# minutes and optional seconds. NULL when there is no scheduled time. The value
-# Postgres's `time` cast of the string takes, so two spellings of one time are one key.
-_SCHEDULED_SEC = (
-    "if(d.scheduled_time IS NULL, NULL, "
-    "toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[1]) * 3600 "
-    "+ toInt32(splitByChar(':', assumeNotNull(d.scheduled_time))[2]) * 60 "
-    "+ toInt32OrZero(splitByChar(':', assumeNotNull(d.scheduled_time))[3]))"
-)
 
 
 def _route_delay_counts(source: str) -> str:
@@ -235,7 +226,7 @@ def _route_delay_counts(source: str) -> str:
                dep_delay, toInt32(n) AS samples, toInt64(dep_delay) * toInt64(n) AS sum_delay_sec
         FROM (
             SELECT d.date AS date, assumeNotNull(d.route_code) AS route_code,
-                   assumeNotNull(d.service_type) AS service_type, {_SCHEDULED_SEC} AS scheduled_sec,
+                   assumeNotNull(d.service_type) AS service_type, {_SEC} AS scheduled_sec,
                    assumeNotNull(d.dep_delay) AS dep_delay, count() AS n
             FROM ({source}) AS d
             WHERE d.route_code IS NOT NULL AND d.service_type IS NOT NULL
@@ -244,21 +235,9 @@ def _route_delay_counts(source: str) -> str:
     """
 
 
-def _clock_sec(hhmm: str) -> int:
-    hours, minutes = hhmm.split(":")
-    return int(hours) * 3600 + int(minutes) * 60
-
-
-# time_band_case_sql on the scheduled time's seconds: the first range holding it,
-# 'none' for no scheduled time or none of them.
-_TIME_BAND = (
-    f"multiIf({_SCHEDULED_SEC} IS NULL, 'none', "
-    + ", ".join(
-        f"{_SCHEDULED_SEC} >= {_clock_sec(start)} AND {_SCHEDULED_SEC} < {_clock_sec(end)}, '{band}'"
-        for band, (start, end) in TIME_BAND_RANGES.items()
-    )
-    + ", 'none')"
-)
+# The band of the departure's time on the wall clock (api.range.time_band_ch),
+# 'none' for no scheduled time.
+_TIME_BAND = time_band_ch("d.")
 
 
 # Each row's timetable (static_archive.JOIN_CONTENT_SQL), computed once per row before the join.
@@ -369,7 +348,9 @@ def _route_stats(source: str) -> str:
     """
 
 
-# Seconds past midnight as HH:MM:SS, the text form of a Postgres `time`.
+# Seconds from the service day's 00:00 as HH:MM:SS, the hours running past 23
+# for a departure after midnight: the text form of the Postgres `interval`
+# agg_route_hour keeps.
 _SCHEDULED_TIME = (
     "concat(leftPad(toString(intDiv(sec, 3600)), 2, '0'), ':', "
     "leftPad(toString(intDiv(sec, 60) % 60), 2, '0'), ':', leftPad(toString(sec % 60), 2, '0'))"
@@ -429,6 +410,8 @@ class _Spec(NamedTuple):
     figures: _Figures = _DEFAULT_FIGURES
     # Read from every `updates` row (`_raw_select`) rather than from the dedup.
     raw: bool = False
+    # Reads the dedup's `scheduled_sec`, which alone holds a time past 24:00.
+    scheduled_sec: bool = False
 
 
 class _WholeSpec(NamedTuple):
@@ -474,16 +457,20 @@ _SPECS: dict[str, _Spec] = {
         ),
         _route_daily_dist,
     ),
-    "agg_hour_daily": _Spec(("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily),
+    "agg_hour_daily": _Spec(
+        ("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily, scheduled_sec=True
+    ),
     "agg_stop_daily": _Spec(
         ("agency_id", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
         _stop_daily,
         _DELAY_SUM_FIGURES,
+        scheduled_sec=True,
     ),
     "agg_route_stop_daily": _Spec(
         ("agency_id", "route_code", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),
         _route_stop_daily,
         _DELAY_SUM_FIGURES,
+        scheduled_sec=True,
     ),
     "route_delay_counts": _Spec(
         (
@@ -497,6 +484,7 @@ _SPECS: dict[str, _Spec] = {
             "sum_delay_sec",
         ),
         _route_delay_counts,
+        scheduled_sec=True,
     ),
     "stop_route_days": _Spec(("agency_id", "date", "stop_id", "route_code"), _stop_route_days, raw=True),
 }
@@ -591,9 +579,14 @@ def work_table(table: str, agency_id: int) -> str:
     return f"{_checked(table)}__work_a{int(agency_id)}"
 
 
-def _dedup_select(where: str) -> str:
-    """The dedup of the agency's `updates` rows matching *where*, with every column a table reads."""
-    return build_dedup_ch_sql(extra_where=where, include_captured_at=True, include_static_version=True)
+def _dedup_select(where: str, *, scheduled_sec: bool = True) -> str:
+    """The dedup of the agency's `updates` rows matching *where*, with every column a table reads.
+
+    Without *scheduled_sec*, every column but `scheduled_sec`: what a table
+    whose `_Spec` does not read it dedups for itself."""
+    return build_dedup_ch_sql(
+        extra_where=where, include_captured_at=True, include_scheduled_sec=scheduled_sec, include_static_version=True
+    )
 
 
 def _raw_select(where: str) -> str:
@@ -634,7 +627,7 @@ def select_sql(
         raise ValueError(f"{table!r} reads every `updates` row, not a dedup")
     if source is None:
         where, params = month_where(month) if days is None else days_where(days)
-        rows = _raw_select(where) if spec.raw else _dedup_select(where)
+        rows = _raw_select(where) if spec.raw else _dedup_select(where, scheduled_sec=spec.scheduled_sec)
     elif days is None:
         rows, params = f"SELECT * FROM {source}", {}
     else:
@@ -804,7 +797,9 @@ def whole_history_sql(table: str, source: str | None = None) -> str:
         raise ValueError(f"{table!r} is not a whole-history aggregate")
     if source is None:
         internal = _SPECS[_WHOLE_SPECS[table].source]
-        source = internal.select(_raw_select("1") if internal.raw else _dedup_select("1"))
+        source = internal.select(
+            _raw_select("1") if internal.raw else _dedup_select("1", scheduled_sec=internal.scheduled_sec)
+        )
     return _WHOLE_SPECS[table].select(source)
 
 

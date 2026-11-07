@@ -22,6 +22,23 @@ function cellAt(container: HTMLElement, date: string, hour: number): Element {
   return container.querySelector(`[data-testid='heat-cell'][data-date='${date}'][data-hour='${hour}']`)!;
 }
 
+describe("HourlyHeatmap hours", () => {
+  it("draws a day's 24 hours when nothing ran past midnight", () => {
+    renderHeatmap(ONE_CELL);
+    expect(screen.getByRole("grid")).toHaveAttribute("aria-rowcount", "24");
+  });
+
+  it("runs on after 23 to a departure past midnight on its service day's clock", () => {
+    const { container } = renderHeatmap([
+      { date: "2026-06-01", hour: 8, avg_min: 2.0, samples: 50 },
+      { date: "2026-06-01", hour: 25, avg_min: 4.0, samples: 50 },
+    ]);
+    expect(screen.getByRole("grid")).toHaveAttribute("aria-rowcount", "26");
+    expect((cellAt(container, "2026-06-01", 25) as SVGElement).style.fill).toBe(delayRampVar(4.0));
+    expect(cellAt(container, "2026-06-01", 24)).not.toBeNull();
+  });
+});
+
 describe("HourlyHeatmap tooltip", () => {
   it("formats the tooltip's date and minutes for the locale", () => {
     const { container } = renderHeatmap([{ date: "2026-06-01", hour: 8, avg_min: 3.25, samples: 2500 }]);

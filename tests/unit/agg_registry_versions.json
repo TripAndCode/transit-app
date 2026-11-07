@@ -8,8 +8,8 @@
     "version": 1
   },
   "agg_hour_daily": {
-    "hash": "72c7ef8aa7de793683e43175457406d5c6b0465586b677692c5bc5c9632eece9",
-    "version": 1
+    "hash": "32c9d96607f901f38411d5f97287f72e099a982541b55465cfaeddbafa0137ef",
+    "version": 2
   },
   "agg_route_daily": {
     "hash": "bd90039a71b65df530fabb880e830fc7ca81f480de997122b3c425b7d5d998fe",
@@ -32,20 +32,20 @@
     "version": 1
   },
   "agg_route_hour": {
-    "hash": "caaf1fb3837f920271a624154606e778201f15e58a3038d205866805976319dd",
-    "version": 1
+    "hash": "4f3d7431a1ed999861139db14a2c8f90b808cde8ad4bb7e12003b6f7dbd9c4a9",
+    "version": 2
   },
   "agg_route_hour_dow": {
-    "hash": "8aedae2260278d877ad485a23231da5d8ef402a319bb934c83a8a9522fda111e",
-    "version": 1
+    "hash": "18b1766991c5d95b0cb363f784a6a33247c409e635b9522e1c581ddf0fa2468b",
+    "version": 2
   },
   "agg_route_stats": {
-    "hash": "0c563a32af78216b89ae7dc06af169e5a372713d7b8c2c7e3dab1ddf6671aed1",
+    "hash": "cbc13a7dd288c5737b9466cfca0fe3b70229762e1bcb2db10179e69555dba928",
     "version": 1
   },
   "agg_route_stop_daily": {
-    "hash": "3e00d826c638ae170d1273da069daaef4fa1f34d0f22ebf91b61b82a90d1aa62",
-    "version": 1
+    "hash": "6d9580d280bebd514854a239b85547dccf6a4db610a3bc0c95747435d6401393",
+    "version": 2
   },
   "agg_schedule_revision_daily": {
     "hash": "2d6ac8580a6c26c0fe6738fc6a57a3707d116b6c9e984eb1bef650fe0ce19f1e",
@@ -56,16 +56,16 @@
     "version": 1
   },
   "agg_stop_daily": {
-    "hash": "91cfac7b9032608558252edaaef29e9e8064dcdcec4ce266adc488ed6118fd38",
-    "version": 1
+    "hash": "977180471d84fb0cea683e780089b030d2f13f8927461e764f0123a8dfdbd2f3",
+    "version": 2
   },
   "agg_stop_routes": {
     "hash": "c62a399601f8f73a7e435a8d0f180ce6fbe14f7a16cd14141f4f57739716f139",
     "version": 1
   },
   "route_delay_counts": {
-    "hash": "28f73d885ad70bb44296e1d77728cff7bad7e8458d5a562ee82eea8ca394136a",
-    "version": 1
+    "hash": "22cad5d0b58910cce2d45d1790c34d7497e439febd4aaf9267fc85f7178c8a2f",
+    "version": 2
   },
   "stop_route_days": {
     "hash": "05e693bc3e83ba3bd35d15de95fe6e8f57d5913808425597b9a3d0ed0b03c199",

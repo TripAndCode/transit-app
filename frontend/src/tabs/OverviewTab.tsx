@@ -9,6 +9,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
+import { LAST_SERVICE_HOUR } from "../api/timeBands";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
@@ -38,7 +39,7 @@ type OpenCard = "concentration" | "peak_hour" | "service_split" | null;
 function parsePeakHourSel(hourParam: string, dowParam: string): { hour: number; dow: number | null } | null {
   if (!/^\d+$/.test(hourParam)) return null;
   const hour = Number(hourParam);
-  if (hour > 23) return null;
+  if (hour > LAST_SERVICE_HOUR) return null;
   if (dowParam === "") return { hour, dow: null };
   if (!/^\d+$/.test(dowParam)) return null;
   const dow = Number(dowParam);

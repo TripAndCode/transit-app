@@ -21,6 +21,16 @@ def test_full_grid_168():
     assert miss["samples"] == 0
 
 
+def test_the_grid_runs_on_to_the_last_hour_past_midnight_the_route_has():
+    out = summarize_expected_delay_heatmap(_rows((1, 8, 5.0, 100), (2, 25, 3.0, 40)), "R1")
+    assert len(out["cells"]) == 7 * 26
+    assert [c["hour"] for c in out["cells"] if c["dow"] == 1] == list(range(26))
+    c = next(x for x in out["cells"] if x["dow"] == 2 and x["hour"] == 25)
+    assert (c["expected_avg_min"], c["samples"]) == (3.0, 40)
+    empty = next(x for x in out["cells"] if x["dow"] == 1 and x["hour"] == 24)
+    assert (empty["expected_avg_min"], empty["samples"]) == (None, 0)
+
+
 def test_low_conf_boundary():
     out = summarize_expected_delay_heatmap(_rows((3, 9, 2.0, 29), (3, 10, 2.0, 30)), "R1")
     assert next(x for x in out["cells"] if x["dow"] == 3 and x["hour"] == 9)["low_confidence"] is True

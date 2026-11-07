@@ -29,6 +29,23 @@ def test_band_of_boundaries():
     assert band_of(23) == "night"
 
 
+def test_band_of_an_hour_past_midnight_is_its_clock_hours_band():
+    """A service day's hour 24 is 00:00 on the clock, so it is late night."""
+    assert band_of(24) == "late_night"
+    assert band_of(25) == "late_night"
+
+
+def test_an_hour_past_midnight_pools_into_the_late_night_band():
+    rows = [
+        {"dow": 1, "hour": 1, "avg_min": 2.0, "samples": 10},
+        {"dow": 1, "hour": 24, "avg_min": 8.0, "samples": 40},
+    ]
+    out = summarize_agency_overview(rows, [])
+    cell = next(c for c in out["grid"] if c["dow"] == 1 and c["band"] == "late_night")
+    assert cell["expected_avg_min"] == pytest.approx((2 * 10 + 8 * 40) / 50, abs=0.05)
+    assert cell["samples"] == 50
+
+
 def test_the_bands_are_the_time_band_filters_own_in_clock_order():
     """A band the forecast or the trend names covers exactly the hours the
     time-band filter of the same name selects."""

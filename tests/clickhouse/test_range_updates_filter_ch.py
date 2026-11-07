@@ -24,6 +24,8 @@ from api.range import (
     build_updates_filter_ch,
     date_range_clause_ch,
     dow_clause_ch,
+    scheduled_sec_ch,
+    time_band_ch,
     time_band_clause_ch,
 )
 from pipeline.service_day import service_date_ch
@@ -75,32 +77,29 @@ def test_time_band_clause_ch_all_is_noop():
     assert params == {}
 
 
-def test_time_band_clause_ch_morning_band():
+def test_time_band_clause_ch_tests_one_range_on_the_clock_it_computes_once():
+    """The live filter runs over every row of the scan, so it computes the
+    departure's clock once and tests only the named band's range on it; the
+    behavioural proof that it selects what analyze stores is
+    tests/pipeline/test_extended_hours.py."""
     frag, params = time_band_clause_ch(_ctx(time_band="morning"))
-    # Compares a normalized "HH:MM", not the raw scheduled_time string —
-    # agency 1 (aomori_regex ingest strategy) writes 5-char "HH:MM" values
-    # with no seconds, while every other agency (static_join) writes 8-char
-    # "HH:MM:SS". A raw lexicographic compare of "09:00" against an 8-char
-    # bound like "09:00:00" is wrong (the 5-char form sorts as "less than"
-    # its own 8-char equivalent), so both sides must be normalized for the
-    # comparison to be exact regardless of which strategy wrote the row.
-    # The hour and minute are asserted separately because normalization
-    # splits them: the hour is taken modulo 24 so an extended-service
-    # "25:10" lands in the same band as "01:10" (see the next test).
-    assert "substring(scheduled_time, 1, 2)" in frag
-    assert "substring(scheduled_time, 3, 3)" in frag
-    assert params["ch_tb_start"] == "05:00"
-    assert params["ch_tb_end"] == "09:00"
+    assert params == {"ch_tb_start": 5 * 3600, "ch_tb_end": 9 * 3600}
+    assert "{ch_tb_start:UInt32}" in frag and "{ch_tb_end:UInt32}" in frag
+    assert frag.count(scheduled_sec_ch("u.")) == 1
+    assert "multiIf" not in frag
 
 
-def test_time_band_clause_ch_normalizes_extended_hours_modulo_24():
-    """GTFS writes post-midnight continuations of a service day as hours
-    >= 24 ("25:30:00"), so the fragment must take the hour modulo 24. This
-    only checks that the expression is present;
-    test_time_band_clause_ch_places_extended_hour_in_its_same_day_band proves
-    a 25:30 trip actually lands in late_night."""
-    frag, _ = time_band_clause_ch(_ctx(time_band="late_night"))
-    assert "% 24" in frag
+@pytest.mark.parametrize(
+    ("sql", "prefix"), [(time_band_clause_ch(_ctx(time_band="night"))[0], "u."), (time_band_ch("d."), "d.")]
+)
+def test_the_band_reads_scheduled_sec_before_it_parses_the_string(sql, prefix):
+    """`if` evaluates only the branch a row takes, where `ifNull` evaluates
+    both, so a row carrying `scheduled_sec` never pays for parsing
+    `scheduled_time`; and the seconds are computed once, however many bands
+    test them."""
+    assert f"ifNull({prefix}scheduled_sec" not in sql
+    assert f"if({prefix}scheduled_sec IS NOT NULL, {prefix}scheduled_sec, " in sql
+    assert sql.count(scheduled_sec_ch(prefix)) == 1
 
 
 def test_time_band_clause_ch_unknown_band_is_noop_not_keyerror():
@@ -284,7 +283,7 @@ def test_time_band_clause_ch_boundary_matches_5char_scheduled_time():
     def _count(time_band):
         frag, params = time_band_clause_ch(_ctx(time_band=time_band))
         result = client.query(
-            f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
+            f"SELECT count() FROM updates AS u WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
             parameters={"agency_id": 1, **params},
         )
         return result.result_rows[0][0]
@@ -297,24 +296,24 @@ def test_time_band_clause_ch_boundary_matches_5char_scheduled_time():
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_time_band_clause_ch_places_extended_hour_in_its_same_day_band():
     """A "25:30:00" departure is 01:30 on the following calendar day, so it
-    belongs to `late_night` ([00:00, 05:00)) — not to no band at all, which
-    is what a raw lexicographic compare against the band bounds produces."""
+    belongs to `late_night` ([00:00, 05:00)). Ingest stores it as ingest
+    stores every extended hour: no `scheduled_time` string, only its
+    `scheduled_sec`."""
     from db.clickhouse.bootstrap import apply_schema
     from pipeline.clickhouse import insert_updates
 
     client = _ch_test_client()
     client.command("DROP TABLE IF EXISTS updates")
     apply_schema(client)
-    insert_updates(
-        client,
-        1,
-        [("a/1.pb", datetime(2026, 8, 3, 3, 0, 0, tzinfo=timezone.utc), "T1", "weekday", "25:30:00", "R1", 1, 30)],
-    )
+    captured = datetime(2026, 8, 3, 16, 30, 0, tzinfo=timezone.utc)  # 01:30 JST the next day
+    # stop_id, arr_delay, both schedule relationships and feed_timestamp precede scheduled_sec.
+    row = ("a/1.pb", captured, "T1", "weekday", None, "R1", 1, 30, None, None, None, None, None, 25 * 3600 + 30 * 60)
+    insert_updates(client, 1, [row])
 
     def _count(time_band):
         frag, params = time_band_clause_ch(_ctx(time_band=time_band))
         result = client.query(
-            f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
+            f"SELECT count() FROM updates AS u WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
             parameters={"agency_id": 1, **params},
         )
         return result.result_rows[0][0]

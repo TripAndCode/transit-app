@@ -933,7 +933,7 @@ export type RoutesResponse = {
 
 export interface ForecastHeatmapCell {
   dow: number; // 1=Mon .. 7=Sun (ISODOW)
-  hour: number; // 0..23
+  hour: number; // 0..23, then 24 and on past midnight on the service day's clock
   expected_avg_min: number | null;
   samples: number;
   low_confidence: boolean;
@@ -953,7 +953,7 @@ export interface ForecastDay {
 export interface ForecastHeatmap {
   scope_applied?: ScopeApplied;
   route: string;
-  cells: ForecastHeatmapCell[]; // always 168 (7×24)
+  cells: ForecastHeatmapCell[]; // 7 × the route's hours: 168, more when it runs past midnight
   /** The dates this route's ML cells forecast, oldest first. */
   forecast_days: ForecastDay[];
   /** First and last analyzed day this route's past averages pool; null when it has none. */
@@ -1096,6 +1096,8 @@ type OverviewTopDelayed = {
 };
 
 export type OverviewPeakHour = {
+  /** Hours 0..23, and on through the latest hour past midnight (24, 25, …)
+   *  any of the summary's three profiles has; the three share one length. */
   by_hour: (number | null)[];
   peak_hour: number;
   peak_avg_min: number;
@@ -1134,9 +1136,9 @@ export type OverviewSummary = {
   concentration: OverviewConcentration;
   top_delayed: OverviewTopDelayed;
   peak_hour: OverviewPeakHour | null;
-  /** Weekday-only 24-hour profile, used by the peak-hour modal split. */
+  /** Weekday-only hour-by-hour profile, used by the peak-hour modal split. */
   peak_hour_weekday?: OverviewPeakHour | null;
-  /** Weekend-only 24-hour profile, used by the peak-hour modal split. */
+  /** Weekend-only hour-by-hour profile, used by the peak-hour modal split. */
   peak_hour_weekend?: OverviewPeakHour | null;
   /** Every bucket the agency is split into, in display order. */
   service_split: OverviewServiceSplitEntry[];

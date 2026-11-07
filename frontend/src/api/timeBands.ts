@@ -21,10 +21,28 @@ export const TIME_BAND_HOURS: readonly { band: Band; from: number; to: number }[
 
 export const BAND_ORDER: readonly Band[] = TIME_BAND_HOURS.map((b) => b.band);
 
-/** The band an hour 0..23 falls in. */
+/** The band an hour falls in. A service day's clock runs past 24:00 for a
+ *  departure after midnight, and its hour 24 is 00:00 on the clock, so an
+ *  hour past 23 takes the band of its clock hour (24 is late night). */
 export function bandOf(hour: number): Band {
-  const hit = TIME_BAND_HOURS.find((b) => hour >= b.from && hour < b.to);
+  const clock = ((hour % 24) + 24) % 24;
+  const hit = TIME_BAND_HOURS.find((b) => clock >= b.from && clock < b.to);
   return hit ? hit.band : "night";
+}
+
+/** The latest hour a service day's clock can reach: it runs past 23 for a
+ *  departure after midnight, and GTFS writes an hour in at most two digits.
+ *  Mirrors pipeline/strategies/_time.py's MAX_SERVICE_HOUR, the bound the
+ *  peak-hour breakdown accepts. */
+export const LAST_SERVICE_HOUR = 99;
+
+/** How many hours a chart of the service day spans: 0 through 23, and on
+ *  through the last hour past midnight (24, 25, …) that `hours` holds, so a
+ *  departure after midnight is drawn after 23 and only when there is one. */
+export function serviceDayHours(hours: Iterable<number>): number {
+  let last = 23;
+  for (const hour of hours) if (Number.isInteger(hour) && hour > last) last = hour;
+  return last + 1;
 }
 
 /** The whole hours a band covers, `from` up to, not including, `to`. */
