@@ -1,4 +1,4 @@
-"""Detect comment-policy violations in Python and TypeScript sources.
+"""Detect comment-policy violations in Python, TypeScript, and JavaScript sources.
 
 When BASE does not resolve or `git diff` fails, `--diff` exits 0 so that a
 shallow or unusual clone never blocks a push, while `--stale-candidates` exits
@@ -350,8 +350,10 @@ def main(argv=None):
         _report(hits, root, "baseline", limit=40)
         return 0
 
-    requested = args.diff or args.stale
-    unavailable = 2 if args.stale else 0
+    # An unset shell variable passes an empty BASE, which still selects its mode.
+    stale = args.stale is not None
+    requested = args.stale if stale else args.diff
+    unavailable = 2 if stale else 0
     base = resolve_base(requested, _ref_exists(root))
     if base is None:
         print(
@@ -362,7 +364,7 @@ def main(argv=None):
     # Stale candidates feed a review of the working tree, so their hunks must
     # describe the files `_read` opens. `--diff` runs at push time and stays on
     # the commits being pushed.
-    revisions = [base] if args.stale else [f"{base}...HEAD"]
+    revisions = [base] if stale else [f"{base}...HEAD"]
     # `_DIFF_FILE` parses `b/` headers, which either setting would rewrite.
     pinned_prefixes = ["-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false"]
     try:
@@ -383,7 +385,7 @@ def main(argv=None):
         lines = _read(root, path)
         if lines is None:
             continue
-        if args.stale:
+        if stale:
             hits += [(path, c) for c in stale_candidates(path, lines, lines_added, args.radius)]
         else:
             hits += [
@@ -392,10 +394,10 @@ def main(argv=None):
     count = _report(
         hits,
         root,
-        "stale candidates" if args.stale else "comment policy",
-        limit=None if args.stale else 40,
+        "stale candidates" if stale else "comment policy",
+        limit=None if stale else 40,
     )
-    return exit_code(count, gating=bool(args.diff), warn_only=args.warn)
+    return exit_code(count, gating=args.diff is not None, warn_only=args.warn)
 
 
 if __name__ == "__main__":

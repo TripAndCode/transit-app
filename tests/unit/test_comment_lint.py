@@ -398,6 +398,22 @@ def test_cli_diff_mode_skips_a_missing_base_instead_of_failing(repository):
     assert "skipped" in result.stderr
 
 
+def test_cli_stale_candidates_fails_on_an_empty_base(repository):
+    """An unset `$MERGE_BASE` expands to an empty BASE, the same mistake as a
+    mistyped one."""
+
+    result = run_cli("--root", str(repository), "--stale-candidates", "")
+    assert result.returncode == 2
+    assert "no baseline ref" in result.stderr
+
+
+def test_cli_diff_mode_skips_an_empty_base(repository):
+    result = run_cli("--root", str(repository), "--diff", "")
+    assert result.returncode == 0
+    assert "no baseline ref" in result.stderr
+    assert "skipped" in result.stderr
+
+
 def blob_base(repo: Path) -> str:
     """A ref that resolves, but to a blob, which `git diff` refuses as a base."""
 
