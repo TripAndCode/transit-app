@@ -96,7 +96,7 @@ class SourceMix(BaseModel):
     path, which holds only what the app received in real time and so is the
     sparser of the two. The rest are the days with no source recorded: no
     observations, a day not analyzed yet, or one analyzed before sources were
-    counted. The three add up to the range (:func:`_day_source`)."""
+    counted. The three add up to the range (:func:`_source_mix`)."""
 
     agency_id: int
     archive_days: int

@@ -316,11 +316,9 @@ app.state.limiter = limiter
 # slowapi's handler is typed against its own exception class, not Starlette's
 # broader (Request, Exception) signature — runtime contract is fine.
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
-# A read endpoint hitting an agg_* table or column that doesn't exist yet
-# (deployment behind on migrations) degrades to a localized 503 instead of an
-# opaque 500.
+# A read endpoint hitting an agg_* table that doesn't exist yet (deployment behind
+# on migrations) degrades to a localized 503 instead of an opaque 500.
 app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_ready_handler)  # type: ignore[arg-type]
-app.add_exception_handler(asyncpg.exceptions.UndefinedColumnError, aggregate_not_ready_handler)  # type: ignore[arg-type]
 # A ClickHouse read that runs out its time budget answers a localized 504 the
 # client does not retry; any other ClickHouse error stays a 500.
 app.add_exception_handler(ClickHouseDatabaseError, clickhouse_error_handler)  # type: ignore[arg-type]

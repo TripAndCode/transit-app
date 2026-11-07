@@ -1266,13 +1266,14 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # Persisted (not just logged) so the app can surface a feed-health
         # banner, and read back by _dates_needing_rebuild as the ledger that
         # decides which dates the next run rebuilds — which is why total_rows
-        # exists: it lets the ledger see delay-less rows too. archive_rows and
-        # live_rows split total_rows by ingest source, for the definition
-        # stamp's per-day source (pipeline.reports.definition.stamp_build);
-        # the ledger does not compare them. A date whose rows
+        # exists: it lets the ledger see delay-less rows too. A date whose rows
         # all lack a dep_delay therefore has a row here with raw_samples = 0;
         # every reader that divides by raw_samples treats zero as "nothing
         # measurable" (see pipeline/health.py, api/agency_diagnostics.py).
+        # archive_rows and live_rows split total_rows by ingest source, for the
+        # definition stamp's per-day source
+        # (pipeline.reports.definition.stamp_build); the ledger does not
+        # compare them.
         # Agency-wide — does NOT require static data, so it runs outside the
         # has_static block. Pure aggregation (no static-table JOIN), so it
         # queries ClickHouse directly and bulk-loads the small per-day result
