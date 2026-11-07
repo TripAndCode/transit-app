@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
-from pipeline.static_archive import fetch_day
+from pipeline.timetable_in_force import fetch_day
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 
 __all__ = [
