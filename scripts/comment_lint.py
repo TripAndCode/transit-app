@@ -1,4 +1,10 @@
-"""Detect comment-policy violations in Python and TypeScript sources."""
+"""Detect comment-policy violations in Python and TypeScript sources.
+
+When BASE does not resolve or `git diff` fails, `--diff` exits 0 so that a
+shallow or unusual clone never blocks a push, while `--stale-candidates` exits
+2: its caller names BASE explicitly and takes the output as its whole work list,
+so a run that never looked must not pass for one that found nothing.
+"""
 
 import argparse
 import os
@@ -235,12 +241,7 @@ _AUTO_BASES = ("origin/HEAD", "master", "main")
 
 
 def resolve_base(requested, exists):
-    """Pick the ref to diff against, or None when there is nothing to compare.
-
-    Returning None is not a failure: a repo with no such ref simply has no
-    baseline here, and the gate must let the push through rather than block on
-    a git error.
-    """
+    """Pick the ref to diff against, or None when no candidate resolves."""
     candidates = _AUTO_BASES if requested == "auto" else (requested,)
     return next((ref for ref in candidates if exists(ref)), None)
 
@@ -350,13 +351,14 @@ def main(argv=None):
         return 0
 
     requested = args.diff or args.stale
+    unavailable = 2 if args.stale else 0
     base = resolve_base(requested, _ref_exists(root))
     if base is None:
         print(
             f"comment policy: no baseline ref for {requested!r} — skipped",
             file=sys.stderr,
         )
-        return 0
+        return unavailable
     # Stale candidates feed a review of the working tree, so their hunks must
     # describe the files `_read` opens. `--diff` runs at push time and stays on
     # the commits being pushed.
@@ -370,7 +372,7 @@ def main(argv=None):
             f"comment policy: skipped ({error.__class__.__name__})",
             file=sys.stderr,
         )
-        return 0
+        return unavailable
     file_hunks = parse_hunks(diff)
 
     hits = []
