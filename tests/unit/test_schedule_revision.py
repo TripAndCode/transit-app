@@ -7,7 +7,7 @@ boundary-detection algorithm directly.
 
 from datetime import date
 
-from pipeline.reports.schedule_revision import read_schedule_days
+from pipeline.reports.schedule_revision import ScheduleDays, read_schedule_days
 
 
 class _FakeConn:
@@ -89,3 +89,16 @@ async def test_the_day_before_the_range_is_read():
     conn = _FakeConn([])
     await read_schedule_days(conn, 1, date(2026, 5, 1), date(2026, 5, 4))
     assert conn.calls == [(1, date(2026, 4, 30), date(2026, 5, 4))]
+
+
+def test_one_agencys_last_day_is_never_compared_with_the_next_agencys_first():
+    """A board-wide read holds several agencies' days in a row; a change of
+    agency is not a timetable revision."""
+    rows = [
+        (1, date(2026, 5, 1), "a1"),
+        (1, date(2026, 5, 2), "a1"),
+        (2, date(2026, 5, 3), "b1"),
+        (2, date(2026, 5, 4), "b2"),
+    ]
+    schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 4), rows)
+    assert schedule.boundaries() == ["2026-05-04"]

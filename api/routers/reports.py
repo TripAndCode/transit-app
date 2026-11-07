@@ -1531,8 +1531,8 @@ async def get_report(
         # agg_schedule_revision_daily coverage at all (its ingest strategy
         # never joins static data, or its RT rows carry no static_version_id
         # yet).
-        # Skipped entirely for the CSV export above, which has no chart to
-        # annotate. Read once, with the definition's timetables.
+        # Drawn from the read the definition's timetables came from; the CSV
+        # export above has no chart to annotate, so it skips them.
         revision_boundaries = schedule.boundaries()
         text = format_trend_text(days, ctx.from_date, ctx.to_date, locale=locale)
         return ReportResponse(

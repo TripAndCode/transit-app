@@ -12,6 +12,9 @@ version differs from the immediately preceding CALENDAR day's — computed
 here at read time from the stored per-day versions rather than persisted as
 its own fact, so it stays correct even as new days get appended to the
 table by later `analyze()` runs.
+
+The same per-day read also backs the definition stamp's list of timetables in
+force (`pipeline.reports.definition.stamp_build`).
 """
 
 from __future__ import annotations
@@ -45,7 +48,7 @@ class ScheduleDays(NamedTuple):
     def boundaries(self) -> list[str]:
         """ISO date strings in ``[from_date, to_date]`` where the static
         schedule version running that day differs from the previous CALENDAR
-        day's, for a single agency's days.
+        day's of the same agency.
 
         A day whose immediately preceding calendar day has no row in
         `agg_schedule_revision_daily` at all (a gap — unknown version) is never
@@ -55,9 +58,12 @@ class ScheduleDays(NamedTuple):
         treated as the series' start.
         """
         boundaries: list[str] = []
+        prev_agency: int | None = None
         prev_date: date | None = None
         prev_version: str | None = None
-        for _agency, d, version in self.rows:
+        for agency, d, version in self.rows:
+            if agency != prev_agency:
+                prev_agency, prev_date, prev_version = agency, None, None
             if d is None:
                 continue
             if (
