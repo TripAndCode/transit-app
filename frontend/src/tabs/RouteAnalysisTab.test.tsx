@@ -117,6 +117,30 @@ describe("RouteAnalysisTab", () => {
     expect(screen.getByText("Delay by stop")).toBeInTheDocument();
   });
 
+  it("judges the route's own targets beside its figures, and no other route's", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    const standards = vi.spyOn(hooks, "usePerformanceStandards").mockReturnValue({
+      data: {
+        rows: [
+          { route_code: "R1", metric_type: "on_time_pct", metric_scope: "route", threshold_value: 85, bonus_malus_rate: 0, actual_value: 80.4, achievement_rate: 80.4 / 85, estimated_bonus_deduction: 0, meets: false },
+          { route_code: "R2", metric_type: "on_time_pct", metric_scope: "route", threshold_value: 85, bonus_malus_rate: 0, actual_value: 90, achievement_rate: 90 / 85, estimated_bonus_deduction: 0, meets: true },
+        ],
+        ctx: { from: "2026-04-01", to: "2026-04-01", dow: "all", time_band: "all", service: "all", routes: [] },
+        disclaimer: "simulation only",
+        on_time_definition: null,
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    expect(standards).toHaveBeenCalledWith(1, expect.anything(), true);
+    expect(screen.getByText("Below standard")).toBeInTheDocument();
+    expect(screen.getByText("80.4%")).toBeInTheDocument();
+    expect(screen.queryByText("Meets standard")).toBeNull();
+  });
+
   it("titles the page by its route, asks its question beneath, and leads back to Routes", () => {
     mockSupportHooks();
     vi.spyOn(useRouteNamesModule, "useRouteNames").mockReturnValue(

@@ -333,10 +333,12 @@ def report_scope_applied(report_type: str) -> dict[str, bool]:
 
 
 # What each panel endpoint filters on: headway_quality's aggregate carries
-# neither service nor time band; performance_standards reads dates only; the
-# forecast endpoints read all-time aggregates, the heatmap for the scope's one route.
+# neither service nor time band; performance_standards reads dates only,
+# except for its on-time targets, which read the Routes table's scope less its
+# route filter; the forecast endpoints read all-time aggregates, the heatmap for the scope's one route.
 _HEADWAY_SCOPE = scope_applied("from", "to", "dow", "routes")
 _STANDARDS_SCOPE = scope_applied("from", "to")
+_ON_TIME_STANDARDS_SCOPE = scope_applied("from", "to", "dow", "time_band", "service", "late", "early")
 _WEATHER_SCOPE = scope_applied("from", "to", "dow", "service", "routes")
 _FORECAST_HEATMAP_SCOPE = scope_applied("routes")
 _FORECAST_OVERVIEW_SCOPE = scope_applied()
@@ -562,17 +564,26 @@ class PerformanceStandardRow(BaseModel):
     actual_value: float | None
     achievement_rate: float | None
     estimated_bonus_deduction: float | None
+    #: Whether `actual_value` is at least as good as `threshold_value`;
+    #: `None` exactly when `actual_value` is.
+    meets: bool | None
 
 
 class PerformanceStandardsResponse(BaseModel):
     """Payload for `GET /performance_standards`. `disclaimer` is a
     server-rendered, already-localized caveat that MUST be surfaced
     verbatim wherever these figures are shown -- this is an internal
-    simulation/estimate, never an actual invoice or contractual output."""
+    simulation/estimate, never an actual invoice or contractual output.
+
+    `on_time_definition` is the on-time definition the `on_time_pct` rows were
+    judged on, which a reader needs to read their target; `None` when no such
+    row came back. With one, `scope_applied` names the Routes table's scope,
+    which those rows follow; the other rows read the dates only."""
 
     rows: list[PerformanceStandardRow]
     ctx: ReportCtx
     disclaimer: str
+    on_time_definition: DefinitionMeta | None
     scope_applied: dict[str, bool]
 
 
@@ -580,9 +591,21 @@ class PerformanceStandardsResponse(BaseModel):
 @limiter.limit(tier_limit)
 async def get_performance_standards(
     request: Request,
+    preset: str | None = Query(
+        default=None,
+        description="The on-time preset the on_time_pct targets are judged on (ON_TIME_PRESETS), as the "
+        "route_table report takes it. Mutually exclusive with late/early.",
+    ),
+    late: int | None = Query(
+        default=None, ge=0, le=3600, description="The scope's on-time late tolerance in seconds, for on_time_pct."
+    ),
+    early: int | None = Query(
+        default=None, ge=0, le=3600, description="The scope's early tolerance in seconds, for on_time_pct."
+    ),
     agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
-    ctx: RangeCtx = Depends(get_range_ctx),
+    ch: AsyncClient = Depends(get_ch),
     locale: str = Depends(get_locale),
 ) -> PerformanceStandardsResponse:
     """Per-route minimum-performance-standard achievement rate and
@@ -594,12 +617,30 @@ async def get_performance_standards(
     populated config table joined against other reports' own compute
     functions, not a single `agg_*` table scan.
     """
-    rows = await compute_performance_standards(agency_id, ctx, conn)
+    early_tolerance_sec, late_tolerance_sec = early, late
+    if preset is not None:
+        early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
+    rows = await compute_performance_standards(
+        agency_id,
+        ctx,
+        conn,
+        ch=ch,
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+    )
+    judges_on_time = any(r["metric_type"] == "on_time_pct" for r in rows)
+    on_time_definition = None
+    if judges_on_time:
+        live = not report_reads_aggregates(
+            "route_table", ctx, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
+        )
+        on_time_definition = resolve_definition_meta("on_time", early_tolerance_sec, late_tolerance_sec, live=live)
     return PerformanceStandardsResponse(
         rows=[PerformanceStandardRow(**r) for r in rows],
         ctx=_report_ctx(ctx),
         disclaimer=simulation_disclaimer(locale),
-        scope_applied=_STANDARDS_SCOPE,
+        on_time_definition=on_time_definition,
+        scope_applied=_ON_TIME_STANDARDS_SCOPE if judges_on_time else _STANDARDS_SCOPE,
     )
 
 
@@ -1239,6 +1280,19 @@ def _csv_response(
     )
 
 
+def _preset_window(
+    preset: str, early_tolerance_sec: int | None, late_tolerance_sec: int | None
+) -> tuple[int | None, int | None]:
+    """The (early, late) on-time window *preset* names
+    (:data:`pipeline.reports.rankings.ON_TIME_PRESETS`): a 400 for a preset
+    that list lacks, or one beside an explicit tolerance it would override."""
+    if early_tolerance_sec is not None or late_tolerance_sec is not None:
+        raise HTTPException(status_code=400, detail="preset cannot be combined with an early or late tolerance")
+    if preset not in ON_TIME_PRESETS:
+        raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
+    return ON_TIME_PRESETS[preset]
+
+
 @router.get("/reports/{report_type}", response_model=ReportResponse)
 @limiter.limit(tier_limit)
 async def get_report(
@@ -1349,22 +1403,17 @@ async def get_report(
         early_tolerance_sec = early
 
     if preset is not None:
-        if early_tolerance_sec is not None or late_tolerance_sec is not None:
-            raise HTTPException(
-                status_code=400, detail="preset cannot be combined with early_tolerance_sec/late_tolerance_sec"
-            )
-        if preset not in ON_TIME_PRESETS:
-            raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
+        window = _preset_window(preset, early_tolerance_sec, late_tolerance_sec)
         # legacy_60s overrides nothing, so it stays accepted everywhere. Any
         # other preset is an on-time window, which worst_5min (whose late
         # tolerance is its own over-5-minute cutoff) and the reports without
         # a tolerance would otherwise misread or reject under another name.
-        if ON_TIME_PRESETS[preset] != (None, None) and report_type not in _EARLY_TOLERANCE_TYPES:
+        if window != (None, None) and report_type not in _EARLY_TOLERANCE_TYPES:
             raise HTTPException(
                 status_code=400,
                 detail=f"preset '{preset}' only applies to the on_time/route_table/council_summary reports",
             )
-        early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
+        early_tolerance_sec, late_tolerance_sec = window
     if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
         raise HTTPException(
             status_code=400,

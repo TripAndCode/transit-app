@@ -365,6 +365,15 @@ input[type="date"] { color-scheme: light; }
    "simulation"): it qualifies what it sits beside without competing with it. */
 .caveat-badge { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 999px; background: var(--bg-soft); color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
 
+/* Whether a figure meets its performance target: calm in both directions,
+   the words carrying the verdict and the tone only reinforcing it. */
+.standard-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+.standard-chip--meets { background: var(--accent-soft); color: var(--accent-strong); }
+.standard-chip--below { background: var(--bg-soft); color: var(--color-warning-text); }
+/* The on-time definition a panel's targets were judged on. */
+.standard-definition { margin-top: 12px; }
+.standard-definition p { margin: 0 0 4px; max-width: 60ch; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
+
 /* A one-line note under a report table. */
 .report-footnote { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); }
 

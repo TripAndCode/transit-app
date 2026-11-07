@@ -17,7 +17,8 @@ import { AdminButton, StatusChip } from "./adminControls";
 import { ClampSparkline } from "./ClampSparkline";
 import { useRowDrafts } from "./useRowDrafts";
 
-const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct"] as const;
+/** pipeline/reports/performance_standard.py's METRIC_TYPES. */
+const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct", "on_time_pct"] as const;
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
@@ -174,6 +175,14 @@ function isNonNegativeNumber(raw: string): boolean {
   return raw.trim() !== "" && Number.isFinite(n) && n >= 0;
 }
 
+/** A finite target, and for an on-time target a percentage, as the API and
+ *  the table's CHECK require. */
+function isThreshold(metricType: string, raw: string): boolean {
+  const n = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(n)) return false;
+  return metricType !== "on_time_pct" || (n >= 0 && n <= 100);
+}
+
 function StandardsEditor({
   agencyId,
   rows,
@@ -195,8 +204,7 @@ function StandardsEditor({
   const valid = drafts.every(
     (d) =>
       d.route_code.trim() !== "" &&
-      Number.isFinite(Number(d.threshold_value)) &&
-      d.threshold_value.trim() !== "" &&
+      isThreshold(d.metric_type, d.threshold_value) &&
       isNonNegativeNumber(d.bonus_malus_rate)
   );
 

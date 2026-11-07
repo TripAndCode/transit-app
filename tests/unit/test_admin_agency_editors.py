@@ -179,6 +179,36 @@ def test_patch_standards_records_before_and_after_in_the_audit_entry():
     ]
 
 
+def test_patch_standards_sets_an_on_time_target_and_audits_it():
+    conn = _EditorConn()
+    target = {"route_code": "A1", "metric_type": "on_time_pct", "threshold_value": 85.0, "bonus_malus_rate": 0.0}
+    response = _client(conn).patch("/api/admin/agencies/1/standards", json={"upsert": [target], "delete": []})
+
+    assert response.status_code == 200
+    assert response.json() == [target]
+    assert len(conn.audit) == 1
+    _actor_id, action, _target_type, _target_id, before_json, after_json, _reason, _ip = conn.audit[0]
+    assert action == "agency.standards_updated"
+    assert json.loads(before_json) == []
+    assert json.loads(after_json) == [target]
+
+
+def test_patch_standards_refuses_an_on_time_target_over_100_and_writes_nothing():
+    conn = _EditorConn()
+    body = {
+        "upsert": [
+            {"route_code": "A1", "metric_type": "on_time_pct", "threshold_value": 120.0, "bonus_malus_rate": 0.0}
+        ],
+        "delete": [],
+    }
+    response = _client(conn).patch("/api/admin/agencies/1/standards", json=body)
+
+    assert response.status_code == 422
+    assert "on_time_pct" in response.json()["detail"]
+    assert conn.standards == []
+    assert conn.audit == []
+
+
 # ── PATCH /{agency_id}/weights ──────────────────────────────────────────
 
 

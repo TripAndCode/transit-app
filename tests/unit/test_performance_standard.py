@@ -2,8 +2,11 @@
 (see pipeline.reports.performance_standard's module docstring for the
 formula this exercises directly)."""
 
+import pytest
+
 from pipeline.reports.performance_standard import (
     _relative_deviation,
+    meets_standard,
     simulation_disclaimer,
 )
 
@@ -52,3 +55,32 @@ def test_simulation_disclaimer_differs_by_locale_and_defaults_to_japanese():
     # raising a KeyError -- same "always assume a non-empty supported
     # value" convention as api.deps.get_locale.
     assert simulation_disclaimer("fr") == ja
+
+
+def test_an_on_time_share_above_its_target_is_better():
+    assert _relative_deviation("on_time_pct", threshold=80.0, actual=60.0) == -0.25
+    assert _relative_deviation("on_time_pct", threshold=80.0, actual=100.0) == 0.25
+
+
+@pytest.mark.parametrize(
+    ("metric_type", "threshold", "actual", "meets"),
+    [
+        # A share at its target meets it; a tenth of a point under does not.
+        ("on_time_pct", 85.0, 85.0, True),
+        ("on_time_pct", 85.0, 84.9, False),
+        ("on_time_pct", 85.0, 91.2, True),
+        # A target of 0 is met by any share, though no achievement rate exists.
+        ("on_time_pct", 0.0, 0.0, True),
+        ("vehicle_km_delivered_pct", 90.0, 80.0, False),
+        # Excess wait is lower-is-better.
+        ("ewt_sec", 50.0, 50.0, True),
+        ("ewt_sec", 50.0, 51.0, False),
+        ("ewt_sec", 50.0, 20.0, True),
+    ],
+)
+def test_meets_standard_reads_each_metrics_direction(metric_type, threshold, actual, meets):
+    assert meets_standard(metric_type, threshold, actual) is meets
+
+
+def test_meets_standard_is_unknown_without_a_figure():
+    assert meets_standard("on_time_pct", 85.0, None) is None

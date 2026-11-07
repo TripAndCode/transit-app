@@ -199,8 +199,17 @@ per route over the scope:
 - **Context.** The heading names the window (「30日間（…）の集計」), so its
   figures are not mistaken for the Pulse screen's shorter window. Under the
   table sit the on-time definition and what 「5分超」 counts.
-  `HeadwayQualityPanel` and `PerformanceStandardPanel` follow the on-time
-  sort.
+  `HeadwayQualityPanel` follows the on-time sort.
+- **Targets.** `PerformanceStandardPanel` follows the table under every sort,
+  and the route page shows it for that route alone. It renders nothing until
+  `GET /api/{agency_id}/performance_standards` returns a target to show. An
+  `on_time_pct` target is judged on the table's own on-time figure for the
+  route (`compute_route_table`, with the table's default observation floor),
+  over the page's scope less its route filter and under its `late`/`early`
+  (or `preset`). The panel names that definition from the response's
+  `on_time_definition`, and marks each figure 「基準を満たす」 or
+  「基準に届かない」. A route under the floor, or one whose feed always reports
+  zero delay, has no figure to judge.
 - **Colour.** A delay bar's colour and length come from the figure the cell
   prints, rounded to a tenth, so two rows printing the same figure share a
   colour. The severe-delay dot other delay tables draw is left off.

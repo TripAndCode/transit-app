@@ -1,11 +1,16 @@
 /**
  * Per-route "minimum performance standard" bonus/malus simulation panel,
- * comparing each configured threshold against the Excess Waiting Time or
- * vehicle-km-delivered rate. Renders nothing when this agency has zero
- * configured `route_performance_standards` rows (see
- * pipeline/reports/performance_standard.py) -- there is no ingestion
- * pipeline or admin UI for this table, so an agency with no rows simply has
- * no standards configured yet, same convention as ridership_weights.
+ * comparing each configured threshold against the route's on-time rate, its
+ * Excess Waiting Time or the agency's vehicle-km-delivered rate, and saying
+ * whether each figure meets its target. Renders nothing until it knows this
+ * agency has configured `route_performance_standards` rows (see
+ * pipeline/reports/performance_standard.py) -- admins write them in the agency
+ * drawer, and most routes have none, so the panel never claims space it may
+ * not need.
+ *
+ * An on-time target is judged on the Routes table's own figure under the
+ * page's on-time definition, which the panel names beneath the table: a
+ * target means nothing without the definition it was read against.
  *
  * This panel is an INTERNAL SIMULATION/ESTIMATE ONLY, never an actual
  * invoice or contractual output -- both a prominent client-side badge
@@ -21,8 +26,8 @@ import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
-import { Skeleton } from "./Skeleton";
 import { ErrorBanner } from "./ErrorBanner";
+import { OnTimeDefinition } from "./DefinitionMetaBlock";
 import { fixedTenth, formatDuration, roundTenth } from "../utils/format";
 
 function fmtMetricValue(v: number | null, metricType: PerformanceStandardRow["metric_type"]): string {
@@ -41,12 +46,25 @@ function fmtEstimate(v: number | null): string {
   return `${sign}${fixedTenth(Math.abs(r))}`;
 }
 
-export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
+function Judgement({ meets }: { meets: boolean | null }) {
+  const { t } = useTranslation();
+  if (meets == null) return <>—</>;
+  return (
+    <span className={`standard-chip standard-chip--${meets ? "meets" : "below"}`}>
+      {t(meets ? "reports.performance_standard.meets" : "reports.performance_standard.below")}
+    </span>
+  );
+}
+
+/** `route` narrows the panel to one route's targets, for that route's own page. */
+export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx: Scope; route?: string }) {
   const { t } = useTranslation();
   const routeNames = useRouteNames(aid);
-  const { data, isLoading, error, refetch } = usePerformanceStandards(aid, ctx, true);
+  const { data, error, refetch } = usePerformanceStandards(aid, ctx, true);
+  const rows = data?.rows.filter((r) => route == null || r.route_code === route) ?? [];
 
-  if (data && data.rows.length === 0) return null;
+  if (!error && rows.length === 0) return null;
+  const onTimeDefinition = rows.some((r) => r.metric_type === "on_time_pct") ? data?.on_time_definition : null;
 
   return (
     <div style={{ marginTop: 20, background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16 }}>
@@ -57,9 +75,8 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
         {t("reports.performance_standard.subtitle")}
       </p>
-      {isLoading && <Skeleton height={80} />}
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
-      {data && data.rows.length > 0 && (
+      {rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
           <table style={SHARED_TABLE}>
             <thead>
@@ -68,12 +85,13 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
                 <th style={th({ align: "left" })}>{t("reports.performance_standard.col.metric")}</th>
                 <th style={th({ align: "right" })}>{t("reports.performance_standard.col.threshold")}</th>
                 <th style={th({ align: "right" })}>{t("reports.performance_standard.col.actual")}</th>
+                <th style={th({ align: "left" })}>{t("reports.performance_standard.col.judgement")}</th>
                 <th style={th({ align: "right" })}>{t("reports.performance_standard.col.achievement_rate")}</th>
                 <th style={th({ align: "right" })}>{t("reports.performance_standard.col.estimate")}</th>
               </tr>
             </thead>
             <tbody>
-              {data.rows.map((r) => (
+              {rows.map((r) => (
                 <tr key={`${r.route_code}-${r.metric_type}`} style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
                   <td style={td()}>
@@ -86,12 +104,23 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
                   </td>
                   <td style={td({ align: "right" })}>{fmtMetricValue(r.threshold_value, r.metric_type)}</td>
                   <td style={td({ align: "right" })}>{fmtMetricValue(r.actual_value, r.metric_type)}</td>
+                  <td style={td()}><Judgement meets={r.meets} /></td>
                   <td style={td({ align: "right" })}>{fmtAchievementRate(r.achievement_rate)}</td>
                   <td style={td({ align: "right" })}>{fmtEstimate(r.estimated_bonus_deduction)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {onTimeDefinition && (
+        <div className="standard-definition">
+          <p>
+            {onTimeDefinition.preset == null || onTimeDefinition.preset === "custom"
+              ? t("reports.performance_standard.judged_on_custom")
+              : t("reports.performance_standard.judged_on", { preset: onTimeDefinition.preset })}
+          </p>
+          <OnTimeDefinition definition={onTimeDefinition} />
         </div>
       )}
       {data && (
@@ -102,4 +131,3 @@ export function PerformanceStandardPanel({ aid, ctx }: { aid: number; ctx: Scope
     </div>
   );
 }
-

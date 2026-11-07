@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
+from pipeline.reports.performance_standard import METRIC_TYPES
 from pipeline.static_archive import fetch_day
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 
@@ -54,10 +55,9 @@ __all__ = [
     "validate_weight_edits",
 ]
 
-#: Mirrors the CHECK constraint on ``route_performance_standards.metric_type``.
-#: Kept as an explicit allow-list so a bad value is a 422 with a readable
-#: message instead of a constraint violation surfacing as a 500.
-METRIC_TYPES = ("ewt_sec", "vehicle_km_delivered_pct")
+#: An on-time target is a share of departures, in percent; the table's own
+#: CHECK holds it to the same range (migration 0090).
+_ON_TIME_TARGET_RANGE = (0.0, 100.0)
 
 #: Width of the clamp-rate sparkline, in whole days ending today.
 CLAMP_HISTORY_DAYS = 14
@@ -385,8 +385,10 @@ def build_weights_coverage(routes_with_weights: int | None, routes_total: int | 
 def validate_standard_edits(items: Sequence[Mapping[str, Any]]) -> None:
     """Raise ``ValueError`` for a standards payload the table would reject.
 
-    Checked here rather than left to the database so a bad edit is a 422
-    naming the offending field, and so the in-payload duplicate case is
+    ``metric_type`` must be one of :data:`METRIC_TYPES`, the values the
+    table's CHECK allows. Checked here rather than left to the database so a
+    bad edit is a 422 naming the offending field, and so the in-payload
+    duplicate case is
     caught before any row is written: the batched upsert is one INSERT ...
     ON CONFLICT, which cannot touch the same row twice and would otherwise
     fail with a CardinalityViolation.
@@ -404,6 +406,9 @@ def validate_standard_edits(items: Sequence[Mapping[str, Any]]) -> None:
         # figure derived from such a threshold would silently be NaN.
         if threshold is None or not math.isfinite(float(threshold)):
             raise ValueError("threshold_value must be a finite number")
+        low, high = _ON_TIME_TARGET_RANGE
+        if metric_type == "on_time_pct" and not low <= float(threshold) <= high:
+            raise ValueError(f"an on_time_pct threshold_value is a percentage, from {low:g} to {high:g}")
         rate = item.get("bonus_malus_rate")
         if rate is None or not math.isfinite(float(rate)) or float(rate) < 0:
             raise ValueError("bonus_malus_rate must be a finite, non-negative number")

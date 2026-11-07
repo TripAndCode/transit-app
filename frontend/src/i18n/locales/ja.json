@@ -1300,19 +1300,25 @@
     "performance_standard": {
       "title": "最低パフォーマンス基準",
       "simulation_badge": "内部シミュレーション（試算） — 請求書ではありません",
-      "subtitle": "路線ごとに設定された最低パフォーマンス基準に対する、達成率と概算のボーナス/減額の試算です。",
+      "subtitle": "路線ごとに設定された最低パフォーマンス基準を満たしているかと、達成率、概算のボーナス/減額の試算です。",
       "col": {
         "metric": "指標",
         "threshold": "基準値",
         "actual": "実績値",
+        "judgement": "判定",
         "achievement_rate": "達成率",
         "estimate": "概算ボーナス/減額"
       },
       "metric_label": {
         "ewt_sec": "超過待ち時間（秒）",
-        "vehicle_km_delivered_pct": "走行キロ達成率（%）"
+        "vehicle_km_delivered_pct": "走行キロ達成率（%）",
+        "on_time_pct": "定時率（%）"
       },
-      "scope_agency_note": "事業者全体の値（路線別の内訳はありません）"
+      "scope_agency_note": "事業者全体の値（路線別の内訳はありません）",
+      "meets": "基準を満たす",
+      "below": "基準に届かない",
+      "judged_on": "定時率の基準は、このページの期間と絞り込みで、定義 {{preset}} に基づいて判定しています。",
+      "judged_on_custom": "定時率の基準は、このページの期間と絞り込みで、任意の許容幅に基づいて判定しています。"
     },
     "weather_delay": {
       "title": "雨天時と晴天時の平均遅延",
