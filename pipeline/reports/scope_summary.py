@@ -15,7 +15,9 @@ Each section drops the one condition it exists to choose:
 - ``tolerance``: the whole scope, as the on-time share at each late
   tolerance, counted as the screens count it
   (:func:`pipeline.histogram.count_on_time`): exact at one and five minutes,
-  a histogram estimate elsewhere.
+  a histogram estimate elsewhere. An early bound below the histogram's floor
+  leaves it empty: only the observations themselves could count it, and the
+  controls never wait on that scan.
 
 ``day_types`` is not a section of figures: it lists the day-type buckets the
 agency's calendar splits the agency into, the choices the timetable control
@@ -31,7 +33,7 @@ from datetime import timedelta
 from typing import Any
 
 from api.range import RangeCtx, day_types_for, resolve_service_dates
-from pipeline.histogram import N_BUCKETS, count_on_time
+from pipeline.histogram import N_BUCKETS, count_on_time, within_histogram
 from pipeline.reports.filters import _dist_filter
 
 DAYS_WINDOW = 90
@@ -118,7 +120,7 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
 
     hist, samples, on_time, late5 = await _merged_hist(agency_id, ctx, conn)
     tolerance: list[dict[str, Any]] = []
-    if samples:
+    if samples and within_histogram(early_sec, max(TOLERANCE_STEPS_SEC)):
         for late in TOLERANCE_STEPS_SEC:
             count = count_on_time(hist, early_sec, late, samples=samples, on_time_count=on_time, late5_count=late5)
             tolerance.append({"late_sec": late, "on_time_pct": round(count * 100.0 / samples, 1)})

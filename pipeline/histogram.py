@@ -160,21 +160,92 @@ def count_in_range(
     return total
 
 
+def within_histogram(early_tolerance_sec: int | None, late_tolerance_sec: int | None) -> bool:
+    """Whether every bound of an on-time window lies where the histogram can
+    split a count: no more than ``-LO`` seconds early and less than ``HI``
+    late. The end buckets are open, so no share of them belongs to either side
+    of a bound inside them; a window reaching there needs the observations
+    themselves."""
+    early_inside = early_tolerance_sec is None or early_tolerance_sec <= -LO
+    late_inside = late_tolerance_sec is None or late_tolerance_sec < HI
+    return early_inside and late_inside
+
+
+def early_edge_buckets(early_sec: int) -> int | None:
+    """How many leading buckets lie wholly below ``-early_sec`` when
+    ``-early_sec`` is a bucket edge, so that their sum is the exact count of
+    departures more than *early_sec* early; ``None`` when it is not an edge.
+    The one rule for when an early count is exact, which both
+    :func:`early_count_sql` and :func:`exact_window` read."""
+    if not 0 <= early_sec <= -LO or (-early_sec - LO) % WIDTH:
+        return None
+    return (-early_sec - LO) // WIDTH + 1
+
+
+def early_count_sql(early_sec: int) -> str:
+    """A SQL aggregate summing a ``hist`` column's leading buckets wholly
+    below ``-early_sec`` (Postgres arrays count from 1): the exact count of
+    departures more than *early_sec* early, without merging histograms.
+    Raises ``ValueError`` when ``-early_sec`` is not a bucket edge."""
+    buckets = early_edge_buckets(early_sec)
+    if buckets is None:
+        raise ValueError(f"-{early_sec} s is not a histogram bucket edge")
+    return "SUM(" + " + ".join(f"hist[{i}]" for i in range(1, buckets + 1)) + ")"
+
+
 def count_early(counts: list[int], early_sec: int) -> float:
     """Estimate how many observations in merged delay-histogram *counts*
     departed more than *early_sec* seconds early, ``dep_delay < -early_sec``:
     a departure exactly *early_sec* early is not counted. ``dep_delay`` is
     whole seconds, so that is :func:`count_in_range` up to ``-early_sec - 1``
     inclusive. The count is exact whenever ``-early_sec`` is a bucket edge
-    (a multiple of ``WIDTH`` from 0 down to ``LO``); beyond ``LO`` the
-    underflow bucket has no edges to split it by.
+    (:func:`early_edge_buckets`). Raises ``ValueError`` below the histogram's
+    floor, where the open underflow bucket cannot be split.
     """
+    if not within_histogram(early_sec, None):
+        raise ValueError(f"{early_sec} s early lies below the histogram's floor")
     return count_in_range(counts, None, -early_sec - 1)
 
 
-def _is_early_edge(early_sec: int) -> bool:
-    """Whether ``-early_sec`` is a bucket edge, so :func:`count_early` is exact."""
-    return LO <= -early_sec <= 0 and (-early_sec - LO) % WIDTH == 0
+def _at_most_late(late_tolerance_sec: int, samples: int, on_time_count: int, late5_count: int) -> int | None:
+    """The exact count of departures at most *late_tolerance_sec* late, where
+    analyze() bakes one: one minute (*on_time_count*) or five minutes
+    (*samples* less *late5_count*)."""
+    if late_tolerance_sec == LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
+        return on_time_count
+    if late_tolerance_sec == LEGACY_SEVERE_LATE_TOLERANCE_SEC:
+        return samples - late5_count
+    return None
+
+
+def exact_window(early_tolerance_sec: int | None, late_tolerance_sec: int) -> bool:
+    """Whether the exact columns answer the on-time window with no merged
+    histogram: a late tolerance of one or five minutes, and no early tolerance
+    or one on a bucket edge (:func:`early_edge_buckets`). Such a window, and
+    the early-departure count at its threshold, are read with
+    :func:`early_count_sql` and :func:`on_time_from_columns`."""
+    late_exact = late_tolerance_sec in (LEGACY_ON_TIME_LATE_TOLERANCE_SEC, LEGACY_SEVERE_LATE_TOLERANCE_SEC)
+    return late_exact and (early_tolerance_sec is None or early_edge_buckets(early_tolerance_sec) is not None)
+
+
+def on_time_from_columns(
+    early_tolerance_sec: int | None,
+    late_tolerance_sec: int,
+    *,
+    samples: int,
+    on_time_count: int,
+    late5_count: int,
+    early_count: int,
+) -> int:
+    """The exact on-time count of an :func:`exact_window`, from the exact
+    columns and *early_count*, the departures more than
+    *early_tolerance_sec* early that :func:`early_count_sql` sums (unused
+    without an early tolerance). It equals :func:`count_on_time` over the
+    same departures. Raises ``ValueError`` for any other window."""
+    at_most_late = _at_most_late(late_tolerance_sec, samples, on_time_count, late5_count)
+    if at_most_late is None or not exact_window(early_tolerance_sec, late_tolerance_sec):
+        raise ValueError(f"({early_tolerance_sec}, {late_tolerance_sec}) is not an exact window")
+    return at_most_late if early_tolerance_sec is None else at_most_late - early_count
 
 
 def count_on_time(
@@ -194,24 +265,22 @@ def count_on_time(
     ``LEGACY_SEVERE_LATE_TOLERANCE_SEC`` late).
 
     Feeds report many delays as whole minutes, which pile up on a bucket's
-    lower edge, where the uniform estimate counts almost none of them. So
-    wherever the window's edges allow, the count is exact: a late tolerance
-    of one or five minutes reads its exact column, and an early tolerance on
-    a bucket edge subtracts the exact :func:`count_early`. Any other window
-    is :func:`count_in_range`'s estimate.
+    lower edge, where the uniform estimate counts almost none of them. So a
+    late tolerance of one or five minutes reads its exact column, less the
+    departures earlier than the early tolerance (:func:`count_early`, exact
+    on a bucket edge). Any other late tolerance is :func:`count_in_range`'s
+    estimate. Raises ``ValueError`` for a window past the histogram's open
+    end buckets (:func:`within_histogram`).
     """
-    if late_tolerance_sec == LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
-        at_most_late = on_time_count
-    elif late_tolerance_sec == LEGACY_SEVERE_LATE_TOLERANCE_SEC:
-        at_most_late = samples - late5_count
-    else:
-        at_most_late = None
-    if early_tolerance_sec is None and at_most_late is not None:
+    if not within_histogram(early_tolerance_sec, late_tolerance_sec):
+        raise ValueError(f"({early_tolerance_sec}, {late_tolerance_sec}) reaches past the histogram")
+    at_most_late = _at_most_late(late_tolerance_sec, samples, on_time_count, late5_count)
+    if at_most_late is None:
+        low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
+        return count_in_range(counts, low_sec, late_tolerance_sec)
+    if early_tolerance_sec is None:
         return at_most_late
-    if early_tolerance_sec is not None and at_most_late is not None and _is_early_edge(early_tolerance_sec):
-        return at_most_late - count_early(counts, early_tolerance_sec)
-    low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
-    return count_in_range(counts, low_sec, late_tolerance_sec)
+    return at_most_late - count_early(counts, early_tolerance_sec)
 
 
 def bucket_case_sql(column: str, *, lo: int = LO, hi: int = HI, width: int = WIDTH) -> str:

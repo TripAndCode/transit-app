@@ -28,16 +28,19 @@ from pipeline.histogram import (
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
     count_early,
     count_on_time,
+    exact_window,
+    on_time_from_columns,
 )
 from pipeline.reports.filters import _dedup_cte_ch, _round2
 from pipeline.reports.rankings import (
     MIN_GROUP_SAMPLES,
     _avg_min,
     _pct1,
+    _read_dist_scalars,
     _read_dist_with_hist,
     _round1,
-    aggregates_serve,
     early_departure_sec,
+    tolerance_aggregates_serve,
 )
 
 # Each sort's row index, and whether the routes needing attention come first
@@ -69,40 +72,44 @@ async def compute_route_table(
     ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples,
     early_pct)``, in no particular order: :func:`sort_route_table` orders them.
 
-    The default on-time rule and the over-5-minute count read the exact
-    columns analyze() bakes into agg_route_daily_dist. A requested on-time
-    tolerance reads the merged delay histogram beside them, as
-    compute_on_time does (:func:`~pipeline.histogram.count_on_time`), and so
-    does the early-departure count, exact wherever its threshold is a bucket
-    edge (:func:`~pipeline.histogram.count_early`). A time_band filter scans
-    ClickHouse.
+    The over-5-minute count reads the exact column analyze() bakes into
+    agg_route_daily_dist. An on-time window the exact columns answer, the
+    default and the industry window among them
+    (:func:`~pipeline.histogram.exact_window`), reads them too, with the
+    early-departure count summed from the leading histogram buckets; any other
+    window merges the routes' delay histograms, as compute_on_time does
+    (:func:`~pipeline.histogram.count_on_time`). A time_band filter, or a
+    tolerance in the histogram's open end buckets, scans ClickHouse.
     """
     early_sec = early_departure_sec(early_tolerance_sec)
-    if not aggregates_serve(ctx):
+    if not tolerance_aggregates_serve(ctx, early_tolerance_sec, late_tolerance_sec):
         if ch is None:
-            raise RuntimeError("compute_route_table's time_band-filtered live fallback requires a ClickHouse client")
+            raise RuntimeError("compute_route_table's live fallback requires a ClickHouse client")
         return await _route_table_live(
             agency_id, ctx, ch, min_samples, early_tolerance_sec, late_tolerance_sec, early_sec
         )
 
     high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
+    exact = exact_window(early_tolerance_sec, high_sec)
+    if exact:
+        rows = await _read_dist_scalars(agency_id, ctx, conn, early_sec=early_sec)
+    else:
+        rows = await _read_dist_with_hist(agency_id, ctx, conn)
     out: list[tuple] = []
-    for r in await _read_dist_with_hist(agency_id, ctx, conn):
+    for r in rows:
         samples = r["samples"]
         if samples < min_samples:
             continue
-        hist = r["hist"]
-        on_time = count_on_time(
-            hist,
-            early_tolerance_sec,
-            high_sec,
-            samples=samples,
-            on_time_count=r["on_time_count"],
-            late5_count=r["late5_count"],
-        )
-        out.append(
-            _row(r["route_code"], _avg_min(r["sum_delay_sec"], samples), r, on_time, count_early(hist, early_sec))
-        )
+        columns = {"samples": samples, "on_time_count": r["on_time_count"], "late5_count": r["late5_count"]}
+        if exact:
+            early_count: float = r["early_count"]
+            on_time: float = on_time_from_columns(
+                early_tolerance_sec, high_sec, early_count=r["early_count"], **columns
+            )
+        else:
+            early_count = count_early(r["hist"], early_sec)
+            on_time = count_on_time(r["hist"], early_tolerance_sec, high_sec, **columns)
+        out.append(_row(r["route_code"], _avg_min(r["sum_delay_sec"], samples), r, on_time, early_count))
     return out
 
 

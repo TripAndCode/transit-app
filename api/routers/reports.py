@@ -1263,10 +1263,11 @@ async def get_report(
         default=None,
         ge=0,
         description="on_time/route_table/worst_5min/council_summary: the late-side cutoff (default 60s "
-        "for on_time/route_table/council_summary, 300s for worst_5min). Passing this reads the "
-        "merged histogram beside the exact columns: on-time counts are exact at 60s and 300s with an "
-        "early tolerance on a whole minute up to 300s (pipeline.histogram.count_on_time), and "
-        "estimated otherwise; worst_5min's count is a histogram estimate.",
+        "for on_time/route_table/council_summary, 300s for worst_5min). An on-time count is exact for "
+        "60s or 300s with no early tolerance or one on a whole minute up to 300s "
+        "(pipeline.histogram.exact_window), and a histogram estimate otherwise; worst_5min's count is "
+        "a histogram estimate. A cutoff of 1800s or more, or an early tolerance over 300s, is scanned "
+        "live, past the histogram's open end buckets.",
     ),
     late: int | None = Query(
         default=None,
@@ -1391,7 +1392,13 @@ async def get_report(
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
-    live = not report_reads_aggregates(report_type, ctx, csv=format == "csv")
+    live = not report_reads_aggregates(
+        report_type,
+        ctx,
+        csv=format == "csv",
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+    )
     definition = await stamp_build(
         conn, resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live), agency_id
     )

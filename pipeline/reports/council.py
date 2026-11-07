@@ -14,7 +14,8 @@ dates, whatever route/dow/service/time_band filter narrows the on-time figures
 and unlike :func:`pipeline.reports.network.compute_network_summary`, whose
 on-time figure is always the ``legacy_60s`` exact column with no tolerance
 override. The fast path reuses ``pipeline.reports.rankings``'s own
-``_read_dist_with_hist`` SQL byte-for-byte, simply
+``_read_dist_scalars`` SQL, or ``_read_dist_with_hist`` for a window the
+exact columns cannot answer, byte-for-byte, simply
 pooling every returned route into one total instead of emitting one row per
 route (with no per-route minimum-sample gate -- that
 gate exists in ``compute_on_time`` to keep a *ranking* free of thin-sample
@@ -52,6 +53,8 @@ from pipeline.histogram import (
     N_BUCKETS,
     count_early,
     count_on_time,
+    exact_window,
+    on_time_from_columns,
 )
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
@@ -60,10 +63,11 @@ from pipeline.reports.network import compute_network_summary
 from pipeline.reports.rankings import (
     _avg_min,
     _pct1,
+    _read_dist_scalars,
     _read_dist_with_hist,
     _round1,
-    aggregates_serve,
     early_departure_sec,
+    tolerance_aggregates_serve,
 )
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
@@ -100,9 +104,9 @@ async def _agency_on_time_pooled(
     high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
     early_sec = early_departure_sec(early_tolerance_sec)
 
-    if not aggregates_serve(ctx):
+    if not tolerance_aggregates_serve(ctx, early_tolerance_sec, late_tolerance_sec):
         if ch is None:
-            raise RuntimeError("council summary's time_band-filtered live fallback requires a ClickHouse client")
+            raise RuntimeError("council summary's live fallback requires a ClickHouse client")
         cte_sql, ch_params = _dedup_cte_ch(ctx)
         low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
         result = await ch.query(
@@ -131,7 +135,11 @@ async def _agency_on_time_pooled(
             int(samples),
         )
 
-    rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    exact = exact_window(early_tolerance_sec, high_sec)
+    if exact:
+        rows = await _read_dist_scalars(agency_id, ctx, conn, early_sec=early_sec)
+    else:
+        rows = await _read_dist_with_hist(agency_id, ctx, conn)
     samples = sum(r["samples"] for r in rows)
     if not samples:
         return None, None, None, 0
@@ -140,21 +148,27 @@ async def _agency_on_time_pooled(
     # already Decimal or a plain int) rather than dividing by the float
     # 60.0 directly, which raises TypeError mixing Decimal and float.
     sum_delay_sec = sum(r["sum_delay_sec"] for r in rows)
-    merged_hist = [0] * N_BUCKETS
-    for r in rows:
-        for i, c in enumerate(r["hist"]):
-            merged_hist[i] += c
-    on_time = count_on_time(
-        merged_hist,
-        early_tolerance_sec,
-        high_sec,
-        samples=samples,
-        on_time_count=sum(r["on_time_count"] for r in rows),
-        late5_count=sum(r["late5_count"] for r in rows),
-    )
+    columns = {
+        "samples": samples,
+        "on_time_count": sum(r["on_time_count"] for r in rows),
+        "late5_count": sum(r["late5_count"] for r in rows),
+    }
+    early_count: float
+    on_time: float
+    if exact:
+        exact_early = sum(r["early_count"] for r in rows)
+        early_count = exact_early
+        on_time = on_time_from_columns(early_tolerance_sec, high_sec, early_count=exact_early, **columns)
+    else:
+        merged_hist = [0] * N_BUCKETS
+        for r in rows:
+            for i, c in enumerate(r["hist"]):
+                merged_hist[i] += c
+        early_count = count_early(merged_hist, early_sec)
+        on_time = count_on_time(merged_hist, early_tolerance_sec, high_sec, **columns)
     return (
         float(_round1(on_time * 100.0 / samples)),
-        float(_pct1(count_early(merged_hist, early_sec), samples)),
+        float(_pct1(early_count, samples)),
         float(_avg_min(sum_delay_sec, samples)),
         samples,
     )
