@@ -11,7 +11,12 @@ from pipeline.histogram import (
     count_early,
     count_in_range,
     count_on_time,
+    early_count_sql,
+    early_edge_buckets,
+    exact_window,
+    on_time_from_columns,
     percentile_from_hist,
+    within_histogram,
 )
 
 
@@ -170,6 +175,51 @@ def test_count_early_at_one_minute_leaves_out_a_departure_exactly_one_minute_ear
     assert count_early(_hist(-61, -60, -59), 60) == 1
 
 
+@pytest.mark.parametrize("early_sec", [301, 330, 360, 600])
+def test_count_early_refuses_a_threshold_below_the_histograms_floor(early_sec):
+    """The underflow bucket is open below LO, so no share of it can be
+    attributed to either side of a threshold there; such a count comes from
+    the live scan instead."""
+    with pytest.raises(ValueError):
+        count_early(_hist(*_EARLY_EDGES), early_sec)
+
+
+@pytest.mark.parametrize(
+    ("early", "late", "inside"),
+    [
+        (None, None, True),
+        (0, 60, True),
+        (300, 1799, True),
+        (301, None, False),
+        (360, None, False),
+        (600, 60, False),
+        (None, 1800, False),
+        (None, 2400, False),
+    ],
+)
+def test_a_tolerance_lies_inside_the_histogram_only_between_its_open_end_buckets(early, late, inside):
+    assert within_histogram(early, late) is inside
+
+
+@pytest.mark.parametrize(("early_sec", "buckets"), [(0, 6), (60, 5), (120, 4), (300, 1)])
+def test_the_leading_buckets_wholly_below_an_edge_hold_the_exact_early_count(early_sec, buckets):
+    counts = _hist(*_EARLY_EDGES)
+    assert early_edge_buckets(early_sec) == buckets
+    assert sum(counts[:buckets]) == count_early(counts, early_sec) == sum(d < -early_sec for d in _EARLY_EDGES)
+
+
+@pytest.mark.parametrize("early_sec", [30, 90, 330, 360])
+def test_a_threshold_off_the_edges_has_no_exact_bucket_sum(early_sec):
+    assert early_edge_buckets(early_sec) is None
+    with pytest.raises(ValueError):
+        early_count_sql(early_sec)
+
+
+def test_the_early_count_column_sums_the_leading_buckets_by_postgres_index():
+    assert early_count_sql(60) == "SUM(hist[1] + hist[2] + hist[3] + hist[4] + hist[5])"
+    assert early_count_sql(300) == "SUM(hist[1])"
+
+
 # Whole-minute readings on every edge an on-time window can have: exactly a
 # minute early, exactly one and five minutes late, and one second past each.
 _WINDOW_EDGES = [-400, -301, -300, -120, -61, -60, -59, 0, 30, 60, 61, 120, 299, 300, 301, 400]
@@ -198,8 +248,57 @@ def test_count_on_time_is_exact_where_the_exact_columns_and_a_bucket_edge_bound_
     assert count_on_time(_hist(*_WINDOW_EDGES), early, late, **_exact_columns(_WINDOW_EDGES)) == expected
 
 
-@pytest.mark.parametrize(("early", "late"), [(None, 120), (60, 180), (90, 300), (30, 60), (None, 0)])
+@pytest.mark.parametrize(("early", "late"), [(None, 120), (60, 180), (None, 0)])
 def test_count_on_time_estimates_from_the_histogram_where_no_exact_column_applies(early, late):
     counts = _hist(*_WINDOW_EDGES)
     estimate = count_in_range(counts, None if early is None else -early, late)
     assert count_on_time(counts, early, late, **_exact_columns(_WINDOW_EDGES)) == estimate
+
+
+@pytest.mark.parametrize(("early", "late"), [(90, 300), (30, 60)])
+def test_count_on_time_keeps_an_exact_late_edge_under_an_early_tolerance_off_the_edges(early, late):
+    """Only the early side is estimated: the departures at most *late* late
+    still come from the exact column."""
+    counts = _hist(*_WINDOW_EDGES)
+    columns = _exact_columns(_WINDOW_EDGES)
+    at_most_late = sum(d <= late for d in _WINDOW_EDGES)
+    expected = at_most_late - count_in_range(counts, None, -early - 1)
+    assert count_on_time(counts, early, late, **columns) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("early", "late"), [(360, 60), (None, 1800), (None, 2400)])
+def test_count_on_time_refuses_a_window_past_the_histograms_open_end_buckets(early, late):
+    with pytest.raises(ValueError):
+        count_on_time(_hist(*_WINDOW_EDGES), early, late, **_exact_columns(_WINDOW_EDGES))
+
+
+@pytest.mark.parametrize(
+    ("early", "late", "exact"),
+    [
+        (None, 60, True),
+        (None, 300, True),
+        (60, 300, True),
+        (0, 60, True),
+        (300, 300, True),
+        (90, 300, False),
+        (None, 120, False),
+        (60, 180, False),
+        (360, 60, False),
+    ],
+)
+def test_the_exact_columns_answer_a_window_and_agree_with_the_histogram(early, late, exact):
+    """The query that sums leading buckets and the merged-histogram path give
+    one figure wherever the exact columns can answer, so the cheaper read can
+    never change a number."""
+    columns = _exact_columns(_WINDOW_EDGES)
+    assert exact_window(early, late) is exact
+    if not exact:
+        with pytest.raises(ValueError):
+            on_time_from_columns(early, late, early_count=0, **columns)
+        return
+    counts = _hist(*_WINDOW_EDGES)
+    early_count = 0 if early is None else sum(counts[: early_edge_buckets(early)])
+    low = -(early if early is not None else 10_000)
+    truth = sum(low <= d <= late for d in _WINDOW_EDGES)
+    from_columns = on_time_from_columns(early, late, early_count=early_count, **columns)
+    assert from_columns == count_on_time(counts, early, late, **columns) == truth

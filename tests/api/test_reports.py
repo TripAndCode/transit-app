@@ -612,6 +612,99 @@ async def test_on_time_counts_readings_on_the_windows_edges_exactly_on_both_path
 
 
 @pytest.mark.asyncio
+async def test_an_exact_window_reads_the_exact_columns_without_merging_histograms(
+    reports_client, ch_client, ch_async_client, monkeypatch
+):
+    """Merging every route's histogram is the expensive read. A window the
+    exact columns answer, the default and the industry window among them,
+    never runs it; only an early tolerance off the bucket edges, or a late
+    one other than one or five minutes, does."""
+    from pipeline.reports import council, rankings, route_table
+
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RQ", "平日", day, "08:00", _WINDOW_EDGES)
+    await _load_for_path("agg", agency_id, ch_client, ch_async_client)
+    merged: list[str] = []
+    for module in (council, rankings, route_table):
+        original = module._read_dist_with_hist
+
+        async def spy(*args, _original=original, _name=module.__name__, **kwargs):
+            merged.append(_name)
+            return await _original(*args, **kwargs)
+
+        monkeypatch.setattr(module, "_read_dist_with_hist", spy)
+
+    async def read(report, query):
+        sparse = "&include_sparse=1" if report == "route_table" else ""
+        resp = await client.get(f"/api/{agency_id}/reports/{report}?from={day}&to={day}{sparse}{query}")
+        assert resp.status_code == 200, (report, query, resp.text)
+
+    for report, query in [
+        ("route_table", ""),
+        ("route_table", "&preset=standard_m1_p5"),
+        ("route_table", "&late=300"),
+        ("route_table", "&early=0&late=60"),
+        ("council_summary", ""),
+        ("council_summary", "&preset=standard_m1_p5"),
+        ("council_summary", "&late=300"),
+        ("on_time", "&preset=standard_m1_p5"),
+        ("on_time", "&late=300"),
+    ]:
+        await read(report, query)
+    assert merged == []
+
+    await read("route_table", "&early=90")
+    await read("route_table", "&late=120")
+    await read("council_summary", "&early=90")
+    await read("on_time", "&early=90&late=300")
+    assert merged == [
+        "pipeline.reports.route_table",
+        "pipeline.reports.route_table",
+        "pipeline.reports.council",
+        "pipeline.reports.rankings",
+    ]
+
+
+# Departures past both of the histogram's open end buckets: earlier than
+# -300 s and later than 1800 s.
+_BEYOND = [-700] * 5 + [-400] * 5 + [-330] * 5 + [0] * 5 + [2000] * 5 + [2500] * 5
+
+
+@pytest.mark.asyncio
+async def test_a_tolerance_past_the_histograms_end_buckets_is_scanned_live(reports_client, ch_client, ch_async_client):
+    """No share of an open end bucket can be put on either side of a
+    tolerance there, so those requests scan the observations live, say so,
+    and agree with the time-band scan."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RB", "平日", day, "08:00", _BEYOND)
+    await _load_for_path("agg", agency_id, ch_client, ch_async_client)
+
+    # (report, query, {row index: expected})
+    cases = [
+        ("route_table", "&early=360", {2: 33.3, 6: 33.3}),
+        ("route_table", "&early=600", {2: 50.0, 6: 16.7}),
+        ("route_table", "&late=2400", {2: 83.3, 6: 50.0}),
+        ("on_time", "&early_tolerance_sec=360", {2: 33.3}),
+        ("on_time", "&late=2400", {2: 83.3}),
+        ("council_summary", "&early=360", {0: 33.3, 6: 33.3}),
+        ("council_summary", "&late=2400", {0: 83.3}),
+        ("worst_5min", "&late_tolerance_sec=2400", {2: 5}),
+    ]
+    for report, query, expected in cases:
+        sparse = "&include_sparse=1" if report == "route_table" else ""
+        url = f"/api/{agency_id}/reports/{report}?from={day}&to={day}{sparse}{query}"
+        whole_day = (await client.get(url)).json()
+        banded = (await client.get(url + "&time_band=morning")).json()
+        for body in (whole_day, banded):
+            row = next(r for r in body["rows"] if report == "council_summary" or r[0] == "RB")
+            assert {i: float(row[i]) for i in expected} == expected, (report, query)
+        assert whole_day["definition"]["source"] == "live", (report, query)
+        assert whole_day["definition"]["built_at"] is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("report", ["ranking", "worst_5min", "trend"])
 async def test_a_preset_with_a_window_is_rejected_where_no_on_time_window_applies(reports_client, report):
     """worst_5min's late tolerance is its own over-5-minute cutoff, and the

@@ -169,6 +169,17 @@ async def test_readings_on_the_windows_edges_count_exactly_on_the_curve(seeded):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("early_sec", [301, 360, 3600])
+async def test_an_early_bound_past_the_histograms_floor_draws_no_curve(seeded, early_sec):
+    """The summary reads only the aggregates, whose underflow bucket cannot be
+    split, so it offers no curve rather than a wrong one."""
+    conn, agency_id = seeded
+    body = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=early_sec)
+    assert body["tolerance"] == []
+    assert body["days"]
+
+
+@pytest.mark.asyncio
 async def test_every_section_honours_the_timetable_days(seeded):
     """The 平日 filter keeps the dates the agency runs its weekday timetable
     whatever service_type the rows carry; with no calendar loaded that is the
