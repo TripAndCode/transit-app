@@ -155,10 +155,13 @@ What the user sees/does:
 `RouteTableScreen` asks `GET /api/{agency_id}/reports/route_table` for one row
 per route over the scope:
 
-- **Columns.** Average delay, on-time rate, the share and the count of
-  departures over five minutes late, and observations. The on-time cell
-  carries the 「誤差大」 badge when its 95% interval is wider than ±5
-  points.
+- **Columns.** Average delay, on-time rate, early-departure rate, the share
+  and the count of departures over five minutes late, and observations. The
+  on-time cell carries the 「誤差大」 badge when its 95% interval is wider than
+  ±5 points. The early-departure rate counts the departures more than the
+  definition's `early_departure_sec` early: the scope's `early`, or one minute
+  while early departures count as on time. Its header and the note under the
+  table name that threshold; it is not a sort.
 - **Sort.** `sort` picks the figure: `avg`, `on_time`, `late5_share` or
   `late5_count`. The routes that need attention come first; `order=best`
   turns the order around. The sorted column alone carries the bar and the
@@ -266,7 +269,8 @@ response honoured that field.
   panel endpoints' sets sit beside those; overview, network and map declare
   theirs in their own routers.
 - **`late`/`early`.** They are the on-time tolerance, applied by `on_time`,
-  `route_table`'s on-time column and `council_summary`. Elsewhere they are
+  `route_table`'s on-time column and `council_summary`; `early` also moves
+  their early-departure rate's threshold. Elsewhere they are
   ignored and reported as `false`, including `worst_5min`, whose over-5-min
   threshold stays its own `late_tolerance_sec`. `route_table`'s over-5-min
   share and count keep that fixed threshold too. The scope summary reports `early` as `true`, since
@@ -331,7 +335,12 @@ the scope as one sentence above their content
   - the tolerance control draws the on-time share at each late tolerance
     (0–10 min) with a marker and readout at the current one, and names the
     share on each preset. The one-minute step is the exact on-time count,
-    matching the screens; the other steps are histogram estimates.
+    matching the screens; the other steps are histogram estimates. Beneath
+    it, an early-departure choice sets `early`: every early departure on time
+    (the default) or none more than a minute early, which with the 5-minute
+    pill is the `standard_m1_p5` window. An `early` a link set to anything
+    else presses neither and is named beneath them. The `early` token in the
+    sentence opens the same choice.
 
   The bars ignore the period and the weekday filter, the weekday means
   ignore the weekday filter, and the route means ignore the routes filter,

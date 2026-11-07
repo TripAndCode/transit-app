@@ -178,7 +178,8 @@ for:
   could move by chance.
 - **Not corrected — early departures** count as on time (the `legacy_60s`
   definition), so an agency that runs early reads better than one that holds
-  to time.
+  to time. The council report and the Routes table give the early-departure
+  rate beside the on-time rate.
 - **Not corrected — feed density:** how many stops per trip, and how often, a
   feed reports differs by vendor and by whether a day was ingested live or
   from an archive. The interval counts trips so that density does not narrow
