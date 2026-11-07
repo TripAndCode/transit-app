@@ -72,3 +72,25 @@ def test_every_report_type_is_answered():
         report_reads_aggregates(report_type, _ALL)
     with pytest.raises(ValueError):
         report_reads_aggregates("not_a_report", _ALL)
+
+
+@pytest.mark.parametrize(
+    ("report_type", "tolerances"),
+    [
+        ("route_table", {"early_tolerance_sec": 360}),
+        ("on_time", {"early_tolerance_sec": 600}),
+        ("council_summary", {"early_tolerance_sec": 301}),
+        ("on_time", {"late_tolerance_sec": 1800}),
+        ("route_table", {"late_tolerance_sec": 2400}),
+        ("worst_5min", {"late_tolerance_sec": 2400}),
+    ],
+)
+def test_a_tolerance_past_the_histograms_open_end_buckets_is_scanned_live(report_type, tolerances):
+    """The histogram's end buckets are open, so no count can be split there;
+    the live scan answers instead, and the definition says so."""
+    assert not report_reads_aggregates(report_type, _ALL, **tolerances)
+
+
+def test_a_tolerance_inside_the_histogram_reads_the_aggregates():
+    assert report_reads_aggregates("route_table", _ALL, early_tolerance_sec=300, late_tolerance_sec=1799)
+    assert report_reads_aggregates("council_summary", _ALL, early_tolerance_sec=60, late_tolerance_sec=300)

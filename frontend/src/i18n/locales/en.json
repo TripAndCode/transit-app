@@ -340,6 +340,7 @@
     "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
     "on_time_late": "On time = no more than {{late}} late (early departures count as on time).",
     "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early.",
+    "early_departure": "Early-departure rate = the share of departures more than {{early}} early.",
     "method_version": "Method version {{version}}, aggregates built: {{day}}.",
     "built_day_unknown": "unknown",
     "built_day_live": "not applicable (live scan)",
@@ -1139,6 +1140,7 @@
       "avg": "Avg",
       "samples": "Samples",
       "on_time_pct": "On-time %",
+      "early_share": "Early (> {{early}})",
       "over_5min_count": "Over 5 min (count)",
       "over_5min_share": "Share over 5 min",
       "diff": "Diff",
@@ -1371,6 +1373,7 @@
     "council": {
       "figures": "Headline figures",
       "on_time": "On time",
+      "early_departures": "Early departures (more than {{early}} early)",
       "avg_delay": "Average delay",
       "planned_trips": "Planned trips",
       "planned_trips_agency_wide": "Planned trips (whole agency)",
@@ -1449,6 +1452,7 @@
       "worst": "Worst first",
       "best": "Best first"
     },
+    "early_note": "Early = departures more than {{early}} early, as a share of the route's observations.",
     "late5_note": "Over 5 min = departures more than 5 minutes late: the share of the route's observations, and how many."
   },
   "insight_panel": {
@@ -2143,7 +2147,11 @@
       "whole_day_place": "These figures cover the whole day, every stop and both directions",
       "readout": "Up to {{n}} min late: {{pct}}% on time",
       "weekday_colour": "Colour = average delay on that weekday",
-      "axis_lateness": "Allowed lateness"
+      "axis_lateness": "Allowed lateness",
+      "early_label": "Early departures",
+      "early_counted": "Count early departures as on time",
+      "early_limited": "Not on time if more than {{n}} min early",
+      "early_current": "Now: {{value}}"
     },
     "pin": "Show all filters",
     "reset": "Reset conditions",

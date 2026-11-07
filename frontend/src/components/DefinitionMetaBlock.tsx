@@ -10,7 +10,8 @@ type Props = {
 
 /** How the figures beside it were made, in plain words, behind one
  *  disclosure: which departures count, how a repeated report is treated,
- *  which readings are dropped, and what on time means, then the method
+ *  which readings are dropped, what on time means and, where the figures
+ *  carry an early-departure rate, what it counts, then the method
  *  version and the day the aggregates were built. A reader comparing two
  *  agencies or two exports can open it to see they share a definition.
  *  Every value comes from the API response's `definition` field
@@ -29,6 +30,9 @@ export function DefinitionMetaBlock({ definition }: Props) {
   ];
   const onTime = onTimeSentence(definition, t);
   if (onTime != null) sentences.push(onTime);
+  if (definition.early_departure_sec != null) {
+    sentences.push(t("definitionMeta.early_departure", { early: formatDuration(definition.early_departure_sec) }));
+  }
 
   return (
     <details data-testid="definition-meta" className="definition-meta" style={{ margin: "2px 0 14px" }}>

@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
@@ -9,6 +9,7 @@ const LEGACY: DefinitionMeta = {
   preset: "legacy_60s",
   early_tolerance_sec: null,
   late_tolerance_sec: 60,
+  early_departure_sec: null,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
@@ -56,6 +57,16 @@ describe("DefinitionMetaBlock", () => {
     expect(screen.getByTestId("definition-meta")).toHaveTextContent(
       "On time = no more than 2 min late and no more than 30 s early.",
     );
+  });
+
+  it("defines the early-departure rate where the figures carry one", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, early_departure_sec: 60 }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Early-departure rate = the share of departures more than 1 min early.",
+    );
+    cleanup();
+    renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
+    expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("Early-departure");
   });
 
   it("says nothing about on time for a report with no tolerance", () => {

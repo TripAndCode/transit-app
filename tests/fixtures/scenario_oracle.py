@@ -19,6 +19,9 @@ Semantics assumed:
   sample counts are the only figures that exercise deduplication across polls.
 - On time (the legacy rule): left early by any amount, or at most
   ``ON_TIME_MAX_LATE_SEC`` late.
+- On time (the industry window): at most ``EARLY_SEC`` early and at most
+  ``OVER_FIVE_MIN_SEC`` late.
+- Early: more than ``EARLY_SEC`` early.
 - Over five minutes late: more than ``OVER_FIVE_MIN_SEC`` late.
 - Mean delay: the plain mean over departures, early ones counting negative.
 - A departure's hour is the whole hour of its scheduled departure on the
@@ -39,6 +42,7 @@ from tests.fixtures.scenario import Scenario
 
 ON_TIME_MAX_LATE_SEC = 60
 OVER_FIVE_MIN_SEC = 300
+EARLY_SEC = 60
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,8 @@ class Figures:
     over_five_min: int
     worst_delay_sec: int
     trip_runs: int
+    early: int
+    on_time_industry: int
 
     @property
     def mean_delay_sec(self) -> Fraction:
@@ -88,6 +94,14 @@ class Figures:
     @property
     def over_five_min_share(self) -> Fraction:
         return Fraction(self.over_five_min, self.departures)
+
+    @property
+    def early_share(self) -> Fraction:
+        return Fraction(self.early, self.departures)
+
+    @property
+    def on_time_industry_share(self) -> Fraction:
+        return Fraction(self.on_time_industry, self.departures)
 
 
 def departures(scenario: Scenario) -> list[Departure]:
@@ -115,6 +129,8 @@ def figures(group: Iterable[Departure]) -> Figures:
         over_five_min=sum(1 for d in delays if d > OVER_FIVE_MIN_SEC),
         worst_delay_sec=max(delays),
         trip_runs=len({(d.trip_id, d.service_date) for d in group}),
+        early=sum(1 for d in delays if d < -EARLY_SEC),
+        on_time_industry=sum(1 for d in delays if -EARLY_SEC <= d <= OVER_FIVE_MIN_SEC),
     )
 
 

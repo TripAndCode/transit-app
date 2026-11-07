@@ -28,6 +28,7 @@ const DEFINITION: DefinitionMeta = {
   preset: "legacy_60s",
   early_tolerance_sec: null,
   late_tolerance_sec: 60,
+  early_departure_sec: null,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
   dedup_rule: "latest_observation_per_stop_event",
@@ -342,6 +343,7 @@ function emptyReport(reportType: string): ReportResponse {
       preset: null,
       early_tolerance_sec: null,
       late_tolerance_sec: null,
+      early_departure_sec: null,
       exclusion_threshold_sec: 0,
       measurement_point: "departure",
       dedup_rule: "",
@@ -731,7 +733,8 @@ describe("AnalysisTab council report", () => {
     vi.spyOn(hooks, "useReport").mockReturnValue({
       data: {
         ...reportResponse("council_summary"),
-        rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6]],
+        rows: [[22.6, 2.5, 540357, 2130, 2100, 98.6, 4.2]],
+        definition: { ...DEFINITION, early_departure_sec: 60 },
         text: "Aomori, 9/1 – 9/28\nOn time 22.6%, average delay 2.5 min.\n* On time means within 1 min.",
         ctx: { from: "2026-09-01", to: "2026-09-28", dow: "all", time_band: "all", service: "all", routes },
         scope_applied: ALL_SIX,
@@ -772,6 +775,15 @@ describe("AnalysisTab council report", () => {
     const list = screen.getByRole("list", { name: "Headline figures" });
     return within(list).getByText(label).closest("li")!;
   }
+
+  it("shows the early-departure rate beside the on-time rate, naming its threshold", () => {
+    showCouncil();
+    const labels = [...screen.getByRole("list", { name: "Headline figures" }).querySelectorAll(".council-report__label")].map(
+      (l) => l.textContent,
+    );
+    expect(labels.slice(0, 2)).toEqual(["On time", "Early departures (more than 1 min early)"]);
+    expect(figure("Early departures (more than 1 min early)")).toHaveTextContent("4.2%");
+  });
 
   it("names the observation count as stop-level readings, not departures", () => {
     showCouncil();

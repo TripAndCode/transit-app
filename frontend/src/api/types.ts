@@ -313,6 +313,9 @@ export type DefinitionMeta = {
   preset: string | null;
   early_tolerance_sec: number | null;
   late_tolerance_sec: number | null;
+  /** How many seconds early a departure must be for the early-departure rate
+   *  to count it, on the reports that show that rate; null elsewhere. */
+  early_departure_sec: number | null;
   exclusion_threshold_sec: number;
   measurement_point: string;
   dedup_rule: string;
@@ -361,8 +364,9 @@ type OnTimeRow = [
 
 /** `route_table` -- the Routes screen's table, one row per route sorted by
  *  the request's `sort`. `late5_pct` and `late5_count` are the departures
- *  over five minutes late; the trailing pair is the on-time rate's caveat,
- *  as on `on_time` rows. */
+ *  over five minutes late; `early_pct` the departures more than the
+ *  definition's `early_departure_sec` early; the trailing pair is the
+ *  on-time rate's caveat, as on `on_time` rows. */
 type RouteTableRow = [
   route_code: string,
   avg_min: DecimalCell,
@@ -370,6 +374,7 @@ type RouteTableRow = [
   late5_pct: DecimalCell,
   late5_count: number,
   samples: number,
+  early_pct: DecimalCell,
   low_confidence: boolean,
   margin_pp: number,
 ];
@@ -407,11 +412,14 @@ type DowRankingRow = [
 ];
 
 /** `council_summary` -- exactly one row. `on_time_pct`/`avg_delay_min`/
- *  `samples` follow the whole scope (`scope_applied`); `planned_trips` onward
- *  cover the whole agency for the dates (`delivered_scope_applied`).
- *  `on_time_pct`/`avg_delay_min` are null together when nothing matched the
- *  range; `executed_trips`/`service_delivered_pct` are null together when the
- *  delivered ratio isn't computable, which is never the same as zero. */
+ *  `samples`/`early_departure_pct` follow the whole scope (`scope_applied`);
+ *  `planned_trips` through `service_delivered_pct` cover the whole agency for
+ *  the dates (`delivered_scope_applied`). `on_time_pct`/`avg_delay_min`/
+ *  `early_departure_pct` are null together when nothing matched the range;
+ *  `executed_trips`/`service_delivered_pct` are null together when the
+ *  delivered ratio isn't computable, which is never the same as zero.
+ *  `early_departure_pct` counts the departures more than the definition's
+ *  `early_departure_sec` early. */
 export type CouncilSummaryRow = [
   on_time_pct: number | null,
   avg_delay_min: number | null,
@@ -419,6 +427,7 @@ export type CouncilSummaryRow = [
   planned_trips: number,
   executed_trips: number | null,
   service_delivered_pct: number | null,
+  early_departure_pct: number | null,
 ];
 
 /** `delay_certificate` -- one row per physical trip-run exceeding the

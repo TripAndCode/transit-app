@@ -1102,6 +1102,7 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
         "5分超の割合(%)",
         "5分超回数",
         "観測数",
+        "早発率(%)",
         "誤差大",
         "誤差(±ポイント)",
     ],
@@ -1121,6 +1122,7 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
         "計画本数",
         "運行本数",
         "運行実績率(%)",
+        "早発率(%)",
         "他事業者と比較できる",
         "比較できない理由",
         "観測カバー率(%)",
@@ -1246,27 +1248,35 @@ async def get_report(
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,
-        description="Named on-time/late tolerance preset (currently only 'legacy_60s'). "
-        "Mutually exclusive with early_tolerance_sec/late_tolerance_sec.",
+        description="Named on-time/late tolerance preset (pipeline.reports.rankings.ON_TIME_PRESETS): "
+        "'legacy_60s', the default (up to 60s late, any early departure on time), or "
+        "'standard_m1_p5' (no more than 60s early and 300s late), which only the on_time, "
+        "route_table and council_summary reports take. Mutually exclusive with "
+        "early_tolerance_sec/late_tolerance_sec.",
     ),
     early_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time/council_summary only: how many seconds early a departure may still be "
-        "'on time'. Unset means unbounded (any early departure counts), matching legacy_60s.",
+        description="on_time/route_table/council_summary only: how many seconds early a departure may still "
+        "be 'on time'. Unset means unbounded (any early departure counts), matching legacy_60s. On "
+        "route_table/council_summary it is also how early a departure must be to count in the "
+        "early-departure rate, 60s when unset.",
     ),
     late_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time/worst_5min/council_summary: the late-side cutoff (default 60s for "
-        "on_time/council_summary, 300s for worst_5min). Passing this opts into a query-time "
-        "histogram estimate instead of the exact legacy_60s column.",
+        description="on_time/route_table/worst_5min/council_summary: the late-side cutoff (default 60s "
+        "for on_time/route_table/council_summary, 300s for worst_5min). An on-time count is exact for "
+        "60s or 300s with no early tolerance or one on a whole minute up to 300s "
+        "(pipeline.histogram.exact_window), and a histogram estimate otherwise; worst_5min's count is "
+        "a histogram estimate. A cutoff of 1800s or more, or an early tolerance over 300s, is scanned "
+        "live, past the histogram's open end buckets.",
     ),
     late: int | None = Query(
         default=None,
         ge=0,
         le=3600,
-        description="The scope's on-time late tolerance in seconds. Applied by on_time and "
+        description="The scope's on-time late tolerance in seconds. Applied by on_time, route_table and "
         "council_summary; otherwise ignored and reported false in scope_applied (worst_5min's "
         "threshold stays its own late_tolerance_sec).",
     ),
@@ -1274,8 +1284,8 @@ async def get_report(
         default=None,
         ge=0,
         le=3600,
-        description="The scope's early tolerance in seconds. Applied by on_time and council_summary; "
-        "otherwise ignored and reported false in scope_applied.",
+        description="The scope's early tolerance in seconds. Applied by on_time, route_table and "
+        "council_summary; otherwise ignored and reported false in scope_applied.",
     ),
     threshold_sec: int | None = Query(
         default=None,
@@ -1345,6 +1355,15 @@ async def get_report(
             )
         if preset not in ON_TIME_PRESETS:
             raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
+        # legacy_60s overrides nothing, so it stays accepted everywhere. Any
+        # other preset is an on-time window, which worst_5min (whose late
+        # tolerance is its own over-5-minute cutoff) and the reports without
+        # a tolerance would otherwise misread or reject under another name.
+        if ON_TIME_PRESETS[preset] != (None, None) and report_type not in _EARLY_TOLERANCE_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"preset '{preset}' only applies to the on_time/route_table/council_summary reports",
+            )
         early_tolerance_sec, late_tolerance_sec = ON_TIME_PRESETS[preset]
     if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
         raise HTTPException(
@@ -1376,7 +1395,13 @@ async def get_report(
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
-    live = not report_reads_aggregates(report_type, ctx, csv=format == "csv")
+    live = not report_reads_aggregates(
+        report_type,
+        ctx,
+        csv=format == "csv",
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+    )
     definition = await stamp_build(
         conn, resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live), agency_id
     )
@@ -1428,7 +1453,13 @@ async def get_report(
         rows_total = listed_total(table)
         rows = [(*r, on_time_pct_low_confidence(r[2], r[5]), on_time_pct_margin_pp(r[2], r[5])) for r in listed(table)]
         left_out_rows.update(left_out_counts(table, left_out))
-        intent = {"query_type": "route_table", "sort": table_sort, "order": table_order, "service": _service_label(ctx)}
+        intent = {
+            "query_type": "route_table",
+            "sort": table_sort,
+            "order": table_order,
+            "service": _service_label(ctx),
+            "early_departure_sec": definition.early_departure_sec,
+        }
     elif report_type in _RANKING_TYPES:
         sort_order = "asc" if report_type == "ranking_best" else "desc"
         ranked = await compute_ranking(
@@ -1553,6 +1584,7 @@ async def get_report(
             payload["planned_trips"],
             payload["executed_trips"],
             payload["service_delivered_pct"],
+            payload["early_departure_pct"],
         )
         gate = payload["comparability"]
         if format == "csv":

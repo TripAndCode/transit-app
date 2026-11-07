@@ -3,7 +3,8 @@ audience, plus a per-trip "delay certificate" export.
 
 ``compute_council_summary`` pools the on-time/late tolerance resolved by
 :mod:`pipeline.reports.definition` into ONE figure across every route matching
-``ctx``, beside the service-delivered rate from
+``ctx``, and the early-departure rate the same way, beside the
+service-delivered rate from
 :func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`.
 That rate, its planned/executed counts and the data-quality share come from
 per-agency aggregates, so they always cover the whole agency for ``ctx``'s
@@ -13,7 +14,8 @@ dates, whatever route/dow/service/time_band filter narrows the on-time figures
 and unlike :func:`pipeline.reports.network.compute_network_summary`, whose
 on-time figure is always the ``legacy_60s`` exact column with no tolerance
 override. The fast path reuses ``pipeline.reports.rankings``'s own
-``_read_dist_scalars``/``_read_dist_with_hist`` SQL byte-for-byte, simply
+``_read_dist_scalars`` SQL, or ``_read_dist_with_hist`` for a window the
+exact columns cannot answer, byte-for-byte, simply
 pooling every returned route into one total instead of emitting one row per
 route (with no per-route minimum-sample gate -- that
 gate exists in ``compute_on_time`` to keep a *ranking* free of thin-sample
@@ -49,13 +51,24 @@ from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
     N_BUCKETS,
-    count_in_range,
+    count_early,
+    count_on_time,
+    exact_window,
+    on_time_from_columns,
 )
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.network import compute_network_summary
-from pipeline.reports.rankings import _avg_min, _read_dist_scalars, _read_dist_with_hist, _round1, aggregates_serve
+from pipeline.reports.rankings import (
+    _avg_min,
+    _pct1,
+    _read_dist_scalars,
+    _read_dist_with_hist,
+    _round1,
+    early_departure_sec,
+    tolerance_aggregates_serve,
+)
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
 
@@ -78,26 +91,29 @@ async def _agency_on_time_pooled(
     ch,
     early_tolerance_sec: int | None,
     late_tolerance_sec: int | None,
-) -> tuple[float | None, float | None, int]:
-    """``(on_time_pct, avg_delay_min, samples)`` pooled across EVERY
-    route matching ``ctx`` -- the same tolerance semantics
+) -> tuple[float | None, float | None, float | None, int]:
+    """``(on_time_pct, early_departure_pct, avg_delay_min, samples)`` pooled
+    across EVERY route matching ``ctx`` -- the same tolerance semantics
     :func:`pipeline.reports.rankings.compute_on_time` resolves per-route,
-    collapsed to one figure. ``(None, None, 0)`` when nothing
-    matches ``ctx`` at all.
+    collapsed to one figure, and the share of departures more than
+    :func:`~pipeline.reports.rankings.early_departure_sec` early, counted as
+    the route table counts it. ``(None, None, None, 0)`` when nothing matches
+    ``ctx`` at all.
     """
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
     high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
-    is_legacy = early_tolerance_sec is None and late_tolerance_sec is None
+    early_sec = early_departure_sec(early_tolerance_sec)
 
-    if not aggregates_serve(ctx):
+    if not tolerance_aggregates_serve(ctx, early_tolerance_sec, late_tolerance_sec):
         if ch is None:
-            raise RuntimeError("council summary's time_band-filtered live fallback requires a ClickHouse client")
+            raise RuntimeError("council summary's live fallback requires a ClickHouse client")
         cte_sql, ch_params = _dedup_cte_ch(ctx)
         low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
         result = await ch.query(
             f"WITH {cte_sql}\n"
             "SELECT\n"
             f"    sum(CASE WHEN dep_delay <= {{ot_high:Int32}} AND {low_clause} THEN 1.0 ELSE 0 END) AS on_time_n,\n"
+            "    countIf(dep_delay < {ot_early:Int32}) AS early_n,\n"
             "    sum(dep_delay) AS sum_delay_sec,\n"
             "    count(*) AS samples\n"
             "FROM deduped",
@@ -105,47 +121,54 @@ async def _agency_on_time_pooled(
                 "agency_id": agency_id,
                 "ot_high": high_sec,
                 "ot_low": 0 if low_sec is None else low_sec,
+                "ot_early": -early_sec,
                 **ch_params,
             },
         )
-        on_time_n, sum_delay_sec, samples = result.result_rows[0]
+        on_time_n, early_n, sum_delay_sec, samples = result.result_rows[0]
         if not samples:
-            return None, None, 0
+            return None, None, None, 0
         return (
             float(_round1(on_time_n * 100.0 / samples)),
+            float(_pct1(early_n, samples)),
             float(_avg_min(sum_delay_sec, samples)),
             int(samples),
         )
 
-    if is_legacy:
-        rows = await _read_dist_scalars(agency_id, ctx, conn)
-        samples = sum(r["samples"] for r in rows)
-        if not samples:
-            return None, None, 0
-        on_time_count = sum(r["on_time_count"] for r in rows)
-        # Postgres SUM(bigint) returns NUMERIC (asyncpg -> Decimal); _avg_min
-        # wraps it in Decimal(...) itself (safe whether the input here is
-        # already Decimal or a plain int) rather than dividing by the float
-        # 60.0 directly, which raises TypeError mixing Decimal and float.
-        sum_delay_sec = sum(r["sum_delay_sec"] for r in rows)
-        return (
-            float(_round1(on_time_count * 100.0 / samples)),
-            float(_avg_min(sum_delay_sec, samples)),
-            samples,
-        )
-
-    rows = await _read_dist_with_hist(agency_id, ctx, conn)
+    exact = exact_window(early_tolerance_sec, high_sec)
+    if exact:
+        rows = await _read_dist_scalars(agency_id, ctx, conn, early_sec=early_sec)
+    else:
+        rows = await _read_dist_with_hist(agency_id, ctx, conn)
     samples = sum(r["samples"] for r in rows)
     if not samples:
-        return None, None, 0
+        return None, None, None, 0
+    # Postgres SUM(bigint) returns NUMERIC (asyncpg -> Decimal); _avg_min
+    # wraps it in Decimal(...) itself (safe whether the input here is
+    # already Decimal or a plain int) rather than dividing by the float
+    # 60.0 directly, which raises TypeError mixing Decimal and float.
     sum_delay_sec = sum(r["sum_delay_sec"] for r in rows)
-    merged_hist = [0] * N_BUCKETS
-    for r in rows:
-        for i, c in enumerate(r["hist"]):
-            merged_hist[i] += c
-    on_time_est = count_in_range(merged_hist, low_sec, high_sec)
+    columns = {
+        "samples": samples,
+        "on_time_count": sum(r["on_time_count"] for r in rows),
+        "late5_count": sum(r["late5_count"] for r in rows),
+    }
+    early_count: float
+    on_time: float
+    if exact:
+        exact_early = sum(r["early_count"] for r in rows)
+        early_count = exact_early
+        on_time = on_time_from_columns(early_tolerance_sec, high_sec, early_count=exact_early, **columns)
+    else:
+        merged_hist = [0] * N_BUCKETS
+        for r in rows:
+            for i, c in enumerate(r["hist"]):
+                merged_hist[i] += c
+        early_count = count_early(merged_hist, early_sec)
+        on_time = count_on_time(merged_hist, early_tolerance_sec, high_sec, **columns)
     return (
-        float(_round1(on_time_est * 100.0 / samples)),
+        float(_round1(on_time * 100.0 / samples)),
+        float(_pct1(early_count, samples)),
         float(_avg_min(sum_delay_sec, samples)),
         samples,
     )
@@ -236,13 +259,13 @@ async def compute_council_summary(
     dict plus the caller's own :class:`~pipeline.reports.definition.DefinitionMeta`
     (:func:`~pipeline.reports.definition.resolve_definition_meta`).
 
-    Returns ``{"on_time_pct", "avg_delay_min", "samples", "planned_trips",
+    Returns ``{"on_time_pct", "early_departure_pct", "avg_delay_min", "samples", "planned_trips",
     "executed_trips", "service_delivered_pct", "covered_days", "window_days",
     "delivered_missing", "is_stale", "clamp_pct", "filtered", "comparability"}``; ``covered_days`` of ``window_days``
     are the days a timetable plans (see
     :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`),
     the only ones the planned and executed figures count. ``filtered`` is :func:`on_time_filter_narrows`: true when
-    the first three cover less of the agency than the planned/executed/delivered
+    the first four cover less of the agency than the planned/executed/delivered
     figures and ``clamp_pct``.
     ``executed_trips``/``service_delivered_pct`` are ``None`` together
     exactly when :func:`~pipeline.reports.service_delivered.compute_service_delivered_by_agency`
@@ -263,7 +286,7 @@ async def compute_council_summary(
     list the agency yet or cannot be built, rather than a verdict of its
     own; ``is_stale`` and ``clamp_pct`` are then read for this agency alone.
     """
-    on_time_pct, avg_delay_min, samples = await _agency_on_time_pooled(
+    on_time_pct, early_departure_pct, avg_delay_min, samples = await _agency_on_time_pooled(
         agency_id, ctx, conn, ch, early_tolerance_sec, late_tolerance_sec
     )
 
@@ -297,6 +320,7 @@ async def compute_council_summary(
 
     return {
         "on_time_pct": on_time_pct,
+        "early_departure_pct": early_departure_pct,
         "avg_delay_min": avg_delay_min,
         "samples": samples,
         "planned_trips": d["planned_trips"],

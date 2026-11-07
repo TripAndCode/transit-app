@@ -24,7 +24,12 @@ from pipeline.reports.comparability import (
     ci_half_width_as_printed,
     tenth_as_printed,
 )
-from pipeline.reports.definition import DefinitionMeta, format_definition_footnotes, format_method_stamp
+from pipeline.reports.definition import (
+    DefinitionMeta,
+    duration_text,
+    format_definition_footnotes,
+    format_method_stamp,
+)
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -65,10 +70,12 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("route_table_by_late5_count_best", "ja"): "5分超の件数が少ない順",
     ("route_table_by_late5_count_best", "en"): "fewest departures over 5 min first",
     ("route_table_row", "ja"): (
-        "{rank}位: 路線{route} 平均{avg}分、定時率{pct}%、5分超{share}%（{count}件）、観測{samples}件"
+        "{rank}位: 路線{route} 平均{avg}分、定時率{pct}%、{early_sec}を超える早発{early}%、"
+        "5分超{share}%（{count}件）、観測{samples}件"
     ),
     ("route_table_row", "en"): (
-        "#{rank} route {route} mean {avg} min, on-time {pct}%, over 5 min {share}% ({count}), {samples} samples"
+        "#{rank} route {route} mean {avg} min, on-time {pct}%, more than {early_sec} early {early}%, "
+        "over 5 min {share}% ({count}), {samples} samples"
     ),
     ("dow_header_weekend", "ja"): "【{label}土日祝遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend/holiday delay ranking]",
@@ -140,8 +147,12 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
     ("council_header", "ja"): "【協議会向け報告（{agency}、{from_date} 〜 {to_date}）】",
     ("council_header", "en"): "[Council report ({agency}, {from_date} to {to_date})]",
-    ("council_headline", "ja"): "定時率 {on_time}%、平均遅延 {avg}分（観測データ{samples}件・停留所単位）",
-    ("council_headline", "en"): "On-time rate {on_time}%, mean delay {avg} min ({samples} stop-level observations)",
+    ("council_headline", "ja"): "定時率 {on_time}%{early}、平均遅延 {avg}分（観測データ{samples}件・停留所単位）",
+    ("council_headline", "en"): (
+        "On-time rate {on_time}%{early}, mean delay {avg} min ({samples} stop-level observations)"
+    ),
+    ("council_headline_early", "ja"): "、早発率 {early}%（{early_sec}を超える早発）",
+    ("council_headline_early", "en"): ", early departures {early}% (more than {early_sec} early)",
     ("council_headline_delivered", "ja"): "、運行率 {delivered}%",
     ("council_headline_delivered", "en"): ", service delivered {delivered}%",
     ("council_headline_delivered_agency_wide", "ja"): "、運行率 {delivered}%（事業者全体）",
@@ -377,11 +388,13 @@ def _fmt_worst_5min(rows: list, intent: dict, locale: str) -> str:
 def _fmt_route_table(rows: list, intent: dict, locale: str) -> str:
     """Render the Routes table in its sorted order, the header naming the sort.
 
-    Row: ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, ...)``.
-    ``intent`` carries ``sort`` (a ``ROUTE_TABLE_SORTS`` key) and ``order``
-    (``"worst"`` or ``"best"``).
+    Row: ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples,
+    early_pct, ...)``. ``intent`` carries ``sort`` (a ``ROUTE_TABLE_SORTS``
+    key), ``order`` (``"worst"`` or ``"best"``) and ``early_departure_sec``,
+    the threshold each row's early-departure rate counts past.
     """
     basis = _t(f"route_table_by_{intent['sort']}_{intent['order']}", locale)
+    early_sec = duration_text(intent["early_departure_sec"], locale)
     lines = [
         _t(
             "route_table_row",
@@ -390,6 +403,8 @@ def _fmt_route_table(rows: list, intent: dict, locale: str) -> str:
             route=r[0],
             avg=_r(r[1]),
             pct=_r(r[2]),
+            early_sec=early_sec,
+            early=_r(r[6]),
             share=_r(r[3]),
             count=r[4],
             samples=r[5],
@@ -651,7 +666,8 @@ def format_council_summary_text(
     locale: str = "ja",
 ) -> str:
     """Locale-aware prose body for the monthly/annual council report
-    template: a headline (on-time rate, average delay, and the
+    template: a headline (on-time rate, early-departure rate with the
+    threshold it counts past, average delay, and the
     service-delivered rate where the feed measures it, labelled whole-agency
     when ``payload["filtered"]``) over
     ``[from_date, to_date]``, footnoted with the definition
@@ -663,10 +679,16 @@ def format_council_summary_text(
     if not payload.get("samples"):
         body = _no_data(locale)
     else:
+        early_pct = payload.get("early_departure_pct")
+        early = ""
+        if early_pct is not None and definition.early_departure_sec is not None:
+            early_sec = duration_text(definition.early_departure_sec, locale)
+            early = _t("council_headline_early", locale, early=_r(early_pct), early_sec=early_sec)
         body = _t(
             "council_headline",
             locale,
             on_time=_r(payload.get("on_time_pct")),
+            early=early,
             avg=_r(payload.get("avg_delay_min")),
             samples=f"{payload['samples']:,}",
         )

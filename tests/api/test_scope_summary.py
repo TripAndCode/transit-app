@@ -5,6 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from api.range import RangeCtx
+from pipeline.histogram import bucketize
 from pipeline.reports.scope_summary import compute_scope_summary
 
 N_BUCKETS = 37
@@ -131,6 +132,51 @@ async def test_tolerance_honours_an_early_bound(seeded):
     assert {t["late_sec"]: t["on_time_pct"] for t in unbounded["tolerance"]}[600] == 100.0
     assert {t["late_sec"]: t["on_time_pct"] for t in bounded["tolerance"]}[600] < 100.0
     assert {t["late_sec"]: t["on_time_pct"] for t in bounded["tolerance"]}[60] < 100.0
+
+
+@pytest.mark.asyncio
+async def test_readings_on_the_windows_edges_count_exactly_on_the_curve(seeded):
+    """Whole-minute feeds pile readings on exactly five minutes late and
+    exactly a minute early. The five-minute step, and an early bound of a
+    minute, count those from the exact columns."""
+    conn, agency_id = seeded
+    delays = [-120] * 10 + [-60] * 10 + [300] * 20 + [400] * 10
+    hist = [0] * N_BUCKETS
+    for d in delays:
+        hist[bucketize(d)] += 1
+    await conn.execute(
+        "INSERT INTO agg_route_daily_dist (agency_id, date, route_code, service_type, "
+        "samples, sum_delay_sec, on_time_count, late5_count, hist) VALUES ($1,$2,'R4','平日',$3,$4,$5,$6,$7)",
+        agency_id,
+        date(2026, 9, 24),
+        len(delays),
+        sum(delays),
+        sum(d <= 60 for d in delays),
+        sum(d > 300 for d in delays),
+        hist,
+    )
+    ctx = _ctx(routes=("R4",))
+    unbounded = {
+        t["late_sec"]: t["on_time_pct"] for t in (await compute_scope_summary(agency_id, ctx, conn))["tolerance"]
+    }
+    bounded = {
+        t["late_sec"]: t["on_time_pct"]
+        for t in (await compute_scope_summary(agency_id, ctx, conn, early_sec=60))["tolerance"]
+    }
+    assert unbounded[300] == 80.0
+    assert bounded[300] == 60.0
+    assert bounded[60] == 20.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("early_sec", [301, 360, 3600])
+async def test_an_early_bound_past_the_histograms_floor_draws_no_curve(seeded, early_sec):
+    """The summary reads only the aggregates, whose underflow bucket cannot be
+    split, so it offers no curve rather than a wrong one."""
+    conn, agency_id = seeded
+    body = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=early_sec)
+    assert body["tolerance"] == []
+    assert body["days"]
 
 
 @pytest.mark.asyncio
