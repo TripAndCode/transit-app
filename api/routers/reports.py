@@ -552,8 +552,10 @@ class PerformanceStandardRow(BaseModel):
     undefined. `metric_scope` is `"agency"` for `vehicle_km_delivered_pct`
     (that figure has no per-route breakdown -- every route configured with
     it is compared against its own agency's rate) and `"route"` for
-    `ewt_sec`; the frontend must label an `"agency"`-scoped row accordingly
-    rather than implying a route-specific figure.
+    `ewt_sec` and `on_time_pct`; the frontend must label an `"agency"`-scoped
+    row accordingly rather than implying a route-specific figure. An
+    `on_time_pct` row reads the Routes table's on-time figure for the route
+    (see `PerformanceStandardsResponse.on_time_definition`).
     """
 
     route_code: str
