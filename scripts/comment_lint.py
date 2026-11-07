@@ -1,4 +1,10 @@
-"""Detect comment-policy violations in Python and TypeScript sources."""
+"""Detect comment-policy violations in Python, TypeScript, and JavaScript sources.
+
+When BASE does not resolve or `git diff` fails, `--diff` exits 0 so that a
+shallow or unusual clone never blocks a push, while `--stale-candidates` exits
+2: its caller names BASE explicitly and takes the output as its whole work list,
+so a run that never looked must not pass for one that found nothing.
+"""
 
 import argparse
 import os
@@ -235,12 +241,7 @@ _AUTO_BASES = ("origin/HEAD", "master", "main")
 
 
 def resolve_base(requested, exists):
-    """Pick the ref to diff against, or None when there is nothing to compare.
-
-    Returning None is not a failure: a repo with no such ref simply has no
-    baseline here, and the gate must let the push through rather than block on
-    a git error.
-    """
+    """Pick the ref to diff against, or None when no candidate resolves."""
     candidates = _AUTO_BASES if requested == "auto" else (requested,)
     return next((ref for ref in candidates if exists(ref)), None)
 
@@ -349,28 +350,34 @@ def main(argv=None):
         _report(hits, root, "baseline", limit=40)
         return 0
 
-    requested = args.diff or args.stale
+    # An empty BASE string still selects its mode.
+    stale = args.stale is not None
+    requested = args.stale if stale else args.diff
+    if stale:
+        label, outcome, unavailable = "stale candidates", "could not run", 2
+    else:
+        label, outcome, unavailable = "comment policy", "skipped", 0
     base = resolve_base(requested, _ref_exists(root))
     if base is None:
         print(
-            f"comment policy: no baseline ref for {requested!r} — skipped",
+            f"{label}: no baseline ref for {requested!r} — {outcome}",
             file=sys.stderr,
         )
-        return 0
+        return unavailable
     # Stale candidates feed a review of the working tree, so their hunks must
     # describe the files `_read` opens. `--diff` runs at push time and stays on
     # the commits being pushed.
-    revisions = [base] if args.stale else [f"{base}...HEAD"]
+    revisions = [base] if stale else [f"{base}...HEAD"]
     # `_DIFF_FILE` parses `b/` headers, which either setting would rewrite.
     pinned_prefixes = ["-c", "diff.mnemonicPrefix=false", "-c", "diff.noprefix=false"]
     try:
         diff = _git([*pinned_prefixes, "diff", "-U0", *revisions], root)
     except (subprocess.CalledProcessError, OSError) as error:
         print(
-            f"comment policy: skipped ({error.__class__.__name__})",
+            f"{label}: {outcome} ({error.__class__.__name__})",
             file=sys.stderr,
         )
-        return 0
+        return unavailable
     file_hunks = parse_hunks(diff)
 
     hits = []
@@ -381,19 +388,14 @@ def main(argv=None):
         lines = _read(root, path)
         if lines is None:
             continue
-        if args.stale:
+        if stale:
             hits += [(path, c) for c in stale_candidates(path, lines, lines_added, args.radius)]
         else:
             hits += [
                 (path, v) for v in find_violations(path, lines, args.max_block, only_lines=lines_added, hunks=hunks)
             ]
-    count = _report(
-        hits,
-        root,
-        "stale candidates" if args.stale else "comment policy",
-        limit=None if args.stale else 40,
-    )
-    return exit_code(count, gating=bool(args.diff), warn_only=args.warn)
+    count = _report(hits, root, label, limit=None if stale else 40)
+    return exit_code(count, gating=args.diff is not None, warn_only=args.warn)
 
 
 if __name__ == "__main__":
