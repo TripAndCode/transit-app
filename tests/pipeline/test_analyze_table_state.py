@@ -101,6 +101,44 @@ def test_a_run_over_changed_dates_moves_the_build_time_of_the_tables_it_rebuilt(
     assert _moved(before, _built_at(pg_conn, agency_id)) == rebuilt
 
 
+def _first_row(table: str) -> str:
+    return f"ctid = (SELECT ctid FROM {table} WHERE agency_id = %s LIMIT 1)"
+
+
+@pytest.mark.parametrize(
+    ("disagreement", "rebuilt"),
+    [
+        (f"DELETE FROM agg_route_daily WHERE {_first_row('agg_route_daily')}", {"agg_route_daily"}),
+        (f"DELETE FROM agg_route_hour WHERE {_first_row('agg_route_hour')}", {"agg_route_hour"}),
+        # agg_route_stats is the figure route_delay_counts is checked against,
+        # and every whole-history table built from route_delay_counts follows it.
+        (
+            f"UPDATE agg_route_stats SET samples = samples + 1 WHERE {_first_row('agg_route_stats')}",
+            {"route_delay_counts", "agg_route_stats", "agg_route_hour", "agg_route_hour_dow"},
+        ),
+    ],
+    ids=["copied monthly", "whole history", "internal"],
+)
+def test_a_table_rebuilt_because_its_stores_disagree_moves_its_build_time(
+    pg_conn, agency_id, ch_client, caplog, disagreement, rebuilt
+):
+    """A ClickHouse-computed table whose Postgres side no longer adds up is
+    rebuilt whole (pipeline.analyze._ch_agg_scopes) though the plan, which
+    reads fingerprints and the ledger, left it unchanged."""
+    _seed_for_stop_agg(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(disagreement, (agency_id,))
+        assert cur.rowcount == 1
+    pg_conn.commit()
+    before = _built_at(pg_conn, agency_id)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(agency_id, pg_conn, ch_client)
+    assert set(_scopes_logged(caplog).values()) == {"unchanged"}
+    assert _moved(before, _built_at(pg_conn, agency_id)) == rebuilt
+
+
 def _as_if_last_built_before_table_state(pg_conn, agency_id):
     """Leave the agency as the agency-wide scheme left it: no table states, and
     agg_meta holding the fingerprint that scheme recorded."""
