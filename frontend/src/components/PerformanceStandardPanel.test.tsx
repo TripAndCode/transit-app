@@ -168,28 +168,29 @@ describe("PerformanceStandardPanel", () => {
     expect(within(unjudged).queryByText(/standard$/)).toBeNull();
   });
 
-  it("names the definition the on-time targets were judged on", () => {
+  it("names the definition the on-time targets were judged on, in words rather than its key", () => {
     mockRoutes();
     mockPerformanceStandards({ data: response([onTimeRow("100", 91.2, true)], { on_time_definition: INDUSTRY }) });
-    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    const { container } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
 
     expect(
-      screen.getByText("On-time standards are judged on this page's period and filters, under the definition standard_m1_p5:"),
+      screen.getByText("On-time standards are judged on this page's period and filters, under this definition of on time:"),
     ).toBeInTheDocument();
     expect(screen.getByText("On time = no more than 5 min late and no more than 1 min early.")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("standard_m1_p5");
   });
 
-  it("names tolerances no preset matches as custom", () => {
+  it("states custom tolerances the same way", () => {
     mockRoutes();
     mockPerformanceStandards({
       data: response([onTimeRow("100", 91.2, true)], {
         on_time_definition: { ...INDUSTRY, preset: "custom", early_tolerance_sec: null, late_tolerance_sec: 120 },
       }),
     });
-    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    const { container } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
 
-    expect(screen.getByText(/under custom tolerances:$/)).toBeInTheDocument();
     expect(screen.getByText("On time = no more than 2 min late (early departures count as on time).")).toBeInTheDocument();
+    expect(container).not.toHaveTextContent("custom");
   });
 
   it("leaves the on-time definition out when no on-time target is shown", () => {
@@ -197,7 +198,6 @@ describe("PerformanceStandardPanel", () => {
     mockPerformanceStandards({
       data: response(
         [
-          onTimeRow("100", 91.2, true),
           {
             route_code: "200",
             metric_type: "ewt_sec",
@@ -210,29 +210,26 @@ describe("PerformanceStandardPanel", () => {
             meets: true,
           },
         ],
-        { on_time_definition: INDUSTRY },
+        { on_time_definition: null },
       ),
     });
-    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} route="200" />);
+    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
 
     expect(screen.getByText("Route 200")).toBeInTheDocument();
-    expect(screen.queryByText("Route 100")).toBeNull();
     expect(screen.queryByText(/^On time =/)).toBeNull();
   });
 
-  it("on a route's own page shows that route's targets only, and nothing when it has none", () => {
+  it("on a route's own page asks for that route's targets alone, and shows nothing when it has none", () => {
     mockRoutes();
-    mockPerformanceStandards({
-      data: response([onTimeRow("100", 91.2, true), onTimeRow("200", 70, false)], { on_time_definition: INDUSTRY }),
-    });
+    mockPerformanceStandards({ data: response([onTimeRow("200", 70, false)], { on_time_definition: INDUSTRY }) });
     const { unmount } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} route="200" />);
+    expect(hooks.usePerformanceStandards).toHaveBeenCalledWith(1, CTX, true, "200");
     expect(screen.getByText("Route 200")).toBeInTheDocument();
-    expect(screen.queryByText("Route 100")).toBeNull();
     unmount();
 
+    mockPerformanceStandards({ data: response([]) });
     const { container } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} route="999" />);
     expect(container).toBeEmptyDOMElement();
-    expect(screen.queryByText("Minimum performance standard")).toBeNull();
   });
 
   it("renders nothing when this agency has zero configured standards", () => {

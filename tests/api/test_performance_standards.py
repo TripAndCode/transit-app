@@ -385,9 +385,54 @@ async def test_an_on_time_target_is_judged_on_the_tables_figure_under_the_reques
         late,
     )
     assert definition["source"] == ("live" if path == "live" else "aggregates")
+    # Stamped as the table's own definition is: its build, timetables and sources.
+    assert definition["timetable_versions"] is not None
+    for key in ("built_at", "timetable_versions", "source_mix"):
+        assert definition[key] == table["definition"][key], key
     assert body["scope_applied"]["late"] is True
     assert body["scope_applied"]["early"] is True
     assert body["scope_applied"]["time_band"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_a_route_page_judges_its_own_route_alone(
+    reports_client,  # noqa: F811
+    ch_client,
+    ch_async_client,
+    path,
+    monkeypatch,
+):
+    """A route's own page asks for that route: only its targets come back,
+    and its figure is read from a table of that route alone, never the whole
+    agency's, which under a time band is a live scan of every route."""
+    from pipeline.reports import performance_standard
+
+    client, agency_id, pool = reports_client
+    await _seed_route_at(pool, agency_id, "OT", "平日", _ON_TIME_DAY, "08:00", _ON_TIME_DELAYS)
+    await _seed_route_at(pool, agency_id, "OTHER", "平日", _ON_TIME_DAY, "08:00", [0] * 100)
+    await _seed_standard(pool, agency_id, "OT", "on_time_pct", 70.0, 0.0)
+    await _seed_standard(pool, agency_id, "OTHER", "on_time_pct", 70.0, 0.0)
+    await _seed_standard(pool, agency_id, "OTHER", "ewt_sec", 50.0, 0.0)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    scoped: list[tuple[str, ...]] = []
+    original = performance_standard.compute_route_table
+
+    async def spy(agency_id, ctx, *args, **kwargs):
+        scoped.append(ctx.routes)
+        return await original(agency_id, ctx, *args, **kwargs)
+
+    monkeypatch.setattr(performance_standard, "compute_route_table", spy)
+    body = await _standards(client, agency_id, f"{band}&routes=OT&route=OT")
+    table = (
+        await client.get(f"/api/{agency_id}/reports/route_table?from={_ON_TIME_DAY}&to={_ON_TIME_DAY}{band}")
+    ).json()
+
+    assert scoped == [("OT",)]
+    assert [(r["route_code"], r["metric_type"]) for r in body["rows"]] == [("OT", "on_time_pct")]
+    figure = next(float(r[2]) for r in table["rows"] if r[0] == "OT")
+    assert body["rows"][0]["actual_value"] == figure == 60.0
 
 
 @pytest.mark.asyncio

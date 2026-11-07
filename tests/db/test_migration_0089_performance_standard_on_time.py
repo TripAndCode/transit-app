@@ -54,7 +54,7 @@ async def test_an_unknown_metric_is_still_rejected(aconn, aagency_id):
 
 
 def test_the_down_is_not_marked_destructive():
-    down = migrate._MIGRATIONS_DIR / "0090_performance_standard_on_time.down.sql"
+    down = migrate._MIGRATIONS_DIR / "0089_performance_standard_on_time.down.sql"
     assert not migrate.is_destructive_down(down.read_text())
 
 
@@ -76,14 +76,14 @@ def test_rolling_back_keeps_the_on_time_targets_and_refuses_new_ones(apply_schem
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO agencies (agency_name, feed_url) VALUES ('0090', 'http://0090.example.com') "
+                "INSERT INTO agencies (agency_name, feed_url) VALUES ('0089', 'http://0089.example.com') "
                 "RETURNING agency_id"
             )
             agency_id = cur.fetchone()[0]
         _insert(conn, agency_id, "KEPT")
         conn.commit()
 
-        migrate.migrate_down("0089", conn)
+        migrate.migrate_down("0088", conn)
         with conn.cursor() as cur:
             cur.execute("SELECT route_code FROM route_performance_standards WHERE agency_id = %s", (agency_id,))
             assert cur.fetchall() == [("KEPT",)]

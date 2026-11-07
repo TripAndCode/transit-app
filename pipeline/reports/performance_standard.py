@@ -2,7 +2,7 @@
 each configured threshold against the route's on-time rate, its Excess Waiting
 Time, or the agency's vehicle-km delivered rate.
 
-``route_performance_standards`` (migrations 0041 and 0090) is a small
+``route_performance_standards`` (migrations 0041 and 0089) is a small
 policy-input table, written by admins through the agency drawer's standards
 editor (``api.routers.admin_agencies.patch_standards``) -- the same convention
 as ``ridership_weights`` (migration 0035): a performance standard's threshold
@@ -75,7 +75,7 @@ _LOWER_IS_BETTER: frozenset[str] = frozenset({"ewt_sec"})
 _STANDARDS_SQL = """
     SELECT route_code, metric_type, threshold_value, bonus_malus_rate
     FROM route_performance_standards
-    WHERE agency_id = $1
+    WHERE agency_id = $1 AND ($2::text IS NULL OR route_code = $2)
     ORDER BY route_code, metric_type
 """
 
@@ -112,6 +112,11 @@ def meets_standard(metric_type: str, threshold: float, actual: float | None) -> 
     return actual <= threshold if metric_type in _LOWER_IS_BETTER else actual >= threshold
 
 
+async def read_standards(conn, agency_id: int, route: str | None = None) -> list:
+    """*agency_id*'s configured standards, or only *route*'s."""
+    return await conn.fetch(_STANDARDS_SQL, agency_id, route)
+
+
 async def _on_time_by_route(
     agency_id: int,
     ctx: RangeCtx,
@@ -120,8 +125,11 @@ async def _on_time_by_route(
     early_tolerance_sec: int | None,
     late_tolerance_sec: int | None,
 ) -> dict[str, float]:
-    """Each route's on-time share as the Routes table shows it by default:
-    the same call, floor and rounding, so the shared cache usually answers it.
+    """Each route of *ctx*'s on-time share as the Routes table shows it at its
+    default observation floor: the same call, floor and rounding. While the
+    table is at that floor and the same routes, the two share one cached
+    computation; with sparse routes included, the table is computed
+    separately and this keeps the default floor.
 
     A route the table leaves out for a feed that always reports zero delay
     has no figure here either: it reads 100% on time and would meet any
@@ -145,14 +153,17 @@ async def compute_performance_standards(
     agency_id: int,
     ctx: RangeCtx,
     conn,
+    standards: list,
+    *,
+    route: str | None = None,
     ch=None,
     early_tolerance_sec: int | None = None,
     late_tolerance_sec: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Every configured ``route_performance_standards`` row for *agency_id*,
-    joined against the current actual value of its ``metric_type`` over
-    *ctx*'s date range, with the resulting achievement rate and estimated
-    bonus/deduction.
+    """Every row of *standards* (:func:`read_standards` for *agency_id*, and
+    for *route* when one is named), joined against the current actual value
+    of its ``metric_type`` over *ctx*'s date range, with the resulting
+    achievement rate and estimated bonus/deduction.
 
     An agency with zero configured rows returns an empty list -- "not
     configured", never a fabricated standard. A configured row whose actual
@@ -170,13 +181,14 @@ async def compute_performance_standards(
     ``ctx.routes`` (the page-level route filter shared with every other
     Analysis-tab panel) never changes WHICH configured rows come back, nor
     whether a given row's actual value resolves -- every configured route
-    is always fully evaluated. Restricting the visible standards to a page
-    filter is the caller's job (e.g. the frontend may choose to hide rows
-    for routes outside the current filter), not this function's.
+    is always fully evaluated. *route* is different: a route's own page
+    names the one route it judges, and every figure is then read for that
+    route alone rather than for the whole agency.
     """
-    rows = await conn.fetch(_STANDARDS_SQL, agency_id)
+    rows = standards
     if not rows:
         return []
+    route_scope: tuple[str, ...] = () if route is None else (route,)
 
     # Resolve every actual value this agency's configured rows could need,
     # up front -- one pass per metric_type family rather than a query per
@@ -193,17 +205,19 @@ async def compute_performance_standards(
     # filter would do the same, and an EWT standard reads dates only. A copy
     # of ctx free of both keeps a configured standard's actual value resolved
     # regardless of the page filter. The on-time rows drop the route filter
-    # alone, since they follow the rest of the scope as the table does.
+    # alone, since they follow the rest of the scope as the table does. A
+    # named *route* replaces the filter in both, so a route's own page reads
+    # that route alone.
     ewt_by_route: dict[str, float | None] = {}
     if any(r["metric_type"] == "ewt_sec" for r in rows):
-        unfiltered_ctx = dataclasses.replace(ctx, routes=(), dow="all")
+        unfiltered_ctx = dataclasses.replace(ctx, routes=route_scope, dow="all")
         quality_rows = await compute_headway_quality(agency_id, unfiltered_ctx, conn)
         ewt_by_route = {q["route_code"]: q["ewt_sec"] for q in quality_rows}
 
     on_time_by_route: dict[str, float] = {}
     if any(r["metric_type"] == "on_time_pct" for r in rows):
         on_time_by_route = await _on_time_by_route(
-            agency_id, dataclasses.replace(ctx, routes=()), conn, ch, early_tolerance_sec, late_tolerance_sec
+            agency_id, dataclasses.replace(ctx, routes=route_scope), conn, ch, early_tolerance_sec, late_tolerance_sec
         )
 
     vehicle_km_delivered_pct: float | None = None

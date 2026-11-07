@@ -56,7 +56,7 @@ __all__ = [
 ]
 
 #: An on-time target is a share of departures, in percent; the table's own
-#: CHECK holds it to the same range (migration 0090).
+#: CHECK holds it to the same range (migration 0089).
 _ON_TIME_TARGET_RANGE = (0.0, 100.0)
 
 #: Width of the clamp-rate sparkline, in whole days ending today.

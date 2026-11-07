@@ -1317,8 +1317,7 @@
       "scope_agency_note": "Agency-wide figure (no per-route breakdown available)",
       "meets": "Meets standard",
       "below": "Below standard",
-      "judged_on": "On-time standards are judged on this page's period and filters, under the definition {{preset}}:",
-      "judged_on_custom": "On-time standards are judged on this page's period and filters, under custom tolerances:"
+      "judged_on": "On-time standards are judged on this page's period and filters, under this definition of on time:"
     },
     "weather_delay": {
       "title": "Rain vs. dry average delay",

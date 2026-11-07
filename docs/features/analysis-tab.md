@@ -206,10 +206,12 @@ per route over the scope:
   `on_time_pct` target is judged on the table's own on-time figure for the
   route (`compute_route_table`, with the table's default observation floor),
   over the page's scope less its route filter and under its `late`/`early`
-  (or `preset`). The panel names that definition from the response's
-  `on_time_definition`, and marks each figure 「基準を満たす」 or
-  「基準に届かない」. A route under the floor, or one whose feed always reports
-  zero delay, has no figure to judge.
+  (or `preset`). The route page sends `route`, so the API returns that
+  route's targets and reads its figures for that route alone. The panel
+  states the definition from the response's `on_time_definition`, stamped as
+  a report's is, and marks each figure 「基準を満たす」 or 「基準に届かない」. A
+  route under the floor, or one whose feed always reports zero delay, has no
+  figure to judge.
 - **Colour.** A delay bar's colour and length come from the figure the cell
   prints, rounded to a tenth, so two rows printing the same figure share a
   colour. The severe-delay dot other delay tables draw is left off.

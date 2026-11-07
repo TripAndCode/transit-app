@@ -285,19 +285,23 @@ export function useHeadwayQuality(
 
 /** Per-route minimum-performance-standard achievement rate / estimated
  *  bonus-or-deduction panel data -- an internal simulation only (see
- *  `PerformanceStandardsResponse.disclaimer`), rendered beside the `on_time`
- *  report. */
+ *  `PerformanceStandardsResponse.disclaimer`), rendered beside the route
+ *  table and on a route's own page. `route` is that page's route: the API
+ *  then judges that route alone instead of every route the agency has. */
 export function usePerformanceStandards(
   agencyId: number | null,
   ctx: Scope,
   enabled: boolean,
+  route?: string,
 ): UseQueryResult<PerformanceStandardsResponse> {
+  const routeParam = route == null ? "" : `&route=${encodeURIComponent(route)}`;
   return useLocalizedQuery({
-    queryKey: ["performance-standards", agencyId, ...scopeKey(ctx)],
+    queryKey: ["performance-standards", agencyId, ...scopeKey(ctx), route ?? null],
     queryFn: ({ signal }) =>
-      apiGet<PerformanceStandardsResponse>(`/api/${agencyId}/performance_standards?${scopeToQueryString(ctx)}`, {
-        signal,
-      }),
+      apiGet<PerformanceStandardsResponse>(
+        `/api/${agencyId}/performance_standards?${scopeToQueryString(ctx)}${routeParam}`,
+        { signal },
+      ),
     enabled: agencyId != null && enabled,
   });
 }

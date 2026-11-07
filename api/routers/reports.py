@@ -63,6 +63,7 @@ from pipeline.reports import (
     delay_certificate_observed,
     format_definition_csv_line,
     observation_disclaimer,
+    read_standards,
     resolve_definition_meta,
     simulation_disclaimer,
     sort_route_table,
@@ -604,6 +605,11 @@ async def get_performance_standards(
     early: int | None = Query(
         default=None, ge=0, le=3600, description="The scope's early tolerance in seconds, for on_time_pct."
     ),
+    route: str | None = Query(
+        default=None,
+        description="One route's own page: only this route's standards, each judged on figures read for it "
+        "alone. Unlike the scope's routes filter, which never narrows the standards returned.",
+    ),
     agency_id: int = Depends(get_agency),
     ctx: RangeCtx = Depends(get_agency_range_ctx),
     conn: asyncpg.Connection = Depends(get_conn),
@@ -622,21 +628,32 @@ async def get_performance_standards(
     early_tolerance_sec, late_tolerance_sec = early, late
     if preset is not None:
         early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
+    standards = await read_standards(conn, agency_id, route)
+    judges_on_time = any(r["metric_type"] == "on_time_pct" for r in standards)
+    on_time_definition = None
+    if judges_on_time:
+        # Stamped before the rows are computed, as get_report does: a rebuild
+        # since this process last looked clears the caches the rows read.
+        live = not report_reads_aggregates(
+            "route_table", ctx, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
+        )
+        schedule = await read_schedule_days(conn, agency_id, ctx.from_date, ctx.to_date)
+        on_time_definition = await stamp_build(
+            conn,
+            resolve_definition_meta("on_time", early_tolerance_sec, late_tolerance_sec, live=live),
+            agency_id,
+            schedule,
+        )
     rows = await compute_performance_standards(
         agency_id,
         ctx,
         conn,
+        standards,
+        route=route,
         ch=ch,
         early_tolerance_sec=early_tolerance_sec,
         late_tolerance_sec=late_tolerance_sec,
     )
-    judges_on_time = any(r["metric_type"] == "on_time_pct" for r in rows)
-    on_time_definition = None
-    if judges_on_time:
-        live = not report_reads_aggregates(
-            "route_table", ctx, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
-        )
-        on_time_definition = resolve_definition_meta("on_time", early_tolerance_sec, late_tolerance_sec, live=live)
     return PerformanceStandardsResponse(
         rows=[PerformanceStandardRow(**r) for r in rows],
         ctx=_report_ctx(ctx),

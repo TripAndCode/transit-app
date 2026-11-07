@@ -60,8 +60,8 @@ function Judgement({ meets }: { meets: boolean | null }) {
 export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx: Scope; route?: string }) {
   const { t } = useTranslation();
   const routeNames = useRouteNames(aid);
-  const { data, error, refetch } = usePerformanceStandards(aid, ctx, true);
-  const rows = data?.rows.filter((r) => route == null || r.route_code === route) ?? [];
+  const { data, error, refetch } = usePerformanceStandards(aid, ctx, true, route);
+  const rows = data?.rows ?? [];
 
   if (!error && rows.length === 0) return null;
   const onTimeDefinition = rows.some((r) => r.metric_type === "on_time_pct") ? data?.on_time_definition : null;
@@ -115,11 +115,7 @@ export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx
       )}
       {onTimeDefinition && (
         <div className="standard-definition">
-          <p>
-            {onTimeDefinition.preset == null || onTimeDefinition.preset === "custom"
-              ? t("reports.performance_standard.judged_on_custom")
-              : t("reports.performance_standard.judged_on", { preset: onTimeDefinition.preset })}
-          </p>
+          <p>{t("reports.performance_standard.judged_on")}</p>
           <OnTimeDefinition definition={onTimeDefinition} />
         </div>
       )}
