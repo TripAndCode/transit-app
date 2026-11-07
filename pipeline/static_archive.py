@@ -208,7 +208,10 @@ def _copy(conn, ch, agency_id: int, key: str, parts: list[str], kept: _Kept, exp
         if (expected is not None and copied != expected) or static_parts(agency_id, conn, True) != parts:
             logger.warning(f"  timetable archive: agency {agency_id}'s timetable changed while copying; not archived")
             return False
-        ch.command(f"ALTER TABLE {kept.table} REPLACE PARTITION ({int(agency_id)}, '{key}') FROM {work}")
+        # A content none of whose stop times has its trip loaded has no
+        # schedule: no poll matched it at ingest either, so there is none to keep.
+        if copied:
+            ch.command(f"ALTER TABLE {kept.table} REPLACE PARTITION ({int(agency_id)}, '{key}') FROM {work}")
         logger.info(f"  timetable archive: agency {agency_id} content {key} kept in {kept.table} ({copied:,} rows)")
         return True
     finally:

@@ -115,11 +115,15 @@ def test_a_timetable_that_changes_mid_copy_is_not_archived(pg_conn, agency_id, c
 
 
 def test_each_attempt_works_in_its_own_table():
-    assert static_archive._work_table(7, "a" * 32) != static_archive._work_table(7, "a" * 32)
+    assert static_archive._work_table(static_archive.ARCHIVE, 7, "a" * 32) != static_archive._work_table(
+        static_archive.ARCHIVE, 7, "a" * 32
+    )
 
 
 def test_a_work_table_a_killed_copy_left_behind_matches_the_work_table_pattern():
-    assert re.search(ch_aggregates.WORK_TABLE_PATTERN, static_archive._work_table(7, "ab12cd34" * 4))
+    assert re.search(
+        ch_aggregates.WORK_TABLE_PATTERN, static_archive._work_table(static_archive.SCHEDULE, 7, "ab12cd34" * 4)
+    )
 
 
 def test_missing_tables_fail_closed_with_the_bootstrap_hint(ch_client):
@@ -300,10 +304,13 @@ def _change_the_content(pg_conn, agency_id):
 
 
 def _archive_joined():
+    """The tables that read the archive: by each row's version, or by the version in force on its service date."""
     from pipeline import agg_registry
     from pipeline.agg_registry import Timetable
 
-    return {name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED}
+    return {
+        name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED or table.in_force
+    }
 
 
 def test_a_name_remapped_to_new_content_clears_the_archive_joined_states(pg_conn, agency_id, ch_client):
