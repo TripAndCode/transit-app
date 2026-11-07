@@ -206,7 +206,13 @@ _TABLE_COLUMNS = {
     "agg_route_hour": "route_code, service_type, scheduled_time, samples, sum_delay_sec",
     "agg_route_hour_dow": "route_code, service_type, dow, hour, samples, sum_delay_sec",
 }
-_REPORTS = {"on_time": "", "route_table": "&include_sparse=1"}
+# Each read's report and query. The industry window puts readings exactly a
+# minute early and exactly five minutes late on its edges.
+_REPORTS = {
+    "on_time": ("on_time", ""),
+    "route_table": ("route_table", "&include_sparse=1"),
+    "route_table_industry": ("route_table", "&include_sparse=1&preset=standard_m1_p5"),
+}
 
 
 @dataclass(frozen=True)
@@ -283,32 +289,52 @@ def _report_mismatches(observed: Observed) -> list[str]:
     window = _window(observed.scenario)
     routes = oracle.by_route(observed.scenario)
     # on_time rows: (route_code, service, on_time_pct, avg_min, samples, ...)
-    # route_table rows: (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, ...)
+    # route_table rows: (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, early_pct, ...)
     on_time = {r[0]: {"on_time_pct": r[2], "avg_min": r[3], "samples": r[4]} for r in observed.reports["on_time"]}
     table = {
-        r[0]: {"avg_min": r[1], "on_time_pct": r[2], "late5_pct": r[3], "late5_count": r[4], "samples": r[5]}
+        r[0]: {
+            "avg_min": r[1],
+            "on_time_pct": r[2],
+            "late5_pct": r[3],
+            "late5_count": r[4],
+            "samples": r[5],
+            "early_pct": r[6],
+        }
         for r in observed.reports["route_table"]
     }
-    return _diff(
-        f"GET reports/on_time {window}",
-        {
-            route: {"on_time_pct": _pct(f.on_time_share), "avg_min": _mean_min(f), "samples": f.departures}
-            for route, f in routes.items()
-        },
-        on_time,
-    ) + _diff(
-        f"GET reports/route_table {window}",
-        {
-            route: {
-                "avg_min": _mean_min(f),
-                "on_time_pct": _pct(f.on_time_share),
-                "late5_pct": _pct(f.over_five_min_share),
-                "late5_count": f.over_five_min,
-                "samples": f.departures,
-            }
-            for route, f in routes.items()
-        },
-        table,
+    industry = {r[0]: {"on_time_pct": r[2], "early_pct": r[6]} for r in observed.reports["route_table_industry"]}
+    return (
+        _diff(
+            f"GET reports/on_time {window}",
+            {
+                route: {"on_time_pct": _pct(f.on_time_share), "avg_min": _mean_min(f), "samples": f.departures}
+                for route, f in routes.items()
+            },
+            on_time,
+        )
+        + _diff(
+            f"GET reports/route_table {window}",
+            {
+                route: {
+                    "avg_min": _mean_min(f),
+                    "on_time_pct": _pct(f.on_time_share),
+                    "late5_pct": _pct(f.over_five_min_share),
+                    "late5_count": f.over_five_min,
+                    "samples": f.departures,
+                    "early_pct": _pct(f.early_share),
+                }
+                for route, f in routes.items()
+            },
+            table,
+        )
+        + _diff(
+            f"GET reports/route_table {window}&preset=standard_m1_p5",
+            {
+                route: {"on_time_pct": _pct(f.on_time_industry_share), "early_pct": _pct(f.early_share)}
+                for route, f in routes.items()
+            },
+            industry,
+        )
     )
 
 
@@ -451,11 +477,11 @@ async def _read_reports(scenario: Scenario, agency_id: int) -> dict[str, list]:
 
     out = {}
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        for report, query in _REPORTS.items():
+        for name, (report, query) in _REPORTS.items():
             resp = await client.get(f"/api/{agency_id}/reports/{report}?{_window(scenario)}{query}")
             if resp.status_code != 200:
-                raise RuntimeError(f"reports/{report}: {resp.status_code} {resp.text}")
-            out[report] = resp.json()["rows"]
+                raise RuntimeError(f"reports/{report}{query}: {resp.status_code} {resp.text}")
+            out[name] = resp.json()["rows"]
     return out
 
 

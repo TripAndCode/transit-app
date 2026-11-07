@@ -10,6 +10,7 @@ from pipeline.histogram import (
     bucketize,
     count_early,
     count_in_range,
+    count_on_time,
     percentile_from_hist,
 )
 
@@ -167,3 +168,38 @@ def test_count_early_counts_departures_strictly_more_than_the_tolerance_early(ea
 
 def test_count_early_at_one_minute_leaves_out_a_departure_exactly_one_minute_early():
     assert count_early(_hist(-61, -60, -59), 60) == 1
+
+
+# Whole-minute readings on every edge an on-time window can have: exactly a
+# minute early, exactly one and five minutes late, and one second past each.
+_WINDOW_EDGES = [-400, -301, -300, -120, -61, -60, -59, 0, 30, 60, 61, 120, 299, 300, 301, 400]
+
+
+def _exact_columns(delays: list[int]) -> dict:
+    """agg_route_daily_dist's exact columns for *delays*: the legacy on-time
+    count (at most 60 s late) and the over-five-minutes count."""
+    return {
+        "samples": len(delays),
+        "on_time_count": sum(d <= 60 for d in delays),
+        "late5_count": sum(d > 300 for d in delays),
+    }
+
+
+@pytest.mark.parametrize(
+    ("early", "late"),
+    [(None, 60), (60, 60), (None, 300), (60, 300), (0, 300), (300, 300), (120, 60)],
+)
+def test_count_on_time_is_exact_where_the_exact_columns_and_a_bucket_edge_bound_the_window(early, late):
+    """A late side at one or five minutes reads the exact columns, and an
+    early side on a bucket edge subtracts an exact early count, so readings
+    piled on either edge are counted exactly."""
+    low = -(early if early is not None else 10_000)
+    expected = sum(low <= d <= late for d in _WINDOW_EDGES)
+    assert count_on_time(_hist(*_WINDOW_EDGES), early, late, **_exact_columns(_WINDOW_EDGES)) == expected
+
+
+@pytest.mark.parametrize(("early", "late"), [(None, 120), (60, 180), (90, 300), (30, 60), (None, 0)])
+def test_count_on_time_estimates_from_the_histogram_where_no_exact_column_applies(early, late):
+    counts = _hist(*_WINDOW_EDGES)
+    estimate = count_in_range(counts, None if early is None else -early, late)
+    assert count_on_time(counts, early, late, **_exact_columns(_WINDOW_EDGES)) == estimate

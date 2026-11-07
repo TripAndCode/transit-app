@@ -296,27 +296,43 @@ async def test_the_early_departure_rate_counts_departures_more_than_the_early_to
     assert float(legacy["rows"][0][2]) == 100.0
 
 
+# Whole-minute readings on the window's edges: exactly a minute early and
+# exactly five minutes late are on time; two minutes early and 301 s late are not.
+_EDGES = [-120] * 5 + [-60] * 5 + [0] * 5 + [300] * 5 + [301] * 5
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["agg", "live"])
-@pytest.mark.parametrize("query", ["&preset=standard_m1_p5", "&early=60&late=300"])
-async def test_the_industry_window_is_named_and_applied_however_it_is_asked_for(
+@pytest.mark.parametrize(
+    ("query", "preset", "on_time"),
+    [
+        ("&preset=standard_m1_p5", "standard_m1_p5", 60.0),
+        ("&early=60&late=300", "standard_m1_p5", 60.0),
+        ("&late=300", "custom", 80.0),
+    ],
+)
+async def test_readings_on_the_windows_edges_count_exactly_on_both_paths(
     reports_client,  # noqa: F811
     ch_client,
     ch_async_client,
     path,
     query,
+    preset,
+    on_time,
 ):
-    """No more than a minute early and five minutes late. No departure sits
-    on the +300 s edge, which the histogram can only estimate."""
+    """The industry window, and the five-minute tolerance with early
+    departures on time, count a departure exactly a minute early or exactly
+    five minutes late the same way whether the aggregates or a live scan
+    answer."""
     client, agency_id, pool = reports_client
-    await _seed_route_at(pool, agency_id, "S", "平日", DAY, "08:00", [-120] * 5 + [-30] * 5 + [200] * 10 + [400] * 5)
+    await _seed_route_at(pool, agency_id, "S", "平日", DAY, "08:00", _EDGES)
     band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
 
     body = (await client.get(_url(agency_id, band, query))).json()
     row = body["rows"][0]
-    assert float(row[2]) == 60.0
+    assert float(row[2]) == on_time
     assert float(row[6]) == 20.0
     definition = body["definition"]
-    assert definition["preset"] == "standard_m1_p5"
-    assert (definition["early_tolerance_sec"], definition["late_tolerance_sec"]) == (60, 300)
+    assert definition["preset"] == preset
+    assert definition["late_tolerance_sec"] == 300
     assert definition["early_departure_sec"] == 60

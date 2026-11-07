@@ -581,26 +581,34 @@ async def test_reports_preset_combined_with_explicit_tolerance_is_rejected(repor
     assert resp.status_code == 400
 
 
+# Whole-minute readings on an on-time window's edges: exactly a minute early,
+# exactly five minutes late, and one step past each.
+_WINDOW_EDGES = [-120] * 5 + [-60] * 5 + [0] * 5 + [300] * 5 + [301] * 5
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["agg", "live"])
-async def test_on_time_industry_preset_counts_no_more_than_a_minute_early_and_five_late(
-    reports_client, ch_client, ch_async_client, path
+@pytest.mark.parametrize(
+    ("query", "preset", "on_time"),
+    [("&preset=standard_m1_p5", "standard_m1_p5", 60.0), ("&late=300", "custom", 80.0)],
+)
+async def test_on_time_counts_readings_on_the_windows_edges_exactly_on_both_paths(
+    reports_client, ch_client, ch_async_client, path, query, preset, on_time
 ):
-    """standard_m1_p5 is the window operators publish. The departures more
-    than a minute early and those more than five minutes late are both off
-    time; nothing sits on the +300 s edge, which the histogram estimates."""
+    """standard_m1_p5 is the window operators publish: no more than a minute
+    early and five minutes late. A departure exactly a minute early or
+    exactly five minutes late is on time, and the aggregates count it as
+    the live scan does."""
     client, agency_id, pool = reports_client
     day = "2026-05-14"
-    await _seed_route_at(pool, agency_id, "RSTD", "平日", day, "08:00", [-120] * 5 + [-30] * 5 + [200] * 10 + [400] * 5)
+    await _seed_route_at(pool, agency_id, "RSTD", "平日", day, "08:00", _WINDOW_EDGES)
     band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
 
-    body = (
-        await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}{band}&preset=standard_m1_p5")
-    ).json()
+    body = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}{band}{query}")).json()
     row = next(r for r in body["rows"] if r[0] == "RSTD")
-    assert float(row[2]) == 60.0
-    assert body["definition"]["preset"] == "standard_m1_p5"
-    assert (body["definition"]["early_tolerance_sec"], body["definition"]["late_tolerance_sec"]) == (60, 300)
+    assert float(row[2]) == on_time
+    assert body["definition"]["preset"] == preset
+    assert body["definition"]["late_tolerance_sec"] == 300
 
 
 @pytest.mark.asyncio
@@ -2470,6 +2478,28 @@ async def test_council_summary_pools_the_early_departure_rate_across_routes(
     limited = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}&early=120")).json()
     assert limited["rows"][0][6] == 0.0
     assert limited["definition"]["early_departure_sec"] == 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+@pytest.mark.parametrize(("query", "on_time"), [("&preset=standard_m1_p5", 75.0), ("&late=300", 87.5)])
+async def test_council_summary_counts_readings_on_the_windows_edges_exactly_on_both_paths(
+    reports_client, ch_client, ch_async_client, path, query, on_time
+):
+    """R1 sits on the window's edges: 15 of its 25 departures are on time
+    under the industry window and 20 under five minutes with early
+    departures on time. R2's 15 are on time either way."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "R1", "平日", day, "08:00", _WINDOW_EDGES)
+    await _seed_route_at(pool, agency_id, "R2", "平日", day, "08:00", [30] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}{query}")).json()
+    row = body["rows"][0]
+    assert row[2] == 40
+    assert row[0] == on_time
+    assert row[6] == 12.5
 
 
 @pytest.mark.asyncio

@@ -60,8 +60,8 @@ def test_on_time_explicit_late_only_resolves_to_custom_with_unbounded_early():
 def test_on_time_preset_numerically_equal_to_legacy_is_still_custom():
     # An explicit late_tolerance_sec=60 (same number as the legacy default)
     # must still resolve to "custom", not silently collapse back to
-    # "legacy_60s" -- the two are different code paths upstream (exact
-    # column vs. histogram estimate) and the metadata block must say so.
+    # "legacy_60s": the preset names what the request asked for, and the
+    # legacy default asks for no tolerance at all.
     meta = resolve_definition_meta("on_time", None, 60)
     assert meta.preset == "custom"
     assert meta.late_tolerance_sec == 60
