@@ -2567,7 +2567,7 @@ async def test_council_summary_says_the_plan_could_not_be_read_when_the_planned_
     assert resp.status_code == 200
     body = resp.json()
     assert body["rows"][0][2] == 25  # samples
-    assert body["rows"][0][3:] == [0, None, None]
+    assert body["rows"][0][3:6] == [0, None, None]
     assert (body["delivered_missing"], body["covered_days"], body["window_days"]) == ("unreadable", 0, 1)
     assert "運行率：—（計画を読み込めませんでした）" in body["text"]
 
@@ -2621,7 +2621,7 @@ async def test_council_summary_has_no_rate_for_a_feed_that_reports_no_cancellati
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["rows"][0][3:] == [4, None, None]  # planned, executed, delivered
+        assert body["rows"][0][3:6] == [4, None, None]  # planned, executed, delivered
         assert body["delivered_missing"] == "feed_reports_no_cancellations"
         assert line in body["text"].split("\n")
 
@@ -2889,7 +2889,7 @@ async def test_council_summary_gives_no_verdict_for_an_agency_the_cached_board_d
     assert not any(line.startswith("※他事業者との比較") for line in body["text"].split("\n"))
     rows = list(csv.reader(io.StringIO((await client.get(_council_url(late, extra="&format=csv"))).text)))
     data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
-    assert data_row[6:] == ["", "", "", "", ""]
+    assert data_row[7:] == ["", "", "", "", ""]
 
 
 @pytest.mark.asyncio
@@ -2924,7 +2924,7 @@ async def test_council_summary_stands_without_a_verdict_when_the_board_cannot_be
     assert csv_resp.status_code == 200
     rows = list(csv.reader(io.StringIO(csv_resp.text)))
     data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
-    assert data_row[6:] == ["", "", "", "", ""]
+    assert data_row[7:] == ["", "", "", "", ""]
 
 
 @pytest.mark.asyncio
