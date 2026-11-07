@@ -13,6 +13,7 @@ from pipeline.histogram import (
     LEGACY_PRESET_NAME,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
     count_in_range,
+    count_on_time,
     percentile_from_hist,
 )
 from pipeline.reports.filters import (
@@ -78,9 +79,9 @@ def report_reads_aggregates(report_type: str, ctx: RangeCtx, *, csv: bool = Fals
 # named back by pipeline.reports.definition.resolve_definition_meta for any
 # request whose tolerances are a preset's.
 # - "legacy_60s" is the spelling of "don't override the tolerance": up to 60 s
-#   late, any early departure on time. Only that untouched default reads the
-#   exact analyze()-time column; ANY explicit tolerance, even one numerically
-#   equal to it, reads the approximate histogram instead (compute_on_time).
+#   late, any early departure on time, read from the exact analyze()-time
+#   column. An explicit tolerance reads the histogram beside the exact
+#   columns (pipeline.histogram.count_on_time).
 # - "standard_m1_p5" is the window operators publish: no more than 60 s early
 #   and no more than 300 s late.
 STANDARD_PRESET_NAME = "standard_m1_p5"
@@ -362,12 +363,13 @@ async def compute_on_time(
     [LEGACY_PRESET_NAME]``) is byte-identical to the historical behavior:
     ``on_time_count`` (<=60s, baked in at analyze time) is read exactly, and
     ``threshold_sec``/``time_band`` still control the pre-existing live
-    ClickHouse fallback for that path. Passing EITHER tolerance — even a
-    value numerically equal to the legacy default — opts into a query-time
-    estimate from agg_route_daily_dist's merged delay histogram instead (see
-    :func:`pipeline.histogram.count_in_range`; bounded to one histogram
-    bucket, i.e. ``pipeline.histogram.WIDTH`` seconds, of error), so a custom
-    on-time definition still avoids both a raw-``updates`` scan and an
+    ClickHouse fallback for that path. Passing EITHER tolerance reads
+    agg_route_daily_dist's merged delay histogram beside its exact columns
+    instead (:func:`pipeline.histogram.count_on_time`): exact for a late
+    tolerance of one or five minutes with an early tolerance on a bucket
+    edge, the industry window among them, and otherwise an estimate within
+    one histogram bucket, i.e. ``pipeline.histogram.WIDTH`` seconds. So a
+    custom on-time definition still avoids both a raw-``updates`` scan and an
     analyze() re-aggregation. A time_band filter still needs the live scan
     either way (the histogram has no hour-of-day dimension).
 
@@ -411,7 +413,7 @@ async def compute_on_time(
         out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
         return out if limit is None else out[:limit]
 
-    # Custom on-time window: estimate from the merged histogram at query time.
+    # Custom on-time window, from the merged histogram and the exact columns.
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
     high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
     if not aggregates_serve(ctx):
@@ -426,8 +428,15 @@ async def compute_on_time(
         samples = r["samples"]
         if samples <= 20:
             continue
-        on_time_est = count_in_range(r["hist"], low_sec, high_sec)
-        on_time_pct = _pct1(on_time_est, samples)
+        on_time = count_on_time(
+            r["hist"],
+            early_tolerance_sec,
+            high_sec,
+            samples=samples,
+            on_time_count=r["on_time_count"],
+            late5_count=r["late5_count"],
+        )
+        on_time_pct = _pct1(on_time, samples)
         out.append(
             (
                 r["route_code"],

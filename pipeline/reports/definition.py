@@ -152,8 +152,8 @@ _EARLY_RATE_REPORTS = frozenset({"route_table", "council_summary"})
 
 def _preset_name(early_tolerance_sec: int | None, late_tolerance_sec: int | None) -> str:
     """The preset whose window the requested tolerances are, compared before
-    any default fills in: an explicit late tolerance of 60 s is not the
-    legacy default, whose figure reads an exact column instead."""
+    any default fills in, so a request that spells out its tolerances is never
+    named the legacy default, which spells out none."""
     requested = (early_tolerance_sec, late_tolerance_sec)
     return next((name for name, window in ON_TIME_PRESETS.items() if window == requested), "custom")
 

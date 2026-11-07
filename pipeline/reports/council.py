@@ -51,7 +51,7 @@ from pipeline.histogram import (
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
     N_BUCKETS,
     count_early,
-    count_in_range,
+    count_on_time,
 )
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
@@ -99,7 +99,6 @@ async def _agency_on_time_pooled(
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
     high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
     early_sec = early_departure_sec(early_tolerance_sec)
-    is_legacy = early_tolerance_sec is None and late_tolerance_sec is None
 
     if not aggregates_serve(ctx):
         if ch is None:
@@ -145,12 +144,16 @@ async def _agency_on_time_pooled(
     for r in rows:
         for i, c in enumerate(r["hist"]):
             merged_hist[i] += c
-    if is_legacy:
-        on_time_pct = _round1(sum(r["on_time_count"] for r in rows) * 100.0 / samples)
-    else:
-        on_time_pct = _round1(count_in_range(merged_hist, low_sec, high_sec) * 100.0 / samples)
+    on_time = count_on_time(
+        merged_hist,
+        early_tolerance_sec,
+        high_sec,
+        samples=samples,
+        on_time_count=sum(r["on_time_count"] for r in rows),
+        late5_count=sum(r["late5_count"] for r in rows),
+    )
     return (
-        float(on_time_pct),
+        float(_round1(on_time * 100.0 / samples)),
         float(_pct1(count_early(merged_hist, early_sec), samples)),
         float(_avg_min(sum_delay_sec, samples)),
         samples,

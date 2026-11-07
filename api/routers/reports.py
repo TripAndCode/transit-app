@@ -1262,9 +1262,11 @@ async def get_report(
     late_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time/worst_5min/council_summary: the late-side cutoff (default 60s for "
-        "on_time/council_summary, 300s for worst_5min). Passing this opts into a query-time "
-        "histogram estimate instead of the exact legacy_60s column.",
+        description="on_time/route_table/worst_5min/council_summary: the late-side cutoff (default 60s "
+        "for on_time/route_table/council_summary, 300s for worst_5min). Passing this reads the "
+        "merged histogram beside the exact columns: on-time counts are exact at 60s and 300s with an "
+        "early tolerance on a whole minute up to 300s (pipeline.histogram.count_on_time), and "
+        "estimated otherwise; worst_5min's count is a histogram estimate.",
     ),
     late: int | None = Query(
         default=None,

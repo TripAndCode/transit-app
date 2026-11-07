@@ -172,6 +172,48 @@ def count_early(counts: list[int], early_sec: int) -> float:
     return count_in_range(counts, None, -early_sec - 1)
 
 
+def _is_early_edge(early_sec: int) -> bool:
+    """Whether ``-early_sec`` is a bucket edge, so :func:`count_early` is exact."""
+    return LO <= -early_sec <= 0 and (-early_sec - LO) % WIDTH == 0
+
+
+def count_on_time(
+    counts: list[int],
+    early_tolerance_sec: int | None,
+    late_tolerance_sec: int,
+    *,
+    samples: int,
+    on_time_count: int,
+    late5_count: int,
+) -> float:
+    """The departures with ``-early_tolerance_sec <= dep_delay <=
+    late_tolerance_sec`` (no early bound when it is ``None``), from merged
+    histogram *counts* and the exact columns analyze() bakes beside it over
+    the same departures: *samples*, *on_time_count* (at most
+    ``LEGACY_ON_TIME_LATE_TOLERANCE_SEC`` late) and *late5_count* (more than
+    ``LEGACY_SEVERE_LATE_TOLERANCE_SEC`` late).
+
+    Feeds report many delays as whole minutes, which pile up on a bucket's
+    lower edge, where the uniform estimate counts almost none of them. So
+    wherever the window's edges allow, the count is exact: a late tolerance
+    of one or five minutes reads its exact column, and an early tolerance on
+    a bucket edge subtracts the exact :func:`count_early`. Any other window
+    is :func:`count_in_range`'s estimate.
+    """
+    if late_tolerance_sec == LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
+        at_most_late = on_time_count
+    elif late_tolerance_sec == LEGACY_SEVERE_LATE_TOLERANCE_SEC:
+        at_most_late = samples - late5_count
+    else:
+        at_most_late = None
+    if early_tolerance_sec is None and at_most_late is not None:
+        return at_most_late
+    if early_tolerance_sec is not None and at_most_late is not None and _is_early_edge(early_tolerance_sec):
+        return at_most_late - count_early(counts, early_tolerance_sec)
+    low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
+    return count_in_range(counts, low_sec, late_tolerance_sec)
+
+
 def bucket_case_sql(column: str, *, lo: int = LO, hi: int = HI, width: int = WIDTH) -> str:
     """Return a SQL ``CASE`` expression bucketing *column* exactly like
     :func:`bucketize` (same bounds/edge conventions).

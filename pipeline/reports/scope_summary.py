@@ -13,8 +13,9 @@ Each section drops the one condition it exists to choose:
 - ``weekdays``: the selected period, ignoring the weekday filter.
 - ``routes``: the selected period, ignoring the routes filter.
 - ``tolerance``: the whole scope, as the on-time share at each late
-  tolerance: exact at the default one minute, a histogram estimate
-  elsewhere.
+  tolerance, counted as the screens count it
+  (:func:`pipeline.histogram.count_on_time`): exact at one and five minutes,
+  a histogram estimate elsewhere.
 
 ``day_types`` is not a section of figures: it lists the day-type buckets the
 agency's calendar splits the agency into, the choices the timetable control
@@ -30,7 +31,7 @@ from datetime import timedelta
 from typing import Any
 
 from api.range import RangeCtx, day_types_for, resolve_service_dates
-from pipeline.histogram import LEGACY_ON_TIME_LATE_TOLERANCE_SEC, N_BUCKETS, count_in_range
+from pipeline.histogram import N_BUCKETS, count_on_time
 from pipeline.reports.filters import _dist_filter
 
 DAYS_WINDOW = 90
@@ -57,16 +58,22 @@ async def _grouped(agency_id: int, ctx: RangeCtx, conn: Any, key_sql: str) -> li
 _HIST_SUMS_SQL = ", ".join(f"COALESCE(SUM(hist[{i}]), 0) AS h{i}" for i in range(1, N_BUCKETS + 1))
 
 
-async def _merged_hist(agency_id: int, ctx: RangeCtx, conn: Any) -> tuple[list[int], int, int]:
+async def _merged_hist(agency_id: int, ctx: RangeCtx, conn: Any) -> tuple[list[int], int, int, int]:
     """The scope's merged histogram, its sample count and its exact on-time
-    count (delay of at most one minute)."""
+    (delay of at most one minute) and over-five-minutes counts."""
     where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
         "SELECT COALESCE(SUM(samples), 0) AS samples, COALESCE(SUM(on_time_count), 0) AS on_time, "
-        f"{_HIST_SUMS_SQL} FROM agg_route_daily_dist WHERE agency_id = $1 AND {where}"
+        f"COALESCE(SUM(late5_count), 0) AS late5, {_HIST_SUMS_SQL} "
+        f"FROM agg_route_daily_dist WHERE agency_id = $1 AND {where}"
     )
     row = await conn.fetchrow(sql, agency_id, *params)
-    return [int(row[f"h{i}"]) for i in range(1, N_BUCKETS + 1)], int(row["samples"]), int(row["on_time"])
+    return (
+        [int(row[f"h{i}"]) for i in range(1, N_BUCKETS + 1)],
+        int(row["samples"]),
+        int(row["on_time"]),
+        int(row["late5"]),
+    )
 
 
 async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, early_sec: int | None = None) -> dict:
@@ -109,19 +116,11 @@ async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, ear
         for r in await _grouped(agency_id, replace(ctx, routes=()), conn, "route_code")
     ]
 
-    hist, samples, on_time = await _merged_hist(agency_id, ctx, conn)
-    low_sec = None if early_sec is None else -early_sec
+    hist, samples, on_time, late5 = await _merged_hist(agency_id, ctx, conn)
     tolerance: list[dict[str, Any]] = []
     if samples:
         for late in TOLERANCE_STEPS_SEC:
-            # Feeds report many delays as whole minutes, which land on a
-            # bucket's lower edge where the uniform estimate counts almost
-            # none of them. The default one-minute rule has an exact count,
-            # so that step matches the on-time figure the screens show.
-            if late == LEGACY_ON_TIME_LATE_TOLERANCE_SEC and early_sec is None:
-                count: float = on_time
-            else:
-                count = count_in_range(hist, low_sec, late)
+            count = count_on_time(hist, early_sec, late, samples=samples, on_time_count=on_time, late5_count=late5)
             tolerance.append({"late_sec": late, "on_time_pct": round(count * 100.0 / samples, 1)})
     return {
         "earliest": earliest,
