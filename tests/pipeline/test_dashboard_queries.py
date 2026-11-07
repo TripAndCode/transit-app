@@ -7,7 +7,7 @@ no-ops on these overview cards. Tests seed the aggregates directly.
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 
 import pytest
 
@@ -68,11 +68,14 @@ async def _seed_trend(pool, agency_id, rows):
 
 
 async def _seed_route_hour(pool, agency_id, rows):
-    """rows: (route_code, service_type, scheduled_time(datetime.time), avg_min, samples[, sum_delay_sec])."""
+    """rows: (route_code, service_type, scheduled_time(datetime.time), avg_min, samples[, sum_delay_sec]).
+
+    The column is an interval from the service day's 00:00, which asyncpg binds from a timedelta."""
     expanded = []
     for rc, st, sch, av, n, *rest in rows:
         sds = rest[0] if rest else _exact_sum_delay_sec(av, n)
-        expanded.append((rc, st, sch, av, n, sds))
+        clock = timedelta(hours=sch.hour, minutes=sch.minute, seconds=sch.second)
+        expanded.append((rc, st, clock, av, n, sds))
     async with pool.acquire() as c:
         await c.executemany(
             "INSERT INTO agg_route_hour (agency_id, route_code, service_type, scheduled_time, "

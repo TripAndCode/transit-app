@@ -1011,6 +1011,16 @@ def _peak_from_hour_rows(rows) -> dict | None:
     }
 
 
+def _on_one_hour_axis(*profiles: dict | None) -> tuple[dict | None, ...]:
+    """*profiles* with every ``by_hour`` as long as the longest, padded with
+    None: one profile can run past midnight where another does not, and the
+    weekday and weekend charts are drawn one above the other on one axis."""
+    hours = max((len(p["by_hour"]) for p in profiles if p is not None), default=0)
+    return tuple(
+        None if p is None else {**p, "by_hour": p["by_hour"] + [None] * (hours - len(p["by_hour"]))} for p in profiles
+    )
+
+
 async def _daily_totals(agency_id: int, ctx: RangeCtx, conn, grain: _Grain | None) -> list[tuple[date, int, int]]:
     """``(date, samples, sum_delay_sec)`` for each date in ``ctx`` with samples, oldest first.
 
@@ -1491,6 +1501,7 @@ async def compute_overview_summary(
             if baseline_avg != 0:
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
+    peak, peak_weekday, peak_weekend = _on_one_hour_axis(peak, peak_weekday, peak_weekend)
     return {
         "headline": {
             "avg_min": avg_min,

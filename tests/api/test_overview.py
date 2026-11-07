@@ -130,7 +130,8 @@ async def _seed_agg_route_hour(
     samples: int,
 ):
     """Insert one ``agg_route_hour`` row. ``scheduled_time`` is HH:MM text;
-    schema column is TIME (post 0011), so we cast on the server side.
+    the column is an interval from the service day's 00:00, so we cast on the
+    server side.
 
     ``sum_delay_sec`` is back-derived as ``round(avg_min * 60 * samples)``, the
     same exact-reconstruction convention ``_seed_agg_daily`` above uses. The
@@ -141,7 +142,7 @@ async def _seed_agg_route_hour(
     await aconn.execute(
         "INSERT INTO agg_route_hour "
         "(agency_id, route_code, service_type, scheduled_time, avg_min, p50_min, p90_min, samples, sum_delay_sec) "
-        "VALUES ($1, $2, $3, ($4::text)::time, $5, NULL, NULL, $6, $7) "
+        "VALUES ($1, $2, $3, ($4::text)::interval, $5, NULL, NULL, $6, $7) "
         "ON CONFLICT (agency_id, route_code, service_type, scheduled_time) DO UPDATE "
         "SET avg_min = EXCLUDED.avg_min, samples = EXCLUDED.samples, sum_delay_sec = EXCLUDED.sum_delay_sec",
         agency_id,
