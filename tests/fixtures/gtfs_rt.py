@@ -43,8 +43,11 @@ def stop_time_update(
     departure_delay: int | None = None,
     arrival_delay: int | None = None,
     stop_id: str | None = None,
+    schedule_relationship: int | None = None,
 ) -> bytes:
-    """A StopTimeUpdate; every field is left off the wire when None."""
+    """A StopTimeUpdate; every field is left off the wire when None.
+    ``schedule_relationship`` is GTFS-RT's enum value: SCHEDULED 0, SKIPPED 1,
+    NO_DATA 2."""
     body = b""
     if stop_sequence is not None:
         body += _uint(1, stop_sequence)
@@ -54,17 +57,26 @@ def stop_time_update(
         body += _len_delimited(3, _int32(1, departure_delay))
     if stop_id is not None:
         body += _string(4, stop_id)
+    if schedule_relationship is not None:
+        body += _uint(5, schedule_relationship)
     return body
 
 
 def trip_update(
-    trip_id: str, *stop_time_updates: bytes, route_id: str | None = None, start_date: str | None = None
+    trip_id: str,
+    *stop_time_updates: bytes,
+    route_id: str | None = None,
+    start_date: str | None = None,
+    schedule_relationship: int | None = None,
 ) -> bytes:
-    """A TripUpdate whose TripDescriptor carries trip_id, plus route_id and
-    start_date ("YYYYMMDD", the trip's service date) when given."""
+    """A TripUpdate whose TripDescriptor carries trip_id, plus route_id,
+    start_date ("YYYYMMDD", the trip's service date) and schedule_relationship
+    (GTFS-RT's enum value: SCHEDULED 0, CANCELED 3) when given."""
     trip = _string(1, trip_id)
     if start_date is not None:
         trip += _string(3, start_date)
+    if schedule_relationship is not None:
+        trip += _uint(4, schedule_relationship)
     if route_id is not None:
         trip += _string(5, route_id)
     return _len_delimited(1, trip) + b"".join(_len_delimited(2, stu) for stu in stop_time_updates)
