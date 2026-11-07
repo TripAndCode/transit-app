@@ -42,7 +42,7 @@ function comparisonFigure(report: CouncilReport, agencyWide: boolean, t: ReturnT
 }
 
 /** The council report as a page someone can read aloud or print: the
- *  headline figures as tiles, the early-departure rate's naming the threshold
+ *  headline figures as tiles, the early-departure tile naming the threshold
  *  it counts past, then the server's prose -- its header line,
  *  the headline sentence and its footnotes -- then a print action. Planned
  *  trips say how many of the period's days a timetable plans, and a missing
