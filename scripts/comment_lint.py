@@ -350,14 +350,17 @@ def main(argv=None):
         _report(hits, root, "baseline", limit=40)
         return 0
 
-    # An unset shell variable passes an empty BASE, which still selects its mode.
+    # An empty BASE string still selects its mode.
     stale = args.stale is not None
     requested = args.stale if stale else args.diff
-    unavailable = 2 if stale else 0
+    if stale:
+        label, outcome, unavailable = "stale candidates", "could not run", 2
+    else:
+        label, outcome, unavailable = "comment policy", "skipped", 0
     base = resolve_base(requested, _ref_exists(root))
     if base is None:
         print(
-            f"comment policy: no baseline ref for {requested!r} — skipped",
+            f"{label}: no baseline ref for {requested!r} — {outcome}",
             file=sys.stderr,
         )
         return unavailable
@@ -371,7 +374,7 @@ def main(argv=None):
         diff = _git([*pinned_prefixes, "diff", "-U0", *revisions], root)
     except (subprocess.CalledProcessError, OSError) as error:
         print(
-            f"comment policy: skipped ({error.__class__.__name__})",
+            f"{label}: {outcome} ({error.__class__.__name__})",
             file=sys.stderr,
         )
         return unavailable
@@ -391,12 +394,7 @@ def main(argv=None):
             hits += [
                 (path, v) for v in find_violations(path, lines, args.max_block, only_lines=lines_added, hunks=hunks)
             ]
-    count = _report(
-        hits,
-        root,
-        "stale candidates" if stale else "comment policy",
-        limit=None if stale else 40,
-    )
+    count = _report(hits, root, label, limit=None if stale else 40)
     return exit_code(count, gating=args.diff is not None, warn_only=args.warn)
 
 

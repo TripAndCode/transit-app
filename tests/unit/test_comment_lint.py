@@ -385,7 +385,8 @@ def test_cli_stale_candidates_fails_on_a_missing_base(repository):
 
     result = run_cli("--root", str(repository), "--stale-candidates", "no-such-ref")
     assert result.returncode == 2
-    assert "no baseline ref" in result.stderr
+    assert "stale candidates: no baseline ref for 'no-such-ref' — could not run" in result.stderr
+    assert "skipped" not in result.stderr
     assert "no baseline ref" not in result.stdout
 
 
@@ -394,24 +395,23 @@ def test_cli_diff_mode_skips_a_missing_base_instead_of_failing(repository):
 
     result = run_cli("--root", str(repository), "--diff", "no-such-ref")
     assert result.returncode == 0
-    assert "no baseline ref" in result.stderr
-    assert "skipped" in result.stderr
+    assert "comment policy: no baseline ref for 'no-such-ref' — skipped" in result.stderr
 
 
 def test_cli_stale_candidates_fails_on_an_empty_base(repository):
-    """An unset `$MERGE_BASE` expands to an empty BASE, the same mistake as a
-    mistyped one."""
+    """An unset variable in a quoted expansion, `"$MERGE_BASE"`, passes an empty
+    BASE string: the same mistake as a mistyped ref."""
 
     result = run_cli("--root", str(repository), "--stale-candidates", "")
     assert result.returncode == 2
-    assert "no baseline ref" in result.stderr
+    assert "stale candidates: no baseline ref for '' — could not run" in result.stderr
+    assert "skipped" not in result.stderr
 
 
 def test_cli_diff_mode_skips_an_empty_base(repository):
     result = run_cli("--root", str(repository), "--diff", "")
     assert result.returncode == 0
-    assert "no baseline ref" in result.stderr
-    assert "skipped" in result.stderr
+    assert "comment policy: no baseline ref for '' — skipped" in result.stderr
 
 
 def blob_base(repo: Path) -> str:
@@ -428,13 +428,14 @@ def blob_base(repo: Path) -> str:
 def test_cli_stale_candidates_fails_when_git_diff_fails(repository):
     result = run_cli("--root", str(repository), "--stale-candidates", blob_base(repository))
     assert result.returncode == 2
-    assert "CalledProcessError" in result.stderr
+    assert "stale candidates: could not run (CalledProcessError)" in result.stderr
+    assert "skipped" not in result.stderr
 
 
 def test_cli_diff_mode_skips_when_git_diff_fails(repository):
     result = run_cli("--root", str(repository), "--diff", blob_base(repository))
     assert result.returncode == 0
-    assert "CalledProcessError" in result.stderr
+    assert "comment policy: skipped (CalledProcessError)" in result.stderr
 
 
 def test_cli_diff_mode_flags_a_block_the_diff_extended(repository):
