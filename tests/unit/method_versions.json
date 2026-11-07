@@ -30,5 +30,22 @@
   },
   "2026.11.2": {
     "agg_feed_health": 2
+  },
+  "2026.11.3": {
+    "agg_daily_trend": 2,
+    "agg_hour_daily": 3,
+    "agg_route_daily": 2,
+    "agg_route_daily_dist": 2,
+    "agg_route_daily_dwell_run": 2,
+    "agg_route_headway_daily": 2,
+    "agg_route_hour": 3,
+    "agg_route_hour_dow": 3,
+    "agg_route_stats": 2,
+    "agg_route_stop_daily": 3,
+    "agg_schedule_revision_daily": 2,
+    "agg_stop_daily": 3,
+    "agg_stop_routes": 2,
+    "route_delay_counts": 3,
+    "stop_route_days": 2
   }
 }

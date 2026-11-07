@@ -21,7 +21,7 @@ AGENCY_ID = 7
 LEDGER_DATE = date(2026, 1, 2)
 LEDGER_SAMPLES = 41
 # Every ClickHouse table analyze needs to find before it runs.
-_STORE_TABLES = (*ch_aggregates.ALL_TABLES, static_archive.ARCHIVE, static_archive.VERSION_MAP)
+_STORE_TABLES = ch_aggregates.STORE_TABLES
 
 
 class _FakeResult:
@@ -416,7 +416,7 @@ def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
     assert [s for s in conn.executed if "DELETE FROM agg_hour_daily WHERE agency_id = %s" in s] or [
         sql for sql, _ in ch.commands if sql.startswith("INSERT INTO agg_hour_daily__work_a")
     ]
-    assert not [s for s in conn.executed if "DELETE FROM agg_schedule_revision_daily" in s]
+    assert not [s for s in conn.executed if "DELETE FROM agg_service_delivered_daily" in s]
 
 
 def test_the_ledger_query_counts_every_row_and_the_delay_rows_separately():

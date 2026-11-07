@@ -215,6 +215,15 @@ def _copy(conn, ch, agency_id: int, key: str, parts: list[str], kept: _Kept, exp
         ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
 
 
+def scheduled_contents(ch, agency_id: int) -> set[str]:
+    """The agency's contents whose schedule the archive keeps."""
+    rows = ch.query(
+        f"SELECT DISTINCT content_hash FROM {SCHEDULE} WHERE agency_id = {{agency:Int32}}",
+        parameters={"agency": agency_id},
+    ).result_rows
+    return {row[0] for row in rows}
+
+
 def spans(ch, agency_id: int) -> dict[str, tuple[date, date]]:
     """Each of the agency's version names with a recorded span, at its latest one."""
     rows = ch.query(
@@ -368,6 +377,13 @@ class ScheduleJoin(NamedTuple):
             "join_hashes": self.hashes,
             "join_current": self.current,
             "join_contents": sorted(contents - {""}),
+            **self.force_params(),
+        }
+
+    def force_params(self) -> dict:
+        """The bound parameters of the segments in force, which IN_FORCE_STEM_SQL reads."""
+        mapped = dict(zip(self.stems, self.hashes, strict=True))
+        return {
             "force_firsts": [s.first for s in self.force],
             "force_lasts": [s.last for s in self.force],
             "force_stems": [s.stem for s in self.force],
@@ -393,13 +409,7 @@ def schedule_join(ch, agency_id: int, current: str | None, *, by_service_date: b
     force: tuple[Segment, ...] = ()
     if by_service_date:
         mapped = dict(zip(stems, hashes, strict=True))
-        kept = {
-            row[0]
-            for row in ch.query(
-                f"SELECT DISTINCT content_hash FROM {SCHEDULE} WHERE agency_id = {{agency:Int32}}",
-                parameters={"agency": agency_id},
-            ).result_rows
-        }
+        kept = scheduled_contents(ch, agency_id)
         versions = [Version(stem, *span) for stem, span in spans(ch, agency_id).items() if stem in mapped]
         force = tuple(s for s in in_force(versions) if mapped[s.stem] in kept)
     return ScheduleJoin(stems, hashes, current or "", force)
@@ -418,6 +428,10 @@ class Stamp(str, Enum):
     # force carries that version's schedule: its service, scheduled time and
     # seconds, and its route where the feed named none. A row whose stop that
     # version lacks carries none, as ingest leaves a row the timetable misses.
+    # The content ingest joined is the one its version name maps to, and for a
+    # row with no name or one the archive does not map, the loaded one, as
+    # JOIN_CONTENT_SQL reads it: such a row is refiled only where the loaded
+    # content is not in force.
     REFIT = "refit"
 
 

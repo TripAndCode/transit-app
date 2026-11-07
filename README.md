@@ -154,19 +154,29 @@ FastAPI + React SPA  <-------------------------------------------------+
 - `analyze` computes the tables in `pipeline/ch_aggregates.py`'s
   `COPIED_TABLES` in ClickHouse, stores them there and copies them into
   Postgres; the whole-history ones are finalized from ClickHouse-only tables
-  of delay counts and of the stop-route pairs each date observed. Those that
-  join the static schedule join the timetable archive below, each row to the
-  timetable its version name maps to, or the loaded one when it maps to none.
-  It builds the rest in Postgres; of those, dwell and running time take each
-  stop visit's scheduled times from the same archive, through the ClickHouse
-  scan that pairs its arrival with its departure. A ClickHouse that predates one of
-  those tables needs `make ch-bootstrap` before the next `analyze`.
-- Every timetable an agency loads is kept in ClickHouse's
-  `static_stop_times_archive` under its content hash, and `static_version_map`
-  records which content each version name carried: `load_static` archives the
-  outgoing timetable before it replaces it, and `analyze` archives the loaded
-  one when its content is missing. A ClickHouse that predates them needs
-  `make ch-bootstrap` before the next `load_static` or `analyze`.
+  of delay counts and of the stop-route pairs each date observed. Each row is
+  read as joined to the timetable in force on its service date
+  (`pipeline/timetable_in_force.py`): the newest loaded timetable whose feed
+  dates, or else calendar, cover that day. A row ingested against another
+  timetable takes that one's scheduled time, day type and route from the
+  archive below. A day no recorded timetable covers keeps the timetable its
+  rows were ingested against: its version name's archived one, or the loaded
+  one when the name maps to none. Those that join the static schedule join
+  the same timetable's stops. It builds the rest in Postgres; of those, dwell
+  and running time take each stop visit's scheduled times from the same
+  archive, through the ClickHouse scan that pairs its arrival with its
+  departure. A ClickHouse that predates one of those tables needs
+  `make ch-bootstrap` before the next `analyze`.
+- Every timetable an agency loads is kept in ClickHouse under its content
+  hash: its stop times in `static_stop_times_archive` and its schedule as
+  ingest stamps it in `static_schedule_archive`. `static_version_map` records
+  which content each version name carried, and `static_version_spans` the days
+  each name covers. `load_static` records the incoming timetable's span and
+  archives the outgoing timetable before it replaces it, and `analyze`
+  archives the loaded one when its content or span is missing.
+  `scripts/backfill_timetable_archive.py` fills the archive for names loaded
+  before it kept them, from the kept zips. A ClickHouse that predates these
+  tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
 - Each day's planned trips are saved into `planned_trips_daily` while the
   timetable that plans the day is loaded: every `analyze` run saves each day
   before today the loaded timetable covers that has no saved count yet, and

@@ -89,13 +89,14 @@ from typing import NamedTuple
 import psycopg2.extras
 
 from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
-from pipeline.agg_registry import ArchivedInput, Timetable
+from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
 from pipeline.service_day import service_date_ch
+from pipeline.static_archive import Stamp
 from pipeline.static_content import static_parts as _static_parts
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
 
@@ -450,21 +451,26 @@ def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_pa
     }
 
 
-# A row that joins the loaded timetable: its version name, NULL read as '', is
-# none of {stems}, the names the archive maps (static_archive.JOIN_CONTENT_SQL).
-_FOLLOWS_THE_LOADED_TIMETABLE = "NOT has({stems:Array(String)}, ifNull(static_version_id, ''))"
+# A row that joins the loaded timetable: the version name it is filed under
+# (static_archive.IN_FORCE_STEM_SQL, '' for none) is none of {stems}, the names
+# the archive maps (static_archive.JOIN_CONTENT_SQL). A version in force is
+# always a mapped name, so only a row of a date with none in force can.
+_FOLLOWS_THE_LOADED_TIMETABLE = "NOT has({stems:Array(String)}, " + static_archive.IN_FORCE_STEM_SQL + ")"
+_SERVICE_DATE_U = service_date_ch("u.captured_at")
 
 
-def _dates_following_the_loaded_timetable(agency_id: int, ch_client, stems: list[str]) -> list:
-    """The service dates holding any of the agency's rows whose version name is
-    none of *stems*, the names the archive maps: those rows join the loaded
-    timetable (static_archive.JOIN_CONTENT_SQL)."""
+def _dates_following_the_loaded_timetable(
+    agency_id: int, ch_client, stems: list[str], join: static_archive.ScheduleJoin
+) -> list:
+    """The service dates holding any of the agency's rows filed under a version
+    name none of *stems*, the names the archive maps: those rows join the
+    loaded timetable (static_archive.JOIN_CONTENT_SQL)."""
     result = _ch_query(
         "plan: dates following the loaded timetable",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _SERVICE_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " ORDER BY date",
-        {"agency_id": agency_id, "stems": stems},
+        {"agency_id": agency_id, "stems": stems, **join.force_params()},
     )
     return [row[0] for row in result.result_rows]
 
@@ -480,17 +486,19 @@ def _loaded_content_of(fingerprint: str | None) -> str | None:
     return None if parts == "none" else static_archive.content_hash(parts.split("|"))
 
 
-def _dates_of_changed_trips(agency_id: int, ch_client, stems: list[str], before: str, after: str) -> list:
+def _dates_of_changed_trips(
+    agency_id: int, ch_client, join: static_archive.ScheduleJoin, before: str, after: str
+) -> list:
     """The service dates holding any of the agency's rows that follow the loaded
-    timetable (a version name none of *stems*) on a trip whose archived stop
-    times differ between *before* and *after*."""
+    timetable (filed under a version name the archive does not map) on a trip
+    whose archived stop times differ between *before* and *after*."""
     result = _ch_query(
         "plan: dates of changed trips",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _SERVICE_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
-        "AND trip_id IN " + static_archive.changed_trips_sql() + " ORDER BY date",
-        {"agency_id": agency_id, "stems": stems, "before": before, "after": after},
+        "AND u.trip_id IN " + static_archive.changed_trips_sql() + " ORDER BY date",
+        {"agency_id": agency_id, "stems": join.stems, "before": before, "after": after, **join.force_params()},
     )
     return [row[0] for row in result.result_rows]
 
@@ -510,7 +518,7 @@ def _dates_of_changed_medians(
     stems = [stem for stem, content in zip(join.stems, join.hashes, strict=True) if content in kept]
     if before not in kept or after not in kept:
         logger.info("  a timetable keeps no medians: every following date rebuilds its daily headways")
-        return _dates_following_the_loaded_timetable(agency_id, ch_client, stems)
+        return _dates_following_the_loaded_timetable(agency_id, ch_client, stems, join)
     routes = static_headways.changed_routes(medians, before, after)
     logger.info(f"  {len(routes)} route(s) changed their median")
     if not routes:
@@ -518,10 +526,10 @@ def _dates_of_changed_medians(
     result = _ch_query(
         "plan: dates of changed medians",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE + " AS date FROM updates WHERE agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _SERVICE_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
-        "AND route_code IN {routes:Array(String)} ORDER BY date",
-        {"agency_id": agency_id, "stems": stems, "routes": routes},
+        "AND u.route_code IN {routes:Array(String)} ORDER BY date",
+        {"agency_id": agency_id, "stems": stems, "routes": routes, **join.force_params()},
     )
     return [row[0] for row in result.result_rows]
 
@@ -537,10 +545,10 @@ def _dates_the_move_reaches(
     if before == after:
         return {archived_input: [] for archived_input in ArchivedInput}
     if before is not None and static_archive.is_archived(ch_client, agency_id, before):
-        stop_times = _dates_of_changed_trips(agency_id, ch_client, join.stems, before, after)
+        stop_times = _dates_of_changed_trips(agency_id, ch_client, join, before, after)
     else:
         logger.info("  the timetable last built against is not archived: every following date rebuilds")
-        stop_times = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems)
+        stop_times = _dates_following_the_loaded_timetable(agency_id, ch_client, join.stems, join)
     medians = _dates_of_changed_medians(agency_id, conn, ch_client, join, before)
     return {ArchivedInput.STOP_TIMES: stop_times, ArchivedInput.MEDIANS: medians}
 
@@ -686,6 +694,44 @@ class Plan(NamedTuple):
     current: dict[str, str]
     scopes: dict[str, list | None]
     content_key: str | None  # the loaded timetable's archive key, None with none loaded
+    # The version map, with the versions in force for an agency whose ingest
+    # stamps each row's version (VERSION_STAMPING_STRATEGIES).
+    join: static_archive.ScheduleJoin
+
+
+def _in_force_at(segments: list[tuple], day) -> tuple[str, str] | None:
+    return next(((stem, content) for first, last, stem, content in segments if first <= day <= last), None)
+
+
+def _dates_in_force_moved(agency_id: int, conn, join: static_archive.ScheduleJoin) -> list:
+    """The service dates already built whose version in force, or its content,
+    is not the one the last run recorded (agg_timetable_in_force): a timetable
+    loaded after days it covers, or a span recorded for one, refiles them."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT first_day, last_day, static_version_id, content_hash FROM agg_timetable_in_force "
+            "WHERE agency_id = %s",
+            (agency_id,),
+        )
+        built = cur.fetchall()
+        cur.execute("SELECT date FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
+        dates = [row[0] for row in cur.fetchall()]
+    now = join.in_force()
+    return sorted(day for day in dates if _in_force_at(built, day) != _in_force_at(now, day))
+
+
+def _record_in_force(conn, agency_id: int, join: static_archive.ScheduleJoin) -> None:
+    """Record the versions in force this run built against, in its transaction."""
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM agg_timetable_in_force WHERE agency_id = %s", (agency_id,))
+        segments = join.in_force()
+        if segments:
+            psycopg2.extras.execute_values(
+                cur,
+                "INSERT INTO agg_timetable_in_force (agency_id, first_day, last_day, static_version_id, content_hash) "
+                "VALUES %s",
+                [(agency_id, *segment) for segment in segments],
+            )
 
 
 def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: str | None) -> Plan:
@@ -735,13 +781,15 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         ledger = _dates_needing_rebuild(agency_id, conn, ch_client)
     else:
         ledger = []
-    extra = None
+    stamped = ingest_strategy in VERSION_STAMPING_STRATEGIES
+    join = static_archive.schedule_join(ch_client, agency_id, content_key, by_service_date=stamped)
+    extra: dict[str, list] = {}
     loaded = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.LOADED]
     archived = [name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED]
     loaded_moved = any(stored.get(name) != current[name] for name in loaded)
     if (
         ledger is not None
-        and ingest_strategy in VERSION_STAMPING_STRATEGIES
+        and stamped
         and loaded_moved
         # One rebuilt in full takes every date anyway.
         and any(stored.get(name) == current[name] for name in archived)
@@ -751,7 +799,6 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         # replaced before the archive kept it) joins the loaded timetable, as
         # does, for the daily headways' threshold, a row whose content keeps no
         # medians; a new one rebuilds its date where what the row reads changed.
-        join = static_archive.schedule_join(ch_client, agency_id, content_key)
         before = _loaded_content_of(next((stored[name] for name in loaded if name in stored), None))
         reached = _dates_the_move_reaches(agency_id, conn, ch_client, join, before)
         for archived_input, dates in reached.items():
@@ -765,6 +812,13 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
             for name, table in agg_registry.TABLES.items()
             if table.archived_input is not None
         }
+    if ledger is not None and stamped:
+        moved = _dates_in_force_moved(agency_id, conn, join)
+        if moved:
+            logger.info(f"  {len(moved)} date(s) moved to another version in force")
+            for name, table in agg_registry.TABLES.items():
+                if table.in_force:
+                    extra[name] = sorted({*extra.get(name, []), *moved})
     scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]
@@ -775,7 +829,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         else:
             described = f"{len(scope)} date(s)"
         logger.info(f"  scope {name}: {described}")
-    return Plan(current, scopes, content_key)
+    return Plan(current, scopes, content_key, join)
 
 
 def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
@@ -1063,7 +1117,12 @@ def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn
 
 
 def _rebuild_ch_aggregates(
-    agency_id: int, conn, ch_client, scopes: dict[str, list | None], join: static_archive.ScheduleJoin | None
+    agency_id: int,
+    conn,
+    ch_client,
+    scopes: dict[str, list | None],
+    join: static_archive.ScheduleJoin,
+    refit: set | None = None,
 ) -> None:
     """Rebuild the ClickHouse-computed tables, then copy them into Postgres.
 
@@ -1080,9 +1139,10 @@ def _rebuild_ch_aggregates(
     monthly build and before any swap, so they read the months just rebuilt from
     those tables' work tables; an internal table itself is never copied.
 
-    *join* is the run's schedule join, which the static-joined tables need: set
-    whenever one of them is rebuilt (and also when only the stop visits needed
-    it), None only when nothing in the run joins the archive.
+    *join* is the run's schedule join, which the static-joined tables need, and
+    with it the versions in force the tables file their rows under; *refit*
+    is the dates whose rows read their schedule from the archive
+    (ch_aggregates.stamp_for).
     """
     monthly = {t: c for t, c in scopes.items() if t in ch_aggregates.MONTHLY_TABLES and c != []}
     whole = [t for t in ch_aggregates.WHOLE_HISTORY_TABLES if t in scopes and scopes[t] != []]
@@ -1103,6 +1163,7 @@ def _rebuild_ch_aggregates(
                 {table: ch_aggregates.Rebuild(months[table], changed) for table, changed in monthly.items()},
                 _step,
                 join,
+                refit,
             )
         if whole:
             recounted = {t: months[t] for t in ch_aggregates.INTERNAL_TABLES if t in months}
@@ -1123,6 +1184,37 @@ def _rebuild_ch_aggregates(
             _copy_ch_aggregate(table, agency_id, None if changed is None else months[table], conn, ch_client)
     for table in whole:
         _copy_ch_aggregate(table, agency_id, None, conn, ch_client)
+
+
+def _refit_dates(agency_id: int, ch_client, join: static_archive.ScheduleJoin, scopes: dict[str, list | None]) -> set:
+    """The dates among those the run rebuilds of the tables filed under the
+    version in force that hold a row whose schedule comes from the archive
+    (static_archive.refit_dates): a read of none of them files its rows without
+    the archive join."""
+    if not join.force:
+        return set()
+    filed = [
+        scope
+        for name, scope in scopes.items()
+        if agg_registry.TABLES[name].in_force and agg_registry.TABLES[name].kind is Kind.DATED
+    ]
+    where: str = "1"
+    params: dict = {}
+    if all(scope is not None for scope in filed):
+        days = sorted({day for scope in filed for day in scope or ()})
+        if not days:
+            return set()
+        where, params = ch_aggregates.days_where(days)
+    with _step("plan: dates read from the schedule archive"):
+        dates = static_archive.refit_dates(ch_client, agency_id, where, params, join)
+    if dates:
+        logger.info(f"  {len(dates)} date(s) hold rows ingested against another timetable than the one in force")
+    return dates
+
+
+def _stamp(join: static_archive.ScheduleJoin, refit: set, scope: list | None) -> Stamp:
+    """How a read of *scope*'s dates (None for every date) files its rows (ch_aggregates.stamp_for)."""
+    return ch_aggregates.stamp_for(join, refit, refit if scope is None else scope)
 
 
 def analyze(agency_id: int, conn, ch_client) -> None:
@@ -1209,28 +1301,15 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         dwell_scope = scopes["agg_route_daily_dwell_run"]
         _, dwell_params = _date_filter(dwell_scope, agency_id)
         scans_visits = builds_dwell_run and dwell_scope != []
-        scans_headways = ingest_strategy in RT_INGEST_STRATEGIES and not _nothing_to_rebuild(
-            "agg_route_headway_daily", scopes["agg_route_headway_daily"]
-        )
-        # The version map, read once and only when something reads it: the
-        # visits scan, the daily headways, or a monthly static-joined ClickHouse
-        # table. A run that rebuilds none reads nothing of the archive beyond
-        # the plan's probes.
-        joins_schedule = (
-            scans_visits
-            or scans_headways
-            or any(
-                table in ch_aggregates.MONTHLY_TABLES and table in ch_aggregates.STATIC_JOINED_TABLES and scope != []
-                for table, scope in ch_scopes.items()
-            )
-        )
-        join = static_archive.schedule_join(ch_client, agency_id, plan.content_key) if joins_schedule else None
+        join = plan.join
+        refit = _refit_dates(agency_id, ch_client, join, {**scopes, **ch_scopes})
+        visits_stamp = _stamp(join, refit, dwell_scope)
         visits_params = dwell_params
-        if scans_visits and join is not None:
+        if scans_visits:
             # A range on captured_at, which prunes on the sort key; the visits
             # scan's own service-date test selects the same rows.
             where, params = ch_aggregates.days_where(dwell_scope) if dwell_scope is not None else ("1", {})
-            stems = ch_aggregates.version_names(ch_client, agency_id, where, params)
+            stems = ch_aggregates.version_names(ch_client, agency_id, where, params, join, visits_stamp)
             visits_params = {**dwell_params, **join.params(stems)}
         with conn.cursor() as cur:
             _load_temp_table(
@@ -1249,6 +1328,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                 ch_sql=build_stop_visits_ch_sql(
                     extra_where=_date_predicate(dwell_scope, "u.captured_at"),
                     join_schedule=True,
+                    stamp=visits_stamp,
                 ),
                 parameters=visits_params,
                 # An empty rebuild list selects no rows at all, so the scan is
@@ -1387,8 +1467,8 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             "(agency_id, date, static_version_id)",
             agency_id,
             ch_client,
-            agg_sql.schedule_revision_ch_sql(where),
-            params,
+            agg_sql.schedule_revision_ch_sql(where, Stamp.IN_FORCE if join.force else Stamp.INGESTED),
+            {**params, **join.params()},
             conn,
             scopes["agg_schedule_revision_daily"],
         )
@@ -1456,9 +1536,10 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             ch_headway = _ch_query(
                 "agg_route_headway_daily: ClickHouse scan",
                 ch_client,
-                agg_sql.route_headway_daily_ch_sql(where),
+                agg_sql.route_headway_daily_ch_sql(where, _stamp(join, refit, headway_scope)),
                 {
                     **params,
+                    **join.params(),
                     "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
                     "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
                 },
@@ -1474,7 +1555,6 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # against), kept per archived timetable by pipeline.static_headways.
             # A timetable with no kept medians falls back to the loaded one's;
             # a route with no median counts no long gaps (count_long_gaps).
-            assert join is not None  # scans_headways put the map in joins_schedule
             with _step("agg_route_headway_daily: reconstruct in Python"):
                 dominant = dominant_contents(ch_headway.result_rows, join.content_of())
             medians = static_headways.route_medians(conn, agency_id, {*dominant.values(), join.current})
@@ -1562,7 +1642,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
         # Last, so a Postgres builder that fails above leaves ClickHouse
         # untouched too.
-        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join)
+        _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join, refit)
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
@@ -1586,6 +1666,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # can be more than the plan's scope when their two stores disagree.
             rewritten = {name for name, scope in {**scopes, **ch_scopes}.items() if scope != []}
             _record_fingerprints(conn, agency_id, plan.current, rewritten)
+            _record_in_force(conn, agency_id, join)
             cur.execute(
                 "INSERT INTO agg_meta (agency_id, analyzed_at, max_updates_captured_at, static_fingerprint) "
                 "VALUES (%s, clock_timestamp(), %s, %s) "

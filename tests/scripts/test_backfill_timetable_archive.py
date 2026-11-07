@@ -44,8 +44,9 @@ def scratch_url():
         admin.close()
 
 
-def _timetable(folder, name: str, stop: str) -> str:
-    """A timetable zip named *name* in *folder*, whose trip T1 makes its first stop at *stop*."""
+def _timetable(folder, name: str, stop: str, first: str = "20260101", last: str = "20261231") -> str:
+    """A timetable zip named *name* in *folder*, covering *first* to *last*, whose trip T1 makes its first
+    stop at *stop*."""
     folder.mkdir(parents=True, exist_ok=True)
     return build_static_zip(
         folder,
@@ -53,19 +54,26 @@ def _timetable(folder, name: str, stop: str) -> str:
         routes_rows=["R1,1"],
         trips_rows=["T1,R1,,"],
         stop_times_rows=[f"T1,1,{stop},08:00:00,08:00:00"],
+        calendar_rows=[f"WD,1,1,1,1,1,1,1,{first},{last}"],
         filename=f"{name}.zip",
     )
 
 
 def _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client):
     """Rows of timetable_old, a name the archive never mapped, beside a loaded timetable_new whose T1 stops at
-    SB. timetable_old's zip, whose T1 stops at SA, is kept in the returned static dir."""
+    SB, from the day after timetable_old's last. timetable_old's zip, whose T1 stops at SA, is kept in the
+    returned static dir."""
     from tests.pipeline.test_analyze import _set_ingest_strategy
 
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
     static_dir = tmp_path / "static"
-    _timetable(static_dir / str(agency_id), "timetable_old", "SA")
-    load_static(_timetable(tmp_path / "loaded", "timetable_new", "SB"), agency_id, pg_conn, ch_client=ch_client)
+    _timetable(static_dir / str(agency_id), "timetable_old", "SA", last="20260601")
+    load_static(
+        _timetable(tmp_path / "loaded", "timetable_new", "SB", first="20260602"),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
     insert_updates(
         ch_client,
         agency_id,

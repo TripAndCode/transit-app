@@ -23,16 +23,23 @@ from typing import NamedTuple
 
 from pipeline import agg_sql, ch_aggregates, db, headways, static_archive, static_headways
 from pipeline.db import build_stop_visits_ch_sql
+from pipeline.static_archive import Stamp
 
 # Versions of the tables built in the loops below, which default to 1. A bump
 # goes here rather than into a second entry, which _index would reject.
 _VERSIONS: dict[str, int] = {
-    "agg_hour_daily": 2,
-    "agg_route_hour": 2,
-    "agg_route_hour_dow": 2,
-    "agg_route_stop_daily": 2,
-    "agg_stop_daily": 2,
-    "route_delay_counts": 2,
+    "agg_daily_trend": 2,
+    "agg_hour_daily": 3,
+    "agg_route_daily": 2,
+    "agg_route_daily_dist": 2,
+    "agg_route_hour": 3,
+    "agg_route_hour_dow": 3,
+    "agg_route_stats": 2,
+    "agg_route_stop_daily": 3,
+    "agg_stop_daily": 3,
+    "agg_stop_routes": 2,
+    "route_delay_counts": 3,
+    "stop_route_days": 2,
 }
 
 # Any fixed month renders a monthly table's statement: only its date bounds
@@ -80,12 +87,22 @@ class AggTable:
     # rebuilds it, and nothing else of theirs does.
     versions_from: tuple[str, ...] = ()
     archived_input: ArchivedInput | None = None
+    # Its rows are read filed under the timetable in force on their service
+    # date (static_archive.Stamp), so a date whose version in force moved is
+    # rebuilt (pipeline.analyze), and so is the table when a version's content
+    # changes under its name (static_archive.clear_archive_joined_states).
+    in_force: bool = False
 
 
 def _monthly(name: str) -> Callable[[], list[str]]:
     # An incremental build copies a month's unchanged days forward in
-    # _build_month before adding the recomputed ones, so that is rendered too.
-    return lambda: [ch_aggregates.select_sql(name, _RENDER_MONTH)[0], inspect.getsource(ch_aggregates._build_month)]
+    # _build_month before adding the recomputed ones, so that is rendered too,
+    # and so is how a build picks the timetable its rows are filed under.
+    return lambda: [
+        *(ch_aggregates.select_sql(name, _RENDER_MONTH, stamp=stamp)[0] for stamp in Stamp),
+        inspect.getsource(ch_aggregates._build_month),
+        inspect.getsource(ch_aggregates.stamp_for),
+    ]
 
 
 def _whole(name: str) -> Callable[[], list[str]]:
@@ -109,7 +126,7 @@ def _clamp() -> str:
 
 def _headway_daily() -> list[str]:
     return [
-        agg_sql.route_headway_daily_ch_sql(""),
+        *(agg_sql.route_headway_daily_ch_sql("", stamp) for stamp in Stamp),
         _clamp(),
         inspect.getsource(headways.reconstruct_headways),
         inspect.getsource(headways.pool_daily_gaps),
@@ -141,7 +158,12 @@ def _entries() -> list[AggTable]:
             "agg_service_delivered_daily", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
         ),
         AggTable(
-            "agg_schedule_revision_daily", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.schedule_revision_ch_sql("")]
+            "agg_schedule_revision_daily",
+            2,
+            Kind.DATED,
+            Timetable.NONE,
+            lambda: [agg_sql.schedule_revision_ch_sql("", stamp) for stamp in (Stamp.INGESTED, Stamp.IN_FORCE)],
+            in_force=True,
         ),
         AggTable(
             "agg_route_headway",
@@ -154,7 +176,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_headway_daily",
-            1,
+            2,
             Kind.DATED,
             Timetable.ARCHIVED,
             _headway_daily,
@@ -162,14 +184,19 @@ def _entries() -> list[AggTable]:
             # timetable, keyed by that table's version, not its rows.
             versions_from=("agg_route_headway",),
             archived_input=ArchivedInput.MEDIANS,
+            in_force=True,
         ),
         AggTable(
             "agg_route_daily_dwell_run",
-            1,
+            2,
             Kind.DATED,
             Timetable.ARCHIVED,
-            lambda: [agg_sql.dwell_run_sql(), build_stop_visits_ch_sql(extra_where="", join_schedule=True)],
+            lambda: [
+                agg_sql.dwell_run_sql(),
+                *(build_stop_visits_ch_sql(extra_where="", join_schedule=True, stamp=stamp) for stamp in Stamp),
+            ],
             archived_input=ArchivedInput.STOP_TIMES,
+            in_force=True,
         ),
     ]
     for name in ch_aggregates.MONTHLY_TABLES:
@@ -181,6 +208,7 @@ def _entries() -> list[AggTable]:
                 _timetable_of(name),
                 _monthly(name),
                 archived_input=_input_of(name),
+                in_force=True,
             )
         )
     for name in ch_aggregates.WHOLE_HISTORY_TABLES:
@@ -193,6 +221,7 @@ def _entries() -> list[AggTable]:
                 _whole(name),
                 depends_on=(ch_aggregates.whole_history_source(name),),
                 archived_input=_input_of(name),
+                in_force=True,
             )
         )
     return entries
@@ -271,6 +300,26 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
         },
     ),
     MethodVersion("2026.11.2", {"agg_feed_health": 2}),
+    MethodVersion(
+        "2026.11.3",
+        {
+            "agg_daily_trend": 2,
+            "agg_hour_daily": 3,
+            "agg_route_daily": 2,
+            "agg_route_daily_dist": 2,
+            "agg_route_daily_dwell_run": 2,
+            "agg_route_headway_daily": 2,
+            "agg_route_hour": 3,
+            "agg_route_hour_dow": 3,
+            "agg_route_stats": 2,
+            "agg_route_stop_daily": 3,
+            "agg_schedule_revision_daily": 2,
+            "agg_stop_daily": 3,
+            "agg_stop_routes": 2,
+            "route_delay_counts": 3,
+            "stop_route_days": 2,
+        },
+    ),
 )
 
 # The method every report, CSV and council document names beside its figures

@@ -62,8 +62,12 @@ _MISS_WARN_MIN_ROWS = 20
 RT_INGEST_STRATEGIES = frozenset({"static_join"})
 
 # The strategies whose rows carry the static_version_id of the timetable
-# they were ingested against (static_join's lookup in static_trips);
-# aomori_regex writes none, so its rows join whatever timetable is loaded.
+# they were ingested against (static_join's lookup in static_trips), which
+# is whichever was loaded when the poll arrived. analyze reads such a row as
+# joined to the timetable in force on its service date instead
+# (pipeline.timetable_in_force), redoing the lookup from the archive where
+# the two differ. aomori_regex writes none, so its rows join whatever
+# timetable is loaded.
 VERSION_STAMPING_STRATEGIES = frozenset({"static_join"})
 
 # The RT-optional per-stop_time_update fields whose population is verified
