@@ -160,6 +160,18 @@ def count_in_range(
     return total
 
 
+def count_early(counts: list[int], early_sec: int) -> float:
+    """Estimate how many observations in merged delay-histogram *counts*
+    departed more than *early_sec* seconds early, ``dep_delay < -early_sec``:
+    a departure exactly *early_sec* early is not counted. ``dep_delay`` is
+    whole seconds, so that is :func:`count_in_range` up to ``-early_sec - 1``
+    inclusive. The count is exact whenever ``-early_sec`` is a bucket edge
+    (a multiple of ``WIDTH`` from 0 down to ``LO``); beyond ``LO`` the
+    underflow bucket has no edges to split it by.
+    """
+    return count_in_range(counts, None, -early_sec - 1)
+
+
 def bucket_case_sql(column: str, *, lo: int = LO, hi: int = HI, width: int = WIDTH) -> str:
     """Return a SQL ``CASE`` expression bucketing *column* exactly like
     :func:`bucketize` (same bounds/edge conventions).

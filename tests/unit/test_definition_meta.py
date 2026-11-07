@@ -27,6 +27,7 @@ from pipeline.reports.definition import (
     format_method_stamp,
     resolve_definition_meta,
 )
+from pipeline.reports.rankings import ON_TIME_PRESETS
 
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
@@ -85,6 +86,72 @@ def test_report_types_without_a_tolerance_concept_have_no_preset():
         assert meta.preset is None
         assert meta.early_tolerance_sec is None
         assert meta.late_tolerance_sec is None
+
+
+@pytest.mark.parametrize("report_type", ["on_time", "route_table", "council_summary"])
+def test_the_industry_window_is_named_as_its_preset_however_it_was_asked_for(report_type):
+    """The screens reach -1/+5 through the scope's early/late, never preset=,
+    so the definition names the preset whose window the tolerances are."""
+    assert ON_TIME_PRESETS["standard_m1_p5"] == (60, 300)
+    meta = resolve_definition_meta(report_type, 60, 300)
+    assert meta.preset == "standard_m1_p5"
+    assert (meta.early_tolerance_sec, meta.late_tolerance_sec) == (60, 300)
+    assert resolve_definition_meta(report_type, None, 300).preset == "custom"
+    assert resolve_definition_meta(report_type, 60, None).preset == "custom"
+
+
+def test_the_preset_is_named_on_the_csv_line():
+    line = format_definition_csv_line(resolve_definition_meta("route_table", 60, 300))
+    assert "プリセット=standard_m1_p5" in line
+    assert "custom" not in line
+
+
+@pytest.mark.parametrize(
+    ("report_type", "early", "expected"),
+    [
+        ("route_table", None, 60),
+        ("council_summary", None, 60),
+        ("route_table", 60, 60),
+        ("council_summary", 30, 30),
+        ("on_time", None, None),
+        ("worst_5min", None, None),
+        ("ranking", None, None),
+    ],
+)
+def test_the_early_departure_threshold_is_the_early_tolerance_or_one_minute(report_type, early, expected):
+    """Only the reports that show an early-departure rate name its
+    threshold; with early departures counted as on time it is one minute,
+    so the rate is always defined."""
+    assert resolve_definition_meta(report_type, early, None).early_departure_sec == expected
+
+
+@pytest.mark.parametrize(
+    ("report_type", "early", "clause"),
+    [
+        ("route_table", None, "早発率=60秒を超える早発の割合"),
+        ("council_summary", 30, "早発率=30秒を超える早発の割合"),
+        ("on_time", None, "早発率=対象外"),
+        ("ranking", None, "早発率=対象外"),
+    ],
+)
+def test_the_csv_line_names_the_early_departure_threshold(report_type, early, clause):
+    line = format_definition_csv_line(resolve_definition_meta(report_type, early, None))
+    assert f"; {clause}; " in line
+
+
+@pytest.mark.parametrize(
+    ("locale", "early", "line"),
+    [
+        ("ja", None, "早発率：定刻より1分を超えて早く発車した割合"),
+        ("en", None, "Early-departure rate: the share of departures more than 1 min early"),
+        ("ja", 30, "早発率：定刻より30秒を超えて早く発車した割合"),
+        ("en", 30, "Early-departure rate: the share of departures more than 30 s early"),
+    ],
+)
+def test_footnotes_define_the_early_departure_rate(locale, early, line):
+    assert line in format_definition_footnotes(resolve_definition_meta("council_summary", early, None), locale)
+    on_time = "\n".join(format_definition_footnotes(resolve_definition_meta("on_time", early, None), locale))
+    assert "早発率" not in on_time and "Early-departure" not in on_time
 
 
 def test_dedup_and_exclusion_and_measurement_point_are_always_present():

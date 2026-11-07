@@ -25,6 +25,7 @@ from pipeline.histogram import (
     LEGACY_PRESET_NAME,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
 )
+from pipeline.reports.rankings import ON_TIME_PRESETS, early_departure_sec
 
 # Stable identifiers (not resolved per request, unlike the tolerance fields
 # below) so a caller can render/translate them instead of a fixed string
@@ -72,6 +73,11 @@ class DefinitionMeta(BaseModel):
     still apply to those, since every aggregate shares the one dedup
     builder, but there is no tolerance value to show.
 
+    ``early_departure_sec`` is how many seconds early a departure must be for
+    the early-departure rate to count it
+    (:func:`pipeline.reports.rankings.early_departure_sec`), on the reports
+    that show that rate; ``None`` on every other.
+
     ``method_version`` names the analysis method the figures were made with
     (:data:`pipeline.agg_registry.METHOD_VERSION`). ``source`` says whether
     they came from the aggregates or from a live scan of the observations
@@ -85,6 +91,7 @@ class DefinitionMeta(BaseModel):
     preset: str | None
     early_tolerance_sec: int | None
     late_tolerance_sec: int | None
+    early_departure_sec: int | None = None
     exclusion_threshold_sec: int = MAX_PLAUSIBLE_DELAY_SEC
     measurement_point: str = MEASUREMENT_POINT
     dedup_rule: str = DEDUP_RULE
@@ -139,6 +146,18 @@ def _note_builds(builds: object) -> None:
         _seen_builds = builds
 
 
+# The reports that show an early-departure rate beside their on-time figures.
+_EARLY_RATE_REPORTS = frozenset({"route_table", "council_summary"})
+
+
+def _preset_name(early_tolerance_sec: int | None, late_tolerance_sec: int | None) -> str:
+    """The preset whose window the requested tolerances are, compared before
+    any default fills in: an explicit late tolerance of 60 s is not the
+    legacy default, whose figure reads an exact column instead."""
+    requested = (early_tolerance_sec, late_tolerance_sec)
+    return next((name for name, window in ON_TIME_PRESETS.items() if window == requested), "custom")
+
+
 def resolve_definition_meta(
     report_type: str,
     early_tolerance_sec: int | None,
@@ -161,12 +180,14 @@ def resolve_definition_meta(
         # on_time's window into one whole-agency figure, and route_table's
         # on-time column is on_time's own. route_table's over-5-min share
         # keeps its fixed cutoff, which this metadata does not describe.
-        is_legacy = early_tolerance_sec is None and late_tolerance_sec is None
         resolved_late = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
         return DefinitionMeta(
-            preset=LEGACY_PRESET_NAME if is_legacy else "custom",
+            preset=_preset_name(early_tolerance_sec, late_tolerance_sec),
             early_tolerance_sec=early_tolerance_sec,
             late_tolerance_sec=resolved_late,
+            early_departure_sec=(
+                early_departure_sec(early_tolerance_sec) if report_type in _EARLY_RATE_REPORTS else None
+            ),
             source=source,
         )
     if report_type == "worst_5min":
@@ -201,6 +222,7 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     """
     early = "無制限" if meta.early_tolerance_sec is None else f"{meta.early_tolerance_sec}秒"
     late = "対象外" if meta.late_tolerance_sec is None else f"{meta.late_tolerance_sec}秒"
+    early_rate = "対象外" if meta.early_departure_sec is None else f"{meta.early_departure_sec}秒を超える早発の割合"
     preset = meta.preset or "対象外"
     # Looked up from *meta*'s own fields, not the module constants directly,
     # so an unrecognized value raises KeyError instead of silently rendering
@@ -210,7 +232,7 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     measurement_point = _MEASUREMENT_POINT_CSV_TEXT[meta.measurement_point]
     dedup_rule = _DEDUP_RULE_CSV_TEXT[meta.dedup_rule]
     return (
-        f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}; "
+        f"定義: プリセット={preset}; 早着許容={early}; 遅延許容={late}; 早発率={early_rate}; "
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
         f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
         f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
@@ -271,6 +293,8 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
     lines: list[str] = []
     if meta.late_tolerance_sec is not None:
         lines.append(_on_time_rule(meta.late_tolerance_sec, meta.early_tolerance_sec, locale))
+    if meta.early_departure_sec is not None:
+        lines.append(_early_departure_rule(meta.early_departure_sec, locale))
 
     if locale == "en":
         lines.append(f"Measurement scope: {measurement_point}")
@@ -284,7 +308,7 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
     return lines
 
 
-def _duration_text(sec: int, locale: str) -> str:
+def duration_text(sec: int, locale: str) -> str:
     """*sec* as whole minutes and seconds, the way the screens write a
     tolerance: 60 -> "1分" / "1 min", 90 -> "1分30秒" / "1 min 30 s"."""
     minutes, seconds = divmod(sec, 60)
@@ -298,8 +322,8 @@ def _on_time_rule(late_sec: int, early_sec: int | None, locale: str) -> str:
     """What counts as on time: up to *late_sec* late and, with no early
     tolerance, any early departure, which is said outright because a reader
     otherwise assumes a window on both sides."""
-    late = _duration_text(late_sec, locale)
-    early = None if early_sec is None else _duration_text(early_sec, locale)
+    late = duration_text(late_sec, locale)
+    early = None if early_sec is None else duration_text(early_sec, locale)
     if locale == "en":
         if early is None:
             return f"On-time definition: no more than {late} late (early departures count as on time)"
@@ -307,3 +331,12 @@ def _on_time_rule(late_sec: int, early_sec: int | None, locale: str) -> str:
     if early is None:
         return f"定時の定義：定刻から{late}以内の遅れ（早発も定時として数えます）"
     return f"定時の定義：定刻から{late}以内の遅れと、{early}以内の早発"
+
+
+def _early_departure_rule(early_sec: int, locale: str) -> str:
+    """What the early-departure rate counts: departures more than *early_sec*
+    early."""
+    early = duration_text(early_sec, locale)
+    if locale == "en":
+        return f"Early-departure rate: the share of departures more than {early} early"
+    return f"早発率：定刻より{early}を超えて早く発車した割合"

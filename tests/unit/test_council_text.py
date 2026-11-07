@@ -47,6 +47,45 @@ def test_headline_groups_the_sample_count(locale, expected):
 @pytest.mark.parametrize(
     ("locale", "expected"),
     [
+        (
+            "en",
+            "On-time rate 23.6%, early departures 4.2% (more than 1 min early), mean delay 2.5 min "
+            "(608,834 stop-level observations), service delivered 75.0%",
+        ),
+        (
+            "ja",
+            "定時率 23.6%、早発率 4.2%（1分を超える早発）、"
+            "平均遅延 2.5分（観測データ608,834件・停留所単位）、運行率 75.0%",
+        ),
+    ],
+)
+def test_headline_states_the_early_departure_rate_with_its_threshold(locale, expected):
+    assert _headline(_payload(early_departure_pct=4.2), locale) == expected
+
+
+@pytest.mark.parametrize(
+    ("locale", "words", "footnote"),
+    [
+        (
+            "en",
+            "early departures 4.2% (more than 30 s early)",
+            "* Early-departure rate: the share of departures more than 30 s early",
+        ),
+        ("ja", "早発率 4.2%（30秒を超える早発）", "※早発率：定刻より30秒を超えて早く発車した割合"),
+    ],
+)
+def test_a_limited_early_tolerance_is_the_early_departure_threshold(locale, words, footnote):
+    definition = resolve_definition_meta("council_summary", 30, None)
+    text = format_council_summary_text(
+        _payload(early_departure_pct=4.2), definition, "青森市バス", "2026-08-12", "2026-09-10", locale=locale
+    )
+    assert words in text.split("\n")[1]
+    assert footnote in text.split("\n")
+
+
+@pytest.mark.parametrize(
+    ("locale", "expected"),
+    [
         ("en", "On-time rate 23.6%, mean delay 2.5 min (608,834 stop-level observations)"),
         ("ja", "定時率 23.6%、平均遅延 2.5分（観測データ608,834件・停留所単位）"),
     ],

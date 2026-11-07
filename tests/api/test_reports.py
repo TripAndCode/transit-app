@@ -582,6 +582,49 @@ async def test_reports_preset_combined_with_explicit_tolerance_is_rejected(repor
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_on_time_industry_preset_counts_no_more_than_a_minute_early_and_five_late(
+    reports_client, ch_client, ch_async_client, path
+):
+    """standard_m1_p5 is the window operators publish. The departures more
+    than a minute early and those more than five minutes late are both off
+    time; nothing sits on the +300 s edge, which the histogram estimates."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "RSTD", "平日", day, "08:00", [-120] * 5 + [-30] * 5 + [200] * 10 + [400] * 5)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (
+        await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}{band}&preset=standard_m1_p5")
+    ).json()
+    row = next(r for r in body["rows"] if r[0] == "RSTD")
+    assert float(row[2]) == 60.0
+    assert body["definition"]["preset"] == "standard_m1_p5"
+    assert (body["definition"]["early_tolerance_sec"], body["definition"]["late_tolerance_sec"]) == (60, 300)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("report", ["ranking", "worst_5min", "trend"])
+async def test_a_preset_with_a_window_is_rejected_where_no_on_time_window_applies(reports_client, report):
+    """worst_5min's late tolerance is its own over-5-minute cutoff, and the
+    ranking has no tolerance at all; legacy_60s, which overrides nothing,
+    stays accepted everywhere."""
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/{report}?preset=standard_m1_p5")
+    assert resp.status_code == 400
+    assert "preset" in resp.json()["detail"]
+    assert (await client.get(f"/api/{agency_id}/reports/{report}?preset=legacy_60s")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_industry_preset_is_named_on_the_csv_preamble(reports_client):
+    client, agency_id, _ = reports_client
+    resp = await client.get(f"/api/{agency_id}/reports/on_time?preset=standard_m1_p5&format=csv")
+    assert resp.status_code == 200
+    assert "プリセット=standard_m1_p5" in _preamble(resp)
+
+
+@pytest.mark.asyncio
 async def test_reports_early_tolerance_sec_rejected_for_worst_5min(reports_client):
     client, agency_id, _ = reports_client
     resp = await client.get(f"/api/{agency_id}/reports/worst_5min?early_tolerance_sec=60")
@@ -2402,6 +2445,66 @@ async def test_council_summary_custom_tolerance_pools_histogram_not_naive_averag
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["agg", "live"])
+async def test_council_summary_pools_the_early_departure_rate_across_routes(
+    reports_client, ch_client, ch_async_client, path
+):
+    """The rate counts every departure more than a minute early, pooled over
+    the routes like the on-time rate: R1 has 10 of 25 (five more at exactly
+    -60 s are not early), R2 none of 15, so 10/40 = 25.0%. A limited early
+    tolerance moves the threshold to that limit, where -120 s is not early."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-14"
+    await _seed_route_at(pool, agency_id, "R1", "平日", day, "08:00", [-120] * 5 + [-61] * 5 + [-60] * 5 + [0] * 10)
+    await _seed_route_at(pool, agency_id, "R2", "平日", day, "08:00", [30] * 15)
+    band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
+
+    body = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}")).json()
+    row = body["rows"][0]
+    # (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips, service_delivered_pct,
+    #  early_departure_pct)
+    assert row[2] == 40
+    assert row[6] == 25.0
+    assert row[0] == 100.0
+    assert body["definition"]["early_departure_sec"] == 60
+    limited = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}&early=120")).json()
+    assert limited["rows"][0][6] == 0.0
+    assert limited["definition"]["early_departure_sec"] == 120
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("lang", "headline", "footnote"),
+    [
+        (
+            "ja",
+            "定時率 100.0%、早発率 40.0%（1分を超える早発）、平均遅延",
+            "※早発率：定刻より1分を超えて早く発車した割合",
+        ),
+        (
+            "en",
+            "On-time rate 100.0%, early departures 40.0% (more than 1 min early), mean delay",
+            "* Early-departure rate: the share of departures more than 1 min early",
+        ),
+    ],
+)
+async def test_council_summary_text_states_the_early_departure_rate_and_its_threshold(
+    reports_client, ch_client, lang, headline, footnote
+):
+    client, agency_id, pool = reports_client
+    day = "2026-06-12"
+    await _seed_route(pool, agency_id, "R1", "平日", day, [-120] * 10 + [0] * 15)
+    _run_analyze(agency_id, ch_client)
+
+    resp = await client.get(
+        f"/api/{agency_id}/reports/council_summary?from={day}&to={day}", headers={"Accept-Language": lang}
+    )
+    text = resp.json()["text"]
+    assert headline in text.split("\n")[1]
+    assert footnote in text.split("\n")
+
+
+@pytest.mark.asyncio
 async def test_council_summary_footnotes_change_with_custom_tolerance(reports_client, ch_client):
     """The report template's rendered footnotes must state the exact
     tolerance actually used, in plain words rather than a preset name --
@@ -2590,6 +2693,9 @@ async def test_council_summary_csv_export_includes_extra_footnote_rows(reports_c
     assert "運行率：—（期間に時刻表の計画なし）" in footnote_cells
     data_row = rows[header_idx + 1]
     assert data_row[2] == "25"  # samples
+    assert data_row[6] == "0.0"  # early departures
+    assert "早発率=60秒を超える早発の割合" in rows[0][0]
+    assert "早発率：定刻より1分を超えて早く発車した割合" in footnote_cells
 
 
 _COUNCIL_CSV_HEADER = [
@@ -2599,6 +2705,7 @@ _COUNCIL_CSV_HEADER = [
     "計画本数",
     "運行本数",
     "運行実績率(%)",
+    "早発率(%)",
     "他事業者と比較できる",
     "比較できない理由",
     "観測カバー率(%)",
@@ -2914,10 +3021,10 @@ async def test_council_summary_csv_carries_the_comparability_columns(reports_cli
         header_idx = rows.index(_COUNCIL_CSV_HEADER)
         data_row = rows[header_idx + 1]
         assert len(data_row) == len(_COUNCIL_CSV_HEADER)
-        assert data_row[6 : 6 + len(status)] == status
+        assert data_row[7 : 7 + len(status)] == status
         assert any(r[0].startswith("他事業者との比較: ") for r in rows[1:header_idx])
     gate = (await client.get(_council_url(other))).json()["comparability"]
-    assert data_row[9:] == [str(gate["ci_low"]), str(gate["ci_high"])]
+    assert data_row[10:] == [str(gate["ci_low"]), str(gate["ci_high"])]
 
 
 _CERT_CSV_HEADER = [

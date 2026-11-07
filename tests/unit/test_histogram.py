@@ -2,7 +2,16 @@
 
 import pytest
 
-from pipeline.histogram import HI, LO, N_BUCKETS, WIDTH, bucketize, count_in_range, percentile_from_hist
+from pipeline.histogram import (
+    HI,
+    LO,
+    N_BUCKETS,
+    WIDTH,
+    bucketize,
+    count_early,
+    count_in_range,
+    percentile_from_hist,
+)
 
 
 def test_bucketize_boundaries():
@@ -142,3 +151,19 @@ def test_count_in_range_within_single_bucket_is_bounded_approximation():
     counts = _hist(*([10] * 20))  # all 20 in the [0, 60) bucket
     estimate = count_in_range(counts, None, 30)  # 30s is mid-bucket, not an edge
     assert 0 < estimate < 20
+
+
+_EARLY_EDGES = [-400, -301, -300, -299, -121, -120, -61, -60, -59, -1, 0, 59, 60, 400]
+
+
+@pytest.mark.parametrize("early_sec", [0, 60, 120, 300])
+def test_count_early_counts_departures_strictly_more_than_the_tolerance_early(early_sec):
+    """More than T early is ``dep_delay < -T``: a departure exactly T early
+    is not early. Every T that is a whole number of buckets inside the
+    histogram's early side puts -T on a bucket edge, so the count is exact."""
+    counts = _hist(*_EARLY_EDGES)
+    assert count_early(counts, early_sec) == sum(d < -early_sec for d in _EARLY_EDGES)
+
+
+def test_count_early_at_one_minute_leaves_out_a_departure_exactly_one_minute_early():
+    assert count_early(_hist(-61, -60, -59), 60) == 1

@@ -1,6 +1,6 @@
 """The Routes screen's table: one row per route over the window, with its
-average delay, on-time rate and share of departures over five minutes late,
-sorted by whichever of those the reader picks.
+average delay, on-time rate, share of departures over five minutes late and
+early-departure rate, sorted by whichever of the first three the reader picks.
 
 Every sort ranks the same routes under one observation floor, so a route keeps
 its figures and the table keeps its length however it is sorted. Each figure
@@ -9,7 +9,9 @@ is computed as its own report computes it: the average as
 :func:`~pipeline.reports.rankings.compute_on_time`'s and the over-5-minute
 count as :func:`~pipeline.reports.rankings.compute_worst_5min`'s, on the
 aggregate path and the live ClickHouse path alike. The five-minute cutoff is
-fixed; only the on-time rate follows a requested tolerance.
+fixed; the on-time rate follows a requested tolerance, and the early-departure
+rate counts the departures more than the early tolerance early
+(:func:`~pipeline.reports.rankings.early_departure_sec`).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from pipeline.cache import async_lru_cache
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
+    count_early,
     count_in_range,
 )
 from pipeline.reports.filters import _dedup_cte_ch, _round2
@@ -31,10 +34,10 @@ from pipeline.reports.rankings import (
     MIN_GROUP_SAMPLES,
     _avg_min,
     _pct1,
-    _read_dist_scalars,
     _read_dist_with_hist,
     _round1,
     aggregates_serve,
+    early_departure_sec,
 )
 
 # Each sort's row index, and whether the routes needing attention come first
@@ -63,42 +66,52 @@ async def compute_route_table(
     late_tolerance_sec: int | None = None,
 ) -> list[tuple]:
     """Every route observed at least ``min_samples`` times in ``ctx``, as
-    ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples)``,
-    in no particular order: :func:`sort_route_table` orders them.
+    ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples,
+    early_pct)``, in no particular order: :func:`sort_route_table` orders them.
 
     The default on-time rule and the over-5-minute count read the exact
     columns analyze() bakes into agg_route_daily_dist. A requested on-time
     tolerance reads the merged delay histogram instead, as compute_on_time
-    does, and a time_band filter scans ClickHouse.
+    does, and so does the early-departure count, exact wherever its threshold
+    is a bucket edge (:func:`~pipeline.histogram.count_early`). A time_band
+    filter scans ClickHouse.
     """
+    early_sec = early_departure_sec(early_tolerance_sec)
     if not aggregates_serve(ctx):
         if ch is None:
             raise RuntimeError("compute_route_table's time_band-filtered live fallback requires a ClickHouse client")
-        return await _route_table_live(agency_id, ctx, ch, min_samples, early_tolerance_sec, late_tolerance_sec)
+        return await _route_table_live(
+            agency_id, ctx, ch, min_samples, early_tolerance_sec, late_tolerance_sec, early_sec
+        )
 
+    legacy = early_tolerance_sec is None and late_tolerance_sec is None
+    low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
+    high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
     out: list[tuple] = []
-    if early_tolerance_sec is None and late_tolerance_sec is None:
-        for r in await _read_dist_scalars(agency_id, ctx, conn):
-            samples = r["samples"]
-            if samples < min_samples:
-                continue
-            out.append(_row(r["route_code"], _avg_min(r["sum_delay_sec"], samples), r, r["on_time_count"]))
-    else:
-        low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
-        high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
-        for r in await _read_dist_with_hist(agency_id, ctx, conn):
-            samples = r["samples"]
-            if samples < min_samples:
-                continue
-            on_time = count_in_range(r["hist"], low_sec, high_sec)
-            out.append(_row(r["route_code"], _avg_min(r["sum_delay_sec"], samples), r, on_time))
+    for r in await _read_dist_with_hist(agency_id, ctx, conn):
+        samples = r["samples"]
+        if samples < min_samples:
+            continue
+        hist = r["hist"]
+        on_time = r["on_time_count"] if legacy else count_in_range(hist, low_sec, high_sec)
+        out.append(
+            _row(r["route_code"], _avg_min(r["sum_delay_sec"], samples), r, on_time, count_early(hist, early_sec))
+        )
     return out
 
 
-def _row(route_code: str, avg_min: Decimal, r: Any, on_time_count: float | int) -> tuple:
+def _row(route_code: str, avg_min: Decimal, r: Any, on_time_count: float | int, early_count: float) -> tuple:
     samples = r["samples"]
     late5 = r["late5_count"]
-    return (route_code, avg_min, _pct1(on_time_count, samples), _pct1(late5, samples), late5, samples)
+    return (
+        route_code,
+        avg_min,
+        _pct1(on_time_count, samples),
+        _pct1(late5, samples),
+        late5,
+        samples,
+        _pct1(early_count, samples),
+    )
 
 
 async def _route_table_live(
@@ -108,6 +121,7 @@ async def _route_table_live(
     min_samples: int,
     early_tolerance_sec: int | None,
     late_tolerance_sec: int | None,
+    early_sec: int,
 ) -> list[tuple]:
     """The table from a live scan, for a time_band the aggregates cannot split.
 
@@ -123,6 +137,7 @@ async def _route_table_live(
         "rt_high": LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec,
         "rt_low": 0 if early_tolerance_sec is None else -early_tolerance_sec,
         "rt_late5": LEGACY_SEVERE_LATE_TOLERANCE_SEC,
+        "rt_early": -early_sec,
         "rt_min": min_samples,
         **ch_params,
     }
@@ -132,7 +147,8 @@ async def _route_table_live(
         "       avg(dep_delay) / 60.0 AS avg_min,\n"
         f"       countIf(dep_delay <= {{rt_high:Int32}} AND {low_clause}) AS on_time_count,\n"
         "       countIf(dep_delay > {rt_late5:Int32}) AS late5_count,\n"
-        "       count(*) AS samples\n"
+        "       count(*) AS samples,\n"
+        "       countIf(dep_delay < {rt_early:Int32}) AS early_count\n"
         "FROM deduped\n"
         "GROUP BY route_code\n"
         "HAVING count(*) >= {rt_min:UInt32}",
@@ -146,8 +162,9 @@ async def _route_table_live(
             _pct1(late5_count, samples),
             late5_count,
             samples,
+            _pct1(early_count, samples),
         )
-        for route_code, avg_min, on_time_count, late5_count, samples in result.result_rows
+        for route_code, avg_min, on_time_count, late5_count, samples, early_count in result.result_rows
     ]
 
 

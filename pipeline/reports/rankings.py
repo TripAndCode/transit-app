@@ -73,17 +73,33 @@ def report_reads_aggregates(report_type: str, ctx: RangeCtx, *, csv: bool = Fals
     raise ValueError(f"unknown report type {report_type!r}")
 
 
-# Named on-time/late tolerance presets exposed to API callers (see
-# api/routers/reports.py). "legacy_60s" is the only preset today: it is an
-# explicit, opt-in spelling of "don't override the tolerance" (compute_on_time/
-# compute_worst_5min already default to it), not a distinct code path — see
-# both functions' own docstrings for why that distinction matters (only the
-# untouched default reads the exact analyze()-time column; ANY explicit
-# tolerance, even one numerically equal to the legacy value, reads the
-# approximate histogram instead).
+# Named on-time/late tolerance presets, as (early_tolerance_sec,
+# late_tolerance_sec), accepted by api/routers/reports.py's ``preset`` and
+# named back by pipeline.reports.definition.resolve_definition_meta for any
+# request whose tolerances are a preset's.
+# - "legacy_60s" is the spelling of "don't override the tolerance": up to 60 s
+#   late, any early departure on time. Only that untouched default reads the
+#   exact analyze()-time column; ANY explicit tolerance, even one numerically
+#   equal to it, reads the approximate histogram instead (compute_on_time).
+# - "standard_m1_p5" is the window operators publish: no more than 60 s early
+#   and no more than 300 s late.
+STANDARD_PRESET_NAME = "standard_m1_p5"
 ON_TIME_PRESETS: dict[str, tuple[int | None, int | None]] = {
     LEGACY_PRESET_NAME: (None, None),
+    STANDARD_PRESET_NAME: (60, 300),
 }
+
+# An early departure is one more than the definition's early tolerance early.
+# A definition that counts every early departure as on time has no such
+# tolerance, so the rate counts those more than this many seconds early and is
+# always defined.
+DEFAULT_EARLY_DEPARTURE_SEC = 60
+
+
+def early_departure_sec(early_tolerance_sec: int | None) -> int:
+    """How many seconds early a departure must be to count as early under
+    *early_tolerance_sec*."""
+    return DEFAULT_EARLY_DEPARTURE_SEC if early_tolerance_sec is None else early_tolerance_sec
 
 
 # The fewest observations behind a route compute_ranking ranks: percentiles
@@ -170,13 +186,13 @@ async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
     Rows of every date and raw service id of a route merge into one (see
     :func:`_service_label`). The histograms are summed element-wise (unnest
     WITH ORDINALITY → regroup → array_agg) so p50/p90 can be interpolated from
-    the merged buckets in Python. The exact over-5-minute count comes along,
-    for a caller that estimates only the on-time count from the histogram.
+    the merged buckets in Python. The exact on-time and over-5-minute counts
+    come along, for a caller that reads only some figures off the histogram.
     """
     where, params, _ = _dist_filter(ctx, next_param=2)
     sql = (
         "WITH ranged AS (\n"
-        "    SELECT route_code, samples, sum_delay_sec, late5_count, hist\n"
+        "    SELECT route_code, samples, sum_delay_sec, on_time_count, late5_count, hist\n"
         "    FROM agg_route_daily_dist\n"
         f"    WHERE agency_id = $1 AND {where}\n"
         "),\n"
@@ -192,10 +208,10 @@ async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
         "scalars AS (\n"
         "    SELECT route_code,\n"
         "           SUM(samples) AS samples, SUM(sum_delay_sec) AS sum_delay_sec,\n"
-        "           SUM(late5_count) AS late5_count\n"
+        "           SUM(on_time_count) AS on_time_count, SUM(late5_count) AS late5_count\n"
         "    FROM ranged GROUP BY route_code\n"
         ")\n"
-        "SELECT s.route_code, s.samples, s.sum_delay_sec, s.late5_count, h.hist\n"
+        "SELECT s.route_code, s.samples, s.sum_delay_sec, s.on_time_count, s.late5_count, h.hist\n"
         "FROM scalars s JOIN hists h USING (route_code)"
     )
     return await conn.fetch(sql, agency_id, *params)
