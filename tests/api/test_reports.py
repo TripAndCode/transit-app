@@ -409,12 +409,31 @@ async def _record_timetables(pool, agency_id, versions):
         )
 
 
+async def _record_sources(pool, agency_id, counts):
+    """agg_feed_health rows as analyze records them: {day: (archive_rows, live_rows)}."""
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count, total_rows, archive_rows, "
+            "live_rows) VALUES ($1, $2, 0, 0, $3, $4, $5)",
+            [
+                (agency_id, date.fromisoformat(day), (archive or 0) + (live or 0), archive, live)
+                for day, (archive, live) in counts.items()
+            ],
+        )
+
+
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+_SOURCE_NOTE = (
+    "アーカイブの日は収集サーバーがその日に取得した全データ、"
+    "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ"
+)
 _BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）"
 _LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
-# The stamp of a one-day delay record with no timetable recorded for its day.
-_CERT_STAMP = f"{_BASIS_NOTE}\n{_LIVE_STAMP}\n※時刻表: 記録なし 1日間（全1日間）"
+# The stamp of a one-day delay record with no timetable or source recorded for its day.
+_CERT_STAMP = "\n".join(
+    [_BASIS_NOTE, _LIVE_STAMP, "※時刻表: 記録なし 1日間（全1日間）", "※観測データ: 記録なし 1日間（全1日間）"]
+)
 
 
 def _preamble(resp) -> str:
@@ -477,10 +496,104 @@ async def test_a_report_names_the_timetables_in_force_over_its_days(reports_clie
         {"agency_id": agency_id, "name": "gtfs_static_20260520", "fetched_on": "2026-05-20", "days": 1},
         {"agency_id": agency_id, "name": None, "fetched_on": None, "days": 3},
     ]
-    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+    assert (
         "; 集計日=不明; 時刻表=gtfs_static_20260401（2026-04-01取得）3日間、"
-        "gtfs_static_20260520（2026-05-20取得）1日間、記録なし 3日間（全7日間）"
+        "gtfs_static_20260520（2026-05-20取得）1日間、記録なし 3日間（全7日間）; 観測データ="
+    ) in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_where_each_of_its_days_observations_came_from(reports_client):
+    """Each day of the range is filed under the source most of its observations
+    came from, and the days analyze has not counted read unrecorded: days past
+    the newest analyzed day and days counted before sources were. Another
+    agency's days are not this report's."""
+    client, agency_id, pool = reports_client
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
     )
+    await _record_sources(
+        pool,
+        agency_id,
+        {
+            "2026-05-17": (0, 50),
+            "2026-05-18": (1000, 0),
+            "2026-05-19": (800, 40),
+            "2026-05-20": (0, 120),
+            "2026-05-21": (None, None),
+        },
+    )
+    await _record_sources(pool, other, {"2026-05-22": (0, 100)})
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-24"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert definition["source_mix"] == [{"agency_id": agency_id, "archive_days": 2, "live_days": 1, "none_days": 4}]
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        f"; 観測データ=アーカイブ 2日間、ライブ 1日間、記録なし 4日間（全7日間）。{_SOURCE_NOTE}"
+    )
+
+
+_DROP_SOURCE_COLUMNS = "ALTER TABLE agg_feed_health DROP COLUMN archive_rows, DROP COLUMN live_rows"
+_ADD_SOURCE_COLUMNS = "ALTER TABLE agg_feed_health ADD COLUMN archive_rows BIGINT, ADD COLUMN live_rows BIGINT"
+
+
+@pytest.mark.asyncio
+async def test_a_database_without_the_source_counts_still_serves_the_report(reports_client):
+    """The observations line is enrichment. On a database not yet migrated to
+    the source counts, the report is served with the rest of its stamp, and the
+    rows it reads after the stamp on the same connection still come back."""
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    await _seed_route_dist(pool, agency_id, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_timetables(pool, agency_id, {day: "gtfs_static_20260401"})
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    url = f"/api/{agency_id}/reports/on_time?from={day}&to={day}"
+    await pool.execute(_DROP_SOURCE_COLUMNS)
+    try:
+        resp = await client.get(url)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert float(next(r for r in body["rows"] if r[0] == "RGATE")[2]) == 40.0
+        definition = body["definition"]
+        assert definition["source_mix"] is None
+        assert datetime.fromisoformat(definition["built_at"]) == _BUILT_AT
+        assert definition["timetable_versions"] == [
+            {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 1}
+        ]
+        assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+            "; 時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）"
+        )
+    finally:
+        await pool.execute(_ADD_SOURCE_COLUMNS)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ddl", [_DROP_SOURCE_COLUMNS, "DROP TABLE agg_feed_health"], ids=["columns", "table"])
+async def test_a_failed_source_read_leaves_the_callers_transaction_usable(reports_client, ddl):
+    """Inside a caller's open transaction, the failed read rolls back to its
+    own savepoint, so the build read after it and the caller's next statement
+    still run."""
+    import asyncpg
+
+    from pipeline.reports.definition import resolve_definition_meta, stamp_build
+    from pipeline.reports.schedule_revision import read_schedule_days
+
+    _client, agency_id, pool = reports_client
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    try:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute(ddl)
+            schedule = await read_schedule_days(conn, agency_id, date(2026, 5, 18), date(2026, 5, 18))
+            meta = await stamp_build(conn, resolve_definition_meta("ranking", None, None), agency_id, schedule)
+            assert (meta.source_mix, meta.built_at) == (None, _BUILT_AT)
+            assert await conn.fetchval("SELECT count(*) FROM agencies WHERE agency_id = $1", agency_id) == 1
+        finally:
+            await tx.rollback()
+    finally:
+        await conn.close()
 
 
 @pytest.mark.asyncio
@@ -566,16 +679,18 @@ async def test_an_analyze_that_rebuilds_nothing_keeps_the_cached_rows(reports_cl
 
 
 @pytest.mark.asyncio
-async def test_the_council_report_text_names_the_method_version_the_build_day_and_the_timetables(reports_client):
+async def test_the_council_report_text_names_the_method_the_build_day_the_timetables_and_the_sources(reports_client):
     client, agency_id, pool = reports_client
     await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
     await _record_timetables(pool, agency_id, {"2026-05-18": "gtfs_static_20260401"})
+    await _record_sources(pool, agency_id, {"2026-05-18": (1000, 0)})
     body = (await client.get(f"/api/{agency_id}/reports/council_summary?from=2026-05-18&to=2026-05-18")).json()
     lines = body["text"].split("\n")
     basis = lines.index(_BASIS_NOTE)
-    assert lines[basis + 1 : basis + 3] == [
+    assert lines[basis + 1 : basis + 4] == [
         f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06",
         "※時刻表: gtfs_static_20260401（2026-04-01取得）1日間（全1日間）",
+        f"※観測データ: アーカイブ 1日間（全1日間）。{_SOURCE_NOTE}",
     ]
 
 
@@ -598,9 +713,12 @@ async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_
     assert body["definition"]["timetable_versions"] == [
         {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 1}
     ]
+    assert body["definition"]["source_mix"] == [
+        {"agency_id": agency_id, "archive_days": 0, "live_days": 0, "none_days": 1}
+    ]
     assert _preamble(await client.get(f"{url}&format=csv")).endswith(
         f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）; "
-        "時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）"
+        "時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）; 観測データ=記録なし 1日間（全1日間）"
     )
     if report_type == "council_summary":
         assert _LIVE_STAMP in body["text"].split("\n")
@@ -1144,6 +1262,10 @@ async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client,
     assert resp.json()["definition"]["timetable_versions"] == [
         {"agency_id": agency_id, "name": "v1", "fetched_on": None, "days": 2},
         {"agency_id": agency_id, "name": "v2", "fetched_on": None, "days": 1},
+    ]
+    # Every row came from an archive file, which analyze counted per day.
+    assert resp.json()["definition"]["source_mix"] == [
+        {"agency_id": agency_id, "archive_days": 3, "live_days": 0, "none_days": 0}
     ]
 
 

@@ -702,6 +702,49 @@ async def test_the_board_names_each_listed_agencys_timetables(net_client):
     ]
 
 
+async def test_the_board_names_where_each_listed_agencys_observations_came_from(net_client):
+    """Each listed agency's days over the range, filed under the source most of
+    each day's observations came from, adding up to the range; an agency the
+    board no longer lists is left out."""
+    client, pool, a, b, cc = net_client
+    params = {"from": "2026-04-01", "to": "2026-04-07"}
+    async with pool.acquire() as c:
+        await c.executemany(
+            "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count, total_rows, archive_rows, "
+            "live_rows) VALUES ($1, $2, 0, 0, $3, $4, $5)",
+            [(a, date(2026, 4, day), 1000, 1000, 0) for day in range(1, 6)]
+            + [(a, date(2026, 4, 6), 100, 0, 100), (b, date(2026, 4, 2), 100, 0, 100)]
+            + [(cc, date(2026, 4, 2), 100, 100, 0)],
+        )
+        await c.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", cc)
+
+    definition = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert definition["source_mix"] == [
+        {"agency_id": a, "archive_days": 5, "live_days": 1, "none_days": 1},
+        {"agency_id": b, "archive_days": 0, "live_days": 1, "none_days": 6},
+    ]
+
+
+async def test_a_database_without_the_source_counts_still_serves_the_board(net_client):
+    """The board's observations line is enrichment: without the source counts
+    the board is served with its figures and the rest of its stamp."""
+    client, pool, a, _b, _cc = net_client
+    params = {"from": "2026-04-01", "to": "2026-04-07"}
+    await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
+    async with pool.acquire() as c:
+        await c.execute("ALTER TABLE agg_feed_health DROP COLUMN archive_rows, DROP COLUMN live_rows")
+    try:
+        resp = await client.get("/api/network/summary", params=params)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert next(r for r in body["agencies"] if r["agency_id"] == a)["on_time_pct"] == 50.0
+        assert body["definition"]["source_mix"] is None
+        assert body["definition"]["timetable_versions"] is not None
+    finally:
+        async with pool.acquire() as c:
+            await c.execute("ALTER TABLE agg_feed_health ADD COLUMN archive_rows BIGINT, ADD COLUMN live_rows BIGINT")
+
+
 async def test_a_board_cached_before_a_rebuild_is_not_served_under_its_stamp(net_client):
     client, pool, a, _b, _cc = net_client
     params = {"from": "2026-04-01", "to": "2026-04-07"}

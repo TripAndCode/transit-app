@@ -69,6 +69,7 @@ const DEFINITION: DefinitionMeta = {
   built_at: null,
   value_basis: "feed_prediction",
   timetable_versions: null,
+  source_mix: null,
 };
 
 function report(): ReportResponse {

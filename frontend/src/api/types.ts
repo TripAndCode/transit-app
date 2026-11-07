@@ -329,6 +329,19 @@ export type DefinitionMeta = {
   /** The timetables in force over the request's days, each listed agency's
    *  adding up to the range; null when the API named none. */
   timetable_versions: TimetableVersion[] | null;
+  /** Which ingest source each of the request's days' observations came from,
+   *  per listed agency, adding up to the range; null when the API named none. */
+  source_mix: SourceMix[] | null;
+};
+
+/** How many of the request's days an agency's observations came mostly from
+ *  the collector's archive (every poll it made) or from the live path (only
+ *  what the app received in real time), and on how many none was recorded. */
+export type SourceMix = {
+  agency_id: number;
+  archive_days: number;
+  live_days: number;
+  none_days: number;
 };
 
 /** A timetable an agency's observations were ingested against, and on how

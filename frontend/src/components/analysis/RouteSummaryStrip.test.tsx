@@ -14,6 +14,7 @@ const DEFINITION = {
   measurement_point: "all_stops_all_observations", dedup_rule: "latest_observation_per_stop_event",
   method_version: "2026.11.0", source: "aggregates", built_at: null, value_basis: "feed_prediction",
   timetable_versions: null,
+  source_mix: null,
 };
 
 function reports(byType: Record<string, unknown[]>, rowsTotal = 174, pending: string[] = []) {

@@ -7,6 +7,7 @@ silently drift from what a report actually computes.
 
 from datetime import date, datetime, timedelta, timezone
 
+import asyncpg
 import pytest
 from pydantic import ValidationError
 
@@ -23,6 +24,7 @@ from pipeline.reports.definition import (
     MEASUREMENT_POINT,
     VALUE_BASIS,
     DefinitionMeta,
+    SourceMix,
     TimetableVersion,
     format_definition_csv_line,
     format_definition_footnotes,
@@ -410,6 +412,7 @@ def test_every_value_is_the_feeds_prediction_and_no_timetable_is_named_until_tol
     meta = resolve_definition_meta(report_type, None, None, live=live)
     assert meta.value_basis == VALUE_BASIS == "feed_prediction"
     assert meta.timetable_versions is None
+    assert meta.source_mix is None
 
 
 _TIMETABLES = [
@@ -501,6 +504,121 @@ def test_each_listed_agency_accounts_for_every_day_of_the_range():
     ]
 
 
+@pytest.mark.parametrize(
+    ("archive_rows", "live_rows", "source"),
+    [
+        (1000, 0, "archive"),
+        (0, 120, "live"),
+        (900, 30, "archive"),
+        (30, 900, "live"),
+        (40, 40, "live"),
+        (0, 0, None),
+        (None, None, None),
+    ],
+    ids=["archive", "live", "mostly-archive", "mostly-live", "tie", "no-rows", "not-counted-yet"],
+)
+def test_a_day_is_filed_under_the_source_most_of_its_observations_came_from(archive_rows, live_rows, source):
+    """A tie reads live, the sparser source, so a day is never called archive
+    without archive rows outnumbering live ones. A day whose counts predate
+    their columns has no source yet."""
+    assert definition._day_source(archive_rows, live_rows) == source
+
+
+def test_each_listed_agency_files_every_day_of_the_range_under_one_source():
+    """Each agency's archive, live and unrecorded days add up to the range:
+    days after its newest analyzed day, days analyzed before the source was
+    counted, and an agency with nothing in the range are unrecorded."""
+
+    def day(n):
+        return date(2026, 5, 1) + timedelta(days=n)
+
+    rows = (
+        [(1, date(2026, 4, 30), 0, 50)]
+        + [(1, day(n), 1000, 0) for n in range(20)]
+        + [(1, day(n), 0, 120) for n in range(20, 23)]
+        + [(1, day(23), 900, 30), (1, day(24), 40, 40), (1, day(25), None, None)]
+        + [(2, None, None, None)]
+    )
+    assert definition._source_mix(rows, date(2026, 5, 1), date(2026, 5, 31)) == [
+        SourceMix(agency_id=1, archive_days=21, live_days=4, none_days=6),
+        SourceMix(agency_id=2, archive_days=0, live_days=0, none_days=31),
+    ]
+
+
+_SOURCE_MIX = [SourceMix(agency_id=1, archive_days=28, live_days=3, none_days=0)]
+_SOURCE_NOTE = {
+    "ja": "アーカイブの日は収集サーバーがその日に取得した全データ、"
+    "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ",
+    "en": "Archive days hold every poll the collector made that day; "
+    "live days hold only the part the app received in real time",
+}
+
+
+@pytest.mark.parametrize(
+    ("locale", "observations"),
+    [
+        ("ja", f"観測データ: アーカイブ 28日間、ライブ 3日間（全31日間）。{_SOURCE_NOTE['ja']}"),
+        ("en", f"Observations: archive 28 days, live 3 days (of 31 days). {_SOURCE_NOTE['en']}"),
+    ],
+)
+def test_the_stamp_ends_with_the_days_each_source_supplied_and_says_what_each_means(locale, observations):
+    meta = _DATED.model_copy(update={"timetable_versions": _TIMETABLES, "source_mix": _SOURCE_MIX})
+    lines = format_stamp_lines(meta, locale)
+    assert lines[:-1] == format_stamp_lines(_DATED.model_copy(update={"timetable_versions": _TIMETABLES}), locale)
+    assert lines[-1] == observations
+
+
+def test_csv_line_ends_with_the_days_each_source_supplied():
+    meta = _DATED.model_copy(update={"timetable_versions": _TIMETABLES, "source_mix": _SOURCE_MIX})
+    line = format_definition_csv_line(meta)
+    assert line.endswith(
+        "; 時刻表=gtfs_static_20260401（2026-04-01取得）28日間、記録なし 3日間（全31日間）"
+        f"; 観測データ=アーカイブ 28日間、ライブ 3日間（全31日間）。{_SOURCE_NOTE['ja']}"
+    )
+    assert "," not in line
+
+
+@pytest.mark.parametrize(
+    ("locale", "mix", "observations"),
+    [
+        ("ja", [SourceMix(agency_id=1, archive_days=7, live_days=0, none_days=0)], "アーカイブ 7日間（全7日間）"),
+        ("en", [SourceMix(agency_id=1, archive_days=7, live_days=0, none_days=0)], "archive 7 days (of 7 days)"),
+        (
+            "ja",
+            [SourceMix(agency_id=1, archive_days=0, live_days=2, none_days=1)],
+            "ライブ 2日間、記録なし 1日間（全3日間）",
+        ),
+        (
+            "en",
+            [SourceMix(agency_id=1, archive_days=0, live_days=2, none_days=1)],
+            "live 2 days, none recorded 1 day (of 3 days)",
+        ),
+        ("ja", [SourceMix(agency_id=1, archive_days=0, live_days=0, none_days=1)], "記録なし 1日間（全1日間）"),
+        ("en", [SourceMix(agency_id=1, archive_days=0, live_days=0, none_days=1)], "none recorded 1 day (of 1 day)"),
+    ],
+    ids=["ja-archive", "en-archive", "ja-live-unrecorded", "en-live-unrecorded", "ja-unrecorded", "en-unrecorded"],
+)
+def test_the_observations_line_names_only_the_sources_that_supplied_a_day(locale, mix, observations):
+    """The words are explained whenever a day came from either source, and
+    not under a range with none."""
+    line = format_stamp_lines(_DATED.model_copy(update={"source_mix": mix}), locale)[-1]
+    label = "観測データ: " if locale == "ja" else "Observations: "
+    if mix[0].archive_days or mix[0].live_days:
+        assert line == label + observations + ("。" if locale == "ja" else ". ") + _SOURCE_NOTE[locale]
+    else:
+        assert line == label + observations
+
+
+@pytest.mark.parametrize(("locale", "line"), [("ja", "観測データ: 記録なし"), ("en", "Observations: none recorded")])
+def test_a_scope_with_no_agency_names_no_source(locale, line):
+    assert format_stamp_lines(_DATED.model_copy(update={"source_mix": []}), locale)[-1] == line
+
+
+def test_a_definition_no_router_stamped_names_no_source():
+    assert "観測データ" not in format_definition_csv_line(_DATED)
+    assert not any(line.startswith("Observations") for line in format_stamp_lines(_DATED, "en"))
+
+
 def test_cached_rows_are_forgotten_whenever_the_builds_move(monkeypatch):
     """Rows cached before a build must not be served under its stamp, so the
     caches are cleared the first time a process looks and on every move after,
@@ -512,3 +630,47 @@ def test_cached_rows_are_forgotten_whenever_the_builds_move(monkeypatch):
     for builds, clears in seen:
         definition._note_builds(builds)
         assert len(cleared) == clears, builds
+
+
+class _BehindConn:
+    """A connection to a database whose schema is behind the code: the source
+    read fails with *error*, the build read answers."""
+
+    def __init__(self, error):
+        self.error = error
+
+    def is_in_transaction(self):
+        return False
+
+    async def fetch(self, _sql, *_args):
+        raise self.error("column h.archive_rows does not exist")
+
+    async def fetchrow(self, _sql, *_args):
+        return (1, 0.0, _BUILT_AT)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [asyncpg.exceptions.UndefinedColumnError, asyncpg.exceptions.UndefinedTableError])
+async def test_a_database_without_the_source_counts_stamps_everything_else(monkeypatch, error):
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 1), [(1, date(2026, 5, 1), "gtfs_static_20260401")])
+    meta = await definition.stamp_build(_BehindConn(error), resolve_definition_meta("on_time", None, None), 1, schedule)
+    assert (meta.source_mix, meta.built_at) == (None, _BUILT_AT)
+    assert meta.timetable_versions == [
+        TimetableVersion(agency_id=1, name="gtfs_static_20260401", fetched_on=date(2026, 4, 1), days=1)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_any_other_failure_of_the_source_read_is_raised(monkeypatch):
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 1), [])
+    with pytest.raises(asyncpg.exceptions.QueryCanceledError):
+        await definition.stamp_build(
+            _BehindConn(asyncpg.exceptions.QueryCanceledError),
+            resolve_definition_meta("on_time", None, None),
+            1,
+            schedule,
+        )
