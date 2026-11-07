@@ -336,8 +336,9 @@ the scope as one sentence above their content
     (0–10 min) with a marker and readout at the current one, and names the
     share on each preset. Each step is counted as the screens count it
     (`pipeline/histogram.py: count_on_time`): the one- and five-minute steps
-    are exact, read from the aggregate's exact columns, and the other steps
-    are histogram estimates. An `early` over 300 s, below the histogram's
+    are exact when the early bound, if any, is on a bucket edge, read from
+    the aggregate's exact columns, and the other steps are histogram
+    estimates. An `early` over 300 s, below the histogram's
     floor, leaves the curve out. Beneath
     it, an early-departure choice sets `early`: every early departure on time
     (the default) or none more than a minute early, which with the 5-minute

@@ -49,8 +49,8 @@ def test_on_time_explicit_tolerance_resolves_to_custom_preset_with_exact_values(
 
 def test_on_time_explicit_late_only_resolves_to_custom_with_unbounded_early():
     # Passing EITHER param opts out of the legacy preset, even if the other
-    # is left unset -- matches compute_on_time's own "any explicit tolerance
-    # switches to the histogram path" contract.
+    # is left unset: the preset names what the request asked for, and the
+    # legacy default asks for no tolerance at all.
     meta = resolve_definition_meta("on_time", None, 90)
     assert meta.preset == "custom"
     assert meta.early_tolerance_sec is None

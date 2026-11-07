@@ -18,6 +18,8 @@ raw-updates scan or an analyze() re-aggregation -- see
 ``pipeline.reports.rankings.compute_on_time``/``compute_worst_5min``.
 """
 
+from collections.abc import Callable
+
 # Inner bins span [LO, HI) in WIDTH-second steps; bucket 0 catches early/negative
 # delays below LO, the final bucket catches everything at or beyond HI. dep_delay
 # is seconds (can be negative when a bus departs early).
@@ -207,15 +209,21 @@ def count_early(counts: list[int], early_sec: int) -> float:
     return count_in_range(counts, None, -early_sec - 1)
 
 
+# The late tolerances analyze() bakes an exact count for, each with how the
+# count of departures at most that late reads off the exact columns
+# (samples, on_time_count, late5_count). The one table both _at_most_late and
+# exact_window read, so the gate can never approve a window the reader refuses.
+_EXACT_LATE: dict[int, Callable[[int, int, int], int]] = {
+    LEGACY_ON_TIME_LATE_TOLERANCE_SEC: lambda samples, on_time_count, late5_count: on_time_count,
+    LEGACY_SEVERE_LATE_TOLERANCE_SEC: lambda samples, on_time_count, late5_count: samples - late5_count,
+}
+
+
 def _at_most_late(late_tolerance_sec: int, samples: int, on_time_count: int, late5_count: int) -> int | None:
     """The exact count of departures at most *late_tolerance_sec* late, where
-    analyze() bakes one: one minute (*on_time_count*) or five minutes
-    (*samples* less *late5_count*)."""
-    if late_tolerance_sec == LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
-        return on_time_count
-    if late_tolerance_sec == LEGACY_SEVERE_LATE_TOLERANCE_SEC:
-        return samples - late5_count
-    return None
+    analyze() bakes one (:data:`_EXACT_LATE`)."""
+    read = _EXACT_LATE.get(late_tolerance_sec)
+    return None if read is None else read(samples, on_time_count, late5_count)
 
 
 def exact_window(early_tolerance_sec: int | None, late_tolerance_sec: int) -> bool:
@@ -224,8 +232,9 @@ def exact_window(early_tolerance_sec: int | None, late_tolerance_sec: int) -> bo
     or one on a bucket edge (:func:`early_edge_buckets`). Such a window, and
     the early-departure count at its threshold, are read with
     :func:`early_count_sql` and :func:`on_time_from_columns`."""
-    late_exact = late_tolerance_sec in (LEGACY_ON_TIME_LATE_TOLERANCE_SEC, LEGACY_SEVERE_LATE_TOLERANCE_SEC)
-    return late_exact and (early_tolerance_sec is None or early_edge_buckets(early_tolerance_sec) is not None)
+    return late_tolerance_sec in _EXACT_LATE and (
+        early_tolerance_sec is None or early_edge_buckets(early_tolerance_sec) is not None
+    )
 
 
 def on_time_from_columns(

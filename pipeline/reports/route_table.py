@@ -136,7 +136,8 @@ async def _route_table_live(
     late_tolerance_sec: int | None,
     early_sec: int,
 ) -> list[tuple]:
-    """The table from a live scan, for a time_band the aggregates cannot split.
+    """The table from a live scan, for a time_band the aggregates cannot split
+    or a bound in the histogram's open end buckets.
 
     Counts come back exact and are rounded here, half-up, so the figures agree
     with the aggregate path's. The on-time rate is rounded from the same

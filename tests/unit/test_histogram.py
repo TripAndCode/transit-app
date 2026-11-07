@@ -302,3 +302,12 @@ def test_the_exact_columns_answer_a_window_and_agree_with_the_histogram(early, l
     truth = sum(low <= d <= late for d in _WINDOW_EDGES)
     from_columns = on_time_from_columns(early, late, early_count=early_count, **columns)
     assert from_columns == count_on_time(counts, early, late, **columns) == truth
+
+
+def test_the_default_early_departure_threshold_sits_on_a_bucket_edge():
+    """With early departures on time, the route table and the council report
+    count the rate at this threshold from the leading buckets alone; off an
+    edge, their exact windows would have no exact early count to read."""
+    from pipeline.reports.rankings import DEFAULT_EARLY_DEPARTURE_SEC
+
+    assert early_edge_buckets(DEFAULT_EARLY_DEPARTURE_SEC) is not None

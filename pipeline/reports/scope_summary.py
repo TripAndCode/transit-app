@@ -14,8 +14,9 @@ Each section drops the one condition it exists to choose:
 - ``routes``: the selected period, ignoring the routes filter.
 - ``tolerance``: the whole scope, as the on-time share at each late
   tolerance, counted as the screens count it
-  (:func:`pipeline.histogram.count_on_time`): exact at one and five minutes,
-  a histogram estimate elsewhere. An early bound below the histogram's floor
+  (:func:`pipeline.histogram.count_on_time`): exact at one and five minutes
+  when the early bound, if any, is on a bucket edge, a histogram estimate
+  elsewhere. An early bound below the histogram's floor
   leaves it empty: only the observations themselves could count it, and the
   controls never wait on that scan.
 

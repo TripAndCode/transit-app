@@ -100,8 +100,9 @@ def report_reads_aggregates(
 # request whose tolerances are a preset's.
 # - "legacy_60s" is the spelling of "don't override the tolerance": up to 60 s
 #   late, any early departure on time, read from the exact analyze()-time
-#   column. An explicit tolerance reads the histogram beside the exact
-#   columns (pipeline.histogram.count_on_time).
+#   column. An explicit tolerance reads the exact columns too where they
+#   answer its window (pipeline.histogram.exact_window), and the merged
+#   histogram where they do not (pipeline.histogram.count_on_time).
 # - "standard_m1_p5" is the window operators publish: no more than 60 s early
 #   and no more than 300 s late.
 STANDARD_PRESET_NAME = "standard_m1_p5"
@@ -113,7 +114,9 @@ ON_TIME_PRESETS: dict[str, tuple[int | None, int | None]] = {
 # An early departure is one more than the definition's early tolerance early.
 # A definition that counts every early departure as on time has no such
 # tolerance, so the rate counts those more than this many seconds early and is
-# always defined.
+# always defined. It sits on a histogram bucket edge, which lets the exact
+# windows read the rate without merging histograms (tests/unit/test_histogram.py
+# pins it).
 DEFAULT_EARLY_DEPARTURE_SEC = 60
 
 
