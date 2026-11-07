@@ -46,7 +46,7 @@ export function DefinitionMetaBlock({ definition, agencyNames }: BlockProps) {
       <summary>{t("definitionMeta.summary")}</summary>
       <p>{sentences.join(t("definitionMeta.sentence_separator"))}</p>
       <p>{methodSentence(definition, t)}</p>
-      {definition.timetable_versions != null && (
+      {definition.timetable_versions != null && definition.timetable_versions.length > 0 && (
         <Timetables versions={definition.timetable_versions} agencyNames={agencyNames} />
       )}
     </details>
@@ -81,7 +81,9 @@ function Timetables({ versions, agencyNames }: { versions: TimetableVersion[]; a
 function groupByAgency(versions: TimetableVersion[]): Map<number, TimetableVersion[]> {
   const byAgency = new Map<number, TimetableVersion[]>();
   for (const version of versions) {
-    byAgency.set(version.agency_id, [...(byAgency.get(version.agency_id) ?? []), version]);
+    const own = byAgency.get(version.agency_id);
+    if (own) own.push(version);
+    else byAgency.set(version.agency_id, [version]);
   }
   return byAgency;
 }
