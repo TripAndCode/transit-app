@@ -347,7 +347,7 @@ export type PipelineRun = {
 
 /** One side of a rebuild's headline. A figure is null when no departure
  *  counted towards it. */
-export type HeadlineFigures = {
+type HeadlineFigures = {
   on_time_pct: number | null;
   avg_delay_min: number | null;
   samples: number;
