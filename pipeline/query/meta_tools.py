@@ -21,7 +21,7 @@ from typing import Any
 from api.range import RangeCtx
 from api.sqlutil import escape_like
 from pipeline.query.results import ToolResult
-from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
 from pipeline.service_day import service_date_ch, service_date_of
 
 VALID_KINDS = (
@@ -367,7 +367,7 @@ async def describe_data(
         # tool's `deduped` CTE keeps "samples" meaning one consistent thing
         # across the whole Ask surface. This also applies ctx's dow/
         # time_band/service/routes scoping like every other ctx-driven Ask tool.
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
+        cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
         ch_result = await ch.query(
             f"""
             WITH {cte_sql}

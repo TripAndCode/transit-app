@@ -218,23 +218,29 @@ def _copy(conn, ch, agency_id: int, key: str, parts: list[str], kept: _Kept, exp
         ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
 
 
+_SCHEDULED_SQL = f"SELECT DISTINCT content_hash FROM {SCHEDULE} WHERE agency_id = {{agency:Int32}}"
+_SPANS_SQL = (
+    f"SELECT static_version_id, argMax(tuple(first_day, last_day), recorded_at) FROM {SPANS} "
+    "WHERE agency_id = {agency:Int32} GROUP BY static_version_id"
+)
+_VERSION_MAP_SQL = (
+    f"SELECT static_version_id, argMax(content_hash, archived_at) FROM {VERSION_MAP} "
+    "WHERE agency_id = {agency:Int32} GROUP BY static_version_id ORDER BY static_version_id"
+)
+
+
 def scheduled_contents(ch, agency_id: int) -> set[str]:
     """The agency's contents whose schedule the archive keeps."""
-    rows = ch.query(
-        f"SELECT DISTINCT content_hash FROM {SCHEDULE} WHERE agency_id = {{agency:Int32}}",
-        parameters={"agency": agency_id},
-    ).result_rows
-    return {row[0] for row in rows}
+    return {row[0] for row in ch.query(_SCHEDULED_SQL, parameters={"agency": agency_id}).result_rows}
+
+
+def _spans(rows) -> dict[str, tuple[date, date]]:
+    return {stem: (span[0], span[1]) for stem, span in rows}
 
 
 def spans(ch, agency_id: int) -> dict[str, tuple[date, date]]:
     """Each of the agency's version names with a recorded span, at its latest one."""
-    rows = ch.query(
-        f"SELECT static_version_id, argMax(tuple(first_day, last_day), recorded_at) FROM {SPANS} "
-        "WHERE agency_id = {agency:Int32} GROUP BY static_version_id",
-        parameters={"agency": agency_id},
-    ).result_rows
-    return {stem: (span[0], span[1]) for stem, span in rows}
+    return _spans(ch.query(_SPANS_SQL, parameters={"agency": agency_id}).result_rows)
 
 
 def record_span(ch, agency_id: int, stem: str, span: tuple[date, date]) -> None:
@@ -367,6 +373,11 @@ class ScheduleJoin(NamedTuple):
         mapped = dict(zip(self.stems, self.hashes, strict=True))
         return [(s.first, s.last, s.stem, mapped[s.stem]) for s in self.force]
 
+    def filing_params(self, between: tuple[date, date]) -> dict:
+        """The bound parameters observation_rows reads to file rows of the
+        service dates *between* (force_params) under Stamp.IN_FORCE or REFIT."""
+        return {"join_stems": self.stems, "join_hashes": self.hashes, **self.force_params(between)}
+
     def params(self, present: Iterable[str] | None = None, between: tuple[date, date] | None = None) -> dict:
         """The join's bound parameters. *present*, the version names of the rows
         being joined, narrows the archive side to the contents they join, and
@@ -412,17 +423,36 @@ def schedule_join(ch, agency_id: int, current: str | None, *, by_service_date: b
     content's schedule is not kept leaves the dates it is in force over with
     none, so their rows keep what ingest joined.
     """
-    rows = ch.query(
-        f"SELECT static_version_id, argMax(content_hash, archived_at) FROM {VERSION_MAP} "
-        "WHERE agency_id = {agency:Int32} GROUP BY static_version_id ORDER BY static_version_id",
-        parameters={"agency": agency_id},
-    ).result_rows
-    stems, hashes = [row[0] for row in rows], [row[1] for row in rows]
+    parameters = {"agency": agency_id}
+    rows = ch.query(_VERSION_MAP_SQL, parameters=parameters).result_rows
+    if not by_service_date:
+        return _schedule_join(rows, current)
+    kept = ch.query(_SCHEDULED_SQL, parameters=parameters).result_rows
+    return _schedule_join(rows, current, (kept, ch.query(_SPANS_SQL, parameters=parameters).result_rows))
+
+
+async def schedule_join_async(
+    ch, agency_id: int, current: str | None, *, by_service_date: bool = False
+) -> ScheduleJoin:
+    """schedule_join through an async ClickHouse client."""
+    parameters = {"agency": agency_id}
+    rows = (await ch.query(_VERSION_MAP_SQL, parameters=parameters)).result_rows
+    if not by_service_date:
+        return _schedule_join(rows, current)
+    kept = (await ch.query(_SCHEDULED_SQL, parameters=parameters)).result_rows
+    return _schedule_join(rows, current, (kept, (await ch.query(_SPANS_SQL, parameters=parameters)).result_rows))
+
+
+def _schedule_join(map_rows, current: str | None, in_force_rows: tuple | None = None) -> ScheduleJoin:
+    """The join of _VERSION_MAP_SQL's rows, with the versions in force from
+    _SCHEDULED_SQL's and _SPANS_SQL's rows when *in_force_rows* holds them."""
+    stems, hashes = [row[0] for row in map_rows], [row[1] for row in map_rows]
     force: tuple[Segment, ...] = ()
-    if by_service_date:
+    if in_force_rows is not None:
+        kept_rows, span_rows = in_force_rows
         mapped = dict(zip(stems, hashes, strict=True))
-        kept = scheduled_contents(ch, agency_id)
-        versions = [Version(stem, *span) for stem, span in spans(ch, agency_id).items() if stem in mapped]
+        kept = {row[0] for row in kept_rows}
+        versions = [Version(stem, *span) for stem, span in _spans(span_rows).items() if stem in mapped]
         force = tuple(s for s in in_force(versions) if mapped[s.stem] in kept)
     return ScheduleJoin(stems, hashes, current or "", force)
 
@@ -482,14 +512,58 @@ _REFIT_COLUMNS = {
 }
 
 
-def _marked_rows(where: str, table: str) -> str:
-    """*table*'s rows matching *where*, each with its place among the segments
-    in force, and whether REFIT reads its schedule from the archive."""
+def _marked_rows(where: str, table: str, source: str | None = None) -> str:
+    """*table*'s rows matching *where*, or *source*'s rows, each with its place
+    among the segments in force, and whether REFIT reads its schedule from the
+    archive."""
+    rows = f"{checked_table(table)} AS u WHERE {where}" if source is None else f"{source} AS u"
     return (
         f"SELECT u.*, {_FORCE_AT} AS force_at, {{force_contents:Array(String)}}[force_at] AS force_content, "
         f"force_content != '' AND force_content != {_STAMPED_CONTENT} AS refit, "
         "if(refit, force_content, '') AS refit_content "
-        f"FROM {checked_table(table)} AS u WHERE {where}"
+        f"FROM {rows}"
+    )
+
+
+# The columns a row is filed by (_marked_rows, _REFIT_COLUMNS), and the stop event it is part of.
+_STOP_EVENT_KEYS = (
+    "agency_id",
+    "trip_id",
+    "stop_sequence",
+    "static_version_id",
+    "route_code",
+    "service_type",
+    "scheduled_time",
+    "scheduled_sec",
+)
+
+
+def _stop_events(where: str, table: str) -> str:
+    """*table*'s rows matching *where*, one per stop event (a trip's stop on
+    one service day) and stored schedule and version name, with `updates`'
+    columns: the latest poll's capture, file name and departure delay, by
+    (captured_at, file_name), and any poll's of the rest. Every poll grouped
+    together is filed alike, so a read keeping only the delay of each stop
+    event's latest poll among those it files together reads the same rows
+    from these, filing a fraction as many. The delay is taken in a tuple,
+    which argMax does not skip as it skips a NULL argument."""
+    latest = "max((u.captured_at, u.file_name))"
+    picked = {
+        "captured_at": f"tupleElement({latest}, 1)",
+        "file_name": f"tupleElement({latest}, 2)",
+        "dep_delay": "tupleElement(argMax(tuple(u.dep_delay), (u.captured_at, u.file_name)), 1)",
+    }
+    columns = ", ".join(
+        f"u.{column} AS event_{column}"
+        if column in _STOP_EVENT_KEYS
+        else f"{picked.get(column, f'any(u.{column})')} AS event_{column}"
+        for column in UPDATE_COLUMNS
+    )
+    keys = ", ".join(f"u.{column}" for column in _STOP_EVENT_KEYS)
+    return (
+        f"(SELECT {', '.join(f'event_{column} AS {column}' for column in UPDATE_COLUMNS)} FROM "
+        f"(SELECT {columns} FROM {checked_table(table)} AS u WHERE {where} "
+        f"GROUP BY {keys}, {service_date_ch('u.captured_at')}))"
     )
 
 
@@ -506,7 +580,15 @@ def _filed_columns(refit: bool) -> str:
     return ", ".join(columns)
 
 
-def observation_rows(where: str, stamp: Stamp, table: str = UPDATES_TABLE, filed_where: str = "") -> str:
+def observation_rows(
+    where: str,
+    stamp: Stamp,
+    table: str = UPDATES_TABLE,
+    filed_where: str = "",
+    *,
+    live_form: bool = False,
+    by_stop_event: bool = False,
+) -> str:
     """The FROM clause of a read of *table*'s rows matching *where*, aliased
     `u`, with `updates`' columns, each row filed under *stamp*'s timetable.
 
@@ -519,20 +601,36 @@ def observation_rows(where: str, stamp: Stamp, table: str = UPDATES_TABLE, filed
     that binds ScheduleJoin.params, which files a row only by the segments in
     force. REFIT also joins the schedule archive, so a read whose rows need
     none of it (refit_dates) is cheaper under IN_FORCE, with the same result.
+
+    *live_form*, for a read inside the API's time budget
+    (pipeline.live_filing), joins the archive on one 64-bit hash of its three
+    keys instead of the keys themselves, which ClickHouse probes several times
+    faster. A hash two stop times share would file a row under the other's
+    schedule; those reads accept that bound, while analyze, whose figures are
+    versioned by this SQL's text (pipeline.agg_registry), keeps the exact
+    join. *by_stop_event* files one row per stop event and stored schedule
+    (_stop_events) under REFIT, for a read that keeps only each stop event's
+    latest delay.
     """
     if stamp is Stamp.INGESTED:
         return f"FROM {checked_table(table)} AS u WHERE {where}" + (f" AND ({filed_where})" if filed_where else "")
-    marked = _marked_rows(where, table)
+    events = by_stop_event and stamp is Stamp.REFIT
+    marked = _marked_rows(where, table, _stop_events(where, table) if events else None)
     after = f" WHERE {filed_where}" if filed_where else ""
     if stamp is Stamp.IN_FORCE:
         return f"FROM (SELECT {_filed_columns(False)} FROM ({marked}) AS u) AS u{after}"
+    if live_form:
+        keys = "cityHash64(content_hash, trip_id, stop_sequence) AS archive_key"
+        on = "s.archive_key = cityHash64(u.refit_content, toString(u.trip_id), toInt32(u.stop_sequence))"
+    else:
+        keys = "content_hash, trip_id, stop_sequence"
+        on = "s.content_hash = u.refit_content AND s.trip_id = u.trip_id AND s.stop_sequence = toInt32(u.stop_sequence)"
     return (
         f"FROM (SELECT {_filed_columns(True)} FROM ({marked}) AS u "
-        "ANY LEFT JOIN (SELECT content_hash, trip_id, stop_sequence, service_type, route_id, scheduled_time, "
+        f"ANY LEFT JOIN (SELECT {keys}, service_type, route_id, scheduled_time, "
         f"scheduled_sec FROM {SCHEDULE} WHERE agency_id = {{agency_id:UInt16}} "
         "AND has({force_contents:Array(String)}, content_hash)) AS s "
-        "ON s.content_hash = u.refit_content AND s.trip_id = u.trip_id "
-        f"AND s.stop_sequence = toInt32(u.stop_sequence)) AS u{after}"
+        f"ON {on}) AS u{after}"
     )
 
 

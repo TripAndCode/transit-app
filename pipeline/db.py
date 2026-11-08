@@ -70,6 +70,8 @@ def build_dedup_ch_sql(
     include_static_version: bool = False,
     table: str = UPDATES_TABLE,
     stamp: static_archive.Stamp = static_archive.Stamp.INGESTED,
+    filed_where: str = "",
+    live_form: bool = False,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
 
@@ -106,7 +108,7 @@ def build_dedup_ch_sql(
     substitution rule turns that into `ILLEGAL_AGGREGATION` (confirmed
     against a live instance). The distinct alias name is what lets a caller
     combine the two safely, as `pipeline.reports.delay_record` does with
-    `api.range.build_updates_filter_ch`'s date clause.
+    `api.range.updates_filter_ch`'s date clause.
 
     The `date` column is the *service date* (`pipeline.service_day`): the
     Asia/Tokyo day shifted back by the service-day cutover, so a stop polled
@@ -162,7 +164,12 @@ def build_dedup_ch_sql(
     (`static_archive.observation_rows`): as ingested, the default, or the one
     in force on its service date, whose query binds a ScheduleJoin's
     parameters. Read so, a stop event polled across a reload that took effect
-    later is one event under one schedule.
+    later is one event under one schedule. `extra_where` is tested on each row
+    as ingest stored it, and `filed_where`, the caller's tests of a column
+    filing rewrites (`api.range.UpdatesFilter`), on the filed row.
+    `live_form` is `static_archive.observation_rows`', and files one row per
+    stop event and stored schedule (its `by_stop_event`), from which this
+    dedup keeps the same rows.
 
     Every reference to a base-table column that shares its name with a
     SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
@@ -193,7 +200,10 @@ def build_dedup_ch_sql(
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{static_version} "
-        f"{static_archive.observation_rows(observation_filter_ch(extra_where), stamp, table)} "
+        + static_archive.observation_rows(
+            observation_filter_ch(extra_where), stamp, table, filed_where, live_form=live_form, by_stop_event=live_form
+        )
+        + " "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')}, u.stop_sequence"
     )
@@ -211,6 +221,8 @@ def build_stop_visits_ch_sql(
     join_schedule: bool = False,
     table: str = UPDATES_TABLE,
     stamp: static_archive.Stamp = static_archive.Stamp.INGESTED,
+    filed_where: str = "",
+    live_form: bool = False,
 ) -> str:
     """Return the SQL body that resolves one row per stop visit (a trip's stop
     on one service day) with the latest plausible departure AND the latest
@@ -277,7 +289,8 @@ def build_stop_visits_ch_sql(
     the visit has one, else the arrival's. A stop with no archived stop time
     keeps its row, with NULL scheduled times.
 
-    `stamp` decides which timetable each poll is read as joined to, as in
+    `stamp` decides which timetable each poll is read as joined to, and
+    `filed_where` is tested on the filed row, with `live_form`, as in
     `build_dedup_ch_sql`.
 
     Columns, in this order (`pipeline/analyze.py` loads them by position):
@@ -323,7 +336,11 @@ def build_stop_visits_ch_sql(
         f"maxIf({latest}, {dep_ok}) AS visit_dep_key, "
         f"minIf({latest}, {arr_ok}) AS visit_first_arr_key "
         + static_archive.observation_rows(
-            f"u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra}", stamp, table
+            f"u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra}",
+            stamp,
+            table,
+            filed_where,
+            live_form=live_form,
         )
         + f" GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
         ")"

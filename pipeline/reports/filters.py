@@ -8,11 +8,12 @@ from api.range import (
     TIME_BAND_RANGES,
     RangeCtx,
     build_agg_daily_trend_filter,
-    build_updates_filter_ch,
     service_date_clause,
+    updates_filter_ch,
 )
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql, build_stop_visits_ch_sql
+from pipeline.live_filing import Filing, band_candidates, filing
 
 # 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
 # submodule that reconciles ClickHouse's round-half-to-even live path against
@@ -46,6 +47,7 @@ def _service_label(ctx: RangeCtx) -> str | None:
 
 def _dedup_cte_ch(
     ctx: RangeCtx,
+    filing: Filing,
     *,
     include_scheduled_sec: bool = False,
     table: str = UPDATES_TABLE,
@@ -54,10 +56,14 @@ def _dedup_cte_ch(
 
     Wraps the shared latest-by-captured_at dedup SQL (`build_dedup_ch_sql`)
     in a `deduped` CTE, combined with `ctx`'s WHERE filter
-    (`api.range.build_updates_filter_ch`). Every report/route/overview
+    (`api.range.updates_filter_ch`). Every report/route/overview
     helper that needs the live (non-aggregated) `updates` table goes
     through this one builder so the dedup+filter shape can't drift between
     call sites.
+
+    ``filing`` is how the read files its rows (`pipeline.live_filing.filing`
+    over ``ctx``'s dates), so a live scan reads each day under the timetable
+    in force on it, as the aggregates do.
 
     ``include_scheduled_sec`` forwards straight to `build_dedup_ch_sql` — pass
     it when the caller needs an hour-of-day bucket that doesn't silently drop
@@ -73,30 +79,49 @@ def _dedup_cte_ch(
     ClickHouse call site in this codebase (see e.g.
     ``pipeline.reports.rankings._route_wd_we_avg_ch``).
     """
-    where, params = build_updates_filter_ch(ctx)
+    filing.check(ctx.from_date, ctx.to_date)
+    where = band_candidates(updates_filter_ch(ctx), ctx.time_band, filing)
     body = build_dedup_ch_sql(
-        extra_where=where,
+        extra_where=where.raw,
         include_captured_at=False,
         include_scheduled_sec=include_scheduled_sec,
         table=table,
+        stamp=filing.stamp,
+        filed_where=where.filed,
+        live_form=True,
     )
     cte_sql = f"deduped AS ({body})"
-    return cte_sql, params
+    return cte_sql, {**where.params, **filing.params}
+
+
+async def ctx_filing(conn, ch, agency_id: int, ctx: RangeCtx, *, table: str = UPDATES_TABLE) -> Filing:
+    """How a read of ``ctx``'s service dates in ``table`` files its rows (`pipeline.live_filing.filing`)."""
+    return await filing(conn, ch, agency_id, ctx.from_date, ctx.to_date, table=table)
 
 
 def _stop_visits_cte_ch(
     ctx: RangeCtx,
+    filing: Filing,
     *,
     include_scheduled_sec: bool = False,
     table: str = UPDATES_TABLE,
 ) -> tuple[str, dict]:
     """:func:`_dedup_cte_ch`'s counterpart for a reader that pairs a stop's
     arrival with its departure: a ``visits`` CTE over
-    `pipeline.db.build_stop_visits_ch_sql`, filtered by ``ctx`` the same way.
-    Returns ``(cte_sql, parameters)``; ``agency_id`` is the caller's to add."""
-    where, params = build_updates_filter_ch(ctx)
-    body = build_stop_visits_ch_sql(extra_where=where, include_scheduled_sec=include_scheduled_sec, table=table)
-    return f"visits AS ({body})", params
+    `pipeline.db.build_stop_visits_ch_sql`, filtered and filed by ``ctx`` and
+    ``filing`` the same way. Returns ``(cte_sql, parameters)``; ``agency_id``
+    is the caller's to add."""
+    filing.check(ctx.from_date, ctx.to_date)
+    where = band_candidates(updates_filter_ch(ctx), ctx.time_band, filing)
+    body = build_stop_visits_ch_sql(
+        extra_where=where.raw,
+        include_scheduled_sec=include_scheduled_sec,
+        table=table,
+        stamp=filing.stamp,
+        filed_where=where.filed,
+        live_form=True,
+    )
+    return f"visits AS ({body})", {**where.params, **filing.params}
 
 
 def _ch_rows(result) -> list[dict]:

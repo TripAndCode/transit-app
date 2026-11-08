@@ -82,6 +82,13 @@ become Nullable.
   clamped/rounded values). `round()` is round-half-to-even vs Postgres's
   round-half-away-from-zero. See `pipeline/reports/rankings.py::_ranking_live`
   (rank()/count() window functions) and its `_round2`/`_round1` helpers.
+- A ClickHouse JOIN of the observations to a small table can be planned with
+  the sides swapped, building the hash table from the observation scan. On
+  agency-scale scans that costs several times the read itself. The API client
+  turns `query_plan_join_swap_table` off (`api/clickhouse.py`). A JOIN on
+  several String keys is also slow to probe at that scale; a live filed read
+  joins the schedule archive on one `cityHash64` of them instead
+  (`pipeline/static_archive.py::observation_rows`'s `hashed_key`).
 - A ClickHouse `Array(String)` parameter cannot contain `None` — a Nullable
   column's NULL value must be filtered out in Python before it reaches a
   `col IN {param:Array(String)}` binding, or the query raises a DatabaseError.

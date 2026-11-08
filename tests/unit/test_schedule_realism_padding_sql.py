@@ -22,6 +22,13 @@ class _RecordingCh:
         return _EmptyResult()
 
 
+class _UnstampedAgencyConn:
+    """An agency whose ingest stamps no timetable version, so its rows are read as ingested."""
+
+    async def fetchval(self, *_args):
+        return None
+
+
 async def test_schedule_realism_padding_filters_the_route_before_aggregating(monkeypatch):
     from pipeline.query import tool_queries
 
@@ -32,13 +39,15 @@ async def test_schedule_realism_padding_filters_the_route_before_aggregating(mon
     ch = _RecordingCh()
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 7))
 
-    result = await tool_queries.schedule_realism_padding(1, ctx, None, ch, route="R9")
+    result = await tool_queries.schedule_realism_padding(1, ctx, _UnstampedAgencyConn(), ch, route="R9")
 
     assert result["rows"] == []
     ((sql, parameters),) = ch.calls
     route_filter = "route_code IN {ch_routes:Array(String)}"
     assert parameters["ch_routes"] == ["R9"]
-    assert sql.count(route_filter) == 1
-    assert sql.index(route_filter) < sql.index(" GROUP BY ")
+    # Once on the row as stored, keeping a row with no route that filing could
+    # give this one, and once on the filed row; both ahead of the aggregation.
+    assert sql.count(route_filter) == 2
+    assert sql.rindex(route_filter) < sql.index(" GROUP BY ")
     after_cte = sql[sql.rindex(")") :]
     assert "route_code" not in after_cte

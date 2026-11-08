@@ -380,6 +380,7 @@ def test_stop_visits_departures_match_the_shared_dedup_row_for_row(include_sched
 
 def test_stop_visits_cte_applies_the_range_filter():
     from api.range import RangeCtx
+    from pipeline.live_filing import AS_INGESTED
     from pipeline.reports.filters import _stop_visits_cte_ch
 
     polls = [
@@ -389,7 +390,7 @@ def test_stop_visits_cte_applies_the_range_filter():
         _poll("p4.pb", _at(86400), 2, arr=99),
     ]
     ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 1), routes=("R1",))
-    cte_sql, params = _stop_visits_cte_ch(ctx)
+    cte_sql, params = _stop_visits_cte_ch(ctx, AS_INGESTED)
     rows = _query(
         polls,
         f"WITH {cte_sql} SELECT stop_sequence, dep_delay, arr_delay FROM visits ORDER BY stop_sequence",

@@ -18,7 +18,7 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from functools import cached_property
-from typing import Annotated, Any, Literal, cast, get_args
+from typing import Annotated, Any, Literal, NamedTuple, cast, get_args
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
@@ -771,43 +771,45 @@ def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     )
 
 
-def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
-    """Combined WHERE fragment for ClickHouse's ``updates`` table.
+class UpdatesFilter(NamedTuple):
+    """``ctx``'s date range, DOW, time band, service and routes filters on the
+    ClickHouse observations, in the two parts a read that files its rows
+    (`pipeline.static_archive.observation_rows`) tests apart, with their
+    ``{name: value}`` parameters for ``ch.query(..., parameters=...)``. Every
+    fragment uses its own parameter names, so the parts compose freely.
 
-    Applies date range + DOW + time-band + service + routes filters against
-    ClickHouse's `updates` table. Returns a single AND-joined fragment plus a
-    ``{name: value}`` dict ready for ``ch.query(..., parameters=...)`` —
-    ClickHouse uses named `{name:Type}` parameters, not asyncpg's positional
-    ``$N``, so there's no `next_param` to thread; every fragment here uses
-    its own unique parameter names.
+    *raw* tests the columns filing never rewrites, on each row as ingest
+    stored it, so it prunes the scan. *filed* tests the scheduled time and the
+    route, which filing can rewrite, on the filed row ('' for no test). A
+    route filter is in both: *raw* also keeps a row with no route, which
+    filing may give one.
     """
-    parts: list[str] = []
+
+    raw: str
+    filed: str
+    params: dict
+
+
+def updates_filter_ch(ctx: RangeCtx) -> UpdatesFilter:
+    """``ctx``'s :class:`UpdatesFilter`."""
+    raw: list[str] = []
+    filed: list[str] = []
     params: dict = {}
-
-    frag, p = date_range_clause_ch(ctx)
-    parts.append(frag)
-    params.update(p)
-
-    frag, p = dow_clause_ch(ctx)
-    if frag != "1":
-        parts.append(frag)
-        params.update(p)
-
-    frag, p = time_band_clause_ch(ctx)
-    if frag != "1":
-        parts.append(frag)
-        params.update(p)
-
-    frag, p = service_date_clause_ch(ctx)
-    if frag != "1":
-        parts.append(frag)
-        params.update(p)
-
+    for clause, part in (
+        (date_range_clause_ch(ctx), raw),
+        (dow_clause_ch(ctx), raw),
+        (time_band_clause_ch(ctx), filed),
+        (service_date_clause_ch(ctx), raw),
+    ):
+        frag, p = clause
+        if frag != "1":
+            part.append(frag)
+            params.update(p)
     if ctx.routes:
-        parts.append("route_code IN {ch_routes:Array(String)}")
+        raw.append("(route_code IN {ch_routes:Array(String)} OR route_code IS NULL)")
+        filed.append("route_code IN {ch_routes:Array(String)}")
         params["ch_routes"] = list(ctx.routes)
-
-    return " AND ".join(parts), params
+    return UpdatesFilter(" AND ".join(raw), " AND ".join(filed), params)
 
 
 def time_band_case_sql(column: str) -> str:

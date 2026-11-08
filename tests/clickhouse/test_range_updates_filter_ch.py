@@ -1,5 +1,5 @@
 """Unit + integration coverage for api.range's ClickHouse-dialect filter
-builders (build_updates_filter_ch and its clause helpers), which the
+builders (updates_filter_ch and its clause helpers), which the
 pipeline/reports queries over the live ClickHouse `updates` table filter
 through.
 
@@ -21,12 +21,12 @@ import pytest
 
 from api.range import (
     RangeCtx,
-    build_updates_filter_ch,
     date_range_clause_ch,
     dow_clause_ch,
     scheduled_sec_ch,
     time_band_ch,
     time_band_clause_ch,
+    updates_filter_ch,
 )
 from pipeline.service_day import service_date_ch
 from tests.fixtures.service_dates import selecting
@@ -110,8 +110,10 @@ def test_time_band_clause_ch_unknown_band_is_noop_not_keyerror():
     assert params == {}
 
 
-def test_build_updates_filter_ch_default_date_only():
-    frag, params = build_updates_filter_ch(_ctx())
+def test_updates_filter_ch_default_date_only():
+    where = updates_filter_ch(_ctx())
+    frag, params = where.raw, where.params
+    assert where.filed == ""
     assert "toDate(captured_at" in frag
     assert "toDayOfWeek" not in frag
     assert "scheduled_time" not in frag
@@ -124,21 +126,28 @@ def _resolved(service, *dates: date):
     return selecting(service, date(2026, 5, 13), date(2026, 6, 11), *dates)
 
 
-def test_build_updates_filter_ch_adds_service_dates_and_routes():
+def test_updates_filter_ch_adds_service_dates_and_routes():
     resolved = _resolved("平日", date(2026, 5, 13), date(2026, 5, 14))
-    frag, params = build_updates_filter_ch(_ctx(service="平日", service_dates=resolved, routes=("R1", "R2")))
+    where = updates_filter_ch(_ctx(service="平日", service_dates=resolved, routes=("R1", "R2")))
+    frag, params = where.raw, where.params
     assert f"{service_date_ch()} IN {{ch_service_dates:Array(Date)}}" in frag
     assert "service_type" not in frag
-    assert "route_code IN {ch_routes:Array(String)}" in frag
+    # A row with no route is kept before filing, which can give it one; the
+    # route itself is tested on the filed row.
+    assert "(route_code IN {ch_routes:Array(String)} OR route_code IS NULL)" in frag
+    assert where.filed == "route_code IN {ch_routes:Array(String)}"
     assert params["ch_service_dates"] == [date(2026, 5, 13), date(2026, 5, 14)]
     assert params["ch_routes"] == ["R1", "R2"]
 
 
-def test_build_updates_filter_ch_all_clauses_combined():
+def test_updates_filter_ch_all_clauses_combined():
     resolved = _resolved("土日祝", date(2026, 5, 16), date(2026, 5, 17))
     ctx = _ctx(dow="weekend", time_band="evening", service="土日祝", service_dates=resolved, routes=("R9",))
-    frag, params = build_updates_filter_ch(ctx)
-    assert " AND " in frag
+    where = updates_filter_ch(ctx)
+    params = where.params
+    assert " AND " in where.raw
+    # The band reads the scheduled time, which filing can rewrite.
+    assert "scheduled_sec" in where.filed and "scheduled_sec" not in where.raw
     for name in ("ch_from_date", "ch_to_date", "ch_tb_start", "ch_tb_end", "ch_service_dates", "ch_routes"):
         assert name in params
 
@@ -156,7 +165,7 @@ def _ch_test_client():
 
 
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
-def test_build_updates_filter_ch_buckets_date_range_by_jst_day_not_utc_day():
+def test_updates_filter_ch_buckets_date_range_by_jst_day_not_utc_day():
     """A captured_at of 2026-01-01 20:00 UTC is 2026-01-02 05:00 JST. A
     date-range filter of [2026-01-02, 2026-01-02] must include this row
     (JST bucketing); a bare-UTC toDate() would put it in 2026-01-01 and
@@ -185,7 +194,7 @@ def test_build_updates_filter_ch_buckets_date_range_by_jst_day_not_utc_day():
         ],
     )
     ctx = _ctx(from_date=date(2026, 1, 2), to_date=date(2026, 1, 2))
-    frag, params = build_updates_filter_ch(ctx)
+    frag, _, params = updates_filter_ch(ctx)
     result = client.query(
         f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
         parameters={"agency_id": 1, **params},
@@ -194,7 +203,7 @@ def test_build_updates_filter_ch_buckets_date_range_by_jst_day_not_utc_day():
     # Sanity check the inverse: the UTC day [2026-01-01, 2026-01-01] must NOT
     # match — otherwise this "test" would pass even with a bare-UTC bug.
     ctx_utc_day = _ctx(from_date=date(2026, 1, 1), to_date=date(2026, 1, 1))
-    frag2, params2 = build_updates_filter_ch(ctx_utc_day)
+    frag2, _, params2 = updates_filter_ch(ctx_utc_day)
     result2 = client.query(
         f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag2}",
         parameters={"agency_id": 1, **params2},
@@ -225,7 +234,7 @@ def test_dow_clause_ch_matches_python_isoweekday():
         [("a/1.pb", captured_at, "T1", "weekday", "10:00:00", "R1", 1, 30)],
     )
     ctx = _ctx(dow="weekday", from_date=date(2026, 8, 3), to_date=date(2026, 8, 3))
-    frag, params = build_updates_filter_ch(ctx)
+    frag, _, params = updates_filter_ch(ctx)
     result = client.query(
         f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
         parameters={"agency_id": 1, **params},
@@ -233,7 +242,7 @@ def test_dow_clause_ch_matches_python_isoweekday():
     assert result.result_rows[0][0] == 1
 
     ctx_weekend = _ctx(dow="weekend", from_date=date(2026, 8, 3), to_date=date(2026, 8, 3))
-    frag_we, params_we = build_updates_filter_ch(ctx_weekend)
+    frag_we, _, params_we = updates_filter_ch(ctx_weekend)
     result_we = client.query(
         f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag_we}",
         parameters={"agency_id": 1, **params_we},

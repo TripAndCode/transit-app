@@ -532,7 +532,12 @@ the scope as one sentence above their content
   many of the request's days it covers, then the days with none recorded (時刻表).
   These are days not yet analyzed, or days from an ingest that stamps no
   version. A version is named by its loaded zip's name, with the fetch day
-  that `gtfs_static_YYYYMMDD` carries. A live scan names its timetables too.
+  that `gtfs_static_YYYYMMDD` carries. A live scan names its timetables too,
+  and files every observation as analyze does, under the timetable in force on
+  its service date (`pipeline/live_filing.py`), so its figures and the
+  aggregates agree. Where a load or a span has moved the version in force since
+  analyze last ran, the live scan already files those days under the new one,
+  and its stamp names that one rather than the one analyze recorded.
   They come from one indexed read per request
   (`pipeline/reports/schedule_revision.py: read_schedule_days`), which also
   gives the trend chart its timetable-revision markers, and they render in the

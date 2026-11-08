@@ -34,6 +34,10 @@ Semantics assumed:
   service-day clock: 07:58:00 is hour 7, and 24:10:00 is hour 24 of the
   service day its trip belongs to. Its weekday is its service date's ISO
   weekday, Monday 1.
+- A departure's time band is the one of ``TIME_BANDS`` its scheduled
+  departure falls in on the wall clock, each band including its start and
+  excluding its end: 24:10:00 is 00:10, in the late night. A departure with
+  no scheduled time is in no band.
 
 Service delivered, per service date, for a feed confirmed to send the trip
 and stop statuses:
@@ -79,6 +83,16 @@ from tests.fixtures.scenario import Scenario
 ON_TIME_MAX_LATE_SEC = 60
 OVER_FIVE_MIN_SEC = 300
 EARLY_SEC = 60
+# Each band's first and end wall-clock hour.
+TIME_BANDS = {
+    "morning": (5, 9),
+    "forenoon": (9, 12),
+    "noon": (12, 14),
+    "afternoon": (14, 17),
+    "evening": (17, 20),
+    "night": (20, 24),
+    "late_night": (0, 5),
+}
 
 
 @dataclass(frozen=True)
@@ -99,6 +113,13 @@ class Departure:
     @property
     def weekday(self) -> int:
         return self.service_date.isoweekday()
+
+    @property
+    def time_band(self) -> str | None:
+        if self.scheduled_sec is None:
+            return None
+        wall = self.scheduled_sec % (24 * 3600)
+        return next(band for band, (first, end) in TIME_BANDS.items() if first * 3600 <= wall < end * 3600)
 
 
 def before_midnight(d: Departure) -> bool:
@@ -257,9 +278,9 @@ def by_route_day_type(found: Outcome) -> dict[tuple[str, str], Figures]:
     return _grouped(found, lambda d: (d.route_id, d.day_type), _scheduled(None))
 
 
-def by_route(found: Outcome) -> dict[str, Figures]:
+def by_route(found: Outcome, where: Where = None) -> dict[str, Figures]:
     """Per route, pooled over every service day and day type."""
-    return _grouped(found, lambda d: d.route_id)
+    return _grouped(found, lambda d: d.route_id, where)
 
 
 def by_day(found: Outcome) -> dict[date, Figures]:

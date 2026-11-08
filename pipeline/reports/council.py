@@ -42,9 +42,8 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from api.clickhouse import max_captured_at_before_by_agency
-from api.range import RangeCtx, build_updates_filter_ch
+from api.range import RangeCtx, updates_filter_ch
 from api.scope_applied import ALL_SIX
-from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.db import observation_filter_ch
 from pipeline.freshness import is_stale
 from pipeline.histogram import (
@@ -56,9 +55,10 @@ from pipeline.histogram import (
     exact_window,
     on_time_from_columns,
 )
+from pipeline.live_filing import band_candidates
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
-from pipeline.reports.filters import _dedup_cte_ch
+from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
 from pipeline.reports.network import compute_network_summary
 from pipeline.reports.rankings import (
     _avg_min,
@@ -71,6 +71,7 @@ from pipeline.reports.rankings import (
 )
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
+from pipeline.static_archive import observation_rows
 
 _log = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ async def _agency_on_time_pooled(
     if not tolerance_aggregates_serve(ctx, early_tolerance_sec, late_tolerance_sec):
         if ch is None:
             raise RuntimeError("council summary's live fallback requires a ClickHouse client")
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
+        cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
         low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
         result = await ch.query(
             f"WITH {cte_sql}\n"
@@ -413,7 +414,7 @@ async def compute_delay_certificate(
     agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
     agency_name = agency_row["agency_name"] if agency_row else str(agency_id)
 
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
         f"WITH {cte_sql},\n"
         "filtered AS (\n"
@@ -522,7 +523,7 @@ async def _recorded_stops(
     return {(r["trip_id"], r["day"], r["stop_sequence"]): (r["stop_name"], r["is_first"]) for r in found}
 
 
-async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:
+async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, conn, ch) -> bool:
     """Whether ``ctx`` holds any departure observation at all.
 
     A certificate lookup that lists nothing means either that no departure
@@ -533,14 +534,18 @@ async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, ch) -> bool:
     event, and that dedup keeps every event a raw row starts, so a raw row
     passing the same filters exists exactly when the certificate had an
     event to judge. Reading raw rows lets the probe stop at the first one
-    instead of aggregating the whole scope.
+    instead of aggregating the whole scope. They are filed as the
+    certificate's are (`pipeline.live_filing`).
     """
     if ch is None:
         raise RuntimeError("delay_certificate_observed requires a ClickHouse client")
-    where, ch_params = build_updates_filter_ch(ctx)
+    filing = await ctx_filing(conn, ch, agency_id, ctx)
+    filing.check(ctx.from_date, ctx.to_date)
+    where = band_candidates(updates_filter_ch(ctx), ctx.time_band, filing)
+    filed = " AND ".join(part for part in ("u.scheduled_time IS NOT NULL", where.filed) if part)
+    rows = observation_rows(observation_filter_ch(where.raw), filing.stamp, filed_where=filed, live_form=True)
     result = await ch.query(
-        f"SELECT 1 FROM {checked_table(UPDATES_TABLE)} AS u "
-        f"WHERE {observation_filter_ch(where)} AND u.scheduled_time IS NOT NULL LIMIT 1",
-        parameters={"agency_id": agency_id, **ch_params},
+        f"SELECT 1 {rows} LIMIT 1",
+        parameters={"agency_id": agency_id, **where.params, **filing.params},
     )
     return bool(result.result_rows)

@@ -334,6 +334,7 @@ def test_dedup_cte_ch_picks_latest_observation():
     from api.range import RangeCtx
     from db.clickhouse.bootstrap import apply_schema
     from pipeline.clickhouse import insert_updates
+    from pipeline.live_filing import AS_INGESTED
     from pipeline.reports.filters import _dedup_cte_ch
 
     client = _ch_test_client()
@@ -355,7 +356,7 @@ def test_dedup_cte_ch_picks_latest_observation():
         ],
     )
     ctx = RangeCtx(from_date=day, to_date=day)
-    cte_sql, params = _dedup_cte_ch(ctx)
+    cte_sql, params = _dedup_cte_ch(ctx, AS_INGESTED)
     result = client.query(
         f"WITH {cte_sql} SELECT dep_delay FROM deduped",
         parameters={"agency_id": 1, **params},

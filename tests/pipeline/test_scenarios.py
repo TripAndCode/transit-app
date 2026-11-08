@@ -50,6 +50,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport
 
+from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from tests.fixtures import scenario_oracle as oracle
 from tests.fixtures.scenario import (
     JST,
@@ -417,8 +418,9 @@ class Observed:
     """One scenario's run: the polls ingested under each timetable version,
     and what the pipeline produced: each table's rows, a ``time`` or an
     ``interval`` as its ``HH:MM:SS`` text; each route report's rows; the trend
-    report's first row; and the council summary of every window ``_windows``
-    names."""
+    report's first row; the council summary of every window ``_windows``
+    names; and the route table's response for each time band the truth
+    departs in."""
 
     scenario: Scenario
     batches: list[tuple[TimetableVersion, list[Poll]]]
@@ -426,6 +428,7 @@ class Observed:
     reports: dict[str, list]
     trend: dict[str, Any]
     council: dict[tuple[date, date], dict[str, Any]]
+    banded: dict[str, dict[str, Any]]
 
     @cached_property
     def choice(self) -> Choice:
@@ -536,20 +539,7 @@ def _reports_expected(observed: Observed, found: oracle.Outcome) -> Cells:
                 for route, f in routes.items()
             },
         )
-        | _cells(
-            f"GET reports/route_table {window}",
-            {
-                route: {
-                    "avg_min": _mean_min(f),
-                    "on_time_pct": _pct(f.on_time_share),
-                    "late5_pct": _pct(f.over_five_min_share),
-                    "late5_count": f.over_five_min,
-                    "samples": f.departures,
-                    "early_pct": _pct(f.early_share),
-                }
-                for route, f in routes.items()
-            },
-        )
+        | _cells(f"GET reports/route_table {window}", {route: _route_table_figures(f) for route, f in routes.items()})
         | _cells(
             f"GET reports/route_table {window}&preset=standard_m1_p5",
             {
@@ -570,25 +560,64 @@ def _reports_actual(observed: Observed) -> Cells:
             f"GET reports/on_time {window}",
             {r[0]: {"on_time_pct": r[2], "avg_min": r[3], "samples": r[4]} for r in reports["on_time"]},
         )
-        | _cells(
-            f"GET reports/route_table {window}",
-            {
-                r[0]: {
-                    "avg_min": r[1],
-                    "on_time_pct": r[2],
-                    "late5_pct": r[3],
-                    "late5_count": r[4],
-                    "samples": r[5],
-                    "early_pct": r[6],
-                }
-                for r in reports["route_table"]
-            },
-        )
+        | _cells(f"GET reports/route_table {window}", _route_table_rows(reports["route_table"]))
         | _cells(
             f"GET reports/route_table {window}&preset=standard_m1_p5",
             {r[0]: {"on_time_pct": r[2], "early_pct": r[6]} for r in reports["route_table_industry"]},
         )
     )
+
+
+def _route_table_figures(f: oracle.Figures) -> dict:
+    return {
+        "avg_min": _mean_min(f),
+        "on_time_pct": _pct(f.on_time_share),
+        "late5_pct": _pct(f.over_five_min_share),
+        "late5_count": f.over_five_min,
+        "samples": f.departures,
+        "early_pct": _pct(f.early_share),
+    }
+
+
+def _route_table_rows(rows: list) -> dict:
+    # route_table rows: (route_code, avg_min, on_time_pct, late5_pct, late5_count, samples, early_pct, ...)
+    return {
+        r[0]: {
+            "avg_min": r[1],
+            "on_time_pct": r[2],
+            "late5_pct": r[3],
+            "late5_count": r[4],
+            "samples": r[5],
+            "early_pct": r[6],
+        }
+        for r in rows
+    }
+
+
+def _banded_label(observed: Observed, band: str) -> str:
+    return f"GET reports/route_table {_window(observed.scenario)}&time_band={band}"
+
+
+def _banded_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """The route table of each time band the truth departs in, from a live
+    scan of the observations, as the oracle files each departure: under the
+    timetable in force on its service date. The table lists a route only
+    once it departs MIN_GROUP_SAMPLES times, include_sparse or not."""
+    cells: Cells = {}
+    for band in observed.banded:
+        routes = oracle.by_route(found, lambda d, band=band: d.time_band == band)
+        listed = {route: _route_table_figures(f) for route, f in routes.items() if f.departures >= MIN_GROUP_SAMPLES}
+        cells |= _cells(_banded_label(observed, band), listed)
+        cells |= _cells(_banded_label(observed, band), {"definition": {"source": "live"}})
+    return cells
+
+
+def _banded_actual(observed: Observed) -> Cells:
+    cells: Cells = {}
+    for band, response in observed.banded.items():
+        cells |= _cells(_banded_label(observed, band), _route_table_rows(response["rows"]))
+        cells |= _cells(_banded_label(observed, band), {"definition": {"source": response["definition"]["source"]}})
+    return cells
 
 
 def _side_label(table: str, after: bool) -> str:
@@ -745,7 +774,8 @@ _BEFORE_MIDNIGHT = (partial(_hourly_expected, after=False), partial(_hourly_actu
 _AFTER_MIDNIGHT = (partial(_hourly_expected, after=True), partial(_hourly_actual, after=True))
 _TIMETABLE = (_timetable_expected, _timetable_actual)
 _SERVICE = (_service_expected, _service_actual)
-_COMPARISONS = (_DAILY, _REPORTS_COMPARED, _BEFORE_MIDNIGHT, _AFTER_MIDNIGHT, _TIMETABLE, _SERVICE)
+_BANDED = (_banded_expected, _banded_actual)
+_COMPARISONS = (_DAILY, _REPORTS_COMPARED, _BEFORE_MIDNIGHT, _AFTER_MIDNIGHT, _TIMETABLE, _SERVICE, _BANDED)
 
 
 @dataclass(frozen=True)
@@ -1001,7 +1031,7 @@ async def _run_scenario(
     zip, its polls are ingested, and the closed days are promoted and
     analyzed before the next version is loaded."""
     from api.main import app
-    from pipeline import day_types, route_catalog, service_hours
+    from pipeline import day_types, live_filing, route_catalog, service_hours
     from pipeline.analyze import analyze
     from pipeline.promote import promote_closed_days
     from pipeline.static_loader import load_static
@@ -1025,6 +1055,7 @@ async def _run_scenario(
             day_types.invalidate_day_types()
             route_catalog.invalidate_retired_routes()
             service_hours.invalidate_service_hours()
+            live_filing.invalidate_schedule_joins()
             for poll in batch:
                 resp = await client.post(
                     f"/internal/collector/updates/{agency_id}",
@@ -1083,7 +1114,7 @@ def _council_figures(response: dict) -> dict[str, Any]:
     }
 
 
-async def _read_reports(scenario: Scenario, agency_id: int) -> tuple[dict[str, list], dict, dict]:
+async def _read_reports(scenario: Scenario, agency_id: int) -> tuple[dict[str, list], dict, dict, dict]:
     from api.main import app
 
     async def get(client, report: str, query: str) -> dict:
@@ -1102,7 +1133,12 @@ async def _read_reports(scenario: Scenario, agency_id: int) -> tuple[dict[str, l
             window: _council_figures(await get(client, "council_summary", f"from={window[0]}&to={window[1]}"))
             for window in _windows(scenario)
         }
-    return reports, trend, council
+        bands = sorted({d.time_band for d in oracle.outcome(scenario).departures} - {None})
+        banded = {
+            band: await get(client, "route_table", f"{_window(scenario)}&include_sparse=1&time_band={band}")
+            for band in bands
+        }
+    return reports, trend, council, banded
 
 
 def _empty_stores(pg_conn, ch_client, reset_sql: str) -> None:
@@ -1188,10 +1224,10 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             stack.push_async_callback(pool.close)
             await confirm_rt_field_coverage(pool, agency_id)
             app.state.pool, app.state.ch_client = pool, ch_async
-            reports, trend, council = await _read_reports(scenario, agency_id)
+            reports, trend, council, banded = await _read_reports(scenario, agency_id)
     except AssertionError as exc:
         raise RuntimeError(f"scenario {scenario.name}: an assertion failed while the pipeline ran") from exc
-    return Observed(scenario, batches, tables, reports, trend, council)
+    return Observed(scenario, batches, tables, reports, trend, council, banded)
 
 
 def _assert_clean(mismatches: list[str]) -> None:
@@ -1245,6 +1281,11 @@ def test_each_day_is_planned_and_filed_under_the_timetable_in_force(observed):
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_service_delivered_and_coverage_match_the_truth(observed):
     _assert_clean(_hard_mismatches(observed, _SERVICE))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_time_band_live_scans_match_the_truth(observed):
+    _assert_clean(_hard_mismatches(observed, _BANDED))
 
 
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CANCELLED_AFTER_PREDICTIONS_DIVERGENCE.reason)

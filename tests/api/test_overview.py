@@ -2291,7 +2291,7 @@ async def test_slow_path_grain_reaches_back_one_period_width(aconn, aagency_id, 
     from pipeline.reports.overview import _fetch_grain
 
     ctx = RangeCtx(from_date=date(2026, 4, 25), to_date=date(2026, 5, 24), time_band="morning")
-    grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+    grain = await _fetch_grain(aagency_id, ctx, aconn, ch_async_client)
     assert (grain.from_date, grain.hours_from, grain.to_date) == (
         date(2026, 3, 26),
         date(2026, 4, 25),
@@ -2330,7 +2330,7 @@ async def test_a_routes_filter_alone_reads_no_days_before_the_period(aconn, aage
     from pipeline.reports.overview import _fetch_grain
 
     ctx = RangeCtx(from_date=date(2026, 4, 25), to_date=date(2026, 5, 24), routes=("R_RT",))
-    grain = await _fetch_grain(aagency_id, ctx, ch_async_client, shape="period_hours")
+    grain = await _fetch_grain(aagency_id, ctx, aconn, ch_async_client, shape="period_hours")
     assert (grain.hours_from, grain.to_date) == (date(2026, 4, 25), date(2026, 5, 24))
     assert grain.route_rows is None
     assert sorted((d, hour) for d, hour, _n, _sum in grain.hour_rows) == [
@@ -2561,7 +2561,7 @@ async def test_slow_path_rejects_a_window_the_grain_does_not_cover(aconn, aagenc
     from pipeline.reports.overview import _fetch_grain, _headline_stats, _peak_hour_by_dow
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+    grain = await _fetch_grain(aagency_id, ctx, aconn, ch_async_client)
     # The grain reaches exactly ctx.days (7) before ctx.from_date, and no further.
     assert grain.from_date == date(2026, 5, 11)
     assert grain.to_date == date(2026, 5, 24)
@@ -2800,7 +2800,7 @@ async def test_route_weekly_history_grain_matches_live_exactly(aconn, aagency_id
     # 24-day ctx: grain spans 2026-04-07..2026-05-24, the weekly-history span is
     # 2026-04-27..2026-05-24 — covered.
     ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning")
-    grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+    grain = await _fetch_grain(aagency_id, ctx, aconn, ch_async_client)
     assert _grain_covers(grain, date(2026, 4, 27), date(2026, 5, 24))
 
     counting = _CountingCh(ch_async_client)
@@ -2826,7 +2826,7 @@ async def test_route_weekly_history_grain_matches_live_with_dow_filter(aconn, aa
 
     for dow in ("weekday", "weekend"):
         ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning", dow=dow)
-        grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
+        grain = await _fetch_grain(aagency_id, ctx, aconn, ch_async_client)
         counting = _CountingCh(ch_async_client)
         derived = await _route_weekly_history(aagency_id, ["R_WH"], ctx, aconn, ch=counting, grain=grain)
         assert counting.queries == []
@@ -2848,7 +2848,7 @@ async def test_route_weekly_history_falls_back_when_grain_too_narrow(aconn, aage
     # 7-day ctx: grain spans 2026-05-11..2026-05-24, weekly-history needs
     # 2026-04-27 — NOT covered.
     narrow = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
-    narrow_grain = await _fetch_grain(aagency_id, narrow, ch_async_client)
+    narrow_grain = await _fetch_grain(aagency_id, narrow, aconn, ch_async_client)
     assert not _grain_covers(narrow_grain, date(2026, 4, 27), date(2026, 5, 24))
 
     counting = _CountingCh(ch_async_client)
@@ -2859,7 +2859,7 @@ async def test_route_weekly_history_falls_back_when_grain_too_narrow(aconn, aage
     # Same `to_date`, so the same four buckets — the grain-derived answer for a
     # wide ctx must match the live answer for the narrow one.
     wide = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 24), time_band="morning")
-    wide_grain = await _fetch_grain(aagency_id, wide, ch_async_client)
+    wide_grain = await _fetch_grain(aagency_id, wide, aconn, ch_async_client)
     derived = await _route_weekly_history(aagency_id, ["R_WH"], wide, aconn, ch=ch_async_client, grain=wide_grain)
     assert fallback == derived, f"live fallback {fallback} != grain-derived {derived}"
 
@@ -2877,9 +2877,9 @@ async def test_route_weekly_history_grain_boundary_coverage(aconn, aagency_id, c
     just_under = RangeCtx(from_date=date(2026, 5, 12), to_date=to_date, time_band="morning")  # 13 days
     at_boundary = RangeCtx(from_date=date(2026, 5, 11), to_date=to_date, time_band="morning")  # 14 days
 
-    under_grain = await _fetch_grain(aagency_id, just_under, ch_async_client)
+    under_grain = await _fetch_grain(aagency_id, just_under, aconn, ch_async_client)
     assert not _grain_covers(under_grain, span_from, to_date)
-    boundary_grain = await _fetch_grain(aagency_id, at_boundary, ch_async_client)
+    boundary_grain = await _fetch_grain(aagency_id, at_boundary, aconn, ch_async_client)
     assert _grain_covers(boundary_grain, span_from, to_date)
     assert boundary_grain.from_date == span_from  # exactly reaches, not past
 
@@ -3030,7 +3030,7 @@ async def test_grain_fetches_route_rows_and_hour_rows_as_two_sets(aconn, aagency
     from pipeline.reports.overview import _fetch_grain
 
     counting = _CountingCh(ch_async_client)
-    grain = await _fetch_grain(aagency_id, _GRAIN_CTX, counting)
+    grain = await _fetch_grain(aagency_id, _GRAIN_CTX, aconn, counting)
 
     assert len(counting.queries) == 1
     assert "GROUP BY GROUPING SETS ((date, route_code), (date, " in counting.queries[0]
