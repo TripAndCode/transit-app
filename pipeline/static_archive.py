@@ -506,28 +506,33 @@ def _filed_columns(refit: bool) -> str:
     return ", ".join(columns)
 
 
-def observation_rows(where: str, stamp: Stamp, table: str = UPDATES_TABLE) -> str:
+def observation_rows(where: str, stamp: Stamp, table: str = UPDATES_TABLE, filed_where: str = "") -> str:
     """The FROM clause of a read of *table*'s rows matching *where*, aliased
     `u`, with `updates`' columns, each row filed under *stamp*'s timetable.
 
-    *where* names columns as `u.` columns. Under INGESTED the clause is the
-    table itself; otherwise a subquery that binds ScheduleJoin.params, which
-    files a row only by the segments in force. REFIT also joins the schedule
-    archive, so a read whose rows need none of it (refit_dates) is cheaper
-    under IN_FORCE, with the same result.
+    *where* names columns as `u.` columns and is tested on each row as ingest
+    stored it, so it must not test a column filing rewrites (static_version_id,
+    and under REFIT service_type, scheduled_time, scheduled_sec and
+    route_code): a row ingest left without a schedule would be dropped before
+    REFIT gives it one. A test of those goes in *filed_where*, on the filed
+    row. Under INGESTED the clause is the table itself; otherwise a subquery
+    that binds ScheduleJoin.params, which files a row only by the segments in
+    force. REFIT also joins the schedule archive, so a read whose rows need
+    none of it (refit_dates) is cheaper under IN_FORCE, with the same result.
     """
     if stamp is Stamp.INGESTED:
-        return f"FROM {checked_table(table)} AS u WHERE {where}"
+        return f"FROM {checked_table(table)} AS u WHERE {where}" + (f" AND ({filed_where})" if filed_where else "")
     marked = _marked_rows(where, table)
+    after = f" WHERE {filed_where}" if filed_where else ""
     if stamp is Stamp.IN_FORCE:
-        return f"FROM (SELECT {_filed_columns(False)} FROM ({marked}) AS u) AS u"
+        return f"FROM (SELECT {_filed_columns(False)} FROM ({marked}) AS u) AS u{after}"
     return (
         f"FROM (SELECT {_filed_columns(True)} FROM ({marked}) AS u "
         "ANY LEFT JOIN (SELECT content_hash, trip_id, stop_sequence, service_type, route_id, scheduled_time, "
         f"scheduled_sec FROM {SCHEDULE} WHERE agency_id = {{agency_id:UInt16}} "
         "AND has({force_contents:Array(String)}, content_hash)) AS s "
         "ON s.content_hash = u.refit_content AND s.trip_id = u.trip_id "
-        "AND s.stop_sequence = toInt32(u.stop_sequence)) AS u"
+        f"AND s.stop_sequence = toInt32(u.stop_sequence)) AS u{after}"
     )
 
 

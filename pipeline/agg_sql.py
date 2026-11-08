@@ -183,10 +183,10 @@ def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> s
                            ) AS latest
                     """
         + observation_rows(
-            "u.agency_id = {agency_id:UInt16} AND u.stop_id IS NOT NULL AND u.route_code IS NOT NULL "
-            "AND u.scheduled_sec IS NOT NULL AND u.dep_delay IS NOT NULL "
+            "u.agency_id = {agency_id:UInt16} AND u.stop_id IS NOT NULL AND u.dep_delay IS NOT NULL "
             "AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}" + date_where,
             stamp,
+            filed_where="u.route_code IS NOT NULL AND u.scheduled_sec IS NOT NULL",
         )
         + """
                     GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
