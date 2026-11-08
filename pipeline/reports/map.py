@@ -62,8 +62,12 @@ async def route_exists(conn, agency_id: int, route_code: str) -> bool:
 def _route_rows(where: UpdatesFilter, stamp: Stamp, trip_filter_sql: str = "") -> str:
     """The route's departure rows matching *where*, filed under *stamp*
     (`pipeline.static_archive.observation_rows`), as the FROM clause both
-    shape dedups read. A row with no route is read too, since filing can give
-    it this one; the route is tested on the filed row."""
+    shape dedups read. Refitting can give a row with no route this one, so a
+    REFIT read also reads those and tests the route on the filed row; any
+    other tests it on the row as stored."""
+    if stamp is not Stamp.REFIT:
+        raw = f"u.route_code = {{route:String}} {trip_filter_sql} AND {where.raw}"
+        return observation_rows(observation_filter_ch(raw), stamp, live_form=True)
     raw = f"(u.route_code = {{route:String}} OR u.route_code IS NULL) {trip_filter_sql} AND {where.raw}"
     filed = " AND ".join(part for part in ("u.route_code = {route:String}", where.filed) if part)
     return observation_rows(observation_filter_ch(raw), stamp, filed_where=filed, live_form=True)
@@ -268,11 +272,11 @@ async def compute_route_shape(
     # all-time history, and an unbounded scan of the route's ENTIRE history
     # would pay for a full-table scan to return only a small number of rows.
     filed = await filing(conn, ch, agency_id, ctx.from_date, ctx.to_date)
-    where = band_candidates(updates_filter_ch(ctx), ctx.time_band, filed)
+    where = band_candidates(updates_filter_ch(ctx, refit=filed.stamp is Stamp.REFIT), ctx.time_band, filed)
     ch_params = {**where.params, **filed.params}
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
-    # only one non-key column (dep_delay) is read off the winning row, so a
-    # single argMax suffices. Base-table columns are qualified with the `u.`
+    # An argMax-based dedup, as pipeline.db.build_dedup_ch_sql's: only one
+    # non-key column (dep_delay) is read off the winning row, so a single argMax
+    # suffices. Base-table columns are qualified with the `u.`
     # alias, so a column `where` (api.range.updates_filter_ch) names is never
     # read as the output alias of the same name.
     # The per-stop stats query below (once a shape is chosen) keeps a full

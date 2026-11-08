@@ -14,6 +14,7 @@ from api.range import (
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.db import build_dedup_ch_sql, build_stop_visits_ch_sql
 from pipeline.live_filing import Filing, band_candidates, filing
+from pipeline.static_archive import Stamp
 
 # 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
 # submodule that reconciles ClickHouse's round-half-to-even live path against
@@ -80,7 +81,7 @@ def _dedup_cte_ch(
     ``pipeline.reports.rankings._route_wd_we_avg_ch``).
     """
     filing.check(ctx.from_date, ctx.to_date)
-    where = band_candidates(updates_filter_ch(ctx), ctx.time_band, filing)
+    where = band_candidates(updates_filter_ch(ctx, refit=filing.stamp is Stamp.REFIT), ctx.time_band, filing)
     body = build_dedup_ch_sql(
         extra_where=where.raw,
         include_captured_at=False,
@@ -112,7 +113,7 @@ def _stop_visits_cte_ch(
     ``filing`` the same way. Returns ``(cte_sql, parameters)``; ``agency_id``
     is the caller's to add."""
     filing.check(ctx.from_date, ctx.to_date)
-    where = band_candidates(updates_filter_ch(ctx), ctx.time_band, filing)
+    where = band_candidates(updates_filter_ch(ctx, refit=filing.stamp is Stamp.REFIT), ctx.time_band, filing)
     body = build_stop_visits_ch_sql(
         extra_where=where.raw,
         include_scheduled_sec=include_scheduled_sec,

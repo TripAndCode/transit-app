@@ -72,7 +72,7 @@ from pipeline.reports.rankings import (
 )
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.service_day import service_date_of
-from pipeline.static_archive import observation_rows
+from pipeline.static_archive import Stamp, observation_rows
 
 _log = logging.getLogger(__name__)
 
@@ -542,7 +542,7 @@ async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, conn, ch) ->
         raise RuntimeError("delay_certificate_observed requires a ClickHouse client")
     filing = await ctx_filing(conn, ch, agency_id, ctx)
     filing.check(ctx.from_date, ctx.to_date)
-    where = band_candidates(updates_filter_ch(ctx), ctx.time_band, filing)
+    where = band_candidates(updates_filter_ch(ctx, refit=filing.stamp is Stamp.REFIT), ctx.time_band, filing)
     filed = " AND ".join(part for part in ("u.scheduled_time IS NOT NULL", where.filed) if part)
     rows = observation_rows(observation_filter_ch(where.raw), filing.stamp, filed_where=filed, live_form=True)
     result = await ch.query(

@@ -44,10 +44,11 @@ from pipeline.service_day import clock_to_sec, service_day_offset
 from pipeline.static_archive import Stamp
 
 
-def _record_filter(day: date, route_code: str, trip_id: str | None = None) -> UpdatesFilter:
+def _record_filter(day: date, route_code: str, trip_id: str | None = None, *, refit: bool = False) -> UpdatesFilter:
     """The row-level filter for one service day of one route, and one trip
-    when given: the same date and route clauses every report scan uses."""
-    where = updates_filter_ch(RangeCtx(from_date=day, to_date=day, routes=(route_code,)))
+    when given: the same date and route clauses every report scan uses, split
+    for a read that refits its rows when *refit* (`api.range.UpdatesFilter`)."""
+    where = updates_filter_ch(RangeCtx(from_date=day, to_date=day, routes=(route_code,)), refit=refit)
     if trip_id is None:
         return where
     return where._replace(
@@ -267,9 +268,9 @@ async def compute_record_trips(agency_id: int, day: date, route_code: str, conn,
     recorded no trip of the route that day."""
     if ch is None:
         raise RuntimeError("compute_record_trips requires a ClickHouse client")
-    where = _record_filter(day, route_code)
     table = await table_holding(ch, agency_id, day)
     filed = await filing(conn, ch, agency_id, day, day, table=table)
+    where = _record_filter(day, route_code, refit=filed.stamp is Stamp.REFIT)
     result = await ch.query(
         record_trips_sql(where, table, filed.stamp),
         parameters={"agency_id": agency_id, **where.params, **filed.params},
@@ -290,9 +291,9 @@ async def compute_record_stops(agency_id: int, day: date, route_code: str, trip_
     """
     if ch is None:
         raise RuntimeError("compute_record_stops requires a ClickHouse client")
-    where = _record_filter(day, route_code, trip_id)
     table = await table_holding(ch, agency_id, day)
     filed = await filing(conn, ch, agency_id, day, day, table=table)
+    where = _record_filter(day, route_code, trip_id, refit=filed.stamp is Stamp.REFIT)
     result = await ch.query(
         record_stops_sql(where, table, filed.stamp),
         parameters={"agency_id": agency_id, **where.params, **filed.params},

@@ -321,8 +321,8 @@ def test_dedup_ch_keeps_a_latest_poll_with_no_schedule_unscheduled():
 
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_dedup_cte_ch_picks_latest_observation():
-    """`pipeline.reports.filters._dedup_cte_ch` composes
-    `build_updates_filter_ch`'s WHERE fragment with `build_dedup_ch_sql`'s
+    """`pipeline.reports.filters._dedup_cte_ch` composes, for rows read as
+    ingested, `build_updates_filter_ch`'s WHERE fragment with `build_dedup_ch_sql`'s
     dedup — every report/route/overview helper reads live `updates` through
     this one wrapper. Ports tests/pipeline/test_dedup.py's equivalent
     end-to-end assertion against the now-deleted asyncpg `_dedup_cte`.

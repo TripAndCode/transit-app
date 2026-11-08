@@ -37,13 +37,13 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # Clamping here, in the ONE shared dedup builder, protects every averaged surface
 # (reports, overview, route-summary, and the live Ask/report queries) — not just
 # the heatmap. Raw `updates` is left intact, so feed-health forensics still work
-# and the ceiling is re-tunable by re-analyze. Every other hand-rolled dedup on
-# the Map tab (api.routers.map's live/route/stop-profile queries,
-# pipeline.reports.map's shape-vote/stats queries) applies this same clamp
-# directly in its own WHERE, even where it computes no average: a frozen feed
-# can report the same implausible reading as a single current value, not just
-# skew a mean. The ceiling sits well above any plausible real delay, so a
-# genuinely very-late bus still counts everywhere.
+# and the ceiling is re-tunable by re-analyze. The Map tab's own dedups
+# (api.routers.map's live/route/stop-profile queries, pipeline.reports.map's
+# shape-vote/stats queries) apply this same clamp through observation_filter_ch,
+# even where they compute no average: a frozen feed can report the same
+# implausible reading as a single current value, not just skew a mean. The
+# ceiling sits well above any plausible real delay, so a genuinely very-late
+# bus still counts everywhere.
 MAX_PLAUSIBLE_DELAY_SEC = 7200
 
 

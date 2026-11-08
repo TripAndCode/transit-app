@@ -58,7 +58,7 @@ from api.scope_applied import ALL_SIX, scope_applied
 from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline.cache import async_lru_cache
-from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE
+from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table
 from pipeline.day_types import DayTypes, load_day_types
 from pipeline.db import build_dedup_ch_sql, observation_filter_ch
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
@@ -224,6 +224,10 @@ async def _latest_route_observation(
     make a miss cheap: route_code sits behind captured_at in the ClickHouse
     sort key, so proving a route has no rows in the window still reads the
     agency's whole window.
+
+    The route is the filed one (`pipeline.live_filing`), as the trips and
+    the stop profile read it: a route whose polls carry none of their own is
+    found where filing names it.
     """
     if not await route_exists(conn, agency_id, route_code):
         return None
@@ -231,16 +235,35 @@ async def _latest_route_observation(
         agency_latest = await max_captured_at(ch, agency_id, table=table)
         if agency_latest is None:
             continue
+        bound = agency_latest - timedelta(days=30)
+        filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
         result = await ch.query(
-            f"SELECT captured_at FROM {table} "
-            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-            "  AND captured_at >= {bound:DateTime64} "
-            "ORDER BY captured_at DESC LIMIT 1",
-            parameters={"agency_id": agency_id, "route": route_code, "bound": agency_latest - timedelta(days=30)},
+            _latest_route_observation_sql(table, filed.stamp),
+            parameters={"agency_id": agency_id, "route": route_code, "bound": bound, **filed.params},
         )
         if result.result_rows:
             return _as_utc(result.result_rows[0][0])
     return None
+
+
+def _latest_route_observation_sql(table: str, stamp: Stamp) -> str:
+    """The latest capture of the route bound as `route` since `bound` in
+    *table*, each poll filed under *stamp*. Refitting can give a poll with no
+    route this one, so a REFIT read also reads those and tests the route on
+    the filed poll."""
+    if stamp is not Stamp.REFIT:
+        return (
+            f"SELECT captured_at FROM {checked_table(table)} "
+            "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
+            "  AND captured_at >= {bound:DateTime64} "
+            "ORDER BY captured_at DESC LIMIT 1"
+        )
+    raw = (
+        "u.agency_id = {agency_id:UInt16} AND (u.route_code = {route:String} OR u.route_code IS NULL) "
+        "AND u.captured_at >= {bound:DateTime64}"
+    )
+    rows = observation_rows(raw, stamp, table, "u.route_code = {route:String}", live_form=True)
+    return f"SELECT u.captured_at {rows} ORDER BY u.captured_at DESC LIMIT 1"
 
 
 # A poll can report several future stops for one trip. The lowest sequence in
@@ -279,10 +302,16 @@ def live_delays_sql(stamp: Stamp) -> str:
 
 
 async def _live_filing(
-    conn: asyncpg.Connection, ch: AsyncClient, agency_id: int, since: datetime, latest: datetime
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    agency_id: int,
+    since: datetime,
+    latest: datetime,
+    *,
+    table: str = LIVE_TABLE,
 ) -> Filing:
-    """How a read of `updates_live`'s rows captured from *since* to *latest* files them."""
-    return await filing(conn, ch, agency_id, service_date_of(since), service_date_of(latest), table=LIVE_TABLE)
+    """How a read of *table*'s rows captured from *since* to *latest* files them."""
+    return await filing(conn, ch, agency_id, service_date_of(since), service_date_of(latest), table=table, since=since)
 
 
 @router.get("/delays/live", response_model=None)
@@ -1185,13 +1214,15 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
 def _route_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = "") -> str:
     """The FROM clause of one route's plausible departures on the service day
     bound as *day_param*, read from *table*, each poll filed under *stamp*
-    (`pipeline.static_archive.observation_rows`). A poll with no route is read
-    too, since filing can give it this one; the route, and *filed_where*, are
-    tested on the filed poll."""
-    raw = (
-        "(u.route_code = {route:String} OR u.route_code IS NULL) "
-        f"AND {service_date_ch('u.captured_at')} = {{{day_param}:Date}}"
-    )
+    (`pipeline.static_archive.observation_rows`), and tested by *filed_where*.
+    Refitting can give a poll with no route this one, so a REFIT read also
+    reads those and tests the route, and *filed_where*, on the filed poll;
+    any other tests them on the poll as stored."""
+    on_day = f"{service_date_ch('u.captured_at')} = {{{day_param}:Date}}"
+    if stamp is not Stamp.REFIT:
+        raw = " AND ".join(part for part in ("u.route_code = {route:String}", on_day, filed_where) if part)
+        return observation_rows(observation_filter_ch(raw), stamp, table, live_form=True)
+    raw = f"(u.route_code = {{route:String}} OR u.route_code IS NULL) AND {on_day}"
     filed = " AND ".join(part for part in ("u.route_code = {route:String}", filed_where) if part)
     return observation_rows(observation_filter_ch(raw), stamp, table, filed, live_form=True)
 

@@ -15,10 +15,10 @@ from api.range import (
     RangeCtx,
     UnresolvedServiceFilter,
     build_agg_stop_filter,
+    build_updates_filter_ch,
     day_types_for,
     resolve_service_dates,
     selected_service_dates,
-    updates_filter_ch,
 )
 from pipeline.cache import _keyable
 from pipeline.day_types import TWO_WAY, load_day_types, public_holidays_between
@@ -325,7 +325,7 @@ def test_selected_dates_keep_only_the_ctx_window():
 
 
 def test_clickhouse_filter_selects_the_service_dates():
-    frag, _, params = updates_filter_ch(replace(_resolved(), routes=("R1",)))
+    frag, params = build_updates_filter_ch(replace(_resolved(), routes=("R1",)))
     assert "service_type" not in frag
     assert f"{service_date_ch()} IN {{ch_service_dates:Array(Date)}}" in frag
     assert params["ch_service_dates"] == [date(2025, 4, 28), date(2025, 4, 30)]
@@ -352,7 +352,7 @@ def test_postgres_filters_select_the_service_dates(build, column):
 @pytest.mark.parametrize(
     "build",
     [
-        lambda ctx: updates_filter_ch(ctx),
+        lambda ctx: build_updates_filter_ch(ctx),
         lambda ctx: build_agg_stop_filter(ctx, next_param=2),
         lambda ctx: _agg_filter(ctx, 2),
         lambda ctx: _dist_filter(ctx, 2),
@@ -366,7 +366,7 @@ def test_every_builder_raises_on_an_unresolved_service_filter(build):
 
 def test_a_service_with_no_dates_in_the_window_matches_nothing():
     empty = _resolved(dates=())
-    frag, _, params = updates_filter_ch(empty)
+    frag, params = build_updates_filter_ch(empty)
     assert "0" in frag.split(" AND ") and "ch_service_dates" not in params
     pg_frag, pg_params, _ = _agg_filter(empty, 2)
     assert "FALSE" in pg_frag.split(" AND ") and pg_params == [str(FROM), str(TO)]

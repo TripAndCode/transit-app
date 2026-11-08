@@ -265,7 +265,7 @@ def _grain_window(grain: _Grain, ctx: RangeCtx) -> Iterator[_RouteRow]:
     """Route rows inside ``ctx``'s date window that satisfy ``ctx.dow``.
 
     This is the in-Python equivalent of the date-range + DOW half of
-    ``updates_filter_ch(ctx)``; the other half (service / routes /
+    ``build_updates_filter_ch(ctx)``; the other half (service / routes /
     time_band) was already applied server-side when the grain was fetched,
     because those three are identical across every consumer of one request.
 

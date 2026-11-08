@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 from api.range import TimeBand, UpdatesFilter, time_band_clause_ch_for
 from pipeline import static_archive
-from pipeline.cache import _REGISTERED_CLEARS, async_lru_cache, clear_all
+from pipeline.cache import async_lru_cache, clear_all
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.service_day import service_date_of, service_day_start_utc
 from pipeline.static_archive import ScheduleJoin, Stamp
@@ -66,7 +66,7 @@ async def schedule_join(conn, ch, agency_id: int) -> ScheduleJoin | None:
     against."""
     if not await _stamps_versions(conn, agency_id):
         return None
-    state = tuple((await ch.query(_ARCHIVE_STATE_SQL, parameters={"agency": agency_id})).result_rows[0])
+    state = await _archive_state(ch, agency_id)
     # Rows a compute cache holds were filed under the archive as it stood, so
     # they are forgotten once it moves, as a recorded build forgets them
     # (pipeline.reports.definition.stamp_build): a figure is never served
@@ -80,24 +80,30 @@ async def schedule_join(conn, ch, agency_id: int) -> ScheduleJoin | None:
 # The archive state each agency's join was last read under.
 _seen_states: dict[int, tuple] = {}
 
+# Each agency's archive state, until the monotonic time it expires: one read
+# serves every live read of a request, and a state that moves in another
+# process is seen within the TTL. Not a compute cache: clear_all, which
+# stamp_build can run between a live report's stamp and its rows, would make
+# one request read it twice.
+_states: dict[int, tuple[float, tuple]] = {}
+_ARCHIVE_STATE_TTL_SECONDS = 15
 
-# Whether each agency's ingest stamps a version, until the monotonic time it
-# expires. Keyed by the agency alone, whichever connection read it, and
-# cleared with every compute cache.
-_stamping: dict[int, tuple[float, bool]] = {}
-_STAMPING_TTL_SECONDS = 300
-_REGISTERED_CLEARS.append(_stamping.clear)
 
-
-async def _stamps_versions(conn, agency_id: int) -> bool:
+async def _archive_state(ch, agency_id: int) -> tuple:
     now = time.monotonic()
-    cached = _stamping.get(agency_id)
+    cached = _states.get(agency_id)
     if cached is not None and now < cached[0]:
         return cached[1]
+    state = tuple((await ch.query(_ARCHIVE_STATE_SQL, parameters={"agency": agency_id})).result_rows[0])
+    _states[agency_id] = (now + _ARCHIVE_STATE_TTL_SECONDS, state)
+    return state
+
+
+@async_lru_cache(maxsize=256, ttl_seconds=300)
+async def _stamps_versions(conn, agency_id: int) -> bool:
+    """Whether the agency's ingest stamps each row's timetable version."""
     strategy = await conn.fetchval("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
-    stamps = strategy in VERSION_STAMPING_STRATEGIES
-    _stamping[agency_id] = (now + _STAMPING_TTL_SECONDS, stamps)
-    return stamps
+    return strategy in VERSION_STAMPING_STRATEGIES
 
 
 # Cleared with every compute cache (pipeline.cache.clear_all), which a build
@@ -109,18 +115,30 @@ async def _schedule_join(ch, agency_id: int, state: tuple) -> ScheduleJoin:
 
 
 def invalidate_schedule_joins() -> None:
-    """Forget every cached join, after a load changed an agency's timetables."""
+    """Forget every cached join and archive state, after a load changed an agency's timetables."""
     _schedule_join.cache_clear()  # type: ignore[attr-defined]
+    _states.clear()
 
 
-async def filing(conn, ch, agency_id: int, first: date, last: date, *, table: str = UPDATES_TABLE) -> Filing:
-    """How a read of *table*'s rows of the service dates [first, last] files them."""
+async def filing(
+    conn,
+    ch,
+    agency_id: int,
+    first: date,
+    last: date,
+    *,
+    table: str = UPDATES_TABLE,
+    since: datetime | None = None,
+) -> Filing:
+    """How a read of *table*'s rows of the service dates [first, last] files
+    them. *since*, for a read of a window that starts within *first*, is the
+    earliest capture it reads, so deciding costs the window, not the day."""
     between = (first, last)
     join = await schedule_join(conn, ch, agency_id)
     params = {} if join is None else join.filing_params(between)
     if join is None or not params["force_stems"]:
         return Filing(Stamp.INGESTED, between, {})
-    if not refits(join, await _stamped_spans(ch, agency_id, between, table)):
+    if not refits(join, await _stamped_spans(ch, agency_id, between, table, since)):
         return Filing(Stamp.INGESTED, between, {})
     return Filing(Stamp.REFIT, between, params)
 
@@ -143,8 +161,9 @@ def refits(join: ScheduleJoin, stamped: Iterable[tuple[str, date, date]]) -> boo
 
 
 # Each version name the agency's rows in the window were stamped with, and
-# its first and last capture: a GROUP BY of one LowCardinality column, so it
-# costs a fraction of the scan it decides about.
+# its first and last capture. It reads the rows the read it decides about
+# reads, but only two of their columns, grouped by one LowCardinality column,
+# so it costs a fraction of that read.
 _STAMPED_SPANS_SQL = (
     "SELECT ifNull(u.static_version_id, '') AS stem, min(u.captured_at), max(u.captured_at) FROM {table} AS u "
     "WHERE u.agency_id = {{agency_id:UInt16}} AND u.captured_at >= {{stamped_from:DateTime64}} "
@@ -152,13 +171,16 @@ _STAMPED_SPANS_SQL = (
 )
 
 
-async def _stamped_spans(ch, agency_id: int, between: tuple[date, date], table: str) -> list[tuple[str, date, date]]:
-    """Each version name *table*'s rows of the service dates *between* carry, with the first and last date it is on."""
+async def _stamped_spans(
+    ch, agency_id: int, between: tuple[date, date], table: str, since: datetime | None = None
+) -> list[tuple[str, date, date]]:
+    """Each version name *table*'s rows of the service dates *between*,
+    captured from *since* when given, carry, with the first and last date it is on."""
     result = await ch.query(
         _STAMPED_SPANS_SQL.format(table=checked_table(table)),
         parameters={
             "agency_id": agency_id,
-            "stamped_from": service_day_start_utc(between[0]),
+            "stamped_from": since or service_day_start_utc(between[0]),
             "stamped_to": service_day_start_utc(between[1] + timedelta(days=1)),
         },
     )

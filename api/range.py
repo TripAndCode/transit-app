@@ -771,18 +771,57 @@ def time_band_clause_ch_for(band: TimeBand) -> tuple[str, dict]:
     )
 
 
-class UpdatesFilter(NamedTuple):
-    """``ctx``'s date range, DOW, time band, service and routes filters on the
-    ClickHouse observations, in the two parts a read that files its rows
-    (`pipeline.static_archive.observation_rows`) tests apart, with their
-    ``{name: value}`` parameters for ``ch.query(..., parameters=...)``. Every
-    fragment uses its own parameter names, so the parts compose freely.
+def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
+    """Combined WHERE fragment for ClickHouse's ``updates`` table.
 
-    *raw* tests the columns filing never rewrites, on each row as ingest
-    stored it, so it prunes the scan. *filed* tests the scheduled time and the
-    route, which filing can rewrite, on the filed row ('' for no test). A
-    route filter is in both: *raw* also keeps a row with no route, which
-    filing may give one.
+    Applies date range + DOW + time-band + service + routes filters against
+    ClickHouse's `updates` table. Returns a single AND-joined fragment plus a
+    ``{name: value}`` dict ready for ``ch.query(..., parameters=...)`` —
+    ClickHouse uses named `{name:Type}` parameters, not asyncpg's positional
+    ``$N``, so there's no `next_param` to thread; every fragment here uses
+    its own unique parameter names.
+    """
+    parts: list[str] = []
+    params: dict = {}
+
+    frag, p = date_range_clause_ch(ctx)
+    parts.append(frag)
+    params.update(p)
+
+    frag, p = dow_clause_ch(ctx)
+    if frag != "1":
+        parts.append(frag)
+        params.update(p)
+
+    frag, p = time_band_clause_ch(ctx)
+    if frag != "1":
+        parts.append(frag)
+        params.update(p)
+
+    frag, p = service_date_clause_ch(ctx)
+    if frag != "1":
+        parts.append(frag)
+        params.update(p)
+
+    if ctx.routes:
+        parts.append("route_code IN {ch_routes:Array(String)}")
+        params["ch_routes"] = list(ctx.routes)
+
+    return " AND ".join(parts), params
+
+
+class UpdatesFilter(NamedTuple):
+    """``ctx``'s filters on the ClickHouse observations, with their
+    ``{name: value}`` parameters, in the two parts a read that files its rows
+    (`pipeline.static_archive.observation_rows`) tests apart.
+
+    *raw* is tested on each row as ingest stored it, and *filed* on the filed
+    row ('' for no test). Only a read that refits rows (Stamp.REFIT) can
+    rewrite the scheduled time and the route, so only it splits them: its
+    *filed* tests the time band and the route, and its *raw* keeps both a
+    row of the route and a row with no route, which filing may give it. Any
+    other read tests every clause as stored, in :func:`build_updates_filter_ch`'s
+    one fragment.
     """
 
     raw: str
@@ -790,11 +829,14 @@ class UpdatesFilter(NamedTuple):
     params: dict
 
 
-def updates_filter_ch(ctx: RangeCtx) -> UpdatesFilter:
-    """``ctx``'s :class:`UpdatesFilter`."""
+def updates_filter_ch(ctx: RangeCtx, *, refit: bool = False) -> UpdatesFilter:
+    """``ctx``'s :class:`UpdatesFilter`, split for a read that refits rows when *refit*."""
+    if not refit:
+        where, params = build_updates_filter_ch(ctx)
+        return UpdatesFilter(where, "", params)
     raw: list[str] = []
     filed: list[str] = []
-    params: dict = {}
+    params = {}
     for clause, part in (
         (date_range_clause_ch(ctx), raw),
         (dow_clause_ch(ctx), raw),

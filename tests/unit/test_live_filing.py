@@ -111,7 +111,8 @@ def test_a_name_of_the_same_content_as_the_version_in_force_needs_no_refit():
 # A read the archive does not refile tests the route and the band on each row
 # as stored, once, as an AND-chain the sort key can serve: no `OR route_code IS
 # NULL`, which only a REFIT read needs to reach rows filing gives a route.
-_ROUTED_BAND = RangeCtx(from_date=date(2026, 10, 3), to_date=date(2026, 10, 9), time_band="noon", routes=("R1",))
+_BAND_ONLY = {"from_date": date(2026, 10, 3), "to_date": date(2026, 10, 9), "time_band": "noon"}
+_ROUTED_BAND = RangeCtx(**_BAND_ONLY, routes=("R1",))
 
 
 def test_a_shared_scan_read_as_ingested_tests_each_route_once_as_stored():
@@ -141,3 +142,28 @@ def test_hand_written_reads_as_ingested_test_each_route_once_as_stored():
     sql = record_trips_sql(_record_filter(date(2026, 10, 3), "R1"), "updates", Stamp.INGESTED)
     assert "route_code IS NULL" not in sql
     assert sql.count("route_code IN {ch_routes:Array(String)}") == 1
+
+
+def test_a_shared_scan_read_as_ingested_is_the_scan_main_reads():
+    from api.range import build_updates_filter_ch
+    from pipeline.db import build_dedup_ch_sql
+
+    where, params = build_updates_filter_ch(_ROUTED_BAND)
+    assert _dedup_cte_ch(_ROUTED_BAND, AS_INGESTED) == (f"deduped AS ({build_dedup_ch_sql(extra_where=where)})", params)
+
+
+def test_hand_written_refit_reads_also_read_rows_filing_gives_the_route():
+    from api.range import updates_filter_ch
+    from api.routers.map import _latest_route_observation_sql, build_route_stop_profile_sql, build_route_trips_sql
+    from pipeline.reports.map import _route_shape_vote_dedup_sql
+
+    where = updates_filter_ch(RangeCtx(**_BAND_ONLY), refit=True)
+    for sql in (
+        build_route_trips_sql("noon", stamp=Stamp.REFIT)[0],
+        build_route_stop_profile_sql("updates", Stamp.REFIT),
+        _route_shape_vote_dedup_sql(where, Stamp.REFIT),
+        _latest_route_observation_sql("updates", Stamp.REFIT),
+    ):
+        assert "(u.route_code = {route:String} OR u.route_code IS NULL)" in sql
+        assert "u.route_code = {route:String}" in sql[sql.index("ANY LEFT JOIN") :]
+    assert "route_code IS NULL" not in _latest_route_observation_sql("updates", Stamp.INGESTED)

@@ -383,6 +383,7 @@ async def test_a_stop_visit_scan_reads_the_timetable_in_force(refiled, aconn, ch
 
 async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_under(refiled, ch_client, client):
     from pipeline import static_archive
+    from pipeline.live_filing import invalidate_schedule_joins
 
     window = f"from={refiled.day}&to={refiled.day}&time_band=noon&include_sparse=1"
     response = (await client.get(f"/api/{refiled.agency_id}/reports/route_table?{window}")).json()
@@ -394,6 +395,9 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
     static_archive.record_span(
         ch_client, refiled.agency_id, refiled.b, (refiled.day, refiled.day + timedelta(days=180))
     )
+    # As a load in this process does; another process's is seen once the
+    # cached archive state expires.
+    invalidate_schedule_joins()
     response = (await client.get(f"/api/{refiled.agency_id}/reports/route_table?{window}")).json()
     assert [(v["name"], v["days"]) for v in response["definition"]["timetable_versions"]] == [(refiled.b, 1)]
     # Under B, b departs at 14:10, outside the band: f and g alone are fewer
