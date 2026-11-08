@@ -75,7 +75,7 @@ def test_headline_states_the_early_departure_rate_with_its_threshold(locale, exp
     ],
 )
 def test_a_limited_early_tolerance_is_the_early_departure_threshold(locale, words, footnote):
-    definition = resolve_definition_meta("council_summary", 30, None)
+    definition = resolve_definition_meta("council_summary", 30, 300)
     text = format_council_summary_text(
         _payload(early_departure_pct=4.2), definition, "青森市バス", "2026-08-12", "2026-09-10", locale=locale
     )
@@ -390,8 +390,11 @@ def test_a_custom_tolerance_says_the_comparison_keeps_the_shared_definition(loca
     assert _SAME_DEFINITION_NOTE[locale] in format_council_summary_footnotes(custom, payload, locale)
     assert _SAME_DEFINITION_NOTE[locale] not in format_council_summary_footnotes(_DEFINITION, payload, locale)
     # A tolerance spelled out as the default one is still the shared definition.
-    spelled_out = resolve_definition_meta("council_summary", None, 60)
+    spelled_out = resolve_definition_meta("council_summary", 60, 300)
     assert _SAME_DEFINITION_NOTE[locale] not in format_council_summary_footnotes(spelled_out, payload, locale)
+    # The legacy preset is another definition than the board's.
+    legacy = resolve_definition_meta("council_summary", None, 60)
+    assert _SAME_DEFINITION_NOTE[locale] in format_council_summary_footnotes(legacy, payload, locale)
     without_gate = format_council_summary_footnotes(custom, _payload(), locale)
     assert _SAME_DEFINITION_NOTE[locale] not in without_gate
 

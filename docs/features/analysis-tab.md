@@ -159,9 +159,10 @@ per route over the scope:
   and the count of departures over five minutes late, and observations. The
   on-time cell carries the 「誤差大」 badge when its 95% interval is wider than
   ±5 points. The early-departure rate counts the departures more than the
-  definition's `early_departure_sec` early: the scope's `early`, or one minute
-  while early departures count as on time. Its header and the note under the
-  table name that threshold; it is not a sort.
+  definition's `early_departure_sec` early: the window's early tolerance, one
+  minute by default, or one minute while every early departure counts as on
+  time. Its header and the note under the table name that threshold; it is
+  not a sort.
 - **Sort.** `sort` picks the figure: `avg`, `on_time`, `late5_share` or
   `late5_count`. The routes that need attention come first; `order=best`
   turns the order around. The sorted column alone carries the bar and the
@@ -198,7 +199,9 @@ per route over the scope:
   maximum.
 - **Context.** The heading names the window (「30日間（…）の集計」), so its
   figures are not mistaken for the Pulse screen's shorter window. Under the
-  table sit the on-time definition and what 「5分超」 counts.
+  table sit the on-time definition, a preset called by its reader's name
+  (「定時（業界標準） = 遅れ5分以内、早発1分以内。」 by default), and what
+  「5分超」 counts.
   `HeadwayQualityPanel` follows the on-time sort.
 - **Targets.** `PerformanceStandardPanel` follows the table under every sort,
   and the route page shows it for that route alone. It renders nothing until
@@ -240,7 +243,7 @@ endpoint that takes them declares as its own bounded query params.
 | `routes` | comma list, at most 100 |
 | `stop` | a GTFS `stop_id` |
 | `dir` | `0` or `1` (`direction_id`) |
-| `late`, `early` | on-time tolerance in seconds, `0`–`3600` |
+| `late`, `early` | on-time tolerance in seconds, `0`–`3600`; `early` also takes `any`, every early departure on time |
 
 Rules the two sides share:
 
@@ -287,7 +290,13 @@ response honoured that field.
   theirs in their own routers.
 - **`late`/`early`.** They are the on-time tolerance, applied by `on_time`,
   `route_table`'s on-time column and `council_summary`; `early` also moves
-  their early-departure rate's threshold. Elsewhere they are
+  their early-departure rate's threshold. Each one left out is the default
+  preset's (`DEFAULT_PRESET` in `pipeline/reports/rankings.py`, mirrored by
+  `frontend/src/api/onTimeDefault.json`): `standard_m1_p5`, no more than 60 s
+  early and 300 s late. `early=any` counts every early departure, so
+  `early=any&late=60` is the `legacy_60s` window, as is `preset=legacy_60s`.
+  A link or saved view that names only one of them gets the default for the
+  other. Elsewhere they are
   ignored and reported as `false`, including `worst_5min`, whose over-5-min
   threshold stays its own `late_tolerance_sec`. `route_table`'s over-5-min
   share and count keep that fixed threshold too. The scope summary reports `early` as `true`, since
@@ -306,13 +315,14 @@ response honoured that field.
 Pulse, Routes, Time, Why, Compare by periods and the Reports summary state
 the scope as one sentence above their content
 (`frontend/src/components/scope/ScopeSentence.tsx`), for example
-「青森市バスの全路線を、9/1〜9/28のすべての曜日・全時間帯で、定時は1分以内として見る」.
+「青森市バスの全路線を、9/1〜9/28のすべての曜日・全時間帯で、定時は5分以内として見る」.
 
 - **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
   scope into one labelled token per condition, in sentence order, and names
   the `scope_applied` field each maps to. The locale template
   `scope.sentence` places them with `[slot]` placeholders. Timetable, stop,
-  direction and the early tolerance appear only when set, in `[extras]`. A line picked by name reads as that
+  direction and the early tolerance appear only when set, in `[extras]`;
+  `early=any` reads 「早発も定時扱い」. A line picked by name reads as that
   line with its variant count, not as a route count. `scopeTitle` reuses
   the same words for saved-analysis titles. Punctuation after a token stays
   on its line.
@@ -330,8 +340,8 @@ the scope as one sentence above their content
     remove the last day, and the timetable select.
   - Time: the seven bands and all day.
   - Routes: the grouped route picker.
-  - On-time tolerance: 1/3/5 minutes and a slider that writes when the drag
-    ends.
+  - On-time tolerance: 1/3/5 minutes, 5 by default, and a slider that writes
+    when the drag ends.
 - **The controls' data.** Once a popover opens or the strip is pinned,
   `useScopeSummary` reads `GET /api/{agency_id}/scope/summary`
   (`api/routers/scope_summary.py`, computed by
@@ -357,11 +367,14 @@ the scope as one sentence above their content
     the aggregate's exact columns, and the other steps are histogram
     estimates. An `early` over 300 s, below the histogram's
     floor, leaves the curve out. Beneath
-    it, an early-departure choice sets `early`: every early departure on time
-    (the default) or none more than a minute early, which with the 5-minute
-    pill is the `standard_m1_p5` window. An `early` a link set to anything
-    else presses neither and is named beneath them. The `early` token in the
-    sentence opens the same choice.
+    it, an early-departure choice sets `early`: none more than a minute
+    early (the default, no param), which with the 5-minute pill is the
+    `standard_m1_p5` window, or every early departure on time (`early=any`),
+    which with the 1-minute pill is the `legacy_60s` window. An `early` a link
+    set to anything else presses neither and is named beneath them. The
+    `early` token in the sentence opens the same choice. The scope summary
+    reads the scope's `early` the same way, so the curve's early bound is
+    one minute unless the scope names another.
 
   The bars ignore the period and the weekday filter, the weekday means
   ignore the weekday filter, and the route means ignore the routes filter,
@@ -507,7 +520,8 @@ the scope as one sentence above their content
   measurement point, dedup rule, and exclusion threshold that produced the
   numbers — resolved from the same tolerance params `get_report` validates,
   never hardcoded, so a custom-tolerance export can't silently read back as
-  the `legacy_60s` default. In the CSV it's a one-cell preamble row before
+  the default. Its `preset` names the window, `standard_m1_p5` for a request
+  that names none. In the CSV it's a one-cell preamble row before
   the column header; in the UI, `DefinitionMetaBlock` renders it from the
   API response's `definition` field.
 - The block also names the method version (`method_version`, see

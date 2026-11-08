@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { DefinitionMeta, SourceMix, TimetableVersion } from "../api/types";
+import { PRESET_NAMES } from "../api/onTimeDefault";
 import { toJstISO } from "../api/scope";
 import { formatDate, formatDuration } from "../utils/format";
 
@@ -159,13 +160,19 @@ export function OnTimeDefinition({ definition }: Props) {
 
 /** The definition's on-time rule, or null for a report without one. An
  *  unbounded early side lets every early departure count as on time, which
- *  the sentence says outright: a reader otherwise assumes a window. */
+ *  the sentence says outright: a reader otherwise assumes a window. A named
+ *  preset is called by its reader's name, in the words the printed footnotes
+ *  use (pipeline/reports/definition.py), so a figure compared with a
+ *  published one says which convention it follows. */
 function onTimeSentence(definition: DefinitionMeta, t: TFunction): string | null {
   if (definition.late_tolerance_sec == null) return null;
   const late = formatDuration(definition.late_tolerance_sec);
+  const preset = definition.preset != null && PRESET_NAMES.has(definition.preset) ? definition.preset : null;
+  const named = preset == null ? "" : "_named";
+  const values = { late, preset: preset == null ? "" : t(`definitionMeta.preset.${preset}`) };
   return definition.early_tolerance_sec == null
-    ? t("definitionMeta.on_time_late", { late })
-    : t("definitionMeta.on_time_late_early", { late, early: formatDuration(definition.early_tolerance_sec) });
+    ? t(`definitionMeta.on_time_late${named}`, values)
+    : t(`definitionMeta.on_time_late_early${named}`, { ...values, early: formatDuration(definition.early_tolerance_sec) });
 }
 
 /** The method version and the day its aggregates were last built: the JST

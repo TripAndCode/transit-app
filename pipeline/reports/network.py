@@ -60,7 +60,8 @@ from zoneinfo import ZoneInfo
 from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.freshness import is_stale
-from pipeline.reports.comparability import assess
+from pipeline.histogram import on_time_count_sql
+from pipeline.reports.comparability import BOARD_ON_TIME_WINDOW, assess
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.reports.supply import compute_supply_metrics_by_agency
@@ -70,8 +71,11 @@ _log = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
 
-_PERF_SQL = """
-    SELECT agency_id, SUM(samples) AS n, SUM(sum_delay_sec) AS sd, SUM(on_time_count) AS ot,
+# The board's on-time count, read off each row's exact columns
+# (pipeline.histogram.on_time_count_sql), so no histogram is merged.
+_PERF_SQL = f"""
+    SELECT agency_id, SUM(samples) AS n, SUM(sum_delay_sec) AS sd,
+           SUM({on_time_count_sql(*BOARD_ON_TIME_WINDOW)}) AS ot,
            MIN(date) AS data_from, MAX(date) AS data_to
     FROM agg_route_daily_dist
     WHERE date BETWEEN $1 AND $2

@@ -24,7 +24,6 @@ from api.range import RangeCtx
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import (
-    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
     count_early,
     count_on_time,
@@ -33,6 +32,8 @@ from pipeline.histogram import (
 )
 from pipeline.reports.filters import _dedup_cte_ch, _round2
 from pipeline.reports.rankings import (
+    DEFAULT_EARLY_TOLERANCE_SEC,
+    DEFAULT_LATE_TOLERANCE_SEC,
     MIN_GROUP_SAMPLES,
     _avg_min,
     _pct1,
@@ -65,17 +66,17 @@ async def compute_route_table(
     conn,
     ch=None,
     min_samples: int = MIN_GROUP_SAMPLES,
-    early_tolerance_sec: int | None = None,
-    late_tolerance_sec: int | None = None,
+    early_tolerance_sec: int | None = DEFAULT_EARLY_TOLERANCE_SEC,
+    late_tolerance_sec: int = DEFAULT_LATE_TOLERANCE_SEC,
 ) -> list[tuple]:
     """Every route observed at least ``min_samples`` times in ``ctx``, as
     ``(route_code, avg_min, on_time_pct, late5_pct, late5_count, samples,
     early_pct)``, in no particular order: :func:`sort_route_table` orders them.
 
     The over-5-minute count reads the exact column analyze() bakes into
-    agg_route_daily_dist. An on-time window the exact columns answer, the
-    default and the industry window among them
-    (:func:`~pipeline.histogram.exact_window`), reads them too, with the
+    agg_route_daily_dist. An on-time window the exact columns answer, both
+    presets among them (:func:`~pipeline.histogram.exact_window`), reads them
+    too, with the
     early-departure count summed from the leading histogram buckets; any other
     window merges the routes' delay histograms, as compute_on_time does
     (:func:`~pipeline.histogram.count_on_time`). A time_band filter, or a
@@ -89,7 +90,7 @@ async def compute_route_table(
             agency_id, ctx, ch, min_samples, early_tolerance_sec, late_tolerance_sec, early_sec
         )
 
-    high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
+    high_sec = late_tolerance_sec
     exact = exact_window(early_tolerance_sec, high_sec)
     if exact:
         rows = await _read_dist_scalars(agency_id, ctx, conn, early_sec=early_sec)
@@ -133,7 +134,7 @@ async def _route_table_live(
     ch,
     min_samples: int,
     early_tolerance_sec: int | None,
-    late_tolerance_sec: int | None,
+    late_tolerance_sec: int,
     early_sec: int,
 ) -> list[tuple]:
     """The table from a live scan, for a time_band the aggregates cannot split
@@ -148,7 +149,7 @@ async def _route_table_live(
     low_clause = "1" if early_tolerance_sec is None else "dep_delay >= {rt_low:Int32}"
     params = {
         "agency_id": agency_id,
-        "rt_high": LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec,
+        "rt_high": late_tolerance_sec,
         "rt_low": 0 if early_tolerance_sec is None else -early_tolerance_sec,
         "rt_late5": LEGACY_SEVERE_LATE_TOLERANCE_SEC,
         "rt_early": -early_sec,

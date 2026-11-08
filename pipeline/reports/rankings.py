@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Final, Literal
 
 from api.range import (
     RangeCtx,
@@ -101,22 +102,53 @@ def report_reads_aggregates(
     raise ValueError(f"unknown report type {report_type!r}")
 
 
-# Named on-time/late tolerance presets, as (early_tolerance_sec,
-# late_tolerance_sec), accepted by api/routers/reports.py's ``preset`` and
-# named back by pipeline.reports.definition.resolve_definition_meta for any
-# request whose tolerances are a preset's.
-# - "legacy_60s" is the spelling of "don't override the tolerance": up to 60 s
-#   late, any early departure on time, read from the exact analyze()-time
-#   column. An explicit tolerance reads the exact columns too where they
-#   answer its window (pipeline.histogram.exact_window), and the merged
-#   histogram where they do not (pipeline.histogram.count_on_time).
-# - "standard_m1_p5" is the window operators publish: no more than 60 s early
+# Named on-time windows, as (early_tolerance_sec, late_tolerance_sec), an
+# early tolerance of None counting every early departure as on time. Accepted
+# by api/routers/reports.py's ``preset`` and named back by
+# pipeline.reports.definition.resolve_definition_meta for any window that is
+# a preset's. Both read analyze()'s exact columns
+# (pipeline.histogram.exact_window), as does any window on their edges; other
+# windows read the merged histogram (pipeline.histogram.count_on_time).
+# - "legacy_60s": up to 60 s late, any early departure on time.
+# - "standard_m1_p5": the window operators publish, no more than 60 s early
 #   and no more than 300 s late.
 STANDARD_PRESET_NAME = "standard_m1_p5"
-ON_TIME_PRESETS: dict[str, tuple[int | None, int | None]] = {
-    LEGACY_PRESET_NAME: (None, None),
+ON_TIME_PRESETS: dict[str, tuple[int | None, int]] = {
+    LEGACY_PRESET_NAME: (None, LEGACY_ON_TIME_LATE_TOLERANCE_SEC),
     STANDARD_PRESET_NAME: (60, 300),
 }
+
+# The on-time window of every figure whose request names none: each report,
+# the agencies board and its comparability gate, the scope summary, the
+# performance standards and the Ask tools. frontend/src/api/onTimeDefault.json
+# mirrors it, and tests/unit/test_on_time_default.py ties the two together.
+DEFAULT_PRESET = STANDARD_PRESET_NAME
+DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC = ON_TIME_PRESETS[DEFAULT_PRESET]
+
+# How a request spells an unbounded early side, every early departure on
+# time, since leaving the early tolerance out names the default's.
+EARLY_ANY: Final = "any"
+EarlyTolerance = int | Literal["any"] | None
+
+
+def on_time_window(
+    preset: str | None = None, early: EarlyTolerance = None, late: int | None = None
+) -> tuple[int | None, int]:
+    """The (early_tolerance_sec, late_tolerance_sec) window a request names:
+    its *preset*'s, or else each tolerance it names, :data:`EARLY_ANY` for an
+    unbounded early side, and the default preset's for each it leaves out. The
+    one place a default fills in. Raises ``KeyError`` for an unknown preset;
+    a caller validates its own input first."""
+    if preset is not None:
+        return ON_TIME_PRESETS[preset]
+    if early == EARLY_ANY:
+        resolved_early: int | None = None
+    elif early is None:
+        resolved_early = DEFAULT_EARLY_TOLERANCE_SEC
+    else:
+        resolved_early = int(early)
+    return resolved_early, DEFAULT_LATE_TOLERANCE_SEC if late is None else late
+
 
 # An early departure is one more than the definition's early tolerance early.
 # A definition that counts every early departure as on time has no such
@@ -379,11 +411,11 @@ async def compute_on_time(
     ctx: RangeCtx,
     conn,
     ch=None,
-    threshold_sec: int = 60,
+    threshold_sec: int | None = None,
     limit: int | None = 100,
     sort_order: str = "desc",
-    early_tolerance_sec: int | None = None,
-    late_tolerance_sec: int | None = None,
+    early_tolerance_sec: int | None = DEFAULT_EARLY_TOLERANCE_SEC,
+    late_tolerance_sec: int = DEFAULT_LATE_TOLERANCE_SEC,
 ) -> list[tuple]:
     """On-time percentage per route, one row per route (see :func:`_service_label`).
 
@@ -391,25 +423,24 @@ async def compute_on_time(
     ``sort_order='asc'`` returns worst routes first (lowest %).
     ``limit=None`` returns every route with more than 20 observations.
 
-    ``early_tolerance_sec``/``late_tolerance_sec`` generalize the on-time
-    window to ``-early_tolerance_sec <= dep_delay <= late_tolerance_sec`` (an
-    unboundedly-early departure still counts as on-time when
-    ``early_tolerance_sec`` is left ``None`` — the LEGACY_60S preset's own
-    behavior, unchanged). Leaving BOTH unset (the default, ``ON_TIME_PRESETS
-    [LEGACY_PRESET_NAME]``) is byte-identical to the historical behavior:
-    ``on_time_count`` (<=60s, baked in at analyze time) is read exactly, and
-    ``threshold_sec``/``time_band`` still control the pre-existing live
-    ClickHouse fallback for that path. Passing EITHER tolerance reads
-    agg_route_daily_dist's exact columns where they answer the window and its
-    merged delay histogram where they do not
-    (:func:`pipeline.histogram.exact_window`): exact for a late tolerance of
-    60 s or 300 s with no early tolerance or one on a whole minute up to
-    300 s, the industry window among them, and otherwise an estimate within
-    one histogram bucket, i.e. ``pipeline.histogram.WIDTH`` seconds. So a
-    custom on-time definition still avoids both a raw-``updates`` scan and an
-    analyze() re-aggregation. A time_band filter still needs the live scan
-    either way (the histogram has no hour-of-day dimension), as does a bound
-    in the histogram's open end buckets (:func:`tolerance_aggregates_serve`).
+    A departure is on time when ``-early_tolerance_sec <= dep_delay <=
+    late_tolerance_sec``, with no early bound when ``early_tolerance_sec`` is
+    ``None``: the default preset's window unless the caller names another
+    (:func:`on_time_window`). agg_route_daily_dist's exact columns answer the
+    window where they can (:func:`pipeline.histogram.exact_window`): a late
+    tolerance of 60 s or 300 s with no early tolerance or one on a whole
+    minute up to 300 s, both presets among them. Any other window is an
+    estimate from the merged delay histogram, within one bucket, i.e.
+    ``pipeline.histogram.WIDTH`` seconds, so a custom definition still avoids
+    both a raw-``updates`` scan and an analyze() re-aggregation. A time_band
+    filter needs the live scan either way (the histogram has no hour-of-day
+    dimension), as does a bound in the histogram's open end buckets
+    (:func:`tolerance_aggregates_serve`).
+
+    ``threshold_sec`` replaces the window with the Ask tool's "at most this
+    many seconds late, any early departure on time", read exactly: from the
+    exact columns where they answer it (60 s and 300 s), and by a live scan at
+    any other threshold.
 
     Returned percentages carry no confidence signal of their own -- a caller
     displaying one of these percentages to a user should also call
@@ -419,42 +450,19 @@ async def compute_on_time(
     thin-sample percentage with the same visual weight as a well-supported
     one.
     """
-    if early_tolerance_sec is None and late_tolerance_sec is None:
-        if not aggregates_serve(ctx) or threshold_sec != LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
+    if threshold_sec is not None:
+        if not aggregates_serve(ctx) or not exact_window(None, threshold_sec):
             if ch is None:
                 raise RuntimeError(
                     "compute_on_time's time_band/threshold-filtered live fallback requires a ClickHouse client"
                 )
             return await _on_time_live(agency_id, ctx, conn, ch, threshold_sec, limit, sort_order)
+        early_tolerance_sec, late_tolerance_sec = None, threshold_sec
 
-        rows = await _read_dist_scalars(agency_id, ctx, conn)
-        service = _service_label(ctx)
-        out: list[tuple] = []
-        for r in rows:
-            samples = r["samples"]
-            if samples <= 20:
-                continue
-            on_time_pct = _pct1(r["on_time_count"], samples)
-            out.append(
-                (
-                    r["route_code"],
-                    service,
-                    on_time_pct,
-                    _avg_min(r["sum_delay_sec"], samples),
-                    samples,
-                )
-            )
-        # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-        # on_time_pct in ascending order regardless of `reverse` — same
-        # unordered-GROUP-BY source as compute_ranking above.
-        out.sort(key=lambda t: t[0])
-        out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
-        return out if limit is None else out[:limit]
-
-    # Custom on-time window, from the exact columns, and the merged histogram
-    # only where they cannot answer it.
+    # The window, from the exact columns, and the merged histogram only where
+    # they cannot answer it.
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
-    high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
+    high_sec = late_tolerance_sec
     if not tolerance_aggregates_serve(ctx, early_tolerance_sec, late_tolerance_sec):
         if ch is None:
             raise RuntimeError("compute_on_time's live fallback requires a ClickHouse client")
@@ -595,9 +603,9 @@ async def compute_worst_5min(
     """Routes ranked by count of severely-late observations.
 
     Reads agg_route_daily_dist (``late5_count`` is exact, >300s baked in at
-    analyze time — the LEGACY_60S preset's own severe-late cutoff). Leaving
-    ``late_tolerance_sec`` unset (the default) is byte-identical to that
-    historical behavior. Passing an explicit value — even ``300`` itself —
+    analyze time — the five-minute cutoff, the default preset's late edge).
+    Leaving ``late_tolerance_sec`` unset (the default) reads that column.
+    Passing an explicit value — even ``300`` itself —
     opts into a query-time estimate from the merged delay histogram instead
     (see :func:`pipeline.histogram.count_in_range`; bounded to one histogram
     bucket of error), rather than needing an analyze() re-aggregation for a

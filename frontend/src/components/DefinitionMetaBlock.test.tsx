@@ -47,9 +47,22 @@ describe("DefinitionMetaBlock", () => {
     expect(block).toHaveTextContent("Average of every recorded departure at every stop.");
     expect(block).toHaveTextContent("When a departure is reported more than once, the latest report counts.");
     expect(block).toHaveTextContent("Readings more than 2 hours off are ignored as errors.");
-    expect(block).toHaveTextContent("On time = no more than 1 min late (early departures count as on time).");
+    expect(block).toHaveTextContent("On time (legacy) = no more than 1 min late (early departures count as on time).");
     expect(block).not.toHaveTextContent("legacy_60s");
     expect(block).not.toHaveTextContent("7200");
+  });
+
+  it("calls the default, the industry window, by its plain name in both languages", async () => {
+    const standard: DefinitionMeta = { ...LEGACY, preset: "standard_m1_p5", early_tolerance_sec: 60, late_tolerance_sec: 300 };
+    renderWithProviders(<DefinitionMetaBlock definition={standard} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "On time (industry standard) = no more than 5 min late and no more than 1 min early.",
+    );
+    expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("standard_m1_p5");
+    cleanup();
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={standard} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("定時（業界標準） = 遅れ5分以内、早発1分以内。");
   });
 
   it("runs Japanese sentences together, without a half-width space between them", async () => {

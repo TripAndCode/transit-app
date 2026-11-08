@@ -118,8 +118,9 @@ class NetworkSummary(BaseModel):
     # The newest day any agency has observations for in the range, where every
     # row's observation coverage stops; None when no agency has any.
     coverage_through: str | None
-    # Always the legacy_60s preset, since this board takes no tolerance, and
-    # surfaced anyway so it can be checked against a report's own definition.
+    # Always the default preset's window, since this board takes no
+    # tolerance, and surfaced anyway so it can be checked against a report's
+    # own definition.
     definition: DefinitionMeta
     scope_applied: dict[str, bool]
 

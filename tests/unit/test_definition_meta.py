@@ -1,8 +1,8 @@
 """Pure-logic tests for pipeline.reports.definition -- the shared "which
 tolerance/dedup/exclusion rule did this report actually use" metadata block.
-Mirrors compute_on_time/compute_worst_5min's own None-default resolution
-(pipeline/reports/rankings.py) so the values these tests assert can never
-silently drift from what a report actually computes.
+Mirrors pipeline.reports.rankings.on_time_window's default resolution, so the
+values these tests assert can never silently drift from what a report
+actually computes.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -32,15 +32,22 @@ from pipeline.reports.definition import (
     format_stamp_lines,
     resolve_definition_meta,
 )
-from pipeline.reports.rankings import ON_TIME_PRESETS
+from pipeline.reports.rankings import DEFAULT_PRESET, ON_TIME_PRESETS, STANDARD_PRESET_NAME
 from pipeline.reports.schedule_revision import ScheduleDays
 
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
 
 
-def test_on_time_no_params_resolves_to_legacy_preset():
+def test_on_time_no_params_resolves_to_the_default_preset():
     meta = resolve_definition_meta("on_time", None, None)
+    assert meta.preset == DEFAULT_PRESET == STANDARD_PRESET_NAME == "standard_m1_p5"
+    assert meta.early_tolerance_sec == 60
+    assert meta.late_tolerance_sec == 300
+
+
+def test_the_legacy_window_keeps_its_name_and_values():
+    meta = resolve_definition_meta("on_time", *ON_TIME_PRESETS[LEGACY_PRESET_NAME])
     assert meta.preset == LEGACY_PRESET_NAME == "legacy_60s"
     assert meta.early_tolerance_sec is None
     assert meta.late_tolerance_sec == LEGACY_ON_TIME_LATE_TOLERANCE_SEC == 60
@@ -54,29 +61,33 @@ def test_on_time_explicit_tolerance_resolves_to_custom_preset_with_exact_values(
 
 
 def test_on_time_explicit_late_only_resolves_to_custom_with_unbounded_early():
-    # Passing EITHER param opts out of the legacy preset, even if the other
-    # is left unset: the preset names what the request asked for, and the
-    # legacy default asks for no tolerance at all.
+    # A resolved window with no early bound and a late tolerance no preset has.
     meta = resolve_definition_meta("on_time", None, 90)
     assert meta.preset == "custom"
     assert meta.early_tolerance_sec is None
     assert meta.late_tolerance_sec == 90
 
 
-def test_on_time_preset_numerically_equal_to_legacy_is_still_custom():
-    # An explicit late_tolerance_sec=60 (same number as the legacy default)
-    # must still resolve to "custom", not silently collapse back to
-    # "legacy_60s": the preset names what the request asked for, and the
-    # legacy default asks for no tolerance at all.
+def test_a_window_equal_to_the_legacy_preset_is_named_legacy():
+    # The scope's "count every early departure, up to 1 minute late" is the
+    # legacy window, and it reads the same exact column as preset=legacy_60s,
+    # so it carries the preset's name however it was asked for.
     meta = resolve_definition_meta("on_time", None, 60)
-    assert meta.preset == "custom"
+    assert meta.preset == LEGACY_PRESET_NAME
     assert meta.late_tolerance_sec == 60
 
 
-def test_worst_5min_no_params_resolves_to_legacy_preset():
+def test_an_early_tolerance_without_a_late_one_is_refused():
+    """Only a request's own spelling says what an unresolved half-window
+    meant, so the definition takes a window already resolved."""
+    with pytest.raises(ValueError):
+        resolve_definition_meta("on_time", 60, None)
+
+
+def test_worst_5min_no_params_names_the_default_window_whose_late_edge_it_counts_past():
     meta = resolve_definition_meta("worst_5min", None, None)
-    assert meta.preset == LEGACY_PRESET_NAME
-    assert meta.early_tolerance_sec is None
+    assert meta.preset == DEFAULT_PRESET
+    assert (meta.early_tolerance_sec, meta.late_tolerance_sec) == ON_TIME_PRESETS[DEFAULT_PRESET]
     assert meta.late_tolerance_sec == LEGACY_SEVERE_LATE_TOLERANCE_SEC == 300
 
 
@@ -102,14 +113,24 @@ def test_the_industry_window_is_named_as_its_preset_however_it_was_asked_for(rep
     meta = resolve_definition_meta(report_type, 60, 300)
     assert meta.preset == "standard_m1_p5"
     assert (meta.early_tolerance_sec, meta.late_tolerance_sec) == (60, 300)
+    assert resolve_definition_meta(report_type, None, None).preset == "standard_m1_p5"
     assert resolve_definition_meta(report_type, None, 300).preset == "custom"
-    assert resolve_definition_meta(report_type, 60, None).preset == "custom"
 
 
 def test_the_preset_is_named_on_the_csv_line():
     line = format_definition_csv_line(resolve_definition_meta("route_table", 60, 300))
-    assert "プリセット=standard_m1_p5" in line
+    assert "プリセット=standard_m1_p5（業界標準）; " in line
     assert "custom" not in line
+    legacy = format_definition_csv_line(resolve_definition_meta("route_table", None, 60))
+    assert "プリセット=legacy_60s（従来の基準）; 早着許容=無制限; 遅延許容=60秒; " in legacy
+    custom = format_definition_csv_line(resolve_definition_meta("route_table", 30, 120))
+    assert "プリセット=custom; " in custom
+
+
+def _late(report_type: str) -> int | None:
+    """A late tolerance beside an early one, for the reports with an on-time
+    window, whose definition takes the window resolved."""
+    return 300 if report_type in ("on_time", "route_table", "council_summary") else None
 
 
 @pytest.mark.parametrize(
@@ -128,7 +149,7 @@ def test_the_early_departure_threshold_is_the_early_tolerance_or_one_minute(repo
     """Only the reports that show an early-departure rate name its
     threshold; with early departures counted as on time it is one minute,
     so the rate is always defined."""
-    assert resolve_definition_meta(report_type, early, None).early_departure_sec == expected
+    assert resolve_definition_meta(report_type, early, _late(report_type)).early_departure_sec == expected
 
 
 @pytest.mark.parametrize(
@@ -141,7 +162,7 @@ def test_the_early_departure_threshold_is_the_early_tolerance_or_one_minute(repo
     ],
 )
 def test_the_csv_line_names_the_early_departure_threshold(report_type, early, clause):
-    line = format_definition_csv_line(resolve_definition_meta(report_type, early, None))
+    line = format_definition_csv_line(resolve_definition_meta(report_type, early, _late(report_type)))
     assert f"; {clause}; " in line
 
 
@@ -155,8 +176,8 @@ def test_the_csv_line_names_the_early_departure_threshold(report_type, early, cl
     ],
 )
 def test_footnotes_define_the_early_departure_rate(locale, early, line):
-    assert line in format_definition_footnotes(resolve_definition_meta("council_summary", early, None), locale)
-    on_time = "\n".join(format_definition_footnotes(resolve_definition_meta("on_time", early, None), locale))
+    assert line in format_definition_footnotes(resolve_definition_meta("council_summary", early, 300), locale)
+    on_time = "\n".join(format_definition_footnotes(resolve_definition_meta("on_time", early, 300), locale))
     assert "早発率" not in on_time and "Early-departure" not in on_time
 
 
@@ -184,12 +205,12 @@ def test_csv_line_reflects_custom_tolerance_not_legacy_defaults():
     assert str(MAX_PLAUSIBLE_DELAY_SEC) in line
 
 
-def test_csv_line_default_shows_legacy_preset_and_unbounded_early():
+def test_csv_line_default_shows_the_industry_preset_and_both_bounds():
     meta = resolve_definition_meta("on_time", None, None)
     line = format_definition_csv_line(meta)
-    assert "legacy_60s" in line
-    assert "無制限" in line  # unbounded early tolerance
-    assert "60秒" in line
+    assert "プリセット=standard_m1_p5（業界標準）; 早着許容=60秒; 遅延許容=300秒; " in line
+    assert "legacy_60s" not in line
+    assert "無制限" not in line
 
 
 def test_csv_line_measurement_point_text_is_read_from_the_field_not_hardcoded():
@@ -224,11 +245,10 @@ def test_council_summary_shares_on_time_tolerance_resolution():
     assert council_meta.late_tolerance_sec == on_time_meta.late_tolerance_sec == 120
 
 
-def test_council_summary_no_params_resolves_to_legacy_preset():
+def test_council_summary_no_params_resolves_to_the_default_preset():
     meta = resolve_definition_meta("council_summary", None, None)
-    assert meta.preset == LEGACY_PRESET_NAME
-    assert meta.early_tolerance_sec is None
-    assert meta.late_tolerance_sec == LEGACY_ON_TIME_LATE_TOLERANCE_SEC == 60
+    assert meta.preset == DEFAULT_PRESET
+    assert (meta.early_tolerance_sec, meta.late_tolerance_sec) == (60, 300)
 
 
 @pytest.mark.parametrize(
@@ -251,18 +271,27 @@ def test_footnotes_reflect_custom_tolerance_not_legacy_defaults(locale, line):
 
 
 @pytest.mark.parametrize(
-    ("locale", "line"),
+    ("locale", "default", "legacy"),
     [
-        ("ja", "定時の定義：定刻から1分以内の遅れ（早発も定時として数えます）"),
-        ("en", "On-time definition: no more than 1 min late (early departures count as on time)"),
+        (
+            "ja",
+            "定時の定義（業界標準）：定刻から5分以内の遅れと、1分以内の早発",
+            "定時の定義（従来の基準）：定刻から1分以内の遅れ（早発も定時として数えます）",
+        ),
+        (
+            "en",
+            "On-time definition (industry standard): no more than 5 min late and no more than 1 min early",
+            "On-time definition (legacy): no more than 1 min late (early departures count as on time)",
+        ),
     ],
 )
-def test_footnotes_default_states_the_on_time_rule_without_the_preset_name(locale, line):
+def test_footnotes_name_a_preset_in_plain_words_not_its_identifier(locale, default, legacy):
     lines = format_definition_footnotes(resolve_definition_meta("council_summary", None, None), locale)
-    assert line in lines
+    assert default in lines
     joined = "\n".join(lines)
-    assert "legacy_60s" not in joined
+    assert "standard_m1_p5" not in joined
     assert "プリセット" not in joined and "preset" not in joined
+    assert legacy in format_definition_footnotes(resolve_definition_meta("council_summary", None, 60), locale)
 
 
 @pytest.mark.parametrize(("seconds", "ja", "en"), [(90, "1分30秒", "1 min 30 s"), (0, "0秒", "0 s")])

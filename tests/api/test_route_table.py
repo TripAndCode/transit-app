@@ -26,7 +26,7 @@ def _reset_limiter():
     limiter.reset()
 
 
-# Spread so that each sort orders the four routes differently:
+# Spread so that each sort orders the four routes differently (on time under legacy_60s):
 #   code   avg   on-time  over 5 (share, count)  samples
 #   A     4.00    40.0%      60.0%  15             25
 #   B     7.33    20.0%      40.0%  10             25
@@ -102,12 +102,12 @@ async def test_every_sort_ranks_the_same_routes_worst_first_and_best_on_request(
     band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
 
     for sort, worst_first in _WORST_FIRST.items():
-        worst = (await client.get(_url(agency_id, band, f"&sort={sort}"))).json()
+        worst = (await client.get(_url(agency_id, band, f"&sort={sort}&preset=legacy_60s"))).json()
         assert [r[0] for r in worst["rows"]] == worst_first, sort
         assert worst["rows_total"] == 4, sort
         # The response names the order its rows are in.
         assert (worst["sort"], worst["order"]) == (sort, "worst")
-        best = (await client.get(_url(agency_id, band, f"&sort={sort}&order=best&limit=2"))).json()
+        best = (await client.get(_url(agency_id, band, f"&sort={sort}&order=best&limit=2&preset=legacy_60s"))).json()
         assert [r[0] for r in best["rows"]] == worst_first[::-1][:2], sort
         assert best["rows_total"] == 4, sort
         assert (best["sort"], best["order"]) == (sort, "best")
@@ -204,15 +204,15 @@ async def test_the_scopes_tolerance_moves_the_on_time_rate_and_never_the_five_mi
     band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
 
     default = (await client.get(_url(agency_id, band))).json()
-    wider = (await client.get(_url(agency_id, band, "&late=120"))).json()
-    assert float(default["rows"][0][2]) == 0.0
-    assert float(wider["rows"][0][2]) == 80.0
-    for body in (default, wider):
+    narrower = (await client.get(_url(agency_id, band, "&late=60"))).json()
+    assert float(default["rows"][0][2]) == 80.0
+    assert float(narrower["rows"][0][2]) == 0.0
+    for body in (default, narrower):
         assert float(body["rows"][0][3]) == 20.0
         assert body["rows"][0][4] == 5
-    assert default["definition"]["late_tolerance_sec"] == 60
-    assert wider["definition"]["late_tolerance_sec"] == 120
-    assert wider["scope_applied"]["late"] is True
+    assert default["definition"]["late_tolerance_sec"] == 300
+    assert narrower["definition"]["late_tolerance_sec"] == 60
+    assert narrower["scope_applied"]["late"] is True
 
 
 @pytest.mark.asyncio
@@ -279,20 +279,24 @@ async def test_the_early_departure_rate_counts_departures_more_than_the_early_to
     ch_async_client,
     path,
 ):
-    """With early departures counted as on time the rate counts those more
-    than a minute early; a limited early tolerance moves it to that limit. A
-    departure exactly at the limit is not early."""
+    """The rate counts the departures more than the early tolerance early, a
+    minute by default and with early departures counted as on time alike; a
+    wider early tolerance moves it to that limit. A departure exactly at the
+    limit is not early."""
     client, agency_id, pool = reports_client
     await _seed_route_at(pool, agency_id, "E", "平日", DAY, "08:00", _EARLY)
     band = await _load_for_path(path, agency_id, ch_client, ch_async_client)
 
-    legacy = (await client.get(_url(agency_id, band))).json()
+    default = (await client.get(_url(agency_id, band))).json()
+    legacy = (await client.get(_url(agency_id, band, "&preset=legacy_60s"))).json()
     limited = (await client.get(_url(agency_id, band, "&early=120"))).json()
-    assert float(legacy["rows"][0][6]) == 40.0
+    assert float(default["rows"][0][6]) == float(legacy["rows"][0][6]) == 40.0
     assert float(limited["rows"][0][6]) == 0.0
-    assert legacy["definition"]["early_departure_sec"] == 60
+    assert default["definition"]["early_departure_sec"] == legacy["definition"]["early_departure_sec"] == 60
     assert limited["definition"]["early_departure_sec"] == 120
-    # The on-time rate keeps its own rule beside it.
+    # The on-time rate keeps its own rule beside it: the ten more than a
+    # minute early are not on time by default, and are under legacy_60s.
+    assert float(default["rows"][0][2]) == 60.0
     assert float(legacy["rows"][0][2]) == 100.0
 
 
@@ -306,9 +310,10 @@ _EDGES = [-120] * 5 + [-60] * 5 + [0] * 5 + [300] * 5 + [301] * 5
 @pytest.mark.parametrize(
     ("query", "preset", "on_time"),
     [
+        ("", "standard_m1_p5", 60.0),
         ("&preset=standard_m1_p5", "standard_m1_p5", 60.0),
         ("&early=60&late=300", "standard_m1_p5", 60.0),
-        ("&late=300", "custom", 80.0),
+        ("&early=any&late=300", "custom", 80.0),
     ],
 )
 async def test_readings_on_the_windows_edges_count_exactly_on_both_paths(

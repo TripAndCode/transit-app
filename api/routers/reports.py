@@ -81,7 +81,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
-from pipeline.reports.rankings import report_reads_aggregates
+from pipeline.reports.rankings import DEFAULT_PRESET, EARLY_ANY, EarlyTolerance, on_time_window, report_reads_aggregates
 from pipeline.reports.route_table import RouteTableOrder
 from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
@@ -331,6 +331,46 @@ def report_scope_applied(report_type: str) -> dict[str, bool]:
     if report_type in _EARLY_TOLERANCE_TYPES:
         honoured.append("early")
     return scope_applied(*honoured)
+
+
+def _preset_window(
+    preset: str | None, early_tolerance_sec: EarlyTolerance, late_tolerance_sec: int | None
+) -> tuple[int | None, int]:
+    """The (early, late) on-time window a request names
+    (:func:`pipeline.reports.rankings.on_time_window`): its *preset*'s, or
+    each tolerance it names and the default preset's for the rest. A 400 for
+    a preset :data:`~pipeline.reports.rankings.ON_TIME_PRESETS` lacks, or one
+    beside an explicit tolerance it would override."""
+    if preset is not None:
+        if early_tolerance_sec is not None or late_tolerance_sec is not None:
+            raise HTTPException(status_code=400, detail="preset cannot be combined with an early or late tolerance")
+        if preset not in ON_TIME_PRESETS:
+            raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
+    return on_time_window(preset, early_tolerance_sec, late_tolerance_sec)
+
+
+_MAX_EARLY_SEC = 3600
+
+
+def scope_early(
+    early: str | None = Query(
+        default=None,
+        pattern=f"^({EARLY_ANY}|[0-9]{{1,4}})$",
+        description="The scope's early tolerance: how many seconds early a departure may still be on time, "
+        f"up to {_MAX_EARLY_SEC}, or '{EARLY_ANY}' for every early departure. Unset, it is the default "
+        "preset's (pipeline.reports.rankings.DEFAULT_PRESET).",
+    ),
+) -> EarlyTolerance:
+    """The scope's ``early`` as :func:`pipeline.reports.rankings.on_time_window`
+    reads it, shared by every endpoint that takes it."""
+    if early is None:
+        return None
+    if early == EARLY_ANY:
+        return EARLY_ANY
+    seconds = int(early)
+    if seconds > _MAX_EARLY_SEC:
+        raise HTTPException(status_code=422, detail=f"early must be at most {_MAX_EARLY_SEC} seconds or '{EARLY_ANY}'")
+    return seconds
 
 
 # What each panel endpoint filters on: headway_quality's aggregate carries
@@ -610,14 +650,12 @@ async def get_performance_standards(
     preset: str | None = Query(
         default=None,
         description="The on-time preset the on_time_pct targets are judged on (ON_TIME_PRESETS), as the "
-        "route_table report takes it. Mutually exclusive with late/early.",
+        "route_table report takes it; unset, the default preset's window. Mutually exclusive with late/early.",
     ),
     late: int | None = Query(
         default=None, ge=0, le=3600, description="The scope's on-time late tolerance in seconds, for on_time_pct."
     ),
-    early: int | None = Query(
-        default=None, ge=0, le=3600, description="The scope's early tolerance in seconds, for on_time_pct."
-    ),
+    early: EarlyTolerance = Depends(scope_early),
     route: str | None = Query(
         default=None,
         description="One route's own page: only this route's standards, each judged on figures read for it "
@@ -638,9 +676,7 @@ async def get_performance_standards(
     populated config table joined against other reports' own compute
     functions, not a single `agg_*` table scan.
     """
-    early_tolerance_sec, late_tolerance_sec = early, late
-    if preset is not None:
-        early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
+    early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
     standards = await read_standards(conn, agency_id, route)
     judges_on_time = any(r["metric_type"] == "on_time_pct" for r in standards)
     on_time_definition = None
@@ -1237,7 +1273,7 @@ def _csv_response(
     definition-metadata preamble (see
     ``pipeline.reports.definition.format_definition_csv_line``) so a CSV
     exported with non-default tolerances shows those exact values instead of
-    silently reading as the legacy_60s default. `extra_footnotes`, when
+    silently reading as the default. `extra_footnotes`, when
     given, adds one single-cell preamble row per string AFTER that line and
     BEFORE the column header -- the council_summary report type's
     freshness/quality caveats (see
@@ -1312,19 +1348,6 @@ def _csv_response(
     )
 
 
-def _preset_window(
-    preset: str, early_tolerance_sec: int | None, late_tolerance_sec: int | None
-) -> tuple[int | None, int | None]:
-    """The (early, late) on-time window *preset* names
-    (:data:`pipeline.reports.rankings.ON_TIME_PRESETS`): a 400 for a preset
-    that list lacks, or one beside an explicit tolerance it would override."""
-    if early_tolerance_sec is not None or late_tolerance_sec is not None:
-        raise HTTPException(status_code=400, detail="preset cannot be combined with an early or late tolerance")
-    if preset not in ON_TIME_PRESETS:
-        raise HTTPException(status_code=400, detail=f"Unknown preset '{preset}'")
-    return ON_TIME_PRESETS[preset]
-
-
 @router.get("/reports/{report_type}", response_model=ReportResponse)
 @limiter.limit(tier_limit)
 async def get_report(
@@ -1334,25 +1357,24 @@ async def get_report(
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,
-        description="Named on-time/late tolerance preset (pipeline.reports.rankings.ON_TIME_PRESETS): "
-        "'legacy_60s', the default (up to 60s late, any early departure on time), or "
-        "'standard_m1_p5' (no more than 60s early and 300s late), which only the on_time, "
-        "route_table and council_summary reports take. Mutually exclusive with "
-        "early_tolerance_sec/late_tolerance_sec.",
+        description="Named on-time window (pipeline.reports.rankings.ON_TIME_PRESETS): 'standard_m1_p5', "
+        "the default (no more than 60s early and 300s late), or 'legacy_60s' (up to 60s late, any early "
+        "departure on time), which only the on_time, route_table and council_summary reports take; the "
+        "default changes nothing on the others. Mutually exclusive with the tolerances.",
     ),
     early_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
         description="on_time/route_table/council_summary only: how many seconds early a departure may still "
-        "be 'on time'. Unset means unbounded (any early departure counts), matching legacy_60s. On "
+        "be 'on time'; unset, the default preset's 60s, and early=any counts every early departure. On "
         "route_table/council_summary it is also how early a departure must be to count in the "
-        "early-departure rate, 60s when unset.",
+        "early-departure rate, 60s with no early bound.",
     ),
     late_tolerance_sec: int | None = Query(
         default=None,
         ge=0,
-        description="on_time/route_table/worst_5min/council_summary: the late-side cutoff (default 60s "
-        "for on_time/route_table/council_summary, 300s for worst_5min). An on-time count is exact for "
+        description="on_time/route_table/worst_5min/council_summary: the late-side cutoff (default 300s, "
+        "the default preset's, and worst_5min's own five minutes). An on-time count is exact for "
         "60s or 300s with no early tolerance or one on a whole minute up to 300s "
         "(pipeline.histogram.exact_window), and a histogram estimate otherwise; worst_5min's count is "
         "a histogram estimate. A cutoff of 1800s or more, or an early tolerance over 300s, is scanned "
@@ -1366,13 +1388,7 @@ async def get_report(
         "council_summary; otherwise ignored and reported false in scope_applied (worst_5min's "
         "threshold stays its own late_tolerance_sec).",
     ),
-    early: int | None = Query(
-        default=None,
-        ge=0,
-        le=3600,
-        description="The scope's early tolerance in seconds. Applied by on_time, route_table and "
-        "council_summary; otherwise ignored and reported false in scope_applied.",
-    ),
+    early: EarlyTolerance = Depends(scope_early),
     threshold_sec: int | None = Query(
         default=None,
         ge=0,
@@ -1431,22 +1447,26 @@ async def get_report(
         raise HTTPException(status_code=400, detail="early and early_tolerance_sec set the same tolerance; pass one")
     if late is not None and report_type in _SCOPE_LATE_TYPES:
         late_tolerance_sec = late
+    early_tolerance: EarlyTolerance = early_tolerance_sec
     if early is not None and report_type in _EARLY_TOLERANCE_TYPES:
-        early_tolerance_sec = early
+        early_tolerance = early
 
-    if preset is not None:
-        window = _preset_window(preset, early_tolerance_sec, late_tolerance_sec)
-        # legacy_60s overrides nothing, so it stays accepted everywhere. Any
+    if preset is not None and report_type not in _EARLY_TOLERANCE_TYPES:
+        _preset_window(preset, early_tolerance, late_tolerance_sec)
+        # The default overrides nothing, so it stays accepted everywhere. Any
         # other preset is an on-time window, which worst_5min (whose late
         # tolerance is its own over-5-minute cutoff) and the reports without
         # a tolerance would otherwise misread or reject under another name.
-        if window != (None, None) and report_type not in _EARLY_TOLERANCE_TYPES:
+        if preset != DEFAULT_PRESET:
             raise HTTPException(
                 status_code=400,
                 detail=f"preset '{preset}' only applies to the on_time/route_table/council_summary reports",
             )
-        early_tolerance_sec, late_tolerance_sec = window
-    if early_tolerance_sec is not None and report_type not in _EARLY_TOLERANCE_TYPES:
+    if report_type in _EARLY_TOLERANCE_TYPES:
+        # The one place a report's on-time window is resolved, so the rows
+        # and the definition beside them read the same pair.
+        early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early_tolerance, late_tolerance_sec)
+    elif early_tolerance is not None:
         raise HTTPException(
             status_code=400,
             detail="early_tolerance_sec only applies to the on_time/route_table/council_summary reports",
@@ -1652,6 +1672,7 @@ async def get_report(
             scope_applied=report_scope_applied(report_type),
         )
     elif report_type == "council_summary":
+        assert late_tolerance_sec is not None  # resolved with the window above
         agency_row = await conn.fetchrow("SELECT agency_name FROM agencies WHERE agency_id = $1", agency_id)
         agency_name = agency_row["agency_name"] if agency_row else str(agency_id)
         payload = await compute_council_summary(

@@ -60,7 +60,7 @@ from typing import Any, Literal
 
 from api.range import RangeCtx
 from pipeline.reports.headway_quality import compute_headway_quality
-from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC, RANKING_MIN_SAMPLES
 from pipeline.reports.route_table import compute_route_table
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from pipeline.reports.supply import compute_supply_metrics_by_agency
@@ -140,7 +140,7 @@ async def _on_time_by_route(
     conn,
     ch,
     early_tolerance_sec: int | None,
-    late_tolerance_sec: int | None,
+    late_tolerance_sec: int,
     codes: Collection[str],
     *,
     one_route: bool,
@@ -179,8 +179,8 @@ async def compute_performance_standards(
     *,
     route: str | None = None,
     ch=None,
-    early_tolerance_sec: int | None = None,
-    late_tolerance_sec: int | None = None,
+    early_tolerance_sec: int | None = DEFAULT_EARLY_TOLERANCE_SEC,
+    late_tolerance_sec: int = DEFAULT_LATE_TOLERANCE_SEC,
 ) -> list[dict[str, Any]]:
     """Every row of *standards* (:func:`read_standards` for *agency_id*, and
     for *route* when one is named), joined against the current actual value

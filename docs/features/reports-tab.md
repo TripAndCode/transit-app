@@ -127,10 +127,14 @@ reports.
   that sent no cancellation in the period or the 90 days up to its end reads
   「運行率：—（この配信は運休を伝えていません）」, never a 100% that measures
   nothing. The
-  on-time definition footnote states the tolerance in words, 「定時の定義：定刻
-  から1分以内の遅れ（早発も定時として数えます）」, not its preset name; the CSV
-  preamble keeps the preset for comparing exports, and names it for the
-  industry window too (`standard_m1_p5`) when the scope sets `early=60&late=300`.
+  on-time definition footnote states the tolerance in words and a preset by
+  its reader's name, never its identifier: by default 「定時の定義（業界標準）：
+  定刻から5分以内の遅れと、1分以内の早発」, and under `legacy_60s`
+  「定時の定義（従来の基準）：定刻から1分以内の遅れ（早発も定時として数えます）」.
+  The CSV preamble keeps the identifier for comparing exports, with the same
+  name beside it (`プリセット=standard_m1_p5（業界標準）`). A window is named
+  as its preset however the request spelt it, so the scope's `early=any&late=60`
+  reads as `legacy_60s`.
   The next footnote defines the early-departure rate,
   「早発率：定刻より1分を超えて早く発車した割合」; the CSV puts 早発率(%) after
   運行実績率(%), and its preamble names the threshold
@@ -154,7 +158,8 @@ reports.
     rather than guessed, and the report reads its staleness and quality share
     for its own agency.
   - The verdict reads the board's figures: the whole agency, every day of the
-    period and the board's on-time definition. A route, day, service or
+    period and the board's on-time definition, the default preset
+    (`standard_m1_p5`). A route, day, service or
     time-band filter, or another tolerance, changes the on-time figures but
     never the verdict. The agency-wide footnote lists the comparison among the
     whole-agency figures, and under another tolerance a footnote says the

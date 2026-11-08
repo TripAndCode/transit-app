@@ -309,7 +309,7 @@
     "observed_coverage_missing": "Observation coverage —",
     "on_time_ci": "({{low}}–{{high}})",
     "col_ranking": "Ranking",
-    "help_ranking": "Only the agencies whose data supports a comparison are ranked: observation coverage of at least {{coverage}}%, an on-time % interval within ±{{ci}} points, and implausible readings of at most {{clamp}}%. The rest follow by name, each with the first check it fails. Early departures count as on time, and neither how densely a feed reports nor where a timetable puts its slack is corrected for.",
+    "help_ranking": "Only the agencies whose data supports a comparison are ranked: observation coverage of at least {{coverage}}%, an on-time % interval within ±{{ci}} points, and implausible readings of at most {{clamp}}%. The rest follow by name, each with the first check it fails. Every agency's on-time % uses the industry standard (no more than 1 min early or 5 min late). Neither how densely a feed reports nor where a timetable puts its slack is corrected for.",
     "unranked_heading": "Not ranked: the data does not support a comparison",
     "unranked_criteria": "Ranked only where observation coverage is at least {{coverage}}%, the on-time % interval is within ±{{ci}} points and implausible readings are at most {{clamp}}%. These are listed by name.",
     "unranked_reason": {
@@ -343,6 +343,12 @@
     "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
     "on_time_late": "On time = no more than {{late}} late (early departures count as on time).",
     "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early.",
+    "on_time_late_named": "On time ({{preset}}) = no more than {{late}} late (early departures count as on time).",
+    "on_time_late_early_named": "On time ({{preset}}) = no more than {{late}} late and no more than {{early}} early.",
+    "preset": {
+      "standard_m1_p5": "industry standard",
+      "legacy_60s": "legacy"
+    },
     "early_departure": "Early-departure rate = the share of departures more than {{early}} early.",
     "method_version": "Method version {{version}}, aggregates built: {{day}}.",
     "built_day_unknown": "unknown",
@@ -2162,6 +2168,7 @@
     "tolerance_sec": "within {{n}} s",
     "early_min": "early by up to {{n}} min",
     "early_sec": "early by up to {{n}} s",
+    "early_any": "any early departure on time",
     "unapplied": "This screen doesn't use this condition",
     "control": {
       "last_days": "Last {{count}} days",
