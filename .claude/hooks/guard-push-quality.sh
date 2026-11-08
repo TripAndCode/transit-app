@@ -769,13 +769,15 @@ if [ "$RUN_BACKEND" -eq 1 ]; then
     # genuine pass -- pushes then either look broken or get routed around,
     # which is strictly worse than no gate.
     #
-    # Every ceiling in this script is bounded by one more: the `timeout` on
-    # this hook's entry in .claude/settings.json, enforced by the harness
-    # rather than by this script. If the ceilings here can sum past it, the
-    # harness kills the script before it reaches its own exit, and whether
-    # that blocks the push or lets it through is outside this script's
-    # control -- the one outcome its fail-closed design cannot guarantee.
-    # Raise that entry alongside any ceiling raised here.
+    # Every ceiling in this script is bounded by one more: the harness
+    # `timeout` of each entry that runs it -- .claude/settings.json, and
+    # .codex/hooks.json through .codex/hooks/pre-push.sh -- enforced by the
+    # harness rather than by this script. If the ceilings here can sum past
+    # one, that harness kills the script before it reaches its own exit, and
+    # whether that blocks the push or lets it through is outside this
+    # script's control -- the one outcome its fail-closed design cannot
+    # guarantee. tests/unit/test_guard_push_quality_hook.py checks the sum
+    # against both entries.
     run_step 1500 "backend suite (scripts/run_full_ci.sh: own Postgres + ClickHouse on free ports)" \
       "${IN_DIR[@]}" "$GATE_DIR" env PATH="$SHIM_DIR:$PATH" GEMINI_API_KEY=test-key scripts/run_full_ci.sh -x -q \
       >>"$LOG" 2>&1 || FAIL=1
