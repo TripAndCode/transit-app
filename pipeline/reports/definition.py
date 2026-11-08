@@ -31,7 +31,7 @@ from pipeline.histogram import (
 )
 from pipeline.reports.rankings import ON_TIME_PRESETS, early_departure_sec
 from pipeline.reports.schedule_revision import ScheduleDays
-from pipeline.static_archive import fetch_day
+from pipeline.timetable_in_force import fetch_day
 
 # Stable identifiers (not resolved per request, unlike the tolerance fields
 # below) so a caller can render/translate them instead of a fixed string

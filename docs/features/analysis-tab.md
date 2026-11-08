@@ -526,8 +526,9 @@ the scope as one sentence above their content
   were in force. `value_basis` is `feed_prediction`: every figure is computed
   from the delays the operator's feed last predicted for each stop, never from
   an observed passage (値の根拠).
-  `timetable_versions` lists, per agency, each timetable that most of a day's
-  observations were ingested against (`agg_schedule_revision_daily`) and how
+  `timetable_versions` lists, per agency, each timetable in force on a day, or
+  for a day no recorded timetable covers, the one most of its observations
+  were ingested against (`agg_schedule_revision_daily`), and how
   many of the request's days it covers, then the days with none recorded (時刻表).
   These are days not yet analyzed, or days from an ingest that stamps no
   version. A version is named by its loaded zip's name, with the fetch day

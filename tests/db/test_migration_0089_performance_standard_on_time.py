@@ -83,7 +83,8 @@ def test_rolling_back_keeps_the_on_time_targets_and_refuses_new_ones(apply_schem
         _insert(conn, agency_id, "KEPT")
         conn.commit()
 
-        migrate.migrate_down("0088", conn)
+        # Forced: the rollback also spans every later migration, and one is `-- DESTRUCTIVE`.
+        migrate.migrate_down("0088", conn, force_destructive=True)
         with conn.cursor() as cur:
             cur.execute("SELECT route_code FROM route_performance_standards WHERE agency_id = %s", (agency_id,))
             assert cur.fetchall() == [("KEPT",)]

@@ -53,12 +53,15 @@ def build_static_zip(
     routes_rows: list[str] | None = None,
     stop_times_rows: list[str] | None = None,
     routes_jp_rows: list[str] | None = None,
+    calendar_rows: list[str] | None = None,
     filename: str = "test_static.zip",
 ) -> str:
     """Build a minimal GTFS Static zip for testing.
 
-    Each of stops.txt/trips.txt/routes.txt/stop_times.txt/routes_jp.txt is
-    included only when its *_rows arg is not None. ``stop_times.txt`` lets
+    Each of stops.txt/trips.txt/routes.txt/stop_times.txt/routes_jp.txt/
+    calendar.txt is included only when its *_rows arg is not None; a
+    calendar.txt row reads ``service_id,monday,...,sunday,start_date,end_date``.
+    ``stop_times.txt`` lets
     synthetic RT `updates` rows join to a real stop_id/stop_sequence pair the
     same way ``pipeline/analyze.py``'s has_static path does in production.
     ``routes_jp.txt`` is the GTFS-JP route extension, whose rows read
@@ -81,6 +84,12 @@ def build_static_zip(
         if routes_jp_rows is not None:
             content = "route_id,route_update_date,origin_stop,via_stop,destination_stop\n" + "\n".join(routes_jp_rows)
             zf.writestr("routes_jp.txt", content)
+        if calendar_rows is not None:
+            content = (
+                "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+                + "\n".join(calendar_rows)
+            )
+            zf.writestr("calendar.txt", content)
     zip_path = tmp_path / filename
     zip_path.write_bytes(buf.getvalue())
     return str(zip_path)

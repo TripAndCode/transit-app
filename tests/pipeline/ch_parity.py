@@ -277,7 +277,8 @@ def legacy_rows(conn, ch_client, agency_id: int, table: str) -> list[str]:
             "ch_sql": build_dedup_ch_sql(include_captured_at=True),
         }
     with conn.cursor() as cur:
-        _load_temp_table(cur, ch_client, **load, parameters={"agency_id": agency_id}, label="parity")
+        ch_sql = load.pop("ch_sql")
+        _load_temp_table(cur, ch_client, **load, reads=[(ch_sql, {"agency_id": agency_id})], label="parity")
         cur.execute(LEGACY_SQL[table], {"agency_id": agency_id})
         rows = cur.fetchall()
         cur.execute(f"CREATE TEMP TABLE _parity_{table} (LIKE {table}) ON COMMIT DROP")

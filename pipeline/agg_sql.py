@@ -17,6 +17,7 @@ from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, 
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.service_day import service_date_ch, service_day_offset_ch, service_day_seconds_sql
+from pipeline.static_archive import Stamp, observation_rows
 
 _SERVICE_DATE = service_date_ch()
 
@@ -106,13 +107,14 @@ def service_delivered_ch_sql(date_where: str) -> str:
     )
 
 
-# `argMax(version, cnt)` picks the version stamped on the MOST rows
-# that day (mode), not the version of the latest single observation
-# -- a reload happening mid-day should attribute that day to whichever
-# version actually served most of it, not to whichever the last poll
-# happened to see.
-def schedule_revision_ch_sql(date_where: str) -> str:
-    """Per service date, the timetable version stamped on the most rows."""
+# `argMax(version, cnt)` picks the version filed on the MOST rows that
+# day (mode), not the version of the latest single observation. Read
+# under Stamp.IN_FORCE every row of a date with a version in force is
+# filed under it; a date with none falls back to the versions its rows
+# were ingested against, where the mode attributes a reload mid-day to
+# the version that served most of the day.
+def schedule_revision_ch_sql(date_where: str, stamp: Stamp = Stamp.IN_FORCE) -> str:
+    """Per service date, the timetable version filed on the most rows."""
     return (
         """
             SELECT svc_date, argMax(version, cnt) AS static_version_id
@@ -122,8 +124,8 @@ def schedule_revision_ch_sql(date_where: str) -> str:
         + """ AS svc_date,
                        static_version_id AS version,
                        count() AS cnt
-                FROM updates WHERE agency_id = {agency_id:UInt16}"""
-        + date_where
+                """
+        + observation_rows("u.agency_id = {agency_id:UInt16}" + date_where, stamp)
         + """
                 GROUP BY svc_date, version
             )
@@ -162,11 +164,12 @@ def schedule_revision_ch_sql(date_where: str) -> str:
 # The filters are on `u.` columns
 # because an unqualified name matching a SELECT alias in WHERE is
 # replaced by that alias's aggregate (see build_dedup_ch_sql).
-def route_headway_daily_ch_sql(date_where: str) -> str:
+def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> str:
     """Per (route, stop, service date), the array of actual event times, and the
-    version names its events were ingested against ('' for none) with how many
-    events carry each (a sumMap tally, so the result grows with the names, not
-    the events). Each event's delay, schedule and name come from its latest poll."""
+    version names its events are filed under ('' for none, as *stamp* files
+    them) with how many events carry each (a sumMap tally, so the result grows
+    with the names, not the events). Each event's delay, schedule and name come
+    from its latest poll."""
     return (
         """
                 WITH per_event AS (
@@ -178,13 +181,13 @@ def route_headway_daily_ch_sql(date_where: str) -> str:
                                tuple(u.dep_delay, u.scheduled_sec, ifNull(u.static_version_id, '')),
                                (u.captured_at, u.file_name)
                            ) AS latest
-                    FROM updates AS u
-                    WHERE u.agency_id = {agency_id:UInt16}
-                      AND u.stop_id IS NOT NULL AND u.route_code IS NOT NULL
-                      AND u.scheduled_sec IS NOT NULL
-                      AND u.dep_delay IS NOT NULL
-                      AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}"""
-        + date_where
+                    """
+        + observation_rows(
+            "u.agency_id = {agency_id:UInt16} AND u.stop_id IS NOT NULL AND u.dep_delay IS NOT NULL "
+            "AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}" + date_where,
+            stamp,
+            filed_where="u.route_code IS NOT NULL AND u.scheduled_sec IS NOT NULL",
+        )
         + """
                     GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
                 )

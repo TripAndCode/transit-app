@@ -21,8 +21,8 @@ from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
 from pipeline.reports.performance_standard import METRIC_TYPES
-from pipeline.static_archive import fetch_day
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
+from pipeline.timetable_in_force import fetch_day
 
 __all__ = [
     "AGENCIES_HEALTH_SQL",

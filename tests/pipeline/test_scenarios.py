@@ -34,7 +34,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 import os
-from collections import Counter, defaultdict
+from collections import Counter
 from collections.abc import Callable, Hashable, Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
@@ -832,49 +832,6 @@ def _partial_runs_count_as_not_run(observed: Observed, found: oracle.Outcome) ->
     return _with_service(found, lambda day, s: replace(s, reported_not_run=s.reported_not_run + partial_runs[day]))
 
 
-def _joined_to_the_timetable_loaded(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
-    """Each poll joins the timetable loaded when it was captured. A departure
-    of a day whose polls joined a version not in force that day takes that
-    version's schedule for its trip, or none, with no day type and no stop,
-    when the version lacks the trip. A day's version is the one stamped on
-    the most rows, a row per listed stop, and a row joined to no trip has
-    none."""
-    scenario = observed.scenario
-    joined: dict[tuple[str, date], set[str]] = defaultdict(set)
-    rows: Counter[tuple[date, str]] = Counter()
-    for version, batch in observed.batches:
-        trips = {t.trip_id for t in version.trips}
-        for poll in batch:
-            for entry in poll.trips:
-                joined[(entry.trip_id, entry.service_date)].add(version.name)
-                if entry.trip_id in trips:
-                    rows[(entry.service_date, version.name)] += len(entry.stops)
-    misjoined = {key: names for key, names in joined.items() if names != {scenario.version_on(key[1]).name}}
-    if any(len(names) > 1 for names in misjoined.values()):
-        raise NotImplementedError("a trip whose polls span a timetable load")
-    departures = []
-    for d in found.departures:
-        if (d.trip_id, d.service_date) not in misjoined:
-            departures.append(d)
-            continue
-        (name,) = misjoined[(d.trip_id, d.service_date)]
-        version = next(v for v in scenario.versions if v.name == name)
-        trip = next((t for t in version.trips if t.trip_id == d.trip_id), None)
-        if trip is None:
-            departures.append(replace(d, day_type="", scheduled_sec=None, stop_id=None))
-        else:
-            departures.append(replace(d, day_type=trip.day_type, scheduled_sec=trip.scheduled_sec[d.stop_sequence - 1]))
-    day_versions = dict(found.day_versions)
-    for day in {day for _trip, day in misjoined}:
-        counts = {name: n for (row_day, name), n in rows.items() if row_day == day}
-        top = max(counts.values())
-        winners = [name for name, n in counts.items() if n == top]
-        if len(winners) > 1:
-            raise NotImplementedError(f"two versions stamped on as many rows of {day}")
-        day_versions[day] = winners[0]
-    return replace(found, departures=tuple(departures), day_versions=day_versions)
-
-
 _CANCELLED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
     name="a cancelled trip keeps its predictions",
     reason=(
@@ -912,16 +869,6 @@ _PARTIAL_RUN_DIVERGENCE = Divergence(
     ),
     view=_partial_runs_count_as_not_run,
 )
-_PUBLISHED_EARLY_DIVERGENCE = Divergence(
-    name="polls join the timetable loaded",
-    reason=(
-        "Ingest joins each poll to the timetable loaded when it arrives, not to the one in force on its "
-        "service date, so the polls of a day before a revision's first day that arrive after the revision is "
-        "loaded take its schedule: a trip it moved is filed under its new times, a trip it dropped loses its "
-        "day type and its stops, and the day is recorded as running the revision."
-    ),
-    view=_joined_to_the_timetable_loaded,
-)
 # The divergences each scenario is known to meet, by scenario name.
 _KNOWN = {
     "cancellations": (
@@ -930,7 +877,6 @@ _KNOWN = {
         _SKIPPED_AFTER_PREDICTIONS_DIVERGENCE,
         _PARTIAL_RUN_DIVERGENCE,
     ),
-    "timetable_published_early": (_PUBLISHED_EARLY_DIVERGENCE,),
 }
 
 
@@ -1266,7 +1212,7 @@ _ALL = [
     pytest.param(plain_weekday, id="plain_weekday"),
     pytest.param(night_route, id="night_route"),
     pytest.param(timetable_change, id="timetable_change"),
-    _TIMETABLE_PUBLISHED_EARLY := pytest.param(timetable_published_early, id="timetable_published_early"),
+    pytest.param(timetable_published_early, id="timetable_published_early"),
     _CANCELLATIONS := pytest.param(cancellations, id="cancellations"),
 ]
 
@@ -1323,9 +1269,3 @@ def test_a_trip_cancelled_without_stop_updates_counts_as_not_run(observed):
 @pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
 def test_a_run_that_skipped_some_stops_counts_as_executed(observed):
     _assert_clean(_divergence_mismatches(observed, _PARTIAL_RUN_DIVERGENCE))
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_PUBLISHED_EARLY_DIVERGENCE.reason)
-@pytest.mark.parametrize("observed", [_TIMETABLE_PUBLISHED_EARLY], indirect=True)
-def test_a_revision_loaded_before_its_first_day_leaves_the_days_before_it_on_their_own_timetable(observed):
-    _assert_clean(_divergence_mismatches(observed, _PUBLISHED_EARLY_DIVERGENCE))

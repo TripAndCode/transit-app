@@ -257,3 +257,33 @@ CREATE TABLE IF NOT EXISTS static_version_map (
     archived_at       DateTime64(3, 'UTC')
 ) ENGINE = MergeTree
 ORDER BY (agency_id, static_version_id, archived_at);
+
+-- Each kept content's schedule as ingest stamps a poll matching each stop
+-- time: the trip's service and route, and the departure parsed as ingest
+-- parses it (pipeline.timetable_in_force.schedule_row). A row ingested against
+-- other content than the version in force on its service date is read with
+-- this instead. One partition per agency and content, written whole by a swap.
+CREATE TABLE IF NOT EXISTS static_schedule_archive (
+    agency_id      Int32,
+    content_hash   LowCardinality(String),
+    trip_id        String,
+    stop_sequence  Int32,
+    service_type   Nullable(String),
+    route_id       Nullable(String),
+    scheduled_time Nullable(String),
+    scheduled_sec  Nullable(Int32)
+) ENGINE = MergeTree
+PARTITION BY (agency_id, content_hash)
+ORDER BY (agency_id, content_hash, trip_id, stop_sequence);
+
+-- The service dates each loaded version name covers, both ends inclusive
+-- (pipeline.timetable_in_force.version_span). A name loaded again with another
+-- span gains a row, and the latest recorded_at is the one in force.
+CREATE TABLE IF NOT EXISTS static_version_spans (
+    agency_id         Int32,
+    static_version_id String,
+    first_day         Date32,
+    last_day          Date32,
+    recorded_at       DateTime64(3, 'UTC')
+) ENGINE = MergeTree
+ORDER BY (agency_id, static_version_id, recorded_at);

@@ -33,7 +33,7 @@ even and is never used for them.
 
 import logging
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Set
 from contextlib import AbstractContextManager, nullcontext
 from datetime import date, timedelta
 from typing import NamedTuple
@@ -51,7 +51,7 @@ from pipeline.histogram import (
     WIDTH,
 )
 from pipeline.service_day import service_date_ch, service_day_start_utc
-from pipeline.static_archive import ScheduleJoin
+from pipeline.static_archive import ScheduleJoin, Stamp, observation_rows
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +61,61 @@ def months_of(dates: Iterable[date]) -> list[int]:
     return sorted({d.year * 100 + d.month for d in dates})
 
 
-def version_names(ch, agency_id: int, where: str, params: dict) -> dict[str, int]:
-    """Each version name among the agency's `updates` rows matching *where* ('' for none), with its row count."""
+def version_names(
+    ch,
+    agency_id: int,
+    where: str,
+    params: dict,
+    join: ScheduleJoin | None = None,
+    stamp: Stamp = Stamp.INGESTED,
+    between: tuple[date, date] | None = None,
+) -> dict[str, int]:
+    """Each version name the agency's `updates` rows matching *where* are filed
+    under ('' for none), as *stamp* files them, with its row count. A *stamp*
+    other than INGESTED reads *join*'s versions in force over *between*, the
+    dates *where* can reach (`ScheduleJoin.force_params`). REFIT files a row
+    under the same name IN_FORCE does, so it is read as IN_FORCE, without the
+    schedule archive's join."""
+    stamp = Stamp.IN_FORCE if stamp is Stamp.REFIT else stamp
     rows = ch.query(
-        f"SELECT ifNull(u.static_version_id, '') AS stem, count() FROM {UPDATES_TABLE} AS u "
-        f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where}) GROUP BY stem",
-        parameters={"agency_id": agency_id, **params},
+        "SELECT ifNull(u.static_version_id, '') AS stem, count() "
+        f"{observation_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', stamp)} GROUP BY stem",
+        parameters={"agency_id": agency_id, **params, **_filing_params(join, stamp, between=between)},
     ).result_rows
     return dict(rows)
+
+
+def _filing_params(
+    join: ScheduleJoin | None,
+    stamp: Stamp,
+    present: Iterable[str] | None = None,
+    between: tuple[date, date] | None = None,
+) -> dict:
+    if stamp is Stamp.INGESTED:
+        return {}
+    if join is None:
+        raise ValueError(f"reading rows {stamp.value} needs a ScheduleJoin")
+    return join.params(present, between)
+
+
+def month_span(month: int, days: list[date] | None = None) -> tuple[date, date]:
+    """The first and last service dates a read of *month*, or of only *days* within it, reaches."""
+    if days:
+        return min(days), max(days)
+    first, following = month_bounds(month)
+    return first, following - timedelta(days=1)
+
+
+def stamp_for(join: ScheduleJoin | None, refit: Set[date] | None, dates: Iterable[date]) -> Stamp:
+    """How a read of *dates* files its rows: INGESTED without versions in
+    force, else REFIT where *refit*, the dates whose rows need the archive's
+    schedule (static_archive.refit_dates), names one of them or is unknown
+    (None), else IN_FORCE."""
+    if join is None or not join.force:
+        return Stamp.INGESTED
+    if refit is None or not refit.isdisjoint(dates):
+        return Stamp.REFIT
+    return Stamp.IN_FORCE
 
 
 def month_bounds(month: int) -> tuple[date, date]:
@@ -553,7 +600,13 @@ ALL_TABLES: tuple[str, ...] = (*MONTHLY_TABLES, *WHOLE_HISTORY_TABLES)
 # Every persistent ClickHouse table besides the observation ones (`updates`,
 # `updates_live`): what analyze builds and the timetable archive. db/clickhouse/schema.sql
 # creates exactly these and the observation tables.
-STORE_TABLES: tuple[str, ...] = (*ALL_TABLES, static_archive.ARCHIVE, static_archive.VERSION_MAP)
+STORE_TABLES: tuple[str, ...] = (
+    *ALL_TABLES,
+    static_archive.ARCHIVE,
+    static_archive.SCHEDULE,
+    static_archive.VERSION_MAP,
+    static_archive.SPANS,
+)
 _ALL_SPECS: dict[str, _Spec | _WholeSpec] = {**_SPECS, **_WHOLE_SPECS}
 COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _ALL_SPECS.items()}
 
@@ -579,23 +632,26 @@ def work_table(table: str, agency_id: int) -> str:
     return f"{_checked(table)}__work_a{int(agency_id)}"
 
 
-def _dedup_select(where: str, *, scheduled_sec: bool = True) -> str:
+def _dedup_select(where: str, *, scheduled_sec: bool = True, stamp: Stamp = Stamp.INGESTED) -> str:
     """The dedup of the agency's `updates` rows matching *where*, with every column a table reads.
 
     Without *scheduled_sec*, every column but `scheduled_sec`: what a table
     whose `_Spec` does not read it dedups for itself."""
     return build_dedup_ch_sql(
-        extra_where=where, include_captured_at=True, include_scheduled_sec=scheduled_sec, include_static_version=True
+        extra_where=where,
+        include_captured_at=True,
+        include_scheduled_sec=scheduled_sec,
+        include_static_version=True,
+        stamp=stamp,
     )
 
 
-def _raw_select(where: str) -> str:
+def _raw_select(where: str, stamp: Stamp = Stamp.INGESTED) -> str:
     """The agency's `updates` rows matching *where*, with no dedup: every poll, delay or not."""
     return (
         f"SELECT {service_date_ch('u.captured_at')} AS date, u.route_code AS route_code, u.trip_id AS trip_id, "
         f"u.stop_sequence AS stop_sequence, ifNull(u.static_version_id, '') AS static_version_id "
-        f"FROM {UPDATES_TABLE} AS u "
-        f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({where})"
+        f"{observation_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', stamp)}"
     )
 
 
@@ -607,6 +663,7 @@ def select_sql(
     *,
     join: ScheduleJoin | None = None,
     present: Iterable[str] | None = None,
+    stamp: Stamp = Stamp.INGESTED,
 ) -> tuple[str, dict]:
     """The SELECT computing *table*'s rows for the agency bound as `agency_id`:
     those of one month, or of only *days* within it.
@@ -619,6 +676,8 @@ def select_sql(
 
     A table in STATIC_JOINED_TABLES also binds *join*'s parameters, narrowed to
     the contents the version names in *present* join (`ScheduleJoin.params`).
+    Without *source*, *stamp* files the rows it reads (`stamp_for`), and any
+    but INGESTED binds *join*'s parameters too.
     """
     if _checked(table) not in _SPECS:
         raise ValueError(f"{table!r} is not built by month")
@@ -627,13 +686,18 @@ def select_sql(
         raise ValueError(f"{table!r} reads every `updates` row, not a dedup")
     if source is None:
         where, params = month_where(month) if days is None else days_where(days)
-        rows = _raw_select(where) if spec.raw else _dedup_select(where, scheduled_sec=spec.scheduled_sec)
+        rows = (
+            _raw_select(where, stamp)
+            if spec.raw
+            else _dedup_select(where, scheduled_sec=spec.scheduled_sec, stamp=stamp)
+        )
     elif days is None:
         rows, params = f"SELECT * FROM {source}", {}
     else:
         rows, params = f"SELECT * FROM {source} WHERE has({{days:Array(Date)}}, date)", {"days": days}
-    if join is not None and table in STATIC_JOINED_TABLES:
-        params = {**params, **join.params(present)}
+    filed = source is None and stamp is not Stamp.INGESTED
+    if join is not None and (filed or table in STATIC_JOINED_TABLES):
+        params = {**params, **join.params(present, month_span(month, days))}
     return spec.select(rows), params
 
 
@@ -660,6 +724,7 @@ def build(
     rebuilds: dict[str, Rebuild],
     step: Callable[[str], AbstractContextManager] = _untimed,
     join: ScheduleJoin | None = None,
+    refit: Set[date] | None = None,
 ) -> None:
     """Compute each of *rebuilds* into its table's work table.
 
@@ -681,6 +746,9 @@ def build(
     first read for their version names, which narrow the archive side of the
     join to the contents those rows join; the rows whose name maps to no
     archived timetable are counted and logged once.
+
+    With *join*'s versions in force, each month's rows are read filed under the
+    version in force on their service date (`stamp_for`, given *refit*).
     """
     joined = sorted(table for table in rebuilds if table in STATIC_JOINED_TABLES)
     if joined and join is None:
@@ -702,21 +770,39 @@ def build(
             table: _days_in(rebuild.changed, month) for table, rebuild in rebuilds.items() if month in rebuild.months
         }
         stems = None
+        first, following = month_bounds(month)
+        scoped = (
+            [first + timedelta(days=i) for i in range((following - first).days)]
+            if any(table_days is None for table_days in days.values())
+            else sorted({day for table_days in days.values() for day in table_days or ()})
+        )
+        stamp = stamp_for(join, refit, scoped)
         joined_days = [table_days for table, table_days in days.items() if table in STATIC_JOINED_TABLES]
         if join is not None and joined_days:
             with step("ClickHouse version names"):
-                counts = version_names(ch, agency_id, *_scope_where(month, joined_days))
+                counts = version_names(
+                    ch, agency_id, *_scope_where(month, joined_days), join, stamp, month_span(month, scoped)
+                )
             stems = list(counts)
             unarchived.update({stem: n for stem, n in counts.items() if stem not in join.stems})
         deduped = {table: table_days for table, table_days in days.items() if not _SPECS[table].raw}
         if len(deduped) == 1:
             ((table, table_days),) = deduped.items()
             with step(f"{table}: ClickHouse build"):
-                _build_month(ch, table, agency_id, month, table_days, source=None, join=join, present=stems)
+                _build_month(
+                    ch, table, agency_id, month, table_days, source=None, join=join, present=stems, stamp=stamp
+                )
         elif deduped:
             where, params = _scope_where(month, deduped.values())
             with step("ClickHouse dedup"):
-                ch.command(f"INSERT INTO {dedup} {_dedup_select(where)}", parameters={"agency_id": agency_id, **params})
+                ch.command(
+                    f"INSERT INTO {dedup} {_dedup_select(where, stamp=stamp)}",
+                    parameters={
+                        "agency_id": agency_id,
+                        **params,
+                        **_filing_params(join, stamp, between=month_span(month, scoped)),
+                    },
+                )
             for table, table_days in deduped.items():
                 with step(f"{table}: ClickHouse build"):
                     _build_month(ch, table, agency_id, month, table_days, source=dedup, join=join, present=stems)
@@ -725,7 +811,9 @@ def build(
         for table, table_days in days.items():
             if _SPECS[table].raw:
                 with step(f"{table}: ClickHouse build"):
-                    _build_month(ch, table, agency_id, month, table_days, source=None, join=join, present=stems)
+                    _build_month(
+                        ch, table, agency_id, month, table_days, source=None, join=join, present=stems, stamp=stamp
+                    )
     with step("ClickHouse build setup"):
         ch.command(f"DROP TABLE IF EXISTS {dedup} SYNC")
     if unarchived and join is not None:
@@ -752,6 +840,7 @@ def _build_month(
     source: str | None,
     join: ScheduleJoin | None = None,
     present: list[str] | None = None,
+    stamp: Stamp = Stamp.INGESTED,
 ) -> None:
     work = work_table(table, agency_id)
     columns = ", ".join(COLUMNS[table])
@@ -762,7 +851,7 @@ def _build_month(
             "AND NOT has({days:Array(Date)}, date)",
             parameters={"agency_id": agency_id, "month": month, "days": days},
         )
-    sql, params = select_sql(table, month, days, source=source, join=join, present=present)
+    sql, params = select_sql(table, month, days, source=source, join=join, present=present, stamp=stamp)
     ch.command(f"INSERT INTO {work} ({columns}) {sql}", parameters={"agency_id": agency_id, **params})
 
 
