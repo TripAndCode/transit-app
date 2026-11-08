@@ -26,9 +26,7 @@ def _reset_limiter():
     limiter.reset()
 
 
-# Spread so that each sort orders the four routes differently, the on-time
-# rate under the legacy preset (up to a minute late), which the sort test asks
-# for; under the default window B's 200 s departures are on time too:
+# Spread so that each sort orders the four routes differently (on time under legacy_60s):
 #   code   avg   on-time  over 5 (share, count)  samples
 #   A     4.00    40.0%      60.0%  15             25
 #   B     7.33    20.0%      40.0%  10             25

@@ -43,9 +43,7 @@ def test_the_browser_mirrors_the_servers_presets_default_and_unbounded_spelling(
     assert MIRROR == {
         "default_preset": DEFAULT_PRESET,
         "early_any": EARLY_ANY,
-        "presets": {
-            name: {"early_sec": early, "late_sec": late} for name, (early, late) in ON_TIME_PRESETS.items()
-        },
+        "presets": {name: {"early_sec": early, "late_sec": late} for name, (early, late) in ON_TIME_PRESETS.items()},
     }
 
 
