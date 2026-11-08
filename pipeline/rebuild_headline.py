@@ -13,8 +13,8 @@ agency with nothing built yet has no "before" and records nothing.
 
 **Which figures**: the council summary's whole-agency on-time rate and average
 delay (``pipeline.reports.council``), under the on-time window a report applies
-when its request names none (``resolve_definition_meta``), read through asyncpg
-as the reports read them. The preset is kept beside them, so the log names the
+when its request names none (``pipeline.reports.rankings.on_time_window``), read
+through asyncpg as the reports read them. The preset is kept beside them, so the log names the
 definition when the default changes.
 
 **Which dates**: both sides cover the service dates agg_route_daily_dist held
@@ -43,7 +43,8 @@ import asyncpg
 from api.range import RangeCtx
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.reports.council import _agency_on_time_pooled
-from pipeline.reports.definition import DefinitionMeta, resolve_definition_meta
+from pipeline.reports.definition import resolve_definition_meta
+from pipeline.reports.rankings import on_time_window
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,10 @@ class Before:
     agency_id: int
     first_day: date
     last_day: date
-    definition: DefinitionMeta
+    # The on-time window, (early_tolerance_sec, late_tolerance_sec), and the
+    # preset it is.
+    window: tuple[int | None, int]
+    preset: str | None
     figures: dict[str, Any]
 
 
@@ -80,7 +84,7 @@ async def _connect(db_url: str) -> asyncpg.Connection:
     return await asyncpg.connect(db_url, timeout=_READ_TIMEOUT_SEC, command_timeout=_READ_TIMEOUT_SEC)
 
 
-async def _figures(conn, agency_id: int, first_day: date, last_day: date, definition: DefinitionMeta) -> dict:
+async def _figures(conn, agency_id: int, first_day: date, last_day: date, window: tuple[int | None, int]) -> dict:
     # No ClickHouse client: a window the aggregates cannot answer would be read
     # off the observations, which a rebuild leaves as they were, so it raises
     # for want of one instead.
@@ -89,8 +93,7 @@ async def _figures(conn, agency_id: int, first_day: date, last_day: date, defini
         RangeCtx(from_date=first_day, to_date=last_day),
         conn,
         None,
-        definition.early_tolerance_sec,
-        definition.late_tolerance_sec,
+        *window,
     )
     return {"on_time_pct": on_time_pct, "avg_delay_min": avg_delay_min, "samples": int(samples)}
 
@@ -101,23 +104,25 @@ async def _read_before(db_url: str, agency_id: int) -> Before | None:
         span = await conn.fetchrow(_SPAN_SQL, agency_id)
         if span is None or span["first_day"] is None:
             return None
-        definition = resolve_definition_meta("council_summary", None, None)
-        figures = await _figures(conn, agency_id, span["first_day"], span["last_day"], definition)
+        # As get_report resolves a council summary whose request names no window.
+        window = on_time_window()
+        figures = await _figures(conn, agency_id, span["first_day"], span["last_day"], window)
     finally:
         await conn.close()
-    return Before(db_url, agency_id, span["first_day"], span["last_day"], definition, figures)
+    preset = resolve_definition_meta("council_summary", *window).preset
+    return Before(db_url, agency_id, span["first_day"], span["last_day"], window, preset, figures)
 
 
 async def _read_after(before: Before) -> dict:
     conn = await _connect(before.db_url)
     try:
-        figures = await _figures(conn, before.agency_id, before.first_day, before.last_day, before.definition)
+        figures = await _figures(conn, before.agency_id, before.first_day, before.last_day, before.window)
     finally:
         await conn.close()
     return {
         "first_day": before.first_day.isoformat(),
         "last_day": before.last_day.isoformat(),
-        "preset": before.definition.preset,
+        "preset": before.preset,
         "method_version": METHOD_VERSION,
         "before": before.figures,
         "after": figures,

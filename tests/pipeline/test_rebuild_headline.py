@@ -15,7 +15,7 @@ from api.range import RangeCtx
 from pipeline import agg_registry, rebuild_headline
 from pipeline.analyze import analyze, mark_for_full_rebuild
 from pipeline.reports.council import compute_council_summary
-from pipeline.reports.definition import resolve_definition_meta
+from pipeline.reports.rankings import DEFAULT_PRESET
 from pipeline.runs import record_run
 from tests.conftest import mirror_updates_to_ch
 
@@ -114,7 +114,7 @@ def test_the_headline_is_the_council_summarys_under_the_default_definition(pg_co
     summary = asyncio.run(_council_summary(agency_id, *DAYS))
     expected = {k: summary[k] for k in ("on_time_pct", "avg_delay_min", "samples")}
     assert headline["before"] == headline["after"] == expected
-    assert headline["preset"] == resolve_definition_meta("council_summary", None, None).preset
+    assert headline["preset"] == DEFAULT_PRESET
 
 
 def test_a_full_rebuild_records_the_headline(pg_conn, agency_id, ch_client):
