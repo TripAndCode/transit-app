@@ -343,6 +343,12 @@
     "exclusion_limit": "Readings more than {{limit}} off are ignored as errors.",
     "on_time_late": "On time = no more than {{late}} late (early departures count as on time).",
     "on_time_late_early": "On time = no more than {{late}} late and no more than {{early}} early.",
+    "on_time_late_named": "On time ({{preset}}) = no more than {{late}} late (early departures count as on time).",
+    "on_time_late_early_named": "On time ({{preset}}) = no more than {{late}} late and no more than {{early}} early.",
+    "preset": {
+      "standard_m1_p5": "industry standard",
+      "legacy_60s": "legacy"
+    },
     "early_departure": "Early-departure rate = the share of departures more than {{early}} early.",
     "method_version": "Method version {{version}}, aggregates built: {{day}}.",
     "built_day_unknown": "unknown",
@@ -2158,6 +2164,7 @@
     "tolerance_sec": "within {{n}} s",
     "early_min": "early by up to {{n}} min",
     "early_sec": "early by up to {{n}} s",
+    "early_any": "any early departure on time",
     "unapplied": "This screen doesn't use this condition",
     "control": {
       "last_days": "Last {{count}} days",

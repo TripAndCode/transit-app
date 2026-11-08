@@ -81,7 +81,7 @@ describe("PresetMenu (signed in)", () => {
       ),
     ).toBeInTheDocument();
     expect(within(menu()).getByText("0 views")).toBeInTheDocument();
-    expect(within(menu()).getByText("all routes, 1/1 – 1/30, every day, all hours, within 1 min")).toBeInTheDocument();
+    expect(within(menu()).getByText("all routes, 1/1 – 1/30, every day, all hours, within 5 min")).toBeInTheDocument();
     const name = within(menu()).getByRole("textbox", { name: "View name" });
     expect(name).toHaveValue("all routes, 1/1 – 1/30");
     expect(name).toHaveFocus();
@@ -129,10 +129,10 @@ describe("PresetMenu (signed in)", () => {
     await open();
     const everything = await screen.findByRole("button", { name: "Everything" });
     expect(everything).toHaveAttribute("aria-current", "true");
-    expect(everything).toHaveAccessibleDescription("all routes, 1/1 – 1/30, every day, all hours, within 1 min");
+    expect(everything).toHaveAccessibleDescription("all routes, 1/1 – 1/30, every day, all hours, within 5 min");
     const weekday = screen.getByRole("button", { name: "Weekday mornings" });
     expect(weekday).not.toHaveAttribute("aria-current");
-    expect(weekday).toHaveAccessibleDescription("all routes, 1/1 – 1/30, weekdays, all hours, within 1 min");
+    expect(weekday).toHaveAccessibleDescription("all routes, 1/1 – 1/30, weekdays, all hours, within 5 min");
     await userEvent.click(weekday);
     expect(onSelect).toHaveBeenCalledWith(SAVED);
     expect(screen.queryByRole("button", { name: "Weekday mornings" })).toBeNull();
@@ -143,7 +143,7 @@ describe("PresetMenu (signed in)", () => {
     signedIn([{ preset_id: 1, agency_id: 1, name: "Old", range_ctx: { dow: "weekday" } }]);
     await open();
     expect(await screen.findByRole("button", { name: "Old" })).toHaveAccessibleDescription(
-      "all routes, 1/1 – 1/30, weekdays, all hours, within 1 min",
+      "all routes, 1/1 – 1/30, weekdays, all hours, within 5 min",
     );
   });
 

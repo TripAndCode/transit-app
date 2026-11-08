@@ -343,6 +343,12 @@
     "exclusion_limit": "{{limit}}を超えてずれた値は誤りとして除外します。",
     "on_time_late": "定時 = 遅れ{{late}}以内（早発も定時に含む）。",
     "on_time_late_early": "定時 = 遅れ{{late}}以内、早発{{early}}以内。",
+    "on_time_late_named": "定時（{{preset}}） = 遅れ{{late}}以内（早発も定時に含む）。",
+    "on_time_late_early_named": "定時（{{preset}}） = 遅れ{{late}}以内、早発{{early}}以内。",
+    "preset": {
+      "standard_m1_p5": "業界標準",
+      "legacy_60s": "従来の基準"
+    },
     "early_departure": "早発率 = 定刻より{{early}}を超えて早い発車の割合。",
     "method_version": "算出方法 {{version}}、集計日 {{day}}。",
     "built_day_unknown": "不明",
@@ -2158,6 +2164,7 @@
     "tolerance_sec": "{{n}}秒以内",
     "early_min": "早発は{{n}}分まで",
     "early_sec": "早発は{{n}}秒まで",
+    "early_any": "早発も定時扱い",
     "unapplied": "この画面では使われない条件です",
     "control": {
       "last_days": "直近{{count}}日",

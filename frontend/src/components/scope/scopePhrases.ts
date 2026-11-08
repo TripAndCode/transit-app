@@ -1,3 +1,4 @@
+import { DEFAULT_WINDOW, EARLY_ANY } from "../../api/onTimeDefault";
 import type { Scope } from "../../api/scope";
 import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, type LabelT } from "../../utils/filterValueLabels";
 import { roundTenth } from "../../utils/format";
@@ -14,8 +15,7 @@ export type PhraseCtx = {
   routeGroup?: (code: string) => string | undefined;
 };
 
-/** The on-time tolerance the server applies when `late` is unset. */
-const DEFAULT_LATE_SEC = 60;
+const DEFAULT_LATE_SEC = DEFAULT_WINDOW.late_sec;
 
 function dateLabel(iso: string, withYear: boolean): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -88,7 +88,8 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   if (scope.stop) tokens.push({ key: "stop", label: tr("scope.stop", { id: scope.stop }), field: "stop" });
   if (scope.dir != null) tokens.push({ key: "dir", label: tr("scope.dir", { dir: scope.dir }), field: "dir" });
   if (scope.early != null) {
-    tokens.push({ key: "early", label: earlyLabel(scope.early, t), field: "early" });
+    const label = scope.early === EARLY_ANY ? tr("scope.early_any") : earlyLabel(scope.early, t);
+    tokens.push({ key: "early", label, field: "early" });
   }
   tokens.push({ key: "tolerance", label: toleranceLabel(scope.late ?? DEFAULT_LATE_SEC, t), field: "late" });
   return tokens;

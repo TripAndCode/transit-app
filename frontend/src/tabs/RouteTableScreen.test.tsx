@@ -11,9 +11,9 @@ vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () =>
 vi.mock("../components/PerformanceStandardPanel", () => ({ PerformanceStandardPanel: () => <div>standards-panel</div> }));
 
 const DEFINITION: DefinitionMeta = {
-  preset: "legacy_60s",
-  early_tolerance_sec: null,
-  late_tolerance_sec: 60,
+  preset: "standard_m1_p5",
+  early_tolerance_sec: 60,
+  late_tolerance_sec: 300,
   early_departure_sec: 60,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
@@ -162,7 +162,7 @@ describe("RouteTableScreen", () => {
 
   it("states what counts as on time and as over five minutes under the table", () => {
     setup("/agencies/1/routes");
-    expect(screen.getByText("On time = no more than 1 min late (early departures count as on time).")).toBeInTheDocument();
+    expect(screen.getByText("On time (industry standard) = no more than 5 min late and no more than 1 min early.")).toBeInTheDocument();
     expect(screen.getByText(/^Over 5 min = departures more than 5 minutes late/)).toBeInTheDocument();
   });
 
@@ -175,7 +175,7 @@ describe("RouteTableScreen", () => {
   });
 
   it("follows the threshold the response names", () => {
-    setup("/agencies/1/routes?early=120", tableResponse({ definition: { ...DEFINITION, early_tolerance_sec: 120, early_departure_sec: 120 } }));
+    setup("/agencies/1/routes?early=120", tableResponse({ definition: { ...DEFINITION, preset: "custom", early_tolerance_sec: 120, early_departure_sec: 120 } }));
     expect(screen.getByRole("columnheader", { name: "Early (> 2 min)" })).toBeInTheDocument();
   });
 
