@@ -316,7 +316,8 @@ describe("AdminBoardPage", () => {
     expect(item).toHaveTextContent(`${formatMinutes(1.42, 2)} → ${formatMinutes(1.57, 2)}`);
     expect(item).toHaveTextContent("2026-06-08");
     expect(item).toHaveTextContent("2026-09-19");
-    expect(item).toHaveTextContent("legacy_60s");
+    expect(item).toHaveTextContent(i18n.t("definitionMeta.preset.legacy_60s"));
+    expect(item).not.toHaveTextContent("legacy_60s");
     expect(item).toHaveTextContent("Hokuriku");
   });
 

@@ -117,6 +117,14 @@ def test_the_headline_is_the_council_summarys_under_the_default_definition(pg_co
     assert headline["preset"] == DEFAULT_PRESET
 
 
+def test_a_bump_to_a_table_the_headline_does_not_read_records_nothing(pg_conn, agency_id, ch_client, monkeypatch):
+    _seed(pg_conn, agency_id)
+    _mirror_and_analyze(agency_id, pg_conn, ch_client)
+    _bump(monkeypatch, "agg_feed_health")
+
+    assert analyze(agency_id, pg_conn, ch_client, db_url=_db_url()) is None
+
+
 def test_a_full_rebuild_records_the_headline(pg_conn, agency_id, ch_client):
     _seed(pg_conn, agency_id)
     _mirror_and_analyze(agency_id, pg_conn, ch_client)
@@ -167,9 +175,11 @@ def test_a_rebuild_repairing_stores_that_disagree_records_nothing(pg_conn, agenc
     assert _stored_avg_delay_min(pg_conn, agency_id) == pytest.approx(built)
 
 
-@pytest.mark.parametrize("failing_read", [1, 2], ids=["before", "after"])
+@pytest.mark.parametrize(
+    ("failing_read", "stalls"), [(1, False), (2, False), (1, True)], ids=["before", "after", "before stalls"]
+)
 def test_a_headline_that_cannot_be_read_leaves_the_rebuild_standing(
-    pg_conn, agency_id, ch_client, monkeypatch, caplog, failing_read
+    pg_conn, agency_id, ch_client, monkeypatch, caplog, failing_read, stalls
 ):
     _seed(pg_conn, agency_id)
     _mirror_and_analyze(agency_id, pg_conn, ch_client)
@@ -182,10 +192,13 @@ def test_a_headline_that_cannot_be_read_leaves_the_rebuild_standing(
     async def _fail_one(*args, **kwargs):
         reads.append(args)
         if len(reads) == failing_read:
-            raise RuntimeError("connection reset")
+            if not stalls:
+                raise RuntimeError("connection reset")
+            await asyncio.sleep(5)
         return await pooled(*args, **kwargs)
 
     monkeypatch.setattr(rebuild_headline, "_agency_on_time_pooled", _fail_one)
+    monkeypatch.setattr(rebuild_headline, "_READ_TIMEOUT_SEC", 1)
 
     with caplog.at_level(logging.WARNING, logger="pipeline.rebuild_headline"):
         assert analyze(agency_id, pg_conn, ch_client, db_url=_db_url()) is None
