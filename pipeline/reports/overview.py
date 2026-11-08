@@ -1474,7 +1474,7 @@ async def compute_overview_summary(
         routes=ctx.routes,
         service_dates=ctx.service_dates,
     )
-    # None when the grain could not reach back to it (see the docstring).
+    # None when the grain was fetched over the period alone, without the days before it.
     baseline_ctx = None if baseline_unavailable else base_ctx
 
     movers: dict | None
