@@ -259,7 +259,7 @@ async def test_the_live_form_of_a_refit_read_gives_the_rows_of_analyzes_form(ref
         filed = await ctx_filing(aconn, ch_async_client, refiled.agency_id, ctx)
         assert filed.stamp is Stamp.REFIT
         cte, params = _dedup_cte_ch(ctx, filed)
-        where = updates_filter_ch(ctx)
+        where = updates_filter_ch(ctx, refit=True)
         exact = build_dedup_ch_sql(extra_where=where.raw, filed_where=where.filed, stamp=Stamp.REFIT)
         read = "SELECT * FROM deduped ORDER BY trip_id, stop_sequence"
         live = await ch_async_client.query(f"WITH {cte} {read}", parameters={"agency_id": refiled.agency_id, **params})
