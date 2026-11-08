@@ -827,7 +827,7 @@ if [ "$RUN_FRONTEND" -eq 1 ]; then
     # file, so like the backend ceiling above it needs headroom over the
     # suite's real wall-clock on a loaded host, not a figure that only a
     # quiet machine clears.
-    run_step 300 "npm run test" "${IN_DIR[@]}" "$FE_DIR" npm run test || FAIL=1
+    run_step 600 "npm run test" "${IN_DIR[@]}" "$FE_DIR" npm run test || FAIL=1
     # Type-aware lint over the whole project; same loaded-host headroom
     # reasoning as the test ceiling above.
     run_step 180 "npm run lint (whole project — matches CI, a file-scoped eslint call can miss project config)" \
