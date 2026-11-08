@@ -12,7 +12,7 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/pre-push.sh\"",
-            "timeout": 3600,
+            "timeout": 4200,
             "statusMessage": "Checking branch quality before push"
           }
         ]
