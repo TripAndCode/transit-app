@@ -493,6 +493,18 @@ def test_the_step_ceilings_fit_inside_the_hooks_own_timeout():
     assert sum(ceilings) < _hook_entry_timeout()
 
 
+def test_the_ceiling_check_sees_a_ceiling_raised_past_the_hooks_timeout():
+    """Positive control for the check above: the same reading of the hook,
+    with only the backend suite's ceiling raised by the whole harness timeout, must
+    exceed it. A parser that stopped seeing a ceiling would pass the check
+    above vacuously and fail here."""
+    timeout = _hook_entry_timeout()
+    text = HOOK_PATH.read_text()
+    assert "run_step 1500 " in text
+    raised = text.replace("run_step 1500 ", f"run_step {1500 + timeout} ", 1)
+    assert sum(_ceilings(raised)) >= timeout
+
+
 def test_the_codex_wrapper_gives_the_hook_the_same_room():
     """Codex runs the same script through .codex/hooks/pre-push.sh, under its
     own harness `timeout`; that one must clear the step ceilings too."""
@@ -507,18 +519,6 @@ def test_the_codex_wrapper_gives_the_hook_the_same_room():
     ]
     assert len(timeouts) == 1, ".codex/hooks/pre-push.sh must be registered exactly once in .codex/hooks.json"
     assert sum(_ceilings(HOOK_PATH.read_text())) < timeouts[0]
-
-
-def test_the_ceiling_check_sees_a_ceiling_raised_past_the_hooks_timeout():
-    """Positive control for the check above: the same reading of the hook,
-    with only the backend suite's ceiling raised by the whole harness timeout, must
-    exceed it. A parser that stopped seeing a ceiling would pass the check
-    above vacuously and fail here."""
-    timeout = _hook_entry_timeout()
-    text = HOOK_PATH.read_text()
-    assert "run_step 1500 " in text
-    raised = text.replace("run_step 1500 ", f"run_step {1500 + timeout} ", 1)
-    assert sum(_ceilings(raised)) >= timeout
 
 
 def _function_source(name: str) -> str:
