@@ -2707,7 +2707,7 @@ class _FailingCh:
 
 
 @pytest.mark.asyncio
-async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id):
+async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id, monkeypatch):
     """The whole /overview/summary payload must survive a ClickHouse hiccup in
     the grain fetched for the hour profiles.
 
@@ -2726,12 +2726,19 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     for d in range(22, 29):
         await _seed_agg_daily(aconn, aagency_id, date(2026, 6, d), "R_DEG", "平日", 5.0, 20)
 
+    from pipeline import cache
     from pipeline.reports import compute_overview_summary
 
+    clock = _CacheClock()
+    monkeypatch.setattr("pipeline.cache._monotonic", clock)
     ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), routes=("R_DEG",))
     failing = _FailingCh()
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=failing)
-    # Not cached with its hour profiles missing: the same request scans again.
+    # Cached only briefly with its hour profiles missing: the same request is
+    # served it for the short TTL, and scans again after.
+    assert await compute_overview_summary(aagency_id, ctx, aconn, ch=failing) == out
+    assert failing.attempts == 1
+    clock.now += cache.DEGRADED_TTL_SECONDS + 1
     assert await compute_overview_summary(aagency_id, ctx, aconn, ch=failing) == out
     assert failing.attempts == 2
 
@@ -2991,6 +2998,16 @@ class _CappedCh:
         return result
 
 
+class _CacheClock:
+    """A settable stand-in for ``pipeline.cache``'s clock."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 class _RecordingCh:
     """Async ClickHouse client proxy that records each query with the rows it
     returned (None for one that raised), raising a ClickHouse error with each
@@ -3187,7 +3204,10 @@ async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without
     window before the period, and the hour profiles, are null; every other
     figure is the one the full grain gives."""
     monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
+    clock = _CacheClock()
+    monkeypatch.setattr("pipeline.cache._monotonic", clock)
     await _seed_grain_fixture(aconn, ch_client, aagency_id)
+    from pipeline import cache
     from pipeline.clickhouse import CH_TIMEOUT_EXCEEDED
     from pipeline.reports import compute_overview_summary
 
@@ -3203,8 +3223,12 @@ async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without
     try:
         out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
         [(full_sql, full_rows), (period_sql, period_rows)] = failing.queries
-        # The degraded payload is not cached: the same request computes again,
-        # and gets the full payload once the grain fits.
+        # The degraded payload is cached only briefly: the same request is
+        # served it for the short TTL, then computes again, and gets the full
+        # payload once the grain fits.
+        assert await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing) == out
+        assert len(failing.queries) == 2
+        clock.now += cache.DEGRADED_TTL_SECONDS + 1
         again = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
     finally:
         if pool is not None:

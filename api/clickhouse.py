@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import clickhouse_connect
 
-from pipeline.cache import do_not_cache
+from pipeline.cache import cache_briefly
 from pipeline.clickhouse import LIVE_SOURCED, LIVE_TABLE, UPDATES_TABLE, ch_conn_kwargs, checked_table, live_table_for
 from pipeline.service_day import service_date_ch
 
@@ -194,7 +194,7 @@ async def max_captured_at_before_by_agency(
             return aid, await max_captured_at_before(ch, aid, before)
         except Exception:
             log.warning("ClickHouse freshness probe failed for agency %s — degrading", aid, exc_info=True)
-            do_not_cache()
+            cache_briefly()
             return aid, None
 
     return dict(await asyncio.gather(*(_probe(aid) for aid in agency_ids)))

@@ -66,7 +66,7 @@ from api.range import (
     service_date_clause,
 )
 from pipeline import perf
-from pipeline.cache import async_lru_cache, do_not_cache
+from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.clickhouse import is_query_timeout, is_result_overflow
 from pipeline.day_types import DayTypes
 from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2
@@ -1412,9 +1412,8 @@ async def compute_overview_summary(
     reads ClickHouse (the movers' weekly scan needs the baseline), so the
     request ends inside the frontend's ``REQUEST_TIMEOUT_MS``
     (``frontend/src/api/client.ts``) as long as that timeout stays above twice
-    the ClickHouse budget plus the Postgres stages. A degraded payload is not
-    cached (:func:`pipeline.cache.do_not_cache`): the next identical request
-    tries the full grain again.
+    the ClickHouse budget plus the Postgres stages. A degraded payload is
+    cached only briefly (:func:`pipeline.cache.cache_briefly`).
     """
     if ctx.service != "all":
         # Every window derived below starts at or after _calendar_from(ctx).
@@ -1449,7 +1448,7 @@ async def compute_overview_summary(
                     )
                     grain = await _fetch_grain(agency_id, ctx, ch, shape="period_routes")
                     peaks_unavailable = baseline_unavailable = True
-                    do_not_cache()
+                    cache_briefly()
             else:
                 try:
                     grain = await _fetch_grain(agency_id, ctx, ch, shape="period_hours")
@@ -1460,7 +1459,7 @@ async def compute_overview_summary(
                         exc_info=True,
                     )
                     peaks_unavailable = True
-                    do_not_cache()
+                    cache_briefly()
 
     # The route lists leave out one set of codes, judged once over the period,
     # so every list leaves out the same codes whichever window it ranks over.

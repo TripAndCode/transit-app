@@ -11,8 +11,10 @@ to a distributed cache only when we run multiple replicas.
 
 A raised failure is never cached. A function that returns a degraded result
 instead of raising (a figure left null because a read failed) calls
-:func:`do_not_cache`, so that result reaches its caller but the next identical
-call computes again rather than being served it for ``ttl_seconds``.
+:func:`cache_briefly`, so that result is cached for
+:data:`DEGRADED_TTL_SECONDS` rather than ``ttl_seconds``. It heals within that
+short TTL once the failed read works again, while identical requests during an
+overload are served it instead of each repeating the reads that failed.
 """
 
 from __future__ import annotations
@@ -32,14 +34,21 @@ T = TypeVar("T")
 # Every decorated function registers its cache_clear here, for clear_all.
 _REGISTERED_CLEARS: list[Callable[[], None]] = []
 
+# The clock every entry's age is read on; a module attribute so a test can move it.
+_monotonic = time.monotonic
+
+#: How long a result marked by :func:`cache_briefly` is cached, unless the
+#: decorator's own TTL is shorter.
+DEGRADED_TTL_SECONDS = 30
+
 
 class _Call:
-    """Whether the cached call in progress may store its result."""
+    """Whether the cached call in progress marked its result as degraded."""
 
-    __slots__ = ("cacheable",)
+    __slots__ = ("brief",)
 
     def __init__(self) -> None:
-        self.cacheable = True
+        self.brief = False
 
 
 # The innermost cached call in progress in this context. A task the call
@@ -48,15 +57,14 @@ class _Call:
 _current_call: ContextVar[_Call | None] = ContextVar("async_lru_cache_call", default=None)
 
 
-def do_not_cache() -> None:
-    """Keep the result of the cached call in progress out of its cache.
-
-    The result still reaches the caller and any identical call coalesced onto
-    it. Outside a cached call it does nothing. See the module docstring.
+def cache_briefly() -> None:
+    """Cache the result of the cached call in progress for
+    :data:`DEGRADED_TTL_SECONDS` only. Outside a cached call it does nothing.
+    See the module docstring.
     """
     call = _current_call.get()
     if call is not None:
-        call.cacheable = False
+        call.brief = True
 
 
 def clear_all() -> None:
@@ -82,6 +90,7 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
     """
 
     def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
+        # key -> (the monotonic time the entry expires at, the result)
         _cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
         # Per-key futures for in-flight computes (stampede coalescing).
         inflight: dict[Any, asyncio.Future[T]] = {}
@@ -98,10 +107,10 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 tuple(_keyable(a) for a in args),
                 tuple(sorted((k, _keyable(v)) for k, v in kwargs.items())),
             )
-            now = time.monotonic()
+            now = _monotonic()
             with lock:
                 entry = _cache.get(key)
-                fresh = entry is not None and now - entry[0] <= ttl_seconds
+                fresh = entry is not None and now <= entry[0]
                 if fresh:
                     _cache.move_to_end(key)
                 elif entry is not None:
@@ -167,13 +176,13 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 # A cache_clear() since this compute started empties the slot
                 # (a newer leader may hold it since). Then its inputs predate
                 # the clear, so it neither caches nor evicts that leader.
-                # Only a success its call did not mark is cached, so the next
-                # caller retries a failure or a degraded result.
+                # Only a success is cached, so the next caller retries a failure.
                 with lock:
                     if inflight.get(key) is fut:
                         del inflight[key]
-                        if succeeded and call.cacheable:
-                            _cache[key] = (time.monotonic(), value)
+                        if succeeded:
+                            ttl = min(ttl_seconds, DEGRADED_TTL_SECONDS) if call.brief else ttl_seconds
+                            _cache[key] = (_monotonic() + ttl, value)
                             _cache.move_to_end(key)
                             while len(_cache) > maxsize:
                                 _cache.popitem(last=False)

@@ -596,13 +596,27 @@ async def test_network_summary_says_how_many_of_the_window_days_the_timetable_co
     assert (by[b]["planned_trips"], by[b]["covered_days"], by[b]["window_days"]) == (0, 0, 7)
 
 
+class _CacheClock:
+    """A settable stand-in for ``pipeline.cache``'s clock."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_fail(net_client, monkeypatch):
     """The planned figures failing in Postgres, as they do on a schema behind
     its migrations, leave every agency without a plan; the delay and feed
-    figures from the other tables still answer. That summary is not cached, so
-    the next request shows the plan once it reads again."""
+    figures from the other tables still answer. That summary is cached only
+    for the short TTL, so a request after it shows the plan once it reads
+    again."""
+    from pipeline import cache
     from pipeline.reports import service_delivered
 
+    clock = _CacheClock()
+    monkeypatch.setattr("pipeline.cache._monotonic", clock)
     client, pool, a, b, _cc = net_client
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260403")
@@ -624,6 +638,9 @@ async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_
     assert by[b]["comparable_reason"] == "no_data"
 
     monkeypatch.setattr(service_delivered, "_SERVICE_SQL", readable_sql)
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert next(x for x in r.json()["agencies"] if x["agency_id"] == a)["delivered_missing"] == "unreadable"
+    clock.now += cache.DEGRADED_TTL_SECONDS + 1
     r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
     assert next(x for x in r.json()["agencies"] if x["agency_id"] == a)["planned_trips"] == 2
 
@@ -775,7 +792,7 @@ async def test_a_board_cached_before_a_rebuild_is_not_served_under_its_stamp(net
     assert next(r for r in after["agencies"] if r["agency_id"] == a)["on_time_pct"] == 80.0
 
 
-async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool):
+async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(net_pool, monkeypatch):
     """ClickHouse backs ONLY the ``is_stale`` field here —
     every other field (avg_delay_min, on_time_pct, samples, raw_samples,
     clamp_pct, data_from, data_to) comes from Postgres agg_* tables. A
@@ -785,7 +802,12 @@ async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(ne
     /api/network/summary response (mirrors api.routers.map's
     today_route_summary freshness try/except; no real ClickHouse needed — a
     client whose `.query` always raises is enough to simulate the hiccup).
-    The degraded summary is not cached: the next request probes again."""
+    The degraded summary is cached only for the short TTL: a request within
+    it is served the summary, and one after it probes again."""
+    from pipeline import cache
+
+    clock = _CacheClock()
+    monkeypatch.setattr("pipeline.cache._monotonic", clock)
     pool, a, _b, _cc = net_pool
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
 
@@ -803,8 +825,12 @@ async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(ne
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
         probes = _BrokenCh.attempts
+        within = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+        assert probes > 0 and _BrokenCh.attempts == probes
+        clock.now += cache.DEGRADED_TTL_SECONDS + 1
         again = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
-    assert probes > 0 and _BrokenCh.attempts == 2 * probes
+    assert _BrokenCh.attempts == 2 * probes
+    assert within.json()["agencies"] == r.json()["agencies"]
     assert again.json()["agencies"] == r.json()["agencies"]
     assert r.status_code == 200
     body = r.json()
