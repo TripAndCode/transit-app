@@ -11,6 +11,7 @@ import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
+from clickhouse_connect.driver.exceptions import DatabaseError
 
 from api.range import RangeCtx
 from tests.conftest import _test_pool
@@ -2116,7 +2117,7 @@ async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_cl
 
     assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
     # ...and it is the grain query: one dedup CTE grouped to the shared grain.
-    assert "GROUP BY GROUPING SETS ((date, route_code, service_type), (date, " in counting.queries[0]
+    assert "GROUP BY GROUPING SETS ((date, route_code), (date, " in counting.queries[0]
     # The payload is still fully populated off that single query.
     assert out["headline"]["samples"] == 3
     assert out["headline"]["avg_min"] == pytest.approx(4.0, abs=0.01)  # (2+4+6)/3
@@ -2315,9 +2316,9 @@ async def test_slow_path_grain_reaches_back_one_period_width(aconn, aagency_id, 
 async def test_a_routes_filter_alone_reads_no_days_before_the_period(aconn, aagency_id, ch_client, ch_async_client):
     """Under a routes filter with every hour, only the hour profiles read the
     grain, and only inside the period: every other figure comes from its agg_*
-    table. So the grain does not reach back at all, however wide the period.
-    A departure with no scheduled time has no hour, so it reaches the route
-    rows and not the hour rows."""
+    table. So the grain holds the period's hour set alone, however wide the
+    period, and a departure with no scheduled time, which has no hour, is
+    not in it."""
     for day, dep in ((date(2026, 3, 26), 120), (date(2026, 4, 25), 600), (date(2026, 5, 24), 600)):
         await _seed_update(aconn, aagency_id, datetime.combine(day, time(12, 0), tzinfo=timezone.utc), "R_RT", dep)
     untimed = datetime.combine(date(2026, 5, 1), time(12, 0), tzinfo=timezone.utc)
@@ -2329,14 +2330,13 @@ async def test_a_routes_filter_alone_reads_no_days_before_the_period(aconn, aage
     from pipeline.reports.overview import _fetch_grain
 
     ctx = RangeCtx(from_date=date(2026, 4, 25), to_date=date(2026, 5, 24), routes=("R_RT",))
-    grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
-    assert (grain.from_date, grain.hours_from, grain.to_date) == (
-        date(2026, 4, 25),
-        date(2026, 4, 25),
-        date(2026, 5, 24),
-    )
-    assert sorted(row[0] for row in grain.route_rows) == [date(2026, 4, 25), date(2026, 5, 1), date(2026, 5, 24)]
-    assert sorted(row[0] for row in grain.hour_rows) == [date(2026, 4, 25), date(2026, 5, 24)]
+    grain = await _fetch_grain(aagency_id, ctx, ch_async_client, shape="period_hours")
+    assert (grain.hours_from, grain.to_date) == (date(2026, 4, 25), date(2026, 5, 24))
+    assert grain.route_rows is None
+    assert sorted((d, hour) for d, hour, _n, _sum in grain.hour_rows) == [
+        (date(2026, 4, 25), 8),
+        (date(2026, 5, 24), 8),
+    ]
 
 
 @pytest.mark.asyncio
@@ -2618,7 +2618,8 @@ async def test_routes_filter_serves_every_hour_profile_from_one_scan(aconn, aage
     """Under a routes filter, agg_hour_daily (aggregated across routes) can't
     serve the hour profiles, so all three read one shared scan: the filtered
     route's own hours, inside the window, split weekday/weekend from the same
-    rows."""
+    rows. Every other figure reads its agg_* table, so the scan groups by hour
+    alone: one row per date and hour, and no route rows."""
     tue = datetime.combine(date(2026, 5, 19), time(12, 0), tzinfo=timezone.utc)
     sat = datetime.combine(date(2026, 5, 23), time(12, 0), tzinfo=timezone.utc)
     before = datetime.combine(date(2026, 5, 5), time(12, 0), tzinfo=timezone.utc)
@@ -2634,11 +2635,12 @@ async def test_routes_filter_serves_every_hour_profile_from_one_scan(aconn, aage
 
     from pipeline.reports import compute_overview_summary
 
-    counting = _CountingCh(ch_async_client)
+    recording = _RecordingCh(ch_async_client)
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), routes=("R_A",))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=counting)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=recording)
 
-    assert len(counting.queries) == 1
+    [(sql, rows)] = recording.queries
+    assert "GROUPING SETS" not in sql and rows == 2
     assert out["peak_hour"]["peak_hour"] == 8
     assert out["peak_hour"]["by_hour"][8] == pytest.approx(10.0, abs=0.01)
     assert out["peak_hour"]["by_hour"][17] == pytest.approx(5.0, abs=0.01)
@@ -2909,7 +2911,7 @@ async def test_slow_path_wide_window_movers_stay_at_one_query(aconn, aagency_id,
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=counting)
 
     assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
-    assert "GROUP BY GROUPING SETS ((date, route_code, service_type), (date, " in counting.queries[0]
+    assert "GROUP BY GROUPING SETS ((date, route_code), (date, " in counting.queries[0]
     # The sparkline still comes through, populated off the grain.
     worse = out["movers"]["worse"]
     assert [m["route_code"] for m in worse] == ["R_WH"]
@@ -2987,13 +2989,33 @@ class _CappedCh:
         return result
 
 
+class _RecordingCh:
+    """Async ClickHouse client proxy that records each query with the rows it
+    returned (None for one that raised), raising a ClickHouse error with each
+    of ``fail_with``'s codes, in order, in place of its first queries."""
+
+    def __init__(self, inner, *fail_with):
+        self._inner = inner
+        self._fail_with = list(fail_with)
+        self.queries: list[tuple[str, int | None]] = []
+
+    async def query(self, sql, parameters=None, **kwargs):
+        if self._fail_with:
+            code = self._fail_with.pop(0)
+            self.queries.append((sql, None))
+            raise DatabaseError(f"simulated ClickHouse error, code: {code}", code=code)
+        result = await self._inner.query(sql, parameters=parameters, **kwargs)
+        self.queries.append((sql, len(result.result_rows)))
+        return result
+
+
 @pytest.mark.asyncio
 async def test_grain_fetches_route_rows_and_hour_rows_as_two_sets(aconn, aagency_id, ch_client, ch_async_client):
-    """Route rows span the period and the window before it, one per date,
-    route and service id; hour rows span the period alone, one per date and
-    hour across every route. A route row whose route is NULL stays a route
-    row: the set a row belongs to is read from grouping(), not from which
-    columns are NULL."""
+    """Route rows span the period and the window before it, one per date and
+    route, every service id pooled; hour rows span the period alone, one per
+    date and hour across every route. A route row whose route is NULL stays a
+    route row: the set a row belongs to is read from grouping(), not from
+    which columns are NULL."""
     noon = datetime.combine(date(2026, 5, 21), time(12, 0), tzinfo=timezone.utc)
     for i in range(3):
         await _seed_update(aconn, aagency_id, noon + timedelta(minutes=i), None, 900, seq=900 + i)
@@ -3004,24 +3026,24 @@ async def test_grain_fetches_route_rows_and_hour_rows_as_two_sets(aconn, aagency
     grain = await _fetch_grain(aagency_id, _GRAIN_CTX, counting)
 
     assert len(counting.queries) == 1
-    assert "GROUPING SETS" in counting.queries[0]
+    assert "GROUP BY GROUPING SETS ((date, route_code), (date, " in counting.queries[0]
     assert (grain.from_date, grain.hours_from, grain.to_date) == (
         date(2026, 4, 27),
         date(2026, 5, 11),
         date(2026, 5, 24),
     )
-    # (date, route_code, service_type, samples, sum_delay_sec, sum_late_sec)
+    # (date, route_code, samples, sum_delay_sec, sum_late_sec): R1's two
+    # service ids on 05-19 are one row.
     expected_routes = {
-        (date(2026, 5, 7), "R1", "平日", 10, 915, 915),
-        (date(2026, 5, 8), "R2", "平日", 10, 3495, 3495),
-        (date(2026, 5, 12), "R3", "平日", 3, 135, 135),
-        (date(2026, 5, 14), "R1", "平日", 2, 500, 500),
-        (date(2026, 5, 19), "R1", "平日", 6, 3195, 3195),
-        (date(2026, 5, 19), "R1", "臨時", 4, 1206, 1206),
-        (date(2026, 5, 20), "R2", "平日", 10, 1135, 1135),
-        (date(2026, 5, 21), None, "平日", 3, 2700, 2700),
-        (date(2026, 5, 23), "R3", "11_土曜(共通)", 4, 260, 330),
-        (date(2026, 5, 24), "R2", "平日", 2, 60, 60),
+        (date(2026, 5, 7), "R1", 10, 915, 915),
+        (date(2026, 5, 8), "R2", 10, 3495, 3495),
+        (date(2026, 5, 12), "R3", 3, 135, 135),
+        (date(2026, 5, 14), "R1", 2, 500, 500),
+        (date(2026, 5, 19), "R1", 10, 4401, 4401),
+        (date(2026, 5, 20), "R2", 10, 1135, 1135),
+        (date(2026, 5, 21), None, 3, 2700, 2700),
+        (date(2026, 5, 23), "R3", 4, 260, 330),
+        (date(2026, 5, 24), "R2", 2, 60, 60),
     }
     assert len(grain.route_rows) == len(expected_routes)
     assert set(grain.route_rows) == expected_routes
@@ -3153,31 +3175,38 @@ async def test_two_set_grain_serves_every_figure_the_one_set_grain_did(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pooled", [False, True])
-async def test_a_grain_past_the_row_cap_serves_the_period_without_its_baseline(
-    aconn, aagency_id, ch_client, ch_async_client, monkeypatch, pooled
+@pytest.mark.parametrize("failure", ["row_cap", "timeout"])
+async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without_its_baseline(
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch, failure, pooled
 ):
-    """A grain past the ClickHouse client's ``max_result_rows`` degrades rather
-    than failing the payload. A second scan fetches the period's route rows
-    alone; the figures that need the window before the period, and the hour
-    profiles, are null; every other figure is the one the full grain gives."""
+    """A grain past the ClickHouse client's ``max_result_rows`` or its
+    ``max_execution_time`` degrades rather than failing the payload. A second
+    scan fetches the period's route rows alone; the figures that need the
+    window before the period, and the hour profiles, are null; every other
+    figure is the one the full grain gives."""
     monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
     await _seed_grain_fixture(aconn, ch_client, aagency_id)
+    from pipeline.clickhouse import CH_TIMEOUT_EXCEEDED
     from pipeline.reports import compute_overview_summary
 
     full = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=ch_async_client)
-    # The full grain is 16 rows (9 route rows, 7 hour rows); the period's 7
+    # The full grain is 15 rows (8 route rows, 7 hour rows); the period's 6
     # route rows fit under the cap.
-    capped = _CappedCh(ch_async_client, max_rows=8)
+    failing = (
+        _CappedCh(ch_async_client, max_rows=8)
+        if failure == "row_cap"
+        else _RecordingCh(ch_async_client, CH_TIMEOUT_EXCEEDED)
+    )
     pool = await _test_pool() if pooled else None
     try:
-        out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=capped)
+        out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
     finally:
         if pool is not None:
             await pool.close()
 
-    [(full_sql, full_rows), (period_sql, period_rows)] = capped.queries
+    [(full_sql, full_rows), (period_sql, period_rows)] = failing.queries
     assert "GROUPING SETS" in full_sql and full_rows is None
-    assert "GROUPING SETS" not in period_sql and period_rows == 7
+    assert "GROUPING SETS" not in period_sql and period_rows == 6
     assert out == {
         **full,
         "headline": {**full["headline"], "baseline_avg_min": None, "delta_min": None, "delta_pct": None},
@@ -3203,8 +3232,6 @@ async def test_a_period_past_the_row_cap_on_its_own_fails(aconn, aagency_id, ch_
     serve the route lists from, so the row-cap error reaches the caller
     after the one retry."""
     await _seed_grain_fixture(aconn, ch_client, aagency_id)
-    from clickhouse_connect.driver.exceptions import DatabaseError
-
     from pipeline.reports import compute_overview_summary
 
     capped = _CappedCh(ch_async_client, max_rows=1)
@@ -3214,9 +3241,29 @@ async def test_a_period_past_the_row_cap_on_its_own_fails(aconn, aagency_id, ch_
 
 
 @pytest.mark.asyncio
-async def test_a_time_band_grain_failure_other_than_the_row_cap_fails(aconn, aagency_id):
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("timeout", "timeout"), ("row_cap", "timeout"), ("timeout", "row_cap")],
+)
+async def test_a_second_grain_failure_fails_the_payload(aconn, aagency_id, ch_client, ch_async_client, first, second):
+    """The retry over the period is the only one: when it fails too, by either
+    limit, that error reaches the caller, and a timeout still answers 504."""
+    await _seed_grain_fixture(aconn, ch_client, aagency_id)
+    from pipeline.clickhouse import CH_TIMEOUT_EXCEEDED, CH_TOO_MANY_ROWS_OR_BYTES
+    from pipeline.reports import compute_overview_summary
+
+    codes = {"timeout": CH_TIMEOUT_EXCEEDED, "row_cap": CH_TOO_MANY_ROWS_OR_BYTES}
+    failing = _RecordingCh(ch_async_client, codes[first], codes[second])
+    with pytest.raises(DatabaseError) as raised:
+        await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=failing)
+    assert raised.value.code == codes[second]
+    assert [rows for _sql, rows in failing.queries] == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_a_time_band_grain_failure_other_than_its_limits_fails(aconn, aagency_id):
     """Under a time band every figure reads the grain, so any failure but the
-    row cap fails the payload without a second scan."""
+    row cap or the time budget fails the payload without a second scan."""
     from pipeline.reports import compute_overview_summary
 
     failing = _FailingCh()

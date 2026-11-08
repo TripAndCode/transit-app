@@ -142,7 +142,7 @@ async def test_the_live_peak_hour_profile_matches_agg_hour_daily_past_midnight(
     routed = RangeCtx(from_date=DAY, to_date=DAY, routes=("R1",))
 
     from_aggregate = await _peak_hour_by_dow(agency_id, whole, aconn, "all")
-    grain = await _fetch_grain(agency_id, routed, ch_async_client)
+    grain = await _fetch_grain(agency_id, routed, ch_async_client, shape="period_hours")
     live = await _peak_hour_by_dow(agency_id, routed, aconn, "all", grain=grain)
 
     assert from_aggregate is not None
