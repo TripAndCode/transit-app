@@ -14,7 +14,10 @@ instead of raising (a figure left null because a read failed) calls
 :func:`cache_briefly`, so that result is cached for
 :data:`DEGRADED_TTL_SECONDS` rather than ``ttl_seconds``. It heals within that
 short TTL once the failed read works again, while identical requests during an
-overload are served it instead of each repeating the reads that failed.
+overload are served it instead of each repeating the reads that failed. Only a
+transient failure is marked: one the request itself causes, such as a result
+past a row cap, recurs on every retry, so its degraded result keeps
+``ttl_seconds``.
 """
 
 from __future__ import annotations

@@ -1412,8 +1412,10 @@ async def compute_overview_summary(
     reads ClickHouse (the movers' weekly scan needs the baseline), so the
     request ends inside the frontend's ``REQUEST_TIMEOUT_MS``
     (``frontend/src/api/client.ts``) as long as that timeout stays above twice
-    the ClickHouse budget plus the Postgres stages. A degraded payload is
-    cached only briefly (:func:`pipeline.cache.cache_briefly`).
+    the ClickHouse budget plus the Postgres stages. A payload a timeout
+    degraded is cached only briefly (:func:`pipeline.cache.cache_briefly`);
+    one the row cap degraded keeps the full TTL, since the same request
+    passes the cap again.
     """
     if ctx.service != "all":
         # Every window derived below starts at or after _calendar_from(ctx).
@@ -1448,18 +1450,20 @@ async def compute_overview_summary(
                     )
                     grain = await _fetch_grain(agency_id, ctx, ch, shape="period_routes")
                     peaks_unavailable = baseline_unavailable = True
-                    cache_briefly()
+                    if is_query_timeout(exc):
+                        cache_briefly()
             else:
                 try:
                     grain = await _fetch_grain(agency_id, ctx, ch, shape="period_hours")
-                except Exception:
+                except Exception as exc:
                     _log.warning(
                         "ClickHouse grain fetch failed for agency %s — degrading the peak-hour profiles to null",
                         agency_id,
                         exc_info=True,
                     )
                     peaks_unavailable = True
-                    cache_briefly()
+                    if not is_result_overflow(exc):
+                        cache_briefly()
 
     # The route lists leave out one set of codes, judged once over the period,
     # so every list leaves out the same codes whichever window it ranks over.

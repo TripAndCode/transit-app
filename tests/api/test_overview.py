@@ -2707,7 +2707,7 @@ class _FailingCh:
 
 
 @pytest.mark.asyncio
-async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id, monkeypatch):
+async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id, cache_clock):
     """The whole /overview/summary payload must survive a ClickHouse hiccup in
     the grain fetched for the hour profiles.
 
@@ -2729,16 +2729,14 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id,
     from pipeline import cache
     from pipeline.reports import compute_overview_summary
 
-    clock = _CacheClock()
-    monkeypatch.setattr("pipeline.cache._monotonic", clock)
     ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), routes=("R_DEG",))
     failing = _FailingCh()
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=failing)
-    # Cached only briefly with its hour profiles missing: the same request is
-    # served it for the short TTL, and scans again after.
+    # An outage passes, so the payload it degraded is cached only briefly: the
+    # same request is served it for the short TTL, and scans again after.
     assert await compute_overview_summary(aagency_id, ctx, aconn, ch=failing) == out
     assert failing.attempts == 1
-    clock.now += cache.DEGRADED_TTL_SECONDS + 1
+    cache_clock.now += cache.DEGRADED_TTL_SECONDS + 1
     assert await compute_overview_summary(aagency_id, ctx, aconn, ch=failing) == out
     assert failing.attempts == 2
 
@@ -2998,16 +2996,6 @@ class _CappedCh:
         return result
 
 
-class _CacheClock:
-    """A settable stand-in for ``pipeline.cache``'s clock."""
-
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def __call__(self) -> float:
-        return self.now
-
-
 class _RecordingCh:
     """Async ClickHouse client proxy that records each query with the rows it
     returned (None for one that raised), raising a ClickHouse error with each
@@ -3196,16 +3184,17 @@ async def test_the_grain_serves_every_figure_of_the_payload(aconn, aagency_id, c
 @pytest.mark.parametrize("pooled", [False, True])
 @pytest.mark.parametrize("failure", ["row_cap", "timeout"])
 async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without_its_baseline(
-    aconn, aagency_id, ch_client, ch_async_client, monkeypatch, failure, pooled
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch, cache_clock, failure, pooled
 ):
     """A grain past the ClickHouse client's ``max_result_rows`` or its
     ``max_execution_time`` degrades rather than failing the payload. A second
     scan fetches the period's route rows alone; the figures that need the
     window before the period, and the hour profiles, are null; every other
-    figure is the one the full grain gives."""
+    figure is the one the full grain gives.
+
+    A timeout passes, so its degraded payload is cached only briefly; a row
+    cap recurs on every retry, so its degraded payload keeps the full TTL."""
     monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
-    clock = _CacheClock()
-    monkeypatch.setattr("pipeline.cache._monotonic", clock)
     await _seed_grain_fixture(aconn, ch_client, aagency_id)
     from pipeline import cache
     from pipeline.clickhouse import CH_TIMEOUT_EXCEEDED
@@ -3223,21 +3212,21 @@ async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without
     try:
         out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
         [(full_sql, full_rows), (period_sql, period_rows)] = failing.queries
-        # The degraded payload is cached only briefly: the same request is
-        # served it for the short TTL, then computes again, and gets the full
-        # payload once the grain fits.
         assert await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing) == out
         assert len(failing.queries) == 2
-        clock.now += cache.DEGRADED_TTL_SECONDS + 1
+        cache_clock.now += cache.DEGRADED_TTL_SECONDS + 1
         again = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
+        if failure == "row_cap":
+            assert again == out and len(failing.queries) == 2
+            # compute_overview_summary's own TTL, 300 s, from the first call.
+            cache_clock.now += 300
+            later = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
+            assert later == out and len(failing.queries) == 4
+        else:
+            assert again == full and len(failing.queries) == 3
     finally:
         if pool is not None:
             await pool.close()
-
-    if failure == "row_cap":
-        assert again == out and len(failing.queries) == 4
-    else:
-        assert again == full and len(failing.queries) == 3
     assert "GROUPING SETS" in full_sql and full_rows is None
     assert "GROUPING SETS" not in period_sql and period_rows == 6
     assert out == {
@@ -3257,6 +3246,26 @@ async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without
     assert full["movers"]["worse"] and full["movers"]["better"]
     assert any(r["delta_min"] is not None for r in full["top_delayed"]["routes"])
     assert None not in (full["peak_hour"], full["peak_hour_weekday"], full["peak_hour_weekend"])
+
+
+@pytest.mark.asyncio
+async def test_a_routes_filter_grain_past_the_row_cap_keeps_the_full_ttl(
+    aconn, aagency_id, ch_async_client, cache_clock
+):
+    """Under a routes filter alone a grain past the row cap degrades the hour
+    profiles as an outage does, but the overflow recurs on every retry, so the
+    payload is cached for the full TTL rather than briefly."""
+    from pipeline import cache
+    from pipeline.clickhouse import CH_TOO_MANY_ROWS_OR_BYTES
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), routes=("R_DEG",))
+    failing = _RecordingCh(ch_async_client, CH_TOO_MANY_ROWS_OR_BYTES)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=failing)
+    assert out["peak_hour"] is None
+    cache_clock.now += cache.DEGRADED_TTL_SECONDS + 1
+    assert await compute_overview_summary(aagency_id, ctx, aconn, ch=failing) == out
+    assert [rows for _sql, rows in failing.queries] == [None]
 
 
 @pytest.mark.asyncio
