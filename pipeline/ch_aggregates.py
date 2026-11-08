@@ -691,13 +691,12 @@ def select_sql(
             if spec.raw
             else _dedup_select(where, scheduled_sec=spec.scheduled_sec, stamp=stamp)
         )
-        if join is not None and stamp is not Stamp.INGESTED:
-            params = {**params, **join.params(present, month_span(month, days))}
     elif days is None:
         rows, params = f"SELECT * FROM {source}", {}
     else:
         rows, params = f"SELECT * FROM {source} WHERE has({{days:Array(Date)}}, date)", {"days": days}
-    if join is not None and table in STATIC_JOINED_TABLES:
+    filed = source is None and stamp is not Stamp.INGESTED
+    if join is not None and (filed or table in STATIC_JOINED_TABLES):
         params = {**params, **join.params(present, month_span(month, days))}
     return spec.select(rows), params
 

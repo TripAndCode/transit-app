@@ -83,7 +83,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import NamedTuple
 
 import psycopg2.extras
@@ -938,21 +938,21 @@ def _load_temp_table(
     *,
     table: str,
     columns: str,
-    ch_sql: str,
-    parameters: dict,
+    reads: list[tuple[str, dict]],
     label: str,
     load: bool = True,
 ) -> None:
-    """Materialise a deduped ClickHouse slice into a Postgres TEMP TABLE.
+    """Materialise a deduped ClickHouse slice into a Postgres TEMP TABLE, from
+    each of *reads* (its SQL and parameters) in turn.
 
     ON COMMIT DROP ties the table's lifetime to the caller's transaction,
     which is safe for the per-agency analyze loop on one connection; ANALYZE
     gives the planner stats for the downstream GROUP BYs, which it otherwise
     sizes at a few thousand rows however many the table actually holds.
 
-    *columns* must list the table's columns in the order *ch_sql*'s SELECT list
-    projects them; the SQL builder's docstring states the order it guarantees
-    and which optional columns land where.
+    *columns* must list the table's columns in the order each read's SELECT
+    list projects them; the SQL builder's docstring states the order it
+    guarantees and which optional columns land where.
 
     ``load=False`` creates the table and skips the scan, for the caller whose
     filter it already knows selects nothing — the table still has to exist,
@@ -960,7 +960,7 @@ def _load_temp_table(
     """
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TEMP TABLE {table} ({columns}) ON COMMIT DROP")
-    if load:
+    for ch_sql, parameters in reads if load else []:
         _stream_copy(
             cur,
             ch_client,
@@ -1229,9 +1229,37 @@ def _refit_dates(agency_id: int, ch_client, join: static_archive.ScheduleJoin, s
     return dates
 
 
-def _stamp(join: static_archive.ScheduleJoin, refit: set, scope: list | None) -> Stamp:
-    """How a read of *scope*'s dates (None for every date) files its rows (ch_aggregates.stamp_for)."""
-    return ch_aggregates.stamp_for(join, refit, refit if scope is None else scope)
+class _Read(NamedTuple):
+    """One read of a scan that reads `updates` in a single query per read."""
+
+    where: str  # a predicate on `u.` columns
+    params: dict
+    stamp: Stamp  # how it files its rows (ch_aggregates.stamp_for)
+    between: tuple | None  # the dates it reaches, which bound its versions in force
+
+
+def _reads(agency_id: int, ch_client, join: static_archive.ScheduleJoin, refit: set, scope: list | None) -> list:
+    """The reads a scan of *scope*'s dates (None for every date) is made of.
+
+    With versions in force, one per month of service date, as
+    ch_aggregates.build reads, so each binds only the versions in force over
+    its own dates (ScheduleJoin.force_params) and a REFIT read loads only their
+    schedules; a scan of the agency's whole history would otherwise load every
+    version's at once. Without, one read of the whole scope. The predicates
+    range on captured_at, which prunes on the sort key.
+    """
+    if not join.force:
+        where, params = ch_aggregates.days_where(scope) if scope is not None else ("1", {})
+        return [_Read(where, params, Stamp.INGESTED, None)]
+    months = ch_aggregates.source_months(ch_client, agency_id) if scope is None else ch_aggregates.months_of(scope)
+    reads = []
+    for month in months:
+        days = None if scope is None else [day for day in scope if day.year * 100 + day.month == month]
+        where, params = ch_aggregates.month_where(month) if days is None else ch_aggregates.days_where(days)
+        first, last = ch_aggregates.month_span(month, days)
+        dates = days or [first + timedelta(days=i) for i in range((last - first).days + 1)]
+        reads.append(_Read(where, params, ch_aggregates.stamp_for(join, refit, dates), (first, last)))
+    return reads
 
 
 def analyze(agency_id: int, conn, ch_client) -> None:
@@ -1316,20 +1344,20 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # built for gets the empty table without the scan.
         builds_dwell_run = has_static and ingest_strategy in RT_INGEST_STRATEGIES
         dwell_scope = scopes["agg_route_daily_dwell_run"]
-        _, dwell_params = _date_filter(dwell_scope, agency_id)
         scans_visits = builds_dwell_run and dwell_scope != []
         join = plan.join
         refit = _refit_dates(agency_id, ch_client, join, {**scopes, **ch_scopes})
-        visits_stamp = _stamp(join, refit, dwell_scope)
-        visits_params = dwell_params
-        if scans_visits:
-            # A range on captured_at, which prunes on the sort key; the visits
-            # scan's own service-date test selects the same rows.
-            where, params = ch_aggregates.days_where(dwell_scope) if dwell_scope is not None else ("1", {})
+        visit_reads = []
+        for read in _reads(agency_id, ch_client, join, refit, dwell_scope) if scans_visits else []:
             stems = ch_aggregates.version_names(
-                ch_client, agency_id, where, params, join, visits_stamp, _span(dwell_scope)
+                ch_client, agency_id, read.where, read.params, join, read.stamp, read.between
             )
-            visits_params = {**dwell_params, **join.params(stems, _span(dwell_scope))}
+            visit_reads.append(
+                (
+                    build_stop_visits_ch_sql(extra_where=read.where, join_schedule=True, stamp=read.stamp),
+                    {"agency_id": agency_id, **read.params, **join.params(stems, read.between)},
+                )
+            )
         with conn.cursor() as cur:
             _load_temp_table(
                 cur,
@@ -1344,12 +1372,7 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
                     "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
                     "dep_observed boolean, sched_arrival_time text, sched_departure_time text"
                 ),
-                ch_sql=build_stop_visits_ch_sql(
-                    extra_where=_date_predicate(dwell_scope, "u.captured_at"),
-                    join_schedule=True,
-                    stamp=visits_stamp,
-                ),
-                parameters=visits_params,
+                reads=visit_reads,
                 # An empty rebuild list selects no rows at all, so the scan is
                 # skipped rather than asked to prove it — the run where nothing
                 # changed is the common one.
@@ -1551,31 +1574,35 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
             # Cardinality is bounded by routes × stops × days, not by raw
             # observation count, so the scan is fetched as one block
             # (ch_client.query(), not the streaming reader _analyze_visits needs).
-            where, params = _date_filter(headway_scope, agency_id)
-            ch_headway = _ch_query(
-                "agg_route_headway_daily: ClickHouse scan",
-                ch_client,
-                agg_sql.route_headway_daily_ch_sql(where, _stamp(join, refit, headway_scope)),
-                {
-                    **params,
-                    **join.params(between=_span(headway_scope)),
-                    "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
-                    "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
-                },
-            )
+            headway_events: list = []
+            for read in _reads(agency_id, ch_client, join, refit, headway_scope):
+                result = _ch_query(
+                    "agg_route_headway_daily: ClickHouse scan",
+                    ch_client,
+                    agg_sql.route_headway_daily_ch_sql(f" AND ({read.where})", read.stamp),
+                    {
+                        "agency_id": agency_id,
+                        **read.params,
+                        **join.params(between=read.between),
+                        "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
+                        "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
+                    },
+                )
+                # Each row is one (route, stop, service date), which no read splits.
+                headway_events.extend(result.result_rows)
             # Timed apart from the ClickHouse scan above: this is the one
             # aggregate whose build is partly Python, so moving it would mean
             # expressing reconstruct_headways in SQL, not just relocating a
             # GROUP BY. Knowing how much of its cost is here decides that.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                pooled = pool_daily_gaps(ch_headway.result_rows)
+                pooled = pool_daily_gaps(headway_events)
             # Each (route, date) is measured against the scheduled median of its
             # dominant timetable (the one most of its events were ingested
             # against), kept per archived timetable by pipeline.static_headways.
             # A timetable with no kept medians falls back to the loaded one's;
             # a route with no median counts no long gaps (count_long_gaps).
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                dominant = dominant_contents(ch_headway.result_rows, join.content_of())
+                dominant = dominant_contents(headway_events, join.content_of())
             medians = static_headways.route_medians(conn, agency_id, {*dominant.values(), join.current})
             fell_back = sum(1 for content in dominant.values() if content not in {c for c, _route in medians})
             if fell_back:
