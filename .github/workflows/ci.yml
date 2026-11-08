@@ -267,6 +267,16 @@ jobs:
       # GITLEAKS_VERSION in sync with every other pin site it checks
       # (.pre-commit-config.yaml, secrets-scan.yml, secrets-scan-full-history.yml,
       # scripts/setup_git_hooks.sh) -- see that test for the authoritative list.
+      # The binary is cached so a test job doesn't depend on GitHub's release
+      # downloads, which can stay unavailable for longer than any retry. The
+      # key follows .pre-commit-config.yaml, whose gitleaks `rev:` that test
+      # keeps equal to the GITLEAKS_VERSION below.
+      - name: Cache gitleaks
+        uses: actions/cache@v6
+        with:
+          path: ~/bin/gitleaks
+          key: gitleaks-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
       - name: Install gitleaks
         env:
           GITLEAKS_VERSION: 8.18.4
@@ -277,9 +287,12 @@ jobs:
           # from a previous run -- skip the download/extract in that case
           # rather than refetching an unchanged tarball from GitHub every job.
           if [ "$("$HOME/bin/gitleaks" version 2>/dev/null || true)" != "$GITLEAKS_VERSION" ]; then
-            curl -sSfL \
-              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-              | tar -xz -C "$HOME/bin" gitleaks
+            # GitHub's release downloads fail transiently (5xx), so the archive
+            # is fetched to a file with retries rather than piped to tar, which
+            # a retried transfer could hand a partial stream.
+            curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+            tar -xz -C "$HOME/bin" -f "$RUNNER_TEMP/gitleaks.tar.gz" gitleaks
           fi
           echo "$HOME/bin" >> "$GITHUB_PATH"
           "$HOME/bin/gitleaks" version
