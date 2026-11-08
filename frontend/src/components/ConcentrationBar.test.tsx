@@ -141,6 +141,15 @@ describe("ConcentrationBar", () => {
     expect(container).not.toHaveTextContent("1471981638");
   });
 
+  it("spotlights the one route without a sparkline when the movers could not be read", () => {
+    mockRoutes();
+    const { container } = renderBar(
+      <ConcentrationBar periodRange={PERIOD} movers={null} concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 100 }], rest_share_pct: 0 }} />,
+    );
+    expect(container.querySelector(".ov-conc-spotlight")).toHaveTextContent("70-3 あさひが丘線 accounts for 100%");
+    expect(container.querySelector(".ov-conc-spotlight-spark")).toBeNull();
+  });
+
   it("states every share as one of the delay of the routes it counts, and says how many and when", () => {
     const { container } = renderBar(<ConcentrationBar periodRange={PERIOD} concentration={concentration} limit={20} variant="modal" />);
     // Two listed routes and four more the API only counts.

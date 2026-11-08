@@ -36,6 +36,20 @@ def is_query_timeout(exc: BaseException) -> bool:
     return getattr(exc, "code", None) == CH_TIMEOUT_EXCEEDED
 
 
+# ClickHouse's TOO_MANY_ROWS_OR_BYTES server error code.
+CH_TOO_MANY_ROWS_OR_BYTES = 396
+
+
+def is_result_overflow(exc: BaseException) -> bool:
+    """Whether a ClickHouse error is a result past the client's ``max_result_rows``.
+
+    ``api.clickhouse.get_ch_client`` raises rather than truncating there, so a
+    caller that can answer from a smaller query can catch this one error and
+    try that instead.
+    """
+    return getattr(exc, "code", None) == CH_TOO_MANY_ROWS_OR_BYTES
+
+
 def checked_table(table: str) -> str:
     """*table*, if it names one of the two observation tables.
 

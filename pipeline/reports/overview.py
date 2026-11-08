@@ -35,8 +35,9 @@ of *substantially the same rows*, each reading a large fraction of an
 agency's history over even a 30-day window, would put several of them over
 ``api.clickhouse.get_ch_client``'s ``max_execution_time`` cap and fail the
 request. :func:`_fetch_grain` pre-aggregates the
-dedup output to ``(date, route_code, service_type, hour)`` once, and each
-helper derives its own answer from that grain in Python. See
+dedup output once, in two grouping sets, ``(date, route_code, service_type)``
+for the route and day figures and ``(date, hour)`` for the hour profiles, and
+each helper derives its own answer from the set it needs in Python. See
 :func:`_fetch_grain` for why one grain can serve consumers with three
 different date windows and two different DOW filters.
 
@@ -53,7 +54,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Final, Iterable, Iterator, Mapping, Sequence
 
 from api.range import (
     RangeCtx,
@@ -66,6 +67,7 @@ from api.range import (
 )
 from pipeline import perf
 from pipeline.cache import async_lru_cache
+from pipeline.clickhouse import is_result_overflow
 from pipeline.day_types import DayTypes
 from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2
 from pipeline.reports.rankings import RANKING_MIN_SAMPLES, _round1
@@ -136,30 +138,39 @@ OVERVIEW_FANOUT_LIMIT = 4
 
 # Shared slow-path grain
 
-# (date, route_code, service_type, hour, samples, sum_delay_sec, sum_late_sec).
-# ``service_type`` is Nullable in ClickHouse; ``hour`` is None for a row with
-# no scheduled time: the time-band filter excludes those, but under a routes
-# filter alone they reach the grain (see _fetch_grain), so consumers that need
-# an hour skip None.
+# A row of the grain's route set: (date, route_code, service_type, samples,
+# sum_delay_sec, sum_late_sec). ``route_code`` and ``service_type`` are both
+# Nullable in ClickHouse.
 # ``sum_delay_sec`` / ``sum_late_sec`` stay in SECONDS as exact integers, so
 # summing partial groups in Python is lossless and the single trailing
 # ``/ 60.0`` reproduces the SQL's own ``/ 60.0`` bit-for-bit.
-_GrainRow = tuple[date, str, "str | None", "int | None", int, int, int]
+_RouteRow = tuple[date, "str | None", "str | None", int, int, int]
+_SAMPLES: Final = 3
+_SUM_DELAY: Final = 4
+_SUM_LATE: Final = 5
+
+# A row of the grain's hour set: (date, hour, samples, sum_delay_sec), pooled
+# across routes and service types. ``hour`` is never None: a departure with no
+# scheduled time has no hour to profile, so the grain leaves it out of this set.
+_HourRow = tuple[date, int, int, int]
 
 
 @dataclass(frozen=True)
 class _Grain:
     """One request's worth of deduped ``updates``, fetched in ONE round trip.
 
-    ``rows`` is the dedup output pre-aggregated to
-    ``(date, route_code, service_type, hour)`` over ``[from_date, to_date]``
-    (``hour`` NULL for the days before the request's period) with
-    ``agency_id`` + ``service`` + ``routes`` + ``time_band`` already applied,
-    but deliberately WITHOUT any day-of-week filter — see :func:`_fetch_grain`.
+    ``route_rows`` (the ``(date, route_code, service_type)`` set) span
+    ``[from_date, to_date]``. ``hour_rows`` (the ``(date, hour)`` set) span
+    ``[hours_from, to_date]``, the request's period alone, and are None for a
+    grain fetched without them (:func:`_fetch_grain`'s ``period_routes_only``).
+    Both have ``agency_id`` + ``service`` + ``routes`` + ``time_band`` already
+    applied, but deliberately no day-of-week filter: see :func:`_fetch_grain`.
     """
 
-    rows: tuple[_GrainRow, ...]
+    route_rows: tuple[_RouteRow, ...]
+    hour_rows: tuple[_HourRow, ...] | None
     from_date: date
+    hours_from: date
     to_date: date
 
 
@@ -207,8 +218,8 @@ def _grain_covers(grain: _Grain | None, from_date: date, to_date: date) -> bool:
 def _check_grain_covers(grain: _Grain, from_date: date, to_date: date) -> None:
     """Fail loudly if a consumer asks for a window the grain never fetched.
 
-    The grain spans ``[ctx.from_date - _grain_lookback_days(ctx), ctx.to_date]``,
-    which is derived from how
+    The grain's route rows span ``[ctx.from_date - _grain_lookback_days(ctx),
+    ctx.to_date]``, which is derived from how
     :func:`compute_overview_summary` builds ``cur_ctx`` / ``base_ctx``. If that
     construction ever drifts — an off-by-one in a window's bounds, a baseline
     wider than the current window — the Python filters here would happily
@@ -223,8 +234,23 @@ def _check_grain_covers(grain: _Grain, from_date: date, to_date: date) -> None:
         )
 
 
-def _grain_window(grain: _Grain, ctx: RangeCtx) -> Iterator[_GrainRow]:
-    """Grain rows inside ``ctx``'s date window that satisfy ``ctx.dow``.
+def _grain_hours(grain: _Grain, from_date: date, to_date: date) -> tuple[_HourRow, ...]:
+    """The grain's hour rows, once they are known to span ``[from_date, to_date]``.
+
+    The hour set's counterpart of :func:`_check_grain_covers`: hour rows span
+    only the period, so a window reaching outside it, or a grain fetched
+    without hours, raises rather than profiling a truncated window.
+    """
+    if grain.hour_rows is None or from_date < grain.hours_from or to_date > grain.to_date:
+        span = "none" if grain.hour_rows is None else f"[{grain.hours_from}..{grain.to_date}]"
+        raise RuntimeError(
+            f"overview grain's hour set ({span}) does not cover the requested window [{from_date}..{to_date}]"
+        )
+    return grain.hour_rows
+
+
+def _grain_window(grain: _Grain, ctx: RangeCtx) -> Iterator[_RouteRow]:
+    """Route rows inside ``ctx``'s date window that satisfy ``ctx.dow``.
 
     This is the in-Python equivalent of the date-range + DOW half of
     ``build_updates_filter_ch(ctx)``; the other half (service / routes /
@@ -236,10 +262,10 @@ def _grain_window(grain: _Grain, ctx: RangeCtx) -> Iterator[_GrainRow]:
     """
     _check_grain_covers(grain, ctx.from_date, ctx.to_date)
     lo, hi, dow = ctx.from_date, ctx.to_date, ctx.dow
-    return (row for row in grain.rows if lo <= row[0] <= hi and _dow_matches(row[0], dow))
+    return (row for row in grain.route_rows if lo <= row[0] <= hi and _dow_matches(row[0], dow))
 
 
-def _grain_avg_min(rows: Iterable[_GrainRow]) -> tuple[float | None, int]:
+def _grain_avg_min(rows: Iterable[_RouteRow]) -> tuple[float | None, int]:
     """``(avg_min, samples)`` over ``rows`` — the ``avg(dep_delay) / 60.0``,
     ``count(*)`` pair the per-helper ClickHouse queries used to return.
 
@@ -253,31 +279,32 @@ def _grain_avg_min(rows: Iterable[_GrainRow]) -> tuple[float | None, int]:
     n = 0
     total = 0
     for row in rows:
-        n += row[4]
-        total += row[5]
+        n += row[_SAMPLES]
+        total += row[_SUM_DELAY]
     if n == 0:
         return None, 0
     return (total / n) / 60.0, n
 
 
-def _grain_sum_by(rows: Iterable[_GrainRow], key_index: int, value_index: int = 5) -> dict:
-    """``{group_key: (samples, summed_value_sec)}`` for one grain column.
+def _grain_sum_by(rows: Iterable[_RouteRow], key_index: int, value_index: int = _SUM_DELAY) -> dict:
+    """``{group_key: (samples, summed_value_sec)}`` for one route-row column.
 
-    ``value_index`` picks ``sum_delay_sec`` (5, the default — for averages) or
-    ``sum_late_sec`` (6 — for :func:`_concentration`'s lateness contribution).
+    ``value_index`` picks ``sum_delay_sec`` (the default — for averages) or
+    ``sum_late_sec`` (``_SUM_LATE`` — for :func:`_concentration`'s lateness
+    contribution).
     """
     acc: dict = {}
     for row in rows:
         slot = acc.get(row[key_index])
         if slot is None:
-            acc[row[key_index]] = [row[4], row[value_index]]
+            acc[row[key_index]] = [row[_SAMPLES], row[value_index]]
         else:
-            slot[0] += row[4]
+            slot[0] += row[_SAMPLES]
             slot[1] += row[value_index]
     return {k: (v[0], v[1]) for k, v in acc.items()}
 
 
-async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
+async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch, *, period_routes_only: bool = False) -> _Grain:
     """Fetch the whole request's deduped ``updates`` in ONE ClickHouse query.
 
     The slow-path stage helpers read this instead of each issuing its own
@@ -312,32 +339,45 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
     add up to ``27 - ctx.days`` days of scan to every narrow slow-path request,
     most for the narrowest, to save a scan on the minority that find movers.
 
-    ``hour`` is grouped alongside ``route_code``/``service_type`` rather than
-    fetched separately for ``_peak_hour_by_dow``: adding it to the existing
-    group-by costs nothing extra (the cost is all in the scan, not the
-    group-by cardinality), whereas a second query genuinely doubles it. Only
-    the hour profiles read ``hour``, and only inside ``ctx``, so a row dated
-    before ``ctx.from_date`` (read only by ``base_ctx`` and the movers'
-    sparkline) is grouped with a NULL hour: the lookback adds one row per date,
-    route and service type, not one per hour as well. That keeps a full
-    365-day window under ``get_ch_client``'s 200 k-row ``max_result_rows`` cap,
-    though not with so much headroom that adding another group-by dimension or
-    widening the window further is free to do without rechecking against the
-    cap. A routes filter alone fetches every hour for just those routes; were
-    that ever to pass the cap, the client raises rather than truncating, and
-    the caller degrades the hour profiles to null.
+    The scan is grouped twice, as two grouping sets. The route set,
+    ``(date, route_code, service_type)``, serves every figure that averages or
+    ranks routes, days or windows. The hour set, ``(date, hour)``, serves the
+    hour profiles, which pool every route anyway. Each row is filed under its
+    set by ``grouping(route_code)``, never by which of its columns are NULL: a
+    route row's own ``route_code`` can be NULL, and a column outside a row's
+    set reads as its type's default. Only the hour profiles read ``hour``, and
+    only inside ``ctx``, so a day before ``ctx.from_date`` gets no hour rows:
+    its hour is NULL, and the ``HAVING`` drops every hour row without an hour.
+    So the result is bounded by
+
+    * route rows: the span's days (``ctx.days`` plus
+      :func:`_grain_lookback_days`) times the ``(route_code, service_type)``
+      pairs observed on a day, and
+    * hour rows: ``ctx.days`` times the hours departures run at, at most the
+      hours of one service day's clock and fewer under a time band,
+
+    which grows with the routes plus the hours, not with routes times hours.
+    The route set dominates, and under a time band the lookback roughly
+    doubles it. ``get_ch_client``'s ``max_result_rows`` cap raises rather than
+    truncating when a dense enough agency over a wide enough period still
+    passes it. :func:`compute_overview_summary` then fetches again with
+    ``period_routes_only``: the route set over ``ctx`` alone, without the
+    lookback or the hour set, which serves every figure but the baseline's and
+    the hour profiles. A routes filter alone reads only the hour set, fetched
+    over just those routes; were that ever to pass the cap, the caller
+    degrades the hour profiles to null.
 
     The hour is the departure's hour on its service day's clock
     (``api.range.scheduled_hour_ch``), the one agg_hour_daily files it under:
     24 and on for a departure after midnight. A row with no scheduled time, or
     a malformed one, has a NULL hour instead of failing the one query the
-    whole payload depends on. Under ``time_band != 'all'`` none reach the
-    grain, since the band filter places no such row in any band; under a
-    ``routes`` filter alone they do, and the hour profiles, the only consumers
-    in that shape, skip them.
+    whole payload depends on: it counts in the route set and not in the hour
+    set. Under ``time_band != 'all'`` none reach the grain, since the band
+    filter places no such row in any band.
     """
+    lookback = 0 if period_routes_only else _grain_lookback_days(ctx)
     span_ctx = RangeCtx(
-        from_date=ctx.from_date - timedelta(days=_grain_lookback_days(ctx)),
+        from_date=ctx.from_date - timedelta(days=lookback),
         to_date=ctx.to_date,
         dow="all",  # applied per-consumer in Python; see the docstring
         time_band=ctx.time_band,
@@ -346,25 +386,45 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch) -> _Grain:
         service_dates=ctx.service_dates,
     )
     cte_sql, ch_params = _dedup_cte_ch(span_ctx, include_scheduled_sec=True)
-    hour_expr = f"if(date >= {{grain_hour_from:Date}}, {scheduled_hour_ch()}, NULL)"
+    params = {"agency_id": agency_id, **ch_params}
+    if period_routes_only:
+        hour_columns = "NULL AS hour, 0 AS hour_set"
+        grouping = "GROUP BY date, route_code, service_type"
+    else:
+        hour_expr = f"if(date >= {{grain_hour_from:Date}}, {scheduled_hour_ch()}, NULL)"
+        hour_columns = f"{hour_expr} AS hour, grouping(route_code) AS hour_set"
+        grouping = (
+            f"GROUP BY GROUPING SETS ((date, route_code, service_type), (date, {hour_expr}))\n"
+            "HAVING hour_set = 0 OR hour IS NOT NULL"
+        )
+        params["grain_hour_from"] = ctx.from_date
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT date,\n"
         "       route_code,\n"
         "       service_type,\n"
-        f"       {hour_expr} AS hour,\n"
+        f"       {hour_columns},\n"
         "       count(*) AS samples,\n"
         "       sum(dep_delay) AS sum_delay,\n"
         "       sum(greatest(dep_delay, 0)) AS sum_late\n"
         "FROM deduped\n"
-        f"GROUP BY date, route_code, service_type, {hour_expr}",
-        parameters={"agency_id": agency_id, "grain_hour_from": ctx.from_date, **ch_params},
+        f"{grouping}",
+        parameters=params,
     )
-    rows: tuple[_GrainRow, ...] = tuple(
-        (d, route_code, service_type, hour, int(samples), int(sum_delay or 0), int(sum_late or 0))
-        for d, route_code, service_type, hour, samples, sum_delay, sum_late in result.result_rows
+    route_rows: list[_RouteRow] = []
+    hour_rows: list[_HourRow] = []
+    for d, route_code, service_type, hour, hour_set, samples, sum_delay, sum_late in result.result_rows:
+        if hour_set:
+            hour_rows.append((d, hour, int(samples), int(sum_delay or 0)))
+        else:
+            route_rows.append((d, route_code, service_type, int(samples), int(sum_delay or 0), int(sum_late or 0)))
+    return _Grain(
+        route_rows=tuple(route_rows),
+        hour_rows=None if period_routes_only else tuple(hour_rows),
+        from_date=span_ctx.from_date,
+        hours_from=ctx.from_date,
+        to_date=span_ctx.to_date,
     )
-    return _Grain(rows=rows, from_date=span_ctx.from_date, to_date=span_ctx.to_date)
 
 
 async def _latest_data_date(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> date | None:
@@ -604,15 +664,15 @@ async def _route_weekly_history(
         #   because the dedup CTE already drops NULL `dep_delay` rows.
         wanted = set(route_codes)
         acc: dict[tuple[str, int], list[int]] = {}
-        for row in _require_grain(grain).rows:
+        for row in _require_grain(grain).route_rows:
             d, route_code = row[0], row[1]
             if route_code not in wanted or not (span_from <= d <= ctx.to_date):
                 continue
             if not _dow_matches(d, ctx.dow):
                 continue
             slot = acc.setdefault((route_code, (ctx.to_date - d).days // 7), [0, 0])
-            slot[0] += row[4]
-            slot[1] += row[5]
+            slot[0] += row[_SAMPLES]
+            slot[1] += row[_SUM_DELAY]
         for code in route_codes:
             for k in range(weeks_back - 1, -1, -1):
                 bucket = acc.get((code, k))
@@ -739,7 +799,7 @@ async def _concentration(
         # Ties are broken by route_code so the top-20 cut is reproducible —
         # the ClickHouse `ORDER BY total_late_min DESC` this replaces left tied
         # rows in an arbitrary, run-to-run-unstable order.
-        by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1, value_index=6)
+        by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1, value_index=_SUM_LATE)
         rows = [(code, late / 60.0) for code, (_n, late) in sorted(by_route.items(), key=lambda kv: (-kv[1][1], kv[0]))]
     rows = _listable(rows, left_out)
     if not rows:
@@ -965,16 +1025,10 @@ async def _peak_hour_by_dow(
         rows = await conn.fetch(sql, agency_id, str(ctx.from_date), str(ctx.to_date), *service_params)
         return _peak_from_hour_rows(rows)
 
-    grain = _require_grain(grain)
-    # Iterates `grain.rows` directly rather than going through `_grain_window`
-    # (the DOW filter here is `dow_group`, not `ctx.dow`), so the coverage
-    # invariant has to be asserted explicitly.
-    _check_grain_covers(grain, ctx.from_date, ctx.to_date)
-    # `hour is None` <=> the row has no scheduled time: no hour to bucket.
     by_hour: dict[int, list[int]] = {}
     lo, hi = ctx.from_date, ctx.to_date
-    for d, _route_code, _service_type, hour, samples, sum_delay, _sum_late in grain.rows:
-        if hour is None or not (lo <= d <= hi) or not _dow_matches(d, dow_group):
+    for d, hour, samples, sum_delay in _grain_hours(_require_grain(grain), lo, hi):
+        if not (lo <= d <= hi) or not _dow_matches(d, dow_group):
             continue
         slot = by_hour.setdefault(hour, [0, 0])
         slot[0] += samples
@@ -1328,6 +1382,14 @@ async def compute_overview_summary(
     still reads its ``agg_*`` table, and a failed fetch degrades just those
     three fields to null. With neither filter ``grain`` stays ``None`` and
     every helper reads its ``agg_*`` table.
+
+    Under a time band, a grain past the ClickHouse client's row cap is fetched
+    again over the period's route rows alone (:func:`_fetch_grain`'s
+    ``period_routes_only``), and every figure that needs the window before the
+    period or the hour set is null: the baseline and the headline's deltas,
+    the movers, each listed route's ``delta_min`` and the three hour
+    profiles. Any other ClickHouse failure, or the period's route rows alone
+    passing the cap, still fails the payload: every figure reads the grain.
     """
     if ctx.service != "all":
         # Every window derived below starts at or after _calendar_from(ctx).
@@ -1343,12 +1405,24 @@ async def compute_overview_summary(
     # agg_* table), so the grain is fetched for them, and a ClickHouse failure
     # degrades just those three fields to null rather than failing the payload.
     peaks_unavailable = False
+    baseline_unavailable = False
     if ctx.time_band != "all" or ctx.routes:
         if ch is None:
             raise RuntimeError("overview slow path requires a ClickHouse client")
         async with perf.timed_block("overview.grain"):
             if ctx.time_band != "all":
-                grain = await _fetch_grain(agency_id, ctx, ch)
+                try:
+                    grain = await _fetch_grain(agency_id, ctx, ch)
+                except Exception as exc:
+                    if not is_result_overflow(exc):
+                        raise
+                    _log.warning(
+                        "Overview grain for agency %s passed the ClickHouse row cap — serving the period's "
+                        "route rows alone, without the baseline or the peak-hour profiles",
+                        agency_id,
+                    )
+                    grain = await _fetch_grain(agency_id, ctx, ch, period_routes_only=True)
+                    peaks_unavailable = baseline_unavailable = True
             else:
                 try:
                     grain = await _fetch_grain(agency_id, ctx, ch)
@@ -1400,11 +1474,18 @@ async def compute_overview_summary(
         routes=ctx.routes,
         service_dates=ctx.service_dates,
     )
+    # None when the grain could not reach back to it (see the docstring).
+    baseline_ctx = None if baseline_unavailable else base_ctx
 
+    movers: dict | None
     if pool is None:
         async with perf.timed_block("overview.headline"):
             avg_min, samples = await _headline_stats(agency_id, cur_ctx, conn, ch=ch, grain=grain)
-            baseline_avg, _ = await _headline_stats(agency_id, base_ctx, conn, ch=ch, grain=grain)
+            baseline_avg = (
+                (await _headline_stats(agency_id, baseline_ctx, conn, ch=ch, grain=grain))[0]
+                if baseline_ctx is not None
+                else None
+            )
 
         delta_min = None
         delta_pct = None
@@ -1414,12 +1495,16 @@ async def compute_overview_summary(
                 delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
 
         async with perf.timed_block("overview.movers"):
-            movers = await _movers(agency_id, cur_ctx, base_ctx, conn, ch=ch, grain=grain, left_out=left_out)
+            movers = (
+                await _movers(agency_id, cur_ctx, baseline_ctx, conn, ch=ch, grain=grain, left_out=left_out)
+                if baseline_ctx is not None
+                else None
+            )
         async with perf.timed_block("overview.concentration"):
             concentration = await _concentration(agency_id, ctx, conn, ch=ch, grain=grain, left_out=left_out)
         async with perf.timed_block("overview.top_delayed"):
             top_delayed = await _top_delayed_routes(
-                agency_id, cur_ctx, conn, ch=ch, grain=grain, left_out=left_out, base_ctx=base_ctx
+                agency_id, cur_ctx, conn, ch=ch, grain=grain, left_out=left_out, base_ctx=baseline_ctx
             )
         async with perf.timed_block("overview.peaks"):
             peak, peak_weekday, peak_weekend = (
@@ -1460,6 +1545,12 @@ async def compute_overview_summary(
             async with fanout, pool.acquire() as c:
                 return await fn(*args, c, ch=ch, grain=grain, **kwargs)
 
+        async def _with_baseline(fn, *args, **kwargs):
+            """``_own_conn(fn, *args, **kwargs)``, or None without a baseline."""
+            if baseline_ctx is None:
+                return None
+            return await _own_conn(fn, *args, **kwargs)
+
         async def _peak_dow(group: str) -> dict | None:
             """``_peak_hour_by_dow`` for ``group``, through the same bounded acquire."""
             if peaks_unavailable:
@@ -1475,7 +1566,7 @@ async def compute_overview_summary(
             peak_weekday,
             peak_weekend,
             (avg_min, samples),
-            (baseline_avg, _),
+            baseline_stats,
             movers,
             concentration,
             top_delayed,
@@ -1486,13 +1577,14 @@ async def compute_overview_summary(
             _peak_dow("weekday"),
             _peak_dow("weekend"),
             _own_conn(_headline_stats, agency_id, cur_ctx),
-            _own_conn(_headline_stats, agency_id, base_ctx),
-            _own_conn(_movers, agency_id, cur_ctx, base_ctx, left_out=left_out),
+            _with_baseline(_headline_stats, agency_id, baseline_ctx),
+            _with_baseline(_movers, agency_id, cur_ctx, baseline_ctx, left_out=left_out),
             _own_conn(_concentration, agency_id, ctx, left_out=left_out),
-            _own_conn(_top_delayed_routes, agency_id, cur_ctx, left_out=left_out, base_ctx=base_ctx),
+            _own_conn(_top_delayed_routes, agency_id, cur_ctx, left_out=left_out, base_ctx=baseline_ctx),
             _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
         )
+        baseline_avg = baseline_stats[0] if baseline_stats is not None else None
 
         delta_min = None
         delta_pct = None

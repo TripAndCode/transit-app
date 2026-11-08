@@ -1158,7 +1158,8 @@ export type OverviewServiceSplitDay = {
 export type OverviewSummary = {
   scope_applied?: ScopeApplied;
   headline: OverviewHeadline;
-  movers: OverviewMovers;
+  /** Null, like the headline's baseline, when the window before the period could not be read. */
+  movers: OverviewMovers | null;
   concentration: OverviewConcentration;
   top_delayed: OverviewTopDelayed;
   peak_hour: OverviewPeakHour | null;

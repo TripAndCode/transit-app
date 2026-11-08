@@ -2116,7 +2116,7 @@ async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_cl
 
     assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
     # ...and it is the grain query: one dedup CTE grouped to the shared grain.
-    assert "GROUP BY date, route_code, service_type" in counting.queries[0]
+    assert "GROUP BY GROUPING SETS ((date, route_code, service_type), (date, " in counting.queries[0]
     # The payload is still fully populated off that single query.
     assert out["headline"]["samples"] == 3
     assert out["headline"]["avg_min"] == pytest.approx(4.0, abs=0.01)  # (2+4+6)/3
@@ -2272,8 +2272,8 @@ async def test_slow_path_grain_reaches_back_one_period_width(aconn, aagency_id, 
     which reaches exactly ``ctx.days`` before the period and no further.
 
     Days before the period only feed the baseline and the movers' weekly
-    sparkline, neither of which buckets by hour, so the grain carries no hour
-    for them and the lookback costs no hourly rows.
+    sparkline, neither of which buckets by hour, so the grain carries route
+    rows for them and no hour rows.
     """
     for day, dep in (
         (date(2026, 3, 25), 1200),
@@ -2291,9 +2291,13 @@ async def test_slow_path_grain_reaches_back_one_period_width(aconn, aagency_id, 
 
     ctx = RangeCtx(from_date=date(2026, 4, 25), to_date=date(2026, 5, 24), time_band="morning")
     grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
-    assert (grain.from_date, grain.to_date) == (date(2026, 3, 26), date(2026, 5, 24))
-    assert sorted((row[0], row[3]) for row in grain.rows) == [
-        (date(2026, 3, 26), None),
+    assert (grain.from_date, grain.hours_from, grain.to_date) == (
+        date(2026, 3, 26),
+        date(2026, 4, 25),
+        date(2026, 5, 24),
+    )
+    assert sorted(row[0] for row in grain.route_rows) == [date(2026, 3, 26), date(2026, 4, 25), date(2026, 5, 24)]
+    assert sorted((d, hour) for d, hour, _n, _sum in grain.hour_rows) == [
         (date(2026, 4, 25), 8),
         (date(2026, 5, 24), 8),
     ]
@@ -2311,9 +2315,13 @@ async def test_slow_path_grain_reaches_back_one_period_width(aconn, aagency_id, 
 async def test_a_routes_filter_alone_reads_no_days_before_the_period(aconn, aagency_id, ch_client, ch_async_client):
     """Under a routes filter with every hour, only the hour profiles read the
     grain, and only inside the period: every other figure comes from its agg_*
-    table. So the grain does not reach back at all, however wide the period."""
+    table. So the grain does not reach back at all, however wide the period.
+    A departure with no scheduled time has no hour, so it reaches the route
+    rows and not the hour rows."""
     for day, dep in ((date(2026, 3, 26), 120), (date(2026, 4, 25), 600), (date(2026, 5, 24), 600)):
         await _seed_update(aconn, aagency_id, datetime.combine(day, time(12, 0), tzinfo=timezone.utc), "R_RT", dep)
+    untimed = datetime.combine(date(2026, 5, 1), time(12, 0), tzinfo=timezone.utc)
+    await _seed_update(aconn, aagency_id, untimed, "R_RT", 300, sched=None)
     from tests.conftest import mirror_updates_to_ch
 
     mirror_updates_to_ch(ch_client, aagency_id)
@@ -2322,8 +2330,13 @@ async def test_a_routes_filter_alone_reads_no_days_before_the_period(aconn, aage
 
     ctx = RangeCtx(from_date=date(2026, 4, 25), to_date=date(2026, 5, 24), routes=("R_RT",))
     grain = await _fetch_grain(aagency_id, ctx, ch_async_client)
-    assert (grain.from_date, grain.to_date) == (date(2026, 4, 25), date(2026, 5, 24))
-    assert sorted(row[0] for row in grain.rows) == [date(2026, 4, 25), date(2026, 5, 24)]
+    assert (grain.from_date, grain.hours_from, grain.to_date) == (
+        date(2026, 4, 25),
+        date(2026, 4, 25),
+        date(2026, 5, 24),
+    )
+    assert sorted(row[0] for row in grain.route_rows) == [date(2026, 4, 25), date(2026, 5, 1), date(2026, 5, 24)]
+    assert sorted(row[0] for row in grain.hour_rows) == [date(2026, 4, 25), date(2026, 5, 24)]
 
 
 @pytest.mark.asyncio
@@ -2896,7 +2909,7 @@ async def test_slow_path_wide_window_movers_stay_at_one_query(aconn, aagency_id,
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=counting)
 
     assert len(counting.queries) == 1, f"expected 1 ClickHouse query, got {len(counting.queries)}"
-    assert "GROUP BY date, route_code, service_type" in counting.queries[0]
+    assert "GROUP BY GROUPING SETS ((date, route_code, service_type), (date, " in counting.queries[0]
     # The sparkline still comes through, populated off the grain.
     worse = out["movers"]["worse"]
     assert [m["route_code"] for m in worse] == ["R_WH"]
@@ -2907,6 +2920,309 @@ async def test_slow_path_wide_window_movers_stay_at_one_query(aconn, aagency_id,
         pytest.approx(1.0, abs=1e-9),
         pytest.approx(10.0, abs=1e-9),
     ]
+
+
+# The grain's two grouping sets: route rows over the period and the window
+# before it, hour rows over the period alone. These pin both sets, every
+# figure they serve against the one-set grain they replaced, and the degrade
+# path for a grain past the ClickHouse client's row cap.
+
+_GRAIN_CTX = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24), time_band="morning")
+
+
+async def _seed_grain_fixture(aconn, ch_client, agency_id):
+    """Rows for every figure the grain serves, over ``_GRAIN_CTX`` and the 14 days before it.
+
+    R1 worsens and R2 improves between the two windows; R1 runs two service
+    ids at two hours on one day; a row outside the band and a row before the
+    grain's span count toward nothing. The period's last row is on its last
+    day, so the movers' four weekly buckets fall inside the grain.
+    """
+    seeds = [
+        # (day, route, scheduled, service, delays in seconds)
+        (date(2026, 4, 20), "R1", "08:00", "平日", [3000]),
+        (date(2026, 5, 7), "R1", "07:00", "平日", [60 + 7 * i for i in range(10)]),
+        (date(2026, 5, 8), "R2", "08:00", "平日", [300 + 11 * i for i in range(10)]),
+        (date(2026, 5, 12), "R3", "08:00", "平日", [45, 45, 45]),
+        (date(2026, 5, 14), "R1", "08:00", "平日", [250, 250]),
+        (date(2026, 5, 19), "R1", "08:00", "平日", [500 + 13 * i for i in range(6)]),
+        (date(2026, 5, 19), "R1", "07:00", "臨時", [300 + i for i in range(4)]),
+        (date(2026, 5, 20), "R2", "07:00", "平日", [100 + 3 * i for i in range(10)]),
+        (date(2026, 5, 22), "R1", "12:00", "平日", [999]),
+        (date(2026, 5, 23), "R3", "06:00", "11_土曜(共通)", [200, 110, 20, -70]),
+        (date(2026, 5, 24), "R2", "08:00", "平日", [30, 30]),
+    ]
+    seq = 0
+    for day, route, sched, service, delays in seeds:
+        noon = datetime.combine(day, time(12, 0), tzinfo=timezone.utc)
+        for i, dep in enumerate(delays):
+            seq += 1
+            await _seed_update(
+                aconn, agency_id, noon + timedelta(minutes=i), route, dep, sched=sched, service=service, seq=seq
+            )
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, agency_id)
+
+
+class _CappedCh:
+    """Async ClickHouse client proxy that caps every result at ``max_rows``,
+    as ``api.clickhouse.get_ch_client`` caps it at its own limit, and records
+    each query with the rows it returned (None for one that raised)."""
+
+    def __init__(self, inner, max_rows):
+        self._inner = inner
+        self._settings = {"max_result_rows": max_rows, "result_overflow_mode": "throw"}
+        self.queries: list[tuple[str, int | None]] = []
+
+    async def query(self, sql, parameters=None, settings=None, **kwargs):
+        try:
+            result = await self._inner.query(
+                sql, parameters=parameters, settings={**(settings or {}), **self._settings}, **kwargs
+            )
+        except Exception:
+            self.queries.append((sql, None))
+            raise
+        self.queries.append((sql, len(result.result_rows)))
+        return result
+
+
+@pytest.mark.asyncio
+async def test_grain_fetches_route_rows_and_hour_rows_as_two_sets(aconn, aagency_id, ch_client, ch_async_client):
+    """Route rows span the period and the window before it, one per date,
+    route and service id; hour rows span the period alone, one per date and
+    hour across every route. A route row whose route is NULL stays a route
+    row: the set a row belongs to is read from grouping(), not from which
+    columns are NULL."""
+    noon = datetime.combine(date(2026, 5, 21), time(12, 0), tzinfo=timezone.utc)
+    for i in range(3):
+        await _seed_update(aconn, aagency_id, noon + timedelta(minutes=i), None, 900, seq=900 + i)
+    await _seed_grain_fixture(aconn, ch_client, aagency_id)
+    from pipeline.reports.overview import _fetch_grain
+
+    counting = _CountingCh(ch_async_client)
+    grain = await _fetch_grain(aagency_id, _GRAIN_CTX, counting)
+
+    assert len(counting.queries) == 1
+    assert "GROUPING SETS" in counting.queries[0]
+    assert (grain.from_date, grain.hours_from, grain.to_date) == (
+        date(2026, 4, 27),
+        date(2026, 5, 11),
+        date(2026, 5, 24),
+    )
+    # (date, route_code, service_type, samples, sum_delay_sec, sum_late_sec)
+    expected_routes = {
+        (date(2026, 5, 7), "R1", "平日", 10, 915, 915),
+        (date(2026, 5, 8), "R2", "平日", 10, 3495, 3495),
+        (date(2026, 5, 12), "R3", "平日", 3, 135, 135),
+        (date(2026, 5, 14), "R1", "平日", 2, 500, 500),
+        (date(2026, 5, 19), "R1", "平日", 6, 3195, 3195),
+        (date(2026, 5, 19), "R1", "臨時", 4, 1206, 1206),
+        (date(2026, 5, 20), "R2", "平日", 10, 1135, 1135),
+        (date(2026, 5, 21), None, "平日", 3, 2700, 2700),
+        (date(2026, 5, 23), "R3", "11_土曜(共通)", 4, 260, 330),
+        (date(2026, 5, 24), "R2", "平日", 2, 60, 60),
+    }
+    assert len(grain.route_rows) == len(expected_routes)
+    assert set(grain.route_rows) == expected_routes
+    # (date, hour, samples, sum_delay_sec): the period only, routes pooled.
+    expected_hours = {
+        (date(2026, 5, 12), 8, 3, 135),
+        (date(2026, 5, 14), 8, 2, 500),
+        (date(2026, 5, 19), 7, 4, 1206),
+        (date(2026, 5, 19), 8, 6, 3195),
+        (date(2026, 5, 20), 7, 10, 1135),
+        (date(2026, 5, 21), 8, 3, 2700),
+        (date(2026, 5, 23), 6, 4, 260),
+        (date(2026, 5, 24), 8, 2, 60),
+    }
+    assert len(grain.hour_rows) == len(expected_hours)
+    assert set(grain.hour_rows) == expected_hours
+
+
+def _by_hour(values: dict[int, float]) -> list[float | None]:
+    """A 24-hour ``by_hour`` list holding *values* and None elsewhere."""
+    return [values.get(h) for h in range(24)]
+
+
+# What the one-set grain gave for ``_seed_grain_fixture`` over ``_GRAIN_CTX``.
+_GRAIN_PAYLOAD = {
+    "headline": {
+        "avg_min": 3.49,
+        "baseline_avg_min": 3.68,
+        "delta_min": -0.19,
+        "delta_pct": -5.2,
+        "samples": 31,
+        "window_from": "2026-05-11",
+        "window_to": "2026-05-24",
+    },
+    "movers": {
+        "worse": [
+            {
+                "route_code": "R1",
+                "route_short_name": None,
+                "delta_min": 5.28,
+                "delta_pct": 346.4,
+                "current_avg_min": 6.8,
+                "previous_avg_min": 1.5,
+                "streak_weeks": 2,
+                "sparkline_points": [1.525, 4.166666666666667, 7.335],
+            }
+        ],
+        "better": [
+            {
+                "route_code": "R2",
+                "route_short_name": None,
+                "delta_min": -4.17,
+                "delta_pct": -71.5,
+                "current_avg_min": 1.7,
+                "previous_avg_min": 5.8,
+                "streak_weeks": 0,
+                "sparkline_points": [5.825, 1.659722222222222],
+            }
+        ],
+    },
+    "concentration": {
+        "top_routes": [
+            {"route_code": "R1", "route_short_name": None, "share_pct": 74.7},
+            {"route_code": "R2", "route_short_name": None, "share_pct": 18.2},
+            {"route_code": "R3", "route_short_name": None, "share_pct": 7.1},
+        ],
+        "rest_share_pct": 0.0,
+        "rest_route_count": 0,
+    },
+    "top_delayed": {
+        "routes": [
+            {"route_code": "R1", "route_short_name": None, "avg_min": 6.81, "delta_min": 5.28},
+            {"route_code": "R2", "route_short_name": None, "avg_min": 1.66, "delta_min": -4.17},
+            {"route_code": "R3", "route_short_name": None, "avg_min": 0.94, "delta_min": None},
+        ],
+        "delayed_count": 1,
+        "delayed_threshold_min": 2.0,
+        "band_counts": {
+            "severe": {"count": 1, "threshold_min": 5.0},
+            "moderate": {"count": 0, "threshold_min": 3.0},
+            "mild": {"count": 1, "threshold_min": 1.5},
+        },
+        "route_count": 3,
+        "min_samples": 3,
+    },
+    "peak_hour": {"by_hour": _by_hour({6: 1.08, 7: 2.79, 8: 4.99}), "peak_hour": 8, "peak_avg_min": 4.99},
+    "peak_hour_weekday": {"by_hour": _by_hour({7: 2.79, 8: 5.8}), "peak_hour": 8, "peak_avg_min": 5.8},
+    "peak_hour_weekend": {"by_hour": _by_hour({6: 1.08, 8: 0.5}), "peak_hour": 6, "peak_avg_min": 1.08},
+    "service_split": _split(weekday=(4.11, 4, 25), saturday=(1.08, 1, 4), sunday_holiday=(0.5, 1, 2)),
+    "service_split_daily": [
+        {"date": "2026-05-12", "day_type": "weekday", "avg_min": 0.75, "samples": 3},
+        {"date": "2026-05-14", "day_type": "weekday", "avg_min": 4.17, "samples": 2},
+        {"date": "2026-05-19", "day_type": "weekday", "avg_min": 7.34, "samples": 10},
+        {"date": "2026-05-20", "day_type": "weekday", "avg_min": 1.89, "samples": 10},
+        {"date": "2026-05-23", "day_type": "saturday", "avg_min": 1.08, "samples": 4},
+        {"date": "2026-05-24", "day_type": "sunday_holiday", "avg_min": 0.5, "samples": 2},
+    ],
+    "sparkline_points": [0.75, 4.17, 7.34, 1.89, 1.08, 0.5],
+    "period_avg_min": 3.49,
+    "period_from": "2026-05-11",
+    "period_to": "2026-05-24",
+}
+
+
+@pytest.mark.asyncio
+async def test_two_set_grain_serves_every_figure_the_one_set_grain_did(
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch
+):
+    """The payload over the two-set grain is, figure for figure, the payload
+    the one-set ``(date, route_code, service_type, hour)`` grain gave for the
+    same rows, on the sequential and the pool path alike. The movers' weekly
+    buckets come from the grain too: one ClickHouse query in all."""
+    monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
+    await _seed_grain_fixture(aconn, ch_client, aagency_id)
+    from pipeline.reports import compute_overview_summary
+
+    counting = _CountingCh(ch_async_client)
+    seq_out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=counting)
+    pool = await _test_pool()
+    try:
+        pool_out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=ch_async_client)
+    finally:
+        await pool.close()
+
+    assert len(counting.queries) == 1
+    assert seq_out == _GRAIN_PAYLOAD
+    assert pool_out == _GRAIN_PAYLOAD
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pooled", [False, True])
+async def test_a_grain_past_the_row_cap_serves_the_period_without_its_baseline(
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch, pooled
+):
+    """A grain past the ClickHouse client's ``max_result_rows`` degrades rather
+    than failing the payload. A second scan fetches the period's route rows
+    alone; the figures that need the window before the period, and the hour
+    profiles, are null; every other figure is the one the full grain gives."""
+    monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
+    await _seed_grain_fixture(aconn, ch_client, aagency_id)
+    from pipeline.reports import compute_overview_summary
+
+    full = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=ch_async_client)
+    # The full grain is 16 rows (9 route rows, 7 hour rows); the period's 7
+    # route rows fit under the cap.
+    capped = _CappedCh(ch_async_client, max_rows=8)
+    pool = await _test_pool() if pooled else None
+    try:
+        out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=capped)
+    finally:
+        if pool is not None:
+            await pool.close()
+
+    [(full_sql, full_rows), (period_sql, period_rows)] = capped.queries
+    assert "GROUPING SETS" in full_sql and full_rows is None
+    assert "GROUPING SETS" not in period_sql and period_rows == 7
+    assert out == {
+        **full,
+        "headline": {**full["headline"], "baseline_avg_min": None, "delta_min": None, "delta_pct": None},
+        "movers": None,
+        "top_delayed": {
+            **full["top_delayed"],
+            "routes": [{**r, "delta_min": None} for r in full["top_delayed"]["routes"]],
+        },
+        "peak_hour": None,
+        "peak_hour_weekday": None,
+        "peak_hour_weekend": None,
+    }
+    # Each figure that went null had a value to lose.
+    assert full["headline"]["baseline_avg_min"] is not None
+    assert full["movers"]["worse"] and full["movers"]["better"]
+    assert any(r["delta_min"] is not None for r in full["top_delayed"]["routes"])
+    assert None not in (full["peak_hour"], full["peak_hour_weekday"], full["peak_hour_weekend"])
+
+
+@pytest.mark.asyncio
+async def test_a_period_past_the_row_cap_on_its_own_fails(aconn, aagency_id, ch_client, ch_async_client):
+    """When the period's route rows alone pass the cap, nothing is left to
+    serve the route lists from, so the row-cap error reaches the caller
+    after the one retry."""
+    await _seed_grain_fixture(aconn, ch_client, aagency_id)
+    from clickhouse_connect.driver.exceptions import DatabaseError
+
+    from pipeline.reports import compute_overview_summary
+
+    capped = _CappedCh(ch_async_client, max_rows=1)
+    with pytest.raises(DatabaseError, match="TOO_MANY_ROWS_OR_BYTES"):
+        await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=capped)
+    assert [rows for _sql, rows in capped.queries] == [None, None]
+
+
+@pytest.mark.asyncio
+async def test_a_time_band_grain_failure_other_than_the_row_cap_fails(aconn, aagency_id):
+    """Under a time band every figure reads the grain, so any failure but the
+    row cap fails the payload without a second scan."""
+    from pipeline.reports import compute_overview_summary
+
+    failing = _FailingCh()
+    with pytest.raises(RuntimeError, match="simulated ClickHouse failure"):
+        await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=failing)
+    assert failing.attempts == 1
 
 
 async def _seed_weekend_split_change(aconn, agency_id):
