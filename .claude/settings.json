@@ -1,4 +1,8 @@
 {
+  "autoCompactWindow": 200000,
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": false
+  },
   "hooks": {
     "PreToolUse": [
       {
