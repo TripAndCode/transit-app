@@ -7,6 +7,7 @@ shaping turns asyncpg rows into the JSON the timeline reads.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 
 from api.admin_runs import RUNS_FOR_DAY_SQL, runs_day_bounds, shape_run
@@ -50,6 +51,7 @@ def test_shape_run_renders_timestamps_as_utc_iso_strings():
             "lock_wait_ms": None,
             "error": None,
             "requested_by": None,
+            "rebuild_headline": None,
         }
     )
     assert shaped["started_at"] == "2026-09-21T04:30:00Z"
@@ -74,6 +76,7 @@ def test_the_lock_column_is_published_as_a_probe_cost_not_as_time_spent_waiting(
             "lock_wait_ms": 4,
             "error": None,
             "requested_by": None,
+            "rebuild_headline": None,
         }
     )
     assert shaped["lock_probe_ms"] == 4
@@ -94,6 +97,7 @@ def test_shape_run_keeps_a_fleet_wide_run_nameless_rather_than_inventing_one():
             "lock_wait_ms": None,
             "error": None,
             "requested_by": 9,
+            "rebuild_headline": None,
         }
     )
     assert shaped["agency_id"] is None
@@ -118,6 +122,36 @@ def test_a_naive_timestamp_is_read_as_utc_rather_than_as_local_time():
             "lock_wait_ms": None,
             "error": None,
             "requested_by": None,
+            "rebuild_headline": None,
         }
     )
     assert shaped["started_at"] == "2026-09-21T06:00:00Z"
+
+
+def test_shape_run_hands_a_rebuilds_headline_over_as_the_document_it_stored():
+    """asyncpg returns jsonb as text, so the queries cast it and the shaping parses it."""
+    headline = {
+        "first_day": "2026-06-08",
+        "last_day": "2026-06-09",
+        "preset": "legacy_60s",
+        "method_version": "2026.11.3",
+        "before": {"on_time_pct": 50.0, "avg_delay_min": 12.13, "samples": 8},
+        "after": {"on_time_pct": 50.0, "avg_delay_min": 2.13, "samples": 8},
+    }
+    shaped = shape_run(
+        {
+            "run_id": 8,
+            "kind": "analyze",
+            "agency_id": 1,
+            "agency_name": "Hokuriku",
+            "started_at": datetime(2026, 9, 21, 3, 0, tzinfo=timezone.utc),
+            "finished_at": datetime(2026, 9, 21, 3, 30, tzinfo=timezone.utc),
+            "status": "ok",
+            "rows": None,
+            "lock_wait_ms": None,
+            "error": None,
+            "requested_by": None,
+            "rebuild_headline": json.dumps(headline),
+        }
+    )
+    assert shaped["rebuild_headline"] == headline

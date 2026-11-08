@@ -833,8 +833,8 @@ def _analyze(conn, agency_ids: list[int]) -> list[int]:
     for agency_id in agency_ids:
         print(f"analyze agency {agency_id}")
         try:
-            with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id):
-                analyze(agency_id, conn, ch_client)
+            with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id) as run:
+                run.rebuild_headline = analyze(agency_id, conn, ch_client, db_url=os.environ.get("DATABASE_URL"))
         except Exception:
             logger.exception(f"analyze failed for agency {agency_id}")
             failed.append(agency_id)
