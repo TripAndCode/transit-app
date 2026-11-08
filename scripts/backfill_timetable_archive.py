@@ -1,14 +1,20 @@
 """Backfill the timetable archive from the kept static zips.
 
 A row stamped with a version name the archive does not map joins whatever
-timetable is loaded (pipeline.static_archive.ScheduleJoin). For each such name of
-the agency whose zip the static fetcher kept (<static-dir>/<agency>/<name>.zip),
---apply loads the zip into the scratch Postgres with the real load_static, whose
-archive writes go to the target ClickHouse. static_archive.archive_loaded then
-keeps its stop times there and maps the name to them, and its route medians
-(pipeline.static_headways) are copied to the target Postgres. Last, the agency's
-archive-joined tables' states are cleared, so its next analyze rebuilds them in
-full against each row's own timetable.
+timetable is loaded (pipeline.static_archive.ScheduleJoin), and a mapped name
+with no recorded span, or whose content's schedule is not kept, is in force on
+no date (pipeline.timetable_in_force), so its rows keep the timetable they were
+ingested against. For each such name of the agency whose zip the static
+fetcher kept (<static-dir>/<agency>/<name>.zip), --apply loads the zip into the
+scratch Postgres with the real load_static, whose archive writes go to the
+target ClickHouse: it records the name's span from the zip.
+static_archive.archive_loaded then keeps its stop times and schedule there and
+maps the name to them, and its route medians (pipeline.static_headways) are
+copied to the target Postgres. Last, the agency's archive-joined tables' states
+are cleared, so its next analyze rebuilds them in full against the timetable
+in force on each row's service date. --every-zip also takes each kept zip whose
+name no row carries: a timetable fetched but never loaded while its days were
+ingested can still be the one in force on them.
 
 The target is the environment's DATABASE_URL and CLICKHOUSE_*, as for every
 pipeline command. The scratch is --scratch-database-url: a throwaway Postgres,
@@ -36,6 +42,7 @@ from pipeline.service_day import service_date_ch
 from pipeline.static_content import STATIC_DEPENDENCY_COLUMNS, static_parts
 from pipeline.static_fetcher import DEFAULT_STATIC_DEST
 from pipeline.static_loader import load_static
+from pipeline.timetable_in_force import fetch_day
 
 
 class Refusal(Exception):
@@ -63,6 +70,26 @@ def candidates(
         path = static_dir / str(agency_id) / f"{stem}.zip"
         found.append(Candidate(stem, rows, first, last, path if path.is_file() else None))
     return sorted(found, key=lambda candidate: (candidate.first, candidate.stem))
+
+
+def complete_names(ch, agency_id: int) -> set[str]:
+    """The mapped names a row can be filed under (pipeline.timetable_in_force):
+    each has a recorded span, and its content's schedule is kept."""
+    join = static_archive.schedule_join(ch, agency_id, None)
+    spans = static_archive.spans(ch, agency_id)
+    kept = static_archive.scheduled_contents(ch, agency_id)
+    return {stem for stem, content in zip(join.stems, join.hashes, strict=True) if stem in spans and content in kept}
+
+
+def with_kept_zips(
+    stems: dict[str, tuple[int, date, date]], static_dir: Path, agency_id: int
+) -> dict[str, tuple[int, date, date]]:
+    """*stems*, plus each zip kept for the agency that no row's name is, with no rows, at its fetch day."""
+    found = dict(stems)
+    for path in sorted((static_dir / str(agency_id)).glob("*.zip")):
+        day = fetch_day(path.stem) or date.min
+        found.setdefault(path.stem, (0, day, day))
+    return found
 
 
 def _stems_in_updates(ch, agency_id: int) -> dict[str, tuple[int, date, date]]:
@@ -190,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         "--static-dir", type=Path, default=Path(DEFAULT_STATIC_DEST), help="where the static fetcher keeps the zips"
     )
     parser.add_argument("--apply", action="store_true", help="archive and map the candidates (default: list them)")
+    parser.add_argument("--every-zip", action="store_true", help="also take kept zips whose name no row carries")
     args = parser.parse_args(argv)
     url = os.environ.get("DATABASE_URL")
     try:
@@ -204,11 +232,16 @@ def main(argv: list[str] | None = None) -> int:
             scratch_conn.set_session(readonly=True)
         try:
             row = _check_scratch(target_conn, scratch_conn, args.agency)
-            mapped = set(static_archive.schedule_join(ch, args.agency, None).stems)
-            found = candidates(_stems_in_updates(ch, args.agency), mapped, args.static_dir, args.agency)
+            stems = _stems_in_updates(ch, args.agency)
+            if args.every_zip:
+                stems = with_kept_zips(stems, args.static_dir, args.agency)
+            found = candidates(stems, complete_names(ch, args.agency), args.static_dir, args.agency)
             for candidate in found:
                 where = candidate.zip if candidate.zip is not None else "no zip, skipped"
-                print(f"{candidate.stem}: {candidate.rows:,} rows, {candidate.first} .. {candidate.last}, {where}")
+                rows = "no rows"
+                if candidate.rows:
+                    rows = f"{candidate.rows:,} rows, {candidate.first} .. {candidate.last}"
+                print(f"{candidate.stem}: {rows}, {where}")
             chosen = [candidate for candidate in found if candidate.zip is not None]
             if not chosen:
                 print("nothing to archive")

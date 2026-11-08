@@ -12,7 +12,7 @@ apart on what "the latest observation" means: they read the ClickHouse
 import psycopg2
 
 from pipeline import static_archive
-from pipeline.clickhouse import UPDATES_TABLE, checked_table
+from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.service_day import service_date_ch
 
 # The database the API and the pipeline CLI connect to when DATABASE_URL is
@@ -69,6 +69,7 @@ def build_dedup_ch_sql(
     include_scheduled_sec: bool = False,
     include_static_version: bool = False,
     table: str = UPDATES_TABLE,
+    stamp: static_archive.Stamp = static_archive.Stamp.INGESTED,
 ) -> str:
     """Return the SQL body that picks the latest observation per stop event.
 
@@ -157,6 +158,12 @@ def build_dedup_ch_sql(
     names across a timetable reload is still one event. `ifNull` keeps a latest
     poll with no name, which `argMax` would otherwise skip for an older one.
 
+    `stamp` decides which timetable each row is read as joined to
+    (`static_archive.observation_rows`): as ingested, the default, or the one
+    in force on its service date, whose query binds a ScheduleJoin's
+    parameters. Read so, a stop event polled across a reload that took effect
+    later is one event under one schedule.
+
     Every reference to a base-table column that shares its name with a
     SELECT-list alias (`dep_delay`) is qualified with the `u.` table alias
     below.
@@ -186,8 +193,7 @@ def build_dedup_ch_sql(
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
         f"argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay{captured}{scheduled_sec}{static_version} "
-        f"FROM {checked_table(table)} AS u "
-        f"WHERE {observation_filter_ch(extra_where)} "
+        f"{static_archive.observation_rows(observation_filter_ch(extra_where), stamp, table)} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')}, u.stop_sequence"
     )
@@ -204,6 +210,7 @@ def build_stop_visits_ch_sql(
     include_scheduled_sec: bool = False,
     join_schedule: bool = False,
     table: str = UPDATES_TABLE,
+    stamp: static_archive.Stamp = static_archive.Stamp.INGESTED,
 ) -> str:
     """Return the SQL body that resolves one row per stop visit (a trip's stop
     on one service day) with the latest plausible departure AND the latest
@@ -270,6 +277,9 @@ def build_stop_visits_ch_sql(
     the visit has one, else the arrival's. A stop with no archived stop time
     keeps its row, with NULL scheduled times.
 
+    `stamp` decides which timetable each poll is read as joined to, as in
+    `build_dedup_ch_sql`.
+
     Columns, in this order (`pipeline/analyze.py` loads them by position):
     `route_code, service_type, scheduled_time, trip_id, date, stop_sequence,
     dep_delay[, scheduled_sec], arr_delay, dep_observed[, sched_arrival_time,
@@ -312,9 +322,10 @@ def build_stop_visits_ch_sql(
         f"argMaxIf(tuple(u.arr_delay, {schedule}), {latest}, {arr_ok}) AS visit_arr, "
         f"maxIf({latest}, {dep_ok}) AS visit_dep_key, "
         f"minIf({latest}, {arr_ok}) AS visit_first_arr_key "
-        f"FROM {checked_table(table)} AS u "
-        f"WHERE u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra} "
-        f"GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
+        + static_archive.observation_rows(
+            f"u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok}){extra}", stamp, table
+        )
+        + f" GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
         ")"
     )
     if not join_schedule:

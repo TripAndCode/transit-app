@@ -131,7 +131,7 @@ def test_a_released_version_edited_in_place_fails():
     """Folding an edited newest version can still match the registry, so only
     the record catches the edit."""
     newest = METHOD_VERSIONS[-1]
-    edited = MethodVersion(newest.version, newest.sets | {"agg_route_daily": 2})
+    edited = MethodVersion(newest.version, newest.sets | {"agg_route_daily": newest.sets.get("agg_route_daily", 0) + 1})
     verdict = _pinned_verdict((*METHOD_VERSIONS[:-1], edited), _record())
     assert verdict is not None and "never changes" in verdict
 

@@ -23,6 +23,11 @@ planned trips for the days it covers before the incoming timetable starts
 (``pipeline.planned_trips``), so a reload never takes away the plan of a day
 that has run or will run on the outgoing timetable, and an uncaptured day the
 incoming timetable covers takes the incoming plan.
+
+A load also records the days the incoming timetable covers, its span
+(``pipeline.timetable_in_force``), under its version name, so analyze files a
+row under the timetable in force on its service date rather than the one
+loaded when the row arrived.
 """
 
 import csv
@@ -41,6 +46,7 @@ from pipeline.planned_trips import capture_before_reload
 from pipeline.route_terminals import load_route_terminals
 from pipeline.static_content import static_parts
 from pipeline.stop_clusters import rebuild_stop_clusters
+from pipeline.timetable_in_force import version_span
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +157,17 @@ def _covered_ranges(calendar_rows: list[list], calendar_dates_rows: list[list]) 
     return ranges
 
 
+def _feed_dates(zf: zipfile.ZipFile, names_in_zip: set[str]) -> tuple[str | None, str | None]:
+    """feed_info.txt's feed_start_date and feed_end_date, raw, or None where the zip gives none."""
+    if "feed_info.txt" not in names_in_zip:
+        return None, None
+    with zf.open("feed_info.txt") as f:
+        row = next(csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig")), None)
+    if row is None:
+        return None, None
+    return row.get("feed_start_date"), row.get("feed_end_date")
+
+
 def _count_calendar_trips(cur, agency_id: int) -> None:
     """Store each calendar service's trip count, the weight of its vote for a
     date's timetable class (``pipeline.day_types``), so reports read it
@@ -204,6 +221,10 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
     timetables and service exceptions cannot classify this feed's dates.
     """
     p = resolve_static_zip(path)
+    # Before any work: the load keeps the outgoing timetable and records the
+    # incoming one's span there, and stopping partway would leave the outgoing
+    # plan saved for a reload that never happened.
+    static_archive.require_tables(ch_client)
 
     # The loaded zip's filename stem (e.g. "gtfs_static_20260101" or the
     # legacy "hiroden_static") is the only identifier that survives past this
@@ -224,7 +245,6 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
         # The outgoing timetable is kept before any table is replaced: a day
         # ingested against it is joined to it after this load. Raising here
         # leaves every table as it was.
-        static_archive.require_tables(ch_client)
         outgoing = static_parts(agency_id, conn, True)
         key = static_archive.archive_loaded(conn, ch_client, agency_id, outgoing)
         if key and static_headways.record_route_headways(conn, agency_id, key, outgoing):
@@ -232,6 +252,14 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
             # outgoing timetable, and held through the reload their row locks
             # would make a concurrent analyze recording the same one wait.
             conn.commit()
+        # Recorded before the load commits: a span left by a load that then
+        # fails names a timetable no row is filed under, and a retry records it again.
+        span = version_span(*_feed_dates(zf, names_in_zip), incoming)
+        if span is not None:
+            static_archive.record_span(ch_client, agency_id, static_version_id, span)
+            logger.info(f"  {static_version_id} covers {span[0]} to {span[1]}")
+        else:
+            logger.warning(f"  {static_version_id} names no days it covers; its rows keep the timetable they joined")
         for filename, table, _csv_cols in _STATIC_FILE_MAP:
             if filename not in names_in_zip:
                 logger.warning(f"  {filename} not in zip — skipped")

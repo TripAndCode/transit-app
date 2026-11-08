@@ -5,7 +5,8 @@ from datetime import date
 
 import pytest
 
-from pipeline.static_archive import ScheduleJoin, content_hash, fetch_day
+from pipeline.static_archive import ScheduleJoin, content_hash
+from pipeline.timetable_in_force import Segment, fetch_day
 
 
 def test_the_key_is_stable_for_the_same_parts():
@@ -25,7 +26,20 @@ def test_a_join_binds_every_mapped_content_and_the_loaded_one():
         "join_hashes": ["h0", "h1"],
         "join_current": "hc",
         "join_contents": ["h0", "h1", "hc"],
+        "force_firsts": [],
+        "force_lasts": [],
+        "force_stems": [],
+        "force_contents": [],
     }
+
+
+def test_a_join_binds_the_versions_in_force_with_their_contents():
+    force = (Segment(date(2026, 1, 1), date(2026, 1, 31), "s1"), Segment(date(2026, 2, 1), date(2026, 3, 31), "s0"))
+    params = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc", force).params()
+    assert params["force_firsts"] == [date(2026, 1, 1), date(2026, 2, 1)]
+    assert params["force_lasts"] == [date(2026, 1, 31), date(2026, 3, 31)]
+    assert params["force_stems"] == ["s1", "s0"]
+    assert params["force_contents"] == ["h1", "h0"]
 
 
 def test_a_month_binds_only_the_contents_its_stems_join():
