@@ -64,9 +64,11 @@ function onTimeRow(
   };
 }
 
-afterEach(async () => {
+// Mocks are restored while the last render is still mounted (RTL's cleanup
+// runs after this file's hooks), so nothing here may re-render it after: a
+// re-render then reaches the real data hooks the mocks stood in for.
+afterEach(() => {
   vi.restoreAllMocks();
-  await i18n.changeLanguage("en");
 });
 
 describe("PerformanceStandardPanel", () => {
@@ -210,10 +212,15 @@ describe("PerformanceStandardPanel", () => {
         { on_time_definition: INDUSTRY },
       ),
     });
-    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
-
-    expect(screen.getByText("観測が100回未満のため判定していません（42回）")).toBeInTheDocument();
-    expect(screen.getByText("遅れが常に0と報告されるため判定していません")).toBeInTheDocument();
+    const { unmount } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    try {
+      expect(screen.getByText("観測が100回未満のため判定していません（42回）")).toBeInTheDocument();
+      expect(screen.getByText("遅れが常に0と報告されるため判定していません")).toBeInTheDocument();
+    } finally {
+      // Back to English once nothing is mounted to re-render in it.
+      unmount();
+      await i18n.changeLanguage("en");
+    }
   });
 
   it("names the definition the on-time targets were judged on, in words rather than its key", () => {
@@ -279,6 +286,28 @@ describe("PerformanceStandardPanel", () => {
     mockPerformanceStandards({ data: response([]) });
     const { container } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} route="999" />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("calls the same hooks while loading as once the standards arrive", () => {
+    mockRoutes();
+    const standards = vi.spyOn(hooks, "usePerformanceStandards").mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const { container, rerender } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    expect(container).toBeEmptyDOMElement();
+
+    standards.mockReturnValue({
+      data: response([onTimeRow("100", 91.2, true)], { on_time_definition: INDUSTRY }),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    rerender(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText("Route 100")).toBeInTheDocument();
+    expect(screen.getByText("Meets standard")).toBeInTheDocument();
   });
 
   it("renders nothing when this agency has zero configured standards", () => {
