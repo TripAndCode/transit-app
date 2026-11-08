@@ -262,3 +262,67 @@ def test_leader_from_before_clear_leaves_newer_leader_inflight():
         assert await asyncio.wait_for(c, 1) == "compute-1"
 
     asyncio.run(run())
+
+
+def test_a_result_marked_do_not_cache_is_computed_afresh_next_time():
+    """A call that marks its result reaches its caller with that result, and
+    the next identical call computes again; an unmarked result is cached."""
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+    async def fn(x):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            cache.do_not_cache()
+            return "degraded"
+        return "full"
+
+    async def run():
+        assert await fn(1) == "degraded"
+        assert await fn(1) == "full"  # computed afresh
+        assert await fn(1) == "full"  # cached
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_do_not_cache_from_a_task_the_call_gathers_marks_the_call():
+    """The mark reaches the call from a task it starts, as a degrade decided
+    inside an ``asyncio.gather`` does."""
+    calls = {"n": 0}
+
+    async def probe():
+        cache.do_not_cache()
+        return None
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+    async def fn(x):
+        calls["n"] += 1
+        await asyncio.gather(probe())
+        return x
+
+    async def run():
+        await fn(1)
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_do_not_cache_outside_a_cached_call_marks_nothing():
+    """Outside a cached call the mark has nothing to mark, and a later cached
+    call in the same context is cached as usual."""
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60)
+    async def fn(x):
+        calls["n"] += 1
+        return x
+
+    async def run():
+        cache.do_not_cache()
+        await fn(1)
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 1

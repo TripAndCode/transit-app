@@ -2731,13 +2731,15 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id)
     ctx = RangeCtx(from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), routes=("R_DEG",))
     failing = _FailingCh()
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=failing)
+    # Not cached with its hour profiles missing: the same request scans again.
+    assert await compute_overview_summary(aagency_id, ctx, aconn, ch=failing) == out
+    assert failing.attempts == 2
 
     # The three ClickHouse-derived peak fields degrade to null, from one
     # attempted scan rather than one each...
     assert out["peak_hour"] is None
     assert out["peak_hour_weekday"] is None
     assert out["peak_hour_weekend"] is None
-    assert failing.attempts == 1
     # ...and every Postgres-served surface is fully populated.
     assert out["headline"]["avg_min"] == pytest.approx(5.0, abs=0.01)
     assert out["headline"]["baseline_avg_min"] == pytest.approx(2.0, abs=0.01)
@@ -2925,9 +2927,9 @@ async def test_slow_path_wide_window_movers_stay_at_one_query(aconn, aagency_id,
 
 
 # The grain's two grouping sets: route rows over the period and the window
-# before it, hour rows over the period alone. These pin both sets, every
-# figure they serve against the one-set grain they replaced, and the degrade
-# path for a grain past the ClickHouse client's row cap.
+# before it, hour rows over the period alone. These pin both sets, the full
+# payload they serve for one fixture, and the degrade path for a grain past
+# the ClickHouse client's row cap or time budget.
 
 _GRAIN_CTX = RangeCtx(from_date=date(2026, 5, 11), to_date=date(2026, 5, 24), time_band="morning")
 
@@ -3067,7 +3069,8 @@ def _by_hour(values: dict[int, float]) -> list[float | None]:
     return [values.get(h) for h in range(24)]
 
 
-# What the one-set grain gave for ``_seed_grain_fixture`` over ``_GRAIN_CTX``.
+# The full payload for ``_seed_grain_fixture`` over ``_GRAIN_CTX``: every
+# figure the grain feeds, pinned value for value.
 _GRAIN_PAYLOAD = {
     "headline": {
         "avg_min": 3.49,
@@ -3149,19 +3152,18 @@ _GRAIN_PAYLOAD = {
 
 
 @pytest.mark.asyncio
-async def test_two_set_grain_serves_every_figure_the_one_set_grain_did(
-    aconn, aagency_id, ch_client, ch_async_client, monkeypatch
-):
-    """The payload over the two-set grain is, figure for figure, the payload
-    the one-set ``(date, route_code, service_type, hour)`` grain gave for the
-    same rows, on the sequential and the pool path alike. The movers' weekly
-    buckets come from the grain too: one ClickHouse query in all."""
+async def test_the_grain_serves_every_figure_of_the_payload(aconn, aagency_id, ch_client, ch_async_client, monkeypatch):
+    """Every figure of the payload for ``_seed_grain_fixture`` is
+    ``_GRAIN_PAYLOAD``'s, on the sequential and the pool path alike, from one
+    ClickHouse query: the movers' weekly buckets come from the grain too."""
     monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
     await _seed_grain_fixture(aconn, ch_client, aagency_id)
     from pipeline.reports import compute_overview_summary
 
     counting = _CountingCh(ch_async_client)
     seq_out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=counting)
+    # A full payload is cached: the same request again issues no query.
+    assert await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, ch=counting) == seq_out
     pool = await _test_pool()
     try:
         pool_out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=ch_async_client)
@@ -3200,11 +3202,18 @@ async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without
     pool = await _test_pool() if pooled else None
     try:
         out = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
+        [(full_sql, full_rows), (period_sql, period_rows)] = failing.queries
+        # The degraded payload is not cached: the same request computes again,
+        # and gets the full payload once the grain fits.
+        again = await compute_overview_summary(aagency_id, _GRAIN_CTX, aconn, pool=pool, ch=failing)
     finally:
         if pool is not None:
             await pool.close()
 
-    [(full_sql, full_rows), (period_sql, period_rows)] = failing.queries
+    if failure == "row_cap":
+        assert again == out and len(failing.queries) == 4
+    else:
+        assert again == full and len(failing.queries) == 3
     assert "GROUPING SETS" in full_sql and full_rows is None
     assert "GROUPING SETS" not in period_sql and period_rows == 6
     assert out == {

@@ -599,12 +599,14 @@ async def test_network_summary_says_how_many_of_the_window_days_the_timetable_co
 async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_fail(net_client, monkeypatch):
     """The planned figures failing in Postgres, as they do on a schema behind
     its migrations, leave every agency without a plan; the delay and feed
-    figures from the other tables still answer."""
+    figures from the other tables still answer. That summary is not cached, so
+    the next request shows the plan once it reads again."""
     from pipeline.reports import service_delivered
 
     client, pool, a, b, _cc = net_client
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
     await _seed_static_schedule(pool, a, service_id="WD", trip_ids=["T1", "T2"], svc_date="20260403")
+    readable_sql = service_delivered._SERVICE_SQL
     monkeypatch.setattr(service_delivered, "_SERVICE_SQL", "SELECT * FROM planned_trips_not_migrated")
 
     r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
@@ -620,6 +622,10 @@ async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_
         assert (by[aid]["observed_trips"], by[aid]["coverage_pct"], by[aid]["comparable"]) == (None, None, False)
     assert by[a]["comparable_reason"] == "coverage_unknown"
     assert by[b]["comparable_reason"] == "no_data"
+
+    monkeypatch.setattr(service_delivered, "_SERVICE_SQL", readable_sql)
+    r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert next(x for x in r.json()["agencies"] if x["agency_id"] == a)["planned_trips"] == 2
 
 
 async def test_network_summary_includes_definition_metadata(net_client):
@@ -778,12 +784,16 @@ async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(ne
     "no completed day / can't determine -> not stale"), not 500/503 the whole
     /api/network/summary response (mirrors api.routers.map's
     today_route_summary freshness try/except; no real ClickHouse needed — a
-    client whose `.query` always raises is enough to simulate the hiccup)."""
+    client whose `.query` always raises is enough to simulate the hiccup).
+    The degraded summary is not cached: the next request probes again."""
     pool, a, _b, _cc = net_pool
     await _seed(pool, a, dist=[("2026-04-02", 100, 60000, 50)], feed=("2026-04-02", 1000, 5))
 
     class _BrokenCh:
+        attempts = 0
+
         async def query(self, *args, **kwargs):
+            _BrokenCh.attempts += 1
             raise RuntimeError("simulated ClickHouse outage")
 
     from api.main import app
@@ -792,6 +802,10 @@ async def test_network_summary_degrades_when_clickhouse_freshness_probe_fails(ne
     app.state.ch_client = _BrokenCh()
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+        probes = _BrokenCh.attempts
+        again = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
+    assert probes > 0 and _BrokenCh.attempts == 2 * probes
+    assert again.json()["agencies"] == r.json()["agencies"]
     assert r.status_code == 200
     body = r.json()
     arow = next(x for x in body["agencies"] if x["agency_id"] == a)

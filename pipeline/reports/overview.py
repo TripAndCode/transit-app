@@ -66,7 +66,7 @@ from api.range import (
     service_date_clause,
 )
 from pipeline import perf
-from pipeline.cache import async_lru_cache
+from pipeline.cache import async_lru_cache, do_not_cache
 from pipeline.clickhouse import is_query_timeout, is_result_overflow
 from pipeline.day_types import DayTypes
 from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2
@@ -375,9 +375,11 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch, *, shape: _GrainShape 
     above. ``"period_routes"`` reads the route set over ``ctx`` alone: a
     time-band request whose full grain passed ``get_ch_client``'s
     ``max_result_rows`` (which raises rather than truncating) or its
-    ``max_execution_time`` reads it instead, which scans half the days and
-    serves every figure but the baseline's and the hour profiles (see
-    :func:`compute_overview_summary`). ``"period_hours"`` reads the hour set
+    ``max_execution_time`` reads it instead, and it serves every figure but
+    the baseline's and the hour profiles (see
+    :func:`compute_overview_summary`). It is cheaper for dropping the hour set
+    and the per-row scheduled time behind it; its shorter date range holds
+    less data only when the window before the period holds some. ``"period_hours"`` reads the hour set
     over ``ctx`` alone, which is all a routes filter without a time band reads
     from the grain; were that ever to fail, the caller degrades the hour
     profiles to null.
@@ -400,7 +402,7 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch, *, shape: _GrainShape 
         routes=ctx.routes,
         service_dates=ctx.service_dates,
     )
-    cte_sql, ch_params = _dedup_cte_ch(span_ctx, include_scheduled_sec=True)
+    cte_sql, ch_params = _dedup_cte_ch(span_ctx, include_scheduled_sec=shape != "period_routes")
     params = {"agency_id": agency_id, **ch_params}
     hour_expr = scheduled_hour_ch()
     if shape == "full":
@@ -1404,12 +1406,15 @@ async def compute_overview_summary(
     the headline's deltas, the movers, each listed route's ``delta_min`` and
     the three hour profiles. Any other ClickHouse failure, or the retry
     failing too, still fails the payload: every figure reads the grain. A
-    degraded grain costs at most twice ``get_ch_client``'s
-    ``max_execution_time``, and nothing else in a degraded payload reads
-    ClickHouse (the movers' weekly scan needs the baseline), so the request
-    ends inside the frontend's ``REQUEST_TIMEOUT_MS``
+    degraded grain costs about twice ``get_ch_client``'s
+    ``max_execution_time`` (ClickHouse checks the limit periodically, so a
+    query can run slightly past it), and nothing else in a degraded payload
+    reads ClickHouse (the movers' weekly scan needs the baseline), so the
+    request ends inside the frontend's ``REQUEST_TIMEOUT_MS``
     (``frontend/src/api/client.ts``) as long as that timeout stays above twice
-    the ClickHouse budget plus the Postgres stages.
+    the ClickHouse budget plus the Postgres stages. A degraded payload is not
+    cached (:func:`pipeline.cache.do_not_cache`): the next identical request
+    tries the full grain again.
     """
     if ctx.service != "all":
         # Every window derived below starts at or after _calendar_from(ctx).
@@ -1444,6 +1449,7 @@ async def compute_overview_summary(
                     )
                     grain = await _fetch_grain(agency_id, ctx, ch, shape="period_routes")
                     peaks_unavailable = baseline_unavailable = True
+                    do_not_cache()
             else:
                 try:
                     grain = await _fetch_grain(agency_id, ctx, ch, shape="period_hours")
@@ -1454,6 +1460,7 @@ async def compute_overview_summary(
                         exc_info=True,
                     )
                     peaks_unavailable = True
+                    do_not_cache()
 
     # The route lists leave out one set of codes, judged once over the period,
     # so every list leaves out the same codes whichever window it ranks over.
