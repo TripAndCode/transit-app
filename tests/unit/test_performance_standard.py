@@ -7,8 +7,10 @@ import pytest
 from pipeline.reports.performance_standard import (
     _relative_deviation,
     meets_standard,
+    on_time_reading,
     simulation_disclaimer,
 )
+from pipeline.reports.rankings import RANKING_MIN_SAMPLES
 
 
 def test_relative_deviation_zero_exactly_at_threshold_lower_is_better():
@@ -84,3 +86,24 @@ def test_meets_standard_reads_each_metrics_direction(metric_type, threshold, act
 
 def test_meets_standard_is_unknown_without_a_figure():
     assert meets_standard("on_time_pct", 85.0, None) is None
+
+
+def test_an_on_time_share_over_the_floor_is_judged():
+    assert on_time_reading(85.0, RANKING_MIN_SAMPLES, zero_delay=False) == (85.0, None)
+
+
+@pytest.mark.parametrize("observations", [0, 42])
+def test_an_on_time_share_under_the_floor_says_how_many_observations_it_had(observations):
+    """The route page shows a share from as few as 21 observations; the
+    verdict needs the table's floor, and says so with the count."""
+    assert on_time_reading(None, observations, zero_delay=False) == (
+        None,
+        {"reason": "too_few_observations", "observations": observations, "floor": RANKING_MIN_SAMPLES},
+    )
+
+
+def test_a_feed_that_reports_zero_delay_only_is_not_judged_however_often_observed():
+    assert on_time_reading(100.0, 750, zero_delay=True) == (
+        None,
+        {"reason": "zero_delay_feed", "observations": None, "floor": None},
+    )

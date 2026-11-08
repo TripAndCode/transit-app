@@ -55,6 +55,7 @@ threshold too.
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Collection
 from typing import Any, Literal
 
 from api.range import RangeCtx
@@ -117,6 +118,21 @@ async def read_standards(conn, agency_id: int, route: str | None = None) -> list
     return await conn.fetch(_STANDARDS_SQL, agency_id, route)
 
 
+def on_time_reading(
+    share: float | None, observations: int, *, zero_delay: bool
+) -> tuple[float | None, dict[str, Any] | None]:
+    """A route's on-time figure to judge, or ``None`` with why it is not
+    judged: a feed that always reports zero delay reads 100% on time and
+    would meet any target, and a share from fewer than the Routes table's
+    floor of observations judges nothing, however a page with a lower floor
+    shows it. *share* is ``None`` exactly when the route is under the floor."""
+    if zero_delay:
+        return None, {"reason": "zero_delay_feed", "observations": None, "floor": None}
+    if share is None:
+        return None, {"reason": "too_few_observations", "observations": observations, "floor": RANKING_MIN_SAMPLES}
+    return share, None
+
+
 async def _on_time_by_route(
     agency_id: int,
     ctx: RangeCtx,
@@ -124,29 +140,26 @@ async def _on_time_by_route(
     ch,
     early_tolerance_sec: int | None,
     late_tolerance_sec: int | None,
-) -> dict[str, float]:
-    """Each route of *ctx*'s on-time share as the Routes table shows it at its
-    default observation floor: the same call, floor and rounding. While the
-    table is at that floor and the same routes, the two share one cached
-    computation; with sparse routes included, the table is computed
-    separately and this keeps the default floor.
-
-    A route the table leaves out for a feed that always reports zero delay
-    has no figure here either: it reads 100% on time and would meet any
-    target. A route under the table's observation floor has none, as a
-    figure resting on so few departures judges nothing.
+    codes: Collection[str],
+) -> dict[str, tuple[float | None, dict[str, Any] | None]]:
+    """:func:`on_time_reading` for each of *codes* over *ctx*, from the Routes
+    table at its default observation floor: the same call, floor and
+    rounding. While the table is at that floor and the same routes, the two
+    share one cached computation; with sparse routes included, the table is
+    computed separately and this keeps the default floor. A code under the
+    floor is counted by a second read of those codes alone.
     """
-    table = await compute_route_table(
-        agency_id,
-        ctx,
-        conn,
-        ch=ch,
-        min_samples=RANKING_MIN_SAMPLES,
-        early_tolerance_sec=early_tolerance_sec,
-        late_tolerance_sec=late_tolerance_sec,
-    )
+    window = {"ch": ch, "early_tolerance_sec": early_tolerance_sec, "late_tolerance_sec": late_tolerance_sec}
+    table = await compute_route_table(agency_id, ctx, conn, min_samples=RANKING_MIN_SAMPLES, **window)
+    readings: dict[str, tuple[float | None, int]] = {row[0]: (float(row[2]), row[5]) for row in table}
+    thin = sorted(set(codes) - readings.keys())
+    if thin:
+        counted = await compute_route_table(
+            agency_id, dataclasses.replace(ctx, routes=tuple(thin)), conn, min_samples=1, **window
+        )
+        readings.update({row[0]: (None, row[5]) for row in counted})
     no_delay = await zero_delay_route_codes(conn, agency_id, ctx)
-    return {row[0]: float(row[2]) for row in table if row[0] not in no_delay}
+    return {code: on_time_reading(*readings.get(code, (None, 0)), zero_delay=code in no_delay) for code in codes}
 
 
 async def compute_performance_standards(
@@ -176,7 +189,9 @@ async def compute_performance_standards(
     ``on_time_pct`` rows read *ctx*'s days, time band and service and the
     on-time window *early_tolerance_sec*/*late_tolerance_sec* name, as the
     Routes table does (:func:`_on_time_by_route`; *ch* serves its live scan).
-    The other metric types read *ctx*'s dates only.
+    An on-time row with no figure carries ``not_judged``, why it has none
+    (:func:`on_time_reading`); every other row carries ``None`` there. The
+    other metric types read *ctx*'s dates only.
 
     ``ctx.routes`` (the page-level route filter shared with every other
     Analysis-tab panel) never changes WHICH configured rows come back, nor
@@ -195,8 +210,9 @@ async def compute_performance_standards(
     # row, mirroring compute_headway_quality/compute_supply_metrics_by_agency's
     # own per-agency batching.
     #
-    # _STANDARDS_SQL above is deliberately unfiltered by ctx.routes -- every
-    # configured standard is always a candidate row. compute_headway_quality,
+    # *standards* is never narrowed by ctx.routes -- read_standards filters
+    # only by a named *route* -- so every configured standard the caller
+    # asked about is a candidate row. compute_headway_quality,
     # however, applies ctx.routes as a page-level filter (it's shared with
     # every other Analysis-tab panel). Resolving ewt_sec with the caller's
     # ctx as-is would silently blank out a configured route's actual value
@@ -214,10 +230,17 @@ async def compute_performance_standards(
         quality_rows = await compute_headway_quality(agency_id, unfiltered_ctx, conn)
         ewt_by_route = {q["route_code"]: q["ewt_sec"] for q in quality_rows}
 
-    on_time_by_route: dict[str, float] = {}
-    if any(r["metric_type"] == "on_time_pct" for r in rows):
+    on_time_by_route: dict[str, tuple[float | None, dict[str, Any] | None]] = {}
+    on_time_codes = {r["route_code"] for r in rows if r["metric_type"] == "on_time_pct"}
+    if on_time_codes:
         on_time_by_route = await _on_time_by_route(
-            agency_id, dataclasses.replace(ctx, routes=route_scope), conn, ch, early_tolerance_sec, late_tolerance_sec
+            agency_id,
+            dataclasses.replace(ctx, routes=route_scope),
+            conn,
+            ch,
+            early_tolerance_sec,
+            late_tolerance_sec,
+            on_time_codes,
         )
 
     vehicle_km_delivered_pct: float | None = None
@@ -233,10 +256,11 @@ async def compute_performance_standards(
         bonus_malus_rate = float(r["bonus_malus_rate"])
 
         metric_scope: Literal["route", "agency"] = "route"
+        not_judged: dict[str, Any] | None = None
         if metric_type == "ewt_sec":
             actual = ewt_by_route.get(r["route_code"])
         elif metric_type == "on_time_pct":
-            actual = on_time_by_route.get(r["route_code"])
+            actual, not_judged = on_time_by_route[r["route_code"]]
         else:
             actual = vehicle_km_delivered_pct
             # vehicle_km_delivered_pct has no per-route breakdown (see
@@ -266,6 +290,7 @@ async def compute_performance_standards(
                 "achievement_rate": achievement_rate,
                 "estimated_bonus_deduction": estimated_bonus_deduction,
                 "meets": meets_standard(metric_type, threshold, actual),
+                "not_judged": not_judged,
             }
         )
     return out

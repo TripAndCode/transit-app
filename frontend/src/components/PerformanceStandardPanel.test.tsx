@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import i18n from "../i18n";
 import { screen, within } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { PerformanceStandardPanel } from "./PerformanceStandardPanel";
@@ -43,7 +44,12 @@ function response(rows: PerformanceStandardRow[], extra: Partial<PerformanceStan
   return { rows, ctx: CTX, disclaimer: "simulation only", on_time_definition: null, ...extra };
 }
 
-function onTimeRow(route_code: string, actual: number | null, meets: boolean | null): PerformanceStandardRow {
+function onTimeRow(
+  route_code: string,
+  actual: number | null,
+  meets: boolean | null,
+  not_judged: PerformanceStandardRow["not_judged"] = null,
+): PerformanceStandardRow {
   return {
     route_code,
     metric_type: "on_time_pct",
@@ -54,11 +60,13 @@ function onTimeRow(route_code: string, actual: number | null, meets: boolean | n
     achievement_rate: actual == null ? null : actual / 85,
     estimated_bonus_deduction: actual == null ? null : 0,
     meets,
+    not_judged,
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  await i18n.changeLanguage("en");
 });
 
 describe("PerformanceStandardPanel", () => {
@@ -77,6 +85,7 @@ describe("PerformanceStandardPanel", () => {
             achievement_rate: 1.0,
             estimated_bonus_deduction: 0,
             meets: true,
+            not_judged: null,
           },
           {
             route_code: "200",
@@ -88,6 +97,7 @@ describe("PerformanceStandardPanel", () => {
             achievement_rate: 0.5,
             estimated_bonus_deduction: -500,
             meets: false,
+            not_judged: null,
           },
         ],
         { disclaimer: "This is an internal simulation/estimate, not an actual invoice or contractual output." },
@@ -119,6 +129,7 @@ describe("PerformanceStandardPanel", () => {
           achievement_rate: 0.99999,
           estimated_bonus_deduction: -0.04,
           meets: false,
+          not_judged: null,
         },
       ]),
     });
@@ -141,6 +152,7 @@ describe("PerformanceStandardPanel", () => {
           achievement_rate: (80 - 90) / 90 + 1,
           estimated_bonus_deduction: 2000 * ((80 - 90) / 90),
           meets: false,
+          not_judged: null,
         },
       ]),
     });
@@ -166,6 +178,42 @@ describe("PerformanceStandardPanel", () => {
     expect(within(below).getByText("70.0%")).toBeInTheDocument();
     expect(within(below).getByText("Below standard")).toHaveClass("standard-chip", "standard-chip--below");
     expect(within(unjudged).queryByText(/standard$/)).toBeNull();
+  });
+
+  it("says why an on-time target is not judged instead of leaving a bare dash", () => {
+    mockRoutes();
+    mockPerformanceStandards({
+      data: response(
+        [
+          onTimeRow("100", null, null, { reason: "too_few_observations", observations: 42, floor: 100 }),
+          onTimeRow("200", null, null, { reason: "zero_delay_feed", observations: null, floor: null }),
+        ],
+        { on_time_definition: INDUSTRY },
+      ),
+    });
+    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+
+    const [, thin, zero] = screen.getAllByRole("row");
+    expect(within(thin).getByText("Not judged: fewer than 100 observations (42)")).toHaveClass("standard-unjudged");
+    expect(within(zero).getByText("Not judged: the feed records zero delay only")).toHaveClass("standard-unjudged");
+  });
+
+  it("says why in Japanese too", async () => {
+    await i18n.changeLanguage("ja");
+    mockRoutes();
+    mockPerformanceStandards({
+      data: response(
+        [
+          onTimeRow("100", null, null, { reason: "too_few_observations", observations: 42, floor: 100 }),
+          onTimeRow("200", null, null, { reason: "zero_delay_feed", observations: null, floor: null }),
+        ],
+        { on_time_definition: INDUSTRY },
+      ),
+    });
+    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+
+    expect(screen.getByText("観測が100件未満のため判定していません（42件）")).toBeInTheDocument();
+    expect(screen.getByText("遅延0のみの記録のため判定していません")).toBeInTheDocument();
   });
 
   it("names the definition the on-time targets were judged on, in words rather than its key", () => {
@@ -208,6 +256,7 @@ describe("PerformanceStandardPanel", () => {
             achievement_rate: 1.2,
             estimated_bonus_deduction: 0,
             meets: true,
+            not_judged: null,
           },
         ],
         { on_time_definition: null },

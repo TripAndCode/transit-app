@@ -203,15 +203,21 @@ per route over the scope:
 - **Targets.** `PerformanceStandardPanel` follows the table under every sort,
   and the route page shows it for that route alone. It renders nothing until
   `GET /api/{agency_id}/performance_standards` returns a target to show. An
-  `on_time_pct` target is judged on the table's own on-time figure for the
-  route (`compute_route_table`, with the table's default observation floor),
-  over the page's scope less its route filter and under its `late`/`early`
-  (or `preset`). The route page sends `route`, so the API returns that
-  route's targets and reads its figures for that route alone. The panel
-  states the definition from the response's `on_time_definition`, stamped as
-  a report's is, and marks each figure 「基準を満たす」 or 「基準に届かない」. A
-  route under the floor, or one whose feed always reports zero delay, has no
-  figure to judge.
+  `on_time_pct` target is judged on the Routes table's on-time figure for the
+  route at its 100-observation floor (`compute_route_table` with
+  `RANKING_MIN_SAMPLES`), over the page's scope less its route filter and
+  under its `late`/`early` (or `preset`). The route page sends `route`, so the
+  API returns that route's targets and reads its figures for that route
+  alone. The panel states the definition from the response's
+  `on_time_definition`, stamped as a report's is, and marks each figure
+  「基準を満たす」 or 「基準に届かない」.
+  - A route under the floor, or one whose feed always reports zero delay, is
+    not judged. Its row's `not_judged` says why, with the route's observation
+    count and the floor for the first, and the panel writes that in place of a
+    verdict.
+  - The route page's own on-time figure comes from the `on_time` list, which
+    shows a route from 21 observations. Between 21 and 99, the page shows a
+    rate the panel beneath it explains it does not judge.
 - **Colour.** A delay bar's colour and length come from the figure the cell
   prints, rounded to a tenth, so two rows printing the same figure share a
   colour. The severe-delay dot other delay tables draw is left off.

@@ -1317,6 +1317,8 @@
       "scope_agency_note": "事業者全体の値（路線別の内訳はありません）",
       "meets": "基準を満たす",
       "below": "基準に届かない",
+      "not_judged_thin": "観測が{{floor}}件未満のため判定していません（{{observations}}件）",
+      "not_judged_zero_delay": "遅延0のみの記録のため判定していません",
       "judged_on": "定時率の基準は、このページの期間と絞り込みで、次の定時の定義に基づいて判定しています。"
     },
     "weather_delay": {

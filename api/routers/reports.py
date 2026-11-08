@@ -538,6 +538,17 @@ async def get_headway_quality(
     )
 
 
+class NotJudged(BaseModel):
+    """Why an `on_time_pct` row has no figure to judge
+    (`pipeline.reports.performance_standard.on_time_reading`):
+    `too_few_observations` gives the route's `observations` in the scope and
+    the `floor` a verdict needs; `zero_delay_feed` gives neither."""
+
+    reason: Literal["too_few_observations", "zero_delay_feed"]
+    observations: int | None
+    floor: int | None
+
+
 class PerformanceStandardRow(BaseModel):
     """One configured `route_performance_standards` row, joined
     against the current actual value of its `metric_type` and the resulting
@@ -570,6 +581,8 @@ class PerformanceStandardRow(BaseModel):
     #: Whether `actual_value` is at least as good as `threshold_value`;
     #: `None` exactly when `actual_value` is.
     meets: bool | None
+    #: Why an `on_time_pct` row is not judged; `None` on every other row.
+    not_judged: NotJudged | None = None
 
 
 class PerformanceStandardsResponse(BaseModel):

@@ -28,7 +28,7 @@ import { SHARED_TABLE, th, td } from "./tableStyles";
 import type { PerformanceStandardRow } from "../api/types";
 import { ErrorBanner } from "./ErrorBanner";
 import { OnTimeDefinition } from "./DefinitionMetaBlock";
-import { fixedTenth, formatDuration, roundTenth } from "../utils/format";
+import { fixedTenth, formatDuration, formatNumber, roundTenth } from "../utils/format";
 
 function fmtMetricValue(v: number | null, metricType: PerformanceStandardRow["metric_type"]): string {
   if (v == null) return "—";
@@ -46,12 +46,27 @@ function fmtEstimate(v: number | null): string {
   return `${sign}${fixedTenth(Math.abs(r))}`;
 }
 
-function Judgement({ meets }: { meets: boolean | null }) {
+/** The verdict, or why there is none. A route page shows an on-time figure
+ *  from fewer observations than a verdict needs, so a bare dash beside it
+ *  would read as missing data. */
+function Judgement({ meets, notJudged }: { meets: boolean | null; notJudged: PerformanceStandardRow["not_judged"] }) {
   const { t } = useTranslation();
-  if (meets == null) return <>—</>;
+  if (meets != null) {
+    return (
+      <span className={`standard-chip standard-chip--${meets ? "meets" : "below"}`}>
+        {t(meets ? "reports.performance_standard.meets" : "reports.performance_standard.below")}
+      </span>
+    );
+  }
+  if (notJudged == null) return <>—</>;
   return (
-    <span className={`standard-chip standard-chip--${meets ? "meets" : "below"}`}>
-      {t(meets ? "reports.performance_standard.meets" : "reports.performance_standard.below")}
+    <span className="standard-unjudged">
+      {notJudged.reason === "zero_delay_feed"
+        ? t("reports.performance_standard.not_judged_zero_delay")
+        : t("reports.performance_standard.not_judged_thin", {
+            floor: formatNumber(notJudged.floor ?? 0),
+            observations: formatNumber(notJudged.observations ?? 0),
+          })}
     </span>
   );
 }
@@ -104,7 +119,7 @@ export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx
                   </td>
                   <td style={td({ align: "right" })}>{fmtMetricValue(r.threshold_value, r.metric_type)}</td>
                   <td style={td({ align: "right" })}>{fmtMetricValue(r.actual_value, r.metric_type)}</td>
-                  <td style={td()}><Judgement meets={r.meets} /></td>
+                  <td style={td()}><Judgement meets={r.meets} notJudged={r.not_judged} /></td>
                   <td style={td({ align: "right" })}>{fmtAchievementRate(r.achievement_rate)}</td>
                   <td style={td({ align: "right" })}>{fmtEstimate(r.estimated_bonus_deduction)}</td>
                 </tr>

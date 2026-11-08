@@ -376,6 +376,7 @@ async def test_an_on_time_target_is_judged_on_the_tables_figure_under_the_reques
     assert row["metric_scope"] == "route"
     assert row["actual_value"] == float(table["rows"][0][2]) == share
     assert row["meets"] is meets
+    assert row["not_judged"] is None
     assert row["achievement_rate"] == pytest.approx(share / 70.0)
     assert row["estimated_bonus_deduction"] == pytest.approx(1000.0 * (share - 70.0) / 70.0)
     definition = body["on_time_definition"]
@@ -471,13 +472,59 @@ async def test_an_on_time_target_is_not_judged_on_thin_data_or_a_feed_that_repor
     for code in ("THIN", "ZERO", "REAL"):
         await _seed_standard(pool, agency_id, code, "on_time_pct", 50.0, 0.0)
 
+    await _seed_standard(pool, agency_id, "UNSEEN", "on_time_pct", 50.0, 0.0)
+
     resp = await client.get(f"/api/{agency_id}/performance_standards?from=2026-09-24&to=2026-10-23")
     by_code = {r["route_code"]: r for r in resp.json()["rows"]}
-    assert by_code["THIN"]["actual_value"] is None
-    assert by_code["ZERO"]["actual_value"] is None
-    assert by_code["ZERO"]["meets"] is None
+    for code in ("THIN", "ZERO", "UNSEEN"):
+        assert (by_code[code]["actual_value"], by_code[code]["meets"]) == (None, None), code
+    # Each says why it is not judged, so a figure shown elsewhere on the page
+    # never meets an unexplained blank here.
+    assert by_code["THIN"]["not_judged"] == {
+        "reason": "too_few_observations",
+        "observations": RANKING_MIN_SAMPLES - 1,
+        "floor": RANKING_MIN_SAMPLES,
+    }
+    assert by_code["UNSEEN"]["not_judged"] == {
+        "reason": "too_few_observations",
+        "observations": 0,
+        "floor": RANKING_MIN_SAMPLES,
+    }
+    assert by_code["ZERO"]["not_judged"] == {"reason": "zero_delay_feed", "observations": None, "floor": None}
     assert by_code["REAL"]["actual_value"] == 100.0
     assert by_code["REAL"]["meets"] is True
+    assert by_code["REAL"]["not_judged"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_route_page_counts_its_own_thin_route_alone(reports_client, monkeypatch):  # noqa: F811
+    """Under the floor, the route's count is read for that route alone too."""
+    from pipeline.reports import performance_standard
+    from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+    from tests.fixtures.route_dist import seed_route_dist_day
+
+    client, agency_id, pool = reports_client
+    day = date.fromisoformat(_ON_TIME_DAY)
+    await seed_route_dist_day(pool, agency_id, "THIN", day, [30] * 42)
+    await seed_route_dist_day(pool, agency_id, "BUSY", day, [30] * 500)
+    await _seed_standard(pool, agency_id, "THIN", "on_time_pct", 50.0, 0.0)
+
+    scoped: list[tuple[str, ...]] = []
+    original = performance_standard.compute_route_table
+
+    async def spy(agency_id, ctx, *args, **kwargs):
+        scoped.append(ctx.routes)
+        return await original(agency_id, ctx, *args, **kwargs)
+
+    monkeypatch.setattr(performance_standard, "compute_route_table", spy)
+    body = await _standards(client, agency_id, "&route=THIN")
+
+    assert scoped and all(routes == ("THIN",) for routes in scoped)
+    assert body["rows"][0]["not_judged"] == {
+        "reason": "too_few_observations",
+        "observations": 42,
+        "floor": RANKING_MIN_SAMPLES,
+    }
 
 
 @pytest.mark.asyncio

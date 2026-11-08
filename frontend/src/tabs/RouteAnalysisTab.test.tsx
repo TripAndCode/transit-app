@@ -123,7 +123,7 @@ describe("RouteAnalysisTab", () => {
     const standards = vi.spyOn(hooks, "usePerformanceStandards").mockReturnValue({
       data: {
         rows: [
-          { route_code: "R1", metric_type: "on_time_pct", metric_scope: "route", threshold_value: 85, bonus_malus_rate: 0, actual_value: 80.4, achievement_rate: 80.4 / 85, estimated_bonus_deduction: 0, meets: false },
+          { route_code: "R1", metric_type: "on_time_pct", metric_scope: "route", threshold_value: 85, bonus_malus_rate: 0, actual_value: 80.4, achievement_rate: 80.4 / 85, estimated_bonus_deduction: 0, meets: false, not_judged: null },
         ],
         ctx: { from: "2026-04-01", to: "2026-04-01", dow: "all", time_band: "all", service: "all", routes: [] },
         disclaimer: "simulation only",
