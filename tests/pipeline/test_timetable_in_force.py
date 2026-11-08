@@ -324,3 +324,70 @@ def test_a_load_refuses_to_start_without_the_span_store(pg_conn, ch_client, tmp_
     pg_conn.rollback()
     assert _rows(pg_conn, "SELECT count(*) FROM planned_trips_daily WHERE agency_id = %s", agency_id) == [(0,)]
     assert _rows(pg_conn, "SELECT trip_id FROM static_trips WHERE agency_id = %s", agency_id) == [("a",)]
+
+
+class _BoundSpy:
+    """Wraps the real client, keeping each read's SQL and bound parameters."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.reads: list[tuple[str, dict]] = []
+
+    def query(self, sql, parameters=None):
+        self.reads.append((sql, parameters or {}))
+        return self._inner.query(sql, parameters=parameters)
+
+    def query_row_block_stream(self, sql, parameters=None):
+        self.reads.append((sql, parameters or {}))
+        return self._inner.query_row_block_stream(sql, parameters=parameters)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_a_full_rebuild_reads_visits_and_headways_one_months_versions_at_a_time(pg_conn, ch_client, tmp_path):
+    """A version in force each month: neither single-shot scan may bind every
+    version's schedule at once, which a full rebuild of an agency's history
+    would otherwise do."""
+    from pipeline.clickhouse import insert_updates
+    from pipeline.service_day import service_day_start_utc
+
+    agency_id = _agency(pg_conn)
+    months = [date(2026, 6, 1), date(2026, 7, 1), date(2026, 8, 1)]
+    for first in months:
+        last = (first + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+        load_static(_zip(tmp_path, _stem(first), first, last, {"a": "07:00"}), agency_id, pg_conn, ch_client=ch_client)
+    rows = []
+    for first in months:
+        day = first + timedelta(days=14)
+        at = service_day_start_utc(day) + timedelta(hours=3, minutes=10)
+        for i, stop in enumerate(STOPS):
+            sec = 7 * 3600 + 120 * i
+            rows.append(
+                (
+                    f"oracle/{day:%Y%m%d}/TripUpdate_071000.pb",
+                    at.isoformat().replace("+00:00", "Z"),
+                    "a",
+                    SERVICE,
+                    f"{sec // 3600:02d}:{sec % 3600 // 60:02d}:00",
+                    ROUTE,
+                    i + 1,
+                    60,
+                    stop,
+                    None,
+                    None,
+                    None,
+                    None,
+                    sec,
+                    _stem(first),
+                )
+            )
+    insert_updates(ch_client, agency_id, rows)
+    spy = _BoundSpy(ch_client)
+    analyze(agency_id, pg_conn, spy)
+
+    visits = [params["force_stems"] for sql, params in spy.reads if "visit_dep" in sql and "force_stems" in params]
+    headways = [params["force_stems"] for sql, params in spy.reads if "per_event" in sql and "force_stems" in params]
+    expected = sorted([_stem(first)] for first in months)
+    assert sorted(visits) == expected
+    assert sorted(headways) == expected

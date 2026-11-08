@@ -85,3 +85,16 @@ def test_a_one_month_build_binds_that_months_versions_and_names_rows_without_the
     names = [sql for sql, _ in bound if sql.startswith("SELECT ifNull(u.static_version_id, '') AS stem")]
     assert names and not any(static_archive.SCHEDULE in sql for sql in names)
     assert any(static_archive.SCHEDULE in sql for sql in reads if sql not in names)
+
+
+def test_a_static_joined_read_binds_its_join_once(monkeypatch):
+    calls = []
+    real = ScheduleJoin.params
+
+    def counted(self, *args, **kwargs):
+        calls.append(args)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(ScheduleJoin, "params", counted)
+    ch_aggregates.select_sql("agg_stop_daily", 202602, join=JOIN, stamp=Stamp.REFIT)
+    assert len(calls) == 1
