@@ -204,15 +204,12 @@ export function RouteTableScreen() {
                 })}
               />
             ))}
-          {/* Punctuality's evidence beside the on-time sort: headway quality
-              and the agency's performance targets. The targets panel renders
+          {/* Headway quality is punctuality's evidence beside the on-time
+              sort. Every sort shows each route's on-time rate, so the
+              agency's targets follow the table under each; the panel renders
               nothing when no standards are configured. */}
-          {view.sort === "on_time" && id != null && (
-            <>
-              <HeadwayQualityPanel aid={id} ctx={ctx} />
-              <PerformanceStandardPanel aid={id} ctx={ctx} />
-            </>
-          )}
+          {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} />}
+          {id != null && <PerformanceStandardPanel aid={id} ctx={ctx} />}
         </div>
         {/* key={id}: InsightPanel seeds its `seen` set from sessionStorage
             once per mount, and that set belongs to one agency. */}

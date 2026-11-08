@@ -317,6 +317,33 @@ def test_standard_edits_accept_both_metrics_for_one_route():
     )
 
 
+def test_standard_edits_accept_an_on_time_target_beside_the_other_metrics():
+    ad.validate_standard_edits(
+        [
+            {"route_code": "42", "metric_type": "on_time_pct", "threshold_value": 85.0, "bonus_malus_rate": 1.0},
+            {"route_code": "42", "metric_type": "ewt_sec", "threshold_value": 120.0, "bonus_malus_rate": 1.0},
+            {"route_code": "43", "metric_type": "on_time_pct", "threshold_value": 0.0, "bonus_malus_rate": 0.0},
+            {"route_code": "44", "metric_type": "on_time_pct", "threshold_value": 100.0, "bonus_malus_rate": 0.0},
+        ]
+    )
+
+
+@pytest.mark.parametrize("threshold", [-1.0, 100.5, 850.0])
+def test_standard_edits_reject_an_on_time_target_outside_0_to_100(threshold):
+    """The target is a share of departures, in percent."""
+    with pytest.raises(ValueError, match="on_time_pct"):
+        ad.validate_standard_edits(
+            [{"route_code": "42", "metric_type": "on_time_pct", "threshold_value": threshold, "bonus_malus_rate": 0.0}]
+        )
+
+
+def test_standard_edits_keep_the_other_metrics_unbounded_above_100():
+    """An excess wait is in seconds, so 240 is an ordinary target."""
+    ad.validate_standard_edits(
+        [{"route_code": "42", "metric_type": "ewt_sec", "threshold_value": 240.0, "bonus_malus_rate": 0.0}]
+    )
+
+
 def test_weight_edits_reject_a_non_positive_weight():
     with pytest.raises(ValueError, match="weight"):
         ad.validate_weight_edits([{"route_code": "42", "weight": 0}])

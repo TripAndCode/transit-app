@@ -213,11 +213,13 @@ The table shows the top 50 routes. When more qualify, the line under it says how
 
 **Download CSV** downloads the rows the table shows, in the table’s order.
 
+When the agency has set targets for its routes (on-time rate, excess wait or vehicle-km delivered), “Minimum performance standard” follows the table under every sort. It gives each target’s actual figure and says “Meets standard” or “Below standard”. An on-time target is judged against the on-time rate the table shows, over the same period and filters and with the same definition of on time, which the panel names beneath it. A route observed fewer than 100 times, or one whose feed always reports zero delay, is not judged, and the panel says which, with the number of observations. A route’s own page shows its on-time rate from 21 observations, so it can show a rate its panel does not judge. Admins set the targets under **Agencies**.
+
 ### 5-5. Sorted by on-time rate
 
 ![On-time rate](./08-routes-ontime.en.png)
 
-Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often, and by “Minimum performance standard” when the agency has set targets for its routes.
+Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often.
 
 ### 5-6. A route’s own page
 
@@ -225,6 +227,7 @@ Clicking a route’s name — in a report, in **Routes to check** on Pulse, or i
 
 - At the top, “Routes / (route name)” leads back to the list, and the page states its question: “Where does delay build up?”. **Pin**, to the right of the heading, adds the route to **My routes** in the sidebar (chapter 2).
 - Below it are the route’s mean delay (and its place among the agency’s routes, most delayed first), on-time rate, share over 5 minutes late and share of all lateness — the same figures as the **Routes** lists. “This route by time of day” and “Why this route runs late” open **Time** and **Why** for this route.
+- When the route has targets, “Minimum performance standard” follows, with this route’s targets alone (5-4).
 - The filters under it — “Route”, “Service pattern”, “From”, “To”, “Days” and “Time” — take effect when you press **Apply**. Until then the page says “Changes not applied yet”.
 - **Delay by stop** shows the mean departure delay at each stop. When the route runs more than one path, pick one under “Path”; “Other direction” switches to the path running the other way. The page says what share of the route’s observations the path holds.
 - A sentence names the segment where delay grows most, and the next largest, and the chart marks the largest. A segment’s increase is the mean change for the same trips observed at both of its stops. The segment from the first stop is left out, since most feeds report a first departure as on time.

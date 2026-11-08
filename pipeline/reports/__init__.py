@@ -25,7 +25,7 @@ from pipeline.reports.definition import (
 from pipeline.reports.dwell_run import compute_dwell_run_decomposition
 from pipeline.reports.headway_quality import compute_headway_quality, compute_headway_quality_report
 from pipeline.reports.overview import compute_overview_summary
-from pipeline.reports.performance_standard import compute_performance_standards, simulation_disclaimer
+from pipeline.reports.performance_standard import compute_performance_standards, read_standards, simulation_disclaimer
 from pipeline.reports.rankings import (
     MIN_GROUP_SAMPLES,
     ON_TIME_PRESETS,
@@ -74,6 +74,7 @@ __all__ = [
     "format_definition_csv_line",
     "format_definition_footnotes",
     "observation_disclaimer",
+    "read_standards",
     "resolve_definition_meta",
     "simulation_disclaimer",
     "sort_route_table",
