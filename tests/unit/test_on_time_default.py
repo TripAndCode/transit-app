@@ -8,12 +8,13 @@ file, so moving either side alone fails a test.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from pipeline.histogram import LEGACY_SEVERE_LATE_TOLERANCE_SEC, exact_window
-from pipeline.reports import definition
+from pipeline.reports import definition, network, ridership
 from pipeline.reports.comparability import BOARD_ON_TIME_DEFINITION, BOARD_ON_TIME_WINDOW
 from pipeline.reports.rankings import (
     DEFAULT_EARLY_DEPARTURE_SEC,
@@ -77,6 +78,14 @@ def test_the_board_counts_by_the_default_preset():
     assert BOARD_ON_TIME_WINDOW == ON_TIME_PRESETS[DEFAULT_PRESET]
     assert BOARD_ON_TIME_DEFINITION.preset == DEFAULT_PRESET
     assert (BOARD_ON_TIME_DEFINITION.early_tolerance_sec, BOARD_ON_TIME_DEFINITION.late_tolerance_sec) == (60, 300)
+
+
+@pytest.mark.parametrize("sql", [network._PERF_SQL, ridership._WEIGHTED_BY_AGENCY_SQL], ids=["board", "weighted"])
+def test_the_board_reads_single_buckets_never_a_whole_histogram(sql):
+    """The board sums each row's exact columns and its leading early buckets;
+    reading whole histograms to merge them is the expensive read it avoids."""
+    assert "hist[1]" in sql
+    assert re.search(r"\bhist\b(?!\[)", sql) is None
 
 
 def test_the_early_departure_rate_keeps_its_one_minute_threshold():

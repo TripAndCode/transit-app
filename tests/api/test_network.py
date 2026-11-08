@@ -7,6 +7,7 @@ import pytest
 from httpx import ASGITransport
 
 from pipeline.agg_registry import METHOD_VERSION
+from pipeline.reports.comparability import assess
 from pipeline.reports.network import compute_network_summary
 from tests.conftest import _test_pool, confirm_rt_field_coverage
 
@@ -38,19 +39,21 @@ async def net_pool(apply_schema):
 async def _seed_route_dist(pool, aid, route_code, dist):
     """dist: list of (date_iso, samples, sum_delay_sec, on_time_count) for one route_code
     (unlike _seed below, which hardcodes route_code='R1' -- this lets a test seed
-    several distinct routes under one agency, needed for ridership-weighting tests)."""
+    several distinct routes under one agency, needed for ridership-weighting tests).
+    The departures not on time are more than five minutes late, as in _seed."""
     async with pool.acquire() as c:
         for d, n, sd, ot in dist:
             await c.execute(
                 "INSERT INTO agg_route_daily_dist (agency_id, date, route_code, service_type, "
                 "samples, sum_delay_sec, on_time_count, late5_count, hist) "
-                "VALUES ($1,$2,$3,'平日',$4,$5,$6,0,$7)",
+                "VALUES ($1,$2,$3,'平日',$4,$5,$6,$7,$8)",
                 aid,
                 date.fromisoformat(d),
                 route_code,
                 n,
                 sd,
                 ot,
+                n - ot,
                 [0] * 37,
             )
 
@@ -66,20 +69,28 @@ async def _seed_ridership_weight(pool, aid, route_code, weight):
         )
 
 
-async def _seed(pool, aid, *, dist, feed=None, updates_at=None):
-    """dist: list of (date_iso, samples, sum_delay_sec, on_time_count). feed: (date_iso, raw, clamp)."""
+async def _seed(pool, aid, *, dist, feed=None, updates_at=None, late5=None, early=0):
+    """dist: list of (date_iso, samples, sum_delay_sec, on_time_count). feed: (date_iso, raw, clamp).
+
+    Unless *late5* says otherwise, the departures not on time are more than
+    five minutes late, so a row reads the same on-time figure under either
+    preset; *early* departures are more than a minute early, among the on
+    time ones."""
     async with pool.acquire() as c:
         for d, n, sd, ot in dist:
+            hist = [0] * 37
+            hist[0] = early
             await c.execute(
                 "INSERT INTO agg_route_daily_dist (agency_id, date, route_code, service_type, "
                 "samples, sum_delay_sec, on_time_count, late5_count, hist) "
-                "VALUES ($1,$2,'R1','平日',$3,$4,$5,0,$6)",
+                "VALUES ($1,$2,'R1','平日',$3,$4,$5,$6,$7)",
                 aid,
                 date.fromisoformat(d),
                 n,
                 sd,
                 ot,
-                [0] * 37,
+                n - ot if late5 is None else late5,
+                hist,
             )
         if feed:
             d, raw, clamp = feed
@@ -194,7 +205,9 @@ async def _seed_observed_trips(pool, aid, rows):
             )
 
 
-async def _seed_gated_agency(pool, aid, *, name, strategy, planned, observed, samples, on_time, delay_min, clamp=0):
+async def _seed_gated_agency(
+    pool, aid, *, name, strategy, planned, observed, samples, on_time, delay_min, clamp=0, late5=None
+):
     """One agency on 2026-04-01 with every figure the comparability gate reads."""
     async with pool.acquire() as c:
         await c.execute("UPDATE agencies SET agency_name = $1 WHERE agency_id = $2", name, aid)
@@ -206,6 +219,7 @@ async def _seed_gated_agency(pool, aid, *, name, strategy, planned, observed, sa
         aid,
         dist=[("2026-04-01", samples, samples * delay_min * 60, on_time)],
         feed=("2026-04-01", samples, clamp),
+        late5=late5,
     )
 
 
@@ -636,22 +650,70 @@ async def test_network_summary_keeps_the_delay_figures_when_the_planned_figures_
 
 
 async def test_network_summary_includes_definition_metadata(net_client):
-    """The board's on_time_pct always reads the exact legacy_60s column (no
-    tolerance query param exists on this endpoint) -- the definition block
-    must say so explicitly rather than leaving a user to assume it, and must
-    match pipeline.reports.definition's resolved legacy values exactly (not
-    a hardcoded/duplicated copy of them)."""
+    """The board's on_time_pct always counts on the default preset's window
+    (no tolerance query param exists on this endpoint) -- the definition block
+    must say so explicitly rather than leaving a user to assume it."""
     client, _pool, _a, _b, _cc = net_client
     r = await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})
     assert r.status_code == 200
     body = r.json()
     definition = body["definition"]
-    assert definition["preset"] == "legacy_60s"
-    assert definition["early_tolerance_sec"] is None
-    assert definition["late_tolerance_sec"] == 60
+    assert definition["preset"] == "standard_m1_p5"
+    assert definition["early_tolerance_sec"] == 60
+    assert definition["late_tolerance_sec"] == 300
     assert definition["exclusion_threshold_sec"] == 7200
     assert definition["measurement_point"] == "all_stops_all_observations"
     assert definition["dedup_rule"] == "latest_observation_per_stop_event"
+
+
+async def test_the_board_counts_on_time_on_the_default_window(net_client):
+    """On the board a departure is on time up to five minutes late and no more
+    than a minute early, in the plain figure and the ridership-weighted one."""
+    client, pool, a, _b, _cc = net_client
+    # 100 departures: 50 at most a minute late (5 of them more than a minute
+    # early), 40 one to five minutes late and 10 more than five minutes late.
+    await _seed(pool, a, dist=[("2026-04-02", 100, 6000, 50)], late5=10, early=5)
+    await _seed_ridership_weight(pool, a, None, 2)
+    body = (await client.get("/api/network/summary", params={"from": "2026-04-01", "to": "2026-04-07"})).json()
+    row = next(r for r in body["agencies"] if r["agency_id"] == a)
+    # 100 - 10 late - 5 early; legacy's one-minute column would read 50.0.
+    assert row["on_time_pct"] == 85.0
+    assert row["weighted_on_time_pct"] == 85.0
+
+
+async def test_the_gate_judges_the_interval_of_the_boards_own_on_time_figure(net_pool, ch_async_client):
+    """The interval the gate reads is the board's on-time figure's. 600
+    observed trips pin a share near 97% within +-3 points but not one near
+    50%, so an agency whose late departures are mostly under five minutes is
+    ranked on the default window, though legacy's one-minute column would
+    leave it unranked."""
+    pool, a, _b, _cc = net_pool
+    await _seed_gated_agency(
+        pool,
+        a,
+        name="Mostly under five",
+        strategy="static_join",
+        planned=650,
+        observed=600,
+        samples=20000,
+        on_time=10000,
+        delay_min=2,
+        late5=600,
+    )
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 2))
+    row = next(r for r in rows if r["agency_id"] == a)
+    assert row["on_time_pct"] == 97.0
+    assert (row["comparable"], row["comparable_reason"]) == (True, None)
+    legacy = assess(
+        ingest_strategy="static_join",
+        observed_trips=600,
+        coverage_planned_trips=650,
+        on_time_count=10000,
+        samples=20000,
+        clamp_pct=0.0,
+    )
+    assert legacy.comparable_reason == "ci_wide"
 
 
 async def test_the_board_names_the_method_version_and_its_newest_build(net_client):
@@ -775,7 +837,9 @@ async def test_a_board_cached_before_a_rebuild_is_not_served_under_its_stamp(net
 
     rebuilt = built + timedelta(hours=1)
     async with pool.acquire() as c:
-        await c.execute("UPDATE agg_route_daily_dist SET on_time_count = 80 WHERE agency_id = $1", a)
+        await c.execute(
+            "UPDATE agg_route_daily_dist SET on_time_count = 80, late5_count = samples - 80 WHERE agency_id = $1", a
+        )
         await c.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", a, rebuilt)
     after = (await client.get("/api/network/summary", params=params)).json()
     assert datetime.fromisoformat(after["definition"]["built_at"]) == rebuilt

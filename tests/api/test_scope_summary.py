@@ -127,7 +127,7 @@ async def test_tolerance_honours_an_early_bound(seeded):
     conn, agency_id = seeded
     # R3 runs two to three minutes early, which only an early bound excludes.
     await _seed(conn, agency_id, "R3", date(2026, 9, 21), 50, -7500, _hist(3, 50))
-    unbounded = await compute_scope_summary(agency_id, _ctx(), conn)
+    unbounded = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=None)
     bounded = await compute_scope_summary(agency_id, _ctx(), conn, early_sec=120)
     assert {t["late_sec"]: t["on_time_pct"] for t in unbounded["tolerance"]}[600] == 100.0
     assert {t["late_sec"]: t["on_time_pct"] for t in bounded["tolerance"]}[600] < 100.0
@@ -156,16 +156,20 @@ async def test_readings_on_the_windows_edges_count_exactly_on_the_curve(seeded):
         hist,
     )
     ctx = _ctx(routes=("R4",))
-    unbounded = {
-        t["late_sec"]: t["on_time_pct"] for t in (await compute_scope_summary(agency_id, ctx, conn))["tolerance"]
-    }
-    bounded = {
-        t["late_sec"]: t["on_time_pct"]
-        for t in (await compute_scope_summary(agency_id, ctx, conn, early_sec=60))["tolerance"]
-    }
+
+    async def curve(**kw):
+        return {
+            t["late_sec"]: t["on_time_pct"]
+            for t in (await compute_scope_summary(agency_id, ctx, conn, **kw))["tolerance"]
+        }
+
+    unbounded = await curve(early_sec=None)
+    bounded = await curve(early_sec=60)
     assert unbounded[300] == 80.0
     assert bounded[300] == 60.0
     assert bounded[60] == 20.0
+    # The default early bound is the industry window's minute.
+    assert await curve() == bounded
 
 
 @pytest.mark.asyncio
@@ -273,7 +277,28 @@ async def test_the_endpoint_resolves_the_service_filter_to_the_agencys_days(clie
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("early", "status"), [(0, 200), (3600, 200), (3601, 422), (-1, 422)])
+async def test_the_endpoint_bounds_early_departures_by_the_default_unless_any_is_asked(client, seeded):
+    """With no early tolerance the curve is the default window's, a minute
+    early at most; early=any counts every early departure, the legacy side."""
+    conn, agency_id = seeded
+    # R3 runs two to three minutes early.
+    await _seed(conn, agency_id, "R3", date(2026, 9, 21), 50, -7500, _hist(3, 50))
+
+    async def curve(query=""):
+        resp = await client.get(f"/api/{agency_id}/scope/summary?from=2026-09-20&to=2026-09-28{query}")
+        assert resp.status_code == 200, resp.text
+        return {t["late_sec"]: t["on_time_pct"] for t in resp.json()["tolerance"]}
+
+    default, bounded, unbounded = await curve(), await curve("&early=60"), await curve("&early=any")
+    assert default == bounded
+    assert unbounded[600] == 100.0
+    assert default[600] < 100.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("early", "status"), [(0, 200), (3600, 200), ("any", 200), (3601, 422), (-1, 422), ("all", 422)]
+)
 async def test_the_endpoint_bounds_the_early_tolerance(client, seeded, early, status):
     _, agency_id = seeded
     resp = await client.get(f"/api/{agency_id}/scope/summary?from=2026-09-20&to=2026-09-28&early={early}")

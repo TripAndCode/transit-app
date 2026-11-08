@@ -286,8 +286,9 @@ async def test_dispatch_time_series_applies_route_filter(conn_two_routes_obs):
 
 @pytest.fixture
 async def conn_punctual_and_late(apply_schema, ch_client):
-    """Route 1021 always on time, route 3021 always five minutes late, each
-    with 25 observations, clearing the on-time ranking's sample gate."""
+    """Route 1021 always on time, route 3021 always more than five minutes
+    late, so late under either preset, each with 25 observations, clearing
+    the on-time ranking's sample gate."""
     pool = await _test_pool()
     async with pool.acquire() as conn:
         agency_id = await conn.fetchval(
@@ -300,7 +301,7 @@ async def conn_punctual_and_late(apply_schema, ch_client):
             "VALUES ($1, $2, $3, $4, $5, $6, '08:00'::time, '平日', $7)",
             [
                 (agency_id, f"pb_{route}_{d}_{s}", f"T{route}_{d}_{s}", route, s, datetime(2026, 5, d + 1, 8), delay)
-                for route, delay in (("1021", 0), ("3021", 300))
+                for route, delay in (("1021", 0), ("3021", 400))
                 for d in range(5)
                 for s in range(1, 6)
             ],
@@ -327,6 +328,62 @@ async def test_dispatch_on_time_lists_the_end_best_first_asks_for(
         result = await dispatch("on_time", {"best_first": best_first}, _ctx(), conn, agency_id, locale="en")
     assert [r[0] for r in result.rows] == routes
     assert summary_word in result.summary
+
+
+@pytest.fixture
+async def conn_early_route(apply_schema, ch_client):
+    """Route E1: 25 observations, ten of them two minutes early and the rest
+    on time."""
+    pool = await _test_pool()
+    async with pool.acquire() as conn:
+        agency_id = await conn.fetchval(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('E', 'http://e') RETURNING agency_id"
+        )
+        delays = [-120] * 10 + [0] * 15
+        await conn.executemany(
+            "INSERT INTO updates "
+            "(agency_id, file_name, trip_id, route_code, stop_sequence, captured_at, "
+            " scheduled_time, service_type, dep_delay) "
+            "VALUES ($1, $2, $3, 'E1', $4, $5, '08:00'::time, '平日', $6)",
+            [
+                (agency_id, f"pb_{i}", f"TE_{i // 5}", i % 5 + 1, datetime(2026, 5, i // 5 + 2, 8), delay)
+                for i, delay in enumerate(delays)
+            ],
+        )
+    _analyze_sync(agency_id, ch_client)
+    yield pool, agency_id
+    async with pool.acquire() as c:
+        await c.execute("TRUNCATE agencies CASCADE")
+    await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_on_time_rate_defaults_to_the_industry_window_and_a_threshold_keeps_early_departures(
+    conn_early_route, monkeypatch
+):
+    """With no threshold the tool counts on time as every other figure does,
+    no more than a minute early and five minutes late, from the exact columns;
+    "within N minutes" counts every early departure, as the tool says."""
+    from pipeline.reports import rankings
+
+    merged: list[str] = []
+    original = rankings._read_dist_with_hist
+
+    async def spy(*args, **kwargs):
+        merged.append("rankings")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(rankings, "_read_dist_with_hist", spy)
+    pool, agency_id = conn_early_route
+    async with pool.acquire() as conn:
+        default = await dispatch("on_time_rate", {}, _ctx(), conn, agency_id, locale="ja")
+        ranked = await dispatch("top_n", {"metric": "on_time_rate"}, _ctx(), conn, agency_id, locale="ja")
+        within = await dispatch("on_time_rate", {"threshold_min": 1}, _ctx(), conn, agency_id, locale="ja")
+    assert float(default.rows[0][1]) == float(ranked.rows[0][1]) == 60.0
+    assert default.summary == "定時率 (業界標準: 早発1分・遅延5分以内) 上位1路線"
+    assert float(within.rows[0][1]) == 100.0
+    assert within.summary == "定時率 (遅延 1 分以内) 上位1路線"
+    assert merged == []
 
 
 class _ExplodingChClient:

@@ -9,6 +9,7 @@ from httpx import ASGITransport
 
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.reports.network import invalidate_network_summary
+from pipeline.reports.rankings import on_time_window
 from tests.api.test_network import (
     _seed_gated_agency,
     _seed_route_dist,
@@ -208,24 +209,27 @@ async def test_on_time_and_worst_5min_exact_from_agg(reports_client, ch_client):
 
 
 @pytest.mark.asyncio
-async def test_on_time_no_params_is_byte_identical_to_legacy(reports_client, ch_client):
-    """Passing no tolerance params -- and passing preset=legacy_60s, an
-    explicit opt-in spelling of the same thing -- must both still read the
-    exact on_time_count column and match the pre-existing percentage,
-    unaffected by the new histogram-based tolerance path."""
+async def test_no_params_is_the_industry_window_and_the_legacy_preset_keeps_its_figure(reports_client, ch_client):
+    """Passing no tolerance params is the default preset, standard_m1_p5,
+    spelled the same as asking for it. preset=legacy_60s and the scope's
+    spelling of it, early=any&late=60, both still read the legacy figure."""
     client, agency_id, pool = reports_client
     day = "2026-05-15"
     await _seed_route(pool, agency_id, "RLEGACY", "平日", day, [-200] * 8 + [30] * 12 + [90] * 5)
     _run_analyze(agency_id, ch_client)
 
-    baseline = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")).json()["rows"]
-    preset = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}&preset=legacy_60s")).json()[
-        "rows"
-    ]
-    r_base = next(x for x in baseline if x[0] == "RLEGACY")
-    r_preset = next(x for x in preset if x[0] == "RLEGACY")
-    assert r_base == r_preset
-    assert float(r_base[2]) == 80.0  # (8 + 12) / 25 on-time at the legacy <=60s cutoff
+    async def row(query):
+        body = (await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}{query}")).json()
+        return next(x for x in body["rows"] if x[0] == "RLEGACY"), body["definition"]["preset"]
+
+    default, standard = await row(""), await row("&preset=standard_m1_p5")
+    legacy, spelled = await row("&preset=legacy_60s"), await row("&early=any&late=60")
+    assert default == standard
+    assert float(default[0][2]) == 68.0  # (12 + 5) / 25: the -200s group is more than a minute early
+    assert default[1] == "standard_m1_p5"
+    assert legacy == spelled
+    assert float(legacy[0][2]) == 80.0  # (8 + 12) / 25 on-time at the legacy <=60s cutoff
+    assert legacy[1] == "legacy_60s"
 
 
 @pytest.mark.asyncio
@@ -271,9 +275,9 @@ async def test_worst_5min_custom_late_tolerance_reads_histogram(reports_client, 
 
 
 @pytest.mark.asyncio
-async def test_on_time_default_response_carries_legacy_definition_metadata(reports_client, ch_client):
-    """The JSON response's `definition` block must reflect the legacy_60s
-    default when no tolerance params are passed -- the always-visible
+async def test_on_time_default_response_carries_the_industry_definition_metadata(reports_client, ch_client):
+    """The JSON response's `definition` block must reflect the default
+    preset when no tolerance params are passed -- the always-visible
     metadata block a comparison view renders."""
     client, agency_id, pool = reports_client
     day = "2026-05-18"
@@ -283,9 +287,9 @@ async def test_on_time_default_response_carries_legacy_definition_metadata(repor
     resp = await client.get(f"/api/{agency_id}/reports/on_time?from={day}&to={day}")
     assert resp.status_code == 200
     definition = resp.json()["definition"]
-    assert definition["preset"] == "legacy_60s"
-    assert definition["early_tolerance_sec"] is None
-    assert definition["late_tolerance_sec"] == 60
+    assert definition["preset"] == "standard_m1_p5"
+    assert definition["early_tolerance_sec"] == 60
+    assert definition["late_tolerance_sec"] == 300
     assert definition["exclusion_threshold_sec"] == 7200
     assert definition["measurement_point"] == "all_stops_all_observations"
     assert definition["dedup_rule"] == "latest_observation_per_stop_event"
@@ -375,7 +379,7 @@ async def test_csv_export_definition_metadata_preamble_reflects_custom_tolerance
 
 
 @pytest.mark.asyncio
-async def test_csv_export_definition_metadata_preamble_defaults_to_legacy(reports_client, ch_client):
+async def test_csv_export_definition_metadata_preamble_defaults_to_the_industry_preset(reports_client, ch_client):
     client, agency_id, pool = reports_client
     day = "2026-05-23"
     await _seed_route(pool, agency_id, "RCSVDEF", "平日", day, [30] * 25)
@@ -388,7 +392,8 @@ async def test_csv_export_definition_metadata_preamble_defaults_to_legacy(report
 
     rows = list(csv.reader(io.StringIO(resp.text)))
     preamble = rows[0][0]
-    assert "legacy_60s" in preamble
+    assert "プリセット=standard_m1_p5（業界標準）; 早着許容=60秒; 遅延許容=300秒; " in preamble
+    assert "legacy_60s" not in preamble
 
 
 async def _record_builds(pool, *builds):
@@ -610,7 +615,10 @@ async def test_rows_cached_before_a_rebuild_are_not_served_under_its_stamp(repor
 
     rebuilt = _BUILT_AT + timedelta(hours=1)
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90 WHERE agency_id = $1", agency_id)
+        await conn.execute(
+            "UPDATE agg_route_daily_dist SET on_time_count = 90, late5_count = samples - 90 WHERE agency_id = $1",
+            agency_id,
+        )
         await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
 
     after = (await client.get(url)).json()
@@ -639,7 +647,10 @@ async def test_a_rebuild_older_than_another_agencys_still_forgets_the_cached_row
 
     rebuilt = _BUILT_AT + timedelta(hours=1)
     async with pool.acquire() as conn:
-        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90 WHERE agency_id = $1", agency_id)
+        await conn.execute(
+            "UPDATE agg_route_daily_dist SET on_time_count = 90, late5_count = samples - 90 WHERE agency_id = $1",
+            agency_id,
+        )
         await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, rebuilt)
 
     after = (await client.get(url)).json()
@@ -767,7 +778,11 @@ _WINDOW_EDGES = [-120] * 5 + [-60] * 5 + [0] * 5 + [300] * 5 + [301] * 5
 @pytest.mark.parametrize("path", ["agg", "live"])
 @pytest.mark.parametrize(
     ("query", "preset", "on_time"),
-    [("&preset=standard_m1_p5", "standard_m1_p5", 60.0), ("&late=300", "custom", 80.0)],
+    [
+        ("", "standard_m1_p5", 60.0),
+        ("&preset=standard_m1_p5", "standard_m1_p5", 60.0),
+        ("&early=any&late=300", "custom", 80.0),
+    ],
 )
 async def test_on_time_counts_readings_on_the_windows_edges_exactly_on_both_paths(
     reports_client, ch_client, ch_async_client, path, query, preset, on_time
@@ -820,12 +835,16 @@ async def test_an_exact_window_reads_the_exact_columns_without_merging_histogram
     for report, query in [
         ("route_table", ""),
         ("route_table", "&preset=standard_m1_p5"),
-        ("route_table", "&late=300"),
+        ("route_table", "&preset=legacy_60s"),
+        ("route_table", "&early=any&late=300"),
         ("route_table", "&early=0&late=60"),
         ("council_summary", ""),
         ("council_summary", "&preset=standard_m1_p5"),
-        ("council_summary", "&late=300"),
+        ("council_summary", "&preset=legacy_60s"),
+        ("council_summary", "&early=any&late=300"),
+        ("on_time", ""),
         ("on_time", "&preset=standard_m1_p5"),
+        ("on_time", "&preset=legacy_60s"),
         ("on_time", "&late=300"),
     ]:
         await read(report, query)
@@ -862,11 +881,11 @@ async def test_a_tolerance_past_the_histograms_end_buckets_is_scanned_live(repor
     cases = [
         ("route_table", "&early=360", {2: 33.3, 6: 33.3}),
         ("route_table", "&early=600", {2: 50.0, 6: 16.7}),
-        ("route_table", "&late=2400", {2: 83.3, 6: 50.0}),
+        ("route_table", "&early=any&late=2400", {2: 83.3, 6: 50.0}),
         ("on_time", "&early_tolerance_sec=360", {2: 33.3}),
-        ("on_time", "&late=2400", {2: 83.3}),
+        ("on_time", "&early=any&late=2400", {2: 83.3}),
         ("council_summary", "&early=360", {0: 33.3, 6: 33.3}),
-        ("council_summary", "&late=2400", {0: 83.3}),
+        ("council_summary", "&early=any&late=2400", {0: 83.3}),
         ("worst_5min", "&late_tolerance_sec=2400", {2: 5}),
     ]
     for report, query, expected in cases:
@@ -885,13 +904,13 @@ async def test_a_tolerance_past_the_histograms_end_buckets_is_scanned_live(repor
 @pytest.mark.parametrize("report", ["ranking", "worst_5min", "trend"])
 async def test_a_preset_with_a_window_is_rejected_where_no_on_time_window_applies(reports_client, report):
     """worst_5min's late tolerance is its own over-5-minute cutoff, and the
-    ranking has no tolerance at all; legacy_60s, which overrides nothing,
-    stays accepted everywhere."""
+    ranking has no tolerance at all; the default preset, which overrides
+    nothing, stays accepted everywhere, and the other one is refused."""
     client, agency_id, _ = reports_client
-    resp = await client.get(f"/api/{agency_id}/reports/{report}?preset=standard_m1_p5")
+    resp = await client.get(f"/api/{agency_id}/reports/{report}?preset=legacy_60s")
     assert resp.status_code == 400
     assert "preset" in resp.json()["detail"]
-    assert (await client.get(f"/api/{agency_id}/reports/{report}?preset=legacy_60s")).status_code == 200
+    assert (await client.get(f"/api/{agency_id}/reports/{report}?preset=standard_m1_p5")).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -1616,7 +1635,8 @@ async def test_a_split_route_ranks_on_all_its_observations(reports_client, ch_cl
 
     on_time = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('on_time', day, band)}")).json()
     r = next(x for x in on_time["rows"] if x[0] == "R_SPLIT")
-    assert float(r[2]) == round(100 * sum(d <= 60 for d in all_delays) / len(all_delays), 1)
+    early, late = on_time_window()
+    assert float(r[2]) == round(100 * sum(-early <= d <= late for d in all_delays) / len(all_delays), 1)
     assert r[4] == len(all_delays)
 
     worst = (await client.get(f"/api/{agency_id}/reports/{_ranking_query('worst_5min', day, band)}")).json()
@@ -2692,16 +2712,16 @@ async def test_dwell_run_lists_a_route_once_across_raw_service_ids(reports_clien
 @pytest.mark.asyncio
 async def test_council_summary_pools_on_time_across_routes_not_a_naive_average(reports_client, ch_client):
     """The pooled on-time rate must be sample-weighted across every route,
-    not an unweighted mean of each route's own rate: R1 (25 samples, 60%
-    on-time) and R2 (10 samples, 100% on-time) pool to 71.4% ((15+10)/35),
-    not the naive average of the two rates (80%)."""
+    not an unweighted mean of each route's own rate: under the legacy preset
+    R1 (25 samples, 60% on-time) and R2 (10 samples, 100% on-time) pool to
+    71.4% ((15+10)/35), not the naive average of the two rates (80%)."""
     client, agency_id, pool = reports_client
     day = "2026-06-10"
     await _seed_route(pool, agency_id, "R1", "平日", day, [30] * 15 + [90] * 10)  # 15/25 on-time (<=60s)
     await _seed_route(pool, agency_id, "R2", "平日", day, [30] * 10)  # 10/10 on-time
     _run_analyze(agency_id, ch_client)
 
-    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")
+    resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&preset=legacy_60s")
     assert resp.status_code == 200
     row = resp.json()["rows"][0]
     # (on_time_pct, avg_delay_min, samples, planned_trips, executed_trips, service_delivered_pct)
@@ -2752,7 +2772,8 @@ async def test_council_summary_pools_the_early_departure_rate_across_routes(
     #  early_departure_pct)
     assert row[2] == 40
     assert row[6] == 25.0
-    assert row[0] == 100.0
+    # The ten more than a minute early are not on time in the default window.
+    assert row[0] == 75.0
     assert body["definition"]["early_departure_sec"] == 60
     limited = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}{band}&early=120")).json()
     assert limited["rows"][0][6] == 0.0
@@ -2761,7 +2782,9 @@ async def test_council_summary_pools_the_early_departure_rate_across_routes(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["agg", "live"])
-@pytest.mark.parametrize(("query", "on_time"), [("&preset=standard_m1_p5", 75.0), ("&late=300", 87.5)])
+@pytest.mark.parametrize(
+    ("query", "on_time"), [("", 75.0), ("&preset=standard_m1_p5", 75.0), ("&early=any&late=300", 87.5)]
+)
 async def test_council_summary_counts_readings_on_the_windows_edges_exactly_on_both_paths(
     reports_client, ch_client, ch_async_client, path, query, on_time
 ):
@@ -2787,12 +2810,12 @@ async def test_council_summary_counts_readings_on_the_windows_edges_exactly_on_b
     [
         (
             "ja",
-            "定時率 100.0%、早発率 40.0%（1分を超える早発）、平均遅延",
+            "定時率 60.0%、早発率 40.0%（1分を超える早発）、平均遅延",
             "※早発率：定刻より1分を超えて早く発車した割合",
         ),
         (
             "en",
-            "On-time rate 100.0%, early departures 40.0% (more than 1 min early), mean delay",
+            "On-time rate 60.0%, early departures 40.0% (more than 1 min early), mean delay",
             "* Early-departure rate: the share of departures more than 1 min early",
         ),
     ],
@@ -2830,9 +2853,14 @@ async def test_council_summary_footnotes_change_with_custom_tolerance(reports_cl
     assert default_resp.status_code == custom_resp.status_code == 200
     default_text = default_resp.json()["text"]
     custom_text = custom_resp.json()["text"]
-    assert "定時の定義：定刻から1分以内の遅れ（早発も定時として数えます）" in default_text
+    legacy_text = (
+        await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&preset=legacy_60s")
+    ).json()["text"]
+    assert "定時の定義（業界標準）：定刻から5分以内の遅れと、1分以内の早発" in default_text
+    assert "定時の定義（従来の基準）：定刻から1分以内の遅れ（早発も定時として数えます）" in legacy_text
     assert "定時の定義：定刻から1分30秒以内の遅れと、45秒以内の早発" in custom_text
-    assert "legacy_60s" not in default_text + custom_text
+    assert "legacy_60s" not in default_text + custom_text + legacy_text
+    assert "standard_m1_p5" not in default_text
     assert "custom" not in custom_text
 
 

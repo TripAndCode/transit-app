@@ -85,9 +85,11 @@ What the user sees/does:
   tolerance, measurement point, dedup rule, and exclusion threshold behind
   every card's on-time %,
   from the response's `definition` field (`pipeline/reports/definition.py`).
-  This board has no tolerance query param of its own, so it always resolves
-  to the `legacy_60s` preset — surfaced explicitly so it can be checked
-  against a per-agency report's own `definition` block instead of assumed.
+  This board has no tolerance query param of its own, so it always counts by
+  the default preset, `standard_m1_p5` (`BOARD_ON_TIME_WINDOW` in
+  `pipeline/reports/comparability.py`: no more than 1 minute early and 5
+  late) — surfaced explicitly so it can be checked against a per-agency
+  report's own `definition` block instead of assumed.
   It ends with the method version, the newest day any listed agency's
   aggregates changed, and each listed agency's timetables and observation
   sources (archive, live or none recorded, in days) over the range, listed
@@ -178,10 +180,13 @@ for:
   sent for each (`latest_observation_per_stop_event`). Coverage shows how much
   of the plan those reports cover, and the interval how far the on-time share
   could move by chance.
-- **Not corrected — early departures** count as on time (the `legacy_60s`
-  definition), so an agency that runs early reads better than one that holds
-  to time. The council report and the Routes table give the early-departure
-  rate beside the on-time rate.
+- **Counted — early departures:** on time is the industry window, so a
+  departure more than 1 minute early is not on time, and an agency that runs
+  early does not read better than one that holds to time. The on-time count
+  and the ridership-weighted one are read off each day's exact columns
+  (`pipeline.histogram.on_time_count_sql`), with no histogram merged. The
+  council report and the Routes table give the early-departure rate beside
+  the on-time rate.
 - **Not corrected — feed density:** how many stops per trip, and how often, a
   feed reports differs by vendor and by whether a day was ingested live or
   from an archive. The interval counts trips so that density does not narrow
