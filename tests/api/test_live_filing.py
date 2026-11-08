@@ -9,6 +9,8 @@ and e that arrive after the load are ingested against B, so ingest stamps b
 at 14:10, leaves c without a schedule, and leaves e, whose feed names no
 route, without a route as well. Filed under A, b departs at 12:30 and c and
 e keep their schedule and route. Trips f and g run alike in both versions.
+On the closed day, trip h, the only trip of route R3, which B drops too, is
+polled with no route at all, so filing alone names its route.
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from pipeline.static_loader import load_static
 from tests.fixtures.clock import JST
 from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
 
-ROUTE, OTHER = "R1", "R2"
+ROUTE, OTHER, FILED_ONLY = "R1", "R2", "R3"
 STOPS = tuple(f"S{i}" for i in range(1, 7))
 SERVICE = "平日"
 DELAY = 60
@@ -47,6 +49,7 @@ _A = {
     "b": (ROUTE, "12:30"),
     "c": (OTHER, "12:40"),
     "e": (ROUTE, "12:48"),
+    "h": (FILED_ONLY, "15:00"),
 }
 _B = {"a": (ROUTE, "07:00"), "f": (ROUTE, "12:00"), "g": (ROUTE, "12:10"), "b": (ROUTE, "14:10"), "d": (ROUTE, "13:00")}
 
@@ -154,6 +157,7 @@ def refiled(pg_conn, ch_client, tmp_path) -> Refiled:
     _poll(pg_conn, ch_client, agency_id, before, 12, 31, "b", ROUTE)
     _promote_and_analyze(pg_conn, ch_client, agency_id)
     _load(pg_conn, ch_client, tmp_path, agency_id, b, day + timedelta(days=1), day + timedelta(days=180), _B)
+    _poll(pg_conn, ch_client, agency_id, day, 12, 20, "h", None)
     _poll_after_the_load(pg_conn, ch_client, agency_id, day)
     _promote_and_analyze(pg_conn, ch_client, agency_id)
     return Refiled(agency_id, day, before, a, b)
@@ -264,8 +268,9 @@ async def test_the_live_form_of_a_refit_read_gives_the_rows_of_analyzes_form(ref
             parameters={"agency_id": refiled.agency_id, **where.params, **filed.params},
         )
         assert live.result_rows == analyzes.result_rows, band
-        # Filed under A, nothing departs in the afternoon.
-        assert bool(live.result_rows) == (band != "afternoon"), band
+        # Filed under A, only h departs in the afternoon; b departs at noon.
+        assert {row[3] for row in live.result_rows if band == "afternoon"} <= {"h"}, band
+        assert live.result_rows, band
 
 
 async def test_a_scan_of_correctly_stamped_days_never_joins_the_schedule_archive(refiled, aconn, ch_async_client):
@@ -307,10 +312,13 @@ async def test_the_live_hourly_heatmap_matches_the_aggregate_on_a_refiled_day(re
     day = refiled.day
     from_aggregate = await compute_hourly_heatmap(refiled.agency_id, RangeCtx(from_date=day, to_date=day), aconn)
     live = await compute_hourly_heatmap(
-        refiled.agency_id, RangeCtx(from_date=day, to_date=day, routes=(ROUTE, OTHER)), aconn, ch=ch_async_client
+        refiled.agency_id,
+        RangeCtx(from_date=day, to_date=day, routes=(ROUTE, OTHER, FILED_ONLY)),
+        aconn,
+        ch=ch_async_client,
     )
-    # a at 07:00; f, g, b, c and e at noon, as A has them.
-    assert {(c["hour"], c["samples"]) for c in from_aggregate} == {(7, 6), (12, 30)}
+    # a at 07:00; f, g, b, c and e at noon and h at 15:00, as A has them.
+    assert {(c["hour"], c["samples"]) for c in from_aggregate} == {(7, 6), (12, 30), (15, 6)}
     assert live == from_aggregate
 
 
@@ -475,3 +483,59 @@ async def test_todays_playback_reads_the_timetable_in_force(today, aconn, ch_asy
     agency_id, day = today
     frames = await compute_delay_timeline(agency_id, day, 60, aconn, ch_async_client, table=LIVE_TABLE)
     assert {f["t"]: [p["samples"] for p in f["points"]] for f in frames if f["points"]} == {"12:00": [3] * len(STOPS)}
+
+
+async def test_a_route_only_filing_names_shows_its_trips_and_stop_profile(refiled, client):
+    """Every poll of h came with no route; its trips and stops are R3's once filed."""
+    response = await client.get(f"/api/{refiled.agency_id}/today/route/{FILED_ONLY}/trips?date={refiled.day}")
+    assert response.status_code == 200, response.text
+    assert [t["trip_id"] for t in response.json()["trips"]] == ["h"]
+    response = await client.get(f"/api/{refiled.agency_id}/today/route/{FILED_ONLY}/stop-profile")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["date"] == refiled.day.isoformat()
+    assert [s["samples"] for s in body["stops"]] == [1] * len(STOPS)
+
+
+# ── what a request costs ───────────────────────────────────────────────────
+
+
+async def test_the_live_endpoints_probe_only_the_window_they_read(today, client, ch_async_client):
+    from api.main import app
+    from pipeline.live_filing import invalidate_schedule_joins
+
+    agency_id, day = today
+    latest = datetime.combine(day, time(12, 33), tzinfo=JST)
+    spy = _Spy(ch_async_client)
+    app.state.ch_client = spy
+    for path, window in (
+        ("delays/live", timedelta(minutes=5)),
+        ("delays/live-progress?trip_id=e", timedelta(hours=6)),
+    ):
+        invalidate_schedule_joins()
+        spy.queries.clear()
+        response = await client.get(f"/api/{agency_id}/{path}")
+        assert response.status_code == 200, response.text
+        probes = [params for sql, params in spy.queries if "GROUP BY stem" in sql]
+        assert [p["stamped_from"] for p in probes] == [latest - window], path
+
+
+async def test_a_live_report_reads_the_archive_state_once(refiled, client, ch_async_client):
+    from api.main import app
+    from pipeline.live_filing import invalidate_schedule_joins
+
+    spy = _Spy(ch_async_client)
+    app.state.ch_client = spy
+    day = refiled.day
+    for query in (
+        f"route_table?from={day}&to={day}&time_band=noon&include_sparse=1",
+        # Nothing exceeds the threshold, so the certificate also asks whether the day was observed.
+        f"delay_certificate?from={day}&to={day}&threshold_sec=7000",
+    ):
+        invalidate_schedule_joins()
+        spy.queries.clear()
+        response = await client.get(f"/api/{refiled.agency_id}/reports/{query}")
+        assert response.status_code == 200, response.text
+        assert response.json()["definition"]["source"] == "live"
+        state_reads = [sql for sql, _params in spy.queries if "max(archived_at)" in sql]
+        assert len(state_reads) == 1, query

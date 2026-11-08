@@ -45,9 +45,7 @@ async def test_schedule_realism_padding_filters_the_route_before_aggregating(mon
     ((sql, parameters),) = ch.calls
     route_filter = "route_code IN {ch_routes:Array(String)}"
     assert parameters["ch_routes"] == ["R9"]
-    # Once on the row as stored, keeping a row with no route that filing could
-    # give this one, and once on the filed row; both ahead of the aggregation.
-    assert sql.count(route_filter) == 2
-    assert sql.rindex(route_filter) < sql.index(" GROUP BY ")
+    assert sql.count(route_filter) == 1
+    assert sql.index(route_filter) < sql.index(" GROUP BY ")
     after_cte = sql[sql.rindex(")") :]
     assert "route_code" not in after_cte

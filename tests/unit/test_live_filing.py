@@ -106,3 +106,38 @@ def test_rows_without_a_name_or_with_one_the_archive_does_not_map_are_refit_wher
 def test_a_name_of_the_same_content_as_the_version_in_force_needs_no_refit():
     renamed = JOIN._replace(stems=["v1", "v2", "v2_renamed"], hashes=["c1", "c2", "c2"])
     assert not refits(renamed, [("v2_renamed", date(2026, 10, 1), date(2026, 10, 9))])
+
+
+# A read the archive does not refile tests the route and the band on each row
+# as stored, once, as an AND-chain the sort key can serve: no `OR route_code IS
+# NULL`, which only a REFIT read needs to reach rows filing gives a route.
+_ROUTED_BAND = RangeCtx(from_date=date(2026, 10, 3), to_date=date(2026, 10, 9), time_band="noon", routes=("R1",))
+
+
+def test_a_shared_scan_read_as_ingested_tests_each_route_once_as_stored():
+    from pipeline.reports.filters import _stop_visits_cte_ch
+
+    for sql, _params in (_dedup_cte_ch(_ROUTED_BAND, AS_INGESTED), _stop_visits_cte_ch(_ROUTED_BAND, AS_INGESTED)):
+        assert "route_code IS NULL" not in sql
+        assert sql.count("route_code IN {ch_routes:Array(String)}") == 1
+        assert sql.count("{ch_tb_start:UInt32}") == 1
+
+
+def test_hand_written_reads_as_ingested_test_each_route_once_as_stored():
+    from api.range import updates_filter_ch
+    from api.routers.map import build_route_stop_profile_sql, build_route_trips_sql
+    from pipeline.reports.delay_record import _record_filter, record_trips_sql
+    from pipeline.reports.map import _route_shape_stats_dedup_sql, _route_shape_vote_dedup_sql
+
+    where = updates_filter_ch(RangeCtx(from_date=date(2026, 10, 3), to_date=date(2026, 10, 9), time_band="noon"))
+    for sql in (
+        build_route_trips_sql("noon", stamp=Stamp.INGESTED)[0],
+        build_route_stop_profile_sql("updates", Stamp.INGESTED),
+        _route_shape_vote_dedup_sql(where, Stamp.INGESTED),
+        _route_shape_stats_dedup_sql(where, "", Stamp.INGESTED),
+    ):
+        assert "route_code IS NULL" not in sql
+        assert sql.count("u.route_code = {route:String}") == 1
+    sql = record_trips_sql(_record_filter(date(2026, 10, 3), "R1"), "updates", Stamp.INGESTED)
+    assert "route_code IS NULL" not in sql
+    assert sql.count("route_code IN {ch_routes:Array(String)}") == 1
