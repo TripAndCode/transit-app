@@ -263,6 +263,13 @@ def test_a_trip_a_revision_adds_polled_before_the_revision_loads_takes_its_sched
         first_day,
     ) == [(stop, 2) for stop in STOPS]
     assert _versions(pg_conn, agency_id) == {first_day: b}
+    # Headways: at each stop, d departs two hours after a.
+    assert _rows(
+        pg_conn,
+        "SELECT route_code, date, actual_samples, actual_headway_median_sec::int FROM agg_route_headway_daily "
+        "WHERE agency_id = %s",
+        agency_id,
+    ) == [(ROUTE, first_day, len(STOPS), 7200)]
 
 
 def test_analyze_refuses_to_start_without_the_in_force_record(pg_conn, ch_client, tmp_path, days, monkeypatch):
