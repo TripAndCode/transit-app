@@ -262,3 +262,112 @@ def test_leader_from_before_clear_leaves_newer_leader_inflight():
         assert await asyncio.wait_for(c, 1) == "compute-1"
 
     asyncio.run(run())
+
+
+def test_a_brief_result_is_served_for_the_short_ttl_then_computed_afresh(cache_clock):
+    """A call that marks its result is served from cache for
+    DEGRADED_TTL_SECONDS and computed again after; the full result that
+    replaces it keeps the decorator's TTL."""
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            cache.cache_briefly()
+            return "degraded"
+        return "full"
+
+    async def run():
+        assert await fn(1) == "degraded"
+        cache_clock.now += cache.DEGRADED_TTL_SECONDS
+        assert await fn(1) == "degraded"
+        cache_clock.now += 1
+        assert await fn(1) == "full"
+        cache_clock.now += 300
+        assert await fn(1) == "full"
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_a_full_result_keeps_the_decorators_ttl(cache_clock):
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        return x
+
+    async def run():
+        await fn(1)
+        cache_clock.now += 300
+        await fn(1)
+        assert calls["n"] == 1
+        cache_clock.now += 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_cache_briefly_from_a_task_the_call_gathers_marks_the_call(cache_clock):
+    """The mark reaches the call from a task it starts, as a degrade decided
+    inside an ``asyncio.gather`` does."""
+    calls = {"n": 0}
+
+    async def probe():
+        cache.cache_briefly()
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        await asyncio.gather(probe())
+        return x
+
+    async def run():
+        await fn(1)
+        cache_clock.now += cache.DEGRADED_TTL_SECONDS + 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 2
+
+
+def test_cache_briefly_outside_a_cached_call_marks_nothing(cache_clock):
+    """Outside a cached call the mark has nothing to mark, and a later cached
+    call in the same context keeps the decorator's TTL."""
+    calls = {"n": 0}
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=300)
+    async def fn(x):
+        calls["n"] += 1
+        return x
+
+    async def run():
+        cache.cache_briefly()
+        await fn(1)
+        cache_clock.now += cache.DEGRADED_TTL_SECONDS + 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 1
+
+
+def test_a_brief_result_never_outlives_the_decorators_own_ttl(cache_clock):
+    calls = {"n": 0}
+    ttl = cache.DEGRADED_TTL_SECONDS // 3
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=ttl)
+    async def fn(x):
+        calls["n"] += 1
+        cache.cache_briefly()
+        return x
+
+    async def run():
+        await fn(1)
+        cache_clock.now += ttl + 1
+        await fn(1)
+
+    asyncio.run(run())
+    assert calls["n"] == 2

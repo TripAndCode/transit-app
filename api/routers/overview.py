@@ -218,10 +218,15 @@ class OverviewSummary(BaseModel):
     ``peak_hour_weekday`` / ``peak_hour_weekend`` and
     ``service_split_daily`` are additive fields used by the modal
     drill-downs; existing card consumers ignore them.
+
+    ``movers`` is None, like the headline's baseline, when the window before
+    the period could not be read: a time-band request whose ClickHouse grain
+    passed the client's row cap or its time budget
+    (``compute_overview_summary``).
     """
 
     headline: Headline
-    movers: Movers
+    movers: Movers | None
     concentration: Concentration
     top_delayed: TopDelayed
     peak_hour: PeakHour | None

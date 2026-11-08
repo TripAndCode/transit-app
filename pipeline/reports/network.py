@@ -58,7 +58,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from api.clickhouse import max_captured_at_before_by_agency
-from pipeline.cache import async_lru_cache
+from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.freshness import is_stale
 from pipeline.reports.comparability import assess
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
@@ -153,6 +153,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         )
     except Exception:
         _log.warning("network summary: service-delivered figures unavailable", exc_info=True)
+        cache_briefly()
         unreadable = unreadable_service_delivered(from_date, to_date)
         delivered = {a["agency_id"]: unreadable for a in agencies}
 

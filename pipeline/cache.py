@@ -8,6 +8,16 @@ cache never grows beyond ``maxsize`` entries.
 
 The cache is in-process — fine for the single-container deploy. Switch
 to a distributed cache only when we run multiple replicas.
+
+A raised failure is never cached. A function that returns a degraded result
+instead of raising (a figure left null because a read failed) calls
+:func:`cache_briefly`, so that result is cached for
+:data:`DEGRADED_TTL_SECONDS` rather than ``ttl_seconds``. It heals within that
+short TTL once the failed read works again, while identical requests during an
+overload are served it instead of each repeating the reads that failed. Only a
+transient failure is marked: one the request itself causes, such as a result
+past a row cap, recurs on every retry, so its degraded result keeps
+``ttl_seconds``.
 """
 
 from __future__ import annotations
@@ -17,6 +27,7 @@ import functools
 import threading
 import time
 from collections import OrderedDict
+from contextvars import ContextVar
 from typing import Any, Awaitable, Callable, TypeVar
 
 from pipeline import perf
@@ -25,6 +36,38 @@ T = TypeVar("T")
 
 # Every decorated function registers its cache_clear here, for clear_all.
 _REGISTERED_CLEARS: list[Callable[[], None]] = []
+
+# The clock every entry's age is read on; a module attribute so a test can move it.
+_monotonic = time.monotonic
+
+#: How long a result marked by :func:`cache_briefly` is cached, unless the
+#: decorator's own TTL is shorter.
+DEGRADED_TTL_SECONDS = 30
+
+
+class _Call:
+    """Whether the cached call in progress marked its result as degraded."""
+
+    __slots__ = ("brief",)
+
+    def __init__(self) -> None:
+        self.brief = False
+
+
+# The innermost cached call in progress in this context. A task the call
+# starts copies the context, and with it this same object, so a mark made
+# inside an asyncio.gather still reaches the call.
+_current_call: ContextVar[_Call | None] = ContextVar("async_lru_cache_call", default=None)
+
+
+def cache_briefly() -> None:
+    """Cache the result of the cached call in progress for
+    :data:`DEGRADED_TTL_SECONDS` only. Outside a cached call it does nothing.
+    See the module docstring.
+    """
+    call = _current_call.get()
+    if call is not None:
+        call.brief = True
 
 
 def clear_all() -> None:
@@ -50,6 +93,7 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
     """
 
     def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
+        # key -> (the monotonic time the entry expires at, the result)
         _cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
         # Per-key futures for in-flight computes (stampede coalescing).
         inflight: dict[Any, asyncio.Future[T]] = {}
@@ -66,10 +110,10 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 tuple(_keyable(a) for a in args),
                 tuple(sorted((k, _keyable(v)) for k, v in kwargs.items())),
             )
-            now = time.monotonic()
+            now = _monotonic()
             with lock:
                 entry = _cache.get(key)
-                fresh = entry is not None and now - entry[0] <= ttl_seconds
+                fresh = entry is not None and now <= entry[0]
                 if fresh:
                     _cache.move_to_end(key)
                 elif entry is not None:
@@ -113,6 +157,8 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
             fut.add_done_callback(lambda f: f.exception() if f.done() and not f.cancelled() else None)
             inflight[key] = fut
             succeeded = False
+            call = _Call()
+            token = _current_call.set(call)
             try:
                 value = await fn(*args, **kwargs)
                 fut.set_result(value)
@@ -129,6 +175,7 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 fut.set_exception(exc)
                 raise
             finally:
+                _current_call.reset(token)
                 # A cache_clear() since this compute started empties the slot
                 # (a newer leader may hold it since). Then its inputs predate
                 # the clear, so it neither caches nor evicts that leader.
@@ -137,7 +184,8 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                     if inflight.get(key) is fut:
                         del inflight[key]
                         if succeeded:
-                            _cache[key] = (time.monotonic(), value)
+                            ttl = min(ttl_seconds, DEGRADED_TTL_SECONDS) if call.brief else ttl_seconds
+                            _cache[key] = (_monotonic() + ttl, value)
                             _cache.move_to_end(key)
                             while len(_cache) > maxsize:
                                 _cache.popitem(last=False)

@@ -287,6 +287,25 @@ def _clear_compute_caches():
     yield
 
 
+class _CacheClock:
+    """A settable stand-in for ``pipeline.cache``'s clock."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def cache_clock(monkeypatch):
+    """``pipeline.cache``'s clock, still until a test moves its ``now``, so a
+    test ages a cached entry without sleeping."""
+    clock = _CacheClock()
+    monkeypatch.setattr("pipeline.cache._monotonic", clock)
+    return clock
+
+
 @pytest.fixture
 def pg_conn(apply_schema, reset_sql):
     conn = psycopg2.connect(_database_url())
