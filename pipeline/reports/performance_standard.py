@@ -124,11 +124,12 @@ def on_time_reading(
     """A route's on-time figure to judge, or ``None`` with why it is not
     judged: a feed that always reports zero delay reads 100% on time and
     would meet any target, and a share from fewer than the Routes table's
-    floor of observations judges nothing, however a page with a lower floor
-    shows it. *share* is ``None`` exactly when the route is under the floor."""
+    floor of *observations* judges nothing, however a page with a lower floor
+    shows it. The count alone decides, so a share read below the floor is
+    never judged and one at it always is."""
     if zero_delay:
         return None, {"reason": "zero_delay_feed", "observations": None, "floor": None}
-    if share is None:
+    if share is None or observations < RANKING_MIN_SAMPLES:
         return None, {"reason": "too_few_observations", "observations": observations, "floor": RANKING_MIN_SAMPLES}
     return share, None
 
@@ -141,23 +142,31 @@ async def _on_time_by_route(
     early_tolerance_sec: int | None,
     late_tolerance_sec: int | None,
     codes: Collection[str],
+    *,
+    one_route: bool,
 ) -> dict[str, tuple[float | None, dict[str, Any] | None]]:
     """:func:`on_time_reading` for each of *codes* over *ctx*, from the Routes
-    table at its default observation floor: the same call, floor and
-    rounding. While the table is at that floor and the same routes, the two
-    share one cached computation; with sparse routes included, the table is
-    computed separately and this keeps the default floor. A code under the
-    floor is counted by a second read of those codes alone.
+    table's own computation: the same call, rounding and on-time window.
+
+    For *one_route*, a route's own page, the table of that route is read once
+    at any count and judged against the floor here. Otherwise the table is
+    read at its default observation floor, sharing one cached computation
+    with the Routes table while it is at that floor and the same routes (with
+    sparse routes included the table is computed separately). The codes it
+    leaves out are then counted by a second read of those routes alone, which
+    runs apart from the first, so a count it finds at the floor is judged
+    rather than reported as under it.
     """
     window = {"ch": ch, "early_tolerance_sec": early_tolerance_sec, "late_tolerance_sec": late_tolerance_sec}
-    table = await compute_route_table(agency_id, ctx, conn, min_samples=RANKING_MIN_SAMPLES, **window)
+    floor = 1 if one_route else RANKING_MIN_SAMPLES
+    table = await compute_route_table(agency_id, ctx, conn, min_samples=floor, **window)
     readings: dict[str, tuple[float | None, int]] = {row[0]: (float(row[2]), row[5]) for row in table}
-    thin = sorted(set(codes) - readings.keys())
-    if thin:
+    unread = sorted(set(codes) - readings.keys())
+    if unread and not one_route:
         counted = await compute_route_table(
-            agency_id, dataclasses.replace(ctx, routes=tuple(thin)), conn, min_samples=1, **window
+            agency_id, dataclasses.replace(ctx, routes=tuple(unread)), conn, min_samples=1, **window
         )
-        readings.update({row[0]: (None, row[5]) for row in counted})
+        readings.update({row[0]: (float(row[2]), row[5]) for row in counted})
     no_delay = await zero_delay_route_codes(conn, agency_id, ctx)
     return {code: on_time_reading(*readings.get(code, (None, 0)), zero_delay=code in no_delay) for code in codes}
 
@@ -241,6 +250,7 @@ async def compute_performance_standards(
             early_tolerance_sec,
             late_tolerance_sec,
             on_time_codes,
+            one_route=route is not None,
         )
 
     vehicle_km_delivered_pct: float | None = None

@@ -1,14 +1,17 @@
 """API tests for GET /api/{agency_id}/performance_standards.
 
-Seeds `route_performance_standards` (migration 0041) directly via asyncpg,
-plus whichever underlying aggregate a row's `metric_type` reads from
-(`agg_route_headway`/`agg_route_headway_daily` for `ewt_sec`, the same
+Seeds `route_performance_standards` (migrations 0041 and 0089) directly via
+asyncpg, plus whichever figures a row's `metric_type` reads:
+`agg_route_headway`/`agg_route_headway_daily` for `ewt_sec`, and the same
 `static_calendar_dates`/`static_trips`/`agg_service_delivered_daily`/
 `agg_static_version_summary` fixture shape `tests/api/test_network.py` uses
-for `vehicle_km_delivered_pct`) -- like `test_headway_quality.py`, this
-endpoint only ever reads precomputed Postgres aggregates plus the new
-config table, so exercising `pipeline.analyze()`'s own population of them
-is other tests' job, not this file's.
+for `vehicle_km_delivered_pct`. Those two read precomputed Postgres
+aggregates only.
+
+The `on_time_pct` tests read the Routes table's own figures, so they seed
+the way its tests do: `agg_route_daily_dist` rows directly, or observations
+that run through `analyze()` (the agg path) or are mirrored to ClickHouse
+and scanned live under a time band (the live path).
 """
 
 from datetime import date

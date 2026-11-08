@@ -1318,7 +1318,7 @@
       "meets": "Meets standard",
       "below": "Below standard",
       "not_judged_thin": "Not judged: fewer than {{floor}} observations ({{observations}})",
-      "not_judged_zero_delay": "Not judged: the feed records zero delay only",
+      "not_judged_zero_delay": "Not judged: the feed always reports zero delay",
       "judged_on": "On-time standards are judged on this page's period and filters, under this definition of on time:"
     },
     "weather_delay": {

@@ -195,7 +195,7 @@ describe("PerformanceStandardPanel", () => {
 
     const [, thin, zero] = screen.getAllByRole("row");
     expect(within(thin).getByText("Not judged: fewer than 100 observations (42)")).toHaveClass("standard-unjudged");
-    expect(within(zero).getByText("Not judged: the feed records zero delay only")).toHaveClass("standard-unjudged");
+    expect(within(zero).getByText("Not judged: the feed always reports zero delay")).toHaveClass("standard-unjudged");
   });
 
   it("says why in Japanese too", async () => {
@@ -212,8 +212,8 @@ describe("PerformanceStandardPanel", () => {
     });
     renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
 
-    expect(screen.getByText("観測が100件未満のため判定していません（42件）")).toBeInTheDocument();
-    expect(screen.getByText("遅延0のみの記録のため判定していません")).toBeInTheDocument();
+    expect(screen.getByText("観測が100回未満のため判定していません（42回）")).toBeInTheDocument();
+    expect(screen.getByText("遅れが常に0と報告されるため判定していません")).toBeInTheDocument();
   });
 
   it("names the definition the on-time targets were judged on, in words rather than its key", () => {

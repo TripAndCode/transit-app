@@ -92,11 +92,11 @@ def test_an_on_time_share_over_the_floor_is_judged():
     assert on_time_reading(85.0, RANKING_MIN_SAMPLES, zero_delay=False) == (85.0, None)
 
 
-@pytest.mark.parametrize("observations", [0, 42])
-def test_an_on_time_share_under_the_floor_says_how_many_observations_it_had(observations):
+@pytest.mark.parametrize(("share", "observations"), [(None, 0), (60.0, 42), (60.0, RANKING_MIN_SAMPLES - 1)])
+def test_an_on_time_share_under_the_floor_says_how_many_observations_it_had(share, observations):
     """The route page shows a share from as few as 21 observations; the
     verdict needs the table's floor, and says so with the count."""
-    assert on_time_reading(None, observations, zero_delay=False) == (
+    assert on_time_reading(share, observations, zero_delay=False) == (
         None,
         {"reason": "too_few_observations", "observations": observations, "floor": RANKING_MIN_SAMPLES},
     )
@@ -107,3 +107,70 @@ def test_a_feed_that_reports_zero_delay_only_is_not_judged_however_often_observe
         None,
         {"reason": "zero_delay_feed", "observations": None, "floor": None},
     )
+
+
+class _FakeTable:
+    """compute_route_table standing in for the Routes table: each call returns
+    the next of *answers*, at or over its floor, recording the routes and floor
+    it was asked for. A route's tuple is (code, avg, share, late5 share, late5
+    count, observations, early share)."""
+
+    def __init__(self, *answers: dict[str, tuple[float, int]]):
+        self.answers = list(answers)
+        self.calls: list[tuple[tuple[str, ...], int]] = []
+
+    async def __call__(self, agency_id, ctx, conn, *, min_samples, **_window):
+        self.calls.append((ctx.routes, min_samples))
+        answer = self.answers.pop(0)
+        return [
+            (code, None, share, None, None, observations, None)
+            for code, (share, observations) in answer.items()
+            if observations >= min_samples and (not ctx.routes or code in ctx.routes)
+        ]
+
+
+async def _readings(monkeypatch, table, ctx, codes, *, one_route):
+    from pipeline.reports import performance_standard
+
+    async def no_zero_delay(conn, agency_id, ctx):
+        return frozenset()
+
+    monkeypatch.setattr(performance_standard, "compute_route_table", table)
+    monkeypatch.setattr(performance_standard, "zero_delay_route_codes", no_zero_delay)
+    return await performance_standard._on_time_by_route(1, ctx, None, None, None, None, codes, one_route=one_route)
+
+
+@pytest.mark.asyncio
+async def test_a_route_page_reads_its_route_once_and_judges_the_count_itself(monkeypatch):
+    from api.range import clamp_range_ctx
+
+    ctx = clamp_range_ctx(from_="2026-05-14", to="2026-05-14", routes=["R"])
+    thin = _FakeTable({"R": (60.0, 42)})
+    assert await _readings(monkeypatch, thin, ctx, {"R"}, one_route=True) == {
+        "R": (None, {"reason": "too_few_observations", "observations": 42, "floor": RANKING_MIN_SAMPLES})
+    }
+    busy = _FakeTable({"R": (80.0, RANKING_MIN_SAMPLES)})
+    assert await _readings(monkeypatch, busy, ctx, {"R"}, one_route=True) == {"R": (80.0, None)}
+    assert thin.calls == busy.calls == [(("R",), 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_thin_route_counted_at_the_floor_by_the_second_read_is_judged(monkeypatch):
+    """The Routes table's floor read and the count of the routes under it run
+    apart, and the data can grow between them. A count at the floor is judged,
+    never reported as under it."""
+    from api.range import clamp_range_ctx
+
+    ctx = clamp_range_ctx(from_="2026-05-14", to="2026-05-14")
+    table = _FakeTable(
+        {"BUSY": (90.0, 500), "GROWN": (70.0, RANKING_MIN_SAMPLES - 1)},
+        {"GROWN": (75.0, RANKING_MIN_SAMPLES), "THIN": (50.0, 30)},
+    )
+    readings = await _readings(monkeypatch, table, ctx, {"BUSY", "GROWN", "THIN"}, one_route=False)
+
+    assert table.calls == [((), RANKING_MIN_SAMPLES), (("GROWN", "THIN"), 1)]
+    assert readings == {
+        "BUSY": (90.0, None),
+        "GROWN": (75.0, None),
+        "THIN": (None, {"reason": "too_few_observations", "observations": 30, "floor": RANKING_MIN_SAMPLES}),
+    }
