@@ -71,7 +71,10 @@ agencies board and its comparability gate, and the Ask tools. `DEFAULT_PRESET` i
 - **Exact and estimated windows.** Both presets are read exactly from analyze's columns
   (`on_time_count`, `late5_count` and the delay histogram's leading buckets), as is any
   window with a late tolerance of 1 or 5 minutes and an early tolerance on a whole minute
-  up to 5. Any other window is estimated from the delay histogram, within one minute.
+  up to 5. Any other window is estimated from the delay histogram, within one minute,
+  except a late tolerance of 30 minutes or more or an early tolerance over 5 minutes:
+  those bounds fall in the histogram's open end buckets, so the window is scanned live
+  from the raw observations. A time-band filter is scanned live too.
 - **The early-departure rate** counts departures more than the early tolerance early, or
   more than 1 minute early when every early departure is on time, so its threshold is 1
   minute under either preset. The count of departures more than 5 minutes late does not

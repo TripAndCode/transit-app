@@ -438,8 +438,9 @@ async def compute_on_time(
     (:func:`tolerance_aggregates_serve`).
 
     ``threshold_sec`` replaces the window with the Ask tool's "at most this
-    many seconds late, any early departure on time", read exactly: from
-    ``on_time_count`` at 60 s, and by a live scan at any other threshold.
+    many seconds late, any early departure on time", read exactly: from the
+    exact columns where they answer it (60 s and 300 s), and by a live scan at
+    any other threshold.
 
     Returned percentages carry no confidence signal of their own -- a caller
     displaying one of these percentages to a user should also call
@@ -450,36 +451,13 @@ async def compute_on_time(
     one.
     """
     if threshold_sec is not None:
-        if not aggregates_serve(ctx) or threshold_sec != LEGACY_ON_TIME_LATE_TOLERANCE_SEC:
+        if not aggregates_serve(ctx) or not exact_window(None, threshold_sec):
             if ch is None:
                 raise RuntimeError(
                     "compute_on_time's time_band/threshold-filtered live fallback requires a ClickHouse client"
                 )
             return await _on_time_live(agency_id, ctx, conn, ch, threshold_sec, limit, sort_order)
-
-        rows = await _read_dist_scalars(agency_id, ctx, conn)
-        service = _service_label(ctx)
-        out: list[tuple] = []
-        for r in rows:
-            samples = r["samples"]
-            if samples <= 20:
-                continue
-            on_time_pct = _pct1(r["on_time_count"], samples)
-            out.append(
-                (
-                    r["route_code"],
-                    service,
-                    on_time_pct,
-                    _avg_min(r["sum_delay_sec"], samples),
-                    samples,
-                )
-            )
-        # Two-pass stable sort: route_code (element 0) tie-breaks ties on
-        # on_time_pct in ascending order regardless of `reverse` — same
-        # unordered-GROUP-BY source as compute_ranking above.
-        out.sort(key=lambda t: t[0])
-        out.sort(key=lambda t: t[2], reverse=sort_order.lower() == "desc")
-        return out if limit is None else out[:limit]
+        early_tolerance_sec, late_tolerance_sec = None, threshold_sec
 
     # The window, from the exact columns, and the merged histogram only where
     # they cannot answer it.

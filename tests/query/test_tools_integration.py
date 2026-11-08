@@ -379,9 +379,12 @@ async def test_on_time_rate_defaults_to_the_industry_window_and_a_threshold_keep
         default = await dispatch("on_time_rate", {}, _ctx(), conn, agency_id, locale="ja")
         ranked = await dispatch("top_n", {"metric": "on_time_rate"}, _ctx(), conn, agency_id, locale="ja")
         within = await dispatch("on_time_rate", {"threshold_min": 1}, _ctx(), conn, agency_id, locale="ja")
+        # No ClickHouse client: five minutes is a window the exact columns
+        # answer, so it must not need the live scan either.
+        within_five = await dispatch("on_time_rate", {"threshold_min": 5}, _ctx(), conn, agency_id, locale="ja")
     assert float(default.rows[0][1]) == float(ranked.rows[0][1]) == 60.0
     assert default.summary == "定時率 (業界標準: 早発1分・遅延5分以内) 上位1路線"
-    assert float(within.rows[0][1]) == 100.0
+    assert float(within.rows[0][1]) == float(within_five.rows[0][1]) == 100.0
     assert within.summary == "定時率 (遅延 1 分以内) 上位1路線"
     assert merged == []
 

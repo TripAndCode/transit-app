@@ -106,3 +106,21 @@ def test_the_default_late_edge_is_the_five_minute_column():
 def test_the_screens_and_the_documents_call_each_preset_by_the_same_name(locale):
     for preset in ON_TIME_PRESETS:
         assert LOCALES[locale]["definitionMeta"]["preset"][preset] == definition._PRESET_TEXT[(preset, locale)]
+
+
+def test_ask_states_the_default_window_it_reads():
+    """Ask's tool schemas, system prompt and metric list name the default
+    window in words for the model and the reader; they must say what
+    on_time_window() reads."""
+    from pipeline.query import meta_tools, tools
+
+    early_sec, late_sec = on_time_window()
+    assert early_sec is not None
+    early_min, late_min = early_sec // 60, late_sec // 60
+    schemas = json.dumps(tools.TOOLS, ensure_ascii=False)
+    assert schemas.count(f"no more than {early_min} minute early and {late_min} minutes late") == 2
+    assert f"({early_min} minute early to {late_min} minutes late)" in schemas
+    assert f"早発{early_min}分・遅延{late_min}分以内" in tools.SYSTEM_PROMPT
+    metric_text = Path(meta_tools.__file__).read_text(encoding="utf-8")
+    assert f"≤{early_min} min early, ≤{late_min} min late" in metric_text
+    assert f"(早発{early_min}分・遅延{late_min}分以内)" in metric_text
