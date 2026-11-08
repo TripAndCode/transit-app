@@ -340,6 +340,29 @@ export type PipelineRun = {
   lock_probe_ms: number | null;
   error: string | null;
   requested_by: number | null;
+  /** An analyze run's headline before and after a rebuild that a method
+   *  version or fingerprint change forced; null on every other run. */
+  rebuild_headline: RebuildHeadline | null;
+};
+
+/** One side of a rebuild's headline. A figure is null when no departure
+ *  counted towards it. */
+export type HeadlineFigures = {
+  on_time_pct: number | null;
+  avg_delay_min: number | null;
+  samples: number;
+};
+
+/** The agency's headline over the service dates it had built when the
+ *  rebuild began (`first_day`–`last_day`), under the default on-time
+ *  definition (`preset`), before and after the rebuild. */
+export type RebuildHeadline = {
+  first_day: string;
+  last_day: string;
+  preset: string | null;
+  method_version: string;
+  before: HeadlineFigures;
+  after: HeadlineFigures;
 };
 
 export type AdminBoard = {

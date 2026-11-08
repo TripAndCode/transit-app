@@ -1,4 +1,4 @@
-import type { PipelineRun } from "../../api/admin";
+import type { PipelineRun, RebuildHeadline } from "../../api/admin";
 
 /** One drawn bar: a run's span expressed in hours from the start of the day
  *  being shown, so the SVG only has to scale, never to parse dates. */
@@ -17,6 +17,7 @@ export type RunBar = {
   rows: number | null;
   lockProbeMs: number | null;
   error: string | null;
+  rebuildHeadline: RebuildHeadline | null;
 };
 
 /** One row of the Gantt: a kind, optionally scoped to an agency. */
@@ -96,6 +97,7 @@ export function runsToBars(runs: readonly PipelineRun[], dayStart: Date, now: Da
       rows: run.rows,
       lockProbeMs: run.lock_probe_ms,
       error: run.error,
+      rebuildHeadline: run.rebuild_headline,
     });
     lanes.set(key, lane);
   }

@@ -17,9 +17,19 @@ function run(over: Partial<PipelineRun> & { run_id: number }): PipelineRun {
     lock_probe_ms: null,
     error: null,
     requested_by: null,
+    rebuild_headline: null,
     ...over,
   };
 }
+
+const HEADLINE = {
+  first_day: "2026-06-08",
+  last_day: "2026-09-19",
+  preset: "legacy_60s",
+  method_version: "2026.11.3",
+  before: { on_time_pct: 81.2, avg_delay_min: 1.42, samples: 5120 },
+  after: { on_time_pct: 79.8, avg_delay_min: 1.57, samples: 5120 },
+};
 
 describe("runsToBars", () => {
   it("places a bar at its JST hour offset from the start of the day", () => {
@@ -116,6 +126,15 @@ describe("runsToBars", () => {
       DAY_START,
     );
     expect(lane.bars[0].lockProbeMs).toBe(4);
+  });
+
+  it("carries a rebuild's headline onto its bar, and nothing onto any other", () => {
+    const [lane] = runsToBars(
+      [run({ run_id: 1, rebuild_headline: HEADLINE }), run({ run_id: 2, started_at: "2026-09-20T20:00:00Z" })],
+      DAY_START,
+      DAY_START,
+    );
+    expect(lane.bars.map((b) => b.rebuildHeadline)).toEqual([HEADLINE, null]);
   });
 
   it("leaves an ordinary completed run solid", () => {

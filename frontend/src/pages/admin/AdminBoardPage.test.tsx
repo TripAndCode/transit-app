@@ -1,11 +1,12 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import type { AdminBoard, PipelineRun } from "../../api/admin";
+import { formatMinutes } from "../../utils/format";
 import { AdminBoardPage } from "./AdminBoardPage";
 
 function days(states: ("fresh" | "stale" | "missing")[], clampOnLast = 0.2) {
@@ -68,6 +69,7 @@ const BOARD: AdminBoard = {
       lock_probe_ms: null,
       error: null,
       requested_by: null,
+      rebuild_headline: null,
     },
     {
       run_id: 2,
@@ -81,6 +83,7 @@ const BOARD: AdminBoard = {
       lock_probe_ms: 3,
       error: null,
       requested_by: null,
+      rebuild_headline: null,
     },
   ] as PipelineRun[],
   alerts: [
@@ -103,6 +106,28 @@ const BOARD: AdminBoard = {
       acked: false,
     },
   ],
+};
+
+const REBUILD: PipelineRun = {
+  run_id: 3,
+  kind: "analyze",
+  agency_id: 1,
+  agency_name: "Hokuriku",
+  started_at: "2026-09-20T20:00:00Z",
+  finished_at: "2026-09-20T21:30:00Z",
+  status: "ok",
+  rows: null,
+  lock_probe_ms: null,
+  error: null,
+  requested_by: null,
+  rebuild_headline: {
+    first_day: "2026-06-08",
+    last_day: "2026-09-19",
+    preset: "legacy_60s",
+    method_version: "2026.11.3",
+    before: { on_time_pct: 81.2, avg_delay_min: 1.42, samples: 5120 },
+    after: { on_time_pct: 79.8, avg_delay_min: 1.57, samples: 5120 },
+  },
 };
 
 let mockQuery: { data?: AdminBoard; error: unknown; isPending: boolean; refetch: () => void };
@@ -277,6 +302,29 @@ describe("AdminBoardPage", () => {
     const title = screen.getAllByTestId("run-bar")[1].querySelector("title")?.textContent ?? "";
     expect(title).toContain(i18n.t("admin.board.run_status.skipped"));
     expect(title).toContain(i18n.t("admin.board.run_tooltip_lock"));
+  });
+
+  it("lists each rebuild with its headline before and after, and only when there is one", () => {
+    wrap(<AdminBoardPage />);
+    expect(screen.queryByTestId("rebuild-headline")).not.toBeInTheDocument();
+    cleanup();
+
+    mockQuery = { data: { ...BOARD, runs: [...BOARD.runs, REBUILD] }, error: null, isPending: false, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    const [item] = screen.getAllByTestId("rebuild-headline");
+    expect(item).toHaveTextContent("81.2% → 79.8%");
+    expect(item).toHaveTextContent(`${formatMinutes(1.42, 2)} → ${formatMinutes(1.57, 2)}`);
+    expect(item).toHaveTextContent("2026-06-08");
+    expect(item).toHaveTextContent("2026-09-19");
+    expect(item).toHaveTextContent("legacy_60s");
+    expect(item).toHaveTextContent("Hokuriku");
+  });
+
+  it("puts a rebuild's headline in its bar's tooltip", () => {
+    mockQuery = { data: { ...BOARD, runs: [...BOARD.runs, REBUILD] }, error: null, isPending: false, refetch: vi.fn() };
+    wrap(<AdminBoardPage />);
+    const bar = screen.getAllByTestId("run-bar").find((b) => b.querySelector("title")?.textContent?.includes("→"));
+    expect(bar?.querySelector("title")?.textContent).toContain("81.2% → 79.8%");
   });
 
   it("marks where now falls on the day's axis", () => {

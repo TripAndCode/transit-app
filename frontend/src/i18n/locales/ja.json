@@ -1945,6 +1945,10 @@
       "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
       "run_tooltip_rows": "{{count}} 行",
       "run_tooltip_lock": "取り込み/集計ロックが保持されていたためスキップ",
+      "rebuilds_title": "今日の再集計: 主要指標の前 → 後",
+      "rebuild_item": "{{run}} {{time}}: {{headline}}",
+      "rebuild_headline": "定時率 {{onTimeBefore}} → {{onTimeAfter}}、平均遅延 {{delayBefore}} → {{delayAfter}}",
+      "rebuild_scope": "（{{from}}〜{{to}}、{{preset}}、算出方法 {{version}}）",
       "collectors_title": "収集器",
       "collector": {
         "oracle_crawler": "Oracle クローラ",
