@@ -38,7 +38,9 @@ _TOOL_DEFAULTS: dict[str, dict[str, Any]] = {
     "time_pattern": {},
     "schedule_realism": {},
     "trend_shift": {},
-    "on_time_rate": {"threshold_min": 1, "n": 20, "best_first": True},
+    # No threshold_min default: leaving it out is the default preset's window,
+    # which no threshold spells, so an explicit one always survives.
+    "on_time_rate": {"n": 20, "best_first": True},
     "capabilities": {},
     "on_time": {"best_first": True},
     "trend": {},

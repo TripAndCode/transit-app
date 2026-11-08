@@ -50,6 +50,44 @@ build day.
 | `2026.11.2` | Each day's feed-health row also counts its observations by ingest source: from the collector's archive, or from the live path. The stamp files each day under the source most of its observations came from. No delay or on-time figure changes. | `agg_feed_health` |
 | `2026.11.3` | Each reading is filed under the timetable in force on its service day: the newest loaded timetable whose feed dates, or else calendar, cover that day. Until now a reading took whichever timetable was loaded when it arrived, so a timetable published ahead of its first day was applied to the rest of the day before. Such readings now take the timetable in force for their scheduled time, day type and stop, and for their route where the feed named none. A day no known timetable covers keeps the timetable its readings joined. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_stop_routes`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_schedule_revision_daily`, `route_delay_counts`, `stop_route_days` |
 
+## What counts as on time
+
+A departure is on time when it leaves no more than 1 minute early and no more than 5
+minutes late: the `standard_m1_p5` preset, the window operators publish. Every on-time
+figure uses it unless its request names another: the reports, the Routes table, the
+council report, the scope summary's tolerance curve, the performance standards, the
+agencies board and its comparability gate, and the Ask tools. `DEFAULT_PRESET` in
+`pipeline/reports/rankings.py` is the one place that says so;
+`frontend/src/api/onTimeDefault.json` mirrors it for the screens, and
+`tests/unit/test_on_time_default.py` keeps the two in step.
+
+- **The legacy definition**, `legacy_60s`, counts every early departure as on time and
+  allows up to 1 minute late. Ask for it with `preset=legacy_60s`, with the scope's
+  `early=any&late=60`, or on screen with 「早発も定時に含める」 and the 1-minute pill.
+- **Other tolerances.** A request may name its own `late` and `early`, in seconds. Each
+  one it leaves out is the default's (300 s late, 60 s early), and `early=any` counts
+  every early departure. A window is named by its preset whenever it equals one, however
+  the request spelt it, and `custom` otherwise.
+- **Exact and estimated windows.** Both presets are read exactly from analyze's columns
+  (`on_time_count`, `late5_count` and the delay histogram's leading buckets), as is any
+  window with a late tolerance of 1 or 5 minutes and an early tolerance on a whole minute
+  up to 5. Any other window is estimated from the delay histogram, within one minute,
+  except a late tolerance of 30 minutes or more or an early tolerance over 5 minutes:
+  those bounds fall in the histogram's open end buckets, so the window is scanned live
+  from the raw observations. A time-band filter is scanned live too.
+- **The early-departure rate** counts departures more than the early tolerance early, or
+  more than 1 minute early when every early departure is on time, so its threshold is 1
+  minute under either preset. The count of departures more than 5 minutes late does not
+  depend on the preset.
+- **Ask's on-time ranking** uses the default unless the question names how late counts
+  (「5分以内の定時率」); with such a threshold, every early departure counts as on time.
+
+Choosing a preset changes no aggregate, so it is not a method version. A figure is
+identified by its method version and its preset together, and the stamp shows both: the
+CSV preamble's `プリセット=` (with the preset's plain name, such as
+`standard_m1_p5（業界標準）`) and `算出方法=`, and the footnotes' on-time definition
+(「定時の定義（業界標準）：…」) and method line.
+
 ## Serving
 
 By default a report endpoint just **reads** an `agg_*` table rather than scanning the raw

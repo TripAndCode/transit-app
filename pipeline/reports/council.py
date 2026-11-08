@@ -12,8 +12,8 @@ dates, whatever route/dow/service/time_band filter narrows the on-time figures
 (:func:`on_time_filter_narrows`) -- unlike
 :func:`pipeline.reports.rankings.compute_on_time`, which reports per-route,
 and unlike :func:`pipeline.reports.network.compute_network_summary`, whose
-on-time figure is always the ``legacy_60s`` exact column with no tolerance
-override. The fast path reuses ``pipeline.reports.rankings``'s own
+on-time figure is always the default preset's window, whatever tolerance the
+report names. The fast path reuses ``pipeline.reports.rankings``'s own
 ``_read_dist_scalars`` SQL, or ``_read_dist_with_hist`` for a window the
 exact columns cannot answer, byte-for-byte, simply
 pooling every returned route into one total instead of emitting one row per
@@ -48,7 +48,6 @@ from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.db import observation_filter_ch
 from pipeline.freshness import is_stale
 from pipeline.histogram import (
-    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
     N_BUCKETS,
     count_early,
@@ -61,6 +60,8 @@ from pipeline.query import formatter
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.network import compute_network_summary
 from pipeline.reports.rankings import (
+    DEFAULT_EARLY_TOLERANCE_SEC,
+    DEFAULT_LATE_TOLERANCE_SEC,
     _avg_min,
     _pct1,
     _read_dist_scalars,
@@ -90,7 +91,7 @@ async def _agency_on_time_pooled(
     conn,
     ch,
     early_tolerance_sec: int | None,
-    late_tolerance_sec: int | None,
+    late_tolerance_sec: int,
 ) -> tuple[float | None, float | None, float | None, int]:
     """``(on_time_pct, early_departure_pct, avg_delay_min, samples)`` pooled
     across EVERY route matching ``ctx`` -- the same tolerance semantics
@@ -101,7 +102,7 @@ async def _agency_on_time_pooled(
     ``ctx`` at all.
     """
     low_sec = None if early_tolerance_sec is None else -early_tolerance_sec
-    high_sec = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
+    high_sec = late_tolerance_sec
     early_sec = early_departure_sec(early_tolerance_sec)
 
     if not tolerance_aggregates_serve(ctx, early_tolerance_sec, late_tolerance_sec):
@@ -247,8 +248,8 @@ async def compute_council_summary(
     ctx: RangeCtx,
     conn,
     ch,
-    early_tolerance_sec: int | None = None,
-    late_tolerance_sec: int | None = None,
+    early_tolerance_sec: int | None = DEFAULT_EARLY_TOLERANCE_SEC,
+    late_tolerance_sec: int = DEFAULT_LATE_TOLERANCE_SEC,
 ) -> dict:
     """Monthly/annual figures for ``ctx``'s range: the on-time rate pooled
     over ``ctx``'s filter + the whole agency's service-delivered rate + the

@@ -230,12 +230,18 @@ describe("scope controls", () => {
   });
 
   describe("tolerance", () => {
-    it("applies presets, with one minute as the default", async () => {
-      mount(ToleranceControl, "?late=300");
+    it("applies presets, with five minutes, the industry window's, as the default", async () => {
+      mount(ToleranceControl, "?late=60");
+      expect(screen.getByRole("button", { name: "1 min" })).toHaveAttribute("aria-pressed", "true");
       await userEvent.click(screen.getByRole("button", { name: "3 min" }));
       expect(params().get("late")).toBe("180");
-      await userEvent.click(screen.getByRole("button", { name: "1 min" }));
+      await userEvent.click(screen.getByRole("button", { name: "5 min" }));
       expect(params().has("late")).toBe(false);
+    });
+
+    it("presses five minutes when the scope names no tolerance", () => {
+      mount(ToleranceControl);
+      expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true");
     });
 
     it("names each preset's on-time share once the data is in", () => {
@@ -290,25 +296,32 @@ describe("scope controls", () => {
       expect(screen.queryByRole("img", { name: "On-time share by tolerance" })).toBeNull();
     });
 
-    it("counts early departures as on time by default, and limits them to one minute on request", async () => {
+    it("limits early departures to one minute by default, and counts them all on request", async () => {
       mount(ToleranceControl);
       const group = screen.getByRole("group", { name: "Early departures" });
       const counted = within(group).getByRole("button", { name: "Count early departures as on time" });
       const limited = within(group).getByRole("button", { name: "Not on time if more than 1 min early" });
-      expect(counted).toHaveAttribute("aria-pressed", "true");
-      expect(limited).toHaveAttribute("aria-pressed", "false");
-      await userEvent.click(limited);
-      expect(params().get("early")).toBe("60");
       expect(limited).toHaveAttribute("aria-pressed", "true");
+      expect(counted).toHaveAttribute("aria-pressed", "false");
       await userEvent.click(counted);
+      expect(params().get("early")).toBe("any");
+      expect(counted).toHaveAttribute("aria-pressed", "true");
+      await userEvent.click(limited);
       expect(params().has("early")).toBe(false);
     });
 
-    it("reaches the industry window, no more than one minute early and five late", async () => {
+    it("is the industry window, no more than one minute early and five late, with nothing set", () => {
       mount(ToleranceControl);
-      await userEvent.click(screen.getByRole("button", { name: "5 min" }));
-      await userEvent.click(screen.getByRole("button", { name: "Not on time if more than 1 min early" }));
-      expect([params().get("early"), params().get("late")]).toEqual(["60", "300"]);
+      expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Not on time if more than 1 min early" })).toHaveAttribute("aria-pressed", "true");
+      expect([params().get("early"), params().get("late")]).toEqual([null, null]);
+    });
+
+    it("reaches the legacy definition, every early departure and up to one minute late", async () => {
+      mount(ToleranceControl);
+      await userEvent.click(screen.getByRole("button", { name: "1 min" }));
+      await userEvent.click(screen.getByRole("button", { name: "Count early departures as on time" }));
+      expect([params().get("early"), params().get("late")]).toEqual(["any", "60"]);
     });
 
     it("says what an early tolerance neither choice names is, pressing neither", () => {
@@ -330,9 +343,9 @@ describe("scope controls", () => {
 
   describe("early", () => {
     it("offers the same early-departure choice as the tolerance control", async () => {
-      mount(EarlyControl, "?early=60");
-      expect(screen.getByRole("button", { name: "Not on time if more than 1 min early" })).toHaveAttribute("aria-pressed", "true");
-      await userEvent.click(screen.getByRole("button", { name: "Count early departures as on time" }));
+      mount(EarlyControl, "?early=any");
+      expect(screen.getByRole("button", { name: "Count early departures as on time" })).toHaveAttribute("aria-pressed", "true");
+      await userEvent.click(screen.getByRole("button", { name: "Not on time if more than 1 min early" }));
       expect(params().has("early")).toBe(false);
     });
   });

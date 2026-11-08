@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from pipeline.reports.definition import resolve_definition_meta
+from pipeline.reports.rankings import DEFAULT_PRESET, ON_TIME_PRESETS
 from pipeline.stats import wilson_interval
 
 ComparableReason = Literal["no_data", "coverage_unknown", "coverage_low", "ci_wide", "clamp_high"]
@@ -51,8 +52,10 @@ MAX_CLAMP_PCT = 5.0
 COMPARABLE_INGEST_STRATEGIES = frozenset({"static_join"})
 
 #: The on-time definition the board counts every agency by, and so the one
-#: the gate judges: the ``on_time`` default, with no tolerance override.
-BOARD_ON_TIME_DEFINITION = resolve_definition_meta("on_time", None, None)
+#: the gate judges: the default preset's window, which analyze's exact
+#: columns answer without merging histograms.
+BOARD_ON_TIME_WINDOW = ON_TIME_PRESETS[DEFAULT_PRESET]
+BOARD_ON_TIME_DEFINITION = resolve_definition_meta("on_time", *BOARD_ON_TIME_WINDOW)
 
 
 @dataclass(frozen=True)

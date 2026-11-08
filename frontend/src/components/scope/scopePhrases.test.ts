@@ -32,7 +32,7 @@ describe("scopeTokens", () => {
       "period=9/1〜9/28",
       "days=すべての曜日",
       "time=全時間帯",
-      "tolerance=1分以内",
+      "tolerance=5分以内",
     ]);
     expect(labels("en")).toEqual([
       "agency=青森市バス",
@@ -40,7 +40,7 @@ describe("scopeTokens", () => {
       "period=9/1 – 9/28",
       "days=every day",
       "time=all hours",
-      "tolerance=within 1 min",
+      "tolerance=within 5 min",
     ]);
   });
 
@@ -87,6 +87,8 @@ describe("scopeTokens", () => {
     expect(ja.map((tok) => tok.key).slice(-3)).toEqual(["dir", "early", "tolerance"]);
     expect(ja.find((tok) => tok.key === "early")).toEqual({ key: "early", label: "早発は2分まで", field: "early" });
     expect(labels("en", { early: 30 })).toContain("early=early by up to 30 s");
+    expect(labels("ja", { early: "any", late: 60 }).slice(-2)).toEqual(["early=早発も定時扱い", "tolerance=1分以内"]);
+    expect(labels("en", { early: "any" })).toContain("early=any early departure on time");
   });
 
   it("states the tolerance in minutes or seconds", () => {
@@ -132,7 +134,7 @@ describe("scopeTitle", () => {
   it("joins the conditions for a saved-analysis title", () => {
     const t = i18n.getFixedT("ja");
     expect(scopeTitle({ ...base, routes: ["50"] }, { t, agencyName: "x", routeLabel: (c) => `R${c}` })).toBe(
-      "R50・9/1〜9/28・すべての曜日・全時間帯・1分以内",
+      "R50・9/1〜9/28・すべての曜日・全時間帯・5分以内",
     );
   });
 });
@@ -167,7 +169,8 @@ describe("tokenChanged", () => {
   });
 
   it("marks a tolerance only when it differs from the one the server applies by default", () => {
-    expect(changed({ late: 60 })).toEqual([]);
+    expect(changed({ late: 300 })).toEqual([]);
+    expect(changed({ late: 60 })).toEqual(["tolerance"]);
     expect(changed({ late: 180 })).toEqual(["tolerance"]);
   });
 

@@ -10,15 +10,16 @@ from datetime import date
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, ctx_payload, get_range_ctx
-from api.routers.reports import ReportCtx
+from api.routers.reports import ReportCtx, scope_early
 from api.scope_applied import scope_applied
 from pipeline.day_types import DayType
+from pipeline.reports.rankings import EarlyTolerance, on_time_window
 from pipeline.reports.scope_summary import compute_scope_summary
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["scope"])
@@ -76,8 +77,9 @@ async def scope_summary(
     request: Request,
     agency_id: int = Depends(get_agency),
     ctx: RangeCtx = Depends(get_range_ctx),
-    early: int | None = Query(None, ge=0, le=3600, description="Early on-time tolerance in seconds."),
+    early: EarlyTolerance = Depends(scope_early),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, Any]:
-    body = await compute_scope_summary(agency_id, ctx, conn, early_sec=early)
+    early_sec, _ = on_time_window(None, early, None)
+    body = await compute_scope_summary(agency_id, ctx, conn, early_sec=early_sec)
     return {**body, "ctx": ReportCtx.model_validate(ctx_payload(ctx)), "scope_applied": _SCOPE_SUMMARY_SCOPE}
