@@ -669,23 +669,36 @@ export type HeadwayQualityResponse = {
  *  ratio undefined). `metric_scope` is `"agency"` for
  *  `vehicle_km_delivered_pct` (no per-route breakdown exists -- every route
  *  configured with it reads its own agency's rate) and `"route"` for
- *  `ewt_sec`. */
+ *  `ewt_sec` and `on_time_pct`. `meets` says whether the actual value is at
+ *  least as good as the threshold, null exactly when `actual_value` is.
+ *  `not_judged` says why an `on_time_pct` row has no figure: too few
+ *  observations in the scope (its count and the floor a verdict needs), or a
+ *  feed that records zero delay only. Null on every other row. */
 export type PerformanceStandardRow = {
   route_code: string;
-  metric_type: "ewt_sec" | "vehicle_km_delivered_pct";
+  metric_type: "ewt_sec" | "vehicle_km_delivered_pct" | "on_time_pct";
   metric_scope: "route" | "agency";
   threshold_value: number;
   bonus_malus_rate: number;
   actual_value: number | null;
   achievement_rate: number | null;
   estimated_bonus_deduction: number | null;
+  meets: boolean | null;
+  not_judged: {
+    reason: "too_few_observations" | "zero_delay_feed";
+    observations: number | null;
+    floor: number | null;
+  } | null;
 };
 
+/** `on_time_definition` is the on-time definition the `on_time_pct` rows were
+ *  judged on, null when there are none. */
 export type PerformanceStandardsResponse = {
   scope_applied?: ScopeApplied;
   rows: PerformanceStandardRow[];
   ctx: ResponseCtx;
   disclaimer: string;
+  on_time_definition: DefinitionMeta | null;
 };
 
 /** The one documented representative observation station an agency's rain-

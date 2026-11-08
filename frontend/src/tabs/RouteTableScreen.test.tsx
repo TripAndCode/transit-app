@@ -179,16 +179,20 @@ describe("RouteTableScreen", () => {
     expect(screen.getByRole("columnheader", { name: "Early (> 2 min)" })).toBeInTheDocument();
   });
 
-  it("puts the headway and targets panels beside the on-time sort only", () => {
+  it("puts the headway panel beside the on-time sort", () => {
     setup("/agencies/1/routes?sort=on_time");
     expect(screen.getByText("headway-panel")).toBeInTheDocument();
-    expect(screen.getByText("standards-panel")).toBeInTheDocument();
   });
 
-  it("leaves the punctuality panels off the other sorts", () => {
+  it("leaves the headway panel off the other sorts", () => {
     setup("/agencies/1/routes?sort=late5_count");
     expect(screen.queryByText("headway-panel")).toBeNull();
-    expect(screen.queryByText("standards-panel")).toBeNull();
+  });
+
+  // Every sort shows each route's on-time rate, so its targets follow the table.
+  it.each(["avg", "on_time", "late5_share", "late5_count"])("judges the targets under the %s sort", (sort) => {
+    setup(`/agencies/1/routes?sort=${sort}`, tableResponse({ sort }));
+    expect(screen.getByText("standards-panel")).toBeInTheDocument();
   });
 
   it("keeps the floor toggle in reach when no route clears it", () => {

@@ -280,6 +280,38 @@ describe("AgencyDiagnosticsDrawer", () => {
     });
   });
 
+  it("sets an on-time target as a share of departures", async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+    await user.click(screen.getByRole("button", { name: /edit performance standards/i }));
+    await user.selectOptions(screen.getByLabelText(/metric/i), "on_time_pct");
+    const threshold = screen.getByLabelText(/threshold/i);
+    await user.clear(threshold);
+    await user.type(threshold, "85");
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+    expect(standardsMutateAsync).toHaveBeenCalledWith({
+      id: 1,
+      body: {
+        upsert: [{ route_code: "42", metric_type: "on_time_pct", threshold_value: 85, bonus_malus_rate: 1.5 }],
+        delete: [{ route_code: "42", metric_type: "ewt_sec", threshold_value: 120, bonus_malus_rate: 1.5 }],
+      },
+    });
+  });
+
+  it("holds an on-time target outside 0 to 100 back from saving", async () => {
+    const user = userEvent.setup();
+    renderDrawer();
+    await user.click(screen.getByRole("button", { name: /edit performance standards/i }));
+    await user.selectOptions(screen.getByLabelText(/metric/i), "on_time_pct");
+    const threshold = screen.getByLabelText(/threshold/i);
+    await user.clear(threshold);
+    await user.type(threshold, "120");
+    expect(screen.getByRole("button", { name: /^Save$/ })).toBeDisabled();
+    // The same figure is an ordinary excess-wait target in seconds.
+    await user.selectOptions(screen.getByLabelText(/metric/i), "ewt_sec");
+    expect(screen.getByRole("button", { name: /^Save$/ })).toBeEnabled();
+  });
+
   it("saves an edited ridership weight", async () => {
     const user = userEvent.setup();
     renderDrawer();

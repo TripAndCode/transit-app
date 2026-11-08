@@ -16,6 +16,7 @@ import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
 import { DelayBandLegend, StopChart } from "../components/analysis/StopChart";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
+import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { RouteVariantPicker } from "../components/analysis/RouteVariantPicker";
 import { initialStop, largestRises, missingStopKey, pickableVariants, previousWindow, windowDays } from "../components/analysis/routeDossier";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
@@ -186,6 +187,7 @@ export function RouteAnalysisTab() {
     </div></header>
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
+    {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
     <AnalysisFilters agencyId={id} />
     {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t, names.format)}

@@ -1300,19 +1300,26 @@
     "performance_standard": {
       "title": "Minimum performance standard",
       "simulation_badge": "Internal simulation — not an invoice",
-      "subtitle": "Estimated achievement rate and bonus/deduction against each route's configured minimum performance standard.",
+      "subtitle": "Whether each route's figure meets its configured minimum performance standard, with the achievement rate and an estimated bonus/deduction.",
       "col": {
         "metric": "Metric",
         "threshold": "Threshold",
         "actual": "Actual",
+        "judgement": "Result",
         "achievement_rate": "Achievement rate",
         "estimate": "Estimated bonus/deduction"
       },
       "metric_label": {
         "ewt_sec": "Excess wait (sec)",
-        "vehicle_km_delivered_pct": "Vehicle-km delivered (%)"
+        "vehicle_km_delivered_pct": "Vehicle-km delivered (%)",
+        "on_time_pct": "On-time rate (%)"
       },
-      "scope_agency_note": "Agency-wide figure (no per-route breakdown available)"
+      "scope_agency_note": "Agency-wide figure (no per-route breakdown available)",
+      "meets": "Meets standard",
+      "below": "Below standard",
+      "not_judged_thin": "Not judged: fewer than {{floor}} observations ({{observations}})",
+      "not_judged_zero_delay": "Not judged: the feed always reports zero delay",
+      "judged_on": "On-time standards are judged on this page's period and filters, under this definition of on time:"
     },
     "weather_delay": {
       "title": "Rain vs. dry average delay",

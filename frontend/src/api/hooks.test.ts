@@ -225,6 +225,21 @@ describe("useReport's ranking options", () => {
   });
 });
 
+describe("usePerformanceStandards", () => {
+  it("names the one route a route's page asks about, and no route otherwise", async () => {
+    mockApiGet.mockResolvedValue({ rows: [] });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(
+      () => ({ page: usePerformanceStandards(1, baseCtx(), true, "R1"), table: usePerformanceStandards(1, baseCtx(), true) }),
+      withProviders(queryClient),
+    );
+    await waitFor(() => expect(result.current.page.isSuccess && result.current.table.isSuccess).toBe(true));
+    const urls = mockApiGet.mock.calls.map((call) => String(call[0]));
+    expect(urls.filter((url) => /[?&]route=R1(&|$)/.test(url))).toHaveLength(1);
+    expect(urls.filter((url) => !/[?&]route=/.test(url))).toHaveLength(1);
+  });
+});
+
 // Each of these endpoints writes text in the request's Accept-Language
 // (api/routers' `Depends(get_locale)` GET routes; tests/unit/test_localized_routes.py
 // pins that list), so a response cached in one language must not be served
