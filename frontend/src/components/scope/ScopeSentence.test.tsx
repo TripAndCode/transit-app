@@ -57,9 +57,9 @@ describe("ScopeSentence", () => {
   it("says the scope as one sentence whose conditions are buttons", () => {
     mount();
     expect(region().textContent).toContain(
-      "Viewing all routes of Aomori, 9/1 – 9/30 30 days, every day, all hours, counting on-time as within 1 min",
+      "Viewing all routes of Aomori, 9/1 – 9/30 30 days, every day, all hours, counting on-time as within 5 min",
     );
-    for (const name of ["all routes", "9/1 – 9/30 30 days", "every day", "all hours", "within 1 min"]) {
+    for (const name of ["all routes", "9/1 – 9/30 30 days", "every day", "all hours", "within 5 min"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
     expect(screen.queryByRole("button", { name: "Aomori" })).toBeNull();
@@ -84,11 +84,11 @@ describe("ScopeSentence", () => {
 
   it("closes when Tab walks focus out of the popover", async () => {
     mount();
-    await userEvent.click(screen.getByRole("button", { name: "within 1 min" }));
+    await userEvent.click(screen.getByRole("button", { name: "within 5 min" }));
     screen.getByRole("button", { name: "Not on time if more than 1 min early" }).focus();
     await userEvent.tab();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(screen.getByRole("button", { name: "within 1 min" })).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: "within 5 min" })).not.toHaveFocus();
   });
 
   it("leaves an Escape to an overlay opened over it", async () => {
@@ -137,9 +137,14 @@ describe("ScopeSentence", () => {
   it("shows a set early tolerance and lets it be cleared", async () => {
     mount("?from=2026-09-01&to=2026-09-30&early=120");
     await userEvent.click(screen.getByRole("button", { name: "early by up to 2 min" }));
-    await userEvent.click(screen.getByRole("button", { name: "Count early departures as on time" }));
+    await userEvent.click(screen.getByRole("button", { name: "Not on time if more than 1 min early" }));
     expect(params().has("early")).toBe(false);
     expect(region()).toHaveFocus();
+  });
+
+  it("says when every early departure counts, the legacy definition's early side", () => {
+    mount("?from=2026-09-01&to=2026-09-30&early=any&late=60");
+    expect(region().textContent).toContain("all hours, any early departure on time, counting on-time as within 1 min");
   });
 
   it("lists the optional conditions in the order the words give them", () => {
@@ -166,7 +171,7 @@ describe("ScopeSentence", () => {
     try {
       mount();
       expect(screen.getByRole("region", { name: "表示の条件" }).textContent).toContain(
-        "Aomoriの全路線を、9/1〜9/30 30日のすべての曜日・全時間帯で、定時は1分以内として見る",
+        "Aomoriの全路線を、9/1〜9/30 30日のすべての曜日・全時間帯で、定時は5分以内として見る",
       );
     } finally {
       await i18n.changeLanguage("en");
@@ -233,7 +238,7 @@ describe("ScopeSentence", () => {
   it("leaves out the on-time clause where the screen doesn't use it and nothing sets it", () => {
     mount(undefined, { late: false });
     expect(region().textContent).not.toContain("counting on-time");
-    expect(screen.queryByRole("button", { name: "within 1 min" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "within 5 min" })).toBeNull();
   });
 
   it("keeps a set on-time tolerance in the sentence, greyed where unused", () => {
@@ -301,7 +306,7 @@ describe("ScopeSentence", () => {
     for (const name of ["weekdays", "Morning (05–09)"]) {
       expect(screen.getByRole("button", { name })).toHaveClass("scope-token", "scope-token--on");
     }
-    for (const name of ["all routes", "9/1 – 9/30 30 days", "within 1 min"]) {
+    for (const name of ["all routes", "9/1 – 9/30 30 days", "within 5 min"]) {
       expect(screen.getByRole("button", { name })).not.toHaveClass("scope-token--on");
     }
   });

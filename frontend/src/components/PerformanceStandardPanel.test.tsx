@@ -231,7 +231,7 @@ describe("PerformanceStandardPanel", () => {
     expect(
       screen.getByText("On-time standards are judged on this page's period and filters, under this definition of on time:"),
     ).toBeInTheDocument();
-    expect(screen.getByText("On time = no more than 5 min late and no more than 1 min early.")).toBeInTheDocument();
+    expect(screen.getByText("On time (industry standard) = no more than 5 min late and no more than 1 min early.")).toBeInTheDocument();
     expect(container).not.toHaveTextContent("standard_m1_p5");
   });
 

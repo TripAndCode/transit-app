@@ -1,6 +1,7 @@
 import { use, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { delayRampVar } from "../../styles/tokens";
+import { DEFAULT_WINDOW, earlyParam, scopeWindow } from "../../api/onTimeDefault";
 import { DataEndContext, WEEKDAYS, defaultPeriod, isoDaysBefore, type Scope, type ScopePatch, type Weekday } from "../../api/scope";
 import { timetableChoices } from "../../api/serviceDays";
 import type { ScopeSummary } from "../../api/types";
@@ -22,7 +23,7 @@ export type ControlProps = {
 
 const PERIOD_PRESETS = [7, 14, 30] as const;
 const TOLERANCE_PRESETS_MIN = [1, 3, 5] as const;
-const DEFAULT_LATE_SEC = 60;
+const DEFAULT_LATE_SEC = DEFAULT_WINDOW.late_sec;
 const MAX_LATE_SEC = 600;
 /** The early tolerance the early-departure choice offers: the industry
  *  window's, one minute. */
@@ -334,28 +335,30 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
   );
 }
 
-/** Whether an early departure counts as on time: every one, the default, or
- *  none more than a minute early, which with a five-minute late tolerance is
- *  the window operators publish. An early tolerance a link set to anything
- *  else presses neither and is named beneath them. */
+/** Whether an early departure counts as on time: none more than a minute
+ *  early, which with the five-minute late tolerance is the window operators
+ *  publish and the default, or every one, which with the one-minute late
+ *  tolerance is the legacy definition. An early tolerance a link set to
+ *  anything else presses neither and is named beneath them. */
 function EarlyChoice({ scope, update }: ControlProps) {
   const { t } = useTranslation();
   const labelId = useId();
+  const early = scopeWindow(scope).early_sec;
   return (
     <>
       <span id={labelId} className="scope-field">
         {t("scope.control.early_label")}
       </span>
       <div className="scope-pills" role="group" aria-labelledby={labelId}>
-        <Pill pressed={scope.early == null} onClick={() => update({ early: null })}>
+        <Pill pressed={early == null} onClick={() => update({ early: earlyParam(null) })}>
           {t("scope.control.early_counted")}
         </Pill>
-        <Pill pressed={scope.early === EARLY_LIMIT_SEC} onClick={() => update({ early: EARLY_LIMIT_SEC })}>
+        <Pill pressed={early === EARLY_LIMIT_SEC} onClick={() => update({ early: earlyParam(EARLY_LIMIT_SEC) })}>
           {t("scope.control.early_limited", { n: EARLY_LIMIT_SEC / 60 })}
         </Pill>
       </div>
-      {scope.early != null && scope.early !== EARLY_LIMIT_SEC && (
-        <p className="scope-note">{t("scope.control.early_current", { value: earlyLabel(scope.early, t) })}</p>
+      {early != null && early !== EARLY_LIMIT_SEC && (
+        <p className="scope-note">{t("scope.control.early_current", { value: earlyLabel(early, t) })}</p>
       )}
     </>
   );

@@ -404,12 +404,13 @@ _TABLE_COLUMNS = {
     "planned_trips_daily": "service_date, planned_trips",
     "agg_service_delivered_daily": "date, non_executed_trips",
 }
-# Each read's report and query. The industry window puts readings exactly a
-# minute early and exactly five minutes late on its edges.
+# Each read's report and query. The default, the industry window, puts
+# readings exactly a minute early and exactly five minutes late on its edges;
+# the legacy preset counts every early departure up to a minute late.
 _REPORTS = {
     "on_time": ("on_time", ""),
     "route_table": ("route_table", "&include_sparse=1"),
-    "route_table_industry": ("route_table", "&include_sparse=1&preset=standard_m1_p5"),
+    "route_table_legacy": ("route_table", "&include_sparse=1&preset=legacy_60s"),
 }
 
 
@@ -535,15 +536,15 @@ def _reports_expected(observed: Observed, found: oracle.Outcome) -> Cells:
         _cells(
             f"GET reports/on_time {window}",
             {
-                route: {"on_time_pct": _pct(f.on_time_share), "avg_min": _mean_min(f), "samples": f.departures}
+                route: {"on_time_pct": _pct(f.on_time_industry_share), "avg_min": _mean_min(f), "samples": f.departures}
                 for route, f in routes.items()
             },
         )
         | _cells(f"GET reports/route_table {window}", {route: _route_table_figures(f) for route, f in routes.items()})
         | _cells(
-            f"GET reports/route_table {window}&preset=standard_m1_p5",
+            f"GET reports/route_table {window}&preset=legacy_60s",
             {
-                route: {"on_time_pct": _pct(f.on_time_industry_share), "early_pct": _pct(f.early_share)}
+                route: {"on_time_pct": _pct(f.on_time_share), "early_pct": _pct(f.early_share)}
                 for route, f in routes.items()
             },
         )
@@ -562,16 +563,17 @@ def _reports_actual(observed: Observed) -> Cells:
         )
         | _cells(f"GET reports/route_table {window}", _route_table_rows(reports["route_table"]))
         | _cells(
-            f"GET reports/route_table {window}&preset=standard_m1_p5",
-            {r[0]: {"on_time_pct": r[2], "early_pct": r[6]} for r in reports["route_table_industry"]},
+            f"GET reports/route_table {window}&preset=legacy_60s",
+            {r[0]: {"on_time_pct": r[2], "early_pct": r[6]} for r in reports["route_table_legacy"]},
         )
     )
 
 
 def _route_table_figures(f: oracle.Figures) -> dict:
+    """The route table's figures for *f* under the default window, the industry one."""
     return {
         "avg_min": _mean_min(f),
-        "on_time_pct": _pct(f.on_time_share),
+        "on_time_pct": _pct(f.on_time_industry_share),
         "late5_pct": _pct(f.over_five_min_share),
         "late5_count": f.over_five_min,
         "samples": f.departures,

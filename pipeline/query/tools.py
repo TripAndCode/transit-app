@@ -59,7 +59,7 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.rankings import _weighted_avg_min
+from pipeline.reports.rankings import _weighted_avg_min, on_time_window
 from pipeline.route_catalog import left_out_unless_named, route_list, rows_to_fetch
 from pipeline.stats import annotate_on_time_pct_confidence
 
@@ -140,6 +140,18 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("on_time_summary", "en"): "On-time rate (within {threshold_min} min) — top {count} routes",
     ("on_time_summary_worst", "ja"): "定時率 (遅延 {threshold_min} 分以内) 下位{count}路線",
     ("on_time_summary_worst", "en"): "On-time rate (within {threshold_min} min) — bottom {count} routes",
+    ("on_time_summary_default", "ja"): "定時率 (業界標準: 早発{early_min}分・遅延{late_min}分以内) 上位{count}路線",
+    ("on_time_summary_default", "en"): (
+        "On-time rate (industry standard: no more than {early_min} min early, {late_min} min late) — top {count} routes"
+    ),
+    (
+        "on_time_summary_default_worst",
+        "ja",
+    ): "定時率 (業界標準: 早発{early_min}分・遅延{late_min}分以内) 下位{count}路線",
+    ("on_time_summary_default_worst", "en"): (
+        "On-time rate (industry standard: no more than {early_min} min early, {late_min} min late) "
+        "— bottom {count} routes"
+    ),
     ("route_meta_not_found", "ja"): "路線{route} の路線情報が見つかりません。",
     ("route_meta_not_found", "en"): "No metadata found for route {route}.",
     ("route_meta_summary", "ja"): "路線{route} 路線情報",
@@ -473,7 +485,8 @@ TOOLS: list[dict] = [
                 "Ranking of routes, one row per route, over the request window "
                 "and UI filters. The metric param controls what is ranked: avg_delay (default; "
                 "longest average delay first, with p50/p90 minutes), on_time_rate (highest on-time "
-                "% first, always at the fixed 60-second on-time threshold), worst_5min (most "
+                "% first, always under the industry standard: no more than 1 minute early and 5 "
+                "minutes late), worst_5min (most "
                 "departures more than 5 minutes late first). avg_delay and on_time_rate leave out "
                 "routes with 20 or fewer samples. " + _LEFT_OUT_NOTE + " For an on-time ranking at another "
                 "threshold use on_time_rate (best_first=false lists the lowest first). Use for "
@@ -576,9 +589,10 @@ TOOLS: list[dict] = [
             "description": (
                 "On-time percentage per route over the request window and UI "
                 "filters, highest first unless best_first=false (n rows, default 20); routes "
-                "with 20 or fewer samples are left out. " + _LEFT_OUT_NOTE + " A departure counts as on time when it "
-                "is at most threshold_min minutes late (default 1 = 60 seconds); early departures "
-                "always count as on time. Set threshold_min=5 for '5分以内定時率'."
+                "with 20 or fewer samples are left out. " + _LEFT_OUT_NOTE + " Without threshold_min, a departure is "
+                "on time under the industry standard: no more than 1 minute early and 5 minutes late. "
+                "With threshold_min, it is on time when at most threshold_min minutes late, and early "
+                "departures always count as on time. Set threshold_min=5 for '5分以内定時率'."
             ),
             "parameters": {
                 "type": "object",
@@ -587,7 +601,10 @@ TOOLS: list[dict] = [
                         "type": "integer",
                         "minimum": 0,
                         "maximum": 30,
-                        "description": "Minutes late still counted as on time (default 1).",
+                        "description": (
+                            "Minutes late still counted as on time, every early departure included. "
+                            "Leave out for the industry standard (1 minute early to 5 minutes late)."
+                        ),
                     },
                     "n": {
                         "type": "integer",
@@ -773,7 +790,8 @@ SYSTEM_PROMPT = """\
    dimension=service_type: 1路線の日種別(平日・土曜・日祝、または平日・土日祝)別。route 必須)
 - time_series(route?, days_back?, from?, to?): 日次トレンド
 - on_time_rate(threshold_min?, n?, best_first?, days_back?, from?, to?): 定時率ランキング
-  (threshold_min で定時の閾値を変えられる。best_first=false で定時率の低い順)
+  (既定は業界標準: 早発1分・遅延5分以内。threshold_min で「N分以内」(早発は定時に含む)に変えられる。
+   best_first=false で定時率の低い順)
 - route_meta(route): 路線の路線情報
 - segment_hotspots(route, days_back?, from?, to?): 路線の遅延ホットスポット
   (遅延が最も大きい停留所 上位5件。上流からの持ち越しを含む)
@@ -1233,8 +1251,11 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
 
 
 async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    threshold_min = int(args.get("threshold_min", 1))
-    threshold_sec = max(0, threshold_min) * 60
+    # No threshold is the default preset's window, as every other on-time
+    # figure; a threshold is "within N minutes late", early departures on time.
+    raw_threshold = args.get("threshold_min")
+    threshold_min = None if raw_threshold is None else max(0, int(raw_threshold))
+    threshold_sec = None if threshold_min is None else threshold_min * 60
     # Card chips send "k"; LLM tool calls send "n".
     n = int(args.get("k", args.get("n", 20)))
     best_first = bool(args.get("best_first", True))
@@ -1254,12 +1275,16 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     # Display-only annotation (pipeline/stats.py) — does not change
     # compute_on_time's own contract.
     rows = annotate_on_time_pct_confidence(rows)
+    key = "on_time_summary" if threshold_min is not None else "on_time_summary_default"
+    early_sec, late_sec = on_time_window()
     return ToolResult(
         kind="table",
         summary=_summary(
-            "on_time_summary" if best_first else "on_time_summary_worst",
+            key if best_first else f"{key}_worst",
             lang=locale,
             threshold_min=threshold_min,
+            early_min=(early_sec or 0) // 60,
+            late_min=late_sec // 60,
             count=len(rows),
         ),
         rows=_without_service_slot(rows),

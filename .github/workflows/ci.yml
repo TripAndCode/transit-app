@@ -277,9 +277,19 @@ jobs:
           # from a previous run -- skip the download/extract in that case
           # rather than refetching an unchanged tarball from GitHub every job.
           if [ "$("$HOME/bin/gitleaks" version 2>/dev/null || true)" != "$GITLEAKS_VERSION" ]; then
-            curl -sSfL \
-              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-              | tar -xz -C "$HOME/bin" gitleaks
+            # GitHub's release downloads fail transiently (5xx), so the archive
+            # is fetched to a file with retries rather than piped to tar, which
+            # a retried transfer could hand a partial stream. When they stay
+            # down, the same version is built from the Go module proxy, whose
+            # checksum database verifies the source.
+            if curl -sSfL --connect-timeout 20 --max-time 120 --retry 5 --retry-all-errors --retry-delay 10 -o "$RUNNER_TEMP/gitleaks.tar.gz" \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"; then
+              tar -xz -C "$HOME/bin" -f "$RUNNER_TEMP/gitleaks.tar.gz" gitleaks
+            else
+              GOBIN="$HOME/bin" go install \
+                -ldflags "-X=github.com/zricethezav/gitleaks/v8/cmd.Version=${GITLEAKS_VERSION}" \
+                "github.com/zricethezav/gitleaks/v8@v${GITLEAKS_VERSION}"
+            fi
           fi
           echo "$HOME/bin" >> "$GITHUB_PATH"
           "$HOME/bin/gitleaks" version

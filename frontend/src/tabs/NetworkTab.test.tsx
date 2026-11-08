@@ -28,9 +28,9 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
 }
 
 const definition: DefinitionMeta = {
-  preset: "legacy_60s",
-  early_tolerance_sec: null,
-  late_tolerance_sec: 60,
+  preset: "standard_m1_p5",
+  early_tolerance_sec: 60,
+  late_tolerance_sec: 300,
   early_departure_sec: null,
   exclusion_threshold_sec: 7200,
   measurement_point: "all_stops_all_observations",
@@ -512,7 +512,7 @@ describe("NetworkTab", () => {
     expect(block.tagName).toBe("DETAILS");
     expect(block).not.toHaveAttribute("open");
     expect(block.parentElement?.closest("details")).toBeNull();
-    expect(block).toHaveTextContent("On time = no more than 1 min late (early departures count as on time).");
+    expect(block).toHaveTextContent("On time (industry standard) = no more than 5 min late and no more than 1 min early.");
   });
 
   it("hides the ridership-weighted toggle when no agency has configured weights", () => {

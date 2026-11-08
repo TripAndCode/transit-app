@@ -24,12 +24,14 @@ from pipeline.agg_registry import METHOD_VERSION
 from pipeline.cache import clear_all
 from pipeline.clickhouse import jst_date
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
-from pipeline.histogram import (
-    LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
-    LEGACY_PRESET_NAME,
-    LEGACY_SEVERE_LATE_TOLERANCE_SEC,
+from pipeline.histogram import LEGACY_PRESET_NAME, LEGACY_SEVERE_LATE_TOLERANCE_SEC
+from pipeline.reports.rankings import (
+    DEFAULT_EARLY_TOLERANCE_SEC,
+    ON_TIME_PRESETS,
+    STANDARD_PRESET_NAME,
+    early_departure_sec,
+    on_time_window,
 )
-from pipeline.reports.rankings import ON_TIME_PRESETS, early_departure_sec
 from pipeline.reports.schedule_revision import ScheduleDays
 from pipeline.timetable_in_force import fetch_day
 
@@ -74,6 +76,16 @@ _VALUE_BASIS_TEXT: dict[tuple[str, str], str] = {
 # a second time.
 _MEASUREMENT_POINT_CSV_TEXT: dict[str, str] = {MEASUREMENT_POINT: _MEASUREMENT_POINT_TEXT[(MEASUREMENT_POINT, "ja")]}
 _DEDUP_RULE_CSV_TEXT: dict[str, str] = {DEDUP_RULE: _DEDUP_RULE_TEXT[(DEDUP_RULE, "ja")]}
+
+# A named preset in a reader's words, said beside its window wherever a
+# definition is written out: the footnotes, the CSV preamble and, in the same
+# words, the screens (frontend definitionMeta.preset).
+_PRESET_TEXT: dict[tuple[str, str], str] = {
+    (STANDARD_PRESET_NAME, "ja"): "業界標準",
+    (STANDARD_PRESET_NAME, "en"): "industry standard",
+    (LEGACY_PRESET_NAME, "ja"): "従来の基準",
+    (LEGACY_PRESET_NAME, "en"): "legacy",
+}
 
 
 class TimetableVersion(BaseModel):
@@ -304,12 +316,12 @@ def _note_builds(builds: object) -> None:
 _EARLY_RATE_REPORTS = frozenset({"route_table", "council_summary"})
 
 
-def _preset_name(early_tolerance_sec: int | None, late_tolerance_sec: int | None) -> str:
-    """The preset whose window the requested tolerances are, compared before
-    any default fills in, so a request that spells out its tolerances is never
-    named the legacy default, which spells out none."""
-    requested = (early_tolerance_sec, late_tolerance_sec)
-    return next((name for name, window in ON_TIME_PRESETS.items() if window == requested), "custom")
+def _preset_name(early_tolerance_sec: int | None, late_tolerance_sec: int) -> str:
+    """The preset whose window a resolved on-time window is, or ``custom``.
+    Named by the window rather than by how a request spelt it, since a
+    window's figures are the same however it was asked for."""
+    window = (early_tolerance_sec, late_tolerance_sec)
+    return next((name for name, preset in ON_TIME_PRESETS.items() if preset == window), "custom")
 
 
 def resolve_definition_meta(
@@ -319,14 +331,18 @@ def resolve_definition_meta(
     *,
     live: bool = False,
 ) -> DefinitionMeta:
-    """Resolve the early/late tolerance actually applied for *report_type*,
-    from the same (already-validated) query params ``get_report`` passes
-    into :func:`pipeline.reports.rankings.compute_on_time`/
-    :func:`~pipeline.reports.rankings.compute_worst_5min`. Mirrors those two
-    functions' own None-default resolution exactly, so this metadata block
-    can never show a tolerance different from the one actually used to
-    compute the rows next to it. *live* marks rows from a live scan of the
-    observations rather than the aggregates.
+    """The definition behind *report_type*'s figures, from the same values
+    ``get_report`` passes into the compute functions, so it can never show a
+    tolerance different from the one the rows beside it were computed with.
+
+    For the reports with an on-time window, the tolerances are that window,
+    already resolved (:func:`pipeline.reports.rankings.on_time_window`): a
+    ``None`` early tolerance counts every early departure as on time. Neither
+    given is the default window; an early tolerance without a late one is
+    refused, since only a request's own spelling could say what it meant.
+    For ``worst_5min``, *late_tolerance_sec* is
+    its own cutoff, unset for the five-minute column. *live* marks rows from
+    a live scan of the observations rather than the aggregates.
     """
     source: Literal["aggregates", "live"] = "live" if live else "aggregates"
     if report_type in ("on_time", "route_table", "council_summary"):
@@ -334,24 +350,31 @@ def resolve_definition_meta(
         # on_time's window into one whole-agency figure, and route_table's
         # on-time column is on_time's own. route_table's over-5-min share
         # keeps its fixed cutoff, which this metadata does not describe.
-        resolved_late = LEGACY_ON_TIME_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
+        if late_tolerance_sec is None:
+            if early_tolerance_sec is not None:
+                raise ValueError(f"{report_type}'s definition needs its resolved on-time window")
+            early_tolerance_sec, late_tolerance_sec = on_time_window()
         return DefinitionMeta(
             preset=_preset_name(early_tolerance_sec, late_tolerance_sec),
             early_tolerance_sec=early_tolerance_sec,
-            late_tolerance_sec=resolved_late,
+            late_tolerance_sec=late_tolerance_sec,
             early_departure_sec=(
                 early_departure_sec(early_tolerance_sec) if report_type in _EARLY_RATE_REPORTS else None
             ),
             source=source,
         )
     if report_type == "worst_5min":
-        is_legacy = late_tolerance_sec is None
-        resolved_late = LEGACY_SEVERE_LATE_TOLERANCE_SEC if late_tolerance_sec is None else late_tolerance_sec
+        if late_tolerance_sec is None:
+            # The five-minute column counts the departures past the default
+            # window's late edge, so it is named as that window, whose early
+            # side does not move the count.
+            early = DEFAULT_EARLY_TOLERANCE_SEC
+            late = LEGACY_SEVERE_LATE_TOLERANCE_SEC
+            return DefinitionMeta(
+                preset=_preset_name(early, late), early_tolerance_sec=early, late_tolerance_sec=late, source=source
+            )
         return DefinitionMeta(
-            preset=LEGACY_PRESET_NAME if is_legacy else "custom",
-            early_tolerance_sec=None,
-            late_tolerance_sec=resolved_late,
-            source=source,
+            preset="custom", early_tolerance_sec=None, late_tolerance_sec=late_tolerance_sec, source=source
         )
     # No on-time/late tolerance concept: the dedup/exclusion/measurement-point
     # defaults still apply, but there is no preset or tolerance to show.
@@ -378,6 +401,9 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     late = "対象外" if meta.late_tolerance_sec is None else f"{meta.late_tolerance_sec}秒"
     early_rate = "対象外" if meta.early_departure_sec is None else f"{meta.early_departure_sec}秒を超える早発の割合"
     preset = meta.preset or "対象外"
+    preset_name = _PRESET_TEXT.get((preset, "ja"))
+    if preset_name is not None:
+        preset = f"{preset}（{preset_name}）"
     # Looked up from *meta*'s own fields, not the module constants directly,
     # so an unrecognized value raises KeyError instead of silently rendering
     # stale text -- the same failure mode a caller passing an unexpected
@@ -519,7 +545,7 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
     values here too -- the same guarantee the CSV preamble already gives.
 
     The on-time rule is stated in a reader's words (:func:`_on_time_rule`),
-    not by its preset name, which is an identifier for comparing exports.
+    not by its preset identifier, which is for comparing exports.
     It is omitted when *meta* has no late tolerance, a report type with no
     on-time concept (see :class:`DefinitionMeta`), unlike
     :func:`format_definition_csv_line`, whose single preamble cell keeps a
@@ -537,7 +563,7 @@ def format_definition_footnotes(meta: DefinitionMeta, locale: str = "ja") -> lis
 
     lines: list[str] = []
     if meta.late_tolerance_sec is not None:
-        lines.append(_on_time_rule(meta.late_tolerance_sec, meta.early_tolerance_sec, locale))
+        lines.append(_on_time_rule(meta.late_tolerance_sec, meta.early_tolerance_sec, meta.preset, locale))
     if meta.early_departure_sec is not None:
         lines.append(_early_departure_rule(meta.early_departure_sec, locale))
 
@@ -563,19 +589,24 @@ def duration_text(sec: int, locale: str) -> str:
     return (f"{minutes}分" if minutes else "") + (f"{seconds}秒" if seconds or not minutes else "")
 
 
-def _on_time_rule(late_sec: int, early_sec: int | None, locale: str) -> str:
+def _on_time_rule(late_sec: int, early_sec: int | None, preset: str | None, locale: str) -> str:
     """What counts as on time: up to *late_sec* late and, with no early
     tolerance, any early departure, which is said outright because a reader
-    otherwise assumes a window on both sides."""
+    otherwise assumes a window on both sides. A named preset is called by its
+    reader's name (:data:`_PRESET_TEXT`), so a figure compared with a
+    published one says which convention it follows."""
     late = duration_text(late_sec, locale)
     early = None if early_sec is None else duration_text(early_sec, locale)
+    name = _PRESET_TEXT.get((preset or "", locale))
     if locale == "en":
+        lead = "On-time definition" if name is None else f"On-time definition ({name})"
         if early is None:
-            return f"On-time definition: no more than {late} late (early departures count as on time)"
-        return f"On-time definition: no more than {late} late and no more than {early} early"
+            return f"{lead}: no more than {late} late (early departures count as on time)"
+        return f"{lead}: no more than {late} late and no more than {early} early"
+    lead = "定時の定義" if name is None else f"定時の定義（{name}）"
     if early is None:
-        return f"定時の定義：定刻から{late}以内の遅れ（早発も定時として数えます）"
-    return f"定時の定義：定刻から{late}以内の遅れと、{early}以内の早発"
+        return f"{lead}：定刻から{late}以内の遅れ（早発も定時として数えます）"
+    return f"{lead}：定刻から{late}以内の遅れと、{early}以内の早発"
 
 
 def _early_departure_rule(early_sec: int, locale: str) -> str:

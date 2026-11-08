@@ -14,6 +14,7 @@ what stage you are at.
 
 | Command | Does | Reads/writes |
 |---|---|---|
+| `/work-issues` | Coordinates authorized issue work with focused workers, native completion notifications, and private handoffs. | Implementation/review in owned worktrees; tracker/publication writes stay within the user's existing authorization. |
 | `/review-branch` | Builds one secret-aware diff + JSON manifest, then uses two complementary reviewers for normal changes. Process docs use one; enforcement adds one; high-risk changes receive one final integrated pass. Clean groups are never repeated just for “fresh eyes.” | Fixes its own Major findings and diff-introduced dead code or misleading comments in place (two fix iterations max), then runs proportional checks. No commit/push. |
 | `/pr-github` | Posts chosen `/review-branch` findings as inline `gh` comments on the PR. Also defines PR-description style (scannable, table-first, bold keywords). | Writes to GitHub via `gh`. |
 | `/cleanup-merged` | Post-merge maintenance: syncs `main`, runs an evidence-based dry run, removes only proven-stale local branches/worktrees, and can repeat on a VPS clone. | Deletes clean local refs/worktrees only; never deletes GitHub branches or files. |
@@ -66,7 +67,17 @@ describes, never as the rule itself.
 
 | Agent | Role | Tools |
 |---|---|---|
+| `issue-worker` | Implements one assigned issue in an owned worktree and returns concise verification evidence for the coordinator's review. | Read, Grep, Glob, Bash, Edit, Write (model: opus) |
 | `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash (model: sonnet) |
+
+`scripts/run_agent_check.py` is an opt-in command runner for native background
+execution. It captures both streams privately, writes a completion result, preserves
+failure status, and forwards cancellation to the child process group. It neither
+selects a test database nor replaces the repository's verification or push guards.
+
+Project settings request automatic compaction at a 200,000-token window and disable
+the duplicate `superpowers@superpowers-marketplace` variant. The official Superpowers
+installation follows the user's own plugin preference.
 
 Dimensions as of this writing: `bugs`, `logic`, `consistency`, `perf`, `practices`,
 `comments`, `security`, `alternatives`, plus `api-contract` (conditional — endpoint

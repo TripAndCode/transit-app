@@ -1,4 +1,8 @@
 {
+  "autoCompactWindow": 200000,
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": false
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -7,7 +11,7 @@
           { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-dev-db.sh\"" },
           {
             "type": "command",
-            "timeout": 3600,
+            "timeout": 4200,
             "statusMessage": "Pre-push gate: ruff fmt/lint + mypy + tests + frontend typecheck/test/lint/i18n/build/entry-chunk",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-push-quality.sh\""
           }

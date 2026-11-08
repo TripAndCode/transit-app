@@ -502,7 +502,7 @@ async def describe_data(
                 ("avg_delay", "average delay (min)"),
                 ("p50_min", "median delay (min)"),
                 ("p90_min", "90th percentile delay (min)"),
-                ("on_time_pct", "on-time rate (%) — default threshold 60 s"),
+                ("on_time_pct", "on-time rate (%) — by default the industry standard: ≤1 min early, ≤5 min late"),
                 ("samples", "observation sample count"),
             ]
         else:
@@ -510,7 +510,7 @@ async def describe_data(
                 ("avg_delay", "平均遅延 (分)"),
                 ("p50_min", "中央値遅延 (分)"),
                 ("p90_min", "90 パーセンタイル遅延 (分)"),
-                ("on_time_pct", "定時率 (%) — 既定しきい値 60 秒"),
+                ("on_time_pct", "定時率 (%) — 既定は業界標準 (早発1分・遅延5分以内)"),
                 ("samples", "観測サンプル数"),
             ]
         return ToolResult(

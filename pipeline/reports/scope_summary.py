@@ -13,7 +13,8 @@ Each section drops the one condition it exists to choose:
 - ``weekdays``: the selected period, ignoring the weekday filter.
 - ``routes``: the selected period, ignoring the routes filter.
 - ``tolerance``: the whole scope, as the on-time share at each late
-  tolerance, counted as the screens count it
+  tolerance under the scope's early bound (the default preset's unless the
+  scope names one), counted as the screens count it
   (:func:`pipeline.histogram.count_on_time`): exact at one and five minutes
   when the early bound, if any, is on a bucket edge, a histogram estimate
   elsewhere. An early bound below the histogram's floor
@@ -36,6 +37,7 @@ from typing import Any
 from api.range import RangeCtx, day_types_for, resolve_service_dates
 from pipeline.histogram import N_BUCKETS, count_on_time, within_histogram
 from pipeline.reports.filters import _dist_filter
+from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC
 
 DAYS_WINDOW = 90
 TOLERANCE_STEPS_SEC = tuple(range(0, 601, 60))
@@ -79,7 +81,9 @@ async def _merged_hist(agency_id: int, ctx: RangeCtx, conn: Any) -> tuple[list[i
     )
 
 
-async def compute_scope_summary(agency_id: int, ctx: RangeCtx, conn: Any, *, early_sec: int | None = None) -> dict:
+async def compute_scope_summary(
+    agency_id: int, ctx: RangeCtx, conn: Any, *, early_sec: int | None = DEFAULT_EARLY_TOLERANCE_SEC
+) -> dict:
     span = await conn.fetchrow(
         "SELECT MIN(date) AS earliest, MAX(date) AS latest FROM agg_route_daily_dist WHERE agency_id = $1",
         agency_id,

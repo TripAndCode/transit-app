@@ -25,6 +25,9 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+from pipeline.histogram import on_time_count_sql
+from pipeline.reports.comparability import BOARD_ON_TIME_WINDOW
+
 # Network-board variant: one pass across every already-configured agency
 # (GROUP BY agency_id) instead of N per-agency round trips, matching
 # pipeline.reports.network.compute_network_summary's own one-query-per-source
@@ -32,10 +35,13 @@ from decimal import Decimal
 # compute_ridership_weighted_on_time_by_agency) rather than scanning every
 # agency's agg_route_daily_dist rows: ridership weighting is a sparse,
 # manually-populated opt-in, so most agencies would otherwise be weighted and
-# summed here only to be discarded.
-_WEIGHTED_BY_AGENCY_SQL = """
+# summed here only to be discarded. Each row's on-time count is on the board's
+# window (pipeline.reports.comparability.BOARD_ON_TIME_WINDOW), read off its
+# exact columns.
+_WEIGHTED_BY_AGENCY_SQL = f"""
     SELECT d.agency_id,
-        SUM(d.on_time_count * COALESCE(rw_route.weight, rw_default.weight, 1))::numeric AS weighted_on_time,
+        SUM({on_time_count_sql(*BOARD_ON_TIME_WINDOW)} * COALESCE(rw_route.weight, rw_default.weight, 1))::numeric
+            AS weighted_on_time,
         SUM(d.samples * COALESCE(rw_route.weight, rw_default.weight, 1))::numeric AS weighted_samples
     FROM agg_route_daily_dist d
     LEFT JOIN ridership_weights rw_route

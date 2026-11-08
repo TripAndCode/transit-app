@@ -33,11 +33,12 @@ N_BUCKETS = _N_INNER + 2
 # The write paths bake these two thresholds into exact per-route scalar
 # columns at analyze time (agg_route_daily_dist's on_time_count/late5_count in
 # pipeline/ch_aggregates.py, agg_route_stats's on_time_pct/late5_pct/
-# late_5min_plus, also in pipeline/ch_aggregates.py) -- the "legacy_60s" preset. Both write
-# paths and the read path (pipeline/reports/rankings.py) import these constants
-# instead of repeating the literals, so the exact precomputed fast-path
-# columns and this default preset's own values can never drift apart -- the
-# same rationale LO/HI/WIDTH above already apply to bucket edges.
+# late_5min_plus, also in pipeline/ch_aggregates.py): the "legacy_60s" preset's
+# late edge and the five-minute edge the industry preset shares. Both write
+# paths and the read paths import these constants instead of repeating the
+# literals, so the exact precomputed columns and the windows that read them
+# can never drift apart -- the same rationale LO/HI/WIDTH above already apply
+# to bucket edges.
 LEGACY_ON_TIME_LATE_TOLERANCE_SEC = 60
 LEGACY_SEVERE_LATE_TOLERANCE_SEC = 300
 LEGACY_PRESET_NAME = "legacy_60s"
@@ -184,15 +185,22 @@ def early_edge_buckets(early_sec: int) -> int | None:
     return (-early_sec - LO) // WIDTH + 1
 
 
-def early_count_sql(early_sec: int) -> str:
-    """A SQL aggregate summing a ``hist`` column's leading buckets wholly
-    below ``-early_sec`` (Postgres arrays count from 1): the exact count of
-    departures more than *early_sec* early, without merging histograms.
-    Raises ``ValueError`` when ``-early_sec`` is not a bucket edge."""
+def _early_terms_sql(early_sec: int) -> str:
+    """The ``hist`` buckets (Postgres arrays count from 1) wholly below
+    ``-early_sec``, added up within one row. Raises ``ValueError`` when
+    ``-early_sec`` is not a bucket edge."""
     buckets = early_edge_buckets(early_sec)
     if buckets is None:
         raise ValueError(f"-{early_sec} s is not a histogram bucket edge")
-    return "SUM(" + " + ".join(f"hist[{i}]" for i in range(1, buckets + 1)) + ")"
+    return " + ".join(f"hist[{i}]" for i in range(1, buckets + 1))
+
+
+def early_count_sql(early_sec: int) -> str:
+    """A SQL aggregate summing a ``hist`` column's leading buckets wholly
+    below ``-early_sec``: the exact count of departures more than
+    *early_sec* early, without merging histograms. Raises ``ValueError``
+    when ``-early_sec`` is not a bucket edge."""
+    return f"SUM({_early_terms_sql(early_sec)})"
 
 
 def count_early(counts: list[int], early_sec: int) -> float:
@@ -211,19 +219,26 @@ def count_early(counts: list[int], early_sec: int) -> float:
 
 # The late tolerances analyze() bakes an exact count for, each with how the
 # count of departures at most that late reads off the exact columns
-# (samples, on_time_count, late5_count). The one table both _at_most_late and
-# exact_window read, so the gate can never approve a window the reader refuses.
-_EXACT_LATE: dict[int, Callable[[int, int, int], int]] = {
-    LEGACY_ON_TIME_LATE_TOLERANCE_SEC: lambda samples, on_time_count, late5_count: on_time_count,
-    LEGACY_SEVERE_LATE_TOLERANCE_SEC: lambda samples, on_time_count, late5_count: samples - late5_count,
+# (samples, on_time_count, late5_count), in Python and as SQL over one
+# agg_route_daily_dist row. The one table _at_most_late, on_time_count_sql and
+# exact_window read, so the gate can never approve a window a reader refuses.
+_EXACT_LATE: dict[int, tuple[Callable[[int, int, int], int], str]] = {
+    LEGACY_ON_TIME_LATE_TOLERANCE_SEC: (
+        lambda samples, on_time_count, late5_count: on_time_count,
+        "on_time_count",
+    ),
+    LEGACY_SEVERE_LATE_TOLERANCE_SEC: (
+        lambda samples, on_time_count, late5_count: samples - late5_count,
+        "(samples - late5_count)",
+    ),
 }
 
 
 def _at_most_late(late_tolerance_sec: int, samples: int, on_time_count: int, late5_count: int) -> int | None:
     """The exact count of departures at most *late_tolerance_sec* late, where
     analyze() bakes one (:data:`_EXACT_LATE`)."""
-    read = _EXACT_LATE.get(late_tolerance_sec)
-    return None if read is None else read(samples, on_time_count, late5_count)
+    exact = _EXACT_LATE.get(late_tolerance_sec)
+    return None if exact is None else exact[0](samples, on_time_count, late5_count)
 
 
 def exact_window(early_tolerance_sec: int | None, late_tolerance_sec: int) -> bool:
@@ -255,6 +270,19 @@ def on_time_from_columns(
     if at_most_late is None or not exact_window(early_tolerance_sec, late_tolerance_sec):
         raise ValueError(f"({early_tolerance_sec}, {late_tolerance_sec}) is not an exact window")
     return at_most_late if early_tolerance_sec is None else at_most_late - early_count
+
+
+def on_time_count_sql(early_tolerance_sec: int | None, late_tolerance_sec: int) -> str:
+    """A SQL expression over one agg_route_daily_dist row: the exact on-time
+    count of an :func:`exact_window`, as :func:`on_time_from_columns` reads
+    it, so a caller can weight or sum it per row without merging histograms.
+    Raises ``ValueError`` for any other window."""
+    if not exact_window(early_tolerance_sec, late_tolerance_sec):
+        raise ValueError(f"({early_tolerance_sec}, {late_tolerance_sec}) is not an exact window")
+    at_most_late = _EXACT_LATE[late_tolerance_sec][1]
+    if early_tolerance_sec is None:
+        return at_most_late
+    return f"({at_most_late} - ({_early_terms_sql(early_tolerance_sec)}))"
 
 
 def count_on_time(

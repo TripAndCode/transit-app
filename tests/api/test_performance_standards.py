@@ -347,7 +347,9 @@ async def _standards(client, agency_id, query=""):
 @pytest.mark.parametrize(
     ("query", "preset", "early", "late", "share", "meets"),
     [
-        ("", "legacy_60s", None, 60, 60.0, False),
+        ("", "standard_m1_p5", 60, 300, 80.0, True),
+        ("&preset=legacy_60s", "legacy_60s", None, 60, 60.0, False),
+        ("&early=any&late=60", "legacy_60s", None, 60, 60.0, False),
         ("&early=60&late=300", "standard_m1_p5", 60, 300, 80.0, True),
         ("&preset=standard_m1_p5", "standard_m1_p5", 60, 300, 80.0, True),
     ],
@@ -436,7 +438,7 @@ async def test_a_route_page_judges_its_own_route_alone(
     assert scoped == [("OT",)]
     assert [(r["route_code"], r["metric_type"]) for r in body["rows"]] == [("OT", "on_time_pct")]
     figure = next(float(r[2]) for r in table["rows"] if r[0] == "OT")
-    assert body["rows"][0]["actual_value"] == figure == 60.0
+    assert body["rows"][0]["actual_value"] == figure == 80.0
 
 
 @pytest.mark.asyncio
@@ -450,7 +452,7 @@ async def test_an_on_time_target_follows_the_scopes_days_but_not_its_route_filte
     await _seed_standard(pool, agency_id, "OT", "on_time_pct", 70.0, 0.0)
 
     filtered = await _standards(client, agency_id, "&routes=ELSEWHERE")
-    assert filtered["rows"][0]["actual_value"] == 60.0
+    assert filtered["rows"][0]["actual_value"] == 80.0
     # 2026-05-14 is a Thursday.
     weekend = await _standards(client, agency_id, "&dow=weekend")
     assert weekend["rows"][0]["actual_value"] is None

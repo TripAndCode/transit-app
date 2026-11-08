@@ -505,6 +505,22 @@ def test_the_ceiling_check_sees_a_ceiling_raised_past_the_hooks_timeout():
     assert sum(_ceilings(raised)) >= timeout
 
 
+def test_the_codex_wrapper_gives_the_hook_the_same_room():
+    """Codex runs the same script through .codex/hooks/pre-push.sh, under its
+    own harness `timeout`; that one must clear the step ceilings too."""
+    wrapper = ROOT / ".codex" / "hooks" / "pre-push.sh"
+    assert "guard-push-quality.sh" in wrapper.read_text()
+    config = json.loads((ROOT / ".codex" / "hooks.json").read_text())
+    timeouts = [
+        int(hook["timeout"])
+        for group in config["hooks"]["PreToolUse"]
+        for hook in group["hooks"]
+        if "pre-push.sh" in str(hook.get("command", ""))
+    ]
+    assert len(timeouts) == 1, ".codex/hooks/pre-push.sh must be registered exactly once in .codex/hooks.json"
+    assert sum(_ceilings(HOOK_PATH.read_text())) < timeouts[0]
+
+
 def _function_source(name: str) -> str:
     text = HOOK_PATH.read_text()
     start = text.index(f"{name}() {{")
