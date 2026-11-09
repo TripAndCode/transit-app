@@ -22,6 +22,7 @@ from api.routers.map import (
     clock_to_sec,
     resolve_route_trips_date,
 )
+from pipeline.db import departure_ch
 from pipeline.service_day import service_date_ch
 from pipeline.static_archive import Stamp
 
@@ -42,9 +43,11 @@ def test_route_trips_sql_reads_every_marey_column_off_one_winning_row():
     sql, _ = build_route_trips_sql("all", stamp=Stamp.INGESTED)
     # One tuple-argMax, not four per-column argMax calls: a captured_at tie
     # resolved independently per column could mix a scheduled time from one
-    # physical row with a delay from another.
+    # physical row with a delay from another. The delay is the departure the
+    # winning row reports, NULL where that row withdraws it.
     assert sql.count("argMax(") == 1
-    assert "argMax(tuple(u.scheduled_time, u.dep_delay, u.stop_id, u.scheduled_sec)" in sql
+    assert f"argMax(tuple(u.scheduled_time, {departure_ch()}, u.stop_id, u.scheduled_sec)" in sql
+    assert "HAVING tupleElement(winner, 2) IS NOT NULL" in sql
     for i, name in enumerate(("scheduled_time", "dep_delay", "stop_id", "scheduled_sec"), start=1):
         assert f"winner.{i} AS {name}" in sql
 

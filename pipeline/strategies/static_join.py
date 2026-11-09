@@ -38,6 +38,7 @@ from datetime import date, datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
+from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
 from pipeline.strategies._time import parse_departure_time
 
@@ -336,21 +337,11 @@ async def invalidate_field_coverage_probes(conn, agency_id: int) -> int:
     return int(tag.rsplit(" ", 1)[-1])
 
 
-def _decode_rows(pb_bytes: bytes):
-    """Yield (trip_id, rt_route_id, stop_sequence, dep_delay, stop_id, arr_delay,
-    schedule_relationship_trip, schedule_relationship_stop) per stop_time_update.
-
-    stop_id (StopTimeUpdate field 4), arr_delay (StopTimeUpdate.arrival's delay,
-    field 2 -> field 1), schedule_relationship_trip (TripDescriptor field 4),
-    and schedule_relationship_stop (StopTimeUpdate field 5) are populated by
-    Hiroshima-style feeds (this strategy's agencies); confirmed absent from
-    Aomori's feed (see pipeline/strategies/aomori_regex.py), so no fallback
-    decoding for it is needed here.
-
-    stop_sequence is None when the update has none that fits its column (see
-    ``_uint16``); ``field_coverage`` still counts such updates, and
-    ``parse_feed`` drops them.
-    """
+def _decode_trip_updates(pb_bytes: bytes):
+    """Yield (trip_id, rt_route_id, schedule_relationship_trip, stop_time_updates)
+    per TripUpdate naming a trip, each of its stop_time_updates as
+    (stop_sequence, dep_delay, stop_id, arr_delay, schedule_relationship_stop),
+    decoded as ``_decode_rows`` describes."""
     try:
         top = _fields(pb_bytes)
     except Exception:
@@ -371,6 +362,7 @@ def _decode_rows(pb_bytes: bytes):
                 sched_rel_trip = trip[4][0]
         if not trip_id:
             continue
+        updates = []
         for stu_bytes in tu.get(2, []):
             stu = _fields(stu_bytes)
             stop_seq = _uint16(stu.get(1, [None])[0])
@@ -383,8 +375,33 @@ def _decode_rows(pb_bytes: bytes):
             if 3 in stu:
                 dep = _fields(stu[3][0])
                 dep_delay = _int32(dep.get(1, [None])[0])
-            sched_rel_stop = stu.get(5, [None])[0]
+            updates.append((stop_seq, dep_delay, stop_id, arr_delay, stu.get(5, [None])[0]))
+        yield trip_id, rt_route_id, sched_rel_trip, updates
+
+
+def _stop_rows(trip_updates):
+    """``_decode_rows``' tuples of *trip_updates* (``_decode_trip_updates``)."""
+    for trip_id, rt_route_id, sched_rel_trip, updates in trip_updates:
+        for stop_seq, dep_delay, stop_id, arr_delay, sched_rel_stop in updates:
             yield (trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop)
+
+
+def _decode_rows(pb_bytes: bytes):
+    """Yield (trip_id, rt_route_id, stop_sequence, dep_delay, stop_id, arr_delay,
+    schedule_relationship_trip, schedule_relationship_stop) per stop_time_update.
+
+    stop_id (StopTimeUpdate field 4), arr_delay (StopTimeUpdate.arrival's delay,
+    field 2 -> field 1), schedule_relationship_trip (TripDescriptor field 4),
+    and schedule_relationship_stop (StopTimeUpdate field 5) are populated by
+    Hiroshima-style feeds (this strategy's agencies); confirmed absent from
+    Aomori's feed (see pipeline/strategies/aomori_regex.py), so no fallback
+    decoding for it is needed here.
+
+    stop_sequence is None when the update has none that fits its column (see
+    ``_uint16``); ``field_coverage`` still counts such updates, and
+    ``parse_feed`` drops them.
+    """
+    yield from _stop_rows(_decode_trip_updates(pb_bytes))
 
 
 def field_coverage(pb_bytes: bytes) -> dict:
@@ -444,15 +461,28 @@ def parse_feed(
                 route_code, stop_sequence, dep_delay, stop_id, arr_delay,
                 schedule_relationship_trip, schedule_relationship_stop,
                 feed_timestamp, scheduled_sec, static_version_id).
+
+    A CANCELED trip that stores no stop row, because it lists no
+    StopTimeUpdate or none with a usable stop_sequence, gets one trip-level
+    row instead (pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE), so the
+    cancellation is kept: the trip's route, service and version as
+    static_trips names them, the CANCELED status, and no stop, delay or
+    schedule.
     """
-    decoded = list(_decode_rows(pb_bytes))
+    trip_updates = list(_decode_trip_updates(pb_bytes))
+    decoded = list(_stop_rows(trip_updates))
     raw_rows = [r for r in decoded if r[2] is not None]
     if len(raw_rows) < len(decoded):
         _log.warning(
             f"[static_join] agency={agency_id} {len(decoded) - len(raw_rows)} stop_time_updates "
             "had no usable stop_sequence (dropped)"
         )
-    if not raw_rows:
+    cancelled = [
+        (trip_id, rt_route_id)
+        for trip_id, rt_route_id, sched_rel_trip, updates in trip_updates
+        if sched_rel_trip == TRIP_CANCELED and all(update[0] is None for update in updates)
+    ]
+    if not raw_rows and not cancelled:
         return []
 
     feed_timestamp = decode_feed_timestamp(pb_bytes)
@@ -508,6 +538,14 @@ def parse_feed(
                 (agency_id, routeless_trips),
             )
             static_routes = dict(cur.fetchall())
+        cancelled_trips: dict[str, tuple[str | None, str | None, str | None]] = {}
+        if cancelled:
+            cur.execute(
+                "SELECT trip_id, route_id, service_id, static_version_id FROM static_trips "
+                "WHERE agency_id = %s AND trip_id = ANY(%s)",
+                (agency_id, list({trip_id for trip_id, _route in cancelled})),
+            )
+            cancelled_trips = {tid: (route, svc, ver) for tid, route, svc, ver in cur.fetchall()}
 
     rows = []
     miss = 0
@@ -587,4 +625,12 @@ def parse_feed(
         )
     if bad_sched:
         _log.warning(f"[static_join] agency={agency_id} {bad_sched} rows had a non-numeric departure_time hour")
+    for trip_id, rt_route_id in cancelled:
+        route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
+        rows.append(
+            (
+                *(file_name, captured_at, trip_id, svc, None, rt_route_id or route, TRIP_LEVEL_STOP_SEQUENCE),
+                *(None, None, None, TRIP_CANCELED, None, feed_timestamp, None, static_version_id),
+            )
+        )
     return rows

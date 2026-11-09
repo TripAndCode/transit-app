@@ -44,7 +44,7 @@ from zoneinfo import ZoneInfo
 from api.clickhouse import max_captured_at_before_by_agency
 from api.range import RangeCtx, updates_filter_ch
 from api.scope_applied import ALL_SIX
-from pipeline.db import observation_filter_ch
+from pipeline.db import stop_event_filter_ch
 from pipeline.freshness import is_stale
 from pipeline.histogram import (
     LEGACY_SEVERE_LATE_TOLERANCE_SEC,
@@ -532,11 +532,15 @@ async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, conn, ch) ->
     the second is a gap in the data, so a passenger must be told which.
 
     The certificate's rows come from the latest observation of each stop
-    event, and that dedup keeps every event a raw row starts, so a raw row
-    passing the same filters exists exactly when the certificate had an
-    event to judge. Reading raw rows lets the probe stop at the first one
-    instead of aggregating the whole scope. They are filed as the
-    certificate's are (`pipeline.live_filing`).
+    event among the rows the shared dedup reads, a plausible departure or a
+    row withdrawing one (`pipeline.db.stop_event_filter_ch`), so a raw row
+    of those passing the same filters exists whenever the certificate had an
+    event to judge. A scope whose every departure was withdrawn, or never
+    predicted before a CANCELED trip or SKIPPED stop, has one too, and reads
+    as observed: the feed did report on it, and nothing departed late.
+    Reading raw rows lets the probe stop at the first one instead of
+    aggregating the whole scope. They are filed as the certificate's are
+    (`pipeline.live_filing`).
     """
     if ch is None:
         raise RuntimeError("delay_certificate_observed requires a ClickHouse client")
@@ -544,7 +548,7 @@ async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, conn, ch) ->
     filing.check(ctx.from_date, ctx.to_date)
     where = band_candidates(updates_filter_ch(ctx, refit=filing.stamp is Stamp.REFIT), ctx.time_band, filing)
     filed = " AND ".join(part for part in ("u.scheduled_time IS NOT NULL", where.filed) if part)
-    rows = observation_rows(observation_filter_ch(where.raw), filing.stamp, filed_where=filed, live_form=True)
+    rows = observation_rows(stop_event_filter_ch(where.raw), filing.stamp, filed_where=filed, live_form=True)
     result = await ch.query(
         f"SELECT 1 {rows} LIMIT 1",
         parameters={"agency_id": agency_id, **where.params, **filing.params},

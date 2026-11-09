@@ -60,7 +60,13 @@ from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, cl
 from pipeline.cache import async_lru_cache
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table
 from pipeline.day_types import DayTypes, load_day_types
-from pipeline.db import build_dedup_ch_sql, observation_filter_ch
+from pipeline.db import (
+    build_dedup_ch_sql,
+    departure_ch,
+    latest_departure_ch,
+    observation_filter_ch,
+    stop_event_filter_ch,
+)
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.live_filing import Filing, filing
 from pipeline.reports.map import compute_route_shape, route_exists
@@ -973,6 +979,8 @@ def build_route_trips_sql(
     captured_at tie could silently mix a scheduled time from one physical row
     with a delay from another. They are unpacked by position in the outer
     SELECT, which is also the order `build_route_trips` unpacks each row in.
+    A stop whose winning row withdraws its departure (a CANCELED trip or a
+    SKIPPED stop, `pipeline.db.departure_ch`) has no delay and no row.
 
     The trip cap is applied here rather than after the fetch: the response
     carries stops per trip, so a route with many trips would otherwise ship
@@ -986,10 +994,11 @@ def build_route_trips_sql(
     sql = f"""
         WITH grouped AS (
             SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
-                argMax(tuple(u.scheduled_time, u.dep_delay, u.stop_id, u.scheduled_sec),
+                argMax(tuple(u.scheduled_time, {departure_ch()}, u.stop_id, u.scheduled_sec),
                     (u.captured_at, u.file_name)) AS winner
             {_route_rows("target_date", stamp, table, "" if band_frag == "1" else band_frag)}
             GROUP BY u.trip_id, u.stop_sequence
+            HAVING tupleElement(winner, 2) IS NOT NULL
         ),
         kept AS (
             SELECT trip_id
@@ -1221,7 +1230,8 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
 
 
 def _route_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = "") -> str:
-    """The FROM clause of one route's plausible departures on the service day
+    """The FROM clause of one route's plausible departures, and the polls
+    withdrawing one (`pipeline.db.stop_event_filter_ch`), on the service day
     bound as *day_param*, read from *table*, each poll filed under *stamp*
     (`pipeline.static_archive.observation_rows`), and tested by *filed_where*.
     Refitting can give a poll with no route this one, so a REFIT read also
@@ -1230,10 +1240,10 @@ def _route_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = "")
     on_day = f"{service_date_ch('u.captured_at')} = {{{day_param}:Date}}"
     if stamp is not Stamp.REFIT:
         raw = " AND ".join(part for part in ("u.route_code = {route:String}", on_day, filed_where) if part)
-        return observation_rows(observation_filter_ch(raw), stamp, table, live_form=True)
+        return observation_rows(stop_event_filter_ch(raw), stamp, table, live_form=True)
     raw = f"(u.route_code = {{route:String}} OR u.route_code IS NULL) AND {on_day}"
     filed = " AND ".join(part for part in ("u.route_code = {route:String}", filed_where) if part)
-    return observation_rows(observation_filter_ch(raw), stamp, table, filed, live_form=True)
+    return observation_rows(stop_event_filter_ch(raw), stamp, table, filed, live_form=True)
 
 
 def build_route_stop_profile_sql(table: str, stamp: Stamp) -> str:
@@ -1242,13 +1252,15 @@ def build_route_stop_profile_sql(table: str, stamp: Stamp) -> str:
     filed under *stamp* (:func:`_route_rows`).
 
     argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring);
-    one non-key column is read off the winning row, so one argMax suffices.
+    one non-key column is read off the winning row, so one argMax
+    (`pipeline.db.latest_departure_ch`) suffices.
     """
     return f"""
     SELECT u.trip_id, u.stop_sequence,
-        argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
+        {latest_departure_ch()} AS dep_delay
     {_route_rows("day", stamp, table)}
     GROUP BY u.trip_id, u.stop_sequence
+    HAVING dep_delay IS NOT NULL
 """
 
 

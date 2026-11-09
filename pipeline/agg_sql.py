@@ -11,8 +11,8 @@ A change to what any of these statements produces is a builder change: bump
 the table's version in `pipeline/agg_registry.py` in the same commit.
 """
 
-from pipeline.clickhouse import LIVE_SOURCED
-from pipeline.db import hms_to_sec_sql
+from pipeline.clickhouse import LIVE_SOURCED, STOP_SKIPPED, TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
+from pipeline.db import departure_ch, hms_to_sec_sql, stop_event_filter_ch, withdrawn_ch
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
@@ -76,8 +76,25 @@ def feed_health_ch_sql(date_where: str) -> str:
 # in the inner UNION, so it emits no row here at all -- the read
 # path sums with a zero default rather than assuming row-per-day
 # density.
+#
+# SKIPPED means the vehicle passes the stop without stopping, so a run
+# that skipped some stops ran; a feed that reports every stop of a trip
+# SKIPPED is reporting the trip not run. The trip-level row of a
+# cancellation that listed no stop counts in the trip's status and is
+# no stop.
+#
+# Both subqueries read the rows the departure dedup reads
+# (pipeline.db.stop_event_filter_ch): a plausible departure, or a row
+# withdrawing one. A report carrying neither a delay nor a CANCELED or
+# SKIPPED status says nothing about whether the trip ran: a later one
+# leaves the withdrawal before it standing here exactly as it leaves that
+# stop without a departure there, and a stop the feed reported only so
+# counts neither way, so the trip's other stops decide.
 def service_delivered_ch_sql(date_where: str) -> str:
-    """Per service date, the trips the feed reported as not run: CANCELED trips and trips with a SKIPPED stop."""
+    """Per service date, the trips the feed reported as not run: a trip whose
+    latest status is CANCELED, or every stop of which it reports with a
+    plausible delay or a CANCELED or SKIPPED status has SKIPPED as its latest
+    such status. A stop reported only without either counts neither way."""
     return (
         """
                 SELECT svc_date, count() FROM (
@@ -86,22 +103,28 @@ def service_delivered_ch_sql(date_where: str) -> str:
         + _SERVICE_DATE
         + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                        FROM updates AS u WHERE """
+        + stop_event_filter_ch()
         + date_where
         + """
                         GROUP BY svc_date, trip_id
-                    ) WHERE trip_rel = 3
+                    ) WHERE trip_rel = """
+        + str(TRIP_CANCELED)
+        + """
                     UNION DISTINCT
                     SELECT svc_date, trip_id FROM (
                         SELECT """
         + _SERVICE_DATE
         + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                        FROM updates AS u WHERE """
+        + stop_event_filter_ch(f"u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}")
         + date_where
         + """
                         GROUP BY svc_date, trip_id, stop_sequence
-                    ) WHERE stop_rel = 1
+                    ) GROUP BY svc_date, trip_id HAVING countIf(stop_rel != """
+        + str(STOP_SKIPPED)
+        + """) = 0
                 ) GROUP BY svc_date
                 """
     )
@@ -145,7 +168,9 @@ def schedule_revision_ch_sql(date_where: str, stamp: Stamp = Stamp.IN_FORCE) -> 
 # delays are dropped BEFORE the latest-observation-wins argMax, so a
 # frozen-feed spike in an event's latest poll leaves its last
 # plausible estimate rather than removing the event and merging its
-# two neighbouring gaps. stop_sequence stays in the per-event key
+# two neighbouring gaps, while an event whose latest poll reports its
+# trip CANCELED or its stop SKIPPED is no departure and leaves no
+# event (pipeline.db.latest_departure_ch). stop_sequence stays in the per-event key
 # (as in build_dedup_ch_sql and agg_service_delivered_daily's own
 # stop-level subquery) so a route that revisits the same physical
 # stop_id within one trip keeps both visits as distinct events; only
@@ -178,18 +203,21 @@ def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> s
         + """ AS svc_date, trip_id,
                            stop_sequence,
                            argMax(
-                               tuple(u.dep_delay, u.scheduled_sec, ifNull(u.static_version_id, '')),
+                               tuple("""
+        + departure_ch()
+        + """, u.scheduled_sec, ifNull(u.static_version_id, '')),
                                (u.captured_at, u.file_name)
                            ) AS latest
                     """
         + observation_rows(
-            "u.agency_id = {agency_id:UInt16} AND u.stop_id IS NOT NULL AND u.dep_delay IS NOT NULL "
-            "AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}" + date_where,
+            "u.agency_id = {agency_id:UInt16} AND u.stop_id IS NOT NULL AND ((u.dep_delay IS NOT NULL "
+            "AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}) OR " + withdrawn_ch() + ")" + date_where,
             stamp,
             filed_where="u.route_code IS NOT NULL AND u.scheduled_sec IS NOT NULL",
         )
         + """
                     GROUP BY route_code, stop_id, svc_date, trip_id, stop_sequence
+                    HAVING tupleElement(latest, 1) IS NOT NULL
                 )
                 SELECT route_code, stop_id, svc_date,
                        groupArray(toInt64("""

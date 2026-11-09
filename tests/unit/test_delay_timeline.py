@@ -11,6 +11,7 @@ from datetime import date, datetime
 import pytest
 
 from api.range import RangeCtx
+from pipeline.db import latest_departure_ch
 from pipeline.live_filing import AS_INGESTED
 from pipeline.reports.timeline import (
     ALLOWED_STEP_MINUTES,
@@ -117,7 +118,7 @@ def test_timeline_sql_reads_the_shared_dedup_cte_and_buckets_by_scheduled_sec():
 
     # Built on the shared dedup CTE, not a hand-rolled scan of `updates`.
     assert sql.startswith("WITH deduped AS (")
-    assert "argMax(u.dep_delay, (u.captured_at, u.file_name))" in sql
+    assert latest_departure_ch() in sql
     assert "argMax(tuple(u.scheduled_sec), (u.captured_at, u.file_name)), 1) AS scheduled_sec" in sql
     assert "FROM deduped" in sql
 

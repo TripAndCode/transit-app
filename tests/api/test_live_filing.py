@@ -119,6 +119,43 @@ def _poll(pg_conn, ch_client, agency_id: int, day: date, hh: int, mm: int, trip_
     ingest_live_payload(agency_id, feed, at.astimezone(timezone.utc).isoformat(), name, pg_conn, ch_client)
 
 
+# GTFS-RT's StopTimeUpdate SCHEDULED, SKIPPED and NO_DATA, and TripDescriptor CANCELED.
+_SCHEDULED, _SKIPPED, _NO_DATA, _CANCELED = 0, 1, 2, 3
+
+
+def _report(
+    pg_conn,
+    ch_client,
+    agency_id: int,
+    day: date,
+    hh: int,
+    mm: int,
+    trip_id: str,
+    stops: dict[int, tuple[int, int | None]],
+    *,
+    trip_status: int = _SCHEDULED,
+) -> None:
+    """One poll at *hh*:*mm* JST of service day *day* reporting *trip_id* with
+    *trip_status*, and each stop of *stops*, by sequence, with its status and
+    departure delay (None for none)."""
+    at = datetime.combine(day, time(hh, mm), tzinfo=JST)
+    feed = trip_update_feed(
+        trip_update(
+            trip_id,
+            *(
+                stop_time_update(seq, departure_delay=delay, stop_id=STOPS[seq - 1], schedule_relationship=status)
+                for seq, (status, delay) in stops.items()
+            ),
+            route_id=ROUTE,
+            start_date=f"{day:%Y%m%d}",
+            schedule_relationship=trip_status,
+        ),
+        timestamp=int(at.timestamp()),
+    )
+    name = f"live_filing/{day:%Y%m%d}/TripUpdate_{trip_id}_{hh:02d}{mm:02d}00_status.pb"
+    ingest_live_payload(agency_id, feed, at.astimezone(timezone.utc).isoformat(), name, pg_conn, ch_client)
+
+
 def _load(pg_conn, ch_client, tmp_path, agency_id: int, stem: str, first: date, last: date, trips) -> None:
     load_static(_zip(tmp_path, stem, first, last, trips), agency_id, pg_conn, ch_client=ch_client)
 
@@ -161,6 +198,24 @@ def refiled(pg_conn, ch_client, tmp_path) -> Refiled:
     _poll_after_the_load(pg_conn, ch_client, agency_id, day)
     _promote_and_analyze(pg_conn, ch_client, agency_id)
     return Refiled(agency_id, day, before, a, b)
+
+
+@pytest.fixture
+def withdrawn(refiled, pg_conn, ch_client) -> Refiled:
+    """The refiled day, where the feed, after predicting them, reports f's last
+    three stops SKIPPED, each still carrying a delay, and then cancels g. It
+    reports b's last stop SKIPPED too, and then predicts it again, 90 seconds
+    late. All are polled after B's load, like the predictions they follow, so
+    the day reads them REFIT."""
+    agency_id, day = refiled.agency_id, refiled.day
+    _report(pg_conn, ch_client, agency_id, day, 12, 5, "f", {seq: (_SKIPPED, 75) for seq in (4, 5, 6)})
+    every_stop = range(1, len(STOPS) + 1)
+    no_data = {seq: (_NO_DATA, None) for seq in every_stop}
+    _report(pg_conn, ch_client, agency_id, day, 12, 15, "g", no_data, trip_status=_CANCELED)
+    _report(pg_conn, ch_client, agency_id, day, 12, 35, "b", {6: (_SKIPPED, None)})
+    _report(pg_conn, ch_client, agency_id, day, 12, 37, "b", {6: (_SCHEDULED, 90)})
+    _promote_and_analyze(pg_conn, ch_client, agency_id)
+    return refiled
 
 
 @pytest.fixture
@@ -330,11 +385,15 @@ async def test_a_time_band_route_table_scan_reads_the_timetable_in_force(refiled
 
 
 async def test_the_weekday_weekend_compare_reads_the_timetable_in_force(refiled, aconn, ch_async_client):
+    from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
     from pipeline.reports.rankings import _route_wd_we_avg_ch
 
     day = refiled.day
-    stats = await _route_wd_we_avg_ch(refiled.agency_id, _noon(day), aconn, ch_async_client, [day], [day])
+    spy = _Spy(ch_async_client)
+    stats = await _route_wd_we_avg_ch(refiled.agency_id, _noon(day), aconn, spy, [day], [day])
     assert {route: (wd_n, we_n) for route, (_wd, wd_n, _we, we_n) in stats.items()} == {ROUTE: (24, 24)}
+    # The plausibility clamp every other departure read applies.
+    assert f"BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}" in spy.queries[-1][0]
 
 
 async def test_the_delay_certificate_reads_the_timetable_in_force(refiled, aconn, ch_async_client):
@@ -352,6 +411,35 @@ async def test_the_delay_certificate_reads_the_timetable_in_force(refiled, aconn
     # c is R2's only trip: ingest left it no schedule, A gives it one at noon.
     other = RangeCtx(from_date=day, to_date=day, routes=(OTHER,), time_band="noon")
     assert await delay_certificate_observed(refiled.agency_id, other, aconn, ch_async_client)
+
+
+async def test_the_delay_certificate_probe_reads_a_scope_whose_every_departure_was_withdrawn_as_observed(
+    pg_conn, ch_client, aconn, ch_async_client
+):
+    """The feed reported on the scope, a stop SKIPPED that was never
+    predicted, so the scope is observed: nothing departed, so nothing
+    departed late."""
+    from pipeline.clickhouse import insert_updates
+    from pipeline.reports.council import compute_delay_certificate, delay_certificate_observed
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('withdrawn only', 'https://w.example.com') "
+            "RETURNING agency_id"
+        )
+        agency_id = cur.fetchone()[0]
+    pg_conn.commit()
+    day = date(2026, 10, 1)
+    at = datetime.combine(day, time(12), tzinfo=JST)
+    # file_name, captured_at, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay,
+    # stop_id, arr_delay, both schedule relationships (the stop SKIPPED), feed_timestamp, scheduled_sec.
+    skipped = ("w.pb", at, "t", SERVICE, "12:00:00", ROUTE, 1, None, "S1", None, _SCHEDULED, _SKIPPED, None, 43200)
+    insert_updates(ch_client, agency_id, [skipped])
+
+    ctx = RangeCtx(from_date=day, to_date=day, routes=(ROUTE,))
+    assert await delay_certificate_observed(agency_id, ctx, aconn, ch_async_client)
+    rows, _total = await compute_delay_certificate(agency_id, ctx, aconn, ch_async_client, threshold_sec=0)
+    assert rows == []
 
 
 async def test_an_ask_tool_scan_reads_the_timetable_in_force(refiled, aconn, ch_async_client):
@@ -403,6 +491,76 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
     # Under B, b departs at 14:10, outside the band: f and g alone are fewer
     # departures than the table lists, so the rows computed under A are gone too.
     assert response["rows"] == []
+
+
+async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(withdrawn, aconn, ch_async_client):
+    """Each stop's latest report decides whether it departed, in the live form
+    of a REFIT read as in analyze's: of the route's 24 noon departures, f
+    keeps its first three and g none, and b keeps its last stop at the delay
+    predicted after the skip."""
+    from api.range import updates_filter_ch
+    from pipeline.db import build_dedup_ch_sql
+    from pipeline.reports.filters import _dedup_cte_ch, _stop_visits_cte_ch, ctx_filing
+    from pipeline.reports.rankings import _route_wd_we_avg_ch, compute_hourly_heatmap
+    from pipeline.reports.route_table import compute_route_table
+
+    agency_id, day = withdrawn.agency_id, withdrawn.day
+    ctx = _noon(day)
+    filed = await ctx_filing(aconn, ch_async_client, agency_id, ctx)
+    assert filed.stamp is Stamp.REFIT
+    cte, params = _dedup_cte_ch(ctx, filed)
+    where = updates_filter_ch(ctx, refit=True)
+    exact = build_dedup_ch_sql(extra_where=where.raw, filed_where=where.filed, stamp=Stamp.REFIT)
+    read = "SELECT trip_id, stop_sequence, dep_delay FROM deduped ORDER BY trip_id, stop_sequence"
+    live = await ch_async_client.query(f"WITH {cte} {read}", parameters={"agency_id": agency_id, **params})
+    analyzes = await ch_async_client.query(
+        f"WITH deduped AS ({exact}) {read}", parameters={"agency_id": agency_id, **where.params, **filed.params}
+    )
+    assert live.result_rows == analyzes.result_rows
+    kept: dict[str, list[int]] = {}
+    for trip_id, stop_sequence, _delay in live.result_rows:
+        kept.setdefault(trip_id, []).append(stop_sequence)
+    assert ("b", 6, 90) in live.result_rows
+    every_stop = list(range(1, len(STOPS) + 1))
+    assert kept == {"b": every_stop, "c": every_stop, "e": every_stop, "f": [1, 2, 3]}
+
+    rows = await compute_route_table(agency_id, ctx, aconn, ch=ch_async_client, min_samples=1)
+    assert {r[0]: r[5] for r in rows} == {ROUTE: 15, OTHER: 6}
+    stats = await _route_wd_we_avg_ch(agency_id, ctx, aconn, ch_async_client, [day], [day])
+    assert {route: (wd_n, we_n) for route, (_wd, wd_n, _we, we_n) in stats.items()} == {ROUTE: (15, 15)}
+
+    whole_day = RangeCtx(from_date=day, to_date=day)
+    from_aggregate = await compute_hourly_heatmap(agency_id, whole_day, aconn)
+    assert {(c["hour"], c["samples"]) for c in from_aggregate} == {(7, 6), (12, 21), (15, 6)}
+    scanned = RangeCtx(from_date=day, to_date=day, routes=(ROUTE, OTHER, FILED_ONLY))
+    assert await compute_hourly_heatmap(agency_id, scanned, aconn, ch=ch_async_client) == from_aggregate
+
+    route_day = RangeCtx(from_date=day, to_date=day, routes=(ROUTE,))
+    cte, params = _stop_visits_cte_ch(route_day, await ctx_filing(aconn, ch_async_client, agency_id, route_day))
+    visits = await ch_async_client.query(
+        f"WITH {cte} SELECT trip_id, count() FROM visits GROUP BY trip_id ORDER BY trip_id",
+        parameters={"agency_id": agency_id, **params},
+    )
+    assert visits.result_rows == [("a", 6), ("b", 6), ("e", 6), ("f", 3)]
+
+
+async def test_the_map_leaves_out_a_departure_the_feed_withdrew(withdrawn, aconn, ch_async_client, client):
+    from pipeline.reports.map import compute_route_shape
+
+    agency_id, day = withdrawn.agency_id, withdrawn.day
+    body = await compute_route_shape(aconn, ch_async_client, agency_id, ROUTE, _noon(day), locale="en")
+    assert [s["samples"] for s in body["stops"]] == [3, 3, 3, 2, 2, 2]
+
+    response = await client.get(f"/api/{agency_id}/today/route/{ROUTE}/trips?date={day}&time_band=noon")
+    assert response.status_code == 200, response.text
+    stops = {t["trip_id"]: [s["stop_sequence"] for s in t["stops"]] for t in response.json()["trips"]}
+    every_stop = list(range(1, len(STOPS) + 1))
+    assert stops == {"f": [1, 2, 3], "b": every_stop, "e": every_stop}
+
+    response = await client.get(f"/api/{agency_id}/today/route/{ROUTE}/stop-profile")
+    assert response.status_code == 200, response.text
+    # a, b and e at every stop, and f at its first three.
+    assert [s["samples"] for s in response.json()["stops"]] == [4, 4, 4, 3, 3, 3]
 
 
 # ── the delay record, the playback and the map ─────────────────────────────

@@ -38,6 +38,8 @@ def _poll(
     service_type="weekday",
     scheduled_time="10:00",
     scheduled_sec=36000,
+    trip_status=None,
+    stop_status=None,
 ):
     """One StopTimeUpdate row of one poll, shaped for insert_updates."""
     return (
@@ -51,8 +53,8 @@ def _poll(
         dep,
         "S1",
         arr,
-        None,
-        None,
+        trip_status,
+        stop_status,
         None,
         scheduled_sec,
         None,
@@ -174,6 +176,31 @@ def test_stop_visits_drop_a_visit_with_no_plausible_reading():
         _poll("p3.pb", _at(90), 3, dep=10),
     ]
     assert _delays(polls) == [(3, 10, None)]
+
+
+def test_stop_visits_drop_what_a_later_poll_withdraws():
+    """A later CANCELED trip or SKIPPED stop withdraws the departure and the
+    arrival the feed reported before it, and a visit left with neither has no
+    row. Each side stands again on a reading reported after the withdrawal."""
+    canceled, skipped, no_data = 3, 1, 2
+    polls = [
+        # Predicted and arrived, then skipped.
+        _poll("p1.pb", _at(0), 2, dep=50),
+        _poll("p2.pb", _at(60), 2, arr=20),
+        _poll("p3.pb", _at(120), 2, stop_status=skipped),
+        # Predicted, then the trip cancelled.
+        _poll("p1.pb", _at(0), 3, dep=70),
+        _poll("p3.pb", _at(120), 3, trip_status=canceled, stop_status=no_data),
+        # Skipped, then reported again.
+        _poll("p1.pb", _at(0), 4, stop_status=skipped),
+        _poll("p2.pb", _at(60), 4, dep=40),
+        _poll("p3.pb", _at(120), 4, arr=30),
+        # An arrival withdrawn by a skip, and a departure predicted after it.
+        _poll("p1.pb", _at(0), 5, arr=10),
+        _poll("p2.pb", _at(60), 5, stop_status=skipped),
+        _poll("p3.pb", _at(120), 5, dep=15),
+    ]
+    assert _delays(polls) == [(4, 40, 30), (5, 15, None)]
 
 
 def test_stop_visits_keep_one_row_per_trip_stop_and_service_day():

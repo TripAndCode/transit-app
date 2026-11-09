@@ -541,17 +541,25 @@ _STOP_EVENT_KEYS = (
 def _stop_events(where: str, table: str) -> str:
     """*table*'s rows matching *where*, one per stop event (a trip's stop on
     one service day) and stored schedule and version name, with `updates`'
-    columns: the latest poll's capture, file name and departure delay, by
-    (captured_at, file_name), and any poll's of the rest. Every poll grouped
-    together is filed alike, so a read keeping only the delay of each stop
-    event's latest poll among those it files together reads the same rows
-    from these, filing a fraction as many. The delay is taken in a tuple,
-    which argMax does not skip as it skips a NULL argument."""
+    columns: the latest poll's capture, file name, departure delay and both
+    schedule relationships, by (captured_at, file_name), and any poll's of the
+    rest. Every poll grouped together is filed alike, so a read keeping only
+    each stop event's latest poll among those it files together, and whether
+    that poll withdraws the departure (pipeline.db.latest_departure_ch), reads
+    the same rows from these, filing a fraction as many. The latest poll's
+    fields are taken in a tuple, which argMax does not skip as it skips a
+    NULL argument."""
     latest = "max((u.captured_at, u.file_name))"
+    reading = (
+        "argMax(tuple(u.dep_delay, u.schedule_relationship_trip, u.schedule_relationship_stop), "
+        "(u.captured_at, u.file_name))"
+    )
     picked = {
         "captured_at": f"tupleElement({latest}, 1)",
         "file_name": f"tupleElement({latest}, 2)",
-        "dep_delay": "tupleElement(argMax(tuple(u.dep_delay), (u.captured_at, u.file_name)), 1)",
+        "dep_delay": f"tupleElement({reading}, 1)",
+        "schedule_relationship_trip": f"tupleElement({reading}, 2)",
+        "schedule_relationship_stop": f"tupleElement({reading}, 3)",
     }
     columns = ", ".join(
         f"u.{column} AS event_{column}"

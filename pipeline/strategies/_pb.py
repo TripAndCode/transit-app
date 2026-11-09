@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
 # Every captured_at this module returns is timezone-aware, never naive:
 # clickhouse-connect resolves naive datetimes via the *process-local* host
 # timezone when writing DateTime64 columns, so a naive string is only
@@ -158,13 +160,15 @@ def _int32(v):
 
 
 def _uint16(v):
-    """v when it fits stop_sequence's UInt16 column, else None.
+    """v when a stop row's stop_sequence can hold it, else None.
 
     stop_sequence is optional on the wire (a StopTimeUpdate may name only its
     stop_id) and a uint32 there, but it is the non-Nullable key of every
-    `updates` row, so a strategy drops the update when this returns None.
+    `updates` row, so a strategy drops the update when this returns None. The
+    UInt16 column's top value is the trip-level row's
+    (pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE), so no stop row takes it.
     """
-    return v if isinstance(v, int) and 0 <= v <= 0xFFFF else None
+    return v if isinstance(v, int) and 0 <= v < TRIP_LEVEL_STOP_SEQUENCE else None
 
 
 def decode_feed_timestamp(pb_bytes: bytes):
