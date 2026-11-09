@@ -1069,10 +1069,8 @@ async def _run_scenario(
                         "Content-Type": "application/octet-stream",
                     },
                 )
-                if resp.status_code != 200 or resp.json()["inserted"] != poll.stop_updates:
-                    raise RuntimeError(
-                        f"{poll.source_file} ({poll.stop_updates} updates): {resp.status_code} {resp.text}"
-                    )
+                if resp.status_code != 200 or resp.json()["inserted"] != poll.stored_rows:
+                    raise RuntimeError(f"{poll.source_file} ({poll.stored_rows} rows): {resp.status_code} {resp.text}")
             promote_closed_days(agency_id, pg_conn, ch_client)
             analyze(agency_id, pg_conn, ch_client)
             pg_conn.commit()

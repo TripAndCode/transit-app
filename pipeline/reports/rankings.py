@@ -16,6 +16,7 @@ from api.range import (
 )
 from pipeline import perf
 from pipeline.cache import async_lru_cache
+from pipeline.db import latest_departure_ch, withdrawn_ch
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
     LEGACY_PRESET_NAME,
@@ -907,7 +908,9 @@ async def _route_wd_we_avg_ch(
     with the aggregate expression, raising `ILLEGAL_AGGREGATION`.
 
     Rows are filed under the timetable in force on their service date
-    (`pipeline.live_filing`), as the shared dedup files them.
+    (`pipeline.live_filing`), as the shared dedup files them, and a stop
+    event whose latest poll reports its trip CANCELED or its stop SKIPPED
+    has no departure, as in the shared dedup (`pipeline.db.latest_departure_ch`).
     """
     combined_ctx = RangeCtx(
         from_date=ctx.from_date,
@@ -923,7 +926,7 @@ async def _route_wd_we_avg_ch(
         updates_filter_ch(combined_ctx, refit=filed.stamp is Stamp.REFIT), combined_ctx.time_band, filed
     )
     rows = observation_rows(
-        f"u.agency_id = {{agency_id:UInt16}} AND u.dep_delay IS NOT NULL AND {where.raw}",
+        f"u.agency_id = {{agency_id:UInt16}} AND (u.dep_delay IS NOT NULL OR {withdrawn_ch()}) AND {where.raw}",
         filed.stamp,
         filed_where=where.filed,
         live_form=True,
@@ -939,10 +942,11 @@ async def _route_wd_we_avg_ch(
                countIf(sd IN {{cmp_we:Array(Date)}})          AS we_n
         FROM (
             SELECT u.route_code AS route_code,
-                   argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
+                   {latest_departure_ch()} AS dep_delay,
                    {service_date} AS sd
             {rows}
             GROUP BY u.route_code, u.trip_id, {service_date}, u.stop_sequence
+            HAVING dep_delay IS NOT NULL
         )
         GROUP BY route_code
         HAVING wd_n > 10 AND we_n > 10

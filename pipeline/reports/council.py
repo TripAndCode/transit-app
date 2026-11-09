@@ -532,11 +532,14 @@ async def delay_certificate_observed(agency_id: int, ctx: RangeCtx, conn, ch) ->
     the second is a gap in the data, so a passenger must be told which.
 
     The certificate's rows come from the latest observation of each stop
-    event, and that dedup keeps every event a raw row starts, so a raw row
-    passing the same filters exists exactly when the certificate had an
-    event to judge. Reading raw rows lets the probe stop at the first one
-    instead of aggregating the whole scope. They are filed as the
-    certificate's are (`pipeline.live_filing`).
+    event, and that dedup keeps every event a raw departure row starts unless
+    a later poll withdrew it (a CANCELED trip or a SKIPPED stop), so a raw row
+    passing the same filters exists whenever the certificate had an event to
+    judge. A scope whose every departure was withdrawn has one too, and reads
+    as observed: the feed did report on it, and nothing departed late.
+    Reading raw rows lets the probe stop at the first one instead of
+    aggregating the whole scope. They are filed as the certificate's are
+    (`pipeline.live_filing`).
     """
     if ch is None:
         raise RuntimeError("delay_certificate_observed requires a ClickHouse client")

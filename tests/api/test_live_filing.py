@@ -119,6 +119,34 @@ def _poll(pg_conn, ch_client, agency_id: int, day: date, hh: int, mm: int, trip_
     ingest_live_payload(agency_id, feed, at.astimezone(timezone.utc).isoformat(), name, pg_conn, ch_client)
 
 
+def _withdraw(
+    pg_conn, ch_client, agency_id: int, day: date, hh: int, mm: int, trip_id: str, *, skipped: tuple[int, ...] = ()
+) -> None:
+    """One poll at *hh*:*mm* JST of service day *day* that reports *trip_id*
+    with the stops numbered in *skipped* SKIPPED or, given none, CANCELED with
+    every stop NO_DATA."""
+    at = datetime.combine(day, time(hh, mm), tzinfo=JST)
+    canceled, skipped_stop, no_data = 3, 1, 2
+    listed = skipped or tuple(range(1, len(STOPS) + 1))
+    feed = trip_update_feed(
+        trip_update(
+            trip_id,
+            *(
+                stop_time_update(
+                    seq, stop_id=STOPS[seq - 1], schedule_relationship=skipped_stop if skipped else no_data
+                )
+                for seq in listed
+            ),
+            route_id=ROUTE,
+            start_date=f"{day:%Y%m%d}",
+            schedule_relationship=0 if skipped else canceled,
+        ),
+        timestamp=int(at.timestamp()),
+    )
+    name = f"live_filing/{day:%Y%m%d}/TripUpdate_{trip_id}_{hh:02d}{mm:02d}00_withdrawn.pb"
+    ingest_live_payload(agency_id, feed, at.astimezone(timezone.utc).isoformat(), name, pg_conn, ch_client)
+
+
 def _load(pg_conn, ch_client, tmp_path, agency_id: int, stem: str, first: date, last: date, trips) -> None:
     load_static(_zip(tmp_path, stem, first, last, trips), agency_id, pg_conn, ch_client=ch_client)
 
@@ -161,6 +189,17 @@ def refiled(pg_conn, ch_client, tmp_path) -> Refiled:
     _poll_after_the_load(pg_conn, ch_client, agency_id, day)
     _promote_and_analyze(pg_conn, ch_client, agency_id)
     return Refiled(agency_id, day, before, a, b)
+
+
+@pytest.fixture
+def withdrawn(refiled, pg_conn, ch_client) -> Refiled:
+    """The refiled day, where the feed, after predicting them, reports f's last
+    three stops SKIPPED and then cancels g. Both are polled after B's load,
+    like the predictions they withdraw, so the day reads them REFIT."""
+    _withdraw(pg_conn, ch_client, refiled.agency_id, refiled.day, 12, 5, "f", skipped=(4, 5, 6))
+    _withdraw(pg_conn, ch_client, refiled.agency_id, refiled.day, 12, 15, "g")
+    _promote_and_analyze(pg_conn, ch_client, refiled.agency_id)
+    return refiled
 
 
 @pytest.fixture
@@ -403,6 +442,74 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
     # Under B, b departs at 14:10, outside the band: f and g alone are fewer
     # departures than the table lists, so the rows computed under A are gone too.
     assert response["rows"] == []
+
+
+async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(withdrawn, aconn, ch_async_client):
+    """Each stop's latest report decides whether it departed, in the live form
+    of a REFIT read as in analyze's: of the route's 24 noon departures, f
+    keeps its first three and g none."""
+    from api.range import updates_filter_ch
+    from pipeline.db import build_dedup_ch_sql
+    from pipeline.reports.filters import _dedup_cte_ch, _stop_visits_cte_ch, ctx_filing
+    from pipeline.reports.rankings import _route_wd_we_avg_ch, compute_hourly_heatmap
+    from pipeline.reports.route_table import compute_route_table
+
+    agency_id, day = withdrawn.agency_id, withdrawn.day
+    ctx = _noon(day)
+    filed = await ctx_filing(aconn, ch_async_client, agency_id, ctx)
+    assert filed.stamp is Stamp.REFIT
+    cte, params = _dedup_cte_ch(ctx, filed)
+    where = updates_filter_ch(ctx, refit=True)
+    exact = build_dedup_ch_sql(extra_where=where.raw, filed_where=where.filed, stamp=Stamp.REFIT)
+    read = "SELECT trip_id, stop_sequence FROM deduped ORDER BY trip_id, stop_sequence"
+    live = await ch_async_client.query(f"WITH {cte} {read}", parameters={"agency_id": agency_id, **params})
+    analyzes = await ch_async_client.query(
+        f"WITH deduped AS ({exact}) {read}", parameters={"agency_id": agency_id, **where.params, **filed.params}
+    )
+    assert live.result_rows == analyzes.result_rows
+    kept: dict[str, list[int]] = {}
+    for trip_id, stop_sequence in live.result_rows:
+        kept.setdefault(trip_id, []).append(stop_sequence)
+    every_stop = list(range(1, len(STOPS) + 1))
+    assert kept == {"b": every_stop, "c": every_stop, "e": every_stop, "f": [1, 2, 3]}
+
+    rows = await compute_route_table(agency_id, ctx, aconn, ch=ch_async_client, min_samples=1)
+    assert {r[0]: r[5] for r in rows} == {ROUTE: 15, OTHER: 6}
+    stats = await _route_wd_we_avg_ch(agency_id, ctx, aconn, ch_async_client, [day], [day])
+    assert {route: (wd_n, we_n) for route, (_wd, wd_n, _we, we_n) in stats.items()} == {ROUTE: (15, 15)}
+
+    whole_day = RangeCtx(from_date=day, to_date=day)
+    from_aggregate = await compute_hourly_heatmap(agency_id, whole_day, aconn)
+    assert {(c["hour"], c["samples"]) for c in from_aggregate} == {(7, 6), (12, 21), (15, 6)}
+    scanned = RangeCtx(from_date=day, to_date=day, routes=(ROUTE, OTHER, FILED_ONLY))
+    assert await compute_hourly_heatmap(agency_id, scanned, aconn, ch=ch_async_client) == from_aggregate
+
+    route_day = RangeCtx(from_date=day, to_date=day, routes=(ROUTE,))
+    cte, params = _stop_visits_cte_ch(route_day, await ctx_filing(aconn, ch_async_client, agency_id, route_day))
+    visits = await ch_async_client.query(
+        f"WITH {cte} SELECT trip_id, count() FROM visits GROUP BY trip_id ORDER BY trip_id",
+        parameters={"agency_id": agency_id, **params},
+    )
+    assert visits.result_rows == [("a", 6), ("b", 6), ("e", 6), ("f", 3)]
+
+
+async def test_the_map_leaves_out_a_departure_the_feed_withdrew(withdrawn, aconn, ch_async_client, client):
+    from pipeline.reports.map import compute_route_shape
+
+    agency_id, day = withdrawn.agency_id, withdrawn.day
+    body = await compute_route_shape(aconn, ch_async_client, agency_id, ROUTE, _noon(day), locale="en")
+    assert [s["samples"] for s in body["stops"]] == [3, 3, 3, 2, 2, 2]
+
+    response = await client.get(f"/api/{agency_id}/today/route/{ROUTE}/trips?date={day}&time_band=noon")
+    assert response.status_code == 200, response.text
+    stops = {t["trip_id"]: [s["stop_sequence"] for s in t["stops"]] for t in response.json()["trips"]}
+    every_stop = list(range(1, len(STOPS) + 1))
+    assert stops == {"f": [1, 2, 3], "b": every_stop, "e": every_stop}
+
+    response = await client.get(f"/api/{agency_id}/today/route/{ROUTE}/stop-profile")
+    assert response.status_code == 200, response.text
+    # a, b and e at every stop, and f at its first three.
+    assert [s["samples"] for s in response.json()["stops"]] == [4, 4, 4, 3, 3, 3]
 
 
 # ── the delay record, the playback and the map ─────────────────────────────

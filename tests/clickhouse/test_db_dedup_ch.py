@@ -319,6 +319,79 @@ def test_dedup_ch_keeps_a_latest_poll_with_no_schedule_unscheduled():
     assert rows == [(None, 120)]
 
 
+# GTFS-RT's TripDescriptor CANCELED, and StopTimeUpdate SKIPPED and NO_DATA.
+_CANCELED, _SKIPPED, _NO_DATA = 3, 1, 2
+
+
+def _status_poll(file_name, minute, trip_id, *, dep_delay, trip_status=0, stop_status=0, stop_sequence=1):
+    """One static_join poll of *trip_id*'s stop, *minute* minutes after 11:00 JST on 1 April."""
+    # Shaped for insert_updates: scheduled_time, stop_id, arr_delay, the two
+    # schedule relationships, feed_timestamp, scheduled_sec, static_version_id.
+    return (
+        file_name,
+        datetime(2026, 4, 1, 2, minute, 0, tzinfo=timezone.utc),
+        trip_id,
+        "weekday",
+        "11:30:00",
+        "R1",
+        stop_sequence,
+        dep_delay,
+        "S1",
+        None,
+        trip_status,
+        stop_status,
+        None,
+        41400,
+        None,
+    )
+
+
+@pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
+def test_dedup_ch_drops_a_departure_its_latest_poll_withdraws():
+    """The latest poll of a stop event decides whether it departed: a later
+    CANCELED trip or SKIPPED stop removes the event, whatever delay that poll
+    carries, and a later prediction restores it. A poll that carries no delay
+    and withdraws nothing leaves the last prediction standing, and the
+    trip-level row of a cancellation that listed no stop is no stop event."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE, insert_updates
+
+    polls = [
+        _status_poll("a/01.pb", 1, "cancelled", dep_delay=90),
+        _status_poll("a/02.pb", 2, "cancelled", dep_delay=None, trip_status=_CANCELED, stop_status=_NO_DATA),
+        _status_poll("a/01.pb", 1, "skipped", dep_delay=60),
+        _status_poll("a/02.pb", 2, "skipped", dep_delay=None, stop_status=_SKIPPED),
+        _status_poll("a/01.pb", 1, "skipped_with_a_delay", dep_delay=60),
+        _status_poll("a/02.pb", 2, "skipped_with_a_delay", dep_delay=75, stop_status=_SKIPPED),
+        _status_poll("a/01.pb", 1, "reinstated", dep_delay=None, stop_status=_SKIPPED),
+        _status_poll("a/02.pb", 2, "reinstated", dep_delay=120),
+        _status_poll("a/01.pb", 1, "silent", dep_delay=45),
+        _status_poll("a/02.pb", 2, "silent", dep_delay=None, stop_status=_NO_DATA),
+        _status_poll(
+            "a/02.pb",
+            2,
+            "cancelled_without_stops",
+            dep_delay=None,
+            trip_status=_CANCELED,
+            stop_status=None,
+            stop_sequence=TRIP_LEVEL_STOP_SEQUENCE,
+        ),
+    ]
+    client = _ch_test_client()
+    client.command("DROP TABLE IF EXISTS updates")
+    apply_schema(client)
+    insert_updates(client, 1, polls)
+    try:
+        result = client.query(build_dedup_ch_sql(include_scheduled_sec=True), parameters={"agency_id": 1})
+        rows = [dict(zip(result.column_names, row, strict=True)) for row in result.result_rows]
+    finally:
+        client.close()
+    assert sorted((r["trip_id"], r["dep_delay"], r["scheduled_sec"]) for r in rows) == [
+        ("reinstated", 120, 41400),
+        ("silent", 45, 41400),
+    ]
+
+
 @pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 def test_dedup_cte_ch_picks_latest_observation():
     """`pipeline.reports.filters._dedup_cte_ch` composes, for rows read as

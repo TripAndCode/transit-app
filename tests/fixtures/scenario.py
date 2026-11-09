@@ -430,6 +430,12 @@ class Poll:
         return sum(len(t.stops) for t in self.trips)
 
     @property
+    def stored_rows(self) -> int:
+        """The rows ingest stores for the poll: one per stop update, and one
+        for each trip it reports CANCELED without listing a stop."""
+        return self.stop_updates + sum(1 for t in self.trips if t.status == CANCELED and not t.stops)
+
+    @property
     def payload(self) -> bytes:
         return trip_update_feed(
             *(

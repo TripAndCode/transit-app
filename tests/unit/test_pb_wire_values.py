@@ -31,8 +31,12 @@ def test_int32_reads_a_missing_or_non_varint_field_as_absent(value):
     assert _int32(value) is None
 
 
-@pytest.mark.parametrize("value, expected", [(0, 0), (1, 1), (65535, 65535), (65536, None), (None, None), (b"", None)])
-def test_uint16_keeps_only_values_the_column_can_hold(value, expected):
+@pytest.mark.parametrize(
+    "value, expected", [(0, 0), (1, 1), (65534, 65534), (65535, None), (65536, None), (None, None), (b"", None)]
+)
+def test_uint16_keeps_only_values_a_stop_row_can_hold(value, expected):
+    """65535 fits the column but is the trip-level row's stop_sequence, so no
+    stop row may carry it."""
     assert _uint16(value) == expected
 
 
