@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import asyncpg
 
 from db.migrate import _versions_on_disk
+from pipeline.reports import comparability
 from pipeline.service_day import service_date_of
 
 _log = logging.getLogger(__name__)
@@ -172,7 +173,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
         f = feed.get(aid)
         raw = int(f["raw"]) if f and f["raw"] else 0
         clamp = int(f["clamp"]) if f and f["clamp"] else 0
-        clamp_pct = round(clamp / raw * 100, 2) if raw else None
+        clamp_pct = comparability.clamp_pct(clamp, raw)
 
         result.append(
             AgencyFreshness(

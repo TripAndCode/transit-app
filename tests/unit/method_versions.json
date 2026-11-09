@@ -62,5 +62,8 @@
     "agg_service_delivered_daily": 2,
     "agg_stop_daily": 4,
     "route_delay_counts": 4
+  },
+  "2026.11.5": {
+    "feed_quality_monthly": 1
   }
 }

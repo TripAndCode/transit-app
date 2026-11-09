@@ -178,12 +178,14 @@ _seen_builds: object = _UNSEEN
 # can become visible dated before one already seen. A table's row moves only
 # when a run rewrites it (pipeline.analyze._record_fingerprints). With no
 # agency named, built_at covers the agencies the board lists, not deleted.
+# Not the feed-quality scorecard: no report reads it, and it rewrites its month in progress.
 _BUILDS_SQL = """
 SELECT count(*) AS builds,
        sum(extract(epoch FROM s.built_at)) AS stamps,
        max(s.built_at) FILTER (WHERE s.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)) AS built_at
 FROM agg_table_state s
 JOIN agencies a USING (agency_id)
+WHERE s.table_name <> 'feed_quality_monthly'
 """
 
 

@@ -447,8 +447,9 @@ def _preamble(resp) -> str:
 
 @pytest.mark.asyncio
 async def test_a_report_names_the_method_version_and_when_its_aggregates_were_built(reports_client):
-    """The newest build analyze recorded for the agency, across its tables;
-    another agency's later build is not this report's."""
+    """The newest build analyze recorded for the agency, across the tables a
+    report reads; another agency's later build is not this report's, nor is
+    the feed-quality scorecard's, which no report reads."""
     client, agency_id, pool = reports_client
     url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-18"
 
@@ -464,6 +465,7 @@ async def test_a_report_names_the_method_version_and_when_its_aggregates_were_bu
         (agency_id, "agg_route_stats", datetime(2026, 11, 4, tzinfo=timezone.utc)),
         (agency_id, "agg_route_daily", _BUILT_AT),
         (other, "agg_route_daily", datetime(2026, 11, 7, tzinfo=timezone.utc)),
+        (agency_id, "feed_quality_monthly", datetime(2026, 11, 8, tzinfo=timezone.utc)),
     )
     built = (await client.get(url)).json()["definition"]
     assert (built["method_version"], built["source"]) == (METHOD_VERSION, "aggregates")

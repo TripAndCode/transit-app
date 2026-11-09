@@ -1,6 +1,6 @@
-"""The agency diagnostics endpoint's seven reads must run concurrently, each
+"""The agency diagnostics endpoint's eight reads must run concurrently, each
 on its own pooled connection -- a single asyncpg connection cannot multiplex
-queries, so awaiting them one at a time serializes seven round trips that
+queries, so awaiting them one at a time serializes eight round trips that
 have no dependency on each other -- and no connection may be held while
 another is waited for, or enough concurrent requests drain the pool and wait
 on each other forever.
@@ -67,15 +67,16 @@ def _client(pool: _FakePool) -> TestClient:
     return TestClient(app)
 
 
-def test_diagnostics_runs_the_seven_reads_on_their_own_pooled_connections():
+def test_diagnostics_runs_the_eight_reads_on_their_own_pooled_connections():
     pool = _FakePool()
     r = _client(pool).get("/api/admin/agencies/1/diagnostics")
     assert r.status_code == 200
-    # The header lookup, then the seven reads; no request-scoped connection.
-    assert pool.events.count("acquire") == 8
+    # The header lookup, then the eight reads; no request-scoped connection.
+    assert pool.events.count("acquire") == 9
     # The header's connection goes back before any read takes one.
     assert pool.events[:3] == ["acquire", "release", "acquire"]
     body = r.json()
     assert body["agency_id"] == 1
     assert body["standards"] == []
     assert body["weights"] == []
+    assert body["feed_quality"] == []

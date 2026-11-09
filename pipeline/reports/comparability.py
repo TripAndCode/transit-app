@@ -93,18 +93,16 @@ def assess(
     (:func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`);
     ``on_time_count`` of ``samples`` the stop events on time and observed.
     """
-    matchable = ingest_strategy in COMPARABLE_INGEST_STRATEGIES
+    matchable = trips_matchable(ingest_strategy)
     observed = observed_trips if matchable else None
     planned = coverage_planned_trips if matchable else None
-    coverage_pct = _coverage_pct(observed, planned)
+    coverage = coverage_pct(observed, planned)
     ci_low, ci_high = _on_time_interval(on_time_count, samples, observed)
-    reason = _first_failure(
-        coverage_pct=coverage_pct, ci_low=ci_low, ci_high=ci_high, clamp_pct=clamp_pct, samples=samples
-    )
+    reason = _first_failure(coverage_pct=coverage, ci_low=ci_low, ci_high=ci_high, clamp_pct=clamp_pct, samples=samples)
     return Assessment(
         observed_trips=observed,
         coverage_planned_trips=planned,
-        coverage_pct=coverage_pct,
+        coverage_pct=coverage,
         ci_low=ci_low,
         ci_high=ci_high,
         comparable=reason is None,
@@ -112,16 +110,32 @@ def assess(
     )
 
 
-def _coverage_pct(observed_trips: int | None, planned_trips: int | None) -> float | None:
-    """Observed trips as a percentage of planned trips, to one decimal.
+def trips_matchable(ingest_strategy: str | None) -> bool:
+    """Whether the strategy's trip_ids are the timetable's, so what its feed
+    reported can be counted against what the timetable planned."""
+    return ingest_strategy in COMPARABLE_INGEST_STRATEGIES
+
+
+def coverage_pct(observed: int | None, planned: int | None) -> float | None:
+    """What the feed reported as a percentage of what the timetable planned,
+    to one decimal: trips on the board, and the same ratio of stop events on
+    the feed-quality scorecard.
 
     Not capped at 100: more observed than planned means the feed reported
     trips the plan doesn't name, and that stays visible. ``None`` without a
     plan or an observed count.
     """
-    if observed_trips is None or planned_trips is None or planned_trips <= 0:
+    if observed is None or planned is None or planned <= 0:
         return None
-    return round(observed_trips / planned_trips * 100, 1)
+    return round(observed / planned * 100, 1)
+
+
+def clamp_pct(clamp_count: int, raw_samples: int) -> float | None:
+    """The share of readings the plausibility clamp dropped
+    (``agg_feed_health.clamp_count`` of ``raw_samples``), in percent to two
+    decimals, as the board, the feed-health banner and the scorecard print
+    it. ``None`` without a reading, which says nothing about plausibility."""
+    return round(clamp_count / raw_samples * 100, 2) if raw_samples else None
 
 
 def _on_time_interval(

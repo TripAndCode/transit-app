@@ -55,6 +55,28 @@ def _trips(pg_conn, agency_id: int, service_id: str, count: int) -> None:
     pg_conn.commit()
 
 
+def _stop_times(pg_conn, agency_id: int, service_id: str, trips: int, stops: int) -> None:
+    """``stops`` stop times for each of the ``trips`` trips :func:`_trips` added under ``service_id``."""
+    with pg_conn.cursor() as cur:
+        for i in range(trips):
+            for seq in range(1, stops + 1):
+                cur.execute(
+                    "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                    "VALUES (%s, %s, %s, %s, '08:00:00')",
+                    (agency_id, f"{service_id}-{i}", seq, f"S{seq}"),
+                )
+    pg_conn.commit()
+
+
+def _saved_stop_events(pg_conn, agency_id: int) -> dict[date, int | None]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_date, planned_stop_events FROM planned_trips_daily WHERE agency_id = %s ORDER BY 1",
+            (agency_id,),
+        )
+        return dict(cur.fetchall())
+
+
 def _saved(pg_conn, agency_id: int) -> dict[date, int]:
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -102,6 +124,45 @@ def test_capture_saves_each_covered_day_before_today(pg_conn, agency_id):
     # is still the loaded timetable's to plan.
     assert _saved(pg_conn, agency_id) == expected
     assert inserted == len(expected)
+
+
+def test_capture_saves_each_days_planned_stop_events_beside_its_trips(pg_conn, agency_id):
+    _weekly(pg_conn, agency_id, "WD", "1111100", date(2026, 4, 6), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "WD", 3)
+    _stop_times(pg_conn, agency_id, "WD", 3, 4)
+    _addition(pg_conn, agency_id, "EX", "20260411")
+    _trips(pg_conn, agency_id, "EX", 2)
+    _stop_times(pg_conn, agency_id, "EX", 2, 5)
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    # Each running trip plans one stop event per stop time: 3 x 4 on a
+    # weekday, the Saturday addition's 2 x 5, nothing on the Sunday.
+    expected = {d: 12 for d in _days(date(2026, 4, 6), date(2026, 4, 14))}
+    expected |= {date(2026, 4, 11): 10, date(2026, 4, 12): 0}
+    assert _saved_stop_events(pg_conn, agency_id) == expected
+
+
+def test_a_day_saved_without_its_stop_events_keeps_them_unknown(pg_conn, agency_id):
+    _weekly(pg_conn, agency_id, "ALL", "1111111", date(2026, 4, 1), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "ALL", 3)
+    _stop_times(pg_conn, agency_id, "ALL", 3, 2)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips) VALUES (%s, '2026-04-14', 3)",
+            (agency_id,),
+        )
+    pg_conn.commit()
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    saved = _saved_stop_events(pg_conn, agency_id)
+    # The first count saved for a day stands, stop events included: the
+    # timetable that planned it may not be the one loaded now.
+    assert saved[date(2026, 4, 14)] is None
+    assert saved[date(2026, 4, 13)] == 6
 
 
 def test_capture_never_overwrites_a_saved_day(pg_conn, agency_id):
