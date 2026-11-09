@@ -395,8 +395,8 @@ def _ingest_and_analyze_sweep(
                         stopped = stop_on_failure
             if not stopped:
                 try:
-                    with _stage("analyze", aid):
-                        analyze(aid, conn, ch_client)
+                    with _stage("analyze", aid) as run:
+                        run.rebuild_headline = analyze(aid, conn, ch_client, db_url=db_url)
                 except Exception:
                     _log.exception("cron: analyze failed for agency %s", aid)
                     failed.append(f"analyze agency {aid}")

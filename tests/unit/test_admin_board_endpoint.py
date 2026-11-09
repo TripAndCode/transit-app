@@ -55,6 +55,7 @@ _RUN_ROWS = [
         "lock_wait_ms": None,
         "error": None,
         "requested_by": None,
+        "rebuild_headline": None,
     }
 ]
 
