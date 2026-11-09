@@ -63,7 +63,9 @@ describe("FeedQualityTrend", () => {
     expect(screen.getByText("693 of 1,000 planned trips")).toBeInTheDocument();
     expect(screen.getByText("median 22 s · 95th percentile 38.3 s")).toBeInTheDocument();
     expect(screen.getByText(/arrival 7\.2%/)).toBeInTheDocument();
-    const rows = within(screen.getByRole("table", { name: "Last six months" })).getAllByRole("row");
+    const rows = within(screen.getByRole("table", { name: "Last six months" })).getAllByRole(
+      "row",
+    ) as HTMLTableRowElement[];
     expect(rows.map((r) => r.cells[0].textContent)).toEqual(["Month", "2026-10", "2026-09"]);
     expect(rows[2].cells[1].textContent).toBe("71.0%");
   });
@@ -82,7 +84,7 @@ describe("FeedQualityTrend", () => {
     ]);
     expect(screen.getByText("archived polls take their time from the feed itself")).toBeInTheDocument();
     expect(screen.getByText("not recorded")).toBeInTheDocument();
-    const row = within(screen.getByRole("table")).getAllByRole("row")[1];
+    const row = within(screen.getByRole("table")).getAllByRole("row")[1] as HTMLTableRowElement;
     expect(row.cells[2].textContent).toBe("—");
     expect(row.cells[2].getAttribute("title")).toBe("stop plan not saved for these days");
     expect(row.cells[3].getAttribute("title")).toBe("archived polls take their time from the feed itself");
