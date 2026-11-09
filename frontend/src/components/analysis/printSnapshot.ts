@@ -43,10 +43,18 @@ export function sameFigures(a: ReportResponse, b: ReportResponse): boolean {
  *  response on the page, `shown`. The server recomputes the figures for the
  *  query, so a page loaded before a rebuild would otherwise carry an id for
  *  figures it does not show. Never throws, and settles within
- *  PRINT_SNAPSHOT_WAIT_MS. */
-export async function snapshotForPrint(spec: SnapshotSpec, shown: ReportResponse, locale: Locale): Promise<PrintSnapshot> {
+ *  PRINT_SNAPSHOT_WAIT_MS, or as soon as `signal` aborts. */
+export async function snapshotForPrint(
+  spec: SnapshotSpec,
+  shown: ReportResponse,
+  locale: Locale,
+  signal?: AbortSignal,
+): Promise<PrintSnapshot> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), PRINT_SNAPSHOT_WAIT_MS);
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop);
+  if (signal?.aborted) stop();
   try {
     const created = await createSnapshot(spec, { signal: controller.signal });
     const stored = (await fetchSnapshot(created.snapshot_id, { signal: controller.signal })).payloads.report?.[locale];
@@ -57,5 +65,6 @@ export async function snapshotForPrint(spec: SnapshotSpec, shown: ReportResponse
     return { kind: "failed" };
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener("abort", stop);
   }
 }

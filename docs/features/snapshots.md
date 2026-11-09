@@ -97,8 +97,13 @@ snapshot, and the button waits while it is taken.
   is scanned live once per language, so its print is the likeliest to go
   without a link: the wait is bounded for the reader's sake, not stretched
   to fit the slowest scan. Figures held over from another scope while the
-  new one loads print without a snapshot, and a report that leaves the
-  screen while its snapshot is taken prints nothing.
+  new one loads print without a snapshot.
+- **Called off when the view changes.** Each press holds its own
+  cancellation. Another scope, a new response or leaving the report while
+  its snapshot is taken stops the requests and calls the print off, since
+  the page it would print is no longer the one asked for (the printed header
+  already names the new scope). The screen says 「表示が変わったため、印刷を
+  取り消しました。」 / "Printing was cancelled because the view changed."
 - **One line, one response.** The line stays in the foot only while the page
   shows the very response it was checked against: a scope change or any new
   response takes it off (`frontend/src/components/analysis/CouncilPrint.tsx`).

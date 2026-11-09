@@ -137,6 +137,22 @@ describe("snapshotForPrint", () => {
     await expect(snapshotForPrint(SPEC, SHOWN, "en")).resolves.toEqual({ kind: "failed" });
   });
 
+  it("stops its requests as soon as the print is called off", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(client, "apiPost").mockImplementation(
+      (_path, _body, opts) =>
+        new Promise((_, reject) => opts?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))),
+    );
+    const calledOff = new AbortController();
+    const result = snapshotForPrint(SPEC, SHOWN, "en", calledOff.signal);
+    let settled = false;
+    void result.then(() => (settled = true));
+    calledOff.abort();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(true);
+    await expect(result).resolves.toEqual({ kind: "failed" });
+  });
+
   it("stops waiting after its bound, so a print is never held by a request that does not answer", async () => {
     vi.useFakeTimers();
     vi.spyOn(client, "apiPost").mockImplementation(

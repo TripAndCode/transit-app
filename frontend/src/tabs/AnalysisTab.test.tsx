@@ -1146,7 +1146,7 @@ describe("AnalysisTab council report print", () => {
     expect(screen.getByTestId("print-frame-footer")).not.toHaveTextContent("Snapshot:");
   });
 
-  it("leaves room below the content for the foot's snapshot line, wrapped once, when the page carries one", () => {
+  it("leaves room below the content for the foot's snapshot line, even wrapped, when the page carries one", () => {
     const shell = ruleBody(readFileSync(resolve(__dirname, "../styles/global.css"), "utf8"), "@media print");
     expect(decl(ruleBody(shell, ".print-frame__footer"), "line-height")).toBe("1.3");
     expect(decl(ruleBody(shell, ".app-shell:has(.print-frame__snapshot:not(:empty)) main"), "padding-bottom")).toBe("20mm");

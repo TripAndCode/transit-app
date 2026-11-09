@@ -23,22 +23,23 @@ function screenKey({ screen, agencyId, query }: SnapshotSpec): string {
  *  print back: the page prints without a link and says why. The line
  *  belongs to the response it was taken of, so it leaves the foot once the
  *  page shows other figures; a print the browser starts on its own (Ctrl+P)
- *  takes no snapshot, and a report that leaves the screen while its
- *  snapshot is taken prints nothing. Without `snapshot`, or outside the app
- *  shell's print frame, it prints as it is. */
+ *  takes no snapshot. A print whose screen changes while its snapshot is
+ *  taken (another scope, new figures, the report gone) is called off: the
+ *  page it would print is no longer the one asked for, its header already
+ *  naming the new scope. Without `snapshot`, or outside the app shell's
+ *  print frame, it prints as it is. */
 export function CouncilPrint({ report, snapshot }: { report: ReportResponse; snapshot?: SnapshotSpec | null }) {
   const { t, i18n } = useTranslation();
   const slot = usePrintFootSlot();
   const [pending, setPending] = useState(false);
   const [printed, setPrinted] = useState<Printed | null>(null);
-  const mounted = useRef(false);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  const [cancelled, setCancelled] = useState(false);
+  // The pending print's own cancellation, one per click.
+  const pendingPrint = useRef<AbortController | null>(null);
   const screen = snapshot ? screenKey(snapshot) : null;
+  // Another screen or another response, or leaving the page, calls off the
+  // print taken for the one before.
+  useEffect(() => () => pendingPrint.current?.abort(), [screen, report]);
   const outcome = printed != null && printed.screen === screen && printed.report === report ? printed.snapshot : null;
   const link = outcome?.kind === "stored" ? { url: `${window.location.origin}${outcome.path}`, method: outcome.methodVersion } : null;
 
@@ -47,10 +48,16 @@ export function CouncilPrint({ report, snapshot }: { report: ReportResponse; sna
       window.print();
       return;
     }
+    const controller = new AbortController();
+    pendingPrint.current = controller;
     setPending(true);
-    const taken = await snapshotForPrint(snapshot, report, contentLocale(i18n));
-    // The report has left the screen: what would print now is not what was asked for.
-    if (!mounted.current) return;
+    setCancelled(false);
+    const taken = await snapshotForPrint(snapshot, report, contentLocale(i18n), controller.signal);
+    if (controller.signal.aborted) {
+      setPending(false);
+      setCancelled(true);
+      return;
+    }
     // print() lays the page out at once, so the foot's line has to be in the
     // document before it is called.
     flushSync(() => {
@@ -70,7 +77,12 @@ export function CouncilPrint({ report, snapshot }: { report: ReportResponse; sna
           {t("reports.council.print_snapshot.pending")}
         </p>
       )}
-      {outcome && !pending && (
+      {cancelled && !pending && (
+        <p role="status" className="council-report__print-note">
+          {t("reports.council.print_snapshot.cancelled")}
+        </p>
+      )}
+      {outcome && !pending && !cancelled && (
         <p role="status" className="council-report__print-note">
           {link ? (
             <>

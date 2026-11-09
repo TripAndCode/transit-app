@@ -1430,7 +1430,8 @@
         "pending": "Creating a snapshot for the printed page…",
         "stored": "The printed page carries this snapshot's link at its foot:",
         "failed": "Printed without a snapshot link, as one couldn't be prepared.",
-        "moved": "Printed without a snapshot link: the figures were updated after this page opened. Reload the page to print them with one."
+        "moved": "Printed without a snapshot link: the figures were updated after this page opened. Reload the page to print them with one.",
+        "cancelled": "Printing was cancelled because the view changed."
       }
     },
     "print": "Print / Save as PDF",
