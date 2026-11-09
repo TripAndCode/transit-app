@@ -1114,8 +1114,21 @@ describe("AnalysisTab council report print", () => {
     const { router } = showPrintable();
     await userEvent.click(printButton());
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("print-frame-footer")).toHaveTextContent(LINE);
     await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-01&to=2026-05-14"));
     expect(screen.getByTestId("print-frame-footer")).not.toHaveTextContent("Snapshot:");
+  });
+
+  it("prints nothing once the report has left the screen while its snapshot was taken", async () => {
+    let answer: (created: typeof CREATED) => void = () => {};
+    vi.spyOn(client, "apiPost").mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    cleanup();
+    await act(async () => answer(CREATED));
+    expect(print).not.toHaveBeenCalled();
   });
 
   it("shows the link on paper and keeps the on-screen notes and the button off it", () => {

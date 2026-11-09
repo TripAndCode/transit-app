@@ -92,8 +92,13 @@ snapshot, and the button waits while it is taken.
 - **Never held back.** A create the server refuses (409, 413), a network
   failure, or a create and read that together take longer than
   `PRINT_SNAPSHOT_WAIT_MS` (20 seconds) still prints, without a link, and the
-  screen says so calmly. Figures held over from another scope while the new
-  one loads print without a snapshot.
+  screen says so calmly. A create the print stopped waiting for may still be
+  stored, and is listed like any other. A scope the aggregates cannot serve
+  is scanned live once per language, so its print is the likeliest to go
+  without a link: the wait is bounded for the reader's sake, not stretched
+  to fit the slowest scan. Figures held over from another scope while the
+  new one loads print without a snapshot, and a report that leaves the
+  screen while its snapshot is taken prints nothing.
 - **One line, one response.** The line stays in the foot only while the page
   shows the very response it was checked against: a scope change or any new
   response takes it off (`frontend/src/components/analysis/CouncilPrint.tsx`).

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { SnapshotSpec } from "../../api/snapshots";
@@ -23,13 +23,21 @@ function screenKey({ screen, agencyId, query }: SnapshotSpec): string {
  *  print back: the page prints without a link and says why. The line
  *  belongs to the response it was taken of, so it leaves the foot once the
  *  page shows other figures; a print the browser starts on its own (Ctrl+P)
- *  takes no snapshot. Without `snapshot`, or outside the app shell's print
- *  frame, it prints as it is. */
+ *  takes no snapshot, and a report that leaves the screen while its
+ *  snapshot is taken prints nothing. Without `snapshot`, or outside the app
+ *  shell's print frame, it prints as it is. */
 export function CouncilPrint({ report, snapshot }: { report: ReportResponse; snapshot?: SnapshotSpec | null }) {
   const { t, i18n } = useTranslation();
   const slot = usePrintFootSlot();
   const [pending, setPending] = useState(false);
   const [printed, setPrinted] = useState<Printed | null>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const screen = snapshot ? screenKey(snapshot) : null;
   const outcome = printed != null && printed.screen === screen && printed.report === report ? printed.snapshot : null;
   const link = outcome?.kind === "stored" ? { url: `${window.location.origin}${outcome.path}`, method: outcome.methodVersion } : null;
@@ -41,6 +49,8 @@ export function CouncilPrint({ report, snapshot }: { report: ReportResponse; sna
     }
     setPending(true);
     const taken = await snapshotForPrint(snapshot, report, contentLocale(i18n));
+    // The report has left the screen: what would print now is not what was asked for.
+    if (!mounted.current) return;
     // print() lays the page out at once, so the foot's line has to be in the
     // document before it is called.
     flushSync(() => {
