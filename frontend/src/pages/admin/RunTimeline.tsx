@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import type { PipelineRun } from "../../api/admin";
+import type { PipelineRun, RebuildHeadline } from "../../api/admin";
+import { EM_DASH, fmtPct, formatMinutes } from "../../utils/format";
 import { nowMarkerHour, runsToBars, type RunBar, type RunLane } from "./runsTimeline";
 
 type TFunction = ReturnType<typeof useTranslation>["t"];
@@ -45,6 +46,20 @@ function laneLabel(t: TFunction, lane: RunLane): string {
     : t("admin.board.run_lane", { kind, agency: lane.agencyName });
 }
 
+// Two decimals, the precision the server rounds them to: a method change can
+// move an agency's whole-history average by less than a tenth of a minute.
+const DELAY_DIGITS = 2;
+
+function headlineText(t: TFunction, headline: RebuildHeadline): string {
+  const { before, after } = headline;
+  return t("admin.board.rebuild_headline", {
+    onTimeBefore: fmtPct(before.on_time_pct, t),
+    onTimeAfter: fmtPct(after.on_time_pct, t),
+    delayBefore: formatMinutes(before.avg_delay_min, DELAY_DIGITS),
+    delayAfter: formatMinutes(after.avg_delay_min, DELAY_DIGITS),
+  });
+}
+
 function barTooltip(t: TFunction, lane: string, bar: RunBar): string {
   const parts = [
     t("admin.board.run_tooltip", {
@@ -57,7 +72,52 @@ function barTooltip(t: TFunction, lane: string, bar: RunBar): string {
   if (bar.rows != null) parts.push(t("admin.board.run_tooltip_rows", { count: bar.rows }));
   if (bar.lockProbeMs != null) parts.push(t("admin.board.run_tooltip_lock"));
   if (bar.error) parts.push(bar.error);
+  if (bar.rebuildHeadline) parts.push(headlineText(t, bar.rebuildHeadline));
   return parts.join(" · ");
+}
+
+/** The day's rebuilds, each with the agency's headline before and after it,
+ *  so what a method change did to the history it rewrote reads without
+ *  hovering a bar. Nothing when no run today rebuilt. */
+export function RebuildList({ runs, dayStart, now }: { runs: readonly PipelineRun[]; dayStart: Date; now: Date }) {
+  const { t } = useTranslation();
+  const rebuilds = runsToBars(runs, dayStart, now).flatMap((lane) =>
+    lane.bars.flatMap((bar) => (bar.rebuildHeadline ? [{ lane, bar, headline: bar.rebuildHeadline }] : [])),
+  );
+  if (rebuilds.length === 0) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <h3 style={{ fontSize: 12, fontWeight: 600, margin: "0 0 4px", color: "var(--text-secondary)" }}>
+        {t("admin.board.rebuilds_title")}
+      </h3>
+      <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        {rebuilds.map(({ lane, bar, headline }) => (
+          <li
+            key={bar.runId}
+            data-testid="rebuild-headline"
+            style={{ padding: "5px 0", borderTop: "1px solid var(--surface-2)", fontSize: 12 }}
+          >
+            {t("admin.board.rebuild_item", {
+              run: laneLabel(t, lane),
+              time: clockLabel(bar.startHour),
+              headline: headlineText(t, headline),
+            })}{" "}
+            <span style={{ color: "var(--text-tertiary)" }}>
+              {t("admin.board.rebuild_scope", {
+                from: headline.first_day,
+                to: headline.last_day,
+                preset:
+                  headline.preset == null
+                    ? EM_DASH
+                    : t(`definitionMeta.preset.${headline.preset}`, { defaultValue: headline.preset }),
+                version: headline.method_version,
+              })}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 /**

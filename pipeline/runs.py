@@ -30,6 +30,7 @@ sits on such a boundary.
 
 from __future__ import annotations
 
+import json
 import logging
 import traceback
 from contextlib import contextmanager
@@ -67,6 +68,8 @@ _FINISH_RUN_SQL = """
     SET status = %s, finished_at = now(), rows = %s, error = %s
     WHERE run_id = %s
 """
+
+_RECORD_REBUILD_HEADLINE_SQL = "UPDATE pipeline_runs SET rebuild_headline = %s::jsonb WHERE run_id = %s"
 
 #: The job kinds that run holding the ingest/analyze advisory lock
 #: (pipeline/locks.py). The lock is session-level, so it dies with the process
@@ -115,12 +118,14 @@ class RunHandle:
     column stays NULL, which the board reads as "this job kind has no row
     count", not as zero rows. ``status`` is what a block that exits normally
     closes with: ``ok``, or ``unchanged`` for a job that found nothing newer
-    to do.
+    to do. ``rebuild_headline`` is an analyze run's headline before and
+    after a rebuild (:mod:`pipeline.rebuild_headline`), when it made one.
     """
 
     run_id: int | None
     rows: int | None = None
     status: str = "ok"
+    rebuild_headline: dict | None = None
 
 
 def _rollback(conn) -> None:
@@ -192,6 +197,21 @@ def finish_run(
         _rollback(conn)
 
 
+def record_rebuild_headline(conn, run_id: int | None, headline: dict) -> None:
+    """Store *headline* on its run. A statement of its own, after the row is
+    closed, so a document that cannot be written costs only itself and never
+    the run's status."""
+    if run_id is None:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute(_RECORD_REBUILD_HEADLINE_SQL, (json.dumps(headline), run_id))
+        conn.commit()
+    except Exception:
+        logger.warning("pipeline_runs: could not record the rebuild headline of run %s", run_id, exc_info=True)
+        _rollback(conn)
+
+
 @contextmanager
 def record_run(
     conn,
@@ -221,6 +241,8 @@ def record_run(
         finish_run(conn, handle.run_id, "error", rows=handle.rows, error=_describe(exc))
         raise
     finish_run(conn, handle.run_id, handle.status, rows=handle.rows)
+    if handle.rebuild_headline is not None:
+        record_rebuild_headline(conn, handle.run_id, handle.rebuild_headline)
 
 
 def reap_abandoned_runs(conn, *, older_than: timedelta = DEFAULT_REAP_AGE, now: datetime | None = None) -> int:

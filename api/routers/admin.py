@@ -1436,6 +1436,11 @@ class PipelineRunOut(BaseModel):
     lock_probe_ms: int | None
     error: str | None
     requested_by: int | None
+    #: An analyze run's headline before and after a rebuild that a method
+    #: version or fingerprint change forced; None on every other run. Stored by
+    #: `pipeline.runs.record_rebuild_headline`, as the document
+    #: `pipeline.rebuild_headline.read_after` builds.
+    rebuild_headline: dict[str, Any] | None
 
 
 class AdminRuns(BaseModel):

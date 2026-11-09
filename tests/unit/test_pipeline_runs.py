@@ -27,6 +27,7 @@ from pipeline.runs import (
     RUN_STATUSES,
     finish_run,
     reap_abandoned_runs,
+    record_rebuild_headline,
     record_run,
     start_run,
 )
@@ -181,6 +182,54 @@ def test_record_run_still_runs_the_work_when_the_row_could_not_be_opened():
         ran = True
     assert ran is True
     assert conn.statements == []
+
+
+# ── A rebuild's headline before and after ──────────────────────────────────
+
+_HEADLINE = {"before": {"avg_delay_min": 1.5}, "after": {"avg_delay_min": 1.25}}
+
+
+def test_a_rebuild_headline_is_stored_on_its_run_and_committed():
+    conn = _Conn()
+    record_rebuild_headline(conn, 5, _HEADLINE)
+    assert conn.statements == [
+        (
+            "UPDATE pipeline_runs SET rebuild_headline = %s::jsonb WHERE run_id = %s",
+            ('{"before": {"avg_delay_min": 1.5}, "after": {"avg_delay_min": 1.25}}', 5),
+        )
+    ]
+    assert conn.events == ["commit"]
+
+
+def test_a_rebuild_headline_with_no_run_row_to_land_on_is_dropped():
+    conn = _Conn()
+    record_rebuild_headline(conn, None, _HEADLINE)
+    assert conn.statements == [] and conn.events == []
+
+
+def test_a_rebuild_headline_that_cannot_be_stored_costs_only_itself(caplog):
+    conn = _Conn(fail_on="rebuild_headline")
+    with caplog.at_level("WARNING", logger="pipeline.runs"):
+        record_rebuild_headline(conn, 5, _HEADLINE)
+    assert conn.events == ["rollback"]
+    assert any("run 5" in r.getMessage() for r in caplog.records)
+
+
+def test_record_run_stores_the_headline_a_rebuild_reported_once_its_row_is_closed():
+    conn = _Conn(run_id=5)
+    with record_run(conn, "analyze", agency_id=1) as run:
+        run.rebuild_headline = _HEADLINE
+    assert [params for _, params in conn.statements][1:] == [
+        ("ok", None, None, 5),
+        ('{"before": {"avg_delay_min": 1.5}, "after": {"avg_delay_min": 1.25}}', 5),
+    ]
+
+
+def test_a_rebuild_whose_headline_cannot_be_stored_still_closes_ok():
+    conn = _Conn(run_id=5, fail_on="rebuild_headline")
+    with record_run(conn, "analyze", agency_id=1) as run:
+        run.rebuild_headline = _HEADLINE
+    assert conn.statements[1][1] == ("ok", None, None, 5)
 
 
 # ── Reaping runs nothing will ever close ──────────────────────────────────

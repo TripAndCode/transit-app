@@ -484,8 +484,8 @@ def cmd_analyze(args):
     if args.full:
         mark_for_full_rebuild(conn, [agency_id])
     ch_client = get_client(send_receive_timeout=ANALYZE_SEND_RECEIVE_TIMEOUT_SEC)
-    with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id):
-        analyze(agency_id, conn, ch_client)
+    with pipeline_runs.record_run(conn, "analyze", agency_id=agency_id) as run:
+        run.rebuild_headline = analyze(agency_id, conn, ch_client, db_url=DATABASE_URL)
     conn.close()
 
 
@@ -516,8 +516,8 @@ def cmd_analyze_all(args):
     for aid in agency_ids:
         try:
             logger.info(f"--- analyze agency_id={aid} ---")
-            with pipeline_runs.record_run(conn, "analyze", agency_id=aid):
-                analyze(aid, conn, ch_client)
+            with pipeline_runs.record_run(conn, "analyze", agency_id=aid) as run:
+                run.rebuild_headline = analyze(aid, conn, ch_client, db_url=DATABASE_URL)
         except Exception:
             logger.exception(f"analyze failed for agency {aid}")
             failed.append(aid)

@@ -1951,6 +1951,10 @@
       "run_tooltip": "{{lane}} · {{from}}–{{to}} · {{status}}",
       "run_tooltip_rows": "{{count}} rows",
       "run_tooltip_lock": "Skipped: the ingest/analyze lock was held",
+      "rebuilds_title": "Rebuilt today: the headline before → after",
+      "rebuild_item": "{{run}} {{time}}: {{headline}}",
+      "rebuild_headline": "on time {{onTimeBefore}} → {{onTimeAfter}}, average delay {{delayBefore}} → {{delayAfter}}",
+      "rebuild_scope": "({{from}} to {{to}}, {{preset}}, method {{version}})",
       "collectors_title": "Collectors",
       "collector": {
         "oracle_crawler": "Oracle crawler",

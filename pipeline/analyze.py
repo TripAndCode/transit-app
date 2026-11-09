@@ -88,7 +88,7 @@ from typing import NamedTuple
 
 import psycopg2.extras
 
-from pipeline import agg_registry, agg_sql, ch_aggregates, static_archive, static_headways
+from pipeline import agg_registry, agg_sql, ch_aggregates, rebuild_headline, static_archive, static_headways
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
@@ -697,6 +697,8 @@ class Plan(NamedTuple):
     # The version map, with the versions in force for an agency whose ingest
     # stamps each row's version (VERSION_STAMPING_STRATEGIES).
     join: static_archive.ScheduleJoin
+    # Why each table rebuilt in full is (agg_registry.table_scopes).
+    reasons: dict[str, str]
 
 
 # The versions in force each run built against (db/migrations/0090).
@@ -844,7 +846,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         else:
             described = f"{len(scope)} date(s)"
         logger.info(f"  scope {name}: {described}")
-    return Plan(current, scopes, content_key, join)
+    return Plan(current, scopes, content_key, join, reasons)
 
 
 def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
@@ -1262,7 +1264,7 @@ def _reads(agency_id: int, ch_client, join: static_archive.ScheduleJoin, refit: 
     return reads
 
 
-def analyze(agency_id: int, conn, ch_client) -> None:
+def analyze(agency_id: int, conn, ch_client, *, db_url: str | None = None) -> dict | None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
     Holds this agency's `updates` lock for the whole run. That is load-bearing,
@@ -1280,13 +1282,18 @@ def analyze(agency_id: int, conn, ch_client) -> None:
     rather than with the run's transaction, which spans the whole rebuild.
     Today is left to the loaded timetable until it is over. A failed capture
     is logged and the run goes on.
+
+    With *db_url*, the database *conn* is connected to, a run that rebuilds
+    history because a method version or fingerprint moved returns the
+    agency's headline before and after it (:mod:`pipeline.rebuild_headline`),
+    for its pipeline_runs row. Every other run returns None.
     """
     capture_planned_trips(conn, agency_id)
     with agency_ingest_lock(conn, agency_id):
-        _analyze_locked(agency_id, conn, ch_client)
+        return _analyze_locked(agency_id, conn, ch_client, db_url)
 
 
-def _analyze_locked(agency_id: int, conn, ch_client) -> None:
+def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict | None:
     """Purges and rebuilds this agency's agg_* rows for the dates the ledger
     marks as changed (everything, on a full rebuild), skipping whole-history
     tables when nothing changed, all in one transaction. A crash mid-run rolls
@@ -1318,6 +1325,9 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
     plan = _plan(agency_id, conn, ch_client, has_static, ingest_strategy)
     scopes = plan.scopes
     ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, scopes)
+    before = None
+    if db_url is not None and rebuild_headline.is_rebuild(plan.reasons):
+        before = rebuild_headline.read_before(db_url, agency_id)
     try:
         # ── Purge stale rows for this agency ─────────────────────────────
         # Scoped for the incremental tables, whole for the rest, skipped for
@@ -1735,3 +1745,4 @@ def _analyze_locked(agency_id: int, conn, ch_client) -> None:
         # knowing which step that was matters most.
         _log_step_summary(agency_id, (time.perf_counter() - wall_t0) * 1000)
         raise
+    return None if before is None else rebuild_headline.read_after(before)

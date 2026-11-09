@@ -14,7 +14,7 @@ import { ErrorBanner } from "../../components/ErrorBanner";
 import { SkeletonChart, SkeletonKpiRow, SkeletonTable } from "../../components/Skeleton";
 import { Tooltip } from "../../components/Tooltip";
 import { Modal } from "../../components/Modal";
-import { RunTimeline } from "./RunTimeline";
+import { RebuildList, RunTimeline } from "./RunTimeline";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { alertText } from "./alertText";
 import { useNow } from "../../hooks/useNow";
@@ -411,7 +411,10 @@ export function AdminBoardPage() {
         ) : unavailable ? (
           unavailableNote
         ) : (
-          <RunTimeline runs={runs} dayStart={dayStart} now={now} />
+          <>
+            <RunTimeline runs={runs} dayStart={dayStart} now={now} />
+            <RebuildList runs={runs} dayStart={dayStart} now={now} />
+          </>
         )}
       </section>
 
