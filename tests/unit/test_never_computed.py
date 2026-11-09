@@ -35,16 +35,20 @@ DOCS = {"ja": ROOT / "docs" / "methodology.md", "en": ROOT / "docs" / "methodolo
 SECTIONS = {"ja": "## 計算しないもの", "en": "## What is never computed"}
 
 # Each identifier the documents name, with every column name it stands for.
-# A name is matched whole, so `vehicle_km` (planned vehicle-kilometres of a
-# timetable) and `ridership_weights` (a route's relative weight) are not it.
+# A name is matched whole, in snake case (:func:`_snake`), with each word
+# boundary optional so a folded spelling (`vehicleid`) matches too. Hence
+# `vehicle_km` (planned vehicle-kilometres of a timetable) and
+# `ridership_weights` (a route's relative weight) are not it.
 NEVER_STORED: dict[str, str] = {
-    "vehicle_id": r"vehicles?(_(id|ids|label|ref|no|number|code|name|descriptor))?",
-    "license_plate": r"licen[cs]e_plate|plate_(no|number)",
-    "driver_id": r"(driver|crew|staff|employee)(_\w+)?",
-    "passenger_id": r"(passenger|rider|traveler|traveller|cardholder)(_\w+)?|(ic_)?card_(id|no|number|hash)",
-    "fare": r"fares?(_\w+)?",
+    "vehicle_id": r"vehicles?(_?(id|ids|label|labels|ref|no|number|code|name|descriptor))?",
+    "license_plate": r"licen[cs]e_?plates?|plate_?(no|number)s?",
+    "driver_id": r"(driver|crew|staff|employee)\w*",
+    "passenger_id": r"(passenger|traveler|traveller|cardholder)\w*|riders?(_\w+|id|ids|no|number|name)?"
+    r"|(ic_?)?card_?(id|ids|no|number|hash)",
+    "fare": r"fare\w*",
 }
-_NEVER = re.compile("|".join(f"(?:{pattern})" for pattern in NEVER_STORED.values()), re.IGNORECASE)
+_NEVER = re.compile("|".join(f"(?:{pattern})" for pattern in NEVER_STORED.values()))
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 _SQL_COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
 _SQL_STRING = re.compile(r"'(?:[^']|'')*'")
@@ -57,8 +61,13 @@ def _identifiers(sql: str) -> set[str]:
     return set(_IDENTIFIER.findall(code))
 
 
+def _snake(name: str) -> str:
+    """*name* in lower snake case: `licensePlate` and `LICENSE_PLATE` read as `license_plate`."""
+    return _CAMEL_BOUNDARY.sub("_", name).lower()
+
+
 def _never_stored(names: set[str]) -> list[str]:
-    return sorted(name for name in names if _NEVER.fullmatch(name))
+    return sorted(name for name in names if _NEVER.fullmatch(_snake(name)))
 
 
 def _schema_sources() -> dict[str, set[str]]:
@@ -106,6 +115,21 @@ def test_the_methodology_names_every_identifier_it_rules_out(locale):
 )
 def test_the_scan_finds_such_a_column(sql):
     assert _never_stored(_identifiers(sql))
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["vehicleId", "vehicleid", "VehicleLabel", "licensePlate", "driverid", "passengerId", "fareAmount", "cardNo"],
+)
+def test_the_scan_finds_such_a_name_however_it_is_spelt(name):
+    assert _never_stored({name}) == [name]
+
+
+@pytest.mark.parametrize(
+    "name", ["vehicle_km", "vehicleKm", "vehicle_km_delivered_pct", "ridership_weights", "ridershipWeights", "user_id"]
+)
+def test_the_scan_leaves_a_lookalike_alone(name):
+    assert _never_stored({name}) == []
 
 
 def test_the_scan_leaves_comments_literals_and_lookalikes_alone():
