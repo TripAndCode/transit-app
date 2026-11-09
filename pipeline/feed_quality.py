@@ -39,14 +39,14 @@ from __future__ import annotations
 import inspect
 import logging
 from collections.abc import Mapping
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from pipeline.clickhouse import LIVE_SOURCED, TRIP_LEVEL_STOP_SEQUENCE
 from pipeline.reports import comparability
 from pipeline.reports.comparability import clamp_pct, coverage_pct, trips_matchable
 from pipeline.reports.service_delivered import coverage_of, planned_days_ctes, service_sql
-from pipeline.service_day import service_date_ch, service_day_start_utc
+from pipeline.service_day import service_date_ch, service_date_of, service_day_start_utc
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,12 @@ FEED_HEALTH_SQL = """
     FROM agg_feed_health
     WHERE agency_id = %(agency_id)s AND date BETWEEN %(first)s AND %(through)s
 """
+
+
+def last_closed_day() -> date:
+    """The last service day that has closed (pipeline.service_day): the newest
+    day `updates` holds in production, and the end of the month in progress."""
+    return service_date_of(datetime.now(timezone.utc)) - timedelta(days=1)
 
 
 def month_of(day: date) -> date:

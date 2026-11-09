@@ -84,7 +84,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import NamedTuple
 
 import psycopg2.extras
@@ -104,7 +104,7 @@ from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visi
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch, service_date_of
+from pipeline.service_day import service_date_ch
 from pipeline.static_archive import Stamp
 from pipeline.static_content import static_parts as _static_parts
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
@@ -1716,10 +1716,9 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         quality_scope = scopes[feed_quality.TABLE]
         if ch_scopes.get("agg_route_daily", quality_scope) is None:
             quality_scope = None
-        last_closed = service_date_of(datetime.now(timezone.utc)) - timedelta(days=1)
         with _step(f"{feed_quality.TABLE}: build"):
             quality_rewritten = feed_quality.rebuild(
-                agency_id, ingest_strategy, quality_scope, last_closed, conn, ch_client
+                agency_id, ingest_strategy, quality_scope, feed_quality.last_closed_day(), conn, ch_client
             )
 
         # ── agg_meta: record of this build ───────────────────────────────
