@@ -34,14 +34,13 @@ from __future__ import annotations
 import contextlib
 import itertools
 import os
-from collections import Counter
 from collections.abc import Callable, Hashable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from fractions import Fraction
 from functools import cached_property, partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import clickhouse_connect
 import httpx
@@ -62,7 +61,6 @@ from tests.fixtures.scenario import (
     ScheduledTrip,
     ServiceDay,
     Stop,
-    StopEntry,
     TimetableVersion,
     TripRun,
     Unreported,
@@ -792,124 +790,8 @@ class Divergence:
     view: Callable[[Observed, oracle.Outcome], oracle.Outcome]
 
 
-def _last_predictions(observed: Observed) -> dict[tuple[str, date, int], StopEntry]:
-    """Each stop event's latest poll entry that predicted a departure delay."""
-    latest = {}
-    for _version, batch in observed.batches:
-        for poll in batch:
-            for trip in poll.trips:
-                for entry in trip.stops:
-                    if entry.departure_delay is not None:
-                        latest[(trip.trip_id, trip.service_date, entry.stop_sequence)] = entry
-    return latest
-
-
-def _stale_departure(scenario: Scenario, trip_id: str, day: date, entry: StopEntry) -> oracle.Departure:
-    trip = scenario.trip(trip_id, day)
-    return oracle.Departure(
-        trip.route_id,
-        trip_id,
-        day,
-        trip.day_type,
-        entry.stop_sequence,
-        entry.stop_id,
-        trip.scheduled_sec[entry.stop_sequence - 1],
-        cast(int, entry.departure_delay),
-    )
-
-
-def _with_service(found: oracle.Outcome, change: Callable[[date, oracle.Service], oracle.Service]) -> oracle.Outcome:
-    return replace(found, service={day: change(day, s) for day, s in found.service.items()})
-
-
-def _cancelled_trips_keep_their_predictions(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
-    """Each stop of a trip reported not running keeps the latest delay the feed
-    predicted for it as a departure, and the trip counts as observed."""
-    scenario = observed.scenario
-    latest = _last_predictions(observed)
-    stale = [
-        _stale_departure(scenario, c.trip_id, c.service_date, entry)
-        for c in scenario.cancellations
-        for (trip_id, day, _seq), entry in latest.items()
-        if (trip_id, day) == (c.trip_id, c.service_date)
-    ]
-    seen = Counter(day for _trip_id, day in {(d.trip_id, d.service_date) for d in stale})
-    found = replace(found, departures=(*found.departures, *stale))
-    return _with_service(found, lambda day, s: replace(s, observed=s.observed + seen[day]))
-
-
-def _skipped_stops_keep_their_predictions(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
-    """Each stop a run skipped keeps the latest delay the feed predicted for it
-    as a departure."""
-    scenario = observed.scenario
-    latest = _last_predictions(observed)
-    stale = [
-        _stale_departure(scenario, run.trip_id, run.service_date, latest[(run.trip_id, run.service_date, i + 1)])
-        for run in scenario.runs
-        for i, sec in enumerate(run.actual_sec)
-        if sec is None and (run.trip_id, run.service_date, i + 1) in latest
-    ]
-    return replace(found, departures=(*found.departures, *stale))
-
-
-def _cancellations_without_stops_are_lost(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
-    """A trip reported CANCELED with no stop listed is not counted as not run."""
-    lost = Counter(c.service_date for c in observed.scenario.cancellations if c.reported_as == "canceled_without_stops")
-    return _with_service(found, lambda day, s: replace(s, reported_not_run=s.reported_not_run - lost[day]))
-
-
-def _partial_runs_count_as_not_run(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
-    """A run that skipped some of its stops counts as not run."""
-    partial_runs = Counter(r.service_date for r in observed.scenario.runs if None in r.actual_sec)
-    return _with_service(found, lambda day, s: replace(s, reported_not_run=s.reported_not_run + partial_runs[day]))
-
-
-_CANCELLED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
-    name="a cancelled trip keeps its predictions",
-    reason=(
-        "A trip the feed predicted and then reported CANCELED before it left keeps its last predictions as "
-        "departures: the delay dedup drops rows without a delay before it picks each stop's latest poll, so "
-        "the CANCELED polls never replace the predictions. Every delay table and route report counts the "
-        "cancelled trip's stops as departures, and the trip counts as observed in its day's coverage."
-    ),
-    view=_cancelled_trips_keep_their_predictions,
-)
-_SKIPPED_AFTER_PREDICTIONS_DIVERGENCE = Divergence(
-    name="a skipped stop keeps its prediction",
-    reason=(
-        "A stop the feed predicted and then reported SKIPPED keeps its last prediction as a departure: the "
-        "delay dedup drops the SKIPPED rows, which carry no delay, before it picks the stop's latest poll."
-    ),
-    view=_skipped_stops_keep_their_predictions,
-)
-_CANCELLED_WITHOUT_STOPS_DIVERGENCE = Divergence(
-    name="a cancellation without stops is lost",
-    reason=(
-        "A CANCELED TripUpdate that lists no StopTimeUpdate, which GTFS-RT allows, stores nothing: ingest "
-        "writes one row per StopTimeUpdate, so neither agg_service_delivered_daily nor the council summary's "
-        "executed trips count that cancellation."
-    ),
-    view=_cancellations_without_stops_are_lost,
-)
-_PARTIAL_RUN_DIVERGENCE = Divergence(
-    name="a partial run counts as not run",
-    reason=(
-        "A trip is not run when it is CANCELED or every stop it reports is SKIPPED; a run that skipped only "
-        "some stops ran, so it counts as executed. agg_service_delivered_daily instead counts a trip as not "
-        "executed when the latest status of any one of its stops is SKIPPED, which lowers executed trips and "
-        "the service-delivered rate by every partial run."
-    ),
-    view=_partial_runs_count_as_not_run,
-)
 # The divergences each scenario is known to meet, by scenario name.
-_KNOWN = {
-    "cancellations": (
-        _CANCELLED_WITHOUT_STOPS_DIVERGENCE,
-        _CANCELLED_AFTER_PREDICTIONS_DIVERGENCE,
-        _SKIPPED_AFTER_PREDICTIONS_DIVERGENCE,
-        _PARTIAL_RUN_DIVERGENCE,
-    ),
-}
+_KNOWN: dict[str, tuple[Divergence, ...]] = {}
 
 
 def _outcomes(observed: Observed) -> list[tuple[tuple[Divergence, ...], oracle.Outcome]]:
@@ -1249,7 +1131,7 @@ _ALL = [
     pytest.param(night_route, id="night_route"),
     pytest.param(timetable_change, id="timetable_change"),
     pytest.param(timetable_published_early, id="timetable_published_early"),
-    _CANCELLATIONS := pytest.param(cancellations, id="cancellations"),
+    pytest.param(cancellations, id="cancellations"),
 ]
 
 
@@ -1286,27 +1168,3 @@ def test_service_delivered_and_coverage_match_the_truth(observed):
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_time_band_live_scans_match_the_truth(observed):
     _assert_clean(_hard_mismatches(observed, _BANDED))
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CANCELLED_AFTER_PREDICTIONS_DIVERGENCE.reason)
-@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_a_trip_cancelled_after_it_was_predicted_has_no_departures(observed):
-    _assert_clean(_divergence_mismatches(observed, _CANCELLED_AFTER_PREDICTIONS_DIVERGENCE))
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_SKIPPED_AFTER_PREDICTIONS_DIVERGENCE.reason)
-@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_a_stop_skipped_after_it_was_predicted_has_no_departure(observed):
-    _assert_clean(_divergence_mismatches(observed, _SKIPPED_AFTER_PREDICTIONS_DIVERGENCE))
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_CANCELLED_WITHOUT_STOPS_DIVERGENCE.reason)
-@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_a_trip_cancelled_without_stop_updates_counts_as_not_run(observed):
-    _assert_clean(_divergence_mismatches(observed, _CANCELLED_WITHOUT_STOPS_DIVERGENCE))
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_PARTIAL_RUN_DIVERGENCE.reason)
-@pytest.mark.parametrize("observed", [_CANCELLATIONS], indirect=True)
-def test_a_run_that_skipped_some_stops_counts_as_executed(observed):
-    _assert_clean(_divergence_mismatches(observed, _PARTIAL_RUN_DIVERGENCE))

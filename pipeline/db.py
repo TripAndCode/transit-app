@@ -449,24 +449,27 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     `pipeline.prediction_accuracy`'s early-vs-final delay-estimate error
     metric.
 
-    Same grouping key, same `agency_id`/plausibility-clamp `WHERE`, and the
-    same `argMax(u.dep_delay, (u.captured_at, u.file_name))` final-value
-    resolution as `build_dedup_ch_sql` (kept byte-for-byte parallel so the
-    two queries can never silently disagree about which row is "the final
-    observation" for a stop event) -- but this query ALSO projects
-    `groupArray(tuple(u.captured_at, u.dep_delay))`, the raw per-observation
-    history `pipeline.prediction_accuracy.compute_stop_event_errors` needs
-    to compare early readings against that final value.
+    Same grouping key, same `agency_id`/plausibility-clamp/withdrawal `WHERE`
+    (`stop_event_filter_ch`), and the same final-value resolution
+    (`latest_departure_ch`) as `build_dedup_ch_sql`, so the two queries can
+    never silently disagree about which row is "the final observation" for a
+    stop event, or about a stop event whose latest poll withdrew its
+    departure, which has none to judge predictions against -- but this query
+    ALSO projects `groupArray(tuple(u.captured_at, u.dep_delay))` over the
+    departure readings, the raw per-observation history
+    `pipeline.prediction_accuracy.compute_stop_event_errors` needs to compare
+    early readings against that final value.
 
     `u.scheduled_time IS NOT NULL` drops stop events with no scheduled
     instant to measure lead time from -- an extended-hour or unmatched row is
     stored with a NULL `scheduled_time` -- so `pipeline.prediction_accuracy`
     never has to parse one.
 
-    `HAVING count() > 1` drops every stop event observed exactly once: a
-    singleton has no EARLY observation to compare against its own (only)
-    final one, so it can never contribute to this metric and would just be
-    dead weight in the result set (and in `groupArray`'s per-row memory).
+    `HAVING` drops every stop event with no final departure, and every one
+    whose departure was observed exactly once: a singleton has no EARLY
+    observation to compare against its own (only) final one, so it can never
+    contribute to this metric and would just be dead weight in the result set
+    (and in `groupArray`'s per-row memory).
 
     Column order/count in the SELECT list is exactly `route_code,
     service_type, scheduled_time, trip_id, date, stop_sequence,
@@ -478,19 +481,17 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     and qualifying every base-table column reference with the `u.` alias
     (all identical here, not repeated).
     """
-    extra = f" AND ({extra_where})" if extra_where else ""
+    departure = f"NOT {withdrawn_ch()}"
+    where = stop_event_filter_ch(" AND ".join(part for part in ("u.scheduled_time IS NOT NULL", extra_where) if part))
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
-        "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay, "
-        "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations "
-        "FROM updates AS u "
-        "WHERE u.dep_delay IS NOT NULL AND u.scheduled_time IS NOT NULL "
-        "AND u.agency_id = {agency_id:UInt16} "
-        f"AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}{extra} "
+        f"{latest_departure_ch()} AS final_dep_delay, "
+        f"groupArrayIf(tuple(u.captured_at, u.dep_delay), {departure}) AS observations "
+        f"FROM updates AS u WHERE {where} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')}, u.stop_sequence "
-        "HAVING count() > 1"
+        f"HAVING final_dep_delay IS NOT NULL AND countIf({departure}) > 1"
     )
 
 

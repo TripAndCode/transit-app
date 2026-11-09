@@ -10,16 +10,16 @@ from datetime import datetime, timezone
 import clickhouse_connect
 import pytest
 
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_prediction_accuracy_ch_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_prediction_accuracy_ch_sql, latest_departure_ch
 from pipeline.prediction_accuracy import rows_to_lead_bucket_stats
 
 
 def test_build_prediction_accuracy_ch_sql_shape():
     """Pure string check -- no ClickHouse instance needed."""
     sql = build_prediction_accuracy_ch_sql()
-    assert "groupArray(tuple(u.captured_at, u.dep_delay)) AS observations" in sql
-    assert "argMax(u.dep_delay, (u.captured_at, u.file_name)) AS final_dep_delay" in sql
-    assert "HAVING count() > 1" in sql
+    assert "groupArrayIf(tuple(u.captured_at, u.dep_delay), " in sql
+    assert f"{latest_departure_ch()} AS final_dep_delay" in sql
+    assert "HAVING final_dep_delay IS NOT NULL AND countIf(" in sql
     assert "{agency_id:UInt16}" in sql
     assert str(MAX_PLAUSIBLE_DELAY_SEC) in sql
 
@@ -59,7 +59,7 @@ def test_prediction_accuracy_ch_sql_end_to_end():
             ("a.pb", datetime(2026, 4, 1, 8, 39, 0, tzinfo=timezone.utc), "T1", "weekday", "09:00", "R1", 1, 600),
             ("b.pb", datetime(2026, 4, 1, 8, 55, 0, tzinfo=timezone.utc), "T1", "weekday", "09:00", "R1", 1, 60),
             ("c.pb", datetime(2026, 4, 1, 8, 58, 0, tzinfo=timezone.utc), "T1", "weekday", "09:00", "R1", 1, 120),
-            # A different trip observed only once must be excluded (HAVING count() > 1).
+            # A different trip whose departure was observed only once must be excluded.
             ("d.pb", datetime(2026, 4, 1, 8, 58, 0, tzinfo=timezone.utc), "T2", "weekday", "09:05", "R1", 1, 30),
         ],
     )

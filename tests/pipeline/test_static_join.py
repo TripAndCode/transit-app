@@ -418,7 +418,8 @@ def test_static_join_stores_a_cancelled_trip_with_no_stored_stop_as_one_trip_lev
     CANCELED status, and the reserved stop_sequence, with no stop, delay or
     schedule a reader could take for a departure. A cancellation that stores
     a stop row needs none, a SCHEDULED trip listing no stop says nothing, and
-    the probe still counts StopTimeUpdates alone."""
+    the probe still counts StopTimeUpdates alone. A poll holding nothing
+    else stores that row too."""
     from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
 
     with pg_conn.cursor() as cur:
@@ -473,6 +474,10 @@ def test_static_join_stores_a_cancelled_trip_with_no_stored_stop_as_one_trip_lev
         row("uuid-unknown", None, None, None, trip_level, None, None, None),
     ]
     assert static_join.field_coverage(pb)["stop_time_updates"] == 2
+    alone = trip_update_feed(trip_update("uuid-A", schedule_relationship=canceled), timestamp=1778295600)
+    assert static_join.parse_feed(alone, at, "f1.bin", aid, pg_conn) == [
+        row("uuid-A", "平日", None, "R1", trip_level, None, None, version)
+    ]
 
 
 # Integration tests against captured fixtures
