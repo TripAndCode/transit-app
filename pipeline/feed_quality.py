@@ -29,9 +29,21 @@ counts that same window:
 - **VehiclePositions available**: not recorded anywhere the app reads.
 
 A figure the feed or the app cannot supply is ``None`` beside a
-:data:`Missing` reason, never 0. Trip and stop-event completeness need trip_ids
-matched to the timetable (``coverage_unknown`` otherwise, the gate's reason)
-and a plan; field coverage needs an ingest strategy that stores the fields.
+:data:`Missing` reason, never 0:
+
+- ``coverage_unknown``: the ingest strategy's trip_ids are not the
+  timetable's, so its trips cannot be counted against the plan (the gate's
+  reason);
+- ``no_plan``: no trip is planned in the window;
+- ``no_stop_plan``: trips are planned, but no planned day's stop events are
+  known;
+- ``no_data``: nothing was observed in the window (for the clamp share, no
+  observation carried a delay);
+- ``archive_stamped``: every poll came through archive ingest, whose
+  captured_at is the header itself;
+- ``no_header``: the live polls carried no FeedHeader timestamp;
+- ``feed_cannot_report``: the ingest strategy never stores the fields;
+- ``not_recorded``: the app records no source for the figure.
 """
 
 from __future__ import annotations
@@ -53,20 +65,7 @@ logger = logging.getLogger(__name__)
 
 TABLE = "feed_quality_monthly"
 
-#: Why a figure is ``None``:
-#:
-#: - ``coverage_unknown``: the ingest strategy's trip_ids are not the
-#:   timetable's, so its trips cannot be counted against the plan;
-#: - ``no_plan``: no trip is planned in the window;
-#: - ``no_stop_plan``: trips are planned, but no planned day's stop events
-#:   are known;
-#: - ``no_data``: nothing was observed in the window (for the clamp share,
-#:   no observation carried a delay);
-#: - ``archive_stamped``: every poll came through archive ingest, whose
-#:   captured_at is the header itself;
-#: - ``no_header``: the live polls carried no FeedHeader timestamp;
-#: - ``feed_cannot_report``: the ingest strategy never stores the fields;
-#: - ``not_recorded``: the app records no source for the figure.
+#: Why a figure is ``None``; the module docstring defines each.
 Missing = Literal[
     "coverage_unknown",
     "no_plan",
@@ -412,6 +411,8 @@ def render() -> list[str]:
         FEED_HEALTH_SQL,
         ROWS_CH_SQL,
         MESSAGE_AGE_CH_SQL,
+        inspect.getsource(build_month),
+        inspect.getsource(_window_params),
         inspect.getsource(shape),
         inspect.getsource(_share_pct),
         inspect.getsource(_completeness_missing),
