@@ -2240,6 +2240,8 @@
     "service": "{{value}}ダイヤ",
     "stop": "停留所 {{id}}",
     "dir": "方向 {{dir}}",
+    "duration_min": "{{n}}分",
+    "duration_sec": "{{n}}秒",
     "tolerance_min": "{{n}}分以内",
     "tolerance_sec": "{{n}}秒以内",
     "early_min": "早発は{{n}}分まで",

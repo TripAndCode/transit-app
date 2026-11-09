@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import ON_TIME from "./onTimeDefault.json";
-import { DEFAULT_WINDOW, EARLY_ANY, PRESET_NAMES, earlyParam, scopeWindow } from "./onTimeDefault";
+import { DEFAULT_WINDOW, EARLY_ANY, PRESET_NAMES, earlyParam, scopeWindow, windowSide } from "./onTimeDefault";
 
 // tests/unit/test_on_time_default.py pins onTimeDefault.json to the server's
 // DEFAULT_PRESET, ON_TIME_PRESETS and EARLY_ANY; this pins the module to the
@@ -26,5 +26,12 @@ describe("the on-time default", () => {
     expect(earlyParam(60)).toBeNull();
     expect(earlyParam(null)).toBe(EARLY_ANY);
     expect(earlyParam(120)).toBe(120);
+  });
+
+  it("puts a delay on time inside the window, both edges included, and late or early only past an edge", () => {
+    const standard = { early_sec: 60, late_sec: 300 };
+    expect([-61, -60, 0, 300, 301].map((d) => windowSide(d, standard))).toEqual(["early", "on_time", "on_time", "on_time", "late"]);
+    const anyEarly = { early_sec: null, late_sec: 60 };
+    expect([-3600, 60, 61].map((d) => windowSide(d, anyEarly))).toEqual(["on_time", "on_time", "late"]);
   });
 });

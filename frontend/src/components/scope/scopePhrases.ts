@@ -1,4 +1,4 @@
-import { DEFAULT_WINDOW, EARLY_ANY } from "../../api/onTimeDefault";
+import { DEFAULT_WINDOW, EARLY_ANY, type OnTimeWindow } from "../../api/onTimeDefault";
 import type { Scope } from "../../api/scope";
 import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, type LabelT } from "../../utils/filterValueLabels";
 import { roundTenth } from "../../utils/format";
@@ -22,9 +22,16 @@ function dateLabel(iso: string, withYear: boolean): string {
   return withYear ? `${y}/${m}/${d}` : `${m}/${d}`;
 }
 
+// Every span a phrase names goes through here, whole seconds under a minute
+// and else minutes to a tenth, so one edge prints one way wherever it shows.
 function secondsLabel(sec: number, t: LabelT, minKey: string, secKey: string): string {
   if (sec < 60) return translationT(t, secKey, { n: sec });
   return translationT(t, minKey, { n: roundTenth(sec / 60) });
+}
+
+/** A span alone, as a figure and its unit. */
+export function durationLabel(sec: number, t: LabelT): string {
+  return secondsLabel(sec, t, "scope.duration_min", "scope.duration_sec");
 }
 
 export function toleranceLabel(sec: number, t: LabelT): string {
@@ -33,6 +40,14 @@ export function toleranceLabel(sec: number, t: LabelT): string {
 
 export function earlyLabel(sec: number, t: LabelT): string {
   return secondsLabel(sec, t, "scope.early_min", "scope.early_sec");
+}
+
+/** An on-time window's two sides in the scope sentence's words. */
+export function windowLabels({ early_sec, late_sec }: OnTimeWindow, t: LabelT): { late: string; early: string } {
+  return {
+    late: toleranceLabel(late_sec, t),
+    early: early_sec == null ? translationT(t, "scope.early_any") : earlyLabel(early_sec, t),
+  };
 }
 
 /** The scope as words, one token per condition, in sentence order. Each

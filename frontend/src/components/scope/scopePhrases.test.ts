@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import i18n from "../../i18n";
 import { SCOPE_EXTRAS_NONE, type Scope } from "../../api/scope";
 import {
+  durationLabel,
   isScopeConditionOff,
   periodDays,
   scopeTitle,
@@ -217,5 +218,14 @@ describe("isScopeConditionOff", () => {
     expect(isScopeConditionOff(token(scope, "time"), scope, undefined)).toBe(false);
     expect(isScopeConditionOff(token(base, "time"), base, { time_band: false })).toBe(false);
     expect(isScopeConditionOff(token(base, "agency"), base, { time_band: false })).toBe(false);
+  });
+});
+
+describe("durationLabel", () => {
+  it("prints a span the way the scope sentence does, seconds under a minute and else minutes to a tenth, its figure held to its unit", () => {
+    const en = i18n.getFixedT("en");
+    const ja = i18n.getFixedT("ja");
+    expect([45, 60, 90, 300].map((sec) => durationLabel(sec, en))).toEqual(["45\u00a0s", "1\u00a0min", "1.5\u00a0min", "5\u00a0min"]);
+    expect([45, 60, 90, 300].map((sec) => durationLabel(sec, ja))).toEqual(["45秒", "1分", "1.5分", "5分"]);
   });
 });

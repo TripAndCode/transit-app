@@ -28,6 +28,17 @@ export function scopeWindow(scope: { early: ScopeEarly; late: number | null }): 
   return { early_sec: early, late_sec: scope.late ?? DEFAULT_WINDOW.late_sec };
 }
 
+export type WindowSide = "early" | "on_time" | "late";
+
+/** Where a departure `delaySec` seconds late falls against `onTimeWindow`,
+ *  as the server counts it: on time with both edges included, late past the
+ *  late edge, early past the early edge. Every delay falls on exactly one. */
+export function windowSide(delaySec: number, { early_sec, late_sec }: OnTimeWindow): WindowSide {
+  if (delaySec > late_sec) return "late";
+  if (early_sec != null && delaySec < -early_sec) return "early";
+  return "on_time";
+}
+
 /** The scope's `early` for an early bound of `sec` seconds, or none: left out
  *  when it is the default's. */
 export function earlyParam(sec: number | null): ScopeEarly {

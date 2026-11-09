@@ -16,6 +16,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
 import { useScope } from "../api/scope";
+import { scopeWindow, windowSide } from "../api/onTimeDefault";
+import { durationLabel, windowLabels } from "../components/scope/scopePhrases";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
 import type { LiveTrip, ServiceHoursResponse } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
@@ -590,11 +592,21 @@ export function MapTab() {
   }
 
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
-  const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
-  const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
+  // The window every other screen counts, filled in from the shared default,
+  // though over a different population: each reporting trip's latest report.
+  // Its edges split the trips into late, on time and early, so the tiles and
+  // the early note never count a trip twice.
+  const onTimeWindow = scopeWindow(ctx);
+  const sideOf = (trip: LiveTrip) => windowSide(trip.dep_delay, onTimeWindow);
+  const delayedRows = liveRows.filter((trip) => sideOf(trip) === "late").sort((a, b) => b.dep_delay - a.dep_delay);
+  const onTimeCount = liveRows.filter((trip) => sideOf(trip) === "on_time").length;
+  const earlyCount = liveRows.filter((trip) => sideOf(trip) === "early").length;
+  const onTimePct = liveRows.length ? Math.round((onTimeCount / liveRows.length) * 100) : null;
+  const lateEdge = durationLabel(onTimeWindow.late_sec, t);
+  const earlyEdge = onTimeWindow.early_sec == null ? null : durationLabel(onTimeWindow.early_sec, t);
   // Names the list, not one fetch of it: a poll must not collapse rows the
   // operator has already expanded.
-  const delayedRowsResetKey = `${id ?? "none"}:${ctx.routes.join(",")}`;
+  const delayedRowsResetKey = `${id ?? "none"}:${ctx.routes.join(",")}:${onTimeWindow.late_sec}`;
   const cappedDelayedRows = useCappedList(delayedRows, DELAYED_TRIPS_CAP, delayedRowsResetKey);
 
   // A hovered vehicle always wins the card: the pointer is the more recent
@@ -620,9 +632,15 @@ export function MapTab() {
               only as "—", since a zero would claim no trip is reporting. */}
           <div className="focus-summary-strip">
             <StatTile label={td("observedLabel")} value={countsKnown ? liveRows.length : EM_DASH} />
-            <StatTile label={td("delayedLabel")} value={countsKnown ? delayedRows.length : EM_DASH} flagged={countsKnown && delayedRows.length > 0} />
+            <StatTile label={td("delayedLabel", { edge: lateEdge })} value={countsKnown ? delayedRows.length : EM_DASH} flagged={countsKnown && delayedRows.length > 0} />
             {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
           </div>
+          {onTimePct != null && (
+            <p className="focus-muted" data-testid="live-on-time-note">{td("onTimeNote", windowLabels(onTimeWindow, t))}</p>
+          )}
+          {earlyEdge != null && earlyCount > 0 && (
+            <p className="focus-muted" data-testid="live-early-note">{td("earlyNote", { count: earlyCount, edge: earlyEdge })}</p>
+          )}
           {liveQuery.data?.truncated && (
             <p className="focus-muted" data-testid="live-truncated">{td("liveTruncated", { n: liveRows.length })}</p>
           )}
@@ -632,7 +650,7 @@ export function MapTab() {
           {liveRows.length > 0 && (
             <button type="button" className="btn-ghost ops-queue__export" disabled={!!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
           )}
-          {!liveQuery.isLoading && !liveQuery.error && liveRows.length > 0 && !delayedRows.length && <p className="focus-muted">{td("noDelayed")}</p>}
+          {!liveQuery.isLoading && !liveQuery.error && liveRows.length > 0 && !delayedRows.length && <p className="focus-muted">{td("noDelayed", { edge: lateEdge })}</p>}
           {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
             <button type="button" onClick={() => { focusTripRow(trip); }}>
               <span>{trip.route_code ? <RouteLabel code={trip.route_code} names={routeNames} compact /> : routeNames.format(null)}<small>{hhmm(trip)}{FILTER_SEPARATOR}{trip.headsign}{FILTER_SEPARATOR}{trip.stop_name}</small></span>
