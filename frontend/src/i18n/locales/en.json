@@ -2240,6 +2240,8 @@
     "service": "{{value}} timetable",
     "stop": "stop {{id}}",
     "dir": "direction {{dir}}",
+    "duration_min": "{{n}}\u00a0min",
+    "duration_sec": "{{n}}\u00a0s",
     "tolerance_min": "within {{n}} min",
     "tolerance_sec": "within {{n}} s",
     "early_min": "early by up to {{n}} min",

@@ -22,9 +22,16 @@ function dateLabel(iso: string, withYear: boolean): string {
   return withYear ? `${y}/${m}/${d}` : `${m}/${d}`;
 }
 
+// Every span a phrase names goes through here, whole seconds under a minute
+// and else minutes to a tenth, so one edge prints one way wherever it shows.
 function secondsLabel(sec: number, t: LabelT, minKey: string, secKey: string): string {
   if (sec < 60) return translationT(t, secKey, { n: sec });
   return translationT(t, minKey, { n: roundTenth(sec / 60) });
+}
+
+/** A span alone, as a figure and its unit. */
+export function durationLabel(sec: number, t: LabelT): string {
+  return secondsLabel(sec, t, "scope.duration_min", "scope.duration_sec");
 }
 
 export function toleranceLabel(sec: number, t: LabelT): string {

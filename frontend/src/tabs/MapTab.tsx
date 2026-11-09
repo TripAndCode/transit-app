@@ -17,7 +17,7 @@ import "./map/operationsMap.css";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
 import { useScope } from "../api/scope";
 import { scopeWindow, windowSide } from "../api/onTimeDefault";
-import { windowLabels } from "../components/scope/scopePhrases";
+import { durationLabel, windowLabels } from "../components/scope/scopePhrases";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
 import type { LiveTrip, ServiceHoursResponse } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
@@ -602,9 +602,8 @@ export function MapTab() {
   const onTimeCount = liveRows.filter((trip) => sideOf(trip) === "on_time").length;
   const earlyCount = liveRows.filter((trip) => sideOf(trip) === "early").length;
   const onTimePct = liveRows.length ? Math.round((onTimeCount / liveRows.length) * 100) : null;
-  const durationLabel = (sec: number) => (sec % 60 === 0 ? td("durationMin", { n: sec / 60 }) : td("durationSec", { n: sec }));
-  const lateEdge = durationLabel(onTimeWindow.late_sec);
-  const earlyEdge = onTimeWindow.early_sec == null ? null : durationLabel(onTimeWindow.early_sec);
+  const lateEdge = durationLabel(onTimeWindow.late_sec, t);
+  const earlyEdge = onTimeWindow.early_sec == null ? null : durationLabel(onTimeWindow.early_sec, t);
   // Names the list, not one fetch of it: a poll must not collapse rows the
   // operator has already expanded.
   const delayedRowsResetKey = `${id ?? "none"}:${ctx.routes.join(",")}:${onTimeWindow.late_sec}`;
