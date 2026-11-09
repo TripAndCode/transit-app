@@ -1,15 +1,18 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { decl, ruleBody } from "../test/cssRules";
+import * as client from "../api/client";
+import { ApiError } from "../api/client";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
 import * as snapshots from "../api/snapshots";
 import { AnalysisTab } from "./AnalysisTab";
+import { PrintFootProvider, PrintFrame } from "../components/PrintFrame";
 import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
 
@@ -920,6 +923,206 @@ describe("AnalysisTab council report", () => {
     showCouncil();
     await userEvent.click(screen.getByRole("button", { name: "Print / Save as PDF" }));
     expect(print).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AnalysisTab council report print", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The create an admin's print sends for this scope, shared with the
+   *  backend test that reads the stored snapshot back (tests/api/test_snapshots.py). */
+  const PRINT_FLOW: { search: string; body: { screen: string; query: Record<string, string> } } = JSON.parse(
+    readFileSync(resolve(__dirname, "../../../tests/fixtures/council_print_snapshot.json"), "utf8"),
+  );
+  const ID = "AbCdEfGhIjKlMnOpQrStUv";
+  const CREATED = {
+    snapshot_id: ID,
+    path: `/s/${ID}`,
+    created_at: "2026-11-10T03:00:05Z",
+    screen: "council_report",
+    agency_id: 1,
+    method_version: "2026.11.0",
+  };
+  const LINE = `Snapshot: ${window.location.origin}/s/${ID} (method 2026.11.0)`;
+
+  function councilReport(onTime = 22.6): ReportResponse {
+    return {
+      ...reportResponse("council_summary"),
+      rows: [[onTime, 2.5, 540357, 2130, 2100, 98.6, 4.2]],
+      definition: { ...DEFINITION, early_departure_sec: 60 },
+      text: `Aomori, 5/14\nOn time ${onTime}%, average delay 2.5 min.`,
+      ctx: { from: "2026-05-14", to: "2026-05-14", dow: "all", time_band: "all", service: "all", routes: [] },
+      scope_applied: { from: true, to: true },
+      delivered_scope_applied: { from: true, to: true },
+      covered_days: 1,
+      window_days: 1,
+      delivered_missing: null,
+    } as ReportResponse;
+  }
+
+  /** The stored snapshot as its read hands it back: the response served a
+   *  moment after the one on the page, its keys in another order. */
+  function storedSnapshot(report: ReportResponse) {
+    const later = Object.fromEntries(Object.entries({ ...report, rendered_at: "2026-11-10T03:00:04Z" }).reverse());
+    return { snapshot_id: ID, payloads: { report: { ja: later, en: later } }, method_version: "2026.11.0" };
+  }
+
+  /** The council report on an agency page, with the print frame the app shell
+   *  draws around it. */
+  function showPrintable({ admin = true, report = councilReport(), placeholder = false } = {}) {
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(admin);
+    mockSupportHooks();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "http://example.com/feed.pb" }],
+    } as never);
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("council_summary")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const answer = (data: ReportResponse, isPlaceholderData = false) =>
+      ({ data, isPlaceholderData, isFetching: false, error: null, refetch: vi.fn() }) as never;
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue(answer(report, placeholder));
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/agencies/:agencyId/analysis/:lens",
+          element: (
+            <PrintFootProvider>
+              <PrintFrame />
+              <AnalysisTab reportTypes={["council_summary"]} />
+            </PrintFootProvider>
+          ),
+        },
+      ],
+      { initialEntries: [`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}`] },
+    );
+    renderWithProviders(<RouterProvider router={router} />);
+    return { router, answerWith: (data: ReportResponse) => useReport.mockReturnValue(answer(data)) };
+  }
+
+  /** window.print, recording what the printed footer said when it was called. */
+  function printer() {
+    const footers: string[] = [];
+    const print = vi.spyOn(window, "print").mockImplementation(() => {
+      footers.push(screen.getByTestId("print-frame-footer").textContent ?? "");
+    });
+    return { print, footers };
+  }
+
+  function answerSnapshotReads(snapshot: unknown) {
+    return vi
+      .spyOn(client, "apiGet")
+      .mockImplementation((path: string) => (path.startsWith("/api/snapshots/") ? Promise.resolve(snapshot) : new Promise(() => {})) as never);
+  }
+
+  const printButton = () => screen.getByRole("button", { name: "Print / Save as PDF" });
+
+  it("stores an admin's printed figures first, then prints the snapshot's link and method in the footer", async () => {
+    const post = vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    const get = answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print, footers } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(post).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith("/api/admin/snapshots", { ...PRINT_FLOW.body, agency_id: 1 }, expect.anything());
+    expect(get).toHaveBeenCalledWith(`/api/snapshots/${ID}`, expect.anything());
+    expect(footers[0]).toContain(LINE);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("The printed page carries this snapshot's link at its foot");
+    expect(within(status).getByRole("link")).toHaveAttribute("href", `${window.location.origin}/s/${ID}`);
+  });
+
+  it("prints anyway, without a link, when the snapshot can't be taken, and says so calmly", async () => {
+    vi.spyOn(client, "apiPost").mockRejectedValue(new ApiError(409, "the aggregates changed"));
+    const { print, footers } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(footers[0]).not.toContain("Snapshot:");
+    expect(screen.getByRole("status")).toHaveTextContent("Printed without a snapshot link, as one couldn't be prepared.");
+  });
+
+  it("prints without a link when the stored figures are not the ones on the page", async () => {
+    vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    answerSnapshotReads(storedSnapshot(councilReport(30.1)));
+    const { print, footers } = printer();
+    showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(footers[0]).not.toContain("Snapshot:");
+    expect(screen.getByRole("status")).toHaveTextContent("the figures were updated after this page opened");
+  });
+
+  it("leaves a reader's print as it is: no snapshot and no note", async () => {
+    const post = vi.spyOn(client, "apiPost");
+    const { print, footers } = printer();
+    showPrintable({ admin: false });
+    await userEvent.click(printButton());
+    expect(print).toHaveBeenCalledOnce();
+    expect(post).not.toHaveBeenCalled();
+    expect(footers[0]).not.toContain("Snapshot:");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("prints figures still held over from another scope without a snapshot of either", async () => {
+    const post = vi.spyOn(client, "apiPost");
+    const { print } = printer();
+    showPrintable({ placeholder: true });
+    await userEvent.click(printButton());
+    expect(print).toHaveBeenCalledOnce();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("takes one snapshot per print, never another for a second click or a repaint", async () => {
+    const post = vi.spyOn(client, "apiPost").mockReturnValue(new Promise(() => {}));
+    const { print } = printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    expect(screen.getByRole("status")).toHaveTextContent("Creating a snapshot for the printed page");
+    expect(printButton()).toBeDisabled();
+    await userEvent.click(printButton());
+    await act(() => router.navigate(`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}&raw=1`));
+    expect(post).toHaveBeenCalledOnce();
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it("keeps the link in the footer only while the page shows the figures it was printed with", async () => {
+    vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    const shown = councilReport();
+    answerSnapshotReads(storedSnapshot(shown));
+    const { print } = printer();
+    const { router, answerWith } = showPrintable({ report: shown });
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    const footer = () => screen.getByTestId("print-frame-footer");
+
+    // A repaint over the same response keeps the line.
+    await act(() => router.navigate(`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}&raw=1`));
+    expect(footer()).toHaveTextContent(LINE);
+
+    // A new response, even one reading the same, is not what was stored.
+    answerWith({ ...shown, rendered_at: "2026-11-10T04:00:00Z" });
+    await act(() => router.navigate(`/agencies/1/analysis/reports?report=council_summary&${PRINT_FLOW.search}`));
+    expect(footer()).not.toHaveTextContent("Snapshot:");
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("drops the link once the scope on screen is another", async () => {
+    vi.spyOn(client, "apiPost").mockResolvedValue(CREATED);
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print } = printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-01&to=2026-05-14"));
+    expect(screen.getByTestId("print-frame-footer")).not.toHaveTextContent("Snapshot:");
+  });
+
+  it("shows the link on paper and keeps the on-screen notes and the button off it", () => {
+    const shell = ruleBody(readFileSync(resolve(__dirname, "../styles/global.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(shell, ".print-frame__snapshot"), "display")).toBe("block");
+    const own = ruleBody(readFileSync(resolve(__dirname, "../components/analysis/CouncilSummaryBlock.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(own, ".council-report__print, .council-report__print-note"), "display")).toBe("none");
   });
 });
 

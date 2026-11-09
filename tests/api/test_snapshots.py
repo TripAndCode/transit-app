@@ -5,6 +5,7 @@ aggregates behind the live screen have moved since."""
 import json
 import re
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
@@ -98,6 +99,44 @@ async def test_a_snapshot_keeps_its_figures_and_stamp_after_a_reanalyze(reports_
     assert body["method_version"] == METHOD_VERSION
     assert body["screen"] == screen
     assert "created_by" not in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("locale", ["ja", "en"])
+async def test_the_id_a_printed_council_report_carries_resolves_to_the_figures_on_the_page(
+    reports_client,  # noqa: F811
+    aconn,
+    locale,
+):
+    """An admin's print of the council report sends this create (the body the
+    print flow's own test pins, frontend/src/tabs/AnalysisTab.test.tsx), reads
+    the snapshot back, and prints its id only where the stored response in the
+    reader's language is the one on the page, all but the moment each was
+    served."""
+    print_flow = json.loads((Path(__file__).parents[1] / "fixtures" / "council_print_snapshot.json").read_text())
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    query = urlencode(print_flow["body"]["query"])
+    assert query == print_flow["search"]
+    on_page = await client.get(
+        f"/api/{agency_id}/reports/council_summary?{query}", headers={"Accept-Language": locale}
+    )
+
+    created = await client.post(
+        "/api/admin/snapshots",
+        json={**print_flow["body"], "agency_id": agency_id},
+        cookies={"sid": sid},
+        headers=ORIGIN,
+    )
+    assert created.status_code == 201, created.text
+    snapshot_id = created.json()["snapshot_id"]
+    assert created.json()["path"] == f"/s/{snapshot_id}"
+
+    stored = await client.get(f"/api/snapshots/{snapshot_id}")
+    assert stored.status_code == 200
+    assert _figures(stored.json()["payloads"]["report"][locale]) == _figures(on_page.json())
+    assert created.json()["method_version"] == on_page.json()["definition"]["method_version"] == METHOD_VERSION
 
 
 @pytest.mark.asyncio
