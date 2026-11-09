@@ -223,3 +223,76 @@ def test_a_day_saved_without_its_stop_events_is_left_out_of_the_stop_ratio(pg_co
     # The 1st's stop events are unknown, so its 8 observed ones go with it.
     assert (april["observed_stop_events"], april["planned_stop_events"], april["stop_plan_days"]) == (0, 232, 29)
     assert april["planned_trips"] == 120
+
+
+def test_a_deleted_agencys_later_days_do_not_stretch_a_live_agencys_window(pg_conn, ch_client, closed_on_may_first):
+    """The board lists only agencies not deleted, so only their aggregates say
+    how far coverage reaches."""
+    gone = _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = %s", (gone,))
+    pg_conn.commit()
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    insert_updates(ch_client, agency, _live_polls())
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["through_date"], april["planned_trips"]) == (_APRIL, 4)
+
+
+def _nodes(plan: dict):
+    yield plan
+    for child in plan.get("Plans", []):
+        yield from _nodes(child)
+
+
+def test_the_newest_day_is_read_per_agency_off_the_index(pg_conn):
+    """Each live agency's newest day is an index probe on the (agency_id, date)
+    key, never a scan of every agency's rows."""
+    with pg_conn.cursor() as cur:
+        cur.execute("SET LOCAL enable_seqscan = off")
+        cur.execute("EXPLAIN (FORMAT JSON) " + feed_quality.NEWEST_DAY_SQL)
+        plan = cur.fetchone()[0][0]["Plan"]
+    pg_conn.rollback()
+    scans = [node for node in _nodes(plan) if node.get("Relation Name") == "agg_route_daily_dist"]
+    assert scans
+    assert all("agency_id" in node.get("Index Cond", "") for node in scans), scans
+
+
+def _one_poll(withheld: tuple) -> list[tuple]:
+    """One live poll of every trip at both stops, the stop *withheld* names
+    reported as the rows of the given (dep_delay, arr_delay, stop status)."""
+    captured = _POLL
+    name = f"oracle/{captured:%Y%m%d}/TripUpdate_{captured:%H%M%S}.pb"
+    header = int(captured.timestamp()) - 10
+    rows = []
+    for trip in _TRIPS:
+        for seq in (1, 2):
+            dep, arr, stop_status = (30, 30, 0) if (trip, seq) != withheld[:2] else withheld[2:]
+            rows.append(
+                (name, captured, trip, "平日", "11:00:00", "R1", seq, dep, f"S{seq}", arr, 0, stop_status, header)
+            )
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("report", "reported"),
+    [
+        # SKIPPED with no time: the feed said something about the stop.
+        ((None, None, 1), 8),
+        # Only an implausible delay: the clamp drops it, as everywhere else.
+        ((9000, None, 0), 7),
+    ],
+    ids=["skipped", "implausible"],
+)
+def test_a_stop_event_counts_as_reported_on_a_plausible_delay_or_a_withdrawal(
+    pg_conn, ch_client, closed_on_may_first, report, reported
+):
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    insert_updates(ch_client, agency, _one_poll(("ALL-3", 2, *report)))
+    analyze(agency, pg_conn, ch_client)
+
+    assert _stored(pg_conn, agency)[_APRIL]["observed_stop_events"] == reported

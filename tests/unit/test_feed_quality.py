@@ -170,6 +170,24 @@ def test_an_incremental_run_builds_the_changed_months_and_the_ones_whose_window_
     assert purge == build == [date(2026, 9, 1), date(2026, 11, 1)]
 
 
+def test_a_changed_date_past_the_last_counted_day_builds_nothing_while_the_window_stands():
+    """The month in progress already counts through the last counted day; a
+    change on a later date is outside every window, so its rows would come
+    out the same."""
+    stored = {_OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 8)}
+    assert plan_months([date(2026, 11, 9)], date(2026, 10, 1), date(2026, 11, 8), stored) == ([], [])
+
+
+def test_a_window_that_shrank_is_rebuilt_too():
+    """A stored month counted further than its window now reaches, as after
+    the agency holding the newest day is deleted."""
+    stored = {_OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 8)}
+    assert plan_months([], date(2026, 10, 1), date(2026, 11, 5), stored) == (
+        [date(2026, 11, 1)],
+        [date(2026, 11, 1)],
+    )
+
+
 def test_a_new_month_is_built_on_its_first_closed_day_without_a_changed_date():
     stored = {_OCT: date(2026, 10, 31)}
     assert plan_months([], date(2026, 10, 1), date(2026, 11, 1), stored) == ([date(2026, 11, 1)], [date(2026, 11, 1)])
