@@ -200,6 +200,32 @@ async def test_an_over_large_payload_is_refused_and_nothing_is_stored(reports_cl
 
 
 @pytest.mark.asyncio
+async def test_locales_that_disagree_on_any_figure_store_nothing(reports_client, aconn, monkeypatch):  # noqa: F811
+    """The two languages are two computations; if anything but their prose and
+    serving time differs between them (here the row count a rebuild moved),
+    the snapshot would freeze two answers, so none is stored."""
+    import api.routers.snapshots as snapshots
+
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    real = snapshots.render_report
+
+    async def moved_between_locales(*args, **kwargs):
+        rendered = await real(*args, **kwargs)
+        assert isinstance(rendered, snapshots.ReportResponse)
+        if kwargs["locale"] == "en":
+            return rendered.model_copy(update={"rows_total": (rendered.rows_total or 0) + 1})
+        return rendered
+
+    monkeypatch.setattr(snapshots, "render_report", moved_between_locales)
+    sid = (await seed_session(aconn, role="admin")).sid
+    resp = await _create(client, sid, agency_id)
+    assert resp.status_code == 409
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+    assert await aconn.fetchval("SELECT count(*) FROM admin_audit WHERE action = 'snapshot.create'") == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("snapshot_id", ["a" * 22, "short", "a" * 21 + "!"])
 async def test_an_unknown_or_malformed_id_is_the_same_404(reports_client, snapshot_id):  # noqa: F811
     client, _, _ = reports_client

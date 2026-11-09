@@ -39,8 +39,9 @@ One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
     (`GET /api/{agency_id}/reports/{council_summary|route_table}`) serves,
     once per language, each with its `definition` (`DefinitionMeta`: method
     version, build time, timetables, ingest sources). Both languages are
-    stored because the server writes the council report's prose; their
-    figures must match, or the create answers 409 and stores nothing.
+    stored because the server writes the council report's prose. Everything
+    but that prose (`text`) and the serving time (`rendered_at`) must match
+    between them, or the create answers 409 and stores nothing.
   - `routes`: the agency's route catalogue (`GET /api/{agency_id}/routes`), so
     the rows keep the labels they had.
   - `credit`: the open-data credit for the agency's feed, per language.

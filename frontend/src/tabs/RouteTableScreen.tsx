@@ -107,7 +107,8 @@ export function RouteTableScreen() {
             {id != null && data && (
               <CsvLink href={apiUrl(`/api/${id}/reports/route_table?${reportQueryString(ctx, options)}&format=csv`)} />
             )}
-            {/* Only a snapshot is new here, and only an admin takes one. */}
+            {/* The table exports its own CSV and has no print view, so the
+                menu holds only the snapshot, which only an admin takes. */}
             {isAdmin && id != null && (
               <ExportMenu
                 csv={null}

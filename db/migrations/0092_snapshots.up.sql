@@ -4,10 +4,12 @@
 -- an admin can delete one.
 --
 -- `snapshot_id` is an unguessable token and the only credential a reader
--- needs. `payloads` holds the responses the screen's own endpoints served,
--- each with its DefinitionMeta, keyed by endpoint and, where the server writes
--- prose, by locale. `agency_id` carries no foreign key: a snapshot outlives
--- the agency it describes, so `agency_name` is frozen beside it.
+-- needs. `payloads` holds `report`, the screen's report response per locale,
+-- each with its DefinitionMeta; `routes`, the agency's route catalogue the
+-- labels are drawn from, which carries no stamp of its own; and `credit`, the
+-- open-data credit as plain text per locale. `agency_id` carries no foreign
+-- key: a snapshot outlives the agency it describes, so `agency_name` is
+-- frozen beside it.
 CREATE TABLE IF NOT EXISTS snapshots (
     snapshot_id    TEXT PRIMARY KEY CHECK (snapshot_id ~ '^[A-Za-z0-9_-]{22,64}$'),
     created_by     INTEGER REFERENCES users(user_id) ON DELETE SET NULL,

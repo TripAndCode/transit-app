@@ -15,7 +15,7 @@ import { SkeletonTable } from "../components/Skeleton";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
 import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 import { reportLabel } from "../components/analysis/reportGroups";
-import { conditionIsSet, scopeTokens } from "../components/scope/scopePhrases";
+import { isScopeConditionOff, scopeTokens } from "../components/scope/scopePhrases";
 import { contentLocale } from "../i18n/contentLocale";
 import { useDocumentLocale } from "../i18n/useDocumentLocale";
 import { routeTableSortDirection, type RouteTableView } from "../routes/destinations";
@@ -119,11 +119,10 @@ function ScopeStatement({ snapshot, report, names }: { snapshot: Snapshot; repor
     routeLabel: names.format,
     routeGroup: (code) => names.data.get(code),
   });
-  const applied = report?.scope_applied;
   return (
     <p className="snapshot-page__scope" data-testid="snapshot-scope">
       {tokens.map((tok, i) => {
-        const off = tok.field != null && applied?.[tok.field] === false && conditionIsSet(tok.key, scope);
+        const off = isScopeConditionOff(tok, scope, report?.scope_applied);
         return (
           <span key={tok.key}>
             {i > 0 && t("common.list_separator")}

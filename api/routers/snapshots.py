@@ -167,9 +167,16 @@ class SnapshotOut(BaseModel):
     note: str | None
 
 
+#: The response fields that legitimately differ between the locales'
+#: renders: the server's prose and the moment each was served.
+_LOCALE_VARYING = frozenset({"text", "rendered_at"})
+
+
 def _figures(report: dict[str, Any]) -> dict[str, Any]:
-    """What a response says that no locale changes."""
-    return {"rows": report["rows"], "ctx": report["ctx"], "definition": report["definition"]}
+    """The whole response except :data:`_LOCALE_VARYING`, which must match
+    across locales: anything else that differs means the aggregates moved
+    between the two computations."""
+    return {k: v for k, v in report.items() if k not in _LOCALE_VARYING}
 
 
 def _client_ip(request: Request) -> str | None:

@@ -19,20 +19,18 @@ import { CONTROLS } from "./controlForToken";
 import { ScopePopover } from "./ScopePopover";
 import { readScopePinned, writeScopePinned } from "./scopePin";
 import {
-  conditionIsSet,
+  isScopeConditionOff,
   periodDays,
   scopeTokens,
   sentenceParts,
   tokenChanged,
-  type ScopeField,
+  type ScopeApplied,
   type ScopeToken,
   type TokenKey,
 } from "./scopePhrases";
 import { useScopeActionsSlot } from "./scopeSlot";
 import "./scope.css";
 
-/** Keyed by URL param name, as the API reports it (api/scope_applied.py). */
-type Applied = Partial<Record<ScopeField | (string & {}), boolean>> | null | undefined;
 type ConditionKey = Exclude<TokenKey, "agency">;
 
 const RESET: ScopePatch = {
@@ -138,7 +136,7 @@ function Token({
  *  `applied` means every condition was used. The saved views and the pin go
  *  on the page heading's row when the page has a ScopePageHeader, and beside
  *  the sentence otherwise. */
-export function ScopeSentence({ applied }: { applied?: Applied }) {
+export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const [scope, update] = useScope();
@@ -168,8 +166,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   const { data: summary } = useScopeSummary(id, scope, pinned || (open != null && DATA_KEYS.has(open)));
   const separator = t("common.list_separator");
 
-  const isOff = (tok: ScopeToken & { key: ConditionKey }) =>
-    tok.field != null && applied?.[tok.field] === false && conditionIsSet(tok.key, scope);
+  const isOff = (tok: ScopeToken & { key: ConditionKey }) => isScopeConditionOff(tok, scope, applied);
 
   function apply(patch: ScopePatch) {
     update(patch);
