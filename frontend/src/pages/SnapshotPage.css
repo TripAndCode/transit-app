@@ -87,3 +87,65 @@
   align-items: center;
   column-gap: var(--space-3);
 }
+
+/* The comparison with today: a toggle, then what the comparison rests on,
+   in the banner's calm register. */
+.snapshot-compare {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.snapshot-compare__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.snapshot-compare__note {
+  margin: var(--space-2) 0 0;
+}
+
+.snapshot-compare__status {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+.snapshot-compare__status p {
+  margin: 0 0 var(--space-2);
+}
+
+.snapshot-compare__status > :last-child {
+  margin-bottom: 0;
+}
+
+.snapshot-compare__sides {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--space-3);
+  row-gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+
+.snapshot-compare__sides dt {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.snapshot-compare__sides dd {
+  margin: 0;
+}
+
+.snapshot-compare__sides dd p {
+  margin: 0;
+}
+
+.snapshot-compare__count {
+  color: var(--text-primary);
+  font-weight: 600;
+}

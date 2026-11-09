@@ -1504,7 +1504,31 @@
       "title": "スナップショットが見つかりません",
       "hint": "リンクが正しいか確認してください。スナップショットが削除された可能性もあります。"
     },
-    "unsupported": "この種類のスナップショットは、まだこのページで表示できません。"
+    "unsupported": "この種類のスナップショットは、まだこのページで表示できません。",
+    "compare": {
+      "toggle": "今日の数値と比較",
+      "explainer": "今日の数値は、このスナップショットと同じ期間・条件・設定で、いま計算し直した値です。値が変わった数値には、今日の値を横に示します。",
+      "loading": "今日の数値を計算しています…",
+      "unavailable_agency_removed": "今日の数値はありません。この事業者は現在アプリに登録されていません。",
+      "unavailable_not_computable": "今日の数値はありません。このスナップショットの条件は、現在の集計では計算できません。",
+      "unavailable_error": "今日の数値を計算できませんでした。",
+      "side_snapshot": "スナップショット",
+      "side_today": "今日",
+      "stamp": "手法 {{method}}、{{built}}。",
+      "built_at": "集計 {{at}} JST",
+      "built_live": "ライブ集計で算出",
+      "built_unknown": "集計日時不明",
+      "method_differs": "今日の数値は手法 {{today}}、スナップショットは手法 {{snapshot}} で計算しています。差は、データではなく手法の違いによる可能性があります。",
+      "on_time_differs": "今日の数値は、スナップショットと定時の基準が異なります。定時に関わる数値は、そのためだけに変わることがあります。",
+      "differences_one": "今日の数値との違い：{{count}}件",
+      "differences_other": "今日の数値との違い：{{count}}件",
+      "no_differences": "すべての数値が今日の値と一致しています。",
+      "one_side_note": "両方とも同じ並び順・同じ件数で路線を挙げているため、片方にだけある路線は、データからなくなったのではなく、その件数の範囲から外れた可能性があります。",
+      "today_value": "今日 {{value}}",
+      "today_value_note": "今日 {{value}}（{{note}}）",
+      "only_snapshot": "スナップショットのみ",
+      "only_today": "今日のみ"
+    }
   },
   "insight_panel": {
     "title": "注目ポイント",

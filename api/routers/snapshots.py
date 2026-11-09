@@ -3,10 +3,11 @@ reproduces those exact figures and their method stamp after any later
 re-analyze.
 
 Admins create, list and delete snapshots under ``/api/admin/snapshots``.
-Anyone holding a snapshot's id reads it at ``GET /api/snapshots/{id}``, which
-the sign-in gate leaves public (``api.middleware.login_gate``): council
-material reaches readers who have no account. The id is the capability, 128
-random bits, and nothing lists ids to a non-admin.
+Anyone holding a snapshot's id reads it at ``GET /api/snapshots/{id}``, and
+today's figures for its stored query at ``GET /api/snapshots/{id}/today``,
+both of which the sign-in gate leaves public (``api.middleware.login_gate``):
+council material reaches readers who have no account. The id is the
+capability, 128 random bits, and nothing lists ids to a non-admin.
 
 The figures are never the client's. A create names the screen and the query
 that screen's own endpoint was asked, and the payload is computed by that
@@ -14,7 +15,9 @@ endpoint's code (``api.routers.reports.render_report``), so a snapshot holds
 exactly what the live screen served at that moment. The server writes the
 council report's prose in the reader's language, so every locale's response is
 stored, and the route catalogue the labels are drawn from is stored beside
-them.
+them. Today's figures come from the same code, asked the stored resolved
+scope and options, so a difference between the two is the aggregates' or the
+method's, never the query's.
 """
 
 from __future__ import annotations
@@ -28,13 +31,13 @@ from typing import Any, Literal
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from api.admin_audit import record_admin_action
-from api.deps import get_ch, get_conn
+from api.deps import get_ch, get_conn, get_locale
 from api.middleware.locale import SUPPORTED_LOCALES
-from api.middleware.ratelimit import limiter, tier_limit
-from api.range import clamp_range_ctx, ctx_payload, resolve_service_dates
+from api.middleware.ratelimit import SNAPSHOT_TODAY_LIMIT, limiter, tier_limit
+from api.range import RangeCtx, clamp_range_ctx, ctx_payload, resolve_service_dates
 from api.routers.reports import ReportResponse, render_report, scope_early
 from api.routers.static import fetch_static_routes
 from api.security import User, csrf_guard, require_admin
@@ -146,6 +149,18 @@ class SnapshotSummary(BaseModel):
     note: str | None
 
 
+class SnapshotToday(BaseModel):
+    """Today's figures for a snapshot's stored query: the screen endpoint's
+    response as it would serve that query now, in the reader's language.
+    ``report`` is None beside an ``unavailable`` reason when no such response
+    exists: the agency is no longer listed (``agency_removed``), or today's
+    code refuses the stored query or has no computation for the screen
+    (``not_computable``)."""
+
+    report: ReportResponse | None
+    unavailable: Literal["agency_removed", "not_computable"] | None = None
+
+
 class SnapshotOut(BaseModel):
     """A snapshot as anyone holding its id reads it. Who created it is left
     out: the reader needs the figures and their stamp, not the operator.
@@ -181,6 +196,51 @@ def _figures(report: dict[str, Any]) -> dict[str, Any]:
 
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
+
+
+async def _render(
+    report_type: str,
+    options: SnapshotQuery,
+    *,
+    agency_id: int,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    locale: str,
+) -> ReportResponse:
+    """The screen endpoint's response for ``ctx`` under the screen's
+    ``options``: the one computation a snapshot's figures and today's both
+    come from, so the two differ only where the data or the method moved."""
+    rendered = await render_report(
+        report_type,
+        agency_id=agency_id,
+        ctx=ctx,
+        conn=conn,
+        ch=ch,
+        locale=locale,
+        limit=options.limit,
+        preset=options.preset,
+        late=options.late,
+        early=scope_early(options.early),
+        include_sparse=options.include_sparse,
+        include_retired=options.include_retired,
+        include_zero_delay=options.include_zero_delay,
+        order=options.order,
+        sort=options.sort,
+    )
+    assert isinstance(rendered, ReportResponse)  # no format=csv, so never the CSV stream
+    return rendered
+
+
+async def _snapshot_row(conn: asyncpg.Connection, snapshot_id: str, columns: str) -> asyncpg.Record:
+    """One snapshot's ``columns``, or the one 404 an id that is malformed,
+    unknown or deleted gets alike, from a single primary-key lookup."""
+    if not _ID.fullmatch(snapshot_id):
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    row = await conn.fetchrow(f"SELECT {columns} FROM snapshots WHERE snapshot_id = $1", snapshot_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    return row
 
 
 @admin_router.post("", response_model=SnapshotCreated, status_code=201)
@@ -222,24 +282,7 @@ async def create_snapshot(
 
     reports: dict[str, dict[str, Any]] = {}
     for locale in SUPPORTED_LOCALES:
-        rendered = await render_report(
-            report_type,
-            agency_id=body.agency_id,
-            ctx=ctx,
-            conn=conn,
-            ch=ch,
-            locale=locale,
-            limit=q.limit,
-            preset=q.preset,
-            late=q.late,
-            early=scope_early(q.early),
-            include_sparse=q.include_sparse,
-            include_retired=q.include_retired,
-            include_zero_delay=q.include_zero_delay,
-            order=q.order,
-            sort=q.sort,
-        )
-        assert isinstance(rendered, ReportResponse)  # no format=csv, so never the CSV stream
+        rendered = await _render(report_type, q, agency_id=body.agency_id, ctx=ctx, conn=conn, ch=ch, locale=locale)
         reports[locale] = rendered.model_dump(mode="json", by_alias=True)
     first, *others = reports.values()
     if any(_figures(other) != _figures(first) for other in others):
@@ -350,14 +393,64 @@ async def read_snapshot(
     snapshot_id: str,
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> SnapshotOut:
-    """One snapshot by its id: a single primary-key lookup, and one 404 for
-    an id that is malformed, unknown or deleted alike."""
-    if not _ID.fullmatch(snapshot_id):
-        raise HTTPException(status_code=404, detail=_NOT_FOUND)
-    row = await conn.fetchrow(
-        f"SELECT snapshot_id, created_at, {_SNAPSHOT_COLUMNS}, payloads FROM snapshots WHERE snapshot_id = $1",
-        snapshot_id,
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail=_NOT_FOUND)
+    """One snapshot by its id."""
+    row = await _snapshot_row(conn, snapshot_id, f"snapshot_id, created_at, {_SNAPSHOT_COLUMNS}, payloads")
     return SnapshotOut(**{**dict(row), "params": json.loads(row["params"]), "payloads": json.loads(row["payloads"])})
+
+
+@router.get("/{snapshot_id}/today", response_model=SnapshotToday)
+@limiter.limit(SNAPSHOT_TODAY_LIMIT)
+async def read_snapshot_today(
+    request: Request,
+    snapshot_id: str,
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+    locale: str = Depends(get_locale),
+) -> SnapshotToday:
+    """Today's figures for a snapshot's stored query: its resolved dates,
+    scope and options replayed through the screen endpoint's own computation,
+    in the reader's language, for the page to mark what moved since.
+
+    The same 404 as the snapshot read for an id that is malformed, unknown or
+    deleted. A stored query is replayed long after it was accepted, so one the
+    current code refuses yields ``not_computable`` rather than the refusal."""
+    row = await _snapshot_row(conn, snapshot_id, "screen, agency_id, params")
+    agency_id = row["agency_id"]
+    listed = await conn.fetchval("SELECT 1 FROM agencies WHERE agency_id = $1 AND deleted_at IS NULL", agency_id)
+    if listed is None:
+        return SnapshotToday(report=None, unavailable="agency_removed")
+    report_type = _REPORT_TYPES.get(row["screen"])
+    if report_type is None:
+        return SnapshotToday(report=None, unavailable="not_computable")
+    params = json.loads(row["params"])
+    try:
+        options = SnapshotQuery.model_validate(
+            {key: params[key] for key in _SCREEN_OPTIONS if params.get(key) is not None}
+        )
+    except ValidationError:
+        return SnapshotToday(report=None, unavailable="not_computable")
+    try:
+        ctx = await resolve_service_dates(_stored_ctx(params), conn, agency_id)
+        report = await _render(report_type, options, agency_id=agency_id, ctx=ctx, conn=conn, ch=ch, locale=locale)
+    except HTTPException as refused:
+        if refused.status_code >= 500:
+            raise
+        return SnapshotToday(report=None, unavailable="not_computable")
+    return SnapshotToday(report=report)
+
+
+def _stored_ctx(params: dict[str, Any]) -> RangeCtx:
+    """The scope a snapshot stored (:func:`api.range.ctx_payload`'s keys),
+    its dates explicit, read back through the same validation a request's
+    scope gets."""
+    return clamp_range_ctx(
+        from_=params.get("from"),
+        to=params.get("to"),
+        dow=params.get("dow", "all"),
+        time_band=params.get("time_band", "all"),
+        service=params.get("service", "all"),
+        routes=params.get("routes") or (),
+        hour=params.get("hour"),
+        stop=params.get("stop"),
+        direction=params.get("dir"),
+    )

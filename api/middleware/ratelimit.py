@@ -24,6 +24,14 @@ PRO_LIMIT = "600/minute"
 #: route that queues real pipeline work.
 ADMIN_ACTION_LIMIT = "20/minute"
 
+#: Budget for a snapshot's figures recomputed for today
+#: (``GET /api/snapshots/{id}/today``), the same for every caller: a public
+#: path that runs a report computation for whoever holds a link. A reader asks
+#: once each time they turn the comparison on, again on a language switch, so
+#: this leaves room for reading several snapshots while capping a scripted
+#: loop well below the report endpoints' own budget.
+SNAPSHOT_TODAY_LIMIT = "10/minute"
+
 
 def tier_limit(key: str) -> str:
     """The one limit a caller is held to, chosen from the key `_key_func` built.

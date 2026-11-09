@@ -21,6 +21,7 @@ import { Z_INDEX } from "../styles/zIndex";
 import { fixedTenth, fmtPct, formatDuration, formatNumber, roundTenth } from "../utils/format";
 import "./ReportTable.css";
 import { ServiceNote } from "./ServiceNote";
+import type { RowMark } from "./snapshotCompare";
 import { Tooltip } from "./Tooltip";
 
 const ROWS_CAP = 200;
@@ -216,6 +217,11 @@ type Props = {
   /** Route labels to draw the rows with, in place of the agency's current
    *  ones: a frozen snapshot keeps the catalogue it was taken with. */
   names?: RouteNames;
+  /** A snapshot's rows marked against today's figures, one mark per row
+   *  (snapshotCompare.ts): a figure that moved prints today's beside it, and
+   *  a row only one side lists says which. A row only today lists has no
+   *  rank in the snapshot's order. */
+  marks?: readonly RowMark[];
 };
 
 type Caveat = { mark: string; tip?: string };
@@ -231,7 +237,7 @@ function TableWithAgencyNames(props: Props) {
   return <Table {...props} names={names} />;
 }
 
-function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec, names }: Props & { names: RouteNames }) {
+function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec, names, marks }: Props & { names: RouteNames }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { search } = useLocation();
@@ -261,6 +267,17 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
     const thin = c.samples && minSamples != null && Number(row[c.index]) < minSamples;
     return [...(own ? [own] : []), ...(thin ? [{ mark: t("reports.confidence_low_mark") }] : [])];
   };
+  const sideOf = (i: number) => {
+    const side = marks?.[i]?.side;
+    return side === "snapshot" || side === "today" ? side : undefined;
+  };
+  // Today's figure for row i's column c, worded for the cell, where it
+  // prints differently from the row's own.
+  const todayOf = (i: number, c: Schema, format: (c: Schema, raw: unknown, t: TFunction) => string) => {
+    const mark = marks?.[i];
+    if (mark?.side !== "both" || !mark.today.has(c.index)) return undefined;
+    return t("snapshot.compare.today_value", { value: format(c, mark.today.get(c.index), t) });
+  };
   const showMore = cappedRows.remaining > 0 && (
     <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
       {t("common.show_more", { count: cappedRows.remaining })}
@@ -280,17 +297,18 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
           {cappedRows.visible.map((row, i) => (
             <li key={i} className="report-cards__item">
               <div className="report-cards__head">
-                <span className="report-cards__rank">{i + 1}</span>
+                <span className="report-cards__rank">{sideOf(i) === "today" ? "" : i + 1}</span>
                 {titleCol && (
                   <span className="report-cards__route">
                     <RouteCell agencyId={id} code={String(row[titleCol.index] ?? "")} names={names} compact={titleCol.route === "compact"} search={search} travels={travelling === i} onTravel={() => setTravelling(i)} />
+                    <RowSide side={sideOf(i)} />
                   </span>
                 )}
                 {headline && (
                   <span className="report-cards__headline">
                     <span className="report-cards__label">{label(headline)}</span>{" "}
                     {headline.severeMarker && isSevere(row[headline.index]) && <DelayMarker />}
-                    <CellValue column={headline} raw={row[headline.index]} text={cardValue(headline, row[headline.index], t)} caveats={caveatsOf(headline, row)} />
+                    <CellValue column={headline} raw={row[headline.index]} text={cardValue(headline, row[headline.index], t)} caveats={caveatsOf(headline, row)} today={todayOf(i, headline, cardValue)} />
                   </span>
                 )}
               </div>
@@ -309,7 +327,7 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
                             <span className="report-cards__label">{label(c)}</span>{" "}
                           </>
                         )}
-                        <CellValue column={c} raw={row[c.index]} text={text} caveats={caveatsOf(c, row)} />
+                        <CellValue column={c} raw={row[c.index]} text={text} caveats={caveatsOf(c, row)} today={todayOf(i, c, cardValue)} />
                       </span>
                     );
                   })}
@@ -358,7 +376,7 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
               className={schema.some((c) => c.route) ? "report-row--link" : undefined}
               style={{ borderTop: "1px solid var(--border-soft)" }}
             >
-              <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
+              <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{sideOf(i) === "today" ? "" : i + 1}</td>
               {schema.map((c) => {
                 if (c.route) {
                   return (
@@ -377,11 +395,12 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
                       }}
                     >
                       <RouteCell agencyId={id} code={String(row[c.index] ?? "")} names={names} compact={c.route === "compact"} search={search} travels={travelling === i} onTravel={() => setTravelling(i)} />
+                      <RowSide side={sideOf(i)} />
                     </td>
                   );
                 }
                 const raw = row[c.index];
-                const value = <CellValue column={c} raw={raw} text={cellText(c, raw, t)} caveats={caveatsOf(c, row)} />;
+                const value = <CellValue column={c} raw={raw} text={cellText(c, raw, t)} caveats={caveatsOf(c, row)} today={todayOf(i, c, cellText)} />;
                 const className = c === basis ? "report-cell--basis" : undefined;
                 if (barred(c)) {
                   // A delay bar is drawn from the minutes the cell prints, so
@@ -480,18 +499,21 @@ function cardValue(c: Schema, raw: unknown, t: TFunction): string {
 
 /** A plain cell: a service in the UI's language where it has copy, anything
  *  else as its formatted text, followed by the row's caveats on it as muted
- *  badges. A badge with a tip takes keyboard focus, so the tip is reachable
+ *  badges, then, on a snapshot compared with today, today's figure where it
+ *  moved. A badge with a tip takes keyboard focus, so the tip is reachable
  *  without a pointer. */
 function CellValue({
   column,
   raw,
   text,
   caveats,
+  today,
 }: {
   column: Schema;
   raw: unknown;
   text: string;
   caveats: Caveat[];
+  today?: string;
 }) {
   if (column.service && raw != null) return <ServiceName value={String(raw)} />;
   return (
@@ -512,6 +534,24 @@ function CellValue({
           )}
         </span>
       ))}
+      {today != null && (
+        <>
+          {" "}
+          <span className="figure-today">{today}</span>
+        </>
+      )}
+    </>
+  );
+}
+
+/** Which side alone lists a row, on a snapshot compared with today. */
+function RowSide({ side }: { side: "snapshot" | "today" | undefined }) {
+  const { t } = useTranslation();
+  if (side == null) return null;
+  return (
+    <>
+      {" "}
+      <span className="caveat-badge">{t(side === "snapshot" ? "snapshot.compare.only_snapshot" : "snapshot.compare.only_today")}</span>
     </>
   );
 }

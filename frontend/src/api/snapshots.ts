@@ -1,5 +1,6 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
+import { useLocalizedQuery } from "./hooks";
 import type { ReportResponse, Route } from "./types";
 import type { Locale } from "../i18n";
 
@@ -60,5 +61,29 @@ export function useSnapshot(snapshotId: string): UseQueryResult<Snapshot> {
     queryKey: ["snapshot", snapshotId],
     queryFn: ({ signal }) => apiGet<Snapshot>(`/api/snapshots/${encodeURIComponent(snapshotId)}`, { signal }),
     staleTime: Infinity,
+  });
+}
+
+/** Today's figures for a snapshot's stored query
+ *  (`GET /api/snapshots/{id}/today`): the screen endpoint's response as it
+ *  would serve that query now, or null beside why there is none. */
+export type SnapshotToday = {
+  report: ReportResponse | null;
+  unavailable: "agency_removed" | "not_computable" | null;
+};
+
+// How long one computation of today's figures is reused: the server's
+// compute caches keep a result as long, and the endpoint is rate-limited.
+const TODAY_STALE_MS = 5 * 60_000;
+
+/** Today's figures for the snapshot, asked only while `enabled`: each ask
+ *  runs a report computation on a public, rate-limited path. Keyed on the UI
+ *  language, as the server writes the council prose in it. */
+export function useSnapshotToday(snapshotId: string, enabled: boolean): UseQueryResult<SnapshotToday> {
+  return useLocalizedQuery({
+    queryKey: ["snapshot-today", snapshotId],
+    queryFn: ({ signal }) => apiGet<SnapshotToday>(`/api/snapshots/${encodeURIComponent(snapshotId)}/today`, { signal }),
+    enabled,
+    staleTime: TODAY_STALE_MS,
   });
 }

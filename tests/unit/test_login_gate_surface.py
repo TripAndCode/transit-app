@@ -22,6 +22,9 @@ PUBLIC_ROUTES = {
     # A frozen snapshot is council material handed to readers with no account;
     # its unguessable id is the credential (api/routers/snapshots.py).
     ("GET", "/api/snapshots/{snapshot_id}"),
+    # Today's figures for a snapshot's stored query, for the same readers;
+    # rate-limited more strictly than the read, since it computes.
+    ("GET", "/api/snapshots/{snapshot_id}/today"),
     ("GET", "/health"),
     ("POST", "/internal/collector/updates/{agency_id}"),
     ("POST", "/internal/cron/ingest"),
@@ -53,10 +56,11 @@ def test_only_reading_who_am_i_is_public_under_api_me():
 
 
 def test_only_reading_a_snapshot_is_public():
-    assert not needs_login("/api/snapshots/abcdefghijklmnopqrstuv", "GET")
-    assert not needs_login("/api/snapshots/abcdefghijklmnopqrstuv", "HEAD")
-    for method in ("DELETE", "POST", "PUT", "PATCH"):
-        assert needs_login("/api/snapshots/abcdefghijklmnopqrstuv", method)
+    for path in ("/api/snapshots/abcdefghijklmnopqrstuv", "/api/snapshots/abcdefghijklmnopqrstuv/today"):
+        assert not needs_login(path, "GET")
+        assert not needs_login(path, "HEAD")
+        for method in ("DELETE", "POST", "PUT", "PATCH"):
+            assert needs_login(path, method)
     assert needs_login("/api/snapshots", "GET")
     assert needs_login("/api/admin/snapshots", "GET")
     assert needs_login("/api/admin/snapshots", "POST")

@@ -16,10 +16,10 @@ the number that was handed out.
   screens.
 - **Anyone holding the link** reads it, signed in or not: the page
   (`frontend/src/pages/SnapshotPage.tsx`) sits outside the sign-in wall and the
-  app shell, and `GET /api/snapshots/{id}` is public even while
-  `login_required` is on. The id is 128 random bits
+  app shell, and `GET /api/snapshots/{id}` and `GET /api/snapshots/{id}/today`
+  are public even while `login_required` is on. The id is 128 random bits
   (`secrets.token_urlsafe(16)`), and nothing lists ids to a non-admin. A
-  malformed, unknown or deleted id gets the same 404.
+  malformed, unknown or deleted id gets the same 404 from both.
 - **Admins** list and delete them through `/api/admin/snapshots`
   ([admin-control-room.md](admin-control-room.md#snapshots)). Each create and
   delete is in the audit log.
@@ -62,10 +62,60 @@ refused. Payloads over 1 MiB serialized are refused with 413.
 as the live scope sentence does, every condition the figures were computed
 under, one the screen's data did not use struck through; a Routes table also
 states its observation floor and the routes it left out, as disabled toggles.
-It asks the API for the snapshot alone, so nothing on it can drift to today's
-figures; route rows are not links, since a route's live page would show
-today's.
+Route rows are not links, since a route's live page would show today's
+figures.
 
 Only the screen's own report is frozen. The panels the Routes screen shows
 beside its table (headway quality, the agency's performance standards) come
 from endpoints of their own and are not part of a snapshot.
+
+## Compared with today
+
+The page asks the API for the snapshot alone until the reader turns on
+「今日の数値と比較」 / "Compare with today's figures" (off on every visit).
+Then it asks `GET /api/snapshots/{id}/today` once, and marks the stored
+figures against today's; the stored figures themselves never change.
+
+- **Like for like.** The endpoint replays the snapshot's stored `params` (the
+  resolved dates, never a rolling window, the scope and the screen's options)
+  through the same function the create used, `render_report`, in the reader's
+  language. A stored query the current code refuses (a preset or sort since
+  retired, a scope value it no longer takes), or a screen with no computation,
+  answers `{"report": null, "unavailable": "not_computable"}`; an agency no
+  longer listed answers `"agency_removed"`. The page says either calmly:
+  today's figures are unavailable, and why.
+- **What is compared.** Figures, never prose, each at the precision the page
+  prints it, so two values that print the same are not a difference
+  (`frontend/src/components/snapshotCompare.ts`):
+  - the Routes table's six figure columns, rows matched by route. A moved
+    figure shows today's value beside the stored one (「今日 15.0%」 /
+    "today 15.0%"); a route only one side lists is marked
+    「スナップショットのみ」 / "only in the snapshot" or 「今日のみ」 / "only
+    today", today's routes following the stored ones. Both sides ran the same
+    sort and row limit, so a route only one side lists may have moved past
+    that limit rather than left the data, which the page says when it
+    happens.
+  - the council report's headline tiles, from its structured fields: the
+    on-time, early-departure and service-delivered rates, the average delay,
+    the observations, the planned trips with the days a timetable plans, the
+    reason a delivered rate is missing, and the agencies board's verdict.
+    Its prose is written from those fields and is not compared.
+  - Equal figures show nothing extra; a figure missing on one side counts as
+    moved.
+- **Both sides named.** Above the figures, each side's method version, build
+  time (JST, or that it was a live scan) and on-time definition. When the
+  method versions differ the page says so plainly ("Today's figures use
+  method X; the snapshot used Y"), and when the on-time windows differ (a
+  snapshot that left its window to the default, after the default changed)
+  it says so too: a difference may then come from the method rather than the
+  data. A count of the differences, or that every figure matches, follows.
+- **Cost.** The endpoint computes on a public path, so every caller is held
+  to `SNAPSHOT_TODAY_LIMIT` (`api/middleware/ratelimit.py`, 10 a minute),
+  stricter than the snapshot read's per-tier budget (60 a minute on the free
+  tier). A repeated query reuses the compute caches behind it: the Routes
+  table's computation and the agencies board behind the council verdict are
+  each cached for five minutes. The council report's pooled on-time figures
+  are read from the aggregates each time, or scanned live for a scope the
+  aggregates cannot serve; the limit is what bounds those. The page reuses
+  one answer for five minutes and asks again on a language switch, since the
+  council report's response is written in the reader's language.

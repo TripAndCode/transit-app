@@ -60,7 +60,7 @@ import { useSession } from "./auth";
  *  language joins the end of the cache key, so a language switch fetches
  *  again rather than serving text cached in the other language, and a key
  *  prefix still matches every language's entry. */
-function useLocalizedQuery<TQueryFnData, TData = TQueryFnData>(
+export function useLocalizedQuery<TQueryFnData, TData = TQueryFnData>(
   options: UseQueryOptions<TQueryFnData, Error, TData>,
 ): UseQueryResult<TData> {
   const { i18n } = useTranslation();
