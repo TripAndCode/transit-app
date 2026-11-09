@@ -47,5 +47,20 @@
     "agg_stop_routes": 2,
     "route_delay_counts": 3,
     "stop_route_days": 2
+  },
+  "2026.11.4": {
+    "agg_daily_trend": 3,
+    "agg_hour_daily": 4,
+    "agg_route_daily": 3,
+    "agg_route_daily_dist": 3,
+    "agg_route_daily_dwell_run": 3,
+    "agg_route_headway_daily": 3,
+    "agg_route_hour": 4,
+    "agg_route_hour_dow": 4,
+    "agg_route_stats": 3,
+    "agg_route_stop_daily": 4,
+    "agg_service_delivered_daily": 2,
+    "agg_stop_daily": 4,
+    "route_delay_counts": 4
   }
 }

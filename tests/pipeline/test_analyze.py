@@ -926,6 +926,7 @@ def _ch_service_delivered_row(
     stop_sequence=1,
     schedule_relationship_trip=None,
     schedule_relationship_stop=None,
+    dep_delay=60,
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields this builder reads populated."""
@@ -937,7 +938,7 @@ def _ch_service_delivered_row(
         "11:00:00",
         "R1",
         stop_sequence,
-        60,
+        dep_delay,
         None,  # stop_id
         None,  # arr_delay
         schedule_relationship_trip,
@@ -967,9 +968,146 @@ def test_analyze_builds_agg_service_delivered_daily_for_static_join_agency(pg_co
             (agency_id,),
         )
         by_date = {str(d): n for d, n in cur.fetchall()}
-    # T2 (CANCELED) + T3 (stop SKIPPED) = 2 on day1; day2's T4 has no
-    # cancellation/skip -> the source query emits no row for that day at all.
+    # T2 (CANCELED) + T3 (its one reported stop SKIPPED) = 2 on day1; day2's
+    # T4 has no cancellation/skip -> the source query emits no row for that day at all.
     assert by_date == {"2026-04-01": 2}
+
+
+def test_analyze_counts_a_trip_not_run_when_cancelled_or_every_stop_it_reports_skipped(pg_conn, agency_id, ch_client):
+    """A trip is not run when its latest status is CANCELED, as the one row a
+    cancellation listing no stop stores says, or when the latest status of
+    every stop it reports is SKIPPED. A trip that skipped only some of its
+    stops ran."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    early = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 1, 2, 5, tzinfo=timezone.utc)
+
+    def stop(trip_id, at, seq, status, file_name="a.pb"):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name=file_name,
+            stop_sequence=seq,
+            schedule_relationship_trip=0,
+            schedule_relationship_stop=status,
+        )
+
+    served, skipped = 0, 1
+    rows = [
+        stop("partial", early, 1, served),
+        stop("partial", early, 2, skipped),
+        stop("every_stop_skipped", early, 1, skipped),
+        stop("every_stop_skipped", early, 2, skipped),
+        stop("skipped_then_served", early, 1, skipped),
+        stop("skipped_then_served", early, 2, skipped),
+        stop("skipped_then_served", later, 1, served, file_name="b.pb"),
+        _ch_service_delivered_row(
+            "cancelled_without_stops",
+            early,
+            file_name="a.pb",
+            stop_sequence=TRIP_LEVEL_STOP_SEQUENCE,
+            schedule_relationship_trip=3,
+            dep_delay=None,
+        ),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 2}
+
+
+def test_analyze_reads_the_same_latest_report_for_service_delivered_as_for_departures(pg_conn, agency_id, ch_client):
+    """A report that carries neither a delay nor a CANCELED or SKIPPED status
+    says nothing about whether the trip ran, so it leaves the withdrawal
+    before it standing: T1, predicted and then cancelled, T2, skipped at its
+    one stop, and T4, cancelled without listing a stop, each followed by such
+    a report, have no departure and are not run. T3's prediction after its
+    skip restores it."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    first, second, third = (datetime(2026, 4, 1, 2, m, tzinfo=timezone.utc) for m in (0, 5, 10))
+    no_data, skipped, canceled = 2, 1, 3
+
+    def row(trip_id, at, file_name, *, trip_status=0, stop_status=0, dep_delay=None, stop_sequence=1):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name=file_name,
+            stop_sequence=stop_sequence,
+            schedule_relationship_trip=trip_status,
+            schedule_relationship_stop=stop_status,
+            dep_delay=dep_delay,
+        )
+
+    rows = [
+        row("T1", first, "a.pb", dep_delay=60),
+        row("T1", second, "b.pb", trip_status=canceled, stop_status=no_data),
+        row("T1", third, "c.pb", stop_status=no_data),
+        row("T2", first, "a.pb", stop_status=skipped),
+        row("T2", second, "b.pb", stop_status=no_data),
+        row("T3", first, "a.pb", stop_status=skipped),
+        row("T3", second, "b.pb", dep_delay=30),
+        row("T3", third, "c.pb", stop_status=no_data),
+        row("T4", first, "a.pb", trip_status=canceled, stop_status=None, stop_sequence=TRIP_LEVEL_STOP_SEQUENCE),
+        row("T4", second, "b.pb", stop_status=no_data),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 3}
+        cur.execute("SELECT trips_observed, samples FROM agg_route_daily WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(1, 1)]
+
+
+def test_analyze_counts_a_stop_reported_with_neither_a_delay_nor_a_status_neither_way(pg_conn, agency_id, ch_client):
+    """A trip is not run when every stop it reports with a delay or a status
+    is SKIPPED; a stop it only ever reports with neither counts neither way.
+    So a trip skipping one stop and reporting the other without either is not
+    run, and the same trip with a third stop departing ran."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    at = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    skipped, no_data = 1, 2
+
+    def stop(trip_id, seq, status, dep_delay=None):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name="a.pb",
+            stop_sequence=seq,
+            schedule_relationship_trip=0,
+            schedule_relationship_stop=status,
+            dep_delay=dep_delay,
+        )
+
+    rows = [
+        stop("skipped_and_silent", 1, skipped),
+        stop("skipped_and_silent", 2, no_data),
+        stop("skipped_silent_and_served", 1, skipped),
+        stop("skipped_silent_and_served", 2, no_data),
+        stop("skipped_silent_and_served", 3, 0, dep_delay=45),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
 
 
 def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):
@@ -1222,6 +1360,7 @@ def _ch_headway_row(
     file_name="f.pb",
     route_code="R1",
     stop_sequence=1,
+    schedule_relationship_trip=None,
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields agg_route_headway_daily reads
@@ -1240,7 +1379,7 @@ def _ch_headway_row(
         dep_delay,
         stop_id,
         None,  # arr_delay
-        None,  # schedule_relationship_trip
+        schedule_relationship_trip,
         None,  # schedule_relationship_stop
         None,  # feed_timestamp
         scheduled_sec,
@@ -1329,6 +1468,36 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     # No static schedule seeded for R1 in this fixture -> no scheduled
     # median to compare against -> nothing is countable as "long" yet.
     assert long_gap_count == 0
+
+
+def test_analyze_leaves_a_cancelled_departure_out_of_the_actual_headway(pg_conn, agency_id, ch_client):
+    """T2's departure was predicted and then withdrawn by a later poll
+    cancelling its trip, so the stop saw T1 and T3 alone: one 960 s gap, not
+    two of 480 s."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    rows = [
+        _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
+        _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", dep_delay=0, file_name="b.pb"),
+        _ch_headway_row(
+            "T2",
+            day + timedelta(minutes=5),
+            stop_id="s1",
+            scheduled_time="08:08:00",
+            dep_delay=None,
+            file_name="d.pb",
+            schedule_relationship_trip=3,
+        ),
+        _ch_headway_row("T3", day, stop_id="s1", scheduled_time="08:16:03", dep_delay=-3, file_name="c.pb"),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    row = _actual_headway_row(pg_conn, agency_id)
+    assert row is not None
+    median_sec, samples = row
+    assert samples == 1
+    assert abs(median_sec - 960) <= 3
 
 
 def _actual_headway_row(pg_conn, agency_id):

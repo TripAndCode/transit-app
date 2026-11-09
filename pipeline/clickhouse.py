@@ -120,6 +120,19 @@ UPDATE_COLUMNS = [
 ]
 
 
+# GTFS-RT's TripDescriptor.ScheduleRelationship CANCELED and
+# StopTimeUpdate.ScheduleRelationship SKIPPED, as schedule_relationship_trip
+# and schedule_relationship_stop store them.
+TRIP_CANCELED = 3
+STOP_SKIPPED = 1
+
+# The stop_sequence of a trip-level row: the one row a CANCELED trip that
+# stores no stop row gets, so the cancellation is kept. No stop row carries it
+# (pipeline.strategies._pb._uint16), and the row has no stop, delay or
+# schedule, so no reader of departures or stop visits takes it for one.
+TRIP_LEVEL_STOP_SEQUENCE = 0xFFFF
+
+
 def ch_conn_kwargs() -> dict:
     """host/port/username/password/database/secure kwargs shared by both
     ClickHouse client factories (this module's sync `get_client` and

@@ -28,17 +28,17 @@ from pipeline.static_archive import Stamp
 # Versions of the tables built in the loops below, which default to 1. A bump
 # goes here rather than into a second entry, which _index would reject.
 _VERSIONS: dict[str, int] = {
-    "agg_daily_trend": 2,
-    "agg_hour_daily": 3,
-    "agg_route_daily": 2,
-    "agg_route_daily_dist": 2,
-    "agg_route_hour": 3,
-    "agg_route_hour_dow": 3,
-    "agg_route_stats": 2,
-    "agg_route_stop_daily": 3,
-    "agg_stop_daily": 3,
+    "agg_daily_trend": 3,
+    "agg_hour_daily": 4,
+    "agg_route_daily": 3,
+    "agg_route_daily_dist": 3,
+    "agg_route_hour": 4,
+    "agg_route_hour_dow": 4,
+    "agg_route_stats": 3,
+    "agg_route_stop_daily": 4,
+    "agg_stop_daily": 4,
     "agg_stop_routes": 2,
-    "route_delay_counts": 3,
+    "route_delay_counts": 4,
     "stop_route_days": 2,
 }
 
@@ -155,7 +155,7 @@ def _entries() -> list[AggTable]:
     entries = [
         AggTable("agg_feed_health", 2, Kind.DATED, Timetable.NONE, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
         AggTable(
-            "agg_service_delivered_daily", 1, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
+            "agg_service_delivered_daily", 2, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
         ),
         AggTable(
             "agg_schedule_revision_daily",
@@ -176,7 +176,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_headway_daily",
-            2,
+            3,
             Kind.DATED,
             Timetable.ARCHIVED,
             _headway_daily,
@@ -188,7 +188,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_daily_dwell_run",
-            2,
+            3,
             Kind.DATED,
             Timetable.ARCHIVED,
             lambda: [
@@ -318,6 +318,24 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
             "agg_stop_routes": 2,
             "route_delay_counts": 3,
             "stop_route_days": 2,
+        },
+    ),
+    MethodVersion(
+        "2026.11.4",
+        {
+            "agg_daily_trend": 3,
+            "agg_hour_daily": 4,
+            "agg_route_daily": 3,
+            "agg_route_daily_dist": 3,
+            "agg_route_daily_dwell_run": 3,
+            "agg_route_headway_daily": 3,
+            "agg_route_hour": 4,
+            "agg_route_hour_dow": 4,
+            "agg_route_stats": 3,
+            "agg_route_stop_daily": 4,
+            "agg_service_delivered_daily": 2,
+            "agg_stop_daily": 4,
+            "route_delay_counts": 4,
         },
     ),
 )

@@ -8,11 +8,15 @@ while its timetable was loaded, or else the count the loaded timetable plans
 for it.
 
 ``executed_trips`` is ``planned_trips`` minus the trip-days GTFS-RT reports
-as not executed — identified via ``schedule_relationship_trip = CANCELED``
-and any populated ``schedule_relationship_stop = SKIPPED``, precomputed per
+as not executed — a trip whose latest ``schedule_relationship_trip`` is
+CANCELED, or every stop of which it reports with a plausible delay or a
+CANCELED or SKIPPED status has SKIPPED as its latest such
+``schedule_relationship_stop`` (a stop reported only without either counts
+neither way, and a trip that skipped only some stops ran), precomputed per
 day into Postgres ``agg_service_delivered_daily`` by
-``pipeline.analyze.analyze()`` (see that builder for the ClickHouse query
-this reads from, which lives against raw `updates`, not this module).
+``pipeline.analyze.analyze()`` (see ``pipeline.agg_sql.service_delivered_ch_sql``
+for the ClickHouse query this reads from, which lives against raw `updates`,
+not this module).
 
 Both ``executed_trips`` and ``service_delivered_pct`` are ``None`` ("not
 available") rather than a misleadingly perfect 100% whenever the ratio isn't
@@ -27,9 +31,9 @@ to plan against (``planned_trips == 0``).
 
 A populated field is not yet a used one. A feed that sends every trip
 SCHEDULED takes nothing off the plan, so its ratio reads 100% whatever ran.
-The rate therefore also needs the feed to have reported at least one
-cancellation (a trip whose last status is CANCELED, or a stop whose last is
-SKIPPED) in the :data:`CANCELLATION_LOOKBACK_DAYS` days up to the range's
+The rate therefore also needs the feed to have reported at least one trip
+not run (a trip whose last status is CANCELED, or every stop of which it
+reports with a delay or a status SKIPPED) in the :data:`CANCELLATION_LOOKBACK_DAYS` days up to the range's
 last day, or anywhere in a longer range. The evidence is a row in
 ``agg_service_delivered_daily``, the same trip-days the ratio subtracts, so
 the check is an index probe in Postgres rather than a scan of ``updates``,
