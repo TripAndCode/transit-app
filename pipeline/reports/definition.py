@@ -428,8 +428,8 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
         f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
         f"値の根拠={_VALUE_BASIS_TEXT[(meta.value_basis, 'ja')]}; "
-        f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}; "
-        f"算出方法の説明={METHODOLOGY_URLS['ja']}"
+        f"算出方法の説明={METHODOLOGY_URLS['ja']}; "
+        f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     )
     timetables = _timetable_text(meta, "ja")
     if timetables is not None:
@@ -540,17 +540,17 @@ def _source_mix_text(meta: DefinitionMeta, locale: str) -> str | None:
 
 def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     """The footnote lines that say where *meta*'s figures came from: what they
-    are made from, the method and build day (:func:`format_method_stamp`) and
-    where that method is published, and the timetables in force and the
-    source of each day's observations when a router named them.
+    are made from, where the method is published, the method and build day
+    (:func:`format_method_stamp`), and the timetables in force and the source
+    of each day's observations when a router named them.
     :func:`format_definition_footnotes` ends with them, and the delay record's
     text is footnoted with them."""
     locale = "en" if locale == "en" else "ja"
     basis = _VALUE_BASIS_TEXT[(meta.value_basis, locale)]
     lines = [
         f"Value basis: {basis}" if locale == "en" else f"値の根拠: {basis}",
-        format_method_stamp(meta, locale),
         _methodology_line(locale),
+        format_method_stamp(meta, locale),
     ]
     timetables = _timetable_text(meta, locale)
     if timetables is not None:
