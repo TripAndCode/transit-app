@@ -16,6 +16,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
 import { useScope } from "../api/scope";
+import { isOnTime, scopeWindow } from "../api/onTimeDefault";
+import { windowLabels } from "../components/scope/scopePhrases";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
 import type { LiveTrip, ServiceHoursResponse } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
@@ -591,7 +593,11 @@ export function MapTab() {
 
   const locatedTrips = liveRows.filter((trip) => trip.stop_lat != null && trip.stop_lon != null).length;
   const delayedRows = liveRows.filter((trip) => trip.dep_delay >= 300).sort((a, b) => b.dep_delay - a.dep_delay);
-  const onTimePct = liveRows.length ? Math.round(((liveRows.length - delayedRows.length) / liveRows.length) * 100) : null;
+  // The window every other screen counts, filled in from the shared default,
+  // though over a different population: each reporting trip's latest report.
+  const onTimeWindow = scopeWindow(ctx);
+  const onTimeCount = liveRows.filter((trip) => isOnTime(trip.dep_delay, onTimeWindow)).length;
+  const onTimePct = liveRows.length ? Math.round((onTimeCount / liveRows.length) * 100) : null;
   // Names the list, not one fetch of it: a poll must not collapse rows the
   // operator has already expanded.
   const delayedRowsResetKey = `${id ?? "none"}:${ctx.routes.join(",")}`;
@@ -623,6 +629,9 @@ export function MapTab() {
             <StatTile label={td("delayedLabel")} value={countsKnown ? delayedRows.length : EM_DASH} flagged={countsKnown && delayedRows.length > 0} />
             {onTimePct != null && <StatTile label={td("onTimePct")} value={onTimePct} suffix="%" />}
           </div>
+          {onTimePct != null && (
+            <p className="focus-muted" data-testid="live-on-time-note">{td("onTimeNote", windowLabels(onTimeWindow, t))}</p>
+          )}
           {liveQuery.data?.truncated && (
             <p className="focus-muted" data-testid="live-truncated">{td("liveTruncated", { n: liveRows.length })}</p>
           )}

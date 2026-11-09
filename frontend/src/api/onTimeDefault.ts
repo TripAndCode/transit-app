@@ -28,6 +28,12 @@ export function scopeWindow(scope: { early: ScopeEarly; late: number | null }): 
   return { early_sec: early, late_sec: scope.late ?? DEFAULT_WINDOW.late_sec };
 }
 
+/** Whether a departure `delaySec` seconds late is on time under `window`,
+ *  both edges included, as the server counts it. */
+export function isOnTime(delaySec: number, window: OnTimeWindow): boolean {
+  return delaySec <= window.late_sec && (window.early_sec == null || delaySec >= -window.early_sec);
+}
+
 /** The scope's `early` for an early bound of `sec` seconds, or none: left out
  *  when it is the default's. */
 export function earlyParam(sec: number | null): ScopeEarly {
