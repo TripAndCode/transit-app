@@ -63,8 +63,9 @@ What the user sees/does:
   trips ÷ planned trips — reads "—" rather than a misleading 100%, followed
   by the reason from `delivered_missing`: no plan this period, a feed format
   that cannot report cancellations, a feed no live verdict has confirmed, or
-  a feed that reported no trip not run (CANCELED, or every stop it lists
-  SKIPPED) in the period or the 90 days up to its end
+  a feed that reported no trip not run (CANCELED, or every stop it reports
+  with a delay or a status SKIPPED; a stop reported with neither counts
+  neither way) in the period or the 90 days up to its end
   (`feed_reports_no_cancellations`: nothing would ever
   come off the plan, so the rate would read 100% whatever ran; the evidence
   is a row in `agg_service_delivered_daily`, so the check reads Postgres,

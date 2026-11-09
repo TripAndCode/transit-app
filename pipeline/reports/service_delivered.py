@@ -9,9 +9,11 @@ for it.
 
 ``executed_trips`` is ``planned_trips`` minus the trip-days GTFS-RT reports
 as not executed — a trip whose latest ``schedule_relationship_trip`` is
-CANCELED, or whose every reported stop has SKIPPED as its latest
-``schedule_relationship_stop`` (a trip that skipped only some stops ran),
-precomputed per day into Postgres ``agg_service_delivered_daily`` by
+CANCELED, or every stop of which it reports with a plausible delay or a
+CANCELED or SKIPPED status has SKIPPED as its latest such
+``schedule_relationship_stop`` (a stop reported only without either counts
+neither way, and a trip that skipped only some stops ran), precomputed per
+day into Postgres ``agg_service_delivered_daily`` by
 ``pipeline.analyze.analyze()`` (see ``pipeline.agg_sql.service_delivered_ch_sql``
 for the ClickHouse query this reads from, which lives against raw `updates`,
 not this module).
@@ -31,7 +33,7 @@ A populated field is not yet a used one. A feed that sends every trip
 SCHEDULED takes nothing off the plan, so its ratio reads 100% whatever ran.
 The rate therefore also needs the feed to have reported at least one trip
 not run (a trip whose last status is CANCELED, or every stop of which it
-reports SKIPPED) in the :data:`CANCELLATION_LOOKBACK_DAYS` days up to the range's
+reports with a delay or a status SKIPPED) in the :data:`CANCELLATION_LOOKBACK_DAYS` days up to the range's
 last day, or anywhere in a longer range. The evidence is a row in
 ``agg_service_delivered_daily``, the same trip-days the ratio subtracts, so
 the check is an index probe in Postgres rather than a scan of ``updates``,

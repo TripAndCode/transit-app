@@ -1072,6 +1072,44 @@ def test_analyze_reads_the_same_latest_report_for_service_delivered_as_for_depar
         assert cur.fetchall() == [(1, 1)]
 
 
+def test_analyze_counts_a_stop_reported_with_neither_a_delay_nor_a_status_neither_way(pg_conn, agency_id, ch_client):
+    """A trip is not run when every stop it reports with a delay or a status
+    is SKIPPED; a stop it only ever reports with neither counts neither way.
+    So a trip skipping one stop and reporting the other without either is not
+    run, and the same trip with a third stop departing ran."""
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    at = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    skipped, no_data = 1, 2
+
+    def stop(trip_id, seq, status, dep_delay=None):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name="a.pb",
+            stop_sequence=seq,
+            schedule_relationship_trip=0,
+            schedule_relationship_stop=status,
+            dep_delay=dep_delay,
+        )
+
+    rows = [
+        stop("skipped_and_silent", 1, skipped),
+        stop("skipped_and_silent", 2, no_data),
+        stop("skipped_silent_and_served", 1, skipped),
+        stop("skipped_silent_and_served", 2, no_data),
+        stop("skipped_silent_and_served", 3, 0, dep_delay=45),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
+
+
 def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):
     """An agency whose ingest_strategy isn't static_join must get zero rows in
     agg_service_delivered_daily regardless of what schedule_relationship_*

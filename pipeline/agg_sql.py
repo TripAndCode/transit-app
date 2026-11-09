@@ -85,14 +85,16 @@ def feed_health_ch_sql(date_where: str) -> str:
 #
 # Both subqueries read the rows the departure dedup reads
 # (pipeline.db.stop_event_filter_ch): a plausible departure, or a row
-# withdrawing one. A later report carrying neither a delay nor a
-# CANCELED or SKIPPED status says nothing about whether the trip ran, so
-# it leaves the withdrawal before it standing here exactly as it leaves
-# that stop without a departure there.
+# withdrawing one. A report carrying neither a delay nor a CANCELED or
+# SKIPPED status says nothing about whether the trip ran: a later one
+# leaves the withdrawal before it standing here exactly as it leaves that
+# stop without a departure there, and a stop the feed reported only so
+# counts neither way, so the trip's other stops decide.
 def service_delivered_ch_sql(date_where: str) -> str:
     """Per service date, the trips the feed reported as not run: a trip whose
-    latest status is CANCELED, or every stop of which it reports has SKIPPED
-    as its latest status."""
+    latest status is CANCELED, or every stop of which it reports with a
+    plausible delay or a CANCELED or SKIPPED status has SKIPPED as its latest
+    such status. A stop reported only without either counts neither way."""
     return (
         """
                 SELECT svc_date, count() FROM (
