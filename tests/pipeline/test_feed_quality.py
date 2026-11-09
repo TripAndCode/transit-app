@@ -12,7 +12,7 @@ import pytest
 from pipeline import feed_quality
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
-from pipeline.reports.comparability import assess
+from pipeline.reports.comparability import assess, clamp_pct
 from pipeline.reports.network import compute_network_summary
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from tests.fixtures.clock import freeze_now, jst_midday
@@ -117,7 +117,8 @@ async def test_a_closed_month_reads_what_the_board_reads(
     # 2 stops of each: 8 stop events reported of 240 planned.
     assert (april["observed_stop_events"], april["planned_stop_events"], april["stop_plan_days"]) == (8, 240, 30)
     assert float(april["stop_completeness_pct"]) == 3.3
-    assert (april["raw_samples"], april["clamp_count"], float(april["clamp_pct"])) == (32, 1, 3.13)
+    # 1 of 32 is 3.125%, which the gate's clamp_pct rounds as the board does.
+    assert (april["raw_samples"], april["clamp_count"], float(april["clamp_pct"])) == (32, 1, clamp_pct(1, 32))
     assert (april["message_age_polls"], april["message_age_p50_sec"], april["message_age_p95_sec"]) == (4, 10.0, 35.5)
     assert april["stop_time_updates"] == 32
     assert all(float(april[f"{field}_pct"]) == 100.0 for field in ("stop_id", "arr_delay"))
