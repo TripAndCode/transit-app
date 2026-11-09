@@ -35,9 +35,9 @@ _PUBLIC_PATHS = frozenset({"/api/config"})
 # Public to read only: who-am-I answers a signed-out caller with null, while
 # DELETE /api/me (account erasure) stays behind the gate.
 _PUBLIC_READS = frozenset({"/api/me"})
-# A frozen snapshot is read by whoever holds its unguessable id, council
-# members without an account among them; creating, listing and deleting stay
-# under /api/admin/snapshots.
+# A frozen snapshot, and today's figures for its stored query, are read by
+# whoever holds its unguessable id, council members without an account among
+# them; creating, listing and deleting stay under /api/admin/snapshots.
 _PUBLIC_READ_PREFIXES = ("/api/snapshots/",)
 _READ_METHODS = frozenset({"GET", "HEAD"})
 _GATED_PATHS = frozenset({"/docs", "/redoc", "/openapi.json"})

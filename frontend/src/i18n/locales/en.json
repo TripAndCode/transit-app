@@ -1504,7 +1504,32 @@
       "title": "Snapshot not found",
       "hint": "Check the link. The snapshot may have been deleted."
     },
-    "unsupported": "This kind of snapshot can't be shown on this page yet."
+    "unsupported": "This kind of snapshot can't be shown on this page yet.",
+    "compare": {
+      "toggle": "Compare with today's figures",
+      "explainer": "Today's figures are this snapshot's dates, conditions and options computed again now. A figure that has moved shows today's value beside it.",
+      "loading": "Computing today's figures…",
+      "unavailable_agency_removed": "Today's figures are unavailable: this agency is no longer in the app.",
+      "unavailable_not_computable": "Today's figures are unavailable: the current analysis can no longer compute this snapshot's conditions.",
+      "unavailable_error": "Today's figures could not be computed.",
+      "side_snapshot": "Snapshot",
+      "side_today": "Today",
+      "stamp": "Method {{method}}, {{built}}.",
+      "built_at": "aggregates built {{at}} JST",
+      "built_live": "computed by a live scan",
+      "built_unknown": "aggregates' build time unknown",
+      "method_differs": "Today's figures use method {{today}}; the snapshot used {{snapshot}}. A difference may come from the method rather than the data.",
+      "on_time_differs": "Today's figures count on time differently from the snapshot's, so figures that depend on it may differ for that reason alone.",
+      "differences_one": "{{count}} difference from today's figures.",
+      "differences_other": "{{count}} differences from today's figures.",
+      "no_differences": "Every figure matches today's.",
+      "one_side_note": "A route marked as on one side only is listed in that side's figures alone.",
+      "one_side_note_capped": "Each side lists only the routes within its row limit, in this order, so a route on one side only may have moved past that limit rather than left the data.",
+      "today_value": "today {{value}}",
+      "today_value_note": "today {{value}} ({{note}})",
+      "only_snapshot": "only in the snapshot",
+      "only_today": "only today"
+    }
   },
   "insight_panel": {
     "title": "Worth a look",

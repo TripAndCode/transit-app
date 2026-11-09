@@ -25,6 +25,7 @@ LOCALIZED_GET_ROUTES = {
     ("GET", "/api/{agency_id}/reports/{report_type}"),
     ("GET", "/api/{agency_id}/route-shape"),
     ("GET", "/api/{agency_id}/weather_delay"),
+    ("GET", "/api/snapshots/{snapshot_id}/today"),
 }
 
 # Take the locale but write no text in it: the build schema returns both
