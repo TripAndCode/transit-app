@@ -33,6 +33,51 @@ function coverageUnknownWhy(a: GateFigures): "unreadable" | "unmatched" | "no_pl
   return a.planned_trips === 0 ? "no_plan" : "no_plan_observed";
 }
 
+/** The first check of the comparability gate an agency fails, as the copy
+ *  key that words it and the printed values that copy fills in (`why` is
+ *  itself a copy key), so two verdicts with the same parts read the same in
+ *  either language. Null for an agency the gate passes. */
+export function unrankedReasonParts(
+  a: GateFigures,
+  limits: ComparabilityThresholds,
+): { key: string; values: Record<string, string> } | null {
+  switch (a.comparable_reason) {
+    case null:
+      return null;
+    case "no_data":
+      return { key: "network.unranked_reason.no_data", values: {} };
+    case "coverage_unknown":
+      return {
+        key: "network.unranked_reason.coverage_unknown",
+        values: { why: `network.coverage_unknown_why.${coverageUnknownWhy(a)}` },
+      };
+    case "coverage_low":
+      return {
+        key: "network.unranked_reason.coverage_low",
+        values: {
+          pct: a.coverage_pct == null ? "—" : fixedTenth(a.coverage_pct),
+          min: formatNumber(limits.min_coverage_pct),
+        },
+      };
+    case "ci_wide":
+      return {
+        key: "network.unranked_reason.ci_wide",
+        values: {
+          half: a.ci_low == null || a.ci_high == null ? "—" : fixedTenth(ciHalfWidth(a.ci_low, a.ci_high)),
+          max: formatNumber(limits.max_ci_half_width_pp),
+        },
+      };
+    case "clamp_high":
+      return {
+        key: "network.unranked_reason.clamp_high",
+        values: {
+          pct: a.clamp_pct == null ? "—" : fixedTenth(a.clamp_pct),
+          max: formatNumber(limits.max_clamp_pct),
+        },
+      };
+  }
+}
+
 /** The first check of the comparability gate an agency fails, in words, with
  *  the figure and the threshold it missed, so the reader sees why without a
  *  lookup. Null for an agency the gate passes. */
@@ -41,29 +86,8 @@ export function unrankedReason(
   limits: ComparabilityThresholds,
   t: ReturnType<typeof useTranslation>["t"],
 ): string | null {
-  switch (a.comparable_reason) {
-    case null:
-      return null;
-    case "no_data":
-      return t("network.unranked_reason.no_data");
-    case "coverage_unknown":
-      return t("network.unranked_reason.coverage_unknown", {
-        why: t(`network.coverage_unknown_why.${coverageUnknownWhy(a)}`),
-      });
-    case "coverage_low":
-      return t("network.unranked_reason.coverage_low", {
-        pct: a.coverage_pct == null ? "—" : fixedTenth(a.coverage_pct),
-        min: formatNumber(limits.min_coverage_pct),
-      });
-    case "ci_wide":
-      return t("network.unranked_reason.ci_wide", {
-        half: a.ci_low == null || a.ci_high == null ? "—" : fixedTenth(ciHalfWidth(a.ci_low, a.ci_high)),
-        max: formatNumber(limits.max_ci_half_width_pp),
-      });
-    case "clamp_high":
-      return t("network.unranked_reason.clamp_high", {
-        pct: a.clamp_pct == null ? "—" : fixedTenth(a.clamp_pct),
-        max: formatNumber(limits.max_clamp_pct),
-      });
-  }
+  const parts = unrankedReasonParts(a, limits);
+  if (parts == null) return null;
+  const { why, ...values } = parts.values;
+  return t(parts.key, why == null ? values : { ...values, why: t(why) });
 }

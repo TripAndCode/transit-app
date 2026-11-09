@@ -298,6 +298,96 @@ describe("SnapshotPage compared with today", () => {
     expect(screen.queryByText(/^today /)).toBeNull();
   });
 
+  it("counts no difference in an early-departure figure the snapshot never showed", async () => {
+    const before = withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3")], { early_departure_sec: null });
+    const after = withRows(routeTable("Route table"), [["42", "10.60", "12.3", "40.1", 496, 1236, "9.9", false, 1.9]]);
+    stubApi(snapshot({ payloads: { report: { en: before, ja: before }, routes: ROUTES, credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("Every figure matches today's.")).toBeInTheDocument();
+    expect(screen.queryByText(/^today /)).toBeNull();
+  });
+
+  it("counts no difference in a council early-departure tile the snapshot never showed", async () => {
+    const before = { ...council("On time 22.6% of the time."), definition: { ...DEFINITION, early_departure_sec: null } } as ReportResponse;
+    const after = withRows(council("On time 22.6% of the time."), [[22.6, 2.5, 540357, 2130, 2100, 98.6, 9.9]]);
+    stubApi(snapshot({ screen: "council_report", payloads: { report: { en: before, ja: before }, routes: [], credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("Every figure matches today's.")).toBeInTheDocument();
+    expect(screen.queryByText(/^today /)).toBeNull();
+    expect(screen.queryByText(/Early departures/)).toBeNull();
+  });
+
+  it("marks the board's verdict when the figure its reason prints has moved", async () => {
+    const gate = (coverage: number) => ({
+      comparable: false,
+      reason: "coverage_low" as const,
+      coverage_pct: coverage,
+      observed_trips: 900,
+      coverage_planned_trips: 2130,
+      ci_low: 20,
+      ci_high: 25,
+      clamp_pct: 0.1,
+      planned_trips: 2130,
+      delivered_missing: null,
+      thresholds: { min_coverage_pct: 50, max_ci_half_width_pp: 5, max_clamp_pct: 5 },
+    });
+    const before = { ...council("On time 22.6% of the time."), comparability: gate(45.0) } as ReportResponse;
+    const after = { ...council("On time 22.6% of the time."), comparability: gate(48.2) } as ReportResponse;
+    stubApi(snapshot({ screen: "council_report", payloads: { report: { en: before, ja: before }, routes: [], credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    const figures = await screen.findByRole("list", { name: "Headline figures" });
+    const verdict = (await within(figures).findByText(/^today Not comparable/)).closest("li");
+    expect(verdict).toHaveTextContent("Observation coverage 45.0% (below 50%)");
+    expect(verdict).toHaveTextContent("48.2%");
+    expect(screen.getByText("1 difference from today's figures.")).toBeInTheDocument();
+  });
+
+  it("says plainly that a route is on one side only when neither side reached its row limit", async () => {
+    const before = { ...withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3"), tableRow("9", "3.00", "80.0")]), rows_total: 2 } as ReportResponse;
+    const after = { ...withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3")]), rows_total: 1 } as ReportResponse;
+    stubApi(snapshot({ payloads: { report: { en: before, ja: before }, routes: ROUTES, credit: {} } }), {
+      status: 200,
+      body: { report: after, unavailable: null },
+    });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("A route marked as on one side only is listed in that side's figures alone.")).toBeInTheDocument();
+    expect(screen.queryByText(/row limit/)).toBeNull();
+  });
+
+  it("explains the row limit only when a side reached it", async () => {
+    const today = withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3")]);
+    stubApi(storedSnapshot, { status: 200, body: { report: today, unavailable: null } });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(
+      await screen.findByText(
+        "Each side lists only the routes within its row limit, in this order, so a route on one side only may have moved past that limit rather than left the data.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says calmly to wait when today's figures are rate-limited, offering no retry that would hit the limit again", async () => {
+    stubApi(storedSnapshot, { status: 429, body: { detail: "Rate limit exceeded" } });
+    renderPage();
+    await userEvent.click(await screen.findByRole("checkbox", { name: "Compare with today's figures" }));
+    expect(await screen.findByText("High traffic right now. Please wait a moment and retry.")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
   it("marks the council report's moved tiles with today's value, never comparing its prose", async () => {
     const before = council("On time 22.6% of the time.");
     const after = withRows(council("On time 25.0% of the time."), [[25.0, 2.5, 540357, 2130, 2100, 98.6, 4.2]]);

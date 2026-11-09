@@ -84,22 +84,30 @@ figures against today's; the stored figures themselves never change.
   answers `{"report": null, "unavailable": "not_computable"}`; an agency no
   longer listed answers `"agency_removed"`. The page says either calmly:
   today's figures are unavailable, and why.
-- **What is compared.** Figures, never prose, each at the precision the page
-  prints it, so two values that print the same are not a difference
-  (`frontend/src/components/snapshotCompare.ts`):
-  - the Routes table's six figure columns, rows matched by route. A moved
+- **What is compared.** What the page prints, never prose: each figure at
+  the precision it is printed, so two values that print the same are not a
+  difference, and only what the snapshot's own screen shows
+  (`frontend/src/components/snapshotCompare.ts`). An early-departure rate a
+  snapshot never showed (its definition names no threshold) is not compared.
+  - the Routes table's figure columns, rows matched by route. A moved
     figure shows today's value beside the stored one (「今日 15.0%」 /
     "today 15.0%"); a route only one side lists is marked
     「スナップショットのみ」 / "only in the snapshot" or 「今日のみ」 / "only
-    today", today's routes following the stored ones. Both sides ran the same
-    sort and row limit, so a route only one side lists may have moved past
-    that limit rather than left the data, which the page says when it
-    happens.
-  - the council report's headline tiles, from its structured fields: the
-    on-time, early-departure and service-delivered rates, the average delay,
-    the observations, the planned trips with the days a timetable plans, the
-    reason a delivered rate is missing, and the agencies board's verdict.
-    Its prose is written from those fields and is not compared.
+    today", today's routes following the stored ones. Beneath, the page says
+    plainly that such a route is in one side's list alone. Only when a side
+    reached its row limit (it listed fewer routes than qualified) does it
+    add that the route may have moved past that limit rather than left the
+    data.
+  - the council report's headline tiles, from its structured fields
+    (`frontend/src/components/analysis/councilTiles.ts`, the one table both
+    the tiles and the comparison read): the on-time, early-departure and
+    service-delivered rates, the average delay, the observations, the
+    planned trips with the days a timetable plans, the reason a delivered
+    rate is missing, and the agencies board's verdict with every figure its
+    reason prints (coverage, the on-time interval, the implausible-reading
+    share, each against its threshold). A note's values count only where
+    the note is printed. The prose is written from those fields and is not
+    compared.
   - Equal figures show nothing extra; a figure missing on one side counts as
     moved.
 - **Both sides named.** Above the figures, each side's method version, build
@@ -118,4 +126,6 @@ figures against today's; the stored figures themselves never change.
   are read from the aggregates each time, or scanned live for a scope the
   aggregates cannot serve; the limit is what bounds those. The page reuses
   one answer for five minutes and asks again on a language switch, since the
-  council report's response is written in the reader's language.
+  council report's response is written in the reader's language. A caller
+  over the limit gets a calm note to wait, with no retry button, since a
+  retry would meet the limit again.

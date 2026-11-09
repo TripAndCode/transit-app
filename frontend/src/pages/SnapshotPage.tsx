@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/client";
+import { classifyError } from "../api/errorClass";
 import { JST_TZ, parseScope, toJstISO, type Scope } from "../api/scope";
 import { useSnapshot, useSnapshotToday, type Snapshot, type SnapshotToday } from "../api/snapshots";
 import type { DefinitionMeta, ReportResponse } from "../api/types";
@@ -17,12 +18,13 @@ import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock"
 import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 import { reportLabel } from "../components/analysis/reportGroups";
 import { isScopeConditionOff, scopeTokens } from "../components/scope/scopePhrases";
+import type { CouncilTile } from "../components/analysis/councilTiles";
 import {
-  changedCouncilTiles,
+  compareCouncilTiles,
   compareRouteTables,
   differenceCount,
   sameOnTimeWindow,
-  type CouncilTile,
+  type CouncilMark,
   type RowMark,
 } from "../components/snapshotCompare";
 import { contentLocale } from "../i18n/contentLocale";
@@ -55,20 +57,27 @@ type RouteTableReport = Extract<ReportResponse, { report_type: "route_table" }>;
 type CouncilReport = Extract<ReportResponse, { report_type: "council_summary" }>;
 
 /** The stored report against today's for the same query: the Routes table's
- *  rows with their marks, or the council report's moved tiles, and how many
- *  differences either holds. */
+ *  rows with their marks and whether a row limit left routes out, or the
+ *  council report's marked tiles, and how many differences either holds. */
 type Comparison =
-  | { report_type: "route_table"; today: RouteTableReport; rows: RouteTableReport["rows"]; marks: RowMark[]; count: number }
-  | { report_type: "council_summary"; today: CouncilReport; changed: Set<CouncilTile>; count: number };
+  | {
+      report_type: "route_table";
+      today: RouteTableReport;
+      rows: RouteTableReport["rows"];
+      marks: RowMark[];
+      capped: boolean;
+      count: number;
+    }
+  | { report_type: "council_summary"; today: CouncilReport; marks: Map<CouncilTile, CouncilMark>; count: number };
 
 function compareWithToday(report: ReportResponse | undefined, today: ReportResponse | null | undefined): Comparison | null {
   if (report?.report_type === "route_table" && today?.report_type === "route_table") {
-    const { rows, marks } = compareRouteTables(report.rows, today.rows);
-    return { report_type: "route_table", today, rows, marks, count: differenceCount(marks) };
+    const { rows, marks, capped } = compareRouteTables(report, today);
+    return { report_type: "route_table", today, rows, marks, capped, count: differenceCount(marks) };
   }
   if (report?.report_type === "council_summary" && today?.report_type === "council_summary") {
-    const changed = changedCouncilTiles(report, today);
-    return { report_type: "council_summary", today, changed, count: changed.size };
+    const marks = compareCouncilTiles(report, today);
+    return { report_type: "council_summary", today, marks, count: marks.size };
   }
   return null;
 }
@@ -210,6 +219,14 @@ function TodayStatus({
 }) {
   const { t } = useTranslation();
   if (loading) return <p className="snapshot-compare__note">{t("snapshot.compare.loading")}</p>;
+  // A retry would only meet the limit again, so the note offers none.
+  if (error && classifyError(error) === "rate_limited") {
+    return (
+      <p className="snapshot-compare__note" role="status">
+        {t("errors.rate_limited")}
+      </p>
+    );
+  }
   if (error) return <ErrorBanner error={error} onRetry={onRetry} prefix={t("snapshot.compare.unavailable_error")} />;
   if (today?.unavailable) {
     return (
@@ -222,6 +239,7 @@ function TodayStatus({
   const before = report.definition;
   const after = comparison.today.definition;
   const oneSided = comparison.report_type === "route_table" && comparison.marks.some((m) => m.side !== "both");
+  const capped = comparison.report_type === "route_table" && comparison.capped;
   return (
     <div className="snapshot-compare__status">
       <p>{t("snapshot.compare.explainer")}</p>
@@ -236,7 +254,7 @@ function TodayStatus({
       <p className="snapshot-compare__count">
         {comparison.count > 0 ? t("snapshot.compare.differences", { count: comparison.count }) : t("snapshot.compare.no_differences")}
       </p>
-      {oneSided && <p>{t("snapshot.compare.one_side_note")}</p>}
+      {oneSided && <p>{t(capped ? "snapshot.compare.one_side_note_capped" : "snapshot.compare.one_side_note")}</p>}
     </div>
   );
 }
@@ -332,7 +350,7 @@ function CouncilSnapshot({
   comparison?: Extract<Comparison, { report_type: "council_summary" }>;
 }) {
   const { t } = useTranslation();
-  const compare = comparison && { today: comparison.today, changed: comparison.changed };
+  const compare = comparison && { today: comparison.today, marks: comparison.marks };
   return (
     <section>
       <DefinitionMetaBlock definition={report.definition} />

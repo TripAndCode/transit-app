@@ -72,8 +72,10 @@ export type SnapshotToday = {
   unavailable: "agency_removed" | "not_computable" | null;
 };
 
-// How long one computation of today's figures is reused: they change only
-// when the aggregates are rebuilt, and each ask is a rate-limited compute.
+// How long one computation of today's figures is reused, since each ask is a
+// rate-limited compute. Figures read from the aggregates move only when those
+// are rebuilt; a scope the aggregates cannot serve (a time band, a tolerance
+// past the delay histogram) is scanned live and can move within this window.
 const TODAY_STALE_MS = 5 * 60_000;
 
 /** Today's figures for the snapshot, asked only while `enabled`: each ask

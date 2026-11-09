@@ -2,21 +2,23 @@ import { useTranslation } from "react-i18next";
 import type { ReportResponse } from "../../api/types";
 import { EM_DASH, fmtPct, formatDuration, formatMinutes, formatNumber } from "../../utils/format";
 import { unrankedReason } from "../comparabilityReason";
-import type { CouncilTile } from "../snapshotCompare";
+import type { CouncilMark } from "../snapshotCompare";
+import { councilTiles, gateFigures, type CouncilTile } from "./councilTiles";
 import "./CouncilSummaryBlock.css";
 
 const FOOTNOTE_MARK = /^(※|\* )/; // i18n-ignore: the server's footnote marks, not copy
 
 type CouncilReport = Extract<ReportResponse, { report_type: "council_summary" }>;
 type TFn = ReturnType<typeof useTranslation>["t"];
+type Words = { label: string; value: string; note?: string };
 /** A headline tile; on a snapshot compared with today, `today` words
  *  today's value where its figures moved, and `side` names the one side a
  *  tile only one of them has. */
-type Figure = { key: CouncilTile; label: string; value: string; note?: string; today?: string; side?: "snapshot" | "today" };
+type Figure = Words & { key: CouncilTile; today?: string; side?: "snapshot" | "today" };
 
-/** Today's council report for the same query, and the tiles whose figures
- *  moved (snapshotCompare.ts's changedCouncilTiles). */
-type CouncilComparison = { today: CouncilReport; changed: ReadonlySet<CouncilTile> };
+/** Today's council report for the same query, and how each tile that reads
+ *  differently stands (snapshotCompare.ts's compareCouncilTiles). */
+type CouncilComparison = { today: CouncilReport; marks: ReadonlyMap<CouncilTile, CouncilMark> };
 
 function count(v: number | null): string {
   return v == null ? EM_DASH : formatNumber(v);
@@ -36,70 +38,80 @@ function plannedIsWider({ ctx, scope_applied: applied, delivered_scope_applied: 
   return Object.keys(narrows).some((field) => narrows[field] && applied[field] && !delivered[field]);
 }
 
-/** The comparison tile: whether the agencies board would rank this agency,
- *  and otherwise the first check it fails, in the board's own words, read
- *  from the verdict's own figures only. Null for a response that carries no
- *  verdict. */
-function comparisonFigure(report: CouncilReport, agencyWide: boolean, t: TFn): Figure | null {
-  const gate = report.comparability;
-  if (!gate) return null;
-  const reason = unrankedReason({ ...gate, comparable_reason: gate.reason }, gate.thresholds, t);
-  return {
-    key: "comparison",
-    label: agencyWide ? t("reports.council.comparison_agency_wide") : t("reports.council.comparison"),
-    value: gate.comparable ? t("reports.council.comparable") : t("reports.council.not_comparable"),
-    note: gate.comparable ? undefined : (reason ?? undefined),
-  };
-}
-
-/** The headline figures as tiles, each keyed by what it shows. */
-function councilFigures(report: CouncilReport, t: TFn): Figure[] {
+/** One tile in words. The comparison tile says whether the agencies board
+ *  would rank this agency, and otherwise the first check it fails, in the
+ *  board's own words, read from the verdict's own figures only; it has no
+ *  words for a response that carries no verdict. */
+function tileWords(key: CouncilTile, report: CouncilReport, t: TFn): Words | null {
   const [onTimePct, avgDelayMin, samples, plannedTrips, , deliveredPct, earlyPct] = report.rows[0];
-  const earlySec = report.definition.early_departure_sec;
   const { covered_days: covered, window_days: days, delivered_missing: missing } = report;
   const agencyWide = plannedIsWider(report);
-  const partlyPlanned = !!plannedTrips && covered != null && days != null && covered < days;
-  const comparison = comparisonFigure(report, agencyWide, t);
-  return [
-    { key: "on_time", label: t("reports.council.on_time"), value: fmtPct(onTimePct, t) },
-    ...(earlySec != null
-      ? [{ key: "early" as const, label: t("reports.council.early_departures", { early: formatDuration(earlySec) }), value: fmtPct(earlyPct, t) }]
-      : []),
-    { key: "avg_delay", label: t("reports.council.avg_delay"), value: formatMinutes(avgDelayMin) },
-    { key: "observations", label: t("reports.council.observations"), value: count(samples) },
-    {
-      key: "planned",
-      label: agencyWide ? t("reports.council.planned_trips_agency_wide") : t("reports.council.planned_trips"),
-      value: count(plannedTrips),
-      note: partlyPlanned ? t("reports.council.plan_coverage", { covered, window: days }) : undefined,
-    },
-    {
-      key: "delivered",
-      label: agencyWide ? t("reports.council.delivered_agency_wide") : t("reports.council.delivered"),
-      value: fmtPct(deliveredPct, t),
-      note: deliveredPct == null && missing != null ? t(`network.delivered_missing.${missing}`) : undefined,
-    },
-    ...(comparison ? [comparison] : []),
-  ];
+  switch (key) {
+    case "on_time":
+      return { label: t("reports.council.on_time"), value: fmtPct(onTimePct, t) };
+    case "early":
+      return {
+        label: t("reports.council.early_departures", { early: formatDuration(report.definition.early_departure_sec) }),
+        value: fmtPct(earlyPct, t),
+      };
+    case "avg_delay":
+      return { label: t("reports.council.avg_delay"), value: formatMinutes(avgDelayMin) };
+    case "observations":
+      return { label: t("reports.council.observations"), value: count(samples) };
+    case "planned": {
+      const partlyPlanned = !!plannedTrips && covered != null && days != null && covered < days;
+      return {
+        label: agencyWide ? t("reports.council.planned_trips_agency_wide") : t("reports.council.planned_trips"),
+        value: count(plannedTrips),
+        note: partlyPlanned ? t("reports.council.plan_coverage", { covered, window: days }) : undefined,
+      };
+    }
+    case "delivered":
+      return {
+        label: agencyWide ? t("reports.council.delivered_agency_wide") : t("reports.council.delivered"),
+        value: fmtPct(deliveredPct, t),
+        note: deliveredPct == null && missing != null ? t(`network.delivered_missing.${missing}`) : undefined,
+      };
+    case "comparison": {
+      const gate = report.comparability;
+      if (!gate) return null;
+      const reason = unrankedReason(gateFigures(gate), gate.thresholds, t);
+      return {
+        label: agencyWide ? t("reports.council.comparison_agency_wide") : t("reports.council.comparison"),
+        value: gate.comparable ? t("reports.council.comparable") : t("reports.council.not_comparable"),
+        note: gate.comparable ? undefined : (reason ?? undefined),
+      };
+    }
+  }
 }
 
-/** Today's tiles beside the snapshot's: a moved tile carries today's value
- *  (and today's note where that differs), a tile only one side has says
- *  which, and today's extra tiles follow the snapshot's. */
+/** The tiles the report shows (councilTiles), in words. */
+function councilFigures(report: CouncilReport, t: TFn): Figure[] {
+  return councilTiles(report).flatMap(({ key }) => {
+    const words = tileWords(key, report, t);
+    return words ? [{ key, ...words }] : [];
+  });
+}
+
+/** The snapshot's tiles marked against today's: a tile that reads
+ *  differently carries today's value (and today's note where that differs),
+ *  a tile only the snapshot has says so, and the tiles only today has follow
+ *  the snapshot's. */
 function comparedFigures(own: Figure[], compare: CouncilComparison, t: TFn): Figure[] {
-  const today = new Map(councilFigures(compare.today, t).map((f) => [f.key, f]));
-  const keys = new Set(own.map((f) => f.key));
-  return [
-    ...own.map((f) => {
-      const now = today.get(f.key);
-      if (now == null) return { ...f, side: "snapshot" as const };
-      if (!compare.changed.has(f.key)) return f;
-      const note = now.note != null && now.note !== f.note ? now.note : null;
-      const words = note == null ? t("snapshot.compare.today_value", { value: now.value }) : t("snapshot.compare.today_value_note", { value: now.value, note });
-      return { ...f, today: words };
-    }),
-    ...[...today.values()].filter((f) => !keys.has(f.key)).map((f) => ({ ...f, side: "today" as const })),
-  ];
+  const marked = own.map((f): Figure => {
+    const mark = compare.marks.get(f.key);
+    if (mark === "snapshot") return { ...f, side: "snapshot" };
+    const now = mark === "changed" ? tileWords(f.key, compare.today, t) : null;
+    if (now == null) return f;
+    const note = now.note != null && now.note !== f.note ? now.note : null;
+    const words = note == null ? t("snapshot.compare.today_value", { value: now.value }) : t("snapshot.compare.today_value_note", { value: now.value, note });
+    return { ...f, today: words };
+  });
+  const added = [...compare.marks].flatMap(([key, mark]): Figure[] => {
+    const words = mark === "today" ? tileWords(key, compare.today, t) : null;
+    return words ? [{ key, ...words, side: "today" }] : [];
+  });
+  return [...marked, ...added];
 }
 
 /** The council report as a page someone can read aloud or print: the
