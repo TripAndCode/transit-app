@@ -93,7 +93,9 @@ def closed_on_may_first(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_closed_month_reads_what_the_board_reads(pg_conn, aconn, ch_client, ch_async_client, closed_on_may_first):
+async def test_a_closed_month_reads_what_the_board_reads(
+    pg_conn, aconn, ch_client, ch_async_client, closed_on_may_first
+):
     joined = _agency(pg_conn, "joined", "static_join")
     _timetable(pg_conn, joined, stops=2)
     insert_updates(ch_client, joined, _live_polls())
@@ -111,10 +113,10 @@ async def test_a_closed_month_reads_what_the_board_reads(pg_conn, aconn, ch_clie
     april = _stored(pg_conn, joined)[_APRIL]
     assert (april["through_date"], april["covered_days"], april["window_days"]) == (date(2026, 4, 30), 30, 30)
     # 4 trips a day for 30 days planned, the 4 reported on the 1st observed.
-    assert (april["observed_trips"], april["planned_trips"], april["rt_completeness_pct"]) == (4, 120, 3.3)
+    assert (april["observed_trips"], april["planned_trips"], float(april["rt_completeness_pct"])) == (4, 120, 3.3)
     # 2 stops of each: 8 stop events reported of 240 planned.
     assert (april["observed_stop_events"], april["planned_stop_events"], april["stop_plan_days"]) == (8, 240, 30)
-    assert april["stop_completeness_pct"] == 3.3
+    assert float(april["stop_completeness_pct"]) == 3.3
     assert (april["raw_samples"], april["clamp_count"], float(april["clamp_pct"])) == (32, 1, 3.13)
     assert (april["message_age_polls"], april["message_age_p50_sec"], april["message_age_p95_sec"]) == (4, 10.0, 35.5)
     assert april["stop_time_updates"] == 32

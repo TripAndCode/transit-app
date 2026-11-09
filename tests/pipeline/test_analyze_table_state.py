@@ -108,7 +108,11 @@ def _first_row(table: str) -> str:
 @pytest.mark.parametrize(
     ("disagreement", "rebuilt"),
     [
-        (f"DELETE FROM agg_route_daily WHERE {_first_row('agg_route_daily')}", {"agg_route_daily"}),
+        # The feed-quality scorecard counts agg_route_daily's trips, so it follows.
+        (
+            f"DELETE FROM agg_route_daily WHERE {_first_row('agg_route_daily')}",
+            {"agg_route_daily", "feed_quality_monthly"},
+        ),
         (f"DELETE FROM agg_route_hour WHERE {_first_row('agg_route_hour')}", {"agg_route_hour"}),
         # agg_route_stats is the figure route_delay_counts is checked against,
         # and every whole-history table built from route_delay_counts follows it.

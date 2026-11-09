@@ -95,6 +95,7 @@ const DIAGNOSTICS = {
     { route_code: "42", weight: 3 },
   ],
   weights_coverage: { routes_with_weights: 1, routes_total: 12 },
+  feed_quality: [],
 };
 
 let diagnosticsState: { data: unknown; isLoading: boolean; error: unknown } = {

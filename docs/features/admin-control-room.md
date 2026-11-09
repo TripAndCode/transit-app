@@ -66,8 +66,9 @@ Endpoints:
   3s while an operator's run is in flight, every 30s while only another job
   (usually the cron sweep) holds an agency, and not at all otherwise.
 - `GET /api/admin/agencies/{agency_id}/diagnostics` — the drawer's full
-  bundle: freshness, RT field coverage, static version timeline, clamp
-  history, weather station, and the two operator-edited policy tables.
+  bundle: freshness, RT field coverage, the monthly feed-quality scorecard,
+  static version timeline, clamp history, weather station, and the two
+  operator-edited policy tables.
 - `PATCH /api/admin/agencies/{agency_id}/standards` and
   `PATCH /api/admin/agencies/{agency_id}/weights` — edit the policy tables.
   A standard's metric is `ewt_sec`, `vehicle_km_delivered_pct` or
@@ -117,12 +118,23 @@ as one a migration adds to the static tables, reaches a timetable whose
 source has not changed. The page's buttons have no such option.
 
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
-`rt_field_coverage_probes`, `agg_feed_health`, `static_trips`,
+`rt_field_coverage_probes`, `agg_feed_health`, `feed_quality_monthly`, `static_trips`,
 `static_calendar`, `static_calendar_dates`, `agg_static_version_summary`,
 `agency_weather_stations`, `route_performance_standards`,
 `ridership_weights`. The two editors write `route_performance_standards`
 and `ridership_weights`; every write additionally records an
 `admin_audit` entry.
+
+### Feed-quality scorecard
+
+The drawer's 月次フィード品質 section reads `feed_quality_monthly`, which
+analyze keeps per agency and month (`pipeline/feed_quality.py`;
+`DELAY_ANALYSIS.md` defines each figure). It shows the newest month in full,
+with the day it counts through, then the last six months' trips reported,
+stop events, median message age and implausible share, newest first. A
+missing figure prints as a dash with its reason, never as 0. Trips reported
+and the implausible share are the agencies board's own figures over the same
+days.
 
 ### RT field-coverage verdicts
 

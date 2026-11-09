@@ -94,6 +94,32 @@ CSV preamble's `プリセット=` (with the preset's plain name, such as
 `standard_m1_p5（業界標準）`) and `算出方法=`, and the footnotes' on-time definition
 (「定時の定義（業界標準）：…」) and method line.
 
+## Feed-quality scorecard
+
+Each analyze run keeps `feed_quality_monthly`, one row per agency and calendar month of
+service date (`pipeline/feed_quality.py`). A month counts its service dates from the 1st
+through its last day, or, for the month in progress, through the last closed service
+day; `through_date` names where it stops. A month is rebuilt when a day of it changed
+or when its window has grown since it was built, so a feed that stops reporting still
+has its planned days counted against it.
+
+| Figure | Definition |
+|---|---|
+| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days. The agencies board's coverage, by the same rule and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board reads over the same days. |
+| Stop events | Stop events the feed reported a departure or arrival delay for, counted once per trip, stop and service date however often reported, of the stop times the planned trips call at. Only the planned days whose stop events are known count (`stop_plan_days`): the day's capture saves them beside its planned trips, and a day saved before it did keeps them unknown. |
+| Message age | Per live poll, the instant it was captured minus its FeedHeader timestamp: the median and 95th percentile, interpolated linearly between the closest ranks (ClickHouse's `quantilesExactInclusive`, the rule of numpy's default), with the number of polls measured. Archive ingest stamps a row's capture time from that same header, so an archived poll's age is zero by construction and is not counted. |
+| Implausible readings | The board's clamp share: readings beyond the plausibility clamp, of the readings that carried a delay (`agg_feed_health`). |
+| Field coverage | For each of `stop_id`, `arr_delay`, the trip's and the stop's `schedule_relationship`, the share of stored stop_time_updates carrying it: the unit the RT field-coverage probe measures one poll in. |
+| VehiclePositions | Not recorded: nothing the app reads says which feeds publish them. |
+
+A figure the feed or the app cannot supply is empty beside a reason, never 0. Trips and
+stop events need trip IDs matched to the timetable (`coverage_unknown` otherwise, the
+gate's reason) and a plan (`no_plan`); stop events also need a known stop plan
+(`no_stop_plan`). Message age needs a live poll (`archive_stamped`) with a header
+(`no_header`). Field coverage needs an ingest strategy that stores the fields
+(`feed_cannot_report`), and every figure needs an observation (`no_data`). The admin
+agency drawer shows the newest month and the five before it.
+
 ## Serving
 
 By default a report endpoint just **reads** an `agg_*` table rather than scanning the raw

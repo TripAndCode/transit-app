@@ -446,6 +446,51 @@ export type AgencyStandard = {
 /** A `route_code` of null is the agency's default weight row. */
 export type AgencyWeight = { route_code: string | null; weight: number };
 
+/** Why a scorecard figure is null (pipeline/feed_quality.py's `Missing`). */
+export type FeedQualityMissing =
+  | "coverage_unknown"
+  | "no_plan"
+  | "no_stop_plan"
+  | "no_data"
+  | "archive_stamped"
+  | "no_header"
+  | "feed_cannot_report"
+  | "not_recorded";
+
+/** One month of an agency's feed-quality scorecard. Each figure is null
+ *  exactly when its `*_missing` reason is set. */
+export type AgencyFeedQualityMonth = {
+  month: string;
+  through_date: string;
+  covered_days: number;
+  window_days: number;
+  observed_trips: number | null;
+  planned_trips: number | null;
+  rt_completeness_pct: number | null;
+  rt_completeness_missing: FeedQualityMissing | null;
+  observed_stop_events: number | null;
+  planned_stop_events: number | null;
+  stop_plan_days: number;
+  stop_completeness_pct: number | null;
+  stop_completeness_missing: FeedQualityMissing | null;
+  message_age_polls: number;
+  message_age_p50_sec: number | null;
+  message_age_p95_sec: number | null;
+  message_age_missing: FeedQualityMissing | null;
+  raw_samples: number;
+  clamp_count: number;
+  clamp_pct: number | null;
+  clamp_missing: FeedQualityMissing | null;
+  stop_time_updates: number;
+  stop_id_pct: number | null;
+  arr_delay_pct: number | null;
+  schedule_relationship_trip_pct: number | null;
+  schedule_relationship_stop_pct: number | null;
+  field_coverage_missing: FeedQualityMissing | null;
+  vehicle_positions_available: boolean | null;
+  vehicle_positions_missing: FeedQualityMissing | null;
+};
+
 type AgencyDiagnostics = {
   agency_id: number;
   agency_name: string;
@@ -465,6 +510,8 @@ type AgencyDiagnostics = {
   standards_count: number;
   weights: AgencyWeight[];
   weights_coverage: { routes_with_weights: number; routes_total: number };
+  /** Newest month first, up to six. */
+  feed_quality: AgencyFeedQualityMonth[];
 };
 
 /** One step of an operator's run, as the server reads it from the step rows
