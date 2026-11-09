@@ -1131,6 +1131,27 @@ describe("AnalysisTab council report print", () => {
     expect(print).not.toHaveBeenCalled();
   });
 
+  it("cancels a print whose scope changes while its snapshot is taken, and says so instead of printing", async () => {
+    let answer: (created: typeof CREATED) => void = () => {};
+    vi.spyOn(client, "apiPost").mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    const { print } = printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-01&to=2026-05-14"));
+    await act(async () => answer(CREATED));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Printing was cancelled because the view changed."));
+    expect(print).not.toHaveBeenCalled();
+    expect(printButton()).toBeEnabled();
+    expect(screen.getByTestId("print-frame-footer")).not.toHaveTextContent("Snapshot:");
+  });
+
+  it("leaves room below the content for the foot's snapshot line, wrapped once, when the page carries one", () => {
+    const shell = ruleBody(readFileSync(resolve(__dirname, "../styles/global.css"), "utf8"), "@media print");
+    expect(decl(ruleBody(shell, ".print-frame__footer"), "line-height")).toBe("1.3");
+    expect(decl(ruleBody(shell, ".app-shell:has(.print-frame__snapshot:not(:empty)) main"), "padding-bottom")).toBe("20mm");
+  });
+
   it("shows the link on paper and keeps the on-screen notes and the button off it", () => {
     const shell = ruleBody(readFileSync(resolve(__dirname, "../styles/global.css"), "utf8"), "@media print");
     expect(decl(ruleBody(shell, ".print-frame__snapshot"), "display")).toBe("block");
