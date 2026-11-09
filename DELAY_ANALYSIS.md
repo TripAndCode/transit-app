@@ -99,9 +99,13 @@ CSV preamble's `プリセット=` (with the preset's plain name, such as
 Each analyze run keeps `feed_quality_monthly`, one row per agency and calendar month of
 service date (`pipeline/feed_quality.py`). A month counts its service dates from the 1st
 through its last day, or, for the month in progress, through the last closed service
-day; `through_date` names where it stops. A month is rebuilt when a day of it changed
+day, and never past the newest day any agency's aggregates reach, where the agencies
+board's coverage stops too: a later day is a lag every feed shares, not trips one feed
+missed. `through_date` names where it stops. A month is rebuilt when a day of it changed
 or when its window has grown since it was built, so a feed that stops reporting still
-has its planned days counted against it.
+has its planned days counted against it once other feeds' days move past it. An agency
+analyzed before the others in the same run counts the days they reached by its turn,
+and its next run catches up.
 
 | Figure | Definition |
 |---|---|

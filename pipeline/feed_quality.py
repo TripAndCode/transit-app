@@ -2,7 +2,9 @@
 built by analyze into ``feed_quality_monthly``.
 
 A month counts the service dates from its first day through its last, or for
-the month in progress through the last closed service day, and every figure
+the month in progress through the last closed service day, and never past the
+newest day any agency's aggregates reach, where the board's coverage stops too:
+a later day is a lag every feed shares, not trips one feed missed. Every figure
 counts that same window:
 
 - **RT completeness**: the trips the feed reported of those the timetable
@@ -165,10 +167,24 @@ FEED_HEALTH_SQL = """
 """
 
 
+# The newest service day any agency's aggregates reach: where the board's
+# coverage stops (pipeline.reports.network.coverage_through, over the same
+# table's dates).
+NEWEST_DAY_SQL = "SELECT MAX(date) FROM agg_route_daily_dist"
+
+
 def last_closed_day() -> date:
     """The last service day that has closed (pipeline.service_day): the newest
-    day `updates` holds in production, and the end of the month in progress."""
+    day `updates` can hold in production."""
     return service_date_of(datetime.now(timezone.utc)) - timedelta(days=1)
+
+
+def last_counted_day(last_closed: date, newest: date | None) -> date | None:
+    """The last service day any month counts: the last closed one, and no
+    later than *newest*, the newest day any agency's aggregates reach, as the
+    board's coverage stops there. A later day is a lag every feed shares, not
+    trips one feed missed. None when no agency's aggregates reach any day."""
+    return None if newest is None else min(last_closed, newest)
 
 
 def month_of(day: date) -> date:
@@ -179,10 +195,10 @@ def month_end(month: date) -> date:
     return (month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
 
 
-def through_of(month: date, last_closed: date) -> date:
-    """The last service date *month* counts: its last day, or *last_closed*,
-    the last closed service day, for the month in progress."""
-    return min(month_end(month), last_closed)
+def through_of(month: date, last_day: date) -> date:
+    """The last service date *month* counts: its last day, or *last_day*
+    (:func:`last_counted_day`) for the month in progress."""
+    return min(month_end(month), last_day)
 
 
 def _months_between(first: date, last: date) -> list[date]:
@@ -194,25 +210,29 @@ def _months_between(first: date, last: date) -> list[date]:
 
 
 def plan_months(
-    scope: list[date] | None, first_day: date | None, last_closed: date, stored: Mapping[date, date]
+    scope: list[date] | None, first_day: date | None, last_day: date | None, stored: Mapping[date, date]
 ) -> tuple[list[date] | None, list[date]]:
     """``(purge, build)``: the months whose rows this run deletes (None for
     every month) and those it builds.
 
     The agency's months run from that of its first observed day, *first_day*,
-    to that of *last_closed*. *scope* is the service dates whose rows changed
-    (None for all of them), and *stored* each built month's ``through_date``.
-    Besides the months holding a changed date, a month is built when it has no
-    row yet or its row stops short of its window, which grows as days close,
-    with or without new observations: a feed that stops reporting still has
-    its planned days counted against it. A stored month outside the agency's
-    months goes.
+    to that of *last_day*, the last day any month counts
+    (:func:`last_counted_day`; None for none). *scope* is the service dates
+    whose rows changed (None for all of them), and *stored* each built month's
+    ``through_date``. Besides the months holding a changed date, a month is
+    built when it has no row yet or its row stops short of its window, which
+    grows as the aggregates reach later days, with or without this feed's own
+    observations: a feed that stops reporting still has its planned days
+    counted against it. A stored month outside the agency's months goes.
     """
-    months = [] if first_day is None or first_day > last_closed else _months_between(first_day, last_closed)
+    months: list[date] = []
+    if first_day is not None and last_day is not None and first_day <= last_day:
+        months = _months_between(first_day, last_day)
     if scope is None:
         return None, months
     wanted = {month_of(day) for day in scope}
-    wanted |= {m for m in months if m not in stored or stored[m] < through_of(m, last_closed)}
+    if last_day is not None:
+        wanted |= {m for m in months if m not in stored or stored[m] < through_of(m, last_day)}
     wanted |= {m for m in stored if m not in months}
     return sorted(wanted), [m for m in months if m in wanted]
 
@@ -376,17 +396,20 @@ def rebuild(
 ) -> bool:
     """Replace the agency's rows of the months :func:`plan_months` names, in
     the caller's transaction, and return whether any row was replaced. Reads
-    agg_feed_health and agg_route_daily as this run left them, so it runs
-    after both."""
+    agg_feed_health, agg_route_daily and agg_route_daily_dist as this run left
+    them, so it runs after all three; the other agencies' as their last runs did."""
     with conn.cursor() as cur:
         cur.execute("SELECT MIN(date) FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
         first_day = cur.fetchone()[0]
+        cur.execute(NEWEST_DAY_SQL)
+        last_day = last_counted_day(last_closed, cur.fetchone()[0])
         cur.execute(f"SELECT month, through_date FROM {TABLE} WHERE agency_id = %s", (agency_id,))
         stored = dict(cur.fetchall())
-    purge, build = plan_months(scope, first_day, last_closed, stored)
+    purge, build = plan_months(scope, first_day, last_day, stored)
     rows = [
-        build_month(agency_id, month, through_of(month, last_closed), ingest_strategy, conn, ch_client)
+        build_month(agency_id, month, through_of(month, last_day), ingest_strategy, conn, ch_client)
         for month in build
+        if last_day is not None
     ]
     with conn.cursor() as cur:
         if purge is None:
@@ -417,6 +440,8 @@ def render() -> list[str]:
         inspect.getsource(_share_pct),
         inspect.getsource(_completeness_missing),
         inspect.getsource(through_of),
+        inspect.getsource(last_counted_day),
+        NEWEST_DAY_SQL,
         inspect.getsource(month_end),
         inspect.getsource(comparability.coverage_pct),
         inspect.getsource(comparability.clamp_pct),

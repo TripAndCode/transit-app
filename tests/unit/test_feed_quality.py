@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 
 from pipeline import feed_quality
-from pipeline.feed_quality import COLUMNS, plan_months, shape, through_of
+from pipeline.feed_quality import COLUMNS, last_counted_day, plan_months, shape, through_of
 from pipeline.reports.comparability import assess
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 
@@ -184,6 +184,13 @@ def test_a_stored_month_outside_the_observed_months_is_purged_not_built():
 def test_an_agency_with_no_closed_observed_day_builds_nothing():
     assert plan_months(None, None, date(2026, 11, 8), {}) == (None, [])
     assert plan_months(None, date(2026, 11, 9), date(2026, 11, 8), {}) == (None, [])
+    assert plan_months([], date(2026, 10, 1), None, {_OCT: date(2026, 10, 31)}) == ([_OCT], [])
+
+
+def test_months_count_no_further_than_the_newest_day_any_agencys_aggregates_reach():
+    assert last_counted_day(date(2026, 11, 9), date(2026, 11, 2)) == date(2026, 11, 2)
+    assert last_counted_day(date(2026, 11, 9), date(2026, 11, 10)) == date(2026, 11, 9)
+    assert last_counted_day(date(2026, 11, 9), None) is None
 
 
 def test_the_render_names_the_gate_rules_it_applies():

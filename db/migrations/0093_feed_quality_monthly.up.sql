@@ -4,8 +4,9 @@
 -- every figure and its reason to exactly one of the two.
 --
 -- through_date is the month's last service date counted: its last day, or for
--- the month in progress the last closed service day. Every figure counts the
--- service dates from the month's first day through it.
+-- the month in progress the last closed service day, and never past the newest
+-- day any agency's aggregates reach. Every figure counts the service dates
+-- from the month's first day through it.
 CREATE TABLE IF NOT EXISTS feed_quality_monthly (
     agency_id                        INT          NOT NULL REFERENCES agencies(agency_id) ON DELETE CASCADE,
     month                            DATE         NOT NULL CHECK (EXTRACT(DAY FROM month) = 1),
