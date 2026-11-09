@@ -16,6 +16,7 @@ from typing import Any
 
 from api.clickhouse import max_captured_at
 from api.range import RangeCtx, UpdatesFilter, updates_filter_ch
+from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
 from pipeline.db import latest_departure_ch, stop_event_filter_ch
 from pipeline.live_filing import band_candidates, filing
 from pipeline.query.tools import unnamed_stop_name
@@ -333,10 +334,12 @@ async def compute_route_shape(
         agency_latest = await max_captured_at(ch, agency_id)
         if agency_latest is not None:
             fallback_bound = agency_latest - timedelta(days=30)
+            # The trip-level row of a cancellation that listed no stop is no
+            # stop of its trip, so it gives the trip no weight.
             fallback_vote_result = await ch.query(
                 "SELECT trip_id, count() AS n FROM updates "
                 "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
-                "  AND captured_at >= {bound:DateTime64} "
+                f"  AND captured_at >= {{bound:DateTime64}} AND stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE} "
                 "GROUP BY trip_id",
                 parameters={"agency_id": agency_id, "route": str(route), "bound": fallback_bound},
             )

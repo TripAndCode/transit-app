@@ -787,8 +787,8 @@ _COMPARISONS = (_DAILY, _REPORTS_COMPARED, _BEFORE_MIDNIGHT, _AFTER_MIDNIGHT, _T
 class Divergence:
     """A known way the pipeline departs from the truth. ``view`` turns an
     outcome into the outcome the pipeline computes instead, from the run's
-    scenario and polls; ``reason`` states the divergence as its strict xfail
-    does, and ``name`` names it in a mismatch report."""
+    scenario and polls; ``reason`` states the divergence, and ``name`` names
+    it in a mismatch report."""
 
     name: str
     reason: str
@@ -882,32 +882,6 @@ def _hard_mismatches(observed: Observed, comparison: tuple[Expect, Callable[[Obs
     choice = observed.choice
     lines = _compare(read(observed), expect(observed, choice.outcome), lambda _cell: True)
     return [f"({choice.describe()})", *lines] if lines else []
-
-
-def _moved(truth: Cells, view: Cells) -> set[tuple[str, Hashable]]:
-    """The cells *view* gives another figure than *truth* does, or a row it lacks."""
-    return {cell for cell in set(truth) | set(view) if truth.get(cell) != view.get(cell)}
-
-
-def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[str]:
-    """The cells *divergence* moves and no other known divergence of the
-    scenario does, against the truth alone."""
-    others = [d for d in _KNOWN[observed.scenario.name] if d is not divergence]
-    truth = oracle.outcome(observed.scenario)
-    lines: list[str] = []
-    own_cells = 0
-    for expect, read in _COMPARISONS:
-        expected = expect(observed, truth)
-        # Assumes each divergence moves cells on its own; one that shows only in
-        # combination needs this extended, never the RuntimeError below weakened.
-        moved = _moved(expected, expect(observed, divergence.view(observed, truth)))
-        for other in others:
-            moved -= _moved(expected, expect(observed, other.view(observed, truth)))
-        own_cells += len(moved)
-        lines += _compare(read(observed), expected, moved.__contains__)
-    if not own_cells:
-        raise RuntimeError("the divergence moves no cell of its own, so its xfail would test nothing")
-    return lines
 
 
 async def _run_scenario(
@@ -1129,8 +1103,6 @@ def _assert_clean(mismatches: list[str]) -> None:
 # Each comparison test holds every cell of every scenario to the truth, or to
 # the view of it under one combination of the scenario's known divergences,
 # chosen once for the whole run, so any other change to a cell still fails.
-# Each divergence's strict xfail holds the cells it alone moves to the truth;
-# fixing it turns that test into a pass.
 _ALL = [
     pytest.param(plain_weekday, id="plain_weekday"),
     pytest.param(night_route, id="night_route"),

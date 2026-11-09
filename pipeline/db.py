@@ -50,9 +50,8 @@ MAX_PLAUSIBLE_DELAY_SEC = 7200
 
 def observation_filter_ch(extra_where: str = "") -> str:
     """The row-level WHERE of a read of departure rows each taken on its own
-    (the live map's vehicles and trails, the delay certificate's probe): the
-    agency, a measured `dep_delay` inside the plausibility clamp, and the
-    caller's own filter. A read picking each stop event's latest poll admits
+    (the live map's vehicles and trails): the agency, a measured `dep_delay`
+    inside the plausibility clamp, and the caller's own filter. A read picking each stop event's latest poll admits
     the rows withdrawing a departure as well (:func:`stop_event_filter_ch`),
     and :func:`build_stop_visits_ch_sql` admits arrival-only rows too, so each
     applies the same clamp through a WHERE of its own. Columns are

@@ -12,7 +12,7 @@ the table's version in `pipeline/agg_registry.py` in the same commit.
 """
 
 from pipeline.clickhouse import LIVE_SOURCED, STOP_SKIPPED, TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
-from pipeline.db import departure_ch, hms_to_sec_sql, withdrawn_ch
+from pipeline.db import departure_ch, hms_to_sec_sql, stop_event_filter_ch, withdrawn_ch
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
@@ -82,6 +82,13 @@ def feed_health_ch_sql(date_where: str) -> str:
 # SKIPPED is reporting the trip not run. The trip-level row of a
 # cancellation that listed no stop counts in the trip's status and is
 # no stop.
+#
+# Both subqueries read the rows the departure dedup reads
+# (pipeline.db.stop_event_filter_ch): a plausible departure, or a row
+# withdrawing one. A later report carrying neither a delay nor a
+# CANCELED or SKIPPED status says nothing about whether the trip ran, so
+# it leaves the withdrawal before it standing here exactly as it leaves
+# that stop without a departure there.
 def service_delivered_ch_sql(date_where: str) -> str:
     """Per service date, the trips the feed reported as not run: a trip whose
     latest status is CANCELED, or every stop of which it reports has SKIPPED
@@ -94,7 +101,8 @@ def service_delivered_ch_sql(date_where: str) -> str:
         + _SERVICE_DATE
         + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16}"""
+                        FROM updates AS u WHERE """
+        + stop_event_filter_ch()
         + date_where
         + """
                         GROUP BY svc_date, trip_id
@@ -107,8 +115,8 @@ def service_delivered_ch_sql(date_where: str) -> str:
         + _SERVICE_DATE
         + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
-                        FROM updates WHERE agency_id = {agency_id:UInt16} AND stop_sequence != """
-        + str(TRIP_LEVEL_STOP_SEQUENCE)
+                        FROM updates AS u WHERE """
+        + stop_event_filter_ch(f"u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}")
         + date_where
         + """
                         GROUP BY svc_date, trip_id, stop_sequence
