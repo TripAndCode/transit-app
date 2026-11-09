@@ -1,6 +1,7 @@
 """ClickHouse SQL for the workbench. Delay facts come only through
 build_dedup_ch_sql, so a run's delays are what the app's reports read: the
-latest observation per stop event, with implausible delays clamped out."""
+latest observation per stop event, with implausible delays clamped out and a
+departure the feed withdrew (a CANCELED trip or SKIPPED stop) left out."""
 
 from __future__ import annotations
 
