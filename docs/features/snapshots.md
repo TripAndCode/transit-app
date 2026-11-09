@@ -57,6 +57,14 @@ refused. Payloads over 1 MiB serialized are refused with 413.
 `/s/{id}` draws the stored responses with the live screens' own components
 (`CouncilSummaryBlock`, `ReportTable`, `DefinitionMetaBlock`), under a banner
 「スナップショット（2026-11-09 14:05 JST 作成、手法 2026.11.0）」 / "Snapshot
-(created 2026-11-09 14:05 JST, method 2026.11.0)". It asks the API for the
-snapshot alone, so nothing on it can drift to today's figures; route rows are
-not links, since a route's live page would show today's.
+(created 2026-11-09 14:05 JST, method 2026.11.0)". Beneath it the scope reads
+as the live scope sentence does, every condition the figures were computed
+under, one the screen's data did not use struck through; a Routes table also
+states its observation floor and the routes it left out, as disabled toggles.
+It asks the API for the snapshot alone, so nothing on it can drift to today's
+figures; route rows are not links, since a route's live page would show
+today's.
+
+Only the screen's own report is frozen. The panels the Routes screen shows
+beside its table (headway quality, the agency's performance standards) come
+from endpoints of their own and are not part of a snapshot.

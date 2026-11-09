@@ -153,6 +153,34 @@ describe("SnapshotPage", () => {
     expect(await screen.findByText(prose.ja)).toBeInTheDocument();
   });
 
+  it("names every condition the figures were computed under, marking one the screen did not use", async () => {
+    const params = { from: "2026-10-01", to: "2026-10-31", dow: "weekday", time_band: "morning", service: "all", routes: ["42"], hour: null, stop: null, dir: null, late: 120, early: null };
+    const report = { ...routeTable("Route table"), scope_applied: { from: true, to: true, dow: true, time_band: false, routes: true, late: true } } as ReportResponse;
+    stubFetch(200, snapshot({ params, payloads: { report: { en: report }, routes: ROUTES, credit: {} } }));
+    renderPage();
+    const scope = await screen.findByTestId("snapshot-scope");
+    expect(scope).toHaveTextContent("Hill Transit");
+    expect(scope).toHaveTextContent("Hillside line");
+    expect(scope).toHaveTextContent("weekdays");
+    expect(scope).toHaveTextContent("within 2 min");
+    const unused = within(scope).getByText("Morning (05–09)");
+    expect(unused.closest("s")).not.toBeNull();
+    expect(unused.closest("s")).toHaveAttribute("title", "This screen doesn't use this condition");
+  });
+
+  it("states the stored table's floor and left-out routes without offering to change them", async () => {
+    const params = { from: "2026-10-01", to: "2026-10-31", include_sparse: true, include_retired: false, include_zero_delay: false };
+    const report = { ...routeTable("Route table"), retired_rows: 3, zero_delay_rows: 0 } as ReportResponse;
+    stubFetch(200, snapshot({ params, payloads: { report: { en: report }, routes: ROUTES, credit: {} } }));
+    renderPage();
+    const sparse = await screen.findByRole("checkbox", { name: "Include routes observed fewer than 100 times" });
+    expect(sparse).toBeChecked();
+    expect(sparse).toBeDisabled();
+    const retired = screen.getByRole("checkbox", { name: "Include 3 route codes the current timetable no longer runs" });
+    expect(retired).not.toBeChecked();
+    expect(retired).toBeDisabled();
+  });
+
   it("shows the snapshot's own title and note when it has them", async () => {
     stubFetch(200, snapshot({ title: "October council", note: "For the 11/20 meeting" }));
     renderPage();

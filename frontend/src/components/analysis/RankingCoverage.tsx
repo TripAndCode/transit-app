@@ -2,7 +2,8 @@ import { useTranslation } from "react-i18next";
 
 /** Whether groups observed too few times to trust join the ranking. They stay
  *  out by default: a special-day variant seen a few dozen times would
- *  otherwise top a ranking of routes seen hundreds of times. */
+ *  otherwise top a ranking of routes seen hundreds of times. Without
+ *  `onChange` it only states the setting, disabled. */
 export function SparseToggle({
   checked,
   floor,
@@ -10,12 +11,17 @@ export function SparseToggle({
 }: {
   checked: boolean;
   floor: number;
-  onChange: (checked: boolean) => void;
+  onChange?: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
     <label className="ranking-sparse-toggle">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={!onChange}
+        onChange={(e) => onChange?.(e.currentTarget.checked)}
+      />
       {t("reports.ranking_coverage.include_sparse", { floor })}
     </label>
   );
@@ -34,7 +40,8 @@ type LeftOutReason = keyof typeof LEFT_OUT_LABELS;
 
 /** The routes a list leaves out by default, on one line: what they are and
  *  how many, each reason with its own toggle to bring them back. Nothing
- *  when the list leaves none out. */
+ *  when the list leaves none out. Without `onChange` it only states which
+ *  were kept, disabled. */
 export function LeftOutLine({
   counts,
   kept,
@@ -42,7 +49,7 @@ export function LeftOutLine({
 }: {
   counts: Partial<Record<LeftOutReason, number | null>>;
   kept: Record<LeftOutReason, boolean>;
-  onChange: (reason: LeftOutReason, checked: boolean) => void;
+  onChange?: (reason: LeftOutReason, checked: boolean) => void;
 }) {
   const { t } = useTranslation();
   const reasons = (Object.keys(LEFT_OUT_LABELS) as LeftOutReason[]).filter((reason) => (counts[reason] ?? 0) > 0);
@@ -56,7 +63,7 @@ export function LeftOutLine({
           reason={reason}
           checked={kept[reason]}
           count={counts[reason] ?? 0}
-          onChange={(on) => onChange(reason, on)}
+          onChange={onChange && ((on) => onChange(reason, on))}
         />
       ))}
     </div>
@@ -72,12 +79,17 @@ export function LeftOutToggle({
   reason: LeftOutReason;
   checked: boolean;
   count: number;
-  onChange: (checked: boolean) => void;
+  onChange?: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
   return (
     <label className="ranking-sparse-toggle">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={!onChange}
+        onChange={(e) => onChange?.(e.currentTarget.checked)}
+      />
       {t(LEFT_OUT_LABELS[reason], { count })}
     </label>
   );

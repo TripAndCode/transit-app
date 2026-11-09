@@ -71,3 +71,19 @@
   font-size: var(--text-sm);
   color: var(--text-secondary);
 }
+
+.snapshot-page__coverage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.snapshot-page__coverage > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-3);
+}

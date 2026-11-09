@@ -2,7 +2,7 @@ import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { ApiError } from "../api/client";
-import { JST_TZ, toJstISO } from "../api/scope";
+import { JST_TZ, parseScope, toJstISO, type Scope } from "../api/scope";
 import { useSnapshot, type Snapshot } from "../api/snapshots";
 import type { ReportResponse } from "../api/types";
 import { buildRouteNames, type RouteNames } from "../api/useRouteNames";
@@ -13,12 +13,13 @@ import { LanguageToggle } from "../components/LanguageToggle";
 import { ReportTable } from "../components/ReportTable";
 import { SkeletonTable } from "../components/Skeleton";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
-import { RowsShown } from "../components/analysis/RankingCoverage";
+import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 import { reportLabel } from "../components/analysis/reportGroups";
+import { conditionIsSet, scopeTokens } from "../components/scope/scopePhrases";
 import { contentLocale } from "../i18n/contentLocale";
 import { useDocumentLocale } from "../i18n/useDocumentLocale";
 import { routeTableSortDirection, type RouteTableView } from "../routes/destinations";
-import { FILTER_SEPARATOR, formatDateRange, formatDuration } from "../utils/format";
+import { formatDuration } from "../utils/format";
 import "./SnapshotPage.css";
 
 const JST_CLOCK = new Intl.DateTimeFormat("en-GB", { timeZone: JST_TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -27,6 +28,18 @@ const JST_CLOCK = new Intl.DateTimeFormat("en-GB", { timeZone: JST_TZ, hour: "2-
 function jstStamp(iso: string): string {
   const at = new Date(iso);
   return `${toJstISO(at)} ${JST_CLOCK.format(at)}`;
+}
+
+/** The scope the snapshot's figures were computed under, from its stored
+ *  params, which name the dates it resolved to. */
+function storedScope(params: Record<string, unknown>, report: ReportResponse | undefined): Scope {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value == null) continue;
+    query.set(key, Array.isArray(value) ? value.join(",") : String(value));
+  }
+  const dates = report?.ctx ?? { from: String(params.from ?? ""), to: String(params.to ?? "") };
+  return parseScope(query, { from: dates.from, to: dates.to });
 }
 
 type RouteTableReport = Extract<ReportResponse, { report_type: "route_table" }>;
@@ -67,7 +80,6 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
   const report = reports[locale] ?? reports.ja ?? reports.en;
   const credit = snapshot.payloads.credit?.[locale] ?? null;
   const names = buildRouteNames(snapshot.payloads.routes ?? [], t, { agencyName: snapshot.agency_name });
-  const scope = [snapshot.agency_name, report?.ctx && formatDateRange(report.ctx.from, report.ctx.to)].filter(Boolean);
   return (
     <>
       <div className="snapshot-banner" role="note">
@@ -77,10 +89,10 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
         <p>{t("snapshot.frozen_note")}</p>
       </div>
       <h1 className="snapshot-page__title">{snapshot.title ?? screenTitle(snapshot.screen, t)}</h1>
-      <p className="snapshot-page__scope">{scope.join(FILTER_SEPARATOR)}</p>
+      <ScopeStatement snapshot={snapshot} report={report} names={names} />
       {snapshot.note && <p className="snapshot-page__note">{snapshot.note}</p>}
       {report?.report_type === "route_table" ? (
-        <RouteTableSnapshot report={report} names={names} />
+        <RouteTableSnapshot report={report} names={names} params={snapshot.params} />
       ) : report?.report_type === "council_summary" ? (
         <CouncilSnapshot report={report} />
       ) : (
@@ -96,6 +108,33 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
+/** The live screen's scope sentence, read-only: every condition the figures
+ *  were computed under, one the screen's data did not use struck through. */
+function ScopeStatement({ snapshot, report, names }: { snapshot: Snapshot; report: ReportResponse | undefined; names: RouteNames }) {
+  const { t } = useTranslation();
+  const scope = storedScope(snapshot.params, report);
+  const tokens = scopeTokens(scope, {
+    t,
+    agencyName: snapshot.agency_name,
+    routeLabel: names.format,
+    routeGroup: (code) => names.data.get(code),
+  });
+  const applied = report?.scope_applied;
+  return (
+    <p className="snapshot-page__scope" data-testid="snapshot-scope">
+      {tokens.map((tok, i) => {
+        const off = tok.field != null && applied?.[tok.field] === false && conditionIsSet(tok.key, scope);
+        return (
+          <span key={tok.key}>
+            {i > 0 && t("common.list_separator")}
+            {off ? <s title={t("scope.unapplied")}>{tok.label}</s> : tok.label}
+          </span>
+        );
+      })}
+    </p>
+  );
+}
+
 function screenTitle(screen: string, t: TFunction): string {
   if (screen === "council_report") return reportLabel(t, "council_summary");
   if (screen === "route_table") return t("routeTable.title");
@@ -104,13 +143,28 @@ function screenTitle(screen: string, t: TFunction): string {
 
 /** The Routes table as the live screen draws it, in the sort it was in,
  *  with no control to change what was stored. */
-function RouteTableSnapshot({ report, names }: { report: RouteTableReport; names: RouteNames }) {
+function RouteTableSnapshot({
+  report,
+  names,
+  params,
+}: {
+  report: RouteTableReport;
+  names: RouteNames;
+  params: Record<string, unknown>;
+}) {
   const { t } = useTranslation();
   const view: RouteTableView = { sort: report.sort ?? "avg", order: report.order ?? "worst" };
   const early = report.definition.early_departure_sec;
+  const kept = { retired: params.include_retired === true, zero_delay: params.include_zero_delay === true };
   return (
     <section>
       <DefinitionMetaBlock definition={report.definition} />
+      <div className="snapshot-page__coverage">
+        {report.reliable_min_samples != null && (
+          <SparseToggle checked={params.include_sparse === true} floor={report.reliable_min_samples} />
+        )}
+        <LeftOutLine counts={{ retired: report.retired_rows, zero_delay: report.zero_delay_rows }} kept={kept} />
+      </div>
       {report.rows.length > 0 ? (
         <>
           <ReportTable

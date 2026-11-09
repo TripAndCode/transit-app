@@ -95,6 +95,25 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   return tokens;
 }
 
+/** Whether a condition narrows anything. A condition at its default filters
+ *  nothing, so a screen ignoring it is not worth striking through. */
+export function conditionIsSet(key: TokenKey, scope: Scope): boolean {
+  switch (key) {
+    case "agency":
+      return false;
+    case "routes":
+      return scope.routes.length > 0;
+    case "days":
+      return scope.dow !== "all";
+    case "time":
+      return scope.hour != null || scope.time_band !== "all";
+    case "tolerance":
+      return scope.late != null;
+    default:
+      return true;
+  }
+}
+
 /** A locale template's text runs and `[slot]` placeholders, in order. Square
  *  brackets rather than `{{ }}` so i18next leaves the slots alone. */
 export function sentenceParts(template: string): ({ text: string } | { slot: string })[] {
