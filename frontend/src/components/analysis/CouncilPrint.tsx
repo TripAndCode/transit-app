@@ -60,7 +60,7 @@ export function CouncilPrint({ report, snapshot }: { report: ReportResponse; sna
           {t("reports.council.print_snapshot.pending")}
         </p>
       )}
-      {outcome && (
+      {outcome && !pending && (
         <p role="status" className="council-report__print-note">
           {link ? (
             <>
