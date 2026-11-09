@@ -57,6 +57,7 @@ from pipeline.histogram import (
 from pipeline.live_filing import band_candidates
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.query import formatter
+from pipeline.reports import comparability
 from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
 from pipeline.reports.network import compute_network_summary
 from pipeline.reports.rankings import (
@@ -241,7 +242,7 @@ async def _freshness_and_quality(agency_id: int, ctx: RangeCtx, conn, ch) -> tup
     )
     raw = int(feed_row["raw"]) if feed_row else 0
     clamp = int(feed_row["clamp"]) if feed_row else 0
-    return is_stale(agg_max_day, live_max_day), (round(clamp / raw * 100, 2) if raw else None)
+    return is_stale(agg_max_day, live_max_day), comparability.clamp_pct(clamp, raw)
 
 
 async def compute_council_summary(

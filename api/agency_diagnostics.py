@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
+from pipeline.reports.comparability import clamp_pct
 from pipeline.reports.performance_standard import METRIC_TYPES
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 from pipeline.timetable_in_force import fetch_day
@@ -337,7 +338,7 @@ def build_clamp_history(
         row = by_date.get(day)
         raw = int(row["raw_samples"]) if row and row["raw_samples"] else 0
         clamp = int(row["clamp_count"]) if row and row["clamp_count"] else 0
-        out.append({"date": day.isoformat(), "clamp_pct": round(clamp / raw * 100, 2) if raw else None})
+        out.append({"date": day.isoformat(), "clamp_pct": clamp_pct(clamp, raw)})
     return out
 
 

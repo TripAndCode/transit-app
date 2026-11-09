@@ -6,12 +6,14 @@ from pipeline.reports.comparability import (
     MAX_CI_HALF_WIDTH_PP,
     MAX_CLAMP_PCT,
     MIN_COVERAGE_PCT,
-    _coverage_pct,
     _first_failure,
     _on_time_interval,
     assess,
     ci_half_width_as_printed,
+    clamp_pct,
+    coverage_pct,
     tenth_as_printed,
+    trips_matchable,
 )
 
 # Every check passes with these; each test changes one input.
@@ -130,19 +132,19 @@ def test_an_interval_half_width_prints_rounded_up_as_the_board_prints_it(low, hi
 
 
 def test_coverage_is_observed_over_planned_to_one_decimal():
-    assert _coverage_pct(900, 1000) == 90.0
-    assert _coverage_pct(2, 3) == 66.7
+    assert coverage_pct(900, 1000) == 90.0
+    assert coverage_pct(2, 3) == 66.7
 
 
 def test_coverage_over_100_is_not_clamped():
-    assert _coverage_pct(1388, 1000) == 138.8
+    assert coverage_pct(1388, 1000) == 138.8
 
 
 def test_coverage_needs_a_plan_and_a_count():
-    assert _coverage_pct(0, 1000) == 0.0
-    assert _coverage_pct(None, 1000) is None
-    assert _coverage_pct(0, 0) is None
-    assert _coverage_pct(900, None) is None
+    assert coverage_pct(0, 1000) == 0.0
+    assert coverage_pct(None, 1000) is None
+    assert coverage_pct(0, 0) is None
+    assert coverage_pct(900, None) is None
 
 
 def test_the_interval_counts_trips_not_stop_events():
@@ -204,3 +206,19 @@ def test_assess_without_samples_is_no_data_whatever_the_strategy():
 def test_assess_with_a_plan_but_nothing_observed_is_coverage_unknown_only_without_a_plan():
     assert _assess(observed_trips=None, coverage_planned_trips=0).comparable_reason == "coverage_unknown"
     assert _assess(observed_trips=0, coverage_planned_trips=1000).comparable_reason == "coverage_low"
+
+
+def test_clamp_share_is_clamped_over_raw_to_two_decimals():
+    assert clamp_pct(3, 1000) == 0.3
+    assert clamp_pct(1, 3) == 33.33
+
+
+def test_clamp_share_without_raw_samples_is_unknown_not_zero():
+    assert clamp_pct(0, 0) is None
+    assert clamp_pct(0, 1000) == 0.0
+
+
+def test_only_timetable_matched_strategies_have_countable_trips():
+    assert trips_matchable("static_join")
+    assert not trips_matchable("aomori_regex")
+    assert not trips_matchable(None)
