@@ -60,7 +60,7 @@ async def test_the_reference_is_the_headline_over_the_90_days_before_the_period(
 
 
 @pytest.mark.asyncio
-async def test_the_reference_keeps_the_scopes_routes_and_days_of_the_week(aconn, aagency_id):
+async def test_the_reference_keeps_the_scopes_routes_and_days_of_the_week(aconn, aagency_id, ch_async_client):
     """A routes and day-of-week scope narrows the reference exactly as it
     narrows the headline: R2 and the weekend days stay out of both."""
     for day in _days(REF_FROM, REF_TO):
@@ -71,13 +71,16 @@ async def test_the_reference_keeps_the_scopes_routes_and_days_of_the_week(aconn,
         await _seed_agg_daily(aconn, aagency_id, day, "R1", "平日", 3.0, 20)
 
     scope = {"dow": "weekday", "routes": ("R1",)}
-    out = await _summary(aconn, aagency_id, RangeCtx(from_date=PERIOD.from_date, to_date=PERIOD.to_date, **scope))
+    period = RangeCtx(from_date=PERIOD.from_date, to_date=PERIOD.to_date, **scope)
+    out = await _summary(aconn, aagency_id, period, ch=ch_async_client)
     ref = out["headline"]["reference"]
     assert ref["avg_min"] == pytest.approx(2.5, abs=0.001)
     assert (ref["days_selected"], ref["days_collected"], ref["samples"]) == (64, 64, 64 * 20)
     assert ref["reason"] is None
 
-    window = await _summary(aconn, aagency_id, RangeCtx(from_date=REF_FROM, to_date=REF_TO, **scope))
+    window = await _summary(
+        aconn, aagency_id, RangeCtx(from_date=REF_FROM, to_date=REF_TO, **scope), ch=ch_async_client
+    )
     assert (ref["avg_min"], ref["samples"]) == (window["headline"]["avg_min"], window["headline"]["samples"])
 
 
@@ -128,7 +131,9 @@ async def test_a_reference_needs_data_on_four_fifths_of_the_days_it_selects(acon
 
 
 @pytest.mark.asyncio
-async def test_coverage_counts_the_days_the_agency_was_collected_not_the_days_a_route_ran(aconn, aagency_id):
+async def test_coverage_counts_the_days_the_agency_was_collected_not_the_days_a_route_ran(
+    aconn, aagency_id, ch_async_client
+):
     """A route that runs on fewer days than the agency is still judged by the
     agency's collected days; its reference averages the days it ran."""
     await _seed_reference_window(aconn, aagency_id, route="R_ALL", samples=10)
@@ -137,7 +142,7 @@ async def test_coverage_counts_the_days_the_agency_was_collected_not_the_days_a_
     )
 
     ctx = RangeCtx(from_date=PERIOD.from_date, to_date=PERIOD.to_date, routes=("R_SOME",))
-    ref = (await _summary(aconn, aagency_id, ctx))["headline"]["reference"]
+    ref = (await _summary(aconn, aagency_id, ctx, ch=ch_async_client))["headline"]["reference"]
     assert (ref["days_collected"], ref["reason"], ref["samples"]) == (90, None, 300)
     assert ref["avg_min"] == pytest.approx(4.0, abs=0.001)
 

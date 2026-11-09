@@ -54,15 +54,19 @@ import asyncio
 import logging
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from fractions import Fraction
+from math import ceil
 from typing import Any, Final, Iterable, Iterator, Literal, Mapping, Sequence
 
 from api.range import (
+    TIME_BAND_RANGES,
     RangeCtx,
     day_types_for,
     dow_clause,
     dow_isodays,
     resolve_service_dates,
     scheduled_hour_ch,
+    selected_service_dates,
     service_date_clause,
 )
 from pipeline import perf
@@ -79,6 +83,25 @@ _log = logging.getLogger(__name__)
 # How many weekly buckets ``_movers`` draws each route's sparkline from
 # (:func:`_route_weekly_history`), ending at the current window's last day.
 _MOVER_HISTORY_WEEKS = 4
+
+#: How many days the headline's reference covers: the agency's own trailing
+#: window, ending the day before the period starts (:func:`_reference`).
+REFERENCE_DAYS = 90
+
+#: The share of the days the scope selects in the reference window that the
+#: agency's feed must hold data on. Under it the window shows little of the
+#: agency's usual level (a new agency, or a long outage), so the figure is
+#: withheld as ``insufficient_days`` rather than printed as that level.
+REFERENCE_MIN_COVERAGE = Fraction(4, 5)
+
+#: The fewest observations behind a reference figure: the Routes ranking's
+#: floor, under which a route's figure is marked as thinly observed.
+REFERENCE_MIN_SAMPLES = RANKING_MIN_SAMPLES
+
+#: Why a reference has no figure. ``not_aggregated``: no aggregate holds the
+#: scope's departures by date, so the figure would need a live scan of the
+#: whole window.
+ReferenceReason = Literal["no_data", "insufficient_days", "insufficient_samples", "not_aggregated"]
 
 
 def _baseline_reach_days(ctx: RangeCtx) -> int:
@@ -109,14 +132,15 @@ def _grain_lookback_days(ctx: RangeCtx) -> int:
 def _calendar_from(ctx: RangeCtx) -> date:
     """The first day of the span the overview resolves its day types over.
 
-    The payload reads before ``ctx.from_date`` twice, whichever store serves it:
-    ``base_ctx`` reaches :func:`_baseline_reach_days` back, and the movers'
-    sparkline ``_MOVER_HISTORY_WEEKS`` weeks back from a current window that
-    ends inside ``ctx``. The day types are resolved once over the whole span
-    (api.range.ServiceDates), so the service filter and the day-type split
-    always agree.
+    The payload reads before ``ctx.from_date`` three times, whichever store
+    serves it: ``base_ctx`` reaches :func:`_baseline_reach_days` back, the
+    movers' sparkline ``_MOVER_HISTORY_WEEKS`` weeks back from a current window
+    that ends inside ``ctx``, and the reference ``REFERENCE_DAYS`` back. The day
+    types are resolved once over the whole span (api.range.ServiceDates), so the
+    service filter and the day-type split always agree.
     """
-    return ctx.from_date - timedelta(days=max(_baseline_reach_days(ctx), 7 * _MOVER_HISTORY_WEEKS - 1))
+    reach = max(_baseline_reach_days(ctx), 7 * _MOVER_HISTORY_WEEKS - 1, REFERENCE_DAYS)
+    return ctx.from_date - timedelta(days=reach)
 
 
 def _listable(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[str]]) -> list:
@@ -1349,6 +1373,132 @@ async def _daily_sparkline(
     return pts, mean
 
 
+def _reference_ctx(ctx: RangeCtx) -> RangeCtx:
+    """The ``REFERENCE_DAYS`` days ending the day before ``ctx`` starts, under
+    ``ctx``'s scope, as ``base_ctx`` copies it."""
+    to_date = ctx.from_date - timedelta(days=1)
+    return RangeCtx(
+        from_date=to_date - timedelta(days=REFERENCE_DAYS - 1),
+        to_date=to_date,
+        dow=ctx.dow,
+        time_band=ctx.time_band,
+        service=ctx.service,
+        routes=ctx.routes,
+        service_dates=ctx.service_dates,
+    )
+
+
+def _selected_days(ctx: RangeCtx) -> list[date]:
+    """The days of ``ctx``'s window its day-of-week and service filters keep."""
+    service_dates = selected_service_dates(ctx)
+    kept = None if service_dates is None else set(service_dates)
+    days = (ctx.from_date + timedelta(days=i) for i in range(ctx.days))
+    return [d for d in days if _dow_matches(d, ctx.dow) and (kept is None or d in kept)]
+
+
+def _whole_hour_band(band: str) -> tuple[int, int] | None:
+    """``band``'s ``[start, end)`` hours on the wall clock, or None when an edge
+    falls inside an hour, which ``agg_hour_daily``'s hours cannot split."""
+    start, end = TIME_BAND_RANGES[band]
+    if not (start.endswith(":00") and end.endswith(":00")):
+        return None
+    return int(start[:2]), int(end[:2])
+
+
+async def _hour_band_stats(agency_id: int, days: list[date], hours: tuple[int, int], conn) -> tuple[float | None, int]:
+    """``(avg_min, samples)`` over ``days`` for the departures whose scheduled
+    hour falls in ``hours``, from ``agg_hour_daily``.
+
+    The table files each departure under its hour on the service day's clock
+    (24 and on after midnight), and a band is a range of the wall clock, so the
+    hour is taken modulo 24, as the live band filter takes the time. The pooled
+    sums are divided and rounded as the live headline divides and rounds its own
+    (:func:`_headline_stats`), so a band's figure is the same from either store.
+    """
+    row = await conn.fetchrow(
+        "SELECT SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL) AS total,\n"
+        "       COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0)::bigint AS samples\n"
+        "FROM agg_hour_daily\n"
+        "WHERE agency_id = $1 AND date = ANY($2::date[]) AND hour % 24 >= $3 AND hour % 24 < $4",
+        agency_id,
+        days,
+        *hours,
+    )
+    samples = int(row["samples"])
+    if samples == 0 or row["total"] is None:
+        return None, 0
+    return float(_round2((int(row["total"]) / samples) / 60.0)), samples
+
+
+async def _reference(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict:
+    """The headline's figure over the reference window ``ctx``
+    (:func:`_reference_ctx`), and whether it may stand as the agency's usual
+    level: ``reason`` names why not, and the figure is then withheld.
+
+    The figure is the headline's own statistic under the headline's own scope.
+    With every hour it is :func:`_headline_stats` itself, over
+    ``agg_daily_trend``. Under a time band it reads ``agg_hour_daily``
+    (:func:`_hour_band_stats`), which pools every route, so a time band with a
+    routes filter has no aggregate to read and is ``not_aggregated``: a live
+    scan of ``REFERENCE_DAYS`` days would cost several times the headline's own.
+
+    Coverage is judged by the days the agency's feed was collected on, not the
+    days the scope's routes ran, so a route that runs on fewer days than the
+    agency is still judged by whether the feed was there to see it.
+    """
+    selected = _selected_days(ctx)
+    collected = 0
+    if selected:
+        row = await conn.fetchrow(
+            "SELECT COUNT(DISTINCT date) AS n FROM agg_daily_trend WHERE agency_id = $1 AND date = ANY($2::date[])",
+            agency_id,
+            selected,
+        )
+        collected = int(row["n"])
+
+    reason: ReferenceReason | None = None
+    avg_min: float | None = None
+    samples = 0
+    if ctx.time_band == "all":
+        avg_min, samples = await _headline_stats(agency_id, ctx, conn)
+    else:
+        hours = None if ctx.routes else _whole_hour_band(ctx.time_band)
+        if hours is None:
+            reason = "not_aggregated"
+        elif selected:
+            avg_min, samples = await _hour_band_stats(agency_id, selected, hours, conn)
+
+    min_days = ceil(REFERENCE_MIN_COVERAGE * len(selected))
+    if reason is None:
+        if samples == 0:
+            reason = "no_data"
+        elif collected < min_days:
+            reason = "insufficient_days"
+        elif samples < REFERENCE_MIN_SAMPLES:
+            reason = "insufficient_samples"
+    return {
+        "avg_min": avg_min if reason is None else None,
+        "samples": samples,
+        "window_from": ctx.from_date.isoformat(),
+        "window_to": ctx.to_date.isoformat(),
+        "days": ctx.days,
+        "days_selected": len(selected),
+        "days_collected": collected,
+        "min_days": min_days,
+        "min_samples": REFERENCE_MIN_SAMPLES,
+        "reason": reason,
+    }
+
+
+def _change(avg_min: float | None, against: float | None) -> tuple[float | None, float | None]:
+    """``(delta_min, delta_pct)`` of ``avg_min`` from ``against``; the share is
+    None against 0 min, and both are None without both figures."""
+    if avg_min is None or against is None:
+        return None, None
+    delta_min = float(_round2(avg_min - against))
+    return delta_min, (round((delta_min / against) * 100.0, 1) if against != 0 else None)
+
+
 @perf.timed("reports.overview")
 @async_lru_cache(maxsize=64, ttl_seconds=300)
 async def compute_overview_summary(
@@ -1370,6 +1520,12 @@ async def compute_overview_summary(
     and the routes-to-check list rank over the same two windows;
     concentration / peak / service_split / sparkline aggregate over the full
     ctx.
+
+    The headline also carries its ``reference``: the same figure over the
+    ``REFERENCE_DAYS`` days before the period under the same scope, the
+    agency's own usual level, or the reason it has none (:func:`_reference`).
+    The baseline answers "did it change since just before?"; the reference
+    answers "is this usual for the agency?".
 
     When ``pool`` is supplied (non-None), the stage queries are dispatched
     as concurrent asyncio tasks, each acquiring its own pooled connection,
@@ -1512,6 +1668,8 @@ async def compute_overview_summary(
     )
     # None when the grain was fetched over the period alone, without the days before it.
     baseline_ctx = None if baseline_unavailable else base_ctx
+    # The reference reads Postgres alone, so a degraded grain leaves it standing.
+    ref_ctx = _reference_ctx(cur_ctx)
 
     movers: dict | None
     if pool is None:
@@ -1522,13 +1680,7 @@ async def compute_overview_summary(
                 if baseline_ctx is not None
                 else None
             )
-
-        delta_min = None
-        delta_pct = None
-        if avg_min is not None and baseline_avg is not None:
-            delta_min = float(_round2(avg_min - baseline_avg))
-            if baseline_avg != 0:
-                delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
+            reference = await _reference(agency_id, ref_ctx, conn)
 
         async with perf.timed_block("overview.movers"):
             movers = (
@@ -1603,6 +1755,7 @@ async def compute_overview_summary(
             peak_weekend,
             (avg_min, samples),
             baseline_stats,
+            reference,
             movers,
             concentration,
             top_delayed,
@@ -1614,6 +1767,7 @@ async def compute_overview_summary(
             _peak_dow("weekend"),
             _own_conn(_headline_stats, agency_id, cur_ctx),
             _with_baseline(_headline_stats, agency_id, baseline_ctx),
+            _own_conn(_reference, agency_id, ref_ctx),
             _with_baseline(_movers, agency_id, cur_ctx, baseline_ctx, left_out=left_out),
             _own_conn(_concentration, agency_id, ctx, left_out=left_out),
             _own_conn(_top_delayed_routes, agency_id, cur_ctx, left_out=left_out, base_ctx=baseline_ctx),
@@ -1622,13 +1776,8 @@ async def compute_overview_summary(
         )
         baseline_avg = baseline_stats[0] if baseline_stats is not None else None
 
-        delta_min = None
-        delta_pct = None
-        if avg_min is not None and baseline_avg is not None:
-            delta_min = float(_round2(avg_min - baseline_avg))
-            if baseline_avg != 0:
-                delta_pct = round((delta_min / baseline_avg) * 100.0, 1)
-
+    delta_min, delta_pct = _change(avg_min, baseline_avg)
+    reference_delta_min, reference_delta_pct = _change(avg_min, reference["avg_min"])
     peak, peak_weekday, peak_weekend = _on_one_hour_axis(peak, peak_weekday, peak_weekend)
     return {
         "headline": {
@@ -1639,6 +1788,7 @@ async def compute_overview_summary(
             "samples": samples,
             "window_from": cur_ctx.from_date.isoformat(),
             "window_to": cur_ctx.to_date.isoformat(),
+            "reference": {**reference, "delta_min": reference_delta_min, "delta_pct": reference_delta_pct},
         },
         "movers": movers,
         "concentration": concentration,
