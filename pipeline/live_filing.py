@@ -87,6 +87,10 @@ _seen_states: dict[int, tuple] = {}
 # one request read it twice.
 _states: dict[int, tuple[float, tuple]] = {}
 _ARCHIVE_STATE_TTL_SECONDS = 15
+# Bumped by invalidate_schedule_joins. A state read begun before a load and
+# returned after it is the pre-load state; kept, it would hide the load's move
+# from _seen_states for the TTL, and the compute caches would outlive it.
+_generation = 0
 
 
 async def _archive_state(ch, agency_id: int) -> tuple:
@@ -94,8 +98,10 @@ async def _archive_state(ch, agency_id: int) -> tuple:
     cached = _states.get(agency_id)
     if cached is not None and now < cached[0]:
         return cached[1]
+    generation = _generation
     state = tuple((await ch.query(_ARCHIVE_STATE_SQL, parameters={"agency": agency_id})).result_rows[0])
-    _states[agency_id] = (now + _ARCHIVE_STATE_TTL_SECONDS, state)
+    if generation == _generation:
+        _states[agency_id] = (now + _ARCHIVE_STATE_TTL_SECONDS, state)
     return state
 
 
@@ -115,7 +121,11 @@ async def _schedule_join(ch, agency_id: int, state: tuple) -> ScheduleJoin:
 
 
 def invalidate_schedule_joins() -> None:
-    """Forget every cached join and archive state, after a load changed an agency's timetables."""
+    """Forget every cached join and archive state, after a load changed an
+    agency's timetables. The states joins were last read under stay: the next
+    read, seeing the load's move from them, forgets the compute caches."""
+    global _generation
+    _generation += 1
     _schedule_join.cache_clear()  # type: ignore[attr-defined]
     _states.clear()
 

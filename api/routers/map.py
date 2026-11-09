@@ -225,9 +225,15 @@ async def _latest_route_observation(
     sort key, so proving a route has no rows in the window still reads the
     agency's whole window.
 
-    The route is the filed one (`pipeline.live_filing`), as the trips and
-    the stop profile read it: a route whose polls carry none of their own is
-    found where filing names it.
+    Each table is asked first of its polls as stored, which the sort key
+    answers at once when the route has one. Only on a miss is it asked of
+    the filed polls (`pipeline.live_filing`), so a route whose polls carry
+    none of their own is found where filing names it; deciding how to file
+    the window scans all of it, as the miss already did. Filing gives a
+    route only to a poll with none, so a poll that has the route as stored
+    has it filed too. A later poll only filing gives the route can then be
+    passed over for an earlier one stored with it, which moves the day read,
+    never what it shows: the trips and the stop profile file their own rows.
     """
     if not await route_exists(conn, agency_id, route_code):
         return None
@@ -236,11 +242,14 @@ async def _latest_route_observation(
         if agency_latest is None:
             continue
         bound = agency_latest - timedelta(days=30)
-        filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
-        result = await ch.query(
-            _latest_route_observation_sql(table, filed.stamp),
-            parameters={"agency_id": agency_id, "route": route_code, "bound": bound, **filed.params},
-        )
+        params = {"agency_id": agency_id, "route": route_code, "bound": bound}
+        result = await ch.query(_latest_route_observation_sql(table, Stamp.INGESTED), parameters=params)
+        if not result.result_rows:
+            filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
+            if filed.stamp is Stamp.REFIT:
+                result = await ch.query(
+                    _latest_route_observation_sql(table, filed.stamp), parameters={**params, **filed.params}
+                )
         if result.result_rows:
             return _as_utc(result.result_rows[0][0])
     return None
