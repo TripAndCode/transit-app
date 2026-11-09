@@ -10,6 +10,7 @@ describe("design translation namespace", () => {
   });
 
   it("keeps a figure and its unit together in a narrow KPI tile's label", () => {
-    expect(design.en.delayedLabel).toContain("5+\u00a0min");
+    expect(design.en.durationMin).toBe("{{n}}\u00a0min");
+    expect(design.en.durationSec).toBe("{{n}}\u00a0s");
   });
 });
