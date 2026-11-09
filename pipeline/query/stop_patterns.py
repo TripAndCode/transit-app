@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from api.range import RangeCtx
-from pipeline.reports.filters import _dedup_cte_ch, _round2
+from pipeline.reports.filters import _dedup_cte_ch, _round2, ctx_filing
 
 MAX_GROUPS = 20000
 # A single observed (trip_id, stop_sequence) group can pull in a whole trip's full
@@ -70,7 +70,8 @@ def assemble_patterns(observations: list, scheduled: list) -> list:
 async def query_stop_patterns(agency_id: int, ctx: RangeCtx, conn, ch=None, *, route: str) -> list:
     if ch is None or (ctx.routes and route not in ctx.routes):
         return []
-    cte, params = _dedup_cte_ch(replace(ctx, routes=(route,)))
+    route_ctx = replace(ctx, routes=(route,))
+    cte, params = _dedup_cte_ch(route_ctx, await ctx_filing(conn, ch, agency_id, route_ctx))
     result = await ch.query(
         f"WITH {cte} SELECT trip_id, stop_sequence, sum(dep_delay), count() "
         "FROM deduped WHERE stop_sequence IS NOT NULL "

@@ -69,7 +69,8 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.clickhouse import is_query_timeout, is_result_overflow
 from pipeline.day_types import DayTypes
-from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2
+from pipeline.query.pooled_conn import PooledConnection
+from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2, ctx_filing
 from pipeline.reports.rankings import RANKING_MIN_SAMPLES, _round1
 from pipeline.route_catalog import left_out_unless_named, route_list
 
@@ -315,7 +316,7 @@ def _grain_sum_by(rows: Iterable[_RouteRow], key_index: int, value_index: int = 
     return {k: (v[0], v[1]) for k, v in acc.items()}
 
 
-async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch, *, shape: _GrainShape = "full") -> _Grain:
+async def _fetch_grain(agency_id: int, ctx: RangeCtx, conn, ch, *, shape: _GrainShape = "full") -> _Grain:
     """Fetch the whole request's deduped ``updates`` in ONE ClickHouse query.
 
     The slow-path stage helpers read this instead of each issuing its own
@@ -402,7 +403,8 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, ch, *, shape: _GrainShape 
         routes=ctx.routes,
         service_dates=ctx.service_dates,
     )
-    cte_sql, ch_params = _dedup_cte_ch(span_ctx, include_scheduled_sec=shape != "period_routes")
+    filing = await ctx_filing(conn, ch, agency_id, span_ctx)
+    cte_sql, ch_params = _dedup_cte_ch(span_ctx, filing, include_scheduled_sec=shape != "period_routes")
     params = {"agency_id": agency_id, **ch_params}
     hour_expr = scheduled_hour_ch()
     if shape == "full":
@@ -715,7 +717,7 @@ async def _route_weekly_history(
         routes=ctx.routes,
         service_dates=ctx.service_dates,
     )
-    cte_sql, ch_params = _dedup_cte_ch(span_ctx)
+    cte_sql, ch_params = _dedup_cte_ch(span_ctx, await ctx_filing(conn, ch, agency_id, span_ctx))
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code,\n"
@@ -1435,10 +1437,13 @@ async def compute_overview_summary(
     if ctx.time_band != "all" or ctx.routes:
         if ch is None:
             raise RuntimeError("overview slow path requires a ClickHouse client")
+        # The grain's one Postgres read, the agency's ingest strategy, borrows
+        # from the pool per statement when the stages hold their own connections.
+        grain_conn = conn if pool is None else PooledConnection(pool)
         async with perf.timed_block("overview.grain"):
             if ctx.time_band != "all":
                 try:
-                    grain = await _fetch_grain(agency_id, ctx, ch)
+                    grain = await _fetch_grain(agency_id, ctx, grain_conn, ch)
                 except Exception as exc:
                     if not (is_result_overflow(exc) or is_query_timeout(exc)):
                         raise
@@ -1448,13 +1453,13 @@ async def compute_overview_summary(
                         agency_id,
                         "passed the ClickHouse row cap" if is_result_overflow(exc) else "ran out of ClickHouse time",
                     )
-                    grain = await _fetch_grain(agency_id, ctx, ch, shape="period_routes")
+                    grain = await _fetch_grain(agency_id, ctx, grain_conn, ch, shape="period_routes")
                     peaks_unavailable = baseline_unavailable = True
                     if is_query_timeout(exc):
                         cache_briefly()
             else:
                 try:
-                    grain = await _fetch_grain(agency_id, ctx, ch, shape="period_hours")
+                    grain = await _fetch_grain(agency_id, ctx, grain_conn, ch, shape="period_hours")
                 except Exception as exc:
                     _log.warning(
                         "ClickHouse grain fetch failed for agency %s — degrading the peak-hour profiles to null",

@@ -30,7 +30,7 @@ from pipeline.histogram import (
     exact_window,
     on_time_from_columns,
 )
-from pipeline.reports.filters import _dedup_cte_ch, _round2
+from pipeline.reports.filters import _dedup_cte_ch, _round2, ctx_filing
 from pipeline.reports.rankings import (
     DEFAULT_EARLY_TOLERANCE_SEC,
     DEFAULT_LATE_TOLERANCE_SEC,
@@ -87,7 +87,7 @@ async def compute_route_table(
         if ch is None:
             raise RuntimeError("compute_route_table's live fallback requires a ClickHouse client")
         return await _route_table_live(
-            agency_id, ctx, ch, min_samples, early_tolerance_sec, late_tolerance_sec, early_sec
+            agency_id, ctx, conn, ch, min_samples, early_tolerance_sec, late_tolerance_sec, early_sec
         )
 
     high_sec = late_tolerance_sec
@@ -131,6 +131,7 @@ def _row(route_code: str, avg_min: Decimal, r: Any, on_time_count: float | int, 
 async def _route_table_live(
     agency_id: int,
     ctx: RangeCtx,
+    conn,
     ch,
     min_samples: int,
     early_tolerance_sec: int | None,
@@ -145,7 +146,7 @@ async def _route_table_live(
     floating-point share compute_on_time's live scans round, so the two never
     differ at a half.
     """
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     low_clause = "1" if early_tolerance_sec is None else "dep_delay >= {rt_low:Int32}"
     params = {
         "agency_id": agency_id,

@@ -24,7 +24,8 @@ from typing import Any
 from api.range import RangeCtx
 from pipeline.cache import async_lru_cache
 from pipeline.clickhouse import UPDATES_TABLE
-from pipeline.reports.filters import _ch_rows, _dedup_cte_ch
+from pipeline.live_filing import Filing
+from pipeline.reports.filters import _ch_rows, _dedup_cte_ch, ctx_filing
 
 # The rail spans the service day, not the calendar day: 05:00 is the first
 # departure hour any configured agency runs, and 24:00 closes the window.
@@ -94,7 +95,9 @@ def bucket_of(scheduled_sec: int | None, step_minutes: int) -> int | None:
     return (scheduled_sec - PLAYBACK_START_SEC) // (step_minutes * 60)
 
 
-def build_timeline_ch_sql(ctx: RangeCtx, step_minutes: int, *, table: str = UPDATES_TABLE) -> tuple[str, dict]:
+def build_timeline_ch_sql(
+    ctx: RangeCtx, step_minutes: int, filing: Filing, *, table: str = UPDATES_TABLE
+) -> tuple[str, dict]:
     """Render the ClickHouse query behind one service day of playback frames.
 
     Buckets on `scheduled_sec`, not `captured_at`: the rail is a timetable
@@ -108,6 +111,9 @@ def build_timeline_ch_sql(ctx: RangeCtx, step_minutes: int, *, table: str = UPDA
     physical stop a trip visit maps to lives in Postgres, so that fold happens
     in :func:`fold_stop_buckets` once the mapping has been read.
 
+    ``filing`` files each stop event under the timetable in force on the
+    day (`pipeline.live_filing`), as the aggregates do.
+
     Returns ``(sql, parameters)``. ``parameters`` excludes ``agency_id``, which
     the caller supplies — the same contract as every other ClickHouse call
     site in this codebase.
@@ -115,7 +121,7 @@ def build_timeline_ch_sql(ctx: RangeCtx, step_minutes: int, *, table: str = UPDA
     if step_minutes not in ALLOWED_STEP_MINUTES:
         raise ValueError(f"step_minutes must be one of {ALLOWED_STEP_MINUTES}, got {step_minutes!r}")
 
-    cte_sql, params = _dedup_cte_ch(ctx, include_scheduled_sec=True, table=table)
+    cte_sql, params = _dedup_cte_ch(ctx, filing, include_scheduled_sec=True, table=table)
     params = {
         **params,
         "tl_start_sec": PLAYBACK_START_SEC,
@@ -285,7 +291,8 @@ async def compute_delay_timeline(
     (`api.clickhouse.table_holding`).
     """
     ctx = RangeCtx(from_date=day, to_date=day, routes=routes)
-    sql, params = build_timeline_ch_sql(ctx, step_minutes, table=table)
+    filing = await ctx_filing(conn, ch, agency_id, ctx, table=table)
+    sql, params = build_timeline_ch_sql(ctx, step_minutes, filing, table=table)
     result = await ch.query(sql, parameters={**params, "agency_id": agency_id})
     rows = _ch_rows(result)
     if not rows:

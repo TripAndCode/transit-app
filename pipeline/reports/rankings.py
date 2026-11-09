@@ -9,10 +9,10 @@ from typing import Final, Literal
 from api.range import (
     RangeCtx,
     ServiceType,
-    build_updates_filter_ch,
     resolve_service_dates,
     scheduled_hour_ch,
     selected_service_dates,
+    updates_filter_ch,
 )
 from pipeline import perf
 from pipeline.cache import async_lru_cache
@@ -28,6 +28,7 @@ from pipeline.histogram import (
     percentile_from_hist,
     within_histogram,
 )
+from pipeline.live_filing import band_candidates
 from pipeline.reports.filters import (
     _MIN,
     _agg_filter,
@@ -36,8 +37,10 @@ from pipeline.reports.filters import (
     _dist_filter,
     _round2,
     _service_label,
+    ctx_filing,
 )
 from pipeline.service_day import service_date_ch
+from pipeline.static_archive import Stamp, observation_rows
 
 
 def aggregates_serve(ctx: RangeCtx) -> bool:
@@ -358,7 +361,7 @@ async def _ranking_live(
     at least `min_samples` rows (the HAVING gate), so `avg` is never NULL/NaN
     — no empty-input guard needed.
     """
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     params = {"agency_id": agency_id, "rk_min": min_samples, **ch_params}
     limit_sql = _limit_clause(params, limit, "rk_limit")
@@ -516,7 +519,7 @@ async def _on_time_live(
     Every group here has > 20 rows (the HAVING gate), so `avg`/`sum` are
     never NULL/NaN — no empty-input guard needed.
     """
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     params = {"agency_id": agency_id, "ot_threshold": threshold_sec, **ch_params}
     limit_sql = _limit_clause(params, limit, "ot_limit")
@@ -559,7 +562,7 @@ async def _on_time_live_window(
 
     Every group here has > 20 rows (the HAVING gate), so `avg` is never NaN.
     """
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     order = "DESC" if sort_order.lower() == "desc" else "ASC"
     low_clause = "1=1" if low_sec is None else "dep_delay >= {ot_low:Int32}"
     params = {
@@ -672,7 +675,7 @@ async def compute_worst_5min(
 
 async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int, late_tolerance_sec: int) -> list[tuple]:
     """Live raw-scan worst-5min — fallback for time_band-filtered queries."""
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT route_code,\n"
@@ -724,7 +727,7 @@ async def compute_dow_ranking(
     label = _DAY_TYPE_SIDES[dow_group]
     overridden = await _day_type_ctx(agency_id, ctx, conn, label)
     if not aggregates_serve(ctx):
-        return await _dow_ranking_live(agency_id, overridden, ch, label, limit)
+        return await _dow_ranking_live(agency_id, overridden, conn, ch, label, limit)
 
     # agg_daily_trend filtered to the day type's dates, sample-weighted.
     where, params, n = _agg_filter(overridden, next_param=2)
@@ -773,9 +776,9 @@ async def _day_type_ctx(agency_id: int, ctx: RangeCtx, conn, service: ServiceTyp
     )
 
 
-async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, ch, label: str, limit: int) -> list[tuple]:
+async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, label: str, limit: int) -> list[tuple]:
     """Live raw-scan dow-ranking — fallback for time_band-filtered queries."""
-    cte_sql, ch_params = _dedup_cte_ch(overridden)
+    cte_sql, ch_params = _dedup_cte_ch(overridden, await ctx_filing(conn, ch, agency_id, overridden))
     result = await ch.query(
         f"WITH {cte_sql}\n"
         f"SELECT route_code, '{label}' AS dow,\n"
@@ -815,7 +818,7 @@ async def compute_compare_ranking(
         raise RuntimeError("compute_compare_ranking's time_band-filtered live fallback requires a ClickHouse client")
     weekday_dates, weekend_dates = await _day_type_dates(agency_id, ctx, conn)
     if not aggregates_serve(ctx):
-        return await _compare_ranking_live(agency_id, ctx, ch, weekday_dates, weekend_dates, limit)
+        return await _compare_ranking_live(agency_id, ctx, conn, ch, weekday_dates, weekend_dates, limit)
 
     # Both sides from one agg_daily_trend pass (split by date via FILTER), summed
     # across service/date per route. dow and service stay 'all' so _agg_filter
@@ -877,7 +880,7 @@ async def _day_type_dates(agency_id: int, ctx: RangeCtx, conn) -> tuple[list[dat
 
 
 async def _route_wd_we_avg_ch(
-    agency_id: int, ctx: RangeCtx, ch, weekday_dates: list[date], weekend_dates: list[date]
+    agency_id: int, ctx: RangeCtx, conn, ch, weekday_dates: list[date], weekend_dates: list[date]
 ) -> dict[str, tuple[float, int, float, int]]:
     """Per-route (wd_avg_min, wd_n, we_avg_min, we_n) from ClickHouse `updates`,
     the sides being the service dates in ``weekday_dates`` and in
@@ -902,6 +905,9 @@ async def _route_wd_we_avg_ch(
     `dep_delay` as an `argMax(...)` alias, and ClickHouse would otherwise
     textually substitute a bare `dep_delay` in that same subquery's WHERE
     with the aggregate expression, raising `ILLEGAL_AGGREGATION`.
+
+    Rows are filed under the timetable in force on their service date
+    (`pipeline.live_filing`), as the shared dedup files them.
     """
     combined_ctx = RangeCtx(
         from_date=ctx.from_date,
@@ -911,7 +917,18 @@ async def _route_wd_we_avg_ch(
         service="all",
         routes=ctx.routes,
     )
-    where_frag, params = build_updates_filter_ch(combined_ctx)
+    filed = await ctx_filing(conn, ch, agency_id, combined_ctx)
+    filed.check(combined_ctx.from_date, combined_ctx.to_date)
+    where = band_candidates(
+        updates_filter_ch(combined_ctx, refit=filed.stamp is Stamp.REFIT), combined_ctx.time_band, filed
+    )
+    rows = observation_rows(
+        f"u.agency_id = {{agency_id:UInt16}} AND u.dep_delay IS NOT NULL AND {where.raw}",
+        filed.stamp,
+        filed_where=where.filed,
+        live_form=True,
+        by_stop_event=True,
+    )
     service_date = service_date_ch("u.captured_at")
     result = await ch.query(
         f"""
@@ -924,14 +941,19 @@ async def _route_wd_we_avg_ch(
             SELECT u.route_code AS route_code,
                    argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
                    {service_date} AS sd
-            FROM updates AS u
-            WHERE u.agency_id = {{agency_id:UInt16}} AND u.dep_delay IS NOT NULL AND {where_frag}
+            {rows}
             GROUP BY u.route_code, u.trip_id, {service_date}, u.stop_sequence
         )
         GROUP BY route_code
         HAVING wd_n > 10 AND we_n > 10
         """,
-        parameters={"agency_id": agency_id, "cmp_wd": weekday_dates, "cmp_we": weekend_dates, **params},
+        parameters={
+            "agency_id": agency_id,
+            "cmp_wd": weekday_dates,
+            "cmp_we": weekend_dates,
+            **where.params,
+            **filed.params,
+        },
     )
     return {
         route_code: (wd_avg / 60.0, wd_n, we_avg / 60.0, we_n)
@@ -940,10 +962,10 @@ async def _route_wd_we_avg_ch(
 
 
 async def _compare_ranking_live(
-    agency_id: int, ctx: RangeCtx, ch, weekday_dates: list[date], weekend_dates: list[date], limit: int | None
+    agency_id: int, ctx: RangeCtx, conn, ch, weekday_dates: list[date], weekend_dates: list[date], limit: int | None
 ) -> list[tuple]:
     """Live raw-scan 平日-vs-土日祝 compare — fallback for time_band queries."""
-    stats = await _route_wd_we_avg_ch(agency_id, ctx, ch, weekday_dates, weekend_dates)
+    stats = await _route_wd_we_avg_ch(agency_id, ctx, conn, ch, weekday_dates, weekend_dates)
 
     out: list[tuple] = []
     for route_code, (wd_mean, _wd_n, we_mean, _we_n) in stats.items():
@@ -1015,7 +1037,7 @@ async def compute_hourly_heatmap(
         # hour and stays out of the histogram rather than failing the query.
         if ch is None:
             raise RuntimeError("compute_hourly_heatmap's live fallback requires a ClickHouse client")
-        cte_sql, ch_params = _dedup_cte_ch(ctx, include_scheduled_sec=True)
+        cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx), include_scheduled_sec=True)
         hour_expr = scheduled_hour_ch()
         result = await ch.query(
             f"WITH {cte_sql}\n"
@@ -1116,7 +1138,7 @@ async def compute_trend_series(
             raise RuntimeError("compute_trend_series's time_band-filtered live fallback requires a ClickHouse client")
         _CH_BUCKET_EXPR = {"day": "date", "week": "toStartOfWeek(date, 1)", "month": "toStartOfMonth(date)"}
         bucket_expr = _CH_BUCKET_EXPR.get(granularity, "date")
-        cte_sql, ch_params = _dedup_cte_ch(ctx)
+        cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
         result = await ch.query(
             f"WITH {cte_sql}\n"
             f"SELECT {bucket_expr} AS bucket,\n"

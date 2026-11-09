@@ -9,38 +9,55 @@ on plausibility.
 
 import pathlib
 
+import pytest
+
+from api.range import UpdatesFilter
 from api.routers import map as api_map
-from api.routers.map import _LIVE_DELAYS_DEDUP_SQL, build_route_stop_profile_sql, build_route_trips_sql
+from api.routers.map import build_route_stop_profile_sql, build_route_trips_sql, live_delays_sql
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.reports import map as reports_map
 from pipeline.reports.map import _route_shape_stats_dedup_sql, _route_shape_vote_dedup_sql
+from pipeline.static_archive import Stamp
 
 _CLAMP = f"BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}"
+_ANY_DAY = UpdatesFilter("1", "", {})
+# Each query files its rows under a stamp, and every stamp keeps the clamp.
+_STAMPS = pytest.mark.parametrize("stamp", list(Stamp))
 
 
-def test_live_delays_dedup_clamps_dep_delay():
-    assert _CLAMP in _LIVE_DELAYS_DEDUP_SQL
+@_STAMPS
+def test_live_delays_dedup_clamps_dep_delay(stamp):
+    assert _CLAMP in live_delays_sql(stamp)
 
 
-def test_route_stop_profile_dedup_clamps_dep_delay():
-    assert _CLAMP in build_route_stop_profile_sql("updates")
+@_STAMPS
+def test_route_stop_profile_dedup_clamps_dep_delay(stamp):
+    assert _CLAMP in build_route_stop_profile_sql("updates", stamp)
 
 
-def test_route_trips_dedup_clamps_dep_delay():
-    sql, _ = build_route_trips_sql("all")
+@_STAMPS
+def test_route_trips_dedup_clamps_dep_delay(stamp):
+    sql, _ = build_route_trips_sql("all", stamp=stamp)
     assert _CLAMP in sql
 
 
-def test_route_shape_vote_dedup_clamps_dep_delay():
-    assert _CLAMP in _route_shape_vote_dedup_sql("1")
+@_STAMPS
+def test_route_shape_vote_dedup_clamps_dep_delay(stamp):
+    assert _CLAMP in _route_shape_vote_dedup_sql(_ANY_DAY, stamp)
 
 
-def test_route_shape_stats_dedup_clamps_dep_delay():
-    assert _CLAMP in _route_shape_stats_dedup_sql("1", "")
+@_STAMPS
+def test_route_shape_stats_dedup_clamps_dep_delay(stamp):
+    assert _CLAMP in _route_shape_stats_dedup_sql(_ANY_DAY, "", stamp)
 
 
 # ── The five above are the ones that exist today. This one is about the sixth.
 
+
+_FACT_READS = ("updates", "{table}", "observation_rows(", "_route_rows(")
+# A literal reading rows through one of these is clamped by it: the tests
+# above render both modules' _route_rows under every stamp.
+_CLAMPED_READS = ("MAX_PLAUSIBLE_DELAY_SEC", _CLAMP, "observation_filter_ch(", "_route_rows(")
 
 _SQL_SOURCES = (
     pathlib.Path(api_map.__file__),
@@ -54,12 +71,14 @@ def _sql_literals(source: str) -> list[str]:
     Read as text rather than by importing and inspecting objects, because a
     new query can arrive as a module constant, a function-local string or an
     f-string, and only the text form catches all three. The fact table
-    arrives literally (``updates``) or as the ``{table}`` placeholder
-    `live_table_for` fills, so either spelling counts as a match.
+    arrives literally (``updates``), as the ``{table}`` placeholder
+    `live_table_for` fills, or as the rows `observation_rows` files, called
+    directly or through a module's ``_route_rows``, so any of those spellings
+    counts as a match.
     """
     literals: list[str] = []
     for chunk in source.split('"""')[1::2]:
-        if ("updates" in chunk or "{table}" in chunk) and "dep_delay" in chunk:
+        if any(read in chunk for read in _FACT_READS) and "dep_delay" in chunk:
             literals.append(chunk)
     return literals
 
@@ -78,7 +97,7 @@ def test_every_fact_table_query_in_the_map_modules_clamps_dep_delay():
     unclamped = []
     for path in _SQL_SOURCES:
         for literal in _sql_literals(path.read_text()):
-            if "MAX_PLAUSIBLE_DELAY_SEC" not in literal and _CLAMP not in literal:
+            if not any(clamp in literal for clamp in _CLAMPED_READS):
                 first_line = next((ln.strip() for ln in literal.splitlines() if ln.strip()), "")
                 unclamped.append(f"{path.name}: {first_line[:70]}")
     assert unclamped == [], (

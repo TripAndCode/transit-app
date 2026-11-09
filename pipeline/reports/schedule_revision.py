@@ -23,8 +23,11 @@ force (`pipeline.reports.definition.stamp_build`).
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, timedelta
 from typing import NamedTuple
+
+from pipeline.timetable_in_force import Segment
 
 # Every scope agency's recorded days, the day before the range included. An
 # agency with none recorded in it is one row with no date, so it is still named.
@@ -79,6 +82,23 @@ class ScheduleDays(NamedTuple):
                 boundaries.append(d.isoformat())
             prev_date, prev_version = d, version
         return boundaries
+
+    def filed_under(self, agency_id: int, force: Iterable[Segment]) -> ScheduleDays:
+        """These days with each of *agency_id*'s recorded days named after the
+        version *force* has in force on it, where one is: the version a live
+        scan, which files each row by the versions in force
+        (`pipeline.live_filing`), computed that day's figures under. The
+        stored row names the version the last analyze filed the day under,
+        which differs only until analyze runs again after a span or a load
+        moved it."""
+        segments = list(force)
+
+        def named(agency: int, day: date | None, version: str | None) -> str | None:
+            if agency != agency_id or day is None:
+                return version
+            return next((s.stem for s in segments if s.first <= day <= s.last), version)
+
+        return self._replace(rows=[(agency, day, named(agency, day, version)) for agency, day, version in self.rows])
 
 
 async def read_schedule_days(conn, agency_id: int | None, from_date: date, to_date: date) -> ScheduleDays:

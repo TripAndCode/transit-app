@@ -15,12 +15,14 @@ from itertools import pairwise
 from typing import Any
 
 from api.clickhouse import max_captured_at
-from api.range import RangeCtx, build_updates_filter_ch
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
+from api.range import RangeCtx, UpdatesFilter, updates_filter_ch
+from pipeline.db import observation_filter_ch
+from pipeline.live_filing import band_candidates, filing
 from pipeline.query.tools import unnamed_stop_name
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import service_date_ch
+from pipeline.static_archive import Stamp, observation_rows
 
 
 def _half_up(x: float, places: int) -> float:
@@ -57,7 +59,21 @@ async def route_exists(conn, agency_id: int, route_code: str) -> bool:
     ) is not None
 
 
-def _route_shape_vote_dedup_sql(ch_where_frag: str) -> str:
+def _route_rows(where: UpdatesFilter, stamp: Stamp, trip_filter_sql: str = "") -> str:
+    """The route's departure rows matching *where*, filed under *stamp*
+    (`pipeline.static_archive.observation_rows`), as the FROM clause both
+    shape dedups read. Refitting can give a row with no route this one, so a
+    REFIT read also reads those and tests the route on the filed row; any
+    other tests it on the row as stored."""
+    if stamp is not Stamp.REFIT:
+        raw = f"u.route_code = {{route:String}} {trip_filter_sql} AND {where.raw}"
+        return observation_rows(observation_filter_ch(raw), stamp, live_form=True)
+    raw = f"(u.route_code = {{route:String}} OR u.route_code IS NULL) {trip_filter_sql} AND {where.raw}"
+    filed = " AND ".join(part for part in ("u.route_code = {route:String}", where.filed) if part)
+    return observation_rows(observation_filter_ch(raw), stamp, filed_where=filed, live_form=True)
+
+
+def _route_shape_vote_dedup_sql(where: UpdatesFilter, stamp: Stamp) -> str:
     """Per-(trip, day, stop) dedup used to weight `compute_route_shape`'s shape vote.
 
     Keyed on the JST service day as well, like `pipeline.db.build_dedup_ch_sql`:
@@ -67,22 +83,18 @@ def _route_shape_vote_dedup_sql(ch_where_frag: str) -> str:
     Broken out as a pure builder — like `api.routers.map.build_route_trips_sql`
     — so its shape, including the plausibility clamp, is unit-testable without
     ClickHouse. Clamps `dep_delay` the same way `pipeline.db.build_dedup_ch_sql`
-    does (see `MAX_PLAUSIBLE_DELAY_SEC`'s docstring): map and aggregates must
-    agree on plausibility, so a frozen feed can't tip the shape vote either.
+    does (`pipeline.db.observation_filter_ch`): map and aggregates must agree
+    on plausibility, so a frozen feed can't tip the shape vote either.
     """
     return f"""
         SELECT u.trip_id, u.stop_sequence,
             argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay
-        FROM updates AS u
-        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
-          AND u.dep_delay IS NOT NULL
-          AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-          AND {ch_where_frag}
+        {_route_rows(where, stamp)}
         GROUP BY u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence
     """
 
 
-def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> str:
+def _route_shape_stats_dedup_sql(where: UpdatesFilter, trip_filter_sql: str, stamp: Stamp) -> str:
     """Per-(trip, day, stop) dedup backing `compute_route_shape`'s per-stop delay stats.
 
     Same key, clamp and pure-builder rationale as `_route_shape_vote_dedup_sql`.
@@ -93,12 +105,7 @@ def _route_shape_stats_dedup_sql(ch_where_frag: str, trip_filter_sql: str) -> st
         SELECT u.trip_id, u.stop_sequence,
             argMax(u.dep_delay, (u.captured_at, u.file_name)) AS dep_delay,
             {service_date_ch("u.captured_at")} AS service_date
-        FROM updates AS u
-        WHERE u.agency_id = {{agency_id:UInt16}} AND u.route_code = {{route:String}}
-          AND u.dep_delay IS NOT NULL
-          AND u.dep_delay BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}
-          {trip_filter_sql}
-          AND {ch_where_frag}
+        {_route_rows(where, stamp, trip_filter_sql)}
         GROUP BY u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence
         ORDER BY u.trip_id, u.stop_sequence, {service_date_ch("u.captured_at")}
     """
@@ -264,12 +271,14 @@ async def compute_route_shape(
     # reflect what's actually being shown for the user's selected range, not
     # all-time history, and an unbounded scan of the route's ENTIRE history
     # would pay for a full-table scan to return only a small number of rows.
-    ch_where_frag, ch_params = build_updates_filter_ch(ctx)
-    # argMax-based dedup (see pipeline/db.py::build_dedup_ch_sql's docstring) —
-    # only one non-key column (dep_delay) is read off the winning row, so a
-    # single argMax suffices; base-table columns are qualified with the `u.`
-    # alias per that same docstring's convention, in case ch_where_frag (built
-    # by api.range.build_updates_filter_ch) ever references an output alias.
+    filed = await filing(conn, ch, agency_id, ctx.from_date, ctx.to_date)
+    where = band_candidates(updates_filter_ch(ctx, refit=filed.stamp is Stamp.REFIT), ctx.time_band, filed)
+    ch_params = {**where.params, **filed.params}
+    # An argMax-based dedup, as pipeline.db.build_dedup_ch_sql's: only one
+    # non-key column (dep_delay) is read off the winning row, so a single argMax
+    # suffices. Base-table columns are qualified with the `u.`
+    # alias, so a column `where` (api.range.updates_filter_ch) names is never
+    # read as the output alias of the same name.
     # The per-stop stats query below (once a shape is chosen) keeps a full
     # `ORDER BY` over its dedup key (as route_trips' equivalent dedup query
     # does) for the same reason that query needs it: `lon`/`lat` are
@@ -287,7 +296,7 @@ async def compute_route_shape(
     # would, for a busy route over a wide window, exceed the async client's
     # result_overflow_mode="throw" cap (api/clickhouse.py) and 500 the
     # endpoint instead of degrading.
-    dedup_cte_sql = _route_shape_vote_dedup_sql(ch_where_frag)
+    dedup_cte_sql = _route_shape_vote_dedup_sql(where, filed.stamp)
     vote_result = await ch.query(
         f"WITH dedup AS ({dedup_cte_sql}) SELECT trip_id, count() AS n FROM dedup GROUP BY trip_id",
         parameters={"agency_id": agency_id, "route": str(route), **ch_params},
@@ -406,7 +415,7 @@ async def compute_route_shape(
     # This is a second ClickHouse scan (the vote query above returns only
     # per-trip counts, not per-stop rows to filter in Python), but it's the one that must
     # stay bounded, so the extra round trip is the right trade. In the
-    # empty-ctx-window fallback case above, `{ch_where_frag}` still encodes
+    # empty-ctx-window fallback case above, `where` still encodes
     # the real (empty) ctx window, so this query naturally comes back empty —
     # `stops` stays empty while `geometry`/`unobserved_stops` still render
     # from the fallback shape.
@@ -423,7 +432,7 @@ async def compute_route_shape(
     if chosen_shape_id is not None:
         stats_params["shape_trip_ids"] = shape_trip_ids
     stats_result = await ch.query(
-        _route_shape_stats_dedup_sql(ch_where_frag, trip_filter_sql),
+        _route_shape_stats_dedup_sql(where, trip_filter_sql, filed.stamp),
         parameters=stats_params,
     )
     dedup_rows = list(stats_result.result_rows)
