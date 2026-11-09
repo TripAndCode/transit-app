@@ -5,7 +5,7 @@
 This document sets out two things about the figures Delay Dashboard ("the Service") produces: what they are computed from and by which rules, and how an operator is told before its figures are published and how an error is reported and corrected.
 
 - **Readers**: municipal staff preparing material for a regional public-transport council (地域公共交通協議会), the members and researchers who read that material, and the operators the figures name.
-- **Version**: every CSV, council report and delay record the Service produces names the method version its figures were made with (for example `2026.11.4`). The [Changelog](#changelog) at the end shows what each version changed. The text describes the current version listed there.
+- **Version**: each CSV fetched with "Download CSV", each council report and each delay record names the method version its figures were made with (for example `2026.11.4`; see [Definition stamp](#definition-stamp)). The [Changelog](#changelog) at the end shows what each version changed. The text describes the current version listed there.
 - **Language**: the Japanese version is [methodology.md](methodology.md). Where the two differ, the Japanese version is authoritative.
 - **Implementation detail**: the developer-facing explanation is [DELAY_ANALYSIS.md](../DELAY_ANALYSIS.md).
 
