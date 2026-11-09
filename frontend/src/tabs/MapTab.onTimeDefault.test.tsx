@@ -7,7 +7,7 @@ import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import { MapTab } from "./MapTab";
 import { stubReducedMotion } from "../test/reducedMotion";
-import type { LiveTrip } from "../api/types";
+import { WINDOW_DELAYS, liveRowsWithDelays } from "../test/liveTripFixtures";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
@@ -18,24 +18,6 @@ vi.mock("../api/onTimeDefault.json", async (importOriginal) => {
   const actual = await importOriginal<{ default: { presets: Record<string, unknown> } }>();
   return { default: { ...actual.default, default_preset: "legacy_60s" } };
 });
-
-function liveRowsWithDelays(delays: number[]): LiveTrip[] {
-  const capturedAt = new Date().toISOString();
-  return delays.map((dep_delay, i) => ({
-    trip_id: `t${i}`,
-    route_code: "R1",
-    service_type: null,
-    scheduled_time: "08:00:00",
-    dep_delay,
-    captured_at: capturedAt,
-    stop_id: `s${i}`,
-    stop_sequence: 1,
-    stop_name: "Stop",
-    stop_lat: 40.8,
-    stop_lon: 140.7,
-    headsign: "Downtown",
-  }));
-}
 
 describe("MapTab's on-time rate under another default", () => {
   beforeEach(() => {
@@ -55,8 +37,7 @@ describe("MapTab's on-time rate under another default", () => {
     });
     vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
       dataUpdatedAt: 0,
-      // MapTab.test.tsx's WINDOW_DELAYS: 3 of 7 inside any-early-to-1-min.
-      data: { latest_captured_at: "2026-06-01T00:00:00Z", rows: liveRowsWithDelays([-90, -61, -60, 120, 299, 300, 301]), truncated: false },
+      data: { latest_captured_at: "2026-06-01T00:00:00Z", rows: liveRowsWithDelays(WINDOW_DELAYS), truncated: false },
       error: null,
       isLoading: false,
       isFetching: false,

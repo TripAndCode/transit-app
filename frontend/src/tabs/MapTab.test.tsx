@@ -16,6 +16,7 @@ import { decl, ruleBody } from "../test/cssRules";
 import { formatDateTime, formatReportTime } from "../utils/format";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse, ServiceHoursResponse } from "../api/types";
 import { MockMap } from "../test/maplibreMock";
+import { WINDOW_DELAYS, liveRowsWithDelays } from "../test/liveTripFixtures";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
@@ -166,30 +167,6 @@ describe("MapTab", () => {
   });
 });
 
-// Two beyond a minute early, one on the early edge, two inside the late side,
-// one on the 5-minute edge and one past it. Each window counts a different
-// share of them: the industry default 4 of 7, any-early-to-1-min 3 of 7, and
-// "everything under 5 minutes late" 5 of 7.
-const WINDOW_DELAYS = [-90, -61, -60, 120, 299, 300, 301];
-
-function liveRowsWithDelays(delays: number[]): LiveTrip[] {
-  const capturedAt = new Date().toISOString();
-  return delays.map((dep_delay, i) => ({
-    trip_id: `t${i}`,
-    route_code: "R1",
-    service_type: null,
-    scheduled_time: "08:00:00",
-    dep_delay,
-    captured_at: capturedAt,
-    stop_id: `s${i}`,
-    stop_sequence: 1,
-    stop_name: "Stop",
-    stop_lat: 40.8,
-    stop_lon: 140.7,
-    headsign: "Downtown",
-  }));
-}
-
 function onTimeTileValue(): string | null {
   return screen.getByText("On-time rate").closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
 }
@@ -255,6 +232,17 @@ describe("MapTab's on-time rate", () => {
     mockLiveDelays([0, 300]);
     renderMap();
     expect(screen.getByText(/^No delays of more than 5\smin observed for these filters$/)).toBeInTheDocument();
+  });
+
+  it("prints a late edge off the whole minute the same way on the tile and in the note", () => {
+    mockLiveDelays([0, 90, 91]);
+    renderMap("1", "?late=90");
+    expect(lateTileValue(/^More than 1\.5\smin late$/)).toBe("1");
+    expect(screen.getByTestId("live-on-time-note")).toHaveTextContent("within 1.5 min late");
+    cleanup();
+    mockLiveDelays([0]);
+    renderMap("1", "?late=90");
+    expect(screen.getByText(/^No delays of more than 1\.5\smin observed for these filters$/)).toBeInTheDocument();
   });
 
   it("says how many trips ran earlier than the window allows, since neither tile counts them", () => {
