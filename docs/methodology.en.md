@@ -20,7 +20,7 @@ The Service uses only the GTFS (timetable) and GTFS-Realtime feeds the operators
 | 青森市バス (Aomori City Bus) | 青森市企業局交通部, 「青森市営バス路線情報」 and 「【リアルタイム情報】青森市営バス路線情報」 (the realtime data fetched from the Public Transportation Open Data Center's public API) | CC BY 4.0 | 30 s |
 | 広島電鉄, 広島バス, 広島交通, 芸陽バス, 備北交通, エイチ・ディー西広島, フォーブル, JRバス中国, ささき観光, 呉市生活バス, 廿日市市自主運行バス, おのみちバス, 朝日交通 | 公益社団法人広島県バス協会 (Hiroshima Bus Association), 「広島県バス協会GTFSオープンデータサイト」 | CC0 | 60 s |
 
-The credit is shown in the app's data-sources section, in each CSV's preamble and at the end of a printed page.
+The credit is shown in the app's data-sources section, in the preamble of each CSV fetched with "Download CSV", and at the end of a printed page.
 
 ### How the data is collected
 
@@ -79,7 +79,7 @@ A trip that skipped only some stops ran. A trip reported cancelled without listi
 
 (`2026.11.0`)
 
-A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped before deduplication. Such values come from a feed that has stopped updating and keeps resending the same prediction, not from real delays. A dropped report counts nowhere, so the stop's departure is decided by the reports before it. The share of dropped reports is one of the comparability conditions.
+A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped before deduplication. Such values come from a feed that has stopped updating and keeps resending the same prediction, not from real delays. A dropped report counts in no delay or on-time figure, so the stop's departure is decided by the reports before it. The share of dropped reports is one of the comparability conditions.
 
 ### Service day and time
 
@@ -189,7 +189,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | Splitting running time from dwell time | Partial | The split exists. Whether a feed's arrival and departure delays are independent has not been checked feed by feed |
 | External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
 | Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The feed-quality scorecard is in preparation |
-| Stating the measurement point and definitions | Done | Every export carries the definition stamp |
+| Stating the measurement point and definitions | Partial | "Download CSV" files, the council report, the delay record and the screens' "How this is calculated" block carry the definition stamp. CSVs a screen builds on the spot and chart images do not |
 | Transfers and total travel time | Out of scope | Passengers are not the Service's primary users. Connection reliability at feeder hubs is considered separately |
 | Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
 | Data coverage | Partial | The Hiroshima Bus Association's thirteen operators and Aomori City Bus. 中国バス and 井笠バスカンパニー, on the association's list, are not ingested |
@@ -217,7 +217,7 @@ The agency comparison screen ranks only the operators whose data supports a comp
 
 ## Definition stamp
 
-Every figure the Service produces carries:
+Figures shown or exported in the places listed below carry:
 
 - the on-time definition's name, and its early and late tolerances;
 - the threshold the early-departure rate counts past;
@@ -230,11 +230,13 @@ Every figure the Service produces carries:
 
 The stamp appears in the places below. The CSV preambles and the footnotes also give this document's URL.
 
-- in each CSV's first-row preamble;
+- in the first-row preamble of each CSV fetched with "Download CSV";
 - in the council report's footnotes, and on its print;
 - in the delay record's footnotes;
 - in the screens' "How this is calculated" block;
 - on snapshot pages.
+
+CSVs a screen builds on the spot from its export menu or "CSV" button (the route page's stops, the Reports screen's period summary, Live and Ask) and chart images carry neither the stamp nor the credit. Quote figures from a stamped export or a snapshot.
 
 ## Snapshots
 
@@ -243,7 +245,7 @@ A snapshot freezes the figures a screen showed, together with their stamp. Its l
 - **Who creates them**: only admins. An admin's print of the council report takes one automatically and prints its link at the foot of the page.
 - **Who reads them**: anyone holding the link, without signing in. The link's identifier is an unguessable random value, and only admins can list snapshots.
 - **Compared with today**: a snapshot's page can compare its figures with today's, naming each side's method version and on-time definition.
-- **Retention**: 2 years by default. Nothing yet deletes a snapshot past that age; today a snapshot stays until an admin deletes it. Each creation and deletion is in the admin audit log.
+- **Retention**: 2 years by default (provisional, awaiting the maintainer's confirmation). Nothing yet deletes a snapshot past that age; today a snapshot stays until an admin deletes it. Each creation and deletion is in the admin audit log.
 
 The screens' behaviour is in [docs/features/snapshots.md](features/snapshots.md).
 
@@ -309,7 +311,7 @@ The letter's text (in Japanese) is [templates/courtesy-letter.md](templates/cour
 This document is linked from:
 
 - the app's footer (the welcome page's footer and the account page);
-- each CSV's preamble;
+- the preamble of each CSV fetched with "Download CSV";
 - the council report's and the delay record's footnotes, and their prints.
 
 The public page will link to it once it exists.
