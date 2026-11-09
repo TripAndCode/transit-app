@@ -1146,6 +1146,20 @@ describe("AnalysisTab council report print", () => {
     expect(screen.getByTestId("print-frame-footer")).not.toHaveTextContent("Snapshot:");
   });
 
+  it("says a print was called off only beside the view it was called off for", async () => {
+    let answer: (created: typeof CREATED) => void = () => {};
+    vi.spyOn(client, "apiPost").mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    answerSnapshotReads(storedSnapshot(councilReport()));
+    printer();
+    const { router } = showPrintable();
+    await userEvent.click(printButton());
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-01&to=2026-05-14"));
+    await act(async () => answer(CREATED));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Printing was cancelled because the view changed."));
+    await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary&from=2026-05-02&to=2026-05-15"));
+    expect(screen.queryByText("Printing was cancelled because the view changed.")).not.toBeInTheDocument();
+  });
+
   it("leaves room below the content for the foot's snapshot line, even wrapped, when the page carries one", () => {
     const shell = ruleBody(readFileSync(resolve(__dirname, "../styles/global.css"), "utf8"), "@media print");
     expect(decl(ruleBody(shell, ".print-frame__footer"), "line-height")).toBe("1.3");

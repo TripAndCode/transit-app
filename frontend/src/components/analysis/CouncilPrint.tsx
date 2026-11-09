@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { SnapshotSpec } from "../../api/snapshots";
@@ -10,6 +10,9 @@ import { snapshotForPrint, type PrintSnapshot } from "./printSnapshot";
 /** What one print's snapshot came to, and what it was taken of: the
  *  screen's query and the very response the page showed. */
 type Printed = { screen: string; report: ReportResponse; snapshot: PrintSnapshot };
+
+/** One view of the screen: its query and the response it shows. */
+type View = { screen: string | null; report: ReportResponse };
 
 function screenKey({ screen, agencyId, query }: SnapshotSpec): string {
   return `${screen}:${agencyId}:${query}`;
@@ -33,13 +36,21 @@ export function CouncilPrint({ report, snapshot }: { report: ReportResponse; sna
   const slot = usePrintFootSlot();
   const [pending, setPending] = useState(false);
   const [printed, setPrinted] = useState<Printed | null>(null);
-  const [cancelled, setCancelled] = useState(false);
-  // The pending print's own cancellation, one per click.
+  // The view a print was called off beside: the note belongs to it alone.
+  const [cancelledAt, setCancelledAt] = useState<View | null>(null);
+  // The pending print's own cancellation, one per click, and the view on
+  // screen now, which a call-off names.
   const pendingPrint = useRef<AbortController | null>(null);
+  const shown = useRef<View | null>(null);
   const screen = snapshot ? screenKey(snapshot) : null;
   // Another screen or another response, or leaving the page, calls off the
-  // print taken for the one before.
-  useEffect(() => () => pendingPrint.current?.abort(), [screen, report]);
+  // print taken for the one before. A layout effect's cleanup runs within the
+  // commit, so the call-off lands before the print's own continuation can.
+  useLayoutEffect(() => {
+    shown.current = { screen, report };
+    return () => pendingPrint.current?.abort();
+  }, [screen, report]);
+  const cancelled = cancelledAt != null && cancelledAt.screen === screen && cancelledAt.report === report;
   const outcome = printed != null && printed.screen === screen && printed.report === report ? printed.snapshot : null;
   const link = outcome?.kind === "stored" ? { url: `${window.location.origin}${outcome.path}`, method: outcome.methodVersion } : null;
 
@@ -51,11 +62,11 @@ export function CouncilPrint({ report, snapshot }: { report: ReportResponse; sna
     const controller = new AbortController();
     pendingPrint.current = controller;
     setPending(true);
-    setCancelled(false);
+    setCancelledAt(null);
     const taken = await snapshotForPrint(snapshot, report, contentLocale(i18n), controller.signal);
     if (controller.signal.aborted) {
       setPending(false);
-      setCancelled(true);
+      setCancelledAt(shown.current);
       return;
     }
     // print() lays the page out at once, so the foot's line has to be in the
