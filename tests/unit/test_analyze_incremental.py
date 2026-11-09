@@ -184,6 +184,10 @@ class FakeConn:
             return None, self._ledger_rows
         if "SUM(clamp_count)" in sql:
             return (0,), []
+        # The scorecard finds no observed day, so it builds no month here;
+        # tests/pipeline/test_feed_quality.py runs it against real stores.
+        if sql.startswith("SELECT MIN(date) FROM agg_feed_health"):
+            return (None,), []
         if "ingest_strategy FROM agencies" in sql:
             return ((self._ingest_strategy,) if self._ingest_strategy else None), []
         if sql.startswith("SELECT to_regclass("):
