@@ -380,8 +380,10 @@ input[type="date"] { color-scheme: light; }
 .standard-definition { margin-top: 12px; }
 .standard-definition p { margin: 0 0 4px; max-width: 60ch; font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; }
 
-/* A one-line note under a report table. */
-.report-footnote { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); }
+/* A one-line note under a report table. It writes its links out, and a URL
+   is one unbroken word, so it wraps anywhere rather than overflow a narrow
+   screen or the page. */
+.report-footnote { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); overflow-wrap: anywhere; }
 
 /* The language switch on pages outside the app shell (login, legal). */
 .language-toggle__options { display: inline-flex; border: 1px solid var(--border-subtle); border-radius: var(--radius); overflow: hidden; }
