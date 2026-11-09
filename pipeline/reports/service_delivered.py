@@ -43,10 +43,11 @@ of the look-back read. The rate returns by itself once a feed reports one.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from typing import Any, Literal
 
-from pipeline.planned_trips import plan_ctes
+from pipeline.planned_trips import plan_ctes, stop_plan_ctes
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, rt_field_coverage_confirmed_agencies
 
 #: Why an agency's rate is ``None``. ``"unreadable"`` marks a read that failed
@@ -59,6 +60,7 @@ DeliveredMissing = Literal[
 #: feed reports them at all.
 CANCELLATION_LOOKBACK_DAYS = 90
 
+
 # A day has a plan when planned_trips_daily saved one for it or the loaded
 # timetable covers it, and the saved count wins. A capture records what the
 # timetable loaded at the time planned, and a reload saves only the days before
@@ -66,33 +68,60 @@ CANCELLATION_LOOKBACK_DAYS = 90
 # would replace or drop. Only those days count, on both sides of the ratio:
 # a reload replaces the agency's calendar, so a window can reach back to days
 # no plan covers, and missed trips count only on the days the plan counted.
-# agg_service_delivered_daily is built from GTFS-RT alone, so a saved day's
-# missed trips are there whatever timetable is loaded now. It has a row only
-# for a day with a missed trip: a planned day without one reads 0 missed, and
-# an agency with no row at all in the look-back ($4 to $3) reported no
-# cancellation in it, so reports_cancellations is false. Observed trips count
-# over the same planned days, up to $5, as do the planned trips coverage is
-# measured against, so the two make a ratio; a covered day that plans nothing
-# still counts what the feed reported then.
-_SERVICE_SQL = (
-    "WITH"
-    + plan_ctes("$1::int[]", "$2::date", "$3::date")
-    + """,
+def planned_days_ctes(agency_ids: str, from_date: str, to_date: str, *, stop_events: bool = False) -> str:
+    """The CTEs that end in ``planned_days(agency_id, day, planned)``: one row
+    per day of ``[from_date, to_date]`` with a plan, saved or loaded, and the
+    trips it plans. With *stop_events*, also ``stop_events``, the stop events
+    those trips plan: a saved day's, NULL where it was saved without them, or
+    the loaded timetable's (:func:`pipeline.planned_trips.stop_plan_ctes`).
+
+    The arguments are SQL expressions, as in :func:`plan_ctes`, so the board's
+    asyncpg read and analyze's psycopg2 build count the same days.
+    """
+    saved_stops = ", planned_stop_events AS stop_events" if stop_events else ""
+    loaded_stops = ", sp.planned_stop_events" if stop_events else ""
+    stop_join = " JOIN timetable_stop_plan sp ON sp.agency_id = tp.agency_id AND sp.day = tp.day" if stop_events else ""
+    return (
+        plan_ctes(agency_ids, from_date, to_date)
+        + (stop_plan_ctes(agency_ids) if stop_events else "")
+        + f""",
     saved AS (
-        SELECT agency_id, service_date AS day, planned_trips AS planned
+        SELECT agency_id, service_date AS day, planned_trips AS planned{saved_stops}
         FROM planned_trips_daily
-        WHERE agency_id = ANY($1::int[]) AND service_date BETWEEN $2::date AND $3::date
+        WHERE agency_id = ANY({agency_ids}) AND service_date BETWEEN {from_date} AND {to_date}
     ),
     planned_days AS (
-        SELECT agency_id, day, planned FROM saved
+        SELECT agency_id, day, planned{", stop_events" if stop_events else ""} FROM saved
         UNION ALL
-        SELECT tp.agency_id, tp.day, tp.planned
-        FROM timetable_plan tp
+        SELECT tp.agency_id, tp.day, tp.planned{loaded_stops}
+        FROM timetable_plan tp{stop_join}
         WHERE NOT EXISTS (SELECT 1 FROM saved s WHERE s.agency_id = tp.agency_id AND s.day = tp.day)
-    ),
+    )"""
+    )
+
+
+def service_sql(agency_ids: str, from_date: str, to_date: str, lookback_from: str, coverage_to: str) -> str:
+    """One row per agency of ``agency_ids`` with the figures
+    :func:`compute_service_delivered_by_agency` shapes, over ``[from_date,
+    to_date]``. The arguments are SQL expressions, as in :func:`plan_ctes`.
+
+    agg_service_delivered_daily is built from GTFS-RT alone, so a saved day's
+    missed trips are there whatever timetable is loaded now. It has a row only
+    for a day with a missed trip: a planned day without one reads 0 missed, and
+    an agency with no row at all in the look-back (``lookback_from`` to
+    ``to_date``) reported no cancellation in it, so reports_cancellations is
+    false. Observed trips count over the same planned days, up to
+    ``coverage_to``, as do the planned trips coverage is measured against, so
+    the two make a ratio; a covered day that plans nothing still counts what
+    the feed reported then.
+    """
+    return (
+        "WITH"
+        + planned_days_ctes(agency_ids, from_date, to_date)
+        + f""",
     plan AS (
         SELECT agency_id, SUM(planned) AS planned, COUNT(*) AS covered_days,
-               SUM(planned) FILTER (WHERE day <= $5::date) AS coverage_planned
+               SUM(planned) FILTER (WHERE day <= {coverage_to}) AS coverage_planned
         FROM planned_days
         GROUP BY agency_id
     ),
@@ -106,7 +135,7 @@ _SERVICE_SQL = (
         SELECT r.agency_id, SUM(r.trips_observed) AS observed
         FROM agg_route_daily r
         JOIN planned_days p ON p.agency_id = r.agency_id AND p.day = r.date
-        WHERE r.agency_id = ANY($1::int[]) AND r.date BETWEEN $2::date AND $5::date
+        WHERE r.agency_id = ANY({agency_ids}) AND r.date BETWEEN {from_date} AND {coverage_to}
         GROUP BY r.agency_id
     )
     SELECT a.agency_id,
@@ -119,16 +148,33 @@ _SERVICE_SQL = (
            EXISTS (
                SELECT 1 FROM agg_service_delivered_daily r
                WHERE r.agency_id = a.agency_id
-                 AND r.date BETWEEN $4::date AND $3::date
+                 AND r.date BETWEEN {lookback_from} AND {to_date}
                  AND r.non_executed_trips > 0
            ) AS reports_cancellations
-    FROM unnest($1::int[]) AS a(agency_id)
+    FROM unnest({agency_ids}) AS a(agency_id)
     LEFT JOIN plan p USING (agency_id)
     LEFT JOIN missed m USING (agency_id)
     LEFT JOIN observed o USING (agency_id)
     LEFT JOIN agencies g USING (agency_id)
 """
-)
+    )
+
+
+_SERVICE_SQL = service_sql("$1::int[]", "$2::date", "$3::date", "$4::date", "$5::date")
+
+
+def coverage_of(row: Mapping[str, Any], window_days: int) -> dict[str, Any]:
+    """The coverage half of one :func:`service_sql` row: ``covered_days`` of
+    ``window_days``, and ``observed_trips`` of ``coverage_planned_trips``,
+    ``observed_trips`` being ``None`` when nothing is planned through the
+    coverage day, since there is no plan to measure it against."""
+    coverage_planned = int(row["coverage_planned"])
+    return {
+        "covered_days": int(row["covered_days"]),
+        "window_days": window_days,
+        "observed_trips": int(row["observed"]) if coverage_planned > 0 else None,
+        "coverage_planned_trips": coverage_planned,
+    }
 
 
 def unreadable_service_delivered(from_date: date, to_date: date) -> dict[str, Any]:
@@ -199,13 +245,7 @@ async def compute_service_delivered_by_agency(
     result: dict[int, dict[str, Any]] = {}
     for aid in agency_ids:
         p = int(rows[aid]["planned"])
-        coverage_planned = int(rows[aid]["coverage_planned"])
-        coverage = {
-            "covered_days": int(rows[aid]["covered_days"]),
-            "window_days": window_days,
-            "observed_trips": int(rows[aid]["observed"]) if coverage_planned > 0 else None,
-            "coverage_planned_trips": coverage_planned,
-        }
+        coverage = coverage_of(rows[aid], window_days)
         missing: DeliveredMissing | None = None
         if p <= 0:
             missing = "no_plan"

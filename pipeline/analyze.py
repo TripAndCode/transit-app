@@ -42,6 +42,7 @@ Aggregation tables produced:
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
   section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
+- feed_quality_monthly — per-month feed-quality scorecard (pipeline/feed_quality.py)
 - agg_meta             — last analyze() time per agency (forensic)
 - agg_table_state      — each table's fingerprint, which decides when the next run rebuilds it in full
 
@@ -83,19 +84,27 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
 import psycopg2.extras
 
-from pipeline import agg_registry, agg_sql, ch_aggregates, rebuild_headline, static_archive, static_headways
+from pipeline import (
+    agg_registry,
+    agg_sql,
+    ch_aggregates,
+    feed_quality,
+    rebuild_headline,
+    static_archive,
+    static_headways,
+)
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import service_date_ch, service_date_of
 from pipeline.static_archive import Stamp
 from pipeline.static_content import static_parts as _static_parts
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
@@ -1700,6 +1709,19 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         # untouched too.
         _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join, refit)
 
+        # ── feed_quality_monthly (per-month feed-quality scorecard) ──
+        # After the ClickHouse tables, whose agg_route_daily copy it reads,
+        # and agg_feed_health above. A whole rebuild of agg_route_daily, which
+        # _ch_agg_scopes can decide beyond the plan, reaches every month.
+        quality_scope = scopes[feed_quality.TABLE]
+        if ch_scopes.get("agg_route_daily", quality_scope) is None:
+            quality_scope = None
+        last_closed = service_date_of(datetime.now(timezone.utc)) - timedelta(days=1)
+        with _step(f"{feed_quality.TABLE}: build"):
+            quality_rewritten = feed_quality.rebuild(
+                agency_id, ingest_strategy, quality_scope, last_closed, conn, ch_client
+            )
+
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
         # `analyzed_at` is `clock_timestamp()`, not `now()`: completion time,
@@ -1721,6 +1743,11 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             # ch_scopes is what the ClickHouse tables actually rebuilt, which
             # can be more than the plan's scope when their two stores disagree.
             rewritten = {name for name, scope in {**scopes, **ch_scopes}.items() if scope != []}
+            # Its months are built as their windows grow, not only for a changed date.
+            if quality_rewritten:
+                rewritten.add(feed_quality.TABLE)
+            else:
+                rewritten.discard(feed_quality.TABLE)
             _record_fingerprints(conn, agency_id, plan.current, rewritten)
             _record_in_force(conn, agency_id, join)
             cur.execute(

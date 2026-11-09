@@ -140,6 +140,14 @@ def _headway_daily() -> list[str]:
     ]
 
 
+def _feed_quality() -> list[str]:
+    # Imported here: the scorecard applies the comparability gate, whose
+    # definition stamp reads METHOD_VERSION from this module.
+    from pipeline import feed_quality
+
+    return feed_quality.render()
+
+
 def _timetable_of(name: str) -> Timetable:
     return Timetable.ARCHIVED if name in ch_aggregates.STATIC_JOINED_TABLES else Timetable.NONE
 
@@ -197,6 +205,15 @@ def _entries() -> list[AggTable]:
             ],
             archived_input=ArchivedInput.STOP_TIMES,
             in_force=True,
+        ),
+        AggTable(
+            "feed_quality_monthly",
+            1,
+            Kind.DATED,
+            # A planned day no capture saved reads the loaded timetable's plan.
+            Timetable.LOADED,
+            _feed_quality,
+            depends_on=("agg_route_daily", "agg_feed_health"),
         ),
     ]
     for name in ch_aggregates.MONTHLY_TABLES:
@@ -338,6 +355,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
             "route_delay_counts": 4,
         },
     ),
+    MethodVersion("2026.11.5", {"feed_quality_monthly": 1}),
 )
 
 # The method every report, CSV and council document names beside its figures
