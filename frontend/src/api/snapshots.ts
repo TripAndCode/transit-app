@@ -47,19 +47,26 @@ export type SnapshotSpec = { screen: SnapshotScreen; agencyId: number; query: st
 
 /** Admin only: the server computes and stores the screen's figures and
  *  answers with the snapshot's id and page. */
-export function createSnapshot({ screen, agencyId, query }: SnapshotSpec): Promise<SnapshotCreated> {
-  return apiPost<SnapshotCreated>("/api/admin/snapshots", {
-    screen,
-    agency_id: agencyId,
-    query: Object.fromEntries(new URLSearchParams(query)),
-  });
+export function createSnapshot(
+  { screen, agencyId, query }: SnapshotSpec,
+  opts?: { signal?: AbortSignal },
+): Promise<SnapshotCreated> {
+  return apiPost<SnapshotCreated>(
+    "/api/admin/snapshots",
+    { screen, agency_id: agencyId, query: Object.fromEntries(new URLSearchParams(query)) },
+    opts,
+  );
+}
+
+export function fetchSnapshot(snapshotId: string, opts?: { signal?: AbortSignal }): Promise<Snapshot> {
+  return apiGet<Snapshot>(`/api/snapshots/${encodeURIComponent(snapshotId)}`, opts);
 }
 
 /** One snapshot by its id. It never changes, so it is read once. */
 export function useSnapshot(snapshotId: string): UseQueryResult<Snapshot> {
   return useQuery({
     queryKey: ["snapshot", snapshotId],
-    queryFn: ({ signal }) => apiGet<Snapshot>(`/api/snapshots/${encodeURIComponent(snapshotId)}`, { signal }),
+    queryFn: ({ signal }) => fetchSnapshot(snapshotId, { signal }),
     staleTime: Infinity,
   });
 }
