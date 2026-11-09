@@ -382,6 +382,20 @@ def test_a_trip_reported_with_every_stop_skipped_did_not_run():
     assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
 
 
+def test_a_trip_may_be_reported_skipped_at_every_stop_and_then_without_data_once_due():
+    scenario = _cancelling(Cancellation("R_0700", DAY, reported_as="skipped_then_no_data"))
+    morning = [(at, trip) for at, trips in _statuses(polls(scenario)) for trip in trips if trip[0] == "R_0700"]
+    assert morning
+    statuses = set()
+    for _at, (_trip_id, trip_status, stops) in morning:
+        assert trip_status == SCHEDULED
+        assert [seq for seq, _delay, _status in stops] == [1, 2, 3]
+        statuses |= {(delay, status) for _seq, delay, status in stops}
+    assert statuses == {(None, SKIPPED), (None, NO_DATA)}
+    assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
+    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+
+
 def test_an_unreported_trip_is_in_no_poll_and_counts_as_executed_but_not_observed():
     scenario = Scenario(
         name="silent",

@@ -1023,6 +1023,55 @@ def test_analyze_counts_a_trip_not_run_when_cancelled_or_every_stop_it_reports_s
         assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 2}
 
 
+def test_analyze_reads_the_same_latest_report_for_service_delivered_as_for_departures(pg_conn, agency_id, ch_client):
+    """A report that carries neither a delay nor a CANCELED or SKIPPED status
+    says nothing about whether the trip ran, so it leaves the withdrawal
+    before it standing: T1, predicted and then cancelled, T2, skipped at its
+    one stop, and T4, cancelled without listing a stop, each followed by such
+    a report, have no departure and are not run. T3's prediction after its
+    skip restores it."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    first, second, third = (datetime(2026, 4, 1, 2, m, tzinfo=timezone.utc) for m in (0, 5, 10))
+    no_data, skipped, canceled = 2, 1, 3
+
+    def row(trip_id, at, file_name, *, trip_status=0, stop_status=0, dep_delay=None, stop_sequence=1):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name=file_name,
+            stop_sequence=stop_sequence,
+            schedule_relationship_trip=trip_status,
+            schedule_relationship_stop=stop_status,
+            dep_delay=dep_delay,
+        )
+
+    rows = [
+        row("T1", first, "a.pb", dep_delay=60),
+        row("T1", second, "b.pb", trip_status=canceled, stop_status=no_data),
+        row("T1", third, "c.pb", stop_status=no_data),
+        row("T2", first, "a.pb", stop_status=skipped),
+        row("T2", second, "b.pb", stop_status=no_data),
+        row("T3", first, "a.pb", stop_status=skipped),
+        row("T3", second, "b.pb", dep_delay=30),
+        row("T3", third, "c.pb", stop_status=no_data),
+        row("T4", first, "a.pb", trip_status=canceled, stop_status=None, stop_sequence=TRIP_LEVEL_STOP_SEQUENCE),
+        row("T4", second, "b.pb", stop_status=no_data),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 3}
+        cur.execute("SELECT trips_observed, samples FROM agg_route_daily WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(1, 1)]
+
+
 def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):
     """An agency whose ingest_strategy isn't static_join must get zero rows in
     agg_service_delivered_daily regardless of what schedule_relationship_*

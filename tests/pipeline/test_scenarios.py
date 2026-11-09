@@ -224,9 +224,9 @@ def timetable_published_early(day: date) -> Scenario:
 
 
 # The cancellations scenario's routes, by what each carries besides ordinary
-# runs. Each route has its own stops, and the routes whose figures a known
-# divergence moves own their scheduled hours, so the cells it moves hold
-# nothing else.
+# runs. Each route has its own stops, and the routes whose predicted
+# departures a later report withdraws own their scheduled hours, so the cells
+# a mistake there would move hold nothing else.
 _CONTROL = "C0"
 _CANCELLED_LISTING_STOPS = "CL"
 _CANCELLED_WITHOUT_STOPS = "CT"
@@ -235,6 +235,7 @@ _UNREPORTED = "CS"
 _EVERY_STOP_SKIPPED = "CA"
 _SKIPPED_FROM_THE_START = "CK"
 _SKIPPED_AFTER_PREDICTIONS = "CP"
+_SKIPPED_THEN_NO_DATA = "CN"
 # Each route runs four trips of eight stops, six minutes apart, from these
 # first departures, all of a group's departures inside its hour.
 _CANCELLATION_TIMETABLE = {
@@ -247,6 +248,7 @@ _CANCELLATION_TIMETABLE = {
     (_EVERY_STOP_SKIPPED, "土曜"): "07:02:00",
     (_UNREPORTED, "土曜"): "07:03:00",
     (_SKIPPED_AFTER_PREDICTIONS, "土曜"): "08:00:00",
+    (_SKIPPED_THEN_NO_DATA, "土曜"): "07:04:00",
 }
 
 
@@ -269,10 +271,11 @@ def cancellations(day: date) -> Scenario:
     is predicted 90 s late and then cancelled two minutes before it was due.
     On the second day, a 土曜, CA's last trip does not run and the feed
     reports every stop of it SKIPPED, and CS's last trip does not run without
-    the feed ever mentioning it. CK's last run skips its third stop, reported
-    SKIPPED from the start, and CP's skips its third stop too, predicted
-    until the feed announces the skip. Every other trip runs, C0's on both
-    days.
+    the feed ever mentioning it. CN's last trip does not run either: the feed
+    lists every stop of it SKIPPED until the stop is due and NO_DATA after.
+    CK's last run skips its third stop, reported SKIPPED from the start, and
+    CP's skips its third stop too, predicted until the feed announces the
+    skip. Every other trip runs, C0's on both days.
 
     The feed is polled every two minutes."""
     second = day + timedelta(days=1)
@@ -285,6 +288,7 @@ def cancellations(day: date) -> Scenario:
         _EVERY_STOP_SKIPPED,
         _UNREPORTED,
         _SKIPPED_AFTER_PREDICTIONS,
+        _SKIPPED_THEN_NO_DATA,
     )
     routes = {code: _route(code, f"Line {code}", 8, 34.45 + i * 0.02) for i, code in enumerate(codes)}
     trips = {
@@ -314,7 +318,7 @@ def cancellations(day: date) -> Scenario:
             last(code, "平日").trip_id
             for code in (_CANCELLED_LISTING_STOPS, _CANCELLED_WITHOUT_STOPS, _CANCELLED_AFTER_PREDICTIONS)
         ),
-        *(last(code, "土曜").trip_id for code in (_EVERY_STOP_SKIPPED, _UNREPORTED)),
+        *(last(code, "土曜").trip_id for code in (_EVERY_STOP_SKIPPED, _UNREPORTED, _SKIPPED_THEN_NO_DATA)),
     }
     runs = []
     for seed, ((_code, day_type), route_trips) in enumerate(trips.items()):
@@ -345,6 +349,7 @@ def cancellations(day: date) -> Scenario:
                 predicted_delay_sec=90,
             ),
             Cancellation(last(_EVERY_STOP_SKIPPED, "土曜").trip_id, second, reported_as="every_stop_skipped"),
+            Cancellation(last(_SKIPPED_THEN_NO_DATA, "土曜").trip_id, second, reported_as="skipped_then_no_data"),
         ),
         unreported=(Unreported(last(_UNREPORTED, "土曜").trip_id, second),),
         feed=FeedModel(poll_interval_sec=120, lead_sec=300),

@@ -185,13 +185,18 @@ class Cancellation:
     - ``canceled_without_stops``: the trip CANCELED with no stop listed, which
       GTFS-RT allows for a cancelled trip;
     - ``every_stop_skipped``: the trip SCHEDULED, each stop not yet due listed
-      SKIPPED.
+      SKIPPED;
+    - ``skipped_then_no_data``: the trip SCHEDULED and every stop listed,
+      SKIPPED until it is due and NO_DATA after, so each stop's last report
+      but the final stop's carries neither a delay nor a skip.
     """
 
     trip_id: str
     service_date: date
     announced_sec: int | None = None
-    reported_as: Literal["canceled", "canceled_without_stops", "every_stop_skipped"] = "canceled"
+    reported_as: Literal["canceled", "canceled_without_stops", "every_stop_skipped", "skipped_then_no_data"] = (
+        "canceled"
+    )
     predicted_delay_sec: int = 0
 
 
@@ -535,6 +540,11 @@ def _cancellation_listing(scenario: Scenario, cancellation: Cancellation, trip: 
             )
         if cancellation.reported_as == "canceled_without_stops":
             return CANCELED, ()
+        if cancellation.reported_as == "skipped_then_no_data":
+            return SCHEDULED, tuple(
+                StopEntry(seq, stop.stop_id, None, SKIPPED if service_day_instant(day, scheduled) > at else NO_DATA)
+                for seq, (stop, scheduled) in enumerate(zip(stops, trip.scheduled_sec, strict=True), start=1)
+            )
         trip_status, stop_status = (
             (SCHEDULED, SKIPPED) if cancellation.reported_as == "every_stop_skipped" else (CANCELED, NO_DATA)
         )
