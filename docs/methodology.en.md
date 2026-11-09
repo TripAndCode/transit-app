@@ -1,6 +1,330 @@
 # Methodology and publication policy
 
+## About this document
+
+This document sets out two things about the figures Delay Dashboard ("the Service") produces: what they are computed from and by which rules, and how an operator is told before its figures are published and how an error is reported and corrected.
+
+- **Readers**: municipal staff preparing material for a regional public-transport council (地域公共交通協議会), the members and researchers who read that material, and the operators the figures name.
+- **Version**: every CSV, council report and delay record the Service produces names the method version its figures were made with (for example `2026.11.4`). The [Changelog](#changelog) at the end shows what each version changed. The text describes the current version listed there.
+- **Language**: the Japanese version is [methodology.md](methodology.md). Where the two differ, the Japanese version is authoritative.
+- **Implementation detail**: the developer-facing explanation is [DELAY_ANALYSIS.md](../DELAY_ANALYSIS.md).
+
+## Data
+
+### Sources and licences
+
+The Service uses only the GTFS (timetable) and GTFS-Realtime feeds the operators publish. It uses nothing from the operators' internal systems.
+
+| Operator | Source | Licence | Poll interval |
+|---|---|---|---|
+| 青森市バス (Aomori City Bus) | 青森市企業局交通部, 「青森市営バス路線情報」 and 「【リアルタイム情報】青森市営バス路線情報」 (through the Public Transportation Open Data Center's public API) | CC BY 4.0 | 30 s |
+| 広島電鉄, 広島バス, 広島交通, 芸陽バス, 備北交通, エイチ・ディー西広島, フォーブル, JRバス中国, ささき観光, 呉市生活バス, 廿日市市自主運行バス, おのみちバス, 朝日交通 | 公益社団法人広島県バス協会 (Hiroshima Bus Association), 「広島県バス協会GTFSオープンデータサイト」 | CC0 | 60 s |
+
+The credit is shown in the app's data-sources section, in each CSV's preamble and at the end of a printed page.
+
+### How the data is collected
+
+- **Realtime data**: a collector polls each operator's TripUpdates at the interval above and keeps every poll.
+- **Timetables**: fetched once a day, each version kept.
+- **Two paths for observations**:
+  - **Archive**: every poll the collector made.
+  - **Live**: only what the app received in real time, which is sparser than the archive.
+  - The figures' stamp says, day by day, which path the day's figures were computed from ([Definition stamp](#definition-stamp)).
+- **Dates and times**: every date and time is Japan Standard Time (JST).
+
+### Value basis and validation status
+
+Every figure the Service produces is computed from **the delay the operator's feed last predicted for each stop**.
+
+- It is not an observation of the bus passing the stop.
+- The Service does not compute the delay; it is the feed's own value, which the Service collects and summarises.
+- The figures' stamp names the value basis as feed prediction (`feed_prediction`).
+
+How far the predictions are from what the buses did is checked by reconstructing stop passages from the vehicles' positions (VehiclePositions). Each operator's status:
+
+| Operator | Validation status |
+|---|---|
+| 広島電鉄, 広島バス, 広島交通 | Position collection has started. After 7 to 14 days of positions, the predictions are compared with them. The comparison is not done yet. |
+| Every other operator | Not validated, and no positions collected. |
+
+An operator's result will be referenced from this document once its validation is done. Depending on the result, that operator's stamp and its treatment in comparisons may change. Until then, read every operator's figures as resting on feed predictions.
+
+### Feed quality
+
+A monthly feed-quality scorecard per operator is in preparation. Its measures and thresholds are not set yet. Today, the share of implausible readings and the share of planned trips observed are used in the [Comparability conditions](#comparability-conditions).
+
+## Processing
+
+Each rule's heading gives the method version that introduced it.
+
+### Deduplication and withdrawal
+
+(`2026.11.4`)
+
+A feed sends its prediction for the same trip and stop many times. For each trip, stop and service day, the stop's departure is therefore decided by **the last report received** among these:
+
+- a report of a delay in the plausible range: the stop departed with that delay;
+- a report of the trip cancelled (`CANCELED`) or the stop skipped (`SKIPPED`): the stop had no departure, and any prediction before it is withdrawn. A prediction received after it restores the departure.
+
+A report carrying neither a delay nor a cancelled or skipped status counts neither way: the report before it stands.
+
+**A trip not run** is one of these:
+
+- a trip whose last status is `CANCELED`;
+- a trip whose every stop reported with a delay or a status was last reported `SKIPPED`.
+
+A trip that skipped only some stops ran. A trip reported cancelled without listing any stop also counts as not run.
+
+### Excluding implausible values
+
+(`2026.11.0`)
+
+A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped before deduplication. Such values come from a feed that has stopped updating and keeps resending the same prediction, not from real delays. A dropped report counts nowhere, so the stop's departure is decided by the reports before it. The share of dropped reports is one of the comparability conditions.
+
+### Service day and time
+
+(`2026.11.0`; after-midnight times `2026.11.1`)
+
+- **Service day**: turns over at 04:00 JST, so a trip running from 23:40 to 00:30 falls in one service day.
+- **Hours**: a departure scheduled at 24:00 or later counts under its service day's hour 24, 25, and so on. A time band such as morning or evening is taken from the clock time (24:30 is late night).
+
+### Matching the timetable
+
+(`2026.11.3`)
+
+Each observation is matched with the timetable in force on its service day: the newest loaded timetable whose validity period (`feed_info`'s dates, or else `calendar`) covers that day.
+
+- A timetable published ahead of its first day is never applied to the day before.
+- A day no known timetable covers keeps the timetable its observations were ingested against.
+- Figures read from the aggregates and figures scanned directly from the observations, such as a time-band filter, follow the same rule.
+- The stamp names each timetable version in force over the period, with the number of days it covered.
+
+### Where the observations came from
+
+(`2026.11.2`)
+
+Each day's observations are counted by the path they came from, archive or live, and the path holding most of them is that day's source. No delay or on-time figure changes under this rule.
+
+### Rebuild record
+
+When the method changes, every past aggregate is rebuilt. Figures exported under an earlier version may therefore differ from today's for the same period.
+
+A rebuild records the following for each operator, shown on the admin board's run timeline:
+
+- the operator-wide on-time rate and average delay, before and after, over the days the rebuild rewrote;
+- the on-time definition they were counted under.
+
+## Metrics
+
+### On-time definition
+
+| Name | On time when | Used |
+|---|---|---|
+| `standard_m1_p5` (industry standard) | no more than 1 minute early and no more than 5 minutes late | by default, on every screen and export |
+| `legacy_60s` (legacy) | any early departure, and no more than 1 minute late | only when asked for |
+
+- A request may also give its own early and late tolerances in seconds. A window equal to a named one is called by that name; any other is called `custom`.
+- Choosing a definition changes no aggregate, so it is not a new method version. A figure is identified by its method version and its on-time definition together, and the stamp names both.
+
+### Main metrics
+
+An "observation" here is one departure: one trip, at one stop, on one day. It is not a count of trips.
+
+| Metric | Computed as |
+|---|---|
+| On-time rate | departures within the on-time window ÷ observations |
+| Average delay | sum of delays ÷ observations, early departures counted as negative |
+| Median, 90th percentile | from the distribution of observed delays |
+| Early-departure rate | the share of observations more than the definition's early tolerance early; under a definition that counts every early departure as on time, more than 1 minute early |
+| Share more than 5 minutes late | the share of observations more than 5 minutes late, whatever the on-time definition |
+| Service delivered | (planned trips − trips not run) ÷ planned trips, where planned trips are those the timetable in force plans for each day |
+| On-time rate interval | the 95% Wilson interval. Stops of one trip run late together, so the sample size is the number of trips, not of observations |
+
+Service delivered is shown only for an operator whose feed has been confirmed to report cancellations and has reported at least one trip not run in the 90 days up to the period's last day (or within the period, when it is longer). Otherwise it is shown as "—" with the reason.
+
+**Headway metrics**: a route whose median scheduled headway is 12 minutes or less is high-frequency, and gets these metrics:
+
+- actual headways, reconstructed from consecutive departures at the same stop;
+- Excess Waiting Time (EWT): actual mean wait − scheduled mean wait;
+- the coefficient of variation of headways;
+- the long-gap rate: the share of gaps longer than 1.75 times the scheduled headway.
+
+**Dwell and running time**: dwell time is the difference between arrival and departure delay at the same stop, and running time the difference from the previous stop's departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
+
+### What is not observed
+
+- A stop with no delay report counts neither as on time nor as late.
+- A planned trip that never appears in the realtime data is not counted as not run. Service delivered subtracts from the plan only the trips the feed reported as not run.
+
+## What is never computed
+
+The Service neither computes nor publishes the following. Changing this rule starts with changing this document.
+
+- **Figures per vehicle or per driver**:
+  - No figure is made per vehicle or per driver.
+  - The feeds' vehicle descriptors are not ingested. No database holds a column for a vehicle's identifier (`vehicle_id`), its licence plate (`license_plate`) or a driver's identifier (`driver_id`).
+- **Passenger identity**:
+  - No passenger identifier (`passenger_id`) or IC card number is held.
+  - The only passenger weighting is a relative weight per route, entered by hand by an admin.
+- **Fares**: nothing about fares (`fare`) is computed.
+
+A test ([tests/unit/test_never_computed.py](../tests/unit/test_never_computed.py)) checks that no such column is in the schemas and that no vehicle descriptor survives into an ingested row.
+
+**Raw archives**: the raw data collected is kept exactly as the operator published it.
+
+- The realtime archive can carry vehicle descriptors the operator included. The Service does not ingest them.
+- Positions are kept only to validate the predictions, for a bounded window (7 to 14 days of collection). They are not ingested into the app. Today they are kept as long as the realtime archive (1,825 days by default). A shorter retention for this validation archive is to be set.
+- Any release of the archives as a public dataset strips the vehicle descriptors.
+
+### The original fourteen gaps
+
+Early in development, the perspectives a cross-operator delay analysis was missing were listed as fourteen items. Their current status follows. The `vehicle_id` column proposed then was never added, and is ruled out as above.
+
+| Perspective | Status | Missing or notes |
+|---|---|---|
+| The on-time definition and early departures | Done | The industry-standard and legacy definitions, and any tolerance; the early-departure rate |
+| High-frequency headways, EWT and long gaps | Done | Routes whose median scheduled headway is 12 minutes or less |
+| The denominator: cancellations, missed trips and skipped stops | Partial | Cancellations and skips are counted. Service delivered is per operator only, not per route. A planned trip absent from the realtime data is not counted |
+| Passenger weighting | Partial | Only hand-entered relative weights per route, used only by the weighted on-time rate on the agency comparison screen. No ridership import |
+| Splitting running time from dwell time | Partial | The split exists. Whether a feed's arrival and departure delays are independent has not been checked feed by feed |
+| External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
+| Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The feed-quality scorecard is in preparation |
+| Stating the measurement point and definitions | Done | Every export carries the definition stamp |
+| Transfers and total travel time | Out of scope | Passengers are not the Service's primary users. Connection reliability at feeder hubs is considered separately |
+| Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
+| Data coverage | Partial | The Hiroshima Bus Association's thirteen operators and Aomori City Bus. 中国バス and 井笠バスカンパニー, on the association's list, are not ingested |
+| Timetable slack and holding | Partial | Only an analysis on the Ask screen, against the current timetable. No aggregate and no route-page panel |
+| Supply: planned trips, vehicle-km, timetable changes | Partial | Planned trips and vehicle-km per timetable version, and the change dates, exist. Only the current version is shown, with no comparison of which routes lost trips between versions. Vehicle-km delivered is approximated from the trip ratio |
+| Contracts and incentives | Partial | Per-route standards (on-time rate, EWT, vehicle-km delivered) with an achievement and bonus/deduction simulation. No per-route service-delivered standard |
+
+## Comparability conditions
+
+The agency comparison screen ranks only the operators whose data supports a comparison. It lists the rest unranked, each with the first condition it failed. The conditions are checked in this order, so one operator always gets the same reason:
+
+| Order | Reason | Condition |
+|---|---|---|
+| 1 | No data | no observation in the period |
+| 2 | Coverage unknown | planned and observed trips cannot be matched. Only operators ingested by a strategy whose trip IDs match the timetable's (`static_join`) can be compared |
+| 3 | Coverage low | under 70% of planned trips observed |
+| 4 | Interval wide | the on-time rate's 95% Wilson interval is more than 3.0 points either side |
+| 5 | Implausible readings high | over 5% of reports dropped as implausible |
+
+- Each threshold is inclusive: a figure exactly at it passes.
+- Each check reads the figure rounded as it is printed, so a reader can confirm the verdict from the row itself.
+- The on-time rate is counted under the default definition (`standard_m1_p5`).
+- The council report states whether the operator is comparable under these conditions, with the figures behind the verdict.
+- The thresholds' source is [pipeline/reports/comparability.py](../pipeline/reports/comparability.py). Changing a threshold changes no aggregate, so it is not a new method version. A change is announced by amending this section.
+
+## Definition stamp
+
+Every figure the Service produces carries:
+
+- the on-time definition's name, and its early and late tolerances;
+- the threshold the early-departure rate counts past;
+- the measurement scope: all stops, all observations;
+- the deduplication rule, and the threshold for implausible values;
+- the value basis: feed prediction;
+- the method version, and the day the aggregates were built, or "live scan" for figures scanned directly from the observations;
+- the timetable versions in force over the period, with their days;
+- where the observations came from: days from the archive and days from the live path;
+- this document's URL.
+
+The stamp appears:
+
+- in each CSV's first-row preamble;
+- in the council report's footnotes, and on its print;
+- in the delay record's footnotes;
+- in the screens' "How this is calculated" block;
+- on snapshot pages.
+
+## Snapshots
+
+A snapshot freezes the figures a screen showed, together with their stamp. Its link shows the same figures after any later rebuild. Figures quoted in council material are kept as snapshots.
+
+- **Who creates them**: only admins. An admin's print of the council report takes one automatically and prints its link at the foot of the page.
+- **Who reads them**: anyone holding the link, without signing in. The link's identifier is an unguessable random value, and only admins can list snapshots.
+- **Compared with today**: a snapshot's page can compare its figures with today's, naming each side's method version and on-time definition.
+- **Retention**: 2 years by default. Nothing yet deletes a snapshot past that age; today a snapshot stays until an admin deletes it. Each creation and deletion is in the admin audit log.
+
+The screens' behaviour is in [docs/features/snapshots.md](features/snapshots.md).
+
+## Publication process
+
+### Advance notice
+
+At least **14 days** before the Service first makes an operator's figures public, the operator is sent:
+
+- its figures;
+- this document;
+- a contact for reporting errors.
+
+"Making public" means a page anyone can read without signing in, a published dataset, or an announcement by the maintainer.
+
+- **Courtesy letter first**: before the first notice, a courtesy letter goes to the Hiroshima Bus Association explaining this process ([Courtesy letter to the association and operators](#courtesy-letter-to-the-association-and-operators)).
+- **During the notice period**: the operator can point out errors in the figures or the method. Errors confirmed are corrected before publication.
+- **Statement alongside**: the operator can send a short statement to be shown beside its figures.
+
+The public page and the public dataset are both in preparation. Neither is published before the first notice is sent.
+
+### Reporting errors and takedown
+
+- **Contact**: the Service's own address, [devyolouis@gmail.com](mailto:devyolouis@gmail.com). Bugs are also welcome on [GitHub Issues](https://github.com/TripAndCode/transit-app/issues), but Issues are public, so please leave personal information out.
+- **Takedown**: a figure confirmed wrong is taken down or corrected **within 5 working days**.
+- **Correction log**: each correction is recorded in this document's [Correction log](#correction-log). Once the public page exists, the log moves there. Each entry records:
+  - the date;
+  - the operator, figures and period affected;
+  - what was wrong;
+  - what was done;
+  - the method version.
+
+### Method changes
+
+A method change does three things:
+
+- it gets a new version number;
+- what it changes is written down;
+- every past aggregate is rebuilt.
+
+The changelog is at the end of this document, and each version's description is in [DELAY_ANALYSIS.md's "Method versions"](../DELAY_ANALYSIS.md#method-versions). How a rebuild moved each operator's on-time rate and average delay is recorded as in [Rebuild record](#rebuild-record).
+
+## Governance
+
+- **Maintainer**: the method and each publication are signed off by the operator of the Service, TripAndCode (an individual), as maintainer, until anyone else shares the role.
+- **How to cite**: give the stamp's method version, build day and on-time definition, and the data source, for example "Delay Dashboard, method `2026.11.4`, aggregates built 2026-11-09, on-time definition `standard_m1_p5`". Add the snapshot link where there is one, so the figures can be checked later.
+- **Reporting a problem**: through the contact in [Reporting errors and takedown](#reporting-errors-and-takedown).
+
+### Personal data
+
+- The Service's figures are about operators' services; it handles no passenger's personal data.
+- Readers use it without signing in; only admins sign in.
+- What personal data the Service handles, and how, is in the [privacy policy](../frontend/public/legal/privacy.en.md).
+
+## Courtesy letter to the association and operators
+
+Using CC0 data needs no one's legal consent. Even so, the Service avoids an operator finding its name and figures in public without having heard of them first. Before publication, a courtesy letter therefore goes to the Hiroshima Bus Association, explaining the Service's purpose and the process in this document.
+
+The letter's text (in Japanese) is [templates/courtesy-letter.md](templates/courtesy-letter.md).
+
+## Where this document is linked
+
+This document is linked from:
+
+- the app's footer (the welcome page's footer and the account page);
+- each CSV's preamble;
+- the council report's and the delay record's footnotes, and their prints.
+
+The public page will link to it once it exists.
+
+## Correction log
+
+No entries yet.
+
+| Date | Affected | Error | Action | Method version |
+|---|---|---|---|---|
+
 ## Changelog
+
+What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"](../DELAY_ANALYSIS.md#method-versions).
 
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
