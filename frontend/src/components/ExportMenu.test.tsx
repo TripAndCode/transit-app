@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import * as adminHook from "../api/useIsAdmin";
+import * as snapshots from "../api/snapshots";
 import { ExportMenu } from "./ExportMenu";
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 type Row = { a: string };
@@ -142,5 +145,71 @@ describe("ExportMenu", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+});
+
+describe("ExportMenu snapshot", () => {
+  const SPEC = { screen: "route_table" as const, agencyId: 3, query: "from=2026-10-01&to=2026-10-31&sort=avg&limit=50" };
+  const ID = "X".repeat(22);
+
+  function created() {
+    return {
+      snapshot_id: ID,
+      path: `/s/${ID}`,
+      created_at: "2026-11-09T05:05:00Z",
+      screen: "route_table",
+      agency_id: 3,
+      method_version: "2026.11.0",
+    };
+  }
+
+  it("offers a snapshot only to an admin, and only where the screen names one", () => {
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    renderMenu("/agencies/3/routes", { csv: null, snapshot: SPEC });
+    openMenu();
+    expect(screen.queryByRole("menuitem", { name: /snapshot/i })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    renderMenu("/agencies/3/routes", { csv: null });
+    openMenu();
+    expect(screen.queryByRole("menuitem", { name: /snapshot/i })).toBeNull();
+    cleanup();
+    renderMenu("/agencies/3/routes", { csv: null, snapshot: SPEC });
+    openMenu();
+    expect(screen.getByRole("menuitem", { name: /snapshot/i })).toBeInTheDocument();
+  });
+
+  it("stores the screen's own query and copies the snapshot's link", async () => {
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockResolvedValue(created());
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    renderMenu("/agencies/3/routes", { csv: null, snapshot: SPEC });
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: /snapshot/i }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/s/${ID}`));
+    expect(create).toHaveBeenCalledWith(SPEC);
+    expect(screen.getByRole("status")).toHaveTextContent("Snapshot created; link copied");
+    expect(screen.getByRole("link", { name: `${window.location.origin}/s/${ID}` })).toBeInTheDocument();
+  });
+
+  it("hands over the snapshot's link to select when the clipboard is unavailable", async () => {
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
+    vi.spyOn(snapshots, "createSnapshot").mockResolvedValue(created());
+    vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+    renderMenu("/agencies/3/routes", { csv: null, snapshot: SPEC });
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: /snapshot/i }));
+    const input = await screen.findByRole("textbox");
+    expect((input as HTMLInputElement).value).toBe(`${window.location.origin}/s/${ID}`);
+  });
+
+  it("says so, calmly, when the snapshot could not be made", async () => {
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
+    vi.spyOn(snapshots, "createSnapshot").mockRejectedValue(new Error("boom"));
+    renderMenu("/agencies/3/routes", { csv: null, snapshot: SPEC });
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: /snapshot/i }));
+    expect(await screen.findByText("Couldn't create the snapshot")).toBeInTheDocument();
   });
 });

@@ -1,0 +1,242 @@
+"""Frozen snapshots: an admin stores what a screen rendered, and anyone holding
+the id reads those exact figures and their method stamp back, however the
+aggregates behind the live screen have moved since."""
+
+import re
+from datetime import date, datetime, timezone
+
+import pytest
+
+from api.middleware.ratelimit import limiter
+from pipeline.agg_registry import METHOD_VERSION
+from tests.api.test_reports import (  # noqa: F401 -- reports_app/reports_client are fixtures
+    _record_builds,
+    reports_app,
+    reports_client,
+)
+from tests.fixtures.route_dist import seed_route_dist_day
+from tests.fixtures.users import seed_session
+
+DAY = "2026-05-14"
+ORIGIN = {"Origin": "http://test"}
+_BUILT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+_REBUILT = datetime(2026, 11, 8, 3, 0, tzinfo=timezone.utc)
+_ID = re.compile(r"^[A-Za-z0-9_-]{22}$")
+
+# Each screen's create request and the live endpoint the screen itself reads.
+_SCREENS = {
+    "route_table": ({"from": DAY, "to": DAY, "include_sparse": "1"}, "route_table?from={d}&to={d}&include_sparse=1"),
+    "council_report": ({"from": DAY, "to": DAY}, "council_summary?from={d}&to={d}"),
+}
+_BEFORE = {"A": [0] * 10 + [400] * 15, "B": [0] * 20 + [2000] * 5}
+_AFTER = {"A": [0] * 25, "B": [900] * 25}
+
+
+@pytest.fixture(autouse=True)
+def _reset_limiter():
+    limiter.reset()
+
+
+async def _seed(pool, agency_id, delays_by_route):
+    for code, delays in delays_by_route.items():
+        await seed_route_dist_day(pool, agency_id, code, date.fromisoformat(DAY), delays)
+
+
+async def _reanalyze(pool, agency_id, delays_by_route, built_at):
+    """Rewrite the aggregates the way a rebuild does: new rows, a new build stamp."""
+    from pipeline.cache import clear_all
+    from pipeline.reports.network import invalidate_network_summary
+
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
+        await conn.execute("UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, built_at)
+    await _seed(pool, agency_id, delays_by_route)
+    clear_all()
+    invalidate_network_summary()
+
+
+async def _create(client, sid, agency_id, screen="route_table", query=None, **extra):
+    body = {"screen": screen, "agency_id": agency_id, "query": _SCREENS[screen][0] if query is None else query}
+    return await client.post("/api/admin/snapshots", json={**body, **extra}, cookies={"sid": sid}, headers=ORIGIN)
+
+
+def _figures(report: dict) -> dict:
+    """What a report says, without the moment it was served."""
+    return {k: v for k, v in report.items() if k != "rendered_at"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("screen", sorted(_SCREENS))
+async def test_a_snapshot_keeps_its_figures_and_stamp_after_a_reanalyze(reports_client, aconn, screen):  # noqa: F811
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT))
+    sid = (await seed_session(aconn, role="admin")).sid
+    live_url = f"/api/{agency_id}/reports/" + _SCREENS[screen][1].format(d=DAY)
+
+    before = (await client.get(live_url, headers={"Accept-Language": "ja"})).json()
+    created = await _create(client, sid, agency_id, screen)
+    assert created.status_code == 201, created.text
+    snapshot_id = created.json()["snapshot_id"]
+    assert _ID.match(snapshot_id)
+    assert created.json()["path"] == f"/s/{snapshot_id}"
+
+    await _reanalyze(pool, agency_id, _AFTER, _REBUILT)
+    after = (await client.get(live_url, headers={"Accept-Language": "ja"})).json()
+    assert after["rows"] != before["rows"]
+    assert after["definition"]["built_at"] != before["definition"]["built_at"]
+
+    # Read back with no session at all: the link is the only credential.
+    stored = await client.get(f"/api/snapshots/{snapshot_id}")
+    assert stored.status_code == 200
+    body = stored.json()
+    assert _figures(body["payloads"]["report"]["ja"]) == _figures(before)
+    assert body["payloads"]["report"]["ja"]["definition"]["built_at"] == before["definition"]["built_at"]
+    assert body["method_version"] == METHOD_VERSION
+    assert body["screen"] == screen
+    assert "created_by" not in body
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_holds_both_languages_the_route_catalogue_and_the_resolved_scope(
+    reports_client,  # noqa: F811
+    aconn,
+):
+    """The council prose is the server's, in the reader's language, so both are
+    stored; the route labels come from the catalogue as it stood; and the
+    scope names its dates, never a rolling default."""
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name, route_long_name) "
+            "VALUES ($1, 'A', 'A', 'Aline')",
+            agency_id,
+        )
+    sid = (await seed_session(aconn, role="admin")).sid
+    snapshot_id = (await _create(client, sid, agency_id, "council_report", title="May council")).json()["snapshot_id"]
+
+    body = (await client.get(f"/api/snapshots/{snapshot_id}")).json()
+    reports = body["payloads"]["report"]
+    assert set(reports) == {"ja", "en"}
+    assert reports["ja"]["rows"] == reports["en"]["rows"]
+    assert reports["ja"]["text"] != reports["en"]["text"]
+    assert [r["route_id"] for r in body["payloads"]["routes"]] == ["A"]
+    assert set(body["payloads"]["credit"]) == {"ja", "en"}
+    assert (body["params"]["from"], body["params"]["to"]) == (DAY, DAY)
+    assert body["agency_name"] == "Reports Test Agency"
+    assert body["title"] == "May council"
+
+
+@pytest.mark.asyncio
+async def test_only_an_admin_creates_lists_or_deletes(reports_client, aconn):  # noqa: F811
+    client, agency_id, _ = reports_client
+    user = (await seed_session(aconn, role="user")).sid
+    body = {"screen": "route_table", "agency_id": agency_id, "query": {}}
+
+    assert (await client.post("/api/admin/snapshots", json=body, headers=ORIGIN)).status_code == 401
+    as_user = await client.post("/api/admin/snapshots", json=body, cookies={"sid": user}, headers=ORIGIN)
+    assert as_user.status_code == 403
+    assert (await client.get("/api/admin/snapshots", cookies={"sid": user})).status_code == 403
+    deleted = await client.delete("/api/admin/snapshots/" + "a" * 22, cookies={"sid": user}, headers=ORIGIN)
+    assert deleted.status_code == 403
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+
+
+@pytest.mark.asyncio
+async def test_a_cross_site_create_is_refused(reports_client, aconn):  # noqa: F811
+    client, agency_id, _ = reports_client
+    sid = (await seed_session(aconn, role="admin")).sid
+    resp = await client.post(
+        "/api/admin/snapshots",
+        json={"screen": "route_table", "agency_id": agency_id, "query": {}},
+        cookies={"sid": sid},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert resp.status_code == 403
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"payloads": {"report": {"ja": {"rows": [[99.9]]}}}},
+        {"query": {"from": DAY, "rows": "[[99.9]]"}},
+        {"screen": "route_page"},
+    ],
+    ids=["client-figures", "unknown-param", "route-page"],
+)
+async def test_the_figures_are_never_the_clients(reports_client, aconn, extra):  # noqa: F811
+    """Only the server's own compute fills a snapshot: a body naming figures or
+    an unknown parameter is refused, as is a screen this slice cannot render."""
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    body = {"screen": "route_table", "agency_id": agency_id, "query": {"from": DAY, "to": DAY}, **extra}
+    resp = await client.post("/api/admin/snapshots", json=body, cookies={"sid": sid}, headers=ORIGIN)
+    assert resp.status_code == 422
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_agency_is_404(reports_client, aconn):  # noqa: F811
+    client, agency_id, _ = reports_client
+    sid = (await seed_session(aconn, role="admin")).sid
+    resp = await _create(client, sid, agency_id + 1000)
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_an_over_large_payload_is_refused_and_nothing_is_stored(reports_client, aconn, monkeypatch):  # noqa: F811
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    monkeypatch.setattr("api.routers.snapshots.MAX_PAYLOAD_BYTES", 256)
+    sid = (await seed_session(aconn, role="admin")).sid
+    resp = await _create(client, sid, agency_id)
+    assert resp.status_code == 413
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+    assert await aconn.fetchval("SELECT count(*) FROM admin_audit WHERE action = 'snapshot.create'") == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_id", ["a" * 22, "short", "a" * 21 + "!"])
+async def test_an_unknown_or_malformed_id_is_the_same_404(reports_client, snapshot_id):  # noqa: F811
+    client, _, _ = reports_client
+    resp = await client.get(f"/api/snapshots/{snapshot_id}")
+    assert resp.status_code == 404
+    assert resp.json() == {"detail": "snapshot not found"}
+
+
+@pytest.mark.asyncio
+async def test_an_admin_lists_and_deletes_and_each_change_is_audited(reports_client, aconn):  # noqa: F811
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    sid, uid, _ = await seed_session(aconn, role="admin")
+    first = (await _create(client, sid, agency_id, note="draft")).json()["snapshot_id"]
+    second = (await _create(client, sid, agency_id, "council_report")).json()["snapshot_id"]
+    assert first != second
+
+    listed = (await client.get("/api/admin/snapshots", cookies={"sid": sid})).json()
+    assert [s["snapshot_id"] for s in listed] == [second, first]
+    assert all(s["created_by"] == uid and "payloads" not in s for s in listed)
+    assert listed[1]["note"] == "draft"
+    assert listed[1]["agency_id"] == agency_id
+
+    gone = await client.delete(f"/api/admin/snapshots/{first}", cookies={"sid": sid}, headers=ORIGIN)
+    assert gone.status_code == 204
+    assert (await client.get(f"/api/snapshots/{first}")).status_code == 404
+    assert (await client.get(f"/api/snapshots/{second}")).status_code == 200
+    again = await client.delete(f"/api/admin/snapshots/{first}", cookies={"sid": sid}, headers=ORIGIN)
+    assert again.status_code == 404
+
+    audit = await aconn.fetch(
+        "SELECT action, target_id, actor_id, before, after FROM admin_audit WHERE target_type = 'snapshot' ORDER BY id"
+    )
+    assert [(a["action"], a["target_id"], a["actor_id"]) for a in audit] == [
+        ("snapshot.create", first, uid),
+        ("snapshot.create", second, uid),
+        ("snapshot.delete", first, uid),
+    ]
+    # The audit names what was frozen, never the figures themselves.
+    assert all("payloads" not in (a["before"] or "") + (a["after"] or "") for a in audit)

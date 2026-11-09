@@ -1438,6 +1438,59 @@ async def get_report(
     locale: str = Depends(get_locale),
 ) -> ReportResponse | StreamingResponse:
     """Compute the named report live and render it."""
+    return await render_report(
+        report_type,
+        limit=limit,
+        format=format,
+        preset=preset,
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+        late=late,
+        early=early,
+        threshold_sec=threshold_sec,
+        include_sparse=include_sparse,
+        include_retired=include_retired,
+        include_zero_delay=include_zero_delay,
+        order=order,
+        sort=sort,
+        lang=lang,
+        agency_id=agency_id,
+        ctx=ctx,
+        conn=conn,
+        ch=ch,
+        locale=locale,
+    )
+
+
+async def render_report(
+    report_type: str,
+    *,
+    agency_id: int,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    locale: str,
+    limit: int | None = None,
+    format: str | None = None,
+    preset: str | None = None,
+    early_tolerance_sec: int | None = None,
+    late_tolerance_sec: int | None = None,
+    late: int | None = None,
+    early: EarlyTolerance = None,
+    threshold_sec: int | None = None,
+    include_sparse: bool = False,
+    include_retired: bool = False,
+    include_zero_delay: bool = False,
+    order: str | None = None,
+    sort: str | None = None,
+    lang: str | None = None,
+) -> ReportResponse | StreamingResponse:
+    """``GET /reports/{report_type}``'s whole computation, for a caller that
+    has resolved the request's parameters itself: a frozen snapshot stores
+    exactly what the endpoint would serve. Each argument means what the
+    endpoint's parameter of the same name means; the endpoint also bounds
+    ``limit``, ``late`` and the ``sort``/``order``/``lang`` values, which a
+    caller of this function checks itself."""
     if report_type not in _REPORT_TYPES:
         raise HTTPException(status_code=404, detail=f"Unknown report type '{report_type}'")
 

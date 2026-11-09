@@ -1496,6 +1496,16 @@
     "early_note": "Early = departures more than {{early}} early, as a share of the route's observations.",
     "late5_note": "Over 5 min = departures more than 5 minutes late: the share of the route's observations, and how many."
   },
+  "snapshot": {
+    "page_title": "Snapshot",
+    "banner": "Snapshot (created {{created}} JST, method {{method}})",
+    "frozen_note": "These are the figures as they stood when the snapshot was taken. Later re-analysis does not change them.",
+    "not_found": {
+      "title": "Snapshot not found",
+      "hint": "Check the link. The snapshot may have been deleted."
+    },
+    "unsupported": "This kind of snapshot can't be shown on this page yet."
+  },
   "insight_panel": {
     "title": "Worth a look",
     "no_signal": "No notable signal right now.",

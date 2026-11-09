@@ -33,6 +33,7 @@ USER_FKS: dict[tuple[str, str], str] = {
     ("feature_flags", "updated_by"): "SET NULL",
     ("pipeline_runs", "requested_by"): "SET NULL",
     ("admin_alert_acks", "acked_by"): "SET NULL",
+    ("snapshots", "created_by"): "SET NULL",
 }
 
 

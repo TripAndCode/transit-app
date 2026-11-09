@@ -8,6 +8,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { decl, ruleBody } from "../test/cssRules";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
+import * as snapshots from "../api/snapshots";
 import { AnalysisTab } from "./AnalysisTab";
 import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
@@ -756,6 +757,25 @@ describe("AnalysisTab council report", () => {
     } as never);
     return renderAnalysis("/agencies/1/analysis/reports?report=council_summary", ["council_summary"]);
   }
+
+  it("lets an admin freeze the council report it shows, and no one else", async () => {
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    showCouncil();
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    showCouncil();
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect(screen.queryByRole("menuitem", { name: /print/i })).toBeNull();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    const [, , scope, options] = vi.mocked(hooks.useReport).mock.calls.at(-1)!;
+    expect(create).toHaveBeenCalledWith({
+      screen: "council_report",
+      agencyId: 1,
+      query: hooks.reportQueryString(scope, options),
+    });
+  });
 
   it("lays the council report out as figures and prose, not a one-row table", () => {
     showCouncil();

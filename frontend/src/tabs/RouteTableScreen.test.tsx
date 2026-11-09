@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
+import * as snapshots from "../api/snapshots";
+import * as adminHook from "../api/useIsAdmin";
 import type { DefinitionMeta, ReportResponse } from "../api/types";
 import { RouteTableScreen } from "./RouteTableScreen";
 
@@ -212,5 +214,24 @@ describe("RouteTableScreen", () => {
     setup("/agencies/1/routes", tableResponse(), { isFetching: true });
     expect(screen.getAllByRole("row").length).toBeGreaterThan(1);
     expect(screen.getByRole("table").closest(".route-table__body")).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("lets an admin freeze the table as it is asked for, and keeps the menu out of everyone else's way", async () => {
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    setup("/agencies/1/routes?from=2026-09-24&to=2026-10-23&sort=on_time");
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    const { useReport, options } = setup("/agencies/1/routes?from=2026-09-24&to=2026-10-23&sort=on_time");
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    const scope = useReport.mock.calls.at(-1)![2];
+    expect(create).toHaveBeenCalledWith({
+      screen: "route_table",
+      agencyId: 1,
+      query: hooks.reportQueryString(scope, options()),
+    });
+    expect(create.mock.calls[0][0].query).toContain("sort=on_time");
   });
 });

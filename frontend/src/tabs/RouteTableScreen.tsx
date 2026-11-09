@@ -6,11 +6,13 @@ import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
 import { useAgencyId } from "../api/useAgencyId";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { useRouteNames } from "../api/useRouteNames";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { ExportMenu } from "../components/ExportMenu";
 import { InsightPanel } from "../components/InsightPanel";
 import { SkeletonTable } from "../components/Skeleton";
 import { StillWorking } from "../components/StillWorking";
@@ -23,6 +25,7 @@ import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/Ran
 import {
   ROUTE_TABLE_SORTS,
   ROUTE_TABLE_SORT_LABELS,
+  routeTableSortDirection,
   routeTableView,
   type RouteTableOrder,
   type RouteTableView,
@@ -38,13 +41,6 @@ const ORDERS = [
   ["worst", "routeTable.order.worst"],
   ["best", "routeTable.order.best"],
 ] as const satisfies readonly (readonly [RouteTableOrder, string])[];
-
-/** Which way the sorted figure runs down the table. A high on-time rate is
- *  good and every other figure's high end needs attention, so the two read
- *  opposite ways for the same order. */
-function sortDirection({ sort, order }: RouteTableView): "ascending" | "descending" {
-  return (sort !== "on_time") === (order === "worst") ? "descending" : "ascending";
-}
 
 /** The days a window covers, both ends included. */
 function windowDays(from: string, to: string): number {
@@ -62,6 +58,7 @@ export function RouteTableScreen() {
   const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
+  const isAdmin = useIsAdmin();
   const view = routeTableView(searchParams);
   const includeSparse = searchParams.get("sparse") === "1";
   const kept = { retired: searchParams.get("retired") === "1", zero_delay: searchParams.get("zero_delay") === "1" };
@@ -109,6 +106,14 @@ export function RouteTableScreen() {
             <h2>{t("routeTable.title")}</h2>
             {id != null && data && (
               <CsvLink href={apiUrl(`/api/${id}/reports/route_table?${reportQueryString(ctx, options)}&format=csv`)} />
+            )}
+            {/* Only a snapshot is new here, and only an admin takes one. */}
+            {isAdmin && id != null && (
+              <ExportMenu
+                csv={null}
+                showPrint={false}
+                snapshot={{ screen: "route_table", agencyId: id, query: reportQueryString(ctx, options) }}
+              />
             )}
           </div>
           {data?.ctx && (
@@ -172,7 +177,7 @@ export function RouteTableScreen() {
                   rows={data.rows}
                   minSamples={data.reliable_min_samples}
                   sortBy={shown.sort}
-                  sortDirection={sortDirection(shown)}
+                  sortDirection={routeTableSortDirection(shown)}
                   earlyDepartureSec={data.definition.early_departure_sec}
                 />
                 {data.rows_total != null && data.rows_total > data.rows.length && (
