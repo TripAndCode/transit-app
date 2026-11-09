@@ -96,7 +96,7 @@ class FakeClickHouse:
 
     @property
     def service_delivered_builds(self) -> list[tuple[str, dict]]:
-        return [q for q in self.queries if "schedule_relationship_trip" in q[0]]
+        return [q for q in self.queries if "AS trip_rel" in q[0]]
 
     @property
     def schedule_revision_builds(self) -> list[tuple[str, dict]]:
@@ -414,6 +414,12 @@ def test_seeding_vouches_only_for_the_versions_at_the_switch(monkeypatch):
         agg_registry.TABLES["agg_hour_daily"], version=agg_registry.TABLES["agg_hour_daily"].version + 1
     )
     monkeypatch.setitem(agg_registry.TABLES, "agg_hour_daily", bumped)
+    # A table still at its version of the switch, whatever it has been bumped to since.
+    at_the_switch = dataclasses.replace(
+        agg_registry.TABLES["agg_service_delivered_daily"],
+        version=analyze_mod._SEED_VERSIONS["agg_service_delivered_daily"],
+    )
+    monkeypatch.setitem(agg_registry.TABLES, "agg_service_delivered_daily", at_the_switch)
     conn, ch = _noop_run(seeded=True)
     assert [s for s in conn.executed if "DELETE FROM agg_hour_daily WHERE agency_id = %s" in s] or [
         sql for sql, _ in ch.commands if sql.startswith("INSERT INTO agg_hour_daily__work_a")

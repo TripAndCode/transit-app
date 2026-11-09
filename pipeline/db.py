@@ -482,7 +482,7 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     (all identical here, not repeated).
     """
     departure = f"NOT {withdrawn_ch()}"
-    where = stop_event_filter_ch(" AND ".join(part for part in ("u.scheduled_time IS NOT NULL", extra_where) if part))
+    where = f"u.scheduled_time IS NOT NULL AND {stop_event_filter_ch(extra_where)}"
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
         f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "

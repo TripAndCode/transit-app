@@ -119,31 +119,40 @@ def _poll(pg_conn, ch_client, agency_id: int, day: date, hh: int, mm: int, trip_
     ingest_live_payload(agency_id, feed, at.astimezone(timezone.utc).isoformat(), name, pg_conn, ch_client)
 
 
-def _withdraw(
-    pg_conn, ch_client, agency_id: int, day: date, hh: int, mm: int, trip_id: str, *, skipped: tuple[int, ...] = ()
+# GTFS-RT's StopTimeUpdate SCHEDULED, SKIPPED and NO_DATA, and TripDescriptor CANCELED.
+_SCHEDULED, _SKIPPED, _NO_DATA, _CANCELED = 0, 1, 2, 3
+
+
+def _report(
+    pg_conn,
+    ch_client,
+    agency_id: int,
+    day: date,
+    hh: int,
+    mm: int,
+    trip_id: str,
+    stops: dict[int, tuple[int, int | None]],
+    *,
+    trip_status: int = _SCHEDULED,
 ) -> None:
-    """One poll at *hh*:*mm* JST of service day *day* that reports *trip_id*
-    with the stops numbered in *skipped* SKIPPED or, given none, CANCELED with
-    every stop NO_DATA."""
+    """One poll at *hh*:*mm* JST of service day *day* reporting *trip_id* with
+    *trip_status*, and each stop of *stops*, by sequence, with its status and
+    departure delay (None for none)."""
     at = datetime.combine(day, time(hh, mm), tzinfo=JST)
-    canceled, skipped_stop, no_data = 3, 1, 2
-    listed = skipped or tuple(range(1, len(STOPS) + 1))
     feed = trip_update_feed(
         trip_update(
             trip_id,
             *(
-                stop_time_update(
-                    seq, stop_id=STOPS[seq - 1], schedule_relationship=skipped_stop if skipped else no_data
-                )
-                for seq in listed
+                stop_time_update(seq, departure_delay=delay, stop_id=STOPS[seq - 1], schedule_relationship=status)
+                for seq, (status, delay) in stops.items()
             ),
             route_id=ROUTE,
             start_date=f"{day:%Y%m%d}",
-            schedule_relationship=0 if skipped else canceled,
+            schedule_relationship=trip_status,
         ),
         timestamp=int(at.timestamp()),
     )
-    name = f"live_filing/{day:%Y%m%d}/TripUpdate_{trip_id}_{hh:02d}{mm:02d}00_withdrawn.pb"
+    name = f"live_filing/{day:%Y%m%d}/TripUpdate_{trip_id}_{hh:02d}{mm:02d}00_status.pb"
     ingest_live_payload(agency_id, feed, at.astimezone(timezone.utc).isoformat(), name, pg_conn, ch_client)
 
 
@@ -194,11 +203,18 @@ def refiled(pg_conn, ch_client, tmp_path) -> Refiled:
 @pytest.fixture
 def withdrawn(refiled, pg_conn, ch_client) -> Refiled:
     """The refiled day, where the feed, after predicting them, reports f's last
-    three stops SKIPPED and then cancels g. Both are polled after B's load,
-    like the predictions they withdraw, so the day reads them REFIT."""
-    _withdraw(pg_conn, ch_client, refiled.agency_id, refiled.day, 12, 5, "f", skipped=(4, 5, 6))
-    _withdraw(pg_conn, ch_client, refiled.agency_id, refiled.day, 12, 15, "g")
-    _promote_and_analyze(pg_conn, ch_client, refiled.agency_id)
+    three stops SKIPPED, each still carrying a delay, and then cancels g. It
+    reports b's last stop SKIPPED too, and then predicts it again, 90 seconds
+    late. All are polled after B's load, like the predictions they follow, so
+    the day reads them REFIT."""
+    agency_id, day = refiled.agency_id, refiled.day
+    _report(pg_conn, ch_client, agency_id, day, 12, 5, "f", {seq: (_SKIPPED, 75) for seq in (4, 5, 6)})
+    every_stop = range(1, len(STOPS) + 1)
+    no_data = {seq: (_NO_DATA, None) for seq in every_stop}
+    _report(pg_conn, ch_client, agency_id, day, 12, 15, "g", no_data, trip_status=_CANCELED)
+    _report(pg_conn, ch_client, agency_id, day, 12, 35, "b", {6: (_SKIPPED, None)})
+    _report(pg_conn, ch_client, agency_id, day, 12, 37, "b", {6: (_SCHEDULED, 90)})
+    _promote_and_analyze(pg_conn, ch_client, agency_id)
     return refiled
 
 
@@ -447,7 +463,8 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
 async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(withdrawn, aconn, ch_async_client):
     """Each stop's latest report decides whether it departed, in the live form
     of a REFIT read as in analyze's: of the route's 24 noon departures, f
-    keeps its first three and g none."""
+    keeps its first three and g none, and b keeps its last stop at the delay
+    predicted after the skip."""
     from api.range import updates_filter_ch
     from pipeline.db import build_dedup_ch_sql
     from pipeline.reports.filters import _dedup_cte_ch, _stop_visits_cte_ch, ctx_filing
@@ -461,15 +478,16 @@ async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(with
     cte, params = _dedup_cte_ch(ctx, filed)
     where = updates_filter_ch(ctx, refit=True)
     exact = build_dedup_ch_sql(extra_where=where.raw, filed_where=where.filed, stamp=Stamp.REFIT)
-    read = "SELECT trip_id, stop_sequence FROM deduped ORDER BY trip_id, stop_sequence"
+    read = "SELECT trip_id, stop_sequence, dep_delay FROM deduped ORDER BY trip_id, stop_sequence"
     live = await ch_async_client.query(f"WITH {cte} {read}", parameters={"agency_id": agency_id, **params})
     analyzes = await ch_async_client.query(
         f"WITH deduped AS ({exact}) {read}", parameters={"agency_id": agency_id, **where.params, **filed.params}
     )
     assert live.result_rows == analyzes.result_rows
     kept: dict[str, list[int]] = {}
-    for trip_id, stop_sequence in live.result_rows:
+    for trip_id, stop_sequence, _delay in live.result_rows:
         kept.setdefault(trip_id, []).append(stop_sequence)
+    assert ("b", 6, 90) in live.result_rows
     every_stop = list(range(1, len(STOPS) + 1))
     assert kept == {"b": every_stop, "c": every_stop, "e": every_stop, "f": [1, 2, 3]}
 
