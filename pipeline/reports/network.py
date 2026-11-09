@@ -61,6 +61,7 @@ from api.clickhouse import max_captured_at_before_by_agency
 from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.freshness import is_stale
 from pipeline.histogram import on_time_count_sql
+from pipeline.reports import comparability
 from pipeline.reports.comparability import BOARD_ON_TIME_WINDOW, assess
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
@@ -186,7 +187,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         f = feed.get(aid)
         raw = int(f["raw"]) if f and f["raw"] else 0
         clamp = int(f["clamp"]) if f and f["clamp"] else 0
-        clamp_pct = round(clamp / raw * 100, 2) if raw else None
+        clamp_pct = comparability.clamp_pct(clamp, raw)
         data_from = p["data_from"].isoformat() if (p and p["data_from"]) else None
         data_to = p["data_to"].isoformat() if (p and p["data_to"]) else None
         d = delivered[aid]

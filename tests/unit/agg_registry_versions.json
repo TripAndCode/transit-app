@@ -63,6 +63,10 @@
     "hash": "c62a399601f8f73a7e435a8d0f180ce6fbe14f7a16cd14141f4f57739716f139",
     "version": 2
   },
+  "feed_quality_monthly": {
+    "hash": "e0d8640f31543452ce1c18808104059a2573ec4e298457d424aa4c3ef201b43f",
+    "version": 1
+  },
   "route_delay_counts": {
     "hash": "5df1ea45643fb4fe551dda79b93cb8d4a0b256a2c85c7c8457b492cb24ac2619",
     "version": 4

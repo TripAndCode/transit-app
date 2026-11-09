@@ -116,6 +116,31 @@ def plan_ctes(agency_ids: str, from_date: str, to_date: str) -> str:
     )"""
 
 
+def stop_plan_ctes(agency_ids: str) -> str:
+    """The CTEs, after :func:`plan_ctes` in the same WITH, that end in
+    ``timetable_stop_plan(agency_id, day, planned_stop_events)``: for each day
+    ``timetable_plan`` has, the stop events its running trips plan, one per
+    ``static_stop_times`` row, 0 on a covered day nothing runs. Counted once
+    per service and multiplied by its running days, as trips are. Kept apart
+    from ``timetable_plan`` because only the capture and the feed-quality
+    scorecard read stop times; the board's plan never does."""
+    return f""",
+    service_stop_events AS (
+        SELECT t.agency_id, t.service_id, COUNT(*) AS stop_events
+        FROM static_trips t
+        JOIN static_stop_times st ON st.agency_id = t.agency_id AND st.trip_id = t.trip_id
+        WHERE t.agency_id = ANY({agency_ids})
+        GROUP BY t.agency_id, t.service_id
+    ),
+    timetable_stop_plan AS (
+        SELECT cv.agency_id, cv.day, COALESCE(SUM(s.stop_events), 0)::bigint AS planned_stop_events
+        FROM covered cv
+        LEFT JOIN running r ON r.agency_id = cv.agency_id AND r.day = cv.day
+        LEFT JOIN service_stop_events s ON s.agency_id = r.agency_id AND s.service_id = r.service_id
+        GROUP BY cv.agency_id, cv.day
+    )"""
+
+
 _TRIP_IDS_SQL = (
     "WITH"
     + plan_ctes("$1::int[]", "$2::date", "$3::date")
@@ -162,9 +187,12 @@ def running_trip_join(agency_id: str, trip_id: str, day: str) -> str:
 _CAPTURE_SQL = (
     "WITH"
     + plan_ctes("ARRAY[%(agency_id)s]::int[]", "%(from_date)s::date", "%(to_date)s::date")
+    + stop_plan_ctes("ARRAY[%(agency_id)s]::int[]")
     + """
-    INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips)
-    SELECT agency_id, day, planned FROM timetable_plan
+    INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips, planned_stop_events)
+    SELECT p.agency_id, p.day, p.planned, sp.planned_stop_events
+    FROM timetable_plan p
+    JOIN timetable_stop_plan sp ON sp.agency_id = p.agency_id AND sp.day = p.day
     ON CONFLICT (agency_id, service_date) DO NOTHING
     """
 )

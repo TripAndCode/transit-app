@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
+from pipeline.feed_quality import COLUMNS as FEED_QUALITY_COLUMNS
+from pipeline.reports.comparability import clamp_pct
 from pipeline.reports.performance_standard import METRIC_TYPES
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 from pipeline.timetable_in_force import fetch_day
@@ -36,6 +39,8 @@ __all__ = [
     "CLAMP_HISTORY_DAYS",
     "CLAMP_HISTORY_SQL",
     "CURRENT_STATIC_VERSION_SQL",
+    "FEED_QUALITY_MONTHS",
+    "FEED_QUALITY_SQL",
     "METRIC_TYPES",
     "RT_COVERAGE_FIELDS",
     "RT_COVERAGE_SQL",
@@ -47,6 +52,7 @@ __all__ = [
     "WEIGHTS_SQL",
     "build_agency_health",
     "build_clamp_history",
+    "build_feed_quality",
     "build_rt_coverage",
     "build_static_versions",
     "build_weights_coverage",
@@ -84,6 +90,18 @@ CLAMP_HISTORY_SQL = """
     FROM agg_feed_health
     WHERE agency_id = $1 AND date >= $2 AND date <= $3
     ORDER BY date
+"""
+
+#: The drawer's feed-quality trend: the newest month built and the five before it.
+FEED_QUALITY_MONTHS = 6
+
+# Every scorecard column but the agency's id (pipeline.feed_quality.COLUMNS).
+FEED_QUALITY_SQL = f"""
+    SELECT {", ".join(column for column in FEED_QUALITY_COLUMNS if column != "agency_id")}
+    FROM feed_quality_monthly
+    WHERE agency_id = $1
+    ORDER BY month DESC
+    LIMIT $2
 """
 
 # `routes` and `calendar_until` are not columns of agg_static_version_summary
@@ -337,7 +355,25 @@ def build_clamp_history(
         row = by_date.get(day)
         raw = int(row["raw_samples"]) if row and row["raw_samples"] else 0
         clamp = int(row["clamp_count"]) if row and row["clamp_count"] else 0
-        out.append({"date": day.isoformat(), "clamp_pct": round(clamp / raw * 100, 2) if raw else None})
+        out.append({"date": day.isoformat(), "clamp_pct": clamp_pct(clamp, raw)})
+    return out
+
+
+def build_feed_quality(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The scorecard's months in the order read, each value as JSON carries
+    it: a date as ISO text, a NUMERIC share as a float, a missing figure as
+    ``None`` beside its reason."""
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        month: dict[str, Any] = {}
+        for key, value in row.items():
+            if isinstance(value, date):
+                month[key] = value.isoformat()
+            elif isinstance(value, Decimal):
+                month[key] = float(value)
+            else:
+                month[key] = value
+        out.append(month)
     return out
 
 

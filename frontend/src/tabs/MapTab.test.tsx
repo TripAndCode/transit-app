@@ -16,6 +16,7 @@ import { decl, ruleBody } from "../test/cssRules";
 import { formatDateTime, formatReportTime } from "../utils/format";
 import type { LiveTrip, LiveTripsResponse, RouteSummaryResponse, ServiceHoursResponse } from "../api/types";
 import { MockMap } from "../test/maplibreMock";
+import { WINDOW_DELAYS, liveRowsWithDelays } from "../test/liveTripFixtures";
 
 vi.mock("maplibre-gl", () => import("../test/maplibreMock"));
 
@@ -166,6 +167,115 @@ describe("MapTab", () => {
   });
 });
 
+function onTimeTileValue(): string | null {
+  return screen.getByText("On-time rate").closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
+}
+
+function lateTileValue(label: RegExp): string | null {
+  return screen.getByText(label).closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
+}
+
+describe("MapTab's on-time rate", () => {
+  function mockLiveDelays(delays: number[]) {
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips(liveRowsWithDelays(delays)),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+  }
+
+  beforeEach(() => {
+    stubReducedMotion();
+    mockCommonHooks();
+    mockLiveDelays(WINDOW_DELAYS);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts the default window, both edges on time, and says it is this moment's trips under that window", () => {
+    renderMap();
+    expect(onTimeTileValue()).toBe("57%");
+    const note = screen.getByTestId("live-on-time-note");
+    expect(note).toHaveTextContent("within 5 min late, early by up to 1 min");
+    expect(note).toHaveTextContent("trips reporting now");
+    expect(note).toHaveTextContent("not a period's departures");
+  });
+
+  it("counts the window the scope names, and names that one", () => {
+    renderMap("1", "?early=any&late=60");
+    expect(onTimeTileValue()).toBe("43%");
+    expect(screen.getByTestId("live-on-time-note")).toHaveTextContent("within 1 min late, any early departure on time");
+  });
+
+  it("counts a trip on the late edge on time only and one a second past it late only, so the tiles split the trips", () => {
+    mockLiveDelays([0, 300, 301]);
+    renderMap();
+    expect(onTimeTileValue()).toBe("67%");
+    expect(document.querySelectorAll(".focus-trip")).toHaveLength(1);
+    expect(lateTileValue(/^More than 5\smin late$/)).toBe("1");
+  });
+
+  it("moves the late tile, its label and the delayed list to the window's late edge", () => {
+    mockLiveDelays([0, 60, 61]);
+    renderMap("1", "?late=60");
+    expect(onTimeTileValue()).toBe("67%");
+    expect(document.querySelectorAll(".focus-trip")).toHaveLength(1);
+    expect(lateTileValue(/^More than 1\smin late$/)).toBe("1");
+  });
+
+  it("says no trip is past the late edge in the edge's words", () => {
+    mockLiveDelays([0, 300]);
+    renderMap();
+    expect(screen.getByText(/^No delays of more than 5\smin observed for these filters$/)).toBeInTheDocument();
+  });
+
+  it("prints a late edge off the whole minute the same way on the tile and in the note", () => {
+    mockLiveDelays([0, 90, 91]);
+    renderMap("1", "?late=90");
+    expect(lateTileValue(/^More than 1\.5\smin late$/)).toBe("1");
+    expect(screen.getByTestId("live-on-time-note")).toHaveTextContent("within 1.5 min late");
+    cleanup();
+    mockLiveDelays([0]);
+    renderMap("1", "?late=90");
+    expect(screen.getByText(/^No delays of more than 1\.5\smin observed for these filters$/)).toBeInTheDocument();
+  });
+
+  it("says how many trips ran earlier than the window allows, since neither tile counts them", () => {
+    renderMap();
+    expect(screen.getByTestId("live-early-note")).toHaveTextContent(/^2 trips more than 1\smin early count as neither late nor on time\.$/);
+  });
+
+  it("says nothing of early trips when none ran early beyond the window, or the window takes every early departure", () => {
+    mockLiveDelays([-60, 0, 301]);
+    renderMap();
+    expect(screen.queryByTestId("live-early-note")).toBeNull();
+    cleanup();
+    mockLiveDelays(WINDOW_DELAYS);
+    renderMap("1", "?early=any");
+    expect(screen.queryByTestId("live-early-note")).toBeNull();
+  });
+
+  it("says in Japanese which window it counts and that it is not the period's figure", async () => {
+    await i18n.changeLanguage("ja");
+    try {
+      renderMap();
+      const note = screen.getByTestId("live-on-time-note");
+      expect(note).toHaveTextContent("いま報告している便"); // i18n-ignore: asserts the ja copy
+      expect(note).toHaveTextContent("遅れ5分以内、早発は1分まで"); // i18n-ignore: asserts the ja copy
+      expect(note).toHaveTextContent("期間の定時率とは数える対象が違います"); // i18n-ignore: asserts the ja copy
+      expect(screen.getByText("5分を超える遅れ")).toBeInTheDocument(); // i18n-ignore: asserts the ja copy
+      expect(screen.getByTestId("live-early-note")).toHaveTextContent("1分を超えて早発した2便は、遅れにも定時にも数えません"); // i18n-ignore: asserts the ja copy
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+});
+
 describe("MapTab day playback scope", () => {
   beforeEach(() => {
     stubReducedMotion();
@@ -264,7 +374,7 @@ describe("MapTab when no trip is reporting", () => {
     mockLive(LAST_REPORT, [reported("t1", LAST_REPORT)]);
     renderMap();
     expect(tileValue("Observed")).toBe("—");
-    expect(tileValue(/^5\+\smin late$/)).toBe("—");
+    expect(tileValue(/^More than 5\smin late$/)).toBe("—");
     expect(screen.queryByText("On-time rate")).toBeNull();
   });
 
@@ -513,7 +623,7 @@ describe("MapTab when no trip is reporting", () => {
   it("claims no absence of delays while nothing is observed", () => {
     mockLive(null);
     renderMap();
-    expect(screen.queryByText("No delays of 5+ minutes observed for these filters")).toBeNull();
+    expect(screen.queryByText(/^No delays of more than/)).toBeNull();
   });
 });
 

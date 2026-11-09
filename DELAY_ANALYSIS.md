@@ -54,6 +54,7 @@ build day.
 | `2026.11.2` | Each day's feed-health row also counts its observations by ingest source: from the collector's archive, or from the live path. The stamp files each day under the source most of its observations came from. No delay or on-time figure changes. | `agg_feed_health` |
 | `2026.11.3` | Each reading is filed under the timetable in force on its service day: the newest loaded timetable whose feed dates, or else calendar, cover that day. Until now a reading took whichever timetable was loaded when it arrived, so a timetable published ahead of its first day was applied to the rest of the day before. Such readings now take the timetable in force for their scheduled time, day type and stop, and for their route where the feed named none. A day no known timetable covers keeps the timetable its readings joined. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_stop_routes`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_schedule_revision_daily`, `route_delay_counts`, `stop_route_days` |
 | `2026.11.4` | The feed's last report on a stop decides whether it departed. A trip reported CANCELED, or a stop reported SKIPPED, after a prediction of it leaves no departure, where the prediction had counted as one; a prediction reported after either restores it. A trip is not run when its last status is CANCELED, or when every stop it reports with a delay or a status was last so reported SKIPPED; a stop reported only without either counts neither way, and a trip that skipped only some stops ran, where any skipped stop had counted it as not run. A report with neither a delay nor a CANCELED or SKIPPED status leaves the report before it standing, in the delay figures and the service-delivered rate alike. A trip cancelled without listing any stop is kept and counts as not run, where it had been lost. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_service_delivered_daily`, `route_delay_counts` |
+| `2026.11.5` | Each agency's monthly feed-quality scorecard: RT and stop-event completeness, message age at capture, the clamp share and RT field coverage (see "Feed-quality scorecard" below). No delay or on-time figure changes. | `feed_quality_monthly` |
 
 ## What counts as on time
 
@@ -92,6 +93,36 @@ identified by its method version and its preset together, and the stamp shows bo
 CSV preamble's `プリセット=` (with the preset's plain name, such as
 `standard_m1_p5（業界標準）`) and `算出方法=`, and the footnotes' on-time definition
 (「定時の定義（業界標準）：…」) and method line.
+
+## Feed-quality scorecard
+
+Each analyze run keeps `feed_quality_monthly`, one row per agency and calendar month of
+service date (`pipeline/feed_quality.py`). A month counts its service dates from the 1st
+through its last day, or, for the month in progress, through the last closed service
+day, and never past the newest day any agency's aggregates reach, where the agencies
+board's coverage stops too: a later day is a lag every feed shares, not trips one feed
+missed. `through_date` names where it stops. A month is rebuilt when a day of it changed
+or when its window has grown since it was built, so a feed that stops reporting still
+has its planned days counted against it once other feeds' days move past it. An agency
+analyzed before the others in the same run counts the days they reached by its turn,
+and its next run catches up.
+
+| Figure | Definition |
+|---|---|
+| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days. The agencies board's coverage, by the same rule and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board reads over the same days. |
+| Stop events | Stop events the feed reported, counted once per trip, stop and service date however often reported, of the stop times the planned trips call at. A stop event is reported when any poll of it carries a plausible departure or arrival delay, or reports its trip CANCELED or its stop SKIPPED. This is reporting coverage, not the service-delivered rate: a cancellation is something the feed said about the stop, so it counts here, where the departure figures let the feed's last report decide whether the stop departed. Only the planned days whose stop events are known count (`stop_plan_days`): the day's capture saves them beside its planned trips, and a day saved before it did keeps them unknown. |
+| Message age | Per live poll, the instant it was captured minus its FeedHeader timestamp: the median and 95th percentile, interpolated linearly between the closest ranks (ClickHouse's `quantilesExactInclusive`, the rule of numpy's default), with the number of polls measured. Archive ingest stamps a row's capture time from that same header, so an archived poll's age is zero by construction and is not counted. |
+| Implausible readings | The board's clamp share: readings beyond the plausibility clamp, of the readings that carried a delay (`agg_feed_health`). |
+| Field coverage | For each of `stop_id`, `arr_delay`, the trip's and the stop's `schedule_relationship`, the share of stored stop_time_updates carrying it: the unit the RT field-coverage probe measures one poll in. |
+| VehiclePositions | Not recorded: nothing the app reads says which feeds publish them. |
+
+A figure the feed or the app cannot supply is empty beside a reason, never 0. Trips and
+stop events need trip IDs matched to the timetable (`coverage_unknown` otherwise, the
+gate's reason) and a plan (`no_plan`); stop events also need a known stop plan
+(`no_stop_plan`). Message age needs a live poll (`archive_stamped`) with a header
+(`no_header`). Field coverage needs an ingest strategy that stores the fields
+(`feed_cannot_report`), and every figure needs an observation (`no_data`). The admin
+agency drawer shows the newest month and the five before it.
 
 ## Serving
 

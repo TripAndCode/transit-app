@@ -15,6 +15,7 @@ import { formatApiError } from "../../api/client";
 import { formatDateTime, EM_DASH } from "../../utils/format";
 import { AdminButton, StatusChip } from "./adminControls";
 import { ClampSparkline } from "./ClampSparkline";
+import { FeedQualityTrend } from "./FeedQualityTrend";
 import { useRowDrafts } from "./useRowDrafts";
 
 /** pipeline/reports/performance_standard.py's METRIC_TYPES. */
@@ -504,6 +505,12 @@ export function AgencyDiagnosticsDrawer({
               );
             })}
           </KeyValueGrid>
+
+          <SectionTitle>{t("admin.agency_diag.quality_section")}</SectionTitle>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
+            {t("admin.agency_diag.quality_scope_note")}
+          </div>
+          <FeedQualityTrend months={data.feed_quality} />
 
           <SectionTitle>{t("admin.agency_diag.static_section")}</SectionTitle>
           {data.static_versions.length === 0 ? (

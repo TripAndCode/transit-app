@@ -42,6 +42,7 @@ Aggregation tables produced:
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
   section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
+- feed_quality_monthly — per-month feed-quality scorecard (pipeline/feed_quality.py)
 - agg_meta             — last analyze() time per agency (forensic)
 - agg_table_state      — each table's fingerprint, which decides when the next run rebuilds it in full
 
@@ -88,7 +89,15 @@ from typing import NamedTuple
 
 import psycopg2.extras
 
-from pipeline import agg_registry, agg_sql, ch_aggregates, rebuild_headline, static_archive, static_headways
+from pipeline import (
+    agg_registry,
+    agg_sql,
+    ch_aggregates,
+    feed_quality,
+    rebuild_headline,
+    static_archive,
+    static_headways,
+)
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
@@ -1696,9 +1705,21 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
 
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
-        # Last, so a Postgres builder that fails above leaves ClickHouse
-        # untouched too.
+        # After every Postgres builder but the scorecard, which reads their
+        # copy, so one that fails above leaves ClickHouse untouched too.
         _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join, refit)
+
+        # ── feed_quality_monthly (per-month feed-quality scorecard) ──
+        # After the ClickHouse tables, whose agg_route_daily copy it reads,
+        # and agg_feed_health above. A whole rebuild of agg_route_daily, which
+        # _ch_agg_scopes can decide beyond the plan, reaches every month.
+        quality_scope = scopes[feed_quality.TABLE]
+        if ch_scopes.get("agg_route_daily", quality_scope) is None:
+            quality_scope = None
+        with _step(f"{feed_quality.TABLE}: build"):
+            quality_rewritten = feed_quality.rebuild(
+                agency_id, ingest_strategy, quality_scope, feed_quality.last_closed_day(), conn, ch_client
+            )
 
         # ── agg_meta: record of this build ───────────────────────────────
         # Upserted (not in the DELETE/rebuild loop) — one row per agency.
@@ -1721,6 +1742,11 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             # ch_scopes is what the ClickHouse tables actually rebuilt, which
             # can be more than the plan's scope when their two stores disagree.
             rewritten = {name for name, scope in {**scopes, **ch_scopes}.items() if scope != []}
+            # Its months are built as their windows grow, not only for a changed date.
+            if quality_rewritten:
+                rewritten.add(feed_quality.TABLE)
+            else:
+                rewritten.discard(feed_quality.TABLE)
             _record_fingerprints(conn, agency_id, plan.current, rewritten)
             _record_in_force(conn, agency_id, join)
             cur.execute(
