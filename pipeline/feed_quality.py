@@ -80,7 +80,7 @@ Missing = Literal[
 
 #: Message age's median and 95th percentile, by linear interpolation between
 #: the closest ranks (ClickHouse's ``quantilesExactInclusive``, the rule of
-#: numpy's default and Excel's PERCENTILE.INC), in seconds.
+#: numpy's default and Excel's PERCENTILE.INC), in seconds to one decimal.
 MESSAGE_AGE_QUANTILES = (0.5, 0.95)
 
 COLUMNS: tuple[str, ...] = (
@@ -365,7 +365,7 @@ def build_month(
         day_rows=day_rows,
         live_polls=int(live_polls),
         polls=int(polls),
-        ages=(float(ages[0]), float(ages[1])) if polls else None,
+        ages=(round(float(ages[0]), 1), round(float(ages[1]), 1)) if polls else None,
         raw_samples=raw_samples,
         clamp_count=clamp_count,
         total_rows=total_rows,

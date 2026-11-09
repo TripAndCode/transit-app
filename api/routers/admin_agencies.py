@@ -93,6 +93,41 @@ class ClampDay(BaseModel):
     clamp_pct: float | None
 
 
+class FeedQualityMonth(BaseModel):
+    """One month of the feed-quality scorecard (pipeline.feed_quality). Each
+    figure is ``None`` exactly when its ``*_missing`` reason is set."""
+
+    month: str
+    through_date: str
+    covered_days: int
+    window_days: int
+    observed_trips: int | None
+    planned_trips: int | None
+    rt_completeness_pct: float | None
+    rt_completeness_missing: str | None
+    observed_stop_events: int | None
+    planned_stop_events: int | None
+    stop_plan_days: int
+    stop_completeness_pct: float | None
+    stop_completeness_missing: str | None
+    message_age_polls: int
+    message_age_p50_sec: float | None
+    message_age_p95_sec: float | None
+    message_age_missing: str | None
+    raw_samples: int
+    clamp_count: int
+    clamp_pct: float | None
+    clamp_missing: str | None
+    stop_time_updates: int
+    stop_id_pct: float | None
+    arr_delay_pct: float | None
+    schedule_relationship_trip_pct: float | None
+    schedule_relationship_stop_pct: float | None
+    field_coverage_missing: str | None
+    vehicle_positions_available: bool | None
+    vehicle_positions_missing: str | None
+
+
 class WeatherStation(BaseModel):
     station_id: str
     station_name: str
@@ -199,6 +234,8 @@ class AgencyDiagnostics(BaseModel):
     standards_count: int
     weights: list[WeightRow]
     weights_coverage: WeightsCoverage
+    #: Newest month first, up to ``FEED_QUALITY_MONTHS``.
+    feed_quality: list[FeedQualityMonth]
 
 
 # ── request models ───────────────────────────────────────────────────────
@@ -317,13 +354,13 @@ async def agency_diagnostics(
 ) -> AgencyDiagnostics:
     """Everything the agency drawer renders, in one round of queries.
 
-    The seven reads below have no dependency on each other, so they run
+    The eight reads below have no dependency on each other, so they run
     concurrently, each on its own connection acquired from the pool: a
     single asyncpg connection cannot multiplex queries, so awaiting them one
-    at a time would serialize seven round trips for no reason. The header
+    at a time would serialize eight round trips for no reason. The header
     lookup runs first, to 404 before spending pool connections on an agency
     that doesn't exist, and gives its connection back before the others are
-    taken: a request holding one while it waits for seven more is how enough
+    taken: a request holding one while it waits for eight more is how enough
     concurrent requests drain the pool and wait on each other forever.
     """
     pool = request.app.state.pool
@@ -352,6 +389,7 @@ async def agency_diagnostics(
         _fetch(ad.STANDARDS_SQL, agency_id),
         _fetch(ad.WEIGHTS_SQL, agency_id),
         _fetchrow(ad.WEIGHTS_COVERAGE_SQL, agency_id),
+        _fetch(ad.FEED_QUALITY_SQL, agency_id, ad.FEED_QUALITY_MONTHS),
     )
     probe_rows = cast("list[asyncpg.Record]", gathered[0])
     clamp_rows = cast("list[asyncpg.Record]", gathered[1])
@@ -360,6 +398,7 @@ async def agency_diagnostics(
     standard_rows = cast("list[asyncpg.Record]", gathered[4])
     weight_rows = cast("list[asyncpg.Record]", gathered[5])
     coverage_row = cast("asyncpg.Record | None", gathered[6])
+    quality_rows = cast("list[asyncpg.Record]", gathered[7])
 
     latest_data_date: date | None = header["latest_data_date"]
     analyzed_at = header["analyzed_at"]
@@ -389,6 +428,7 @@ async def agency_diagnostics(
                 coverage_row["routes_total"] if coverage_row else 0,
             )
         ),
+        feed_quality=[FeedQualityMonth(**m) for m in ad.build_feed_quality([dict(r) for r in quality_rows])],
     )
 
 
