@@ -5,9 +5,8 @@ it rewrote is on record when it happens.
 
 **Which runs** (:func:`is_rebuild`): one whose plan rebuilds HEADLINE_TABLE,
 the table the figures are read from, in full: because its fingerprint moved,
-because it has none stored (every table after ``analyze --full``), because a
-table it is computed from goes in full, or because there is no ledger to scope
-it by. A plan that rebuilds only other tables leaves the figures' rows
+because it has none stored (every table after ``analyze --full``), or because
+there is no ledger to scope it by. A plan that rebuilds only other tables leaves the figures' rows
 standing. A run over changed days rebuilds only those days, and a store repair
 (``pipeline.analyze._ch_agg_scopes``) rebuilds the table under the method it was
 built with, so neither is one. An agency with nothing built yet has no "before"
@@ -68,8 +67,8 @@ def is_rebuild(reasons: Mapping[str, str]) -> bool:
     """Whether a plan with these per-table reasons rebuilds the history the
     figures are read from. *reasons* names every table the plan rebuilds in
     full (``pipeline.agg_registry.table_scopes``), and HEADLINE_TABLE is a
-    dated table, which goes in full only for a reason of its own or of a table
-    it is computed from."""
+    dated table with no upstream table, so it goes in full only for a reason
+    of its own."""
     return HEADLINE_TABLE in reasons
 
 
