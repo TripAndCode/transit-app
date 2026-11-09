@@ -166,6 +166,81 @@ describe("MapTab", () => {
   });
 });
 
+// Two beyond a minute early, one on the early edge, two inside the late side,
+// one on the 5-minute edge and one past it. Each window counts a different
+// share of them: the industry default 4 of 7, any-early-to-1-min 3 of 7, and
+// "everything under 5 minutes late" 5 of 7.
+const WINDOW_DELAYS = [-90, -61, -60, 120, 299, 300, 301];
+
+function liveRowsWithDelays(delays: number[]): LiveTrip[] {
+  const capturedAt = new Date().toISOString();
+  return delays.map((dep_delay, i) => ({
+    trip_id: `t${i}`,
+    route_code: "R1",
+    service_type: null,
+    scheduled_time: "08:00:00",
+    dep_delay,
+    captured_at: capturedAt,
+    stop_id: `s${i}`,
+    stop_sequence: 1,
+    stop_name: "Stop",
+    stop_lat: 40.8,
+    stop_lon: 140.7,
+    headsign: "Downtown",
+  }));
+}
+
+function onTimeTileValue(): string | null {
+  return screen.getByText("On-time rate").closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
+}
+
+describe("MapTab's on-time rate", () => {
+  beforeEach(() => {
+    stubReducedMotion();
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips(liveRowsWithDelays(WINDOW_DELAYS)),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("counts the default window, both edges on time, and says it is this moment's trips under that window", () => {
+    renderMap();
+    expect(onTimeTileValue()).toBe("57%");
+    const note = screen.getByTestId("live-on-time-note");
+    expect(note).toHaveTextContent("within 5 min late, early by up to 1 min");
+    expect(note).toHaveTextContent("trips reporting now");
+    expect(note).toHaveTextContent("not a period's departures");
+  });
+
+  it("counts the window the scope names, and names that one", () => {
+    renderMap("1", "?early=any&late=60");
+    expect(onTimeTileValue()).toBe("43%");
+    expect(screen.getByTestId("live-on-time-note")).toHaveTextContent("within 1 min late, any early departure on time");
+  });
+
+  it("says in Japanese which window it counts and that it is not the period's figure", async () => {
+    await i18n.changeLanguage("ja");
+    try {
+      renderMap();
+      const note = screen.getByTestId("live-on-time-note");
+      expect(note).toHaveTextContent("いま報告している便"); // i18n-ignore: asserts the ja copy
+      expect(note).toHaveTextContent("遅れ5分以内、早発は1分まで"); // i18n-ignore: asserts the ja copy
+      expect(note).toHaveTextContent("期間の定時率とは数える対象が違います"); // i18n-ignore: asserts the ja copy
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+});
+
 describe("MapTab day playback scope", () => {
   beforeEach(() => {
     stubReducedMotion();
