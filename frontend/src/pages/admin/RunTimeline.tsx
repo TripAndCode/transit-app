@@ -106,7 +106,10 @@ export function RebuildList({ runs, dayStart, now }: { runs: readonly PipelineRu
               {t("admin.board.rebuild_scope", {
                 from: headline.first_day,
                 to: headline.last_day,
-                preset: headline.preset ?? EM_DASH,
+                preset:
+                  headline.preset == null
+                    ? EM_DASH
+                    : t(`definitionMeta.preset.${headline.preset}`, { defaultValue: headline.preset }),
                 version: headline.method_version,
               })}
             </span>

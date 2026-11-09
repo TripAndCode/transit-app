@@ -30,11 +30,12 @@ checkout at the path `OPS_STATUS_REPO` names (see `README.md` and
 `POST /api/admin/runs` triggers a manual run and writes `pipeline_runs`
 (see `api/admin_runs.py`).
 
-An analyze run that rebuilds an agency's history because a table's method
-version or fingerprint moved (`make analyze-all` after a `METHOD_VERSIONS`
-bump, or `FULL=1`) carries the agency's headline before and after it: the
-council summary's on-time rate and average delay, under the default on-time
-definition, over the service dates the agency had built when the run began.
+An analyze run that rebuilds `agg_route_daily_dist`, the table the headline is
+read from, in full because its method version or fingerprint moved (`make
+analyze-all` after a `METHOD_VERSIONS` bump to it, or `FULL=1`) carries the
+agency's headline before and after it: the council summary's on-time rate and
+average delay, under the default on-time definition, over the service dates
+the agency had built when the run began.
 The run row keeps it (`pipeline_runs.rebuild_headline`); the bar's tooltip
 shows it, and a list under the timeline names each such run of the day.
 `pipeline/rebuild_headline.py` owns which runs count and why those dates.
