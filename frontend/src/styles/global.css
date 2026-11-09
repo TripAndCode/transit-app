@@ -365,6 +365,10 @@ input[type="date"] { color-scheme: light; }
    "simulation"): it qualifies what it sits beside without competing with it. */
 .caveat-badge { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-soft); border-radius: 999px; background: var(--bg-soft); color: var(--text-secondary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
 
+/* Today's value beside a snapshot's figure that has moved since: a soft
+   accent tint that marks the difference without reading as an alarm. */
+.figure-today { display: inline-block; padding: 1px 6px; border-radius: var(--radius); background: var(--accent-soft); color: var(--text-primary); font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }
+
 /* Whether a figure meets its performance target: calm in both directions,
    the words carrying the verdict and the tone only reinforcing it. */
 .standard-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: var(--text-xs); font-weight: 500; white-space: nowrap; }

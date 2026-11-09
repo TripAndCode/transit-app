@@ -289,7 +289,8 @@ for the full key list.
 `login_required` is the sign-in gate (`api/middleware/login_gate.py`): on,
 every `/api/*` route except the sign-in flow, `/api/config`, a read of
 `/api/me` (who-am-I, `null` when signed out) and a read of a frozen snapshot
-(`/api/snapshots/{id}`, see [snapshots.md](snapshots.md)) refuses a signed-out
+or of today's figures for it (`/api/snapshots/{id}` and
+`/api/snapshots/{id}/today`, see [snapshots.md](snapshots.md)) refuses a signed-out
 caller while SSO is configured. Turning it off reopens the app to
 signed-out visitors; it is the recovery switch when OAuth is down (see
 `docs/deploy-railway.md`).
