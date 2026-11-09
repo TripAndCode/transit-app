@@ -36,10 +36,10 @@ export function earlyLabel(sec: number, t: LabelT): string {
 }
 
 /** An on-time window's two sides in the scope sentence's words. */
-export function windowLabels(window: OnTimeWindow, t: LabelT): { late: string; early: string } {
+export function windowLabels({ early_sec, late_sec }: OnTimeWindow, t: LabelT): { late: string; early: string } {
   return {
-    late: toleranceLabel(window.late_sec, t),
-    early: window.early_sec == null ? translationT(t, "scope.early_any") : earlyLabel(window.early_sec, t),
+    late: toleranceLabel(late_sec, t),
+    early: early_sec == null ? translationT(t, "scope.early_any") : earlyLabel(early_sec, t),
   };
 }
 
