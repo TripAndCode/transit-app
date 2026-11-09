@@ -17,7 +17,7 @@ The Service uses only the GTFS (timetable) and GTFS-Realtime feeds the operators
 
 | Operator | Source | Licence | Poll interval |
 |---|---|---|---|
-| 青森市バス (Aomori City Bus) | 青森市企業局交通部, 「青森市営バス路線情報」 and 「【リアルタイム情報】青森市営バス路線情報」 (through the Public Transportation Open Data Center's public API) | CC BY 4.0 | 30 s |
+| 青森市バス (Aomori City Bus) | 青森市企業局交通部, 「青森市営バス路線情報」 and 「【リアルタイム情報】青森市営バス路線情報」 (the realtime data fetched from the Public Transportation Open Data Center's public API) | CC BY 4.0 | 30 s |
 | 広島電鉄, 広島バス, 広島交通, 芸陽バス, 備北交通, エイチ・ディー西広島, フォーブル, JRバス中国, ささき観光, 呉市生活バス, 廿日市市自主運行バス, おのみちバス, 朝日交通 | 公益社団法人広島県バス協会 (Hiroshima Bus Association), 「広島県バス協会GTFSオープンデータサイト」 | CC0 | 60 s |
 
 The credit is shown in the app's data-sources section, in each CSV's preamble and at the end of a printed page.
@@ -55,11 +55,11 @@ A monthly feed-quality scorecard per operator is in preparation. Its measures an
 
 ## Processing
 
-Each rule's heading gives the method version that introduced it.
+Under each rule's heading is the method version that introduced it.
 
 ### Deduplication and withdrawal
 
-(`2026.11.4`)
+(the last report deciding: `2026.11.0`; withdrawal by a cancellation or skip: `2026.11.4`)
 
 A feed sends its prediction for the same trip and stop many times. For each trip, stop and service day, the stop's departure is therefore decided by **the last report received** among these:
 
@@ -107,9 +107,9 @@ Each day's observations are counted by the path they came from, archive or live,
 
 ### Rebuild record
 
-When the method changes, every past aggregate is rebuilt. Figures exported under an earlier version may therefore differ from today's for the same period.
+When the method changes, every aggregate it changed is rebuilt over its whole history. Figures exported under an earlier version may therefore differ from today's for the same period.
 
-A rebuild records the following for each operator, shown on the admin board's run timeline:
+When a rebuild rewrites the aggregate behind the operator-wide on-time rate and average delay, it records the following for each operator, shown on the admin board's run timeline:
 
 - the operator-wide on-time rate and average delay, before and after, over the days the rebuild rewrote;
 - the on-time definition they were counted under.
@@ -138,7 +138,7 @@ An "observation" here is one departure: one trip, at one stop, on one day. It is
 | Early-departure rate | the share of observations more than the definition's early tolerance early; under a definition that counts every early departure as on time, more than 1 minute early |
 | Share more than 5 minutes late | the share of observations more than 5 minutes late, whatever the on-time definition |
 | Service delivered | (planned trips − trips not run) ÷ planned trips, where planned trips are those the timetable in force plans for each day |
-| On-time rate interval | the 95% Wilson interval. Stops of one trip run late together, so the sample size is the number of trips, not of observations |
+| On-time rate interval (used by the comparability conditions) | the 95% Wilson interval. Stops of one trip run late together, so the sample size is the number of trips, not of observations |
 
 Service delivered is shown only for an operator whose feed has been confirmed to report cancellations and has reported at least one trip not run in the 90 days up to the period's last day (or within the period, when it is longer). Otherwise it is shown as "—" with the reason.
 
@@ -226,10 +226,9 @@ Every figure the Service produces carries:
 - the value basis: feed prediction;
 - the method version, and the day the aggregates were built, or "live scan" for figures scanned directly from the observations;
 - the timetable versions in force over the period, with their days;
-- where the observations came from: days from the archive and days from the live path;
-- this document's URL.
+- where the observations came from: days from the archive and days from the live path.
 
-The stamp appears:
+The stamp appears in the places below. The CSV preambles and the footnotes also give this document's URL.
 
 - in each CSV's first-row preamble;
 - in the council report's footnotes, and on its print;
@@ -258,13 +257,13 @@ At least **14 days** before the Service first makes an operator's figures public
 - this document;
 - a contact for reporting errors.
 
-"Making public" means a page anyone can read without signing in, a published dataset, or an announcement by the maintainer.
+"Making public" means a page anyone can read without signing in, a published dataset, or an announcement by the maintainer. Opening the Service's own screens to anyone without signing in counts too.
 
 - **Courtesy letter first**: before the first notice, a courtesy letter goes to the Hiroshima Bus Association explaining this process ([Courtesy letter to the association and operators](#courtesy-letter-to-the-association-and-operators)).
 - **During the notice period**: the operator can point out errors in the figures or the method. Errors confirmed are corrected before publication.
 - **Statement alongside**: the operator can send a short statement to be shown beside its figures.
 
-The public page and the public dataset are both in preparation. Neither is published before the first notice is sent.
+The Service is not open to the public today. The public page and the public dataset are both in preparation. Until the first notice is sent, neither is published and the Service is not opened to the public.
 
 ### Reporting errors and takedown
 
@@ -283,7 +282,7 @@ A method change does three things:
 
 - it gets a new version number;
 - what it changes is written down;
-- every past aggregate is rebuilt.
+- every aggregate it changes is rebuilt over its whole history.
 
 The changelog is at the end of this document, and each version's description is in [DELAY_ANALYSIS.md's "Method versions"](../DELAY_ANALYSIS.md#method-versions). How a rebuild moved each operator's on-time rate and average delay is recorded as in [Rebuild record](#rebuild-record).
 
