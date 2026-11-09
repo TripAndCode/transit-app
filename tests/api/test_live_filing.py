@@ -385,11 +385,15 @@ async def test_a_time_band_route_table_scan_reads_the_timetable_in_force(refiled
 
 
 async def test_the_weekday_weekend_compare_reads_the_timetable_in_force(refiled, aconn, ch_async_client):
+    from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
     from pipeline.reports.rankings import _route_wd_we_avg_ch
 
     day = refiled.day
-    stats = await _route_wd_we_avg_ch(refiled.agency_id, _noon(day), aconn, ch_async_client, [day], [day])
+    spy = _Spy(ch_async_client)
+    stats = await _route_wd_we_avg_ch(refiled.agency_id, _noon(day), aconn, spy, [day], [day])
     assert {route: (wd_n, we_n) for route, (_wd, wd_n, _we, we_n) in stats.items()} == {ROUTE: (24, 24)}
+    # The plausibility clamp every other departure read applies.
+    assert f"BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}" in spy.queries[-1][0]
 
 
 async def test_the_delay_certificate_reads_the_timetable_in_force(refiled, aconn, ch_async_client):
@@ -407,6 +411,35 @@ async def test_the_delay_certificate_reads_the_timetable_in_force(refiled, aconn
     # c is R2's only trip: ingest left it no schedule, A gives it one at noon.
     other = RangeCtx(from_date=day, to_date=day, routes=(OTHER,), time_band="noon")
     assert await delay_certificate_observed(refiled.agency_id, other, aconn, ch_async_client)
+
+
+async def test_the_delay_certificate_probe_reads_a_scope_whose_every_departure_was_withdrawn_as_observed(
+    pg_conn, ch_client, aconn, ch_async_client
+):
+    """The feed reported on the scope, a stop SKIPPED that was never
+    predicted, so the scope is observed: nothing departed, so nothing
+    departed late."""
+    from pipeline.clickhouse import insert_updates
+    from pipeline.reports.council import compute_delay_certificate, delay_certificate_observed
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('withdrawn only', 'https://w.example.com') "
+            "RETURNING agency_id"
+        )
+        agency_id = cur.fetchone()[0]
+    pg_conn.commit()
+    day = date(2026, 10, 1)
+    at = datetime.combine(day, time(12), tzinfo=JST)
+    # file_name, captured_at, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay,
+    # stop_id, arr_delay, both schedule relationships (the stop SKIPPED), feed_timestamp, scheduled_sec.
+    skipped = ("w.pb", at, "t", SERVICE, "12:00:00", ROUTE, 1, None, "S1", None, _SCHEDULED, _SKIPPED, None, 43200)
+    insert_updates(ch_client, agency_id, [skipped])
+
+    ctx = RangeCtx(from_date=day, to_date=day, routes=(ROUTE,))
+    assert await delay_certificate_observed(agency_id, ctx, aconn, ch_async_client)
+    rows, _total = await compute_delay_certificate(agency_id, ctx, aconn, ch_async_client, threshold_sec=0)
+    assert rows == []
 
 
 async def test_an_ask_tool_scan_reads_the_timetable_in_force(refiled, aconn, ch_async_client):
