@@ -16,6 +16,7 @@ band, first narrows the rows to those the band can keep (band_candidates).
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Iterable
 from datetime import date, datetime, timedelta, timezone
@@ -91,6 +92,10 @@ _ARCHIVE_STATE_TTL_SECONDS = 15
 # returned after it is the pre-load state; kept, it would hide the load's move
 # from _seen_states for the TTL, and the compute caches would outlive it.
 _generation = 0
+# A load forgets the states on a worker thread (a background task's static
+# refresh) while the event loop checks a read's generation and writes it back,
+# so both hold this lock: no write lands between a load's bump and its clear.
+_states_lock = threading.Lock()
 
 
 async def _archive_state(ch, agency_id: int) -> tuple:
@@ -100,8 +105,9 @@ async def _archive_state(ch, agency_id: int) -> tuple:
         return cached[1]
     generation = _generation
     state = tuple((await ch.query(_ARCHIVE_STATE_SQL, parameters={"agency": agency_id})).result_rows[0])
-    if generation == _generation:
-        _states[agency_id] = (now + _ARCHIVE_STATE_TTL_SECONDS, state)
+    with _states_lock:
+        if generation == _generation:
+            _states[agency_id] = (now + _ARCHIVE_STATE_TTL_SECONDS, state)
     return state
 
 
@@ -125,9 +131,10 @@ def invalidate_schedule_joins() -> None:
     agency's timetables. The states joins were last read under stay: the next
     read, seeing the load's move from them, forgets the compute caches."""
     global _generation
-    _generation += 1
+    with _states_lock:
+        _generation += 1
+        _states.clear()
     _schedule_join.cache_clear()  # type: ignore[attr-defined]
-    _states.clear()
 
 
 async def filing(

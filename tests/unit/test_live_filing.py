@@ -203,3 +203,22 @@ async def test_an_archive_state_read_across_a_load_is_not_kept():
     assert await live_filing._archive_state(ch, 77) == ((2, "after"), (2, "after"))
     assert ch.reads == 2
     live_filing.invalidate_schedule_joins()
+
+
+def test_a_load_on_another_thread_bumps_and_clears_under_the_state_lock():
+    """A static load forgets the states on a worker thread, while the event
+    loop checks a read's generation and writes it back: both hold one lock,
+    so a write can't land between a load's bump and its clear."""
+    import threading
+    import time
+
+    from pipeline import live_filing
+
+    before = live_filing._generation
+    with live_filing._states_lock:
+        loading = threading.Thread(target=live_filing.invalidate_schedule_joins)
+        loading.start()
+        time.sleep(0.05)
+        assert live_filing._generation == before
+    loading.join(timeout=5)
+    assert live_filing._generation == before + 1
