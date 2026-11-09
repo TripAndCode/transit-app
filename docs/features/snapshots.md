@@ -102,7 +102,8 @@ snapshot, and the button waits while it is taken.
   snapshot's link.
 - **Unchanged elsewhere.** A reader who is not an admin prints the page as
   before, with no snapshot and no link. A snapshot's own page (`/s/{id}`)
-  prints what it stores and takes no new snapshot.
+  prints what it stores and takes no new snapshot, and the Routes table's
+  print, from its Export menu, takes none either.
 - **The delay record** prints no snapshot. Its printers are mostly readers
   with no account, and only admins take snapshots; a snapshot for it waits on
   letting anyone take one, rate-limited, which is not decided.

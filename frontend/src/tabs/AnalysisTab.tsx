@@ -227,8 +227,9 @@ export function AnalysisTab({
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
-              {/* The council report prints from its own button; the menu
-                  carries the snapshot, which only an admin takes. */}
+              {/* The council report prints from its own button, which for
+                  an admin takes a snapshot first; the menu takes one without
+                  printing. */}
               {councilSnapshot && <ExportMenu csv={null} showPrint={false} snapshot={councilSnapshot} />}
             </div>
             <ReportMeta data={detail.data} />
