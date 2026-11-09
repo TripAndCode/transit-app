@@ -1705,8 +1705,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
 
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
-        # Last, so a Postgres builder that fails above leaves ClickHouse
-        # untouched too.
+        # After every Postgres builder but the scorecard, which reads their
+        # copy, so one that fails above leaves ClickHouse untouched too.
         _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join, refit)
 
         # ── feed_quality_monthly (per-month feed-quality scorecard) ──

@@ -65,9 +65,8 @@ CANCELLATION_LOOKBACK_DAYS = 90
 # timetable covers it, and the saved count wins. A capture records what the
 # timetable loaded at the time planned, and a reload saves only the days before
 # the incoming timetable starts, so a saved day keeps the plan a later reload
-# would replace or drop. Only those days count, on both sides of the ratio:
-# a reload replaces the agency's calendar, so a window can reach back to days
-# no plan covers, and missed trips count only on the days the plan counted.
+# would replace or drop. A reload replaces the agency's calendar, so a window
+# can reach back to days no plan covers.
 def planned_days_ctes(agency_ids: str, from_date: str, to_date: str, *, stop_events: bool = False) -> str:
     """The CTEs that end in ``planned_days(agency_id, day, planned)``: one row
     per day of ``[from_date, to_date]`` with a plan, saved or loaded, and the
@@ -105,6 +104,8 @@ def service_sql(agency_ids: str, from_date: str, to_date: str, lookback_from: st
     :func:`compute_service_delivered_by_agency` shapes, over ``[from_date,
     to_date]``. The arguments are SQL expressions, as in :func:`plan_ctes`.
 
+    Only the planned days (:func:`planned_days_ctes`) count, on both sides of
+    the ratio: missed trips count only on the days the plan counted.
     agg_service_delivered_daily is built from GTFS-RT alone, so a saved day's
     missed trips are there whatever timetable is loaded now. It has a row only
     for a day with a missed trip: a planned day without one reads 0 missed, and

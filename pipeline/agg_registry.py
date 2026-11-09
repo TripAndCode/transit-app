@@ -141,8 +141,8 @@ def _headway_daily() -> list[str]:
 
 
 def _feed_quality() -> list[str]:
-    # Imported here: the scorecard applies the comparability gate, whose
-    # definition stamp reads METHOD_VERSION from this module.
+    # Imported here: the scorecard reads pipeline.reports, whose package
+    # imports the report stack, and that reads METHOD_VERSION from this module.
     from pipeline import feed_quality
 
     return feed_quality.render()

@@ -257,7 +257,12 @@ def test_the_newest_day_is_read_per_agency_off_the_index(pg_conn):
     pg_conn.rollback()
     scans = [node for node in _nodes(plan) if node.get("Relation Name") == "agg_route_daily_dist"]
     assert scans
-    assert all("agency_id" in node.get("Index Cond", "") for node in scans), scans
+
+    def keyed(node: dict) -> bool:
+        conditions = (n.get("Index Cond", "") + n.get("Recheck Cond", "") for n in _nodes(node))
+        return any("agency_id" in condition for condition in conditions)
+
+    assert all(keyed(node) for node in scans), scans
 
 
 def _one_poll(withheld: tuple) -> list[tuple]:

@@ -12,11 +12,16 @@ counts that same window:
   (:func:`pipeline.reports.comparability.coverage_pct` over
   :func:`pipeline.reports.service_delivered.service_sql`), so a month reads
   what the agencies board reads over the same days.
-- **Stop-event completeness**: the stop events the feed reported a departure
-  or arrival delay for (one per trip, stop and service date, however often
-  reported) of those the planned trips' stop times plan, over the planned days
-  whose stop events are known. A day saved before the capture kept them is
-  left out (``stop_plan_days`` counts the rest).
+- **Stop-event completeness**: the stop events the feed reported (one per
+  trip, stop and service date, however often reported) of those the planned
+  trips' stop times plan, over the planned days whose stop events are known.
+  A day saved before the capture kept them is left out (``stop_plan_days``
+  counts the rest). A stop event is reported when any poll of it carries a
+  plausible departure or arrival delay or withdraws it (its trip CANCELED or
+  its stop SKIPPED, :func:`pipeline.db.withdrawn_ch`). This is reporting
+  coverage, not the service-delivered rate: a withdrawal is something the feed
+  said about the stop, so it counts here, where the departure figures let the
+  feed's last report decide whether the stop departed.
 - **Message age**: per poll, the instant the poll was captured minus its
   FeedHeader timestamp, summarized by :data:`MESSAGE_AGE_QUANTILES`. Only a
   poll from the live path counts: archive ingest stamps a row's captured_at
@@ -57,6 +62,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from pipeline.clickhouse import LIVE_SOURCED, TRIP_LEVEL_STOP_SEQUENCE
+from pipeline.db import plausible_delay_ch, withdrawn_ch
 from pipeline.reports import comparability
 from pipeline.reports.comparability import clamp_pct, coverage_pct, trips_matchable
 from pipeline.reports.service_delivered import coverage_of, planned_days_ctes, service_sql
@@ -122,12 +128,12 @@ _WINDOW = "u.captured_at >= {window_start:DateTime64} AND u.captured_at < {windo
 _FIELD_COUNTS = ", ".join(f"countIf(u.{field} IS NOT NULL) AS {field}_rows" for field in RT_COVERAGE_FIELDS)
 
 # Per service date: the stop_time_updates stored, how many carry each RT
-# coverage field, and the stop events reported with a delay. The trip-level
-# row a cancellation without stops leaves is no stop_time_update.
+# coverage field, and the stop events reported. The trip-level row a
+# cancellation without stops leaves is no stop_time_update.
+_REPORTED = f"{plausible_delay_ch('u.dep_delay')} OR {plausible_delay_ch('u.arr_delay')} OR {withdrawn_ch()}"
 ROWS_CH_SQL = f"""
     SELECT {service_date_ch("u.captured_at")} AS date, count() AS stop_time_updates, {_FIELD_COUNTS},
-           uniqExactIf((u.trip_id, u.stop_sequence), u.dep_delay IS NOT NULL OR u.arr_delay IS NOT NULL)
-               AS stop_events
+           uniqExactIf((u.trip_id, u.stop_sequence), {_REPORTED}) AS stop_events
     FROM updates AS u
     WHERE u.agency_id = {{agency_id:UInt16}} AND {_WINDOW} AND u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}
     GROUP BY date
@@ -167,10 +173,18 @@ FEED_HEALTH_SQL = """
 """
 
 
-# The newest service day any agency's aggregates reach: where the board's
-# coverage stops (pipeline.reports.network.coverage_through, over the same
-# table's dates).
-NEWEST_DAY_SQL = "SELECT MAX(date) FROM agg_route_daily_dist"
+# The newest service day any agency the board lists has aggregates for: where
+# its coverage stops (pipeline.reports.network.coverage_through, over the same
+# table's dates, of the agencies not deleted). Each agency's is one probe of
+# the (agency_id, date) key rather than a scan of every agency's rows.
+NEWEST_DAY_SQL = """
+    SELECT MAX(newest.date)
+    FROM agencies a
+    CROSS JOIN LATERAL (
+        SELECT r.date FROM agg_route_daily_dist r WHERE r.agency_id = a.agency_id ORDER BY r.date DESC LIMIT 1
+    ) newest
+    WHERE a.deleted_at IS NULL
+"""
 
 
 def last_closed_day() -> date:
@@ -219,20 +233,22 @@ def plan_months(
     to that of *last_day*, the last day any month counts
     (:func:`last_counted_day`; None for none). *scope* is the service dates
     whose rows changed (None for all of them), and *stored* each built month's
-    ``through_date``. Besides the months holding a changed date, a month is
-    built when it has no row yet or its row stops short of its window, which
-    grows as the aggregates reach later days, with or without this feed's own
-    observations: a feed that stops reporting still has its planned days
-    counted against it. A stored month outside the agency's months goes.
+    ``through_date``. Besides the months holding a changed date it counts, a
+    month is built when it has no row yet or its row counts another window than
+    it has now: the window grows as the aggregates reach later days, with or
+    without this feed's own observations, so a feed that stops reporting still
+    has its planned days counted against it, and shrinks when the agency
+    holding the newest day goes. A stored month outside the agency's months goes.
     """
     months: list[date] = []
     if first_day is not None and last_day is not None and first_day <= last_day:
         months = _months_between(first_day, last_day)
     if scope is None:
         return None, months
-    wanted = {month_of(day) for day in scope}
+    # A date past the last counted day is in no window, so it rebuilds nothing.
+    wanted = {month_of(day) for day in scope if last_day is not None and day <= last_day}
     if last_day is not None:
-        wanted |= {m for m in months if m not in stored or stored[m] < through_of(m, last_day)}
+        wanted |= {m for m in months if stored.get(m) != through_of(m, last_day)}
     wanted |= {m for m in stored if m not in months}
     return sorted(wanted), [m for m in months if m in wanted]
 

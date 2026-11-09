@@ -80,7 +80,7 @@ def stop_event_filter_ch(extra_where: str = "") -> str:
     the plausibility clamp or a row withdrawing the departure whatever delay
     it carries, and the caller's own filter."""
     extra = f" AND ({extra_where})" if extra_where else ""
-    return f"u.agency_id = {{agency_id:UInt16}} AND ({_plausible_delay_ch('u.dep_delay')} OR {withdrawn_ch()}){extra}"
+    return f"u.agency_id = {{agency_id:UInt16}} AND ({plausible_delay_ch('u.dep_delay')} OR {withdrawn_ch()}){extra}"
 
 
 def departure_ch() -> str:
@@ -253,7 +253,7 @@ def build_dedup_ch_sql(
     )
 
 
-def _plausible_delay_ch(column: str) -> str:
+def plausible_delay_ch(column: str) -> str:
     """A measured delay inside the ±MAX_PLAUSIBLE_DELAY_SEC clamp."""
     return f"({column} IS NOT NULL AND {column} BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC})"
 
@@ -349,8 +349,8 @@ def build_stop_visits_ch_sql(
     aggregate into WHERE (the alias rule `build_dedup_ch_sql`'s docstring
     describes).
     """
-    dep_ok = _plausible_delay_ch("u.dep_delay")
-    arr_ok = _plausible_delay_ch("u.arr_delay")
+    dep_ok = plausible_delay_ch("u.dep_delay")
+    arr_ok = plausible_delay_ch("u.arr_delay")
     withdrawn = withdrawn_ch()
     latest = "(u.captured_at, u.file_name)"
     filed = [(2, "route_code"), (3, "service_type"), (4, "scheduled_time")]
