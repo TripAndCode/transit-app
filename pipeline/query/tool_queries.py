@@ -34,7 +34,7 @@ from dataclasses import replace
 from api.range import DAY_TYPE_SERVICE, RangeCtx, day_types_for
 from pipeline.db import hms_to_sec_sql
 from pipeline.dwell_run import StopVisit, compute_trip_dwell_running
-from pipeline.reports.filters import _ch_rows, _dedup_cte_ch, _stop_visits_cte_ch
+from pipeline.reports.filters import _ch_rows, _dedup_cte_ch, _stop_visits_cte_ch, ctx_filing
 from pipeline.reports.rankings import _round2, compute_trend_series
 from pipeline.service_day import service_day_offset, service_day_seconds_sql
 from pipeline.stats import linear_percentile
@@ -63,7 +63,7 @@ async def route_dow_breakdown(
     """
     if ch is None:
         return []
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT toDayOfWeek(date) AS dow,\n"
@@ -107,7 +107,7 @@ async def route_compare_service(
     """
     if ch is None:
         return []
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT date,\n"
@@ -202,7 +202,7 @@ async def segment_hotspots(
     """
     if ch is None:
         return []
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT stop_sequence, any(trip_id) AS sample_trip_id,\n"
@@ -321,7 +321,7 @@ async def schedule_realism_segments(
     """
     if ch is None:
         return []
-    cte_sql, ch_params = _dedup_cte_ch(ctx)
+    cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
         f"WITH {cte_sql},\n"
         "     with_next AS (\n"
@@ -445,7 +445,8 @@ async def schedule_realism_padding(
     # them) keeps only this route's polls, the narrow edge
     # build_stop_visits_ch_sql's docstring describes.
     route_ctx = replace(ctx, routes=(str(route),))
-    cte_sql, ch_params = _stop_visits_cte_ch(route_ctx, include_scheduled_sec=True)
+    filing = await ctx_filing(conn, ch, agency_id, route_ctx)
+    cte_sql, ch_params = _stop_visits_cte_ch(route_ctx, filing, include_scheduled_sec=True)
     result = await ch.query(
         f"WITH {cte_sql}\n"
         "SELECT trip_id, date, stop_sequence, scheduled_sec, dep_delay, arr_delay, dep_observed\n"

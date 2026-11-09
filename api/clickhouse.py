@@ -50,6 +50,12 @@ async def get_ch_client():
             "max_execution_time": 30,
             "max_result_rows": 200_000,
             "result_overflow_mode": "throw",
+            # The one join this client runs is a filed read's schedule archive
+            # (pipeline.live_filing), written with the archive as the side the
+            # hash table is built from. The planner, misjudging the size of the
+            # filtered observation scan, would otherwise swap the sides and
+            # build it from the scan, which costs many times the read itself.
+            "query_plan_join_swap_table": "false",
             # This client only ever SELECTs from `updates`/`updates_live` — every write/DDL
             # path (ingest, analyze, bootstrap) goes through pipeline/clickhouse.py's
             # sync client instead. `readonly=2` (not 1) so the settings above

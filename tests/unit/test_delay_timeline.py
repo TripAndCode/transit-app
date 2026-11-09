@@ -11,6 +11,7 @@ from datetime import date, datetime
 import pytest
 
 from api.range import RangeCtx
+from pipeline.live_filing import AS_INGESTED
 from pipeline.reports.timeline import (
     ALLOWED_STEP_MINUTES,
     MAX_POINTS_PER_FRAME,
@@ -106,13 +107,13 @@ def test_playback_day_rolls_back_before_the_window_opens(captured, expected):
 def test_timeline_sql_orders_before_truncating_to_the_row_guard():
     """An unordered LIMIT would keep an arbitrary slice that can differ
     between two recomputes of the very same day."""
-    sql, _ = build_timeline_ch_sql(_ctx(), 60)
+    sql, _ = build_timeline_ch_sql(_ctx(), 60, AS_INGESTED)
     assert "ORDER BY samples DESC" in sql
     assert sql.index("ORDER BY samples DESC") < sql.index("LIMIT {tl_max_rows:UInt32}")
 
 
 def test_timeline_sql_reads_the_shared_dedup_cte_and_buckets_by_scheduled_sec():
-    sql, params = build_timeline_ch_sql(_ctx(), 60)
+    sql, params = build_timeline_ch_sql(_ctx(), 60, AS_INGESTED)
 
     # Built on the shared dedup CTE, not a hand-rolled scan of `updates`.
     assert sql.startswith("WITH deduped AS (")
@@ -143,13 +144,13 @@ def test_timeline_sql_reads_the_shared_dedup_cte_and_buckets_by_scheduled_sec():
 
 
 def test_timeline_sql_step_parameter_tracks_the_requested_step():
-    _, params = build_timeline_ch_sql(_ctx(), 15)
+    _, params = build_timeline_ch_sql(_ctx(), 15, AS_INGESTED)
     assert params["tl_step_sec"] == 900
 
 
 def test_timeline_sql_rejects_an_unsupported_step():
     with pytest.raises(ValueError):
-        build_timeline_ch_sql(_ctx(), 30)
+        build_timeline_ch_sql(_ctx(), 30, AS_INGESTED)
 
 
 # ── folding mocked rows ──────────────────────────────────────────────────────
@@ -250,5 +251,5 @@ def test_frame_mean_is_sample_weighted_not_a_mean_of_means():
 
 
 def test_timeline_sql_reads_the_table_it_is_given():
-    sql, _ = build_timeline_ch_sql(_ctx(), 60, table="updates_live")
+    sql, _ = build_timeline_ch_sql(_ctx(), 60, AS_INGESTED, table="updates_live")
     assert "FROM updates_live AS u" in sql

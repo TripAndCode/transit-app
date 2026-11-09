@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from api.range import TIME_BAND_RANGES, RangeCtx
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
+from pipeline.live_filing import AS_INGESTED
 from pipeline.reports.filters import _dedup_cte_ch
 from pipeline.reports.overview import _fetch_grain, _peak_hour_by_dow
 from pipeline.reports.rankings import compute_hourly_heatmap
@@ -110,7 +111,7 @@ def test_the_live_time_band_filter_selects_what_the_stored_band_holds(pg_conn, a
     stored = {band: (n, s) for band, n, s in _fetch(pg_conn, _STOP_BANDS, agency_id)}
 
     for band in TIME_BAND_RANGES:
-        cte, params = _dedup_cte_ch(RangeCtx(from_date=DAY, to_date=DAY, time_band=band))
+        cte, params = _dedup_cte_ch(RangeCtx(from_date=DAY, to_date=DAY, time_band=band), AS_INGESTED)
         ((n, s),) = ch_client.query(
             f"WITH {cte} SELECT count(), ifNull(sum(dep_delay), 0) FROM deduped",
             parameters={"agency_id": agency_id, **params},
@@ -142,7 +143,7 @@ async def test_the_live_peak_hour_profile_matches_agg_hour_daily_past_midnight(
     routed = RangeCtx(from_date=DAY, to_date=DAY, routes=("R1",))
 
     from_aggregate = await _peak_hour_by_dow(agency_id, whole, aconn, "all")
-    grain = await _fetch_grain(agency_id, routed, ch_async_client, shape="period_hours")
+    grain = await _fetch_grain(agency_id, routed, aconn, ch_async_client, shape="period_hours")
     live = await _peak_hour_by_dow(agency_id, routed, aconn, "all", grain=grain)
 
     assert from_aggregate is not None

@@ -29,6 +29,7 @@ from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.data_sources import credit_line
 from pipeline.day_types import DayType
 from pipeline.flags import aflag
+from pipeline.live_filing import schedule_join
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -83,7 +84,7 @@ from pipeline.reports.forecast import (
 )
 from pipeline.reports.rankings import DEFAULT_PRESET, EARLY_ANY, EarlyTolerance, on_time_window, report_reads_aggregates
 from pipeline.reports.route_table import RouteTableOrder
-from pipeline.reports.schedule_revision import read_schedule_days
+from pipeline.reports.schedule_revision import ScheduleDays, read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
@@ -686,7 +687,7 @@ async def get_performance_standards(
         live = not report_reads_aggregates(
             "route_table", ctx, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
         )
-        schedule = await read_schedule_days(conn, agency_id, ctx.from_date, ctx.to_date)
+        schedule = await _scanned_schedule(conn, ch, agency_id, ctx, live)
         on_time_definition = await stamp_build(
             conn,
             resolve_definition_meta("on_time", early_tolerance_sec, late_tolerance_sec, live=live),
@@ -710,6 +711,19 @@ async def get_performance_standards(
         on_time_definition=on_time_definition,
         scope_applied=_ON_TIME_STANDARDS_SCOPE if judges_on_time else _STANDARDS_SCOPE,
     )
+
+
+async def _scanned_schedule(
+    conn: asyncpg.Connection, ch: AsyncClient, agency_id: int, ctx: RangeCtx, live: bool
+) -> ScheduleDays:
+    """The timetables the request's figures were computed under, for its
+    definition stamp: as analyze recorded them, or for a live scan, each day
+    named after the version the scan filed it under."""
+    schedule = await read_schedule_days(conn, agency_id, ctx.from_date, ctx.to_date)
+    if not live:
+        return schedule
+    join = await schedule_join(conn, ch, agency_id)
+    return schedule if join is None else schedule.filed_under(agency_id, join.force)
 
 
 class WeatherStation(BaseModel):
@@ -1556,7 +1570,7 @@ async def render_report(
         early_tolerance_sec=early_tolerance_sec,
         late_tolerance_sec=late_tolerance_sec,
     )
-    schedule = await read_schedule_days(conn, agency_id, ctx.from_date, ctx.to_date)
+    schedule = await _scanned_schedule(conn, ch, agency_id, ctx, live)
     definition = await stamp_build(
         conn,
         resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live),
@@ -1789,7 +1803,7 @@ async def render_report(
             # Only tells an empty list's two causes apart, so a failed probe
             # leaves that unknown rather than failing a complete response.
             try:
-                observed = await delay_certificate_observed(agency_id, ctx, ch)
+                observed = await delay_certificate_observed(agency_id, ctx, conn, ch)
             except Exception:
                 _log.warning("delay_certificate: observed probe failed for agency %s", agency_id, exc_info=True)
                 observed = None

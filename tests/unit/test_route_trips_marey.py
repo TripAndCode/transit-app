@@ -23,12 +23,13 @@ from api.routers.map import (
     resolve_route_trips_date,
 )
 from pipeline.service_day import service_date_ch
+from pipeline.static_archive import Stamp
 
 # --- rendered SQL -----------------------------------------------------------
 
 
 def test_route_trips_sql_filters_the_target_date_in_jst():
-    sql, params = build_route_trips_sql("all")
+    sql, params = build_route_trips_sql("all", stamp=Stamp.INGESTED)
     assert f"{service_date_ch('u.captured_at')} = {{target_date:Date}}" in sql
     # A bare toDate() buckets captured_at by UTC day, so a JST evening
     # observation would fall under the previous day -- one day off the JST
@@ -38,7 +39,7 @@ def test_route_trips_sql_filters_the_target_date_in_jst():
 
 
 def test_route_trips_sql_reads_every_marey_column_off_one_winning_row():
-    sql, _ = build_route_trips_sql("all")
+    sql, _ = build_route_trips_sql("all", stamp=Stamp.INGESTED)
     # One tuple-argMax, not four per-column argMax calls: a captured_at tie
     # resolved independently per column could mix a scheduled time from one
     # physical row with a delay from another.
@@ -49,14 +50,14 @@ def test_route_trips_sql_reads_every_marey_column_off_one_winning_row():
 
 
 def test_route_trips_sql_orders_by_trip_then_stop_sequence():
-    sql, _ = build_route_trips_sql("all")
+    sql, _ = build_route_trips_sql("all", stamp=Stamp.INGESTED)
     # A polyline is only meaningful if its points arrive in stop order, and a
     # bare GROUP BY has no defined output order.
     assert "ORDER BY trip_id, stop_sequence" in sql
 
 
 def test_route_trips_sql_all_band_adds_no_time_filter():
-    sql, params = build_route_trips_sql("all")
+    sql, params = build_route_trips_sql("all", stamp=Stamp.INGESTED)
     assert "ch_tb_start" not in sql
     assert "multiIf" not in sql
     assert params == {"rt_limit": MAX_ROUTE_TRIPS + 1}
@@ -69,7 +70,7 @@ def test_route_trips_sql_named_band_filters_on_the_shared_clock_expression():
     and pinning one spelling of it here would break the moment the shared
     helper is retuned.
     """
-    sql, params = build_route_trips_sql("morning")
+    sql, params = build_route_trips_sql("morning", stamp=Stamp.INGESTED)
     frag, frag_params = time_band_clause_ch_for("morning")
     assert frag in sql
     assert "{ch_tb_start:UInt32}" in sql and "{ch_tb_end:UInt32}" in sql
@@ -83,7 +84,7 @@ def test_route_trips_sql_caps_trips_not_rows():
     transfer and build every trip the day held. Limiting the ranked trip
     list -- not the per-stop rows -- keeps whole polylines intact.
     """
-    sql, params = build_route_trips_sql("all")
+    sql, params = build_route_trips_sql("all", stamp=Stamp.INGESTED)
     kept = sql[sql.index("kept AS (") :]
     assert "GROUP BY trip_id" in kept
     assert "LIMIT {rt_limit:UInt32}" in kept
@@ -97,13 +98,13 @@ def test_route_trips_sql_caps_trips_not_rows():
 
 
 def test_route_trips_sql_ranks_by_the_same_average_the_python_side_sorts_on():
-    sql, _ = build_route_trips_sql("all")
+    sql, _ = build_route_trips_sql("all", stamp=Stamp.INGESTED)
     assert "ORDER BY avg(winner.2) DESC, trip_id" in sql
 
 
 def test_route_trips_sql_keeps_the_agency_and_route_bounds_in_every_band():
     for band in ("all", "morning", "late_night"):
-        sql, _ = build_route_trips_sql(band)
+        sql, _ = build_route_trips_sql(band, stamp=Stamp.INGESTED)
         assert "u.agency_id = {agency_id:UInt16}" in sql
         assert "u.route_code = {route:String}" in sql
         assert "u.dep_delay IS NOT NULL" in sql

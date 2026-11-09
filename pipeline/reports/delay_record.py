@@ -20,7 +20,10 @@ Both reads are a live ClickHouse scan over the shared dedup
 (:func:`pipeline.db.build_dedup_ch_sql`: the latest plausible poll per stop
 event), filtered to one agency, one service day, one route and, for the
 stops, one trip before any aggregation, so every filter is a row-level
-predicate ClickHouse can apply in PREWHERE. Names, the origin departure and
+predicate ClickHouse can apply in PREWHERE. Each poll is filed under the
+timetable in force that day (:mod:`pipeline.live_filing`), which can give a
+poll with no route one, so the route is also tested on the filed poll
+(:class:`api.range.UpdatesFilter`). Names, the origin departure and
 where the trip runs to come from the loaded timetable only when it runs the
 trip that day (:func:`pipeline.planned_trips.running_trip_join`).
 """
@@ -32,33 +35,46 @@ from datetime import date
 from typing import Any
 
 from api.clickhouse import table_holding
-from api.range import RangeCtx, build_updates_filter_ch
+from api.range import RangeCtx, UpdatesFilter, updates_filter_ch
 from pipeline.db import build_dedup_ch_sql
+from pipeline.live_filing import filing
 from pipeline.planned_trips import plan_ctes, running_trip_join
 from pipeline.route_terminals import normalize_stop_name
 from pipeline.service_day import clock_to_sec, service_day_offset
+from pipeline.static_archive import Stamp
 
 
-def _record_filter(day: date, route_code: str, trip_id: str | None = None) -> tuple[str, dict]:
-    """The row-level WHERE for one service day of one route, and one trip
-    when given: the same date and route clauses every report scan uses."""
-    where, params = build_updates_filter_ch(RangeCtx(from_date=day, to_date=day, routes=(route_code,)))
-    if trip_id is not None:
-        where += " AND u.trip_id = {record_trip:String}"
-        params["record_trip"] = trip_id
-    return where, params
+def _record_filter(day: date, route_code: str, trip_id: str | None = None, *, refit: bool = False) -> UpdatesFilter:
+    """The row-level filter for one service day of one route, and one trip
+    when given: the same date and route clauses every report scan uses, split
+    for a read that refits its rows when *refit* (`api.range.UpdatesFilter`)."""
+    where = updates_filter_ch(RangeCtx(from_date=day, to_date=day, routes=(route_code,)), refit=refit)
+    if trip_id is None:
+        return where
+    return where._replace(
+        raw=f"{where.raw} AND u.trip_id = {{record_trip:String}}", params={**where.params, "record_trip": trip_id}
+    )
 
 
-def _stop_readings_cte(where: str, table: str) -> str:
+def _stop_readings_cte(where: UpdatesFilter, table: str, stamp: Stamp) -> str:
     """``stops``: one row per ``(trip_id, stop_sequence)`` with the reading the
     dedup keeps for it, as ``(scheduled_time, scheduled_sec, dep_delay)``.
 
     The dedup's GROUP BY also holds ``scheduled_time``, ``route_code`` and
     ``service_type``, so a static reload between two polls of one stop splits
     it in two; the later capture is the one kept, as the dedup keeps the
-    later poll within a group.
+    later poll within a group. Each poll is filed under *stamp*
+    (`pipeline.live_filing`).
     """
-    body = build_dedup_ch_sql(extra_where=where, include_captured_at=True, include_scheduled_sec=True, table=table)
+    body = build_dedup_ch_sql(
+        extra_where=where.raw,
+        include_captured_at=True,
+        include_scheduled_sec=True,
+        table=table,
+        stamp=stamp,
+        filed_where=where.filed,
+        live_form=True,
+    )
     return (
         f"deduped AS ({body}),\n"
         "stops AS (\n"
@@ -70,11 +86,11 @@ def _stop_readings_cte(where: str, table: str) -> str:
     )
 
 
-def record_trips_sql(where: str, table: str) -> str:
+def record_trips_sql(where: UpdatesFilter, table: str, stamp: Stamp) -> str:
     """Each observed trip: how many stops it has a reading at, and the
     schedule of the earliest one as ``(scheduled_time, scheduled_sec)``."""
     return (
-        f"WITH {_stop_readings_cte(where, table)}\n"
+        f"WITH {_stop_readings_cte(where, table, stamp)}\n"
         "SELECT trip_id, count() AS observed_stops,\n"
         "    argMin(tuple(reading.1, reading.2), stop_sequence) AS first_schedule\n"
         "FROM stops\n"
@@ -82,11 +98,11 @@ def record_trips_sql(where: str, table: str) -> str:
     )
 
 
-def record_stops_sql(where: str, table: str) -> str:
+def record_stops_sql(where: UpdatesFilter, table: str, stamp: Stamp) -> str:
     """One trip's readings, by stop: ``(stop_sequence, scheduled_time,
     scheduled_sec, dep_delay)`` in stop order."""
     return (
-        f"WITH {_stop_readings_cte(where, table)}\n"
+        f"WITH {_stop_readings_cte(where, table, stamp)}\n"
         "SELECT stop_sequence, reading.1, reading.2, reading.3\n"
         "FROM stops\n"
         "ORDER BY stop_sequence"
@@ -252,9 +268,13 @@ async def compute_record_trips(agency_id: int, day: date, route_code: str, conn,
     recorded no trip of the route that day."""
     if ch is None:
         raise RuntimeError("compute_record_trips requires a ClickHouse client")
-    where, params = _record_filter(day, route_code)
     table = await table_holding(ch, agency_id, day)
-    result = await ch.query(record_trips_sql(where, table), parameters={"agency_id": agency_id, **params})
+    filed = await filing(conn, ch, agency_id, day, day, table=table)
+    where = _record_filter(day, route_code, refit=filed.stamp is Stamp.REFIT)
+    result = await ch.query(
+        record_trips_sql(where, table, filed.stamp),
+        parameters={"agency_id": agency_id, **where.params, **filed.params},
+    )
     observed = result.result_rows
     if not observed:
         return []
@@ -271,9 +291,13 @@ async def compute_record_stops(agency_id: int, day: date, route_code: str, trip_
     """
     if ch is None:
         raise RuntimeError("compute_record_stops requires a ClickHouse client")
-    where, params = _record_filter(day, route_code, trip_id)
     table = await table_holding(ch, agency_id, day)
-    result = await ch.query(record_stops_sql(where, table), parameters={"agency_id": agency_id, **params})
+    filed = await filing(conn, ch, agency_id, day, day, table=table)
+    where = _record_filter(day, route_code, trip_id, refit=filed.stamp is Stamp.REFIT)
+    result = await ch.query(
+        record_stops_sql(where, table, filed.stamp),
+        parameters={"agency_id": agency_id, **where.params, **filed.params},
+    )
     observed = result.result_rows
     if not observed:
         return {"trip": None, "stops": []}

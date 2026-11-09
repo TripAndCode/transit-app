@@ -160,7 +160,8 @@ What the user sees/does:
 - Backend: `tests/api/test_api_map.py` (exercises `/route-shape` alongside the
   Map tab's other endpoints in `api/routers/map.py`),
   `tests/clickhouse/test_range_updates_filter_ch.py` (the
-  `build_updates_filter_ch` filter `compute_route_shape()` scans through), and
+  `build_updates_filter_ch` filter `compute_route_shape()` scans through,
+  by way of `updates_filter_ch`), and
   `tests/unit/test_response_schema_ratchet.py` (lists `/route-shape` among the
   endpoints still without a response model).
 

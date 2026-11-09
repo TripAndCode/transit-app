@@ -18,7 +18,7 @@ from collections.abc import Collection, Iterable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from functools import cached_property
-from typing import Annotated, Any, Literal, cast, get_args
+from typing import Annotated, Any, Literal, NamedTuple, cast, get_args
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, Query
@@ -808,6 +808,50 @@ def build_updates_filter_ch(ctx: RangeCtx) -> tuple[str, dict]:
         params["ch_routes"] = list(ctx.routes)
 
     return " AND ".join(parts), params
+
+
+class UpdatesFilter(NamedTuple):
+    """``ctx``'s filters on the ClickHouse observations, with their
+    ``{name: value}`` parameters, in the two parts a read that files its rows
+    (`pipeline.static_archive.observation_rows`) tests apart.
+
+    *raw* is tested on each row as ingest stored it, and *filed* on the filed
+    row ('' for no test). Only a read that refits rows (Stamp.REFIT) can
+    rewrite the scheduled time and the route, so only it splits them: its
+    *filed* tests the time band and the route, and its *raw* keeps both a
+    row of the route and a row with no route, which filing may give it. Any
+    other read tests every clause as stored, in :func:`build_updates_filter_ch`'s
+    one fragment.
+    """
+
+    raw: str
+    filed: str
+    params: dict
+
+
+def updates_filter_ch(ctx: RangeCtx, *, refit: bool = False) -> UpdatesFilter:
+    """``ctx``'s :class:`UpdatesFilter`, split for a read that refits rows when *refit*."""
+    if not refit:
+        where, params = build_updates_filter_ch(ctx)
+        return UpdatesFilter(where, "", params)
+    raw: list[str] = []
+    filed: list[str] = []
+    params = {}
+    for clause, part in (
+        (date_range_clause_ch(ctx), raw),
+        (dow_clause_ch(ctx), raw),
+        (time_band_clause_ch(ctx), filed),
+        (service_date_clause_ch(ctx), raw),
+    ):
+        frag, p = clause
+        if frag != "1":
+            part.append(frag)
+            params.update(p)
+    if ctx.routes:
+        raw.append("(route_code IN {ch_routes:Array(String)} OR route_code IS NULL)")
+        filed.append("route_code IN {ch_routes:Array(String)}")
+        params["ch_routes"] = list(ctx.routes)
+    return UpdatesFilter(" AND ".join(raw), " AND ".join(filed), params)
 
 
 def time_band_case_sql(column: str) -> str:
