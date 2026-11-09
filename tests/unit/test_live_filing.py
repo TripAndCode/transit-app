@@ -167,3 +167,39 @@ def test_hand_written_refit_reads_also_read_rows_filing_gives_the_route():
         assert "(u.route_code = {route:String} OR u.route_code IS NULL)" in sql
         assert "u.route_code = {route:String}" in sql[sql.index("ANY LEFT JOIN") :]
     assert "route_code IS NULL" not in _latest_route_observation_sql("updates", Stamp.INGESTED)
+
+
+async def test_an_archive_state_read_across_a_load_is_not_kept():
+    """A state read that began before a load and returned after it is the
+    pre-load state: kept, every read for the TTL would see the archive as
+    unmoved, and the compute caches would outlive the load."""
+    import asyncio
+
+    from pipeline import live_filing
+
+    class _SlowCh:
+        def __init__(self):
+            self.reads = 0
+            self.release = asyncio.Event()
+
+        async def query(self, sql, parameters=None):
+            self.reads += 1
+            state = ((1, "before"), (1, "before")) if self.reads == 1 else ((2, "after"), (2, "after"))
+            if self.reads == 1:
+                await self.release.wait()
+
+            class _Result:
+                result_rows = [state]
+
+            return _Result()
+
+    live_filing.invalidate_schedule_joins()
+    ch = _SlowCh()
+    reading = asyncio.create_task(live_filing._archive_state(ch, 77))
+    await asyncio.sleep(0)
+    live_filing.invalidate_schedule_joins()
+    ch.release.set()
+    assert await reading == ((1, "before"), (1, "before"))
+    assert await live_filing._archive_state(ch, 77) == ((2, "after"), (2, "after"))
+    assert ch.reads == 2
+    live_filing.invalidate_schedule_joins()

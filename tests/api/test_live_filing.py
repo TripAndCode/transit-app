@@ -543,3 +543,25 @@ async def test_a_live_report_reads_the_archive_state_once(refiled, client, ch_as
         assert response.json()["definition"]["source"] == "live"
         state_reads = [sql for sql, _params in spy.queries if "max(archived_at)" in sql]
         assert len(state_reads) == 1, query
+
+
+async def test_a_route_seen_as_stored_finds_its_latest_day_without_deciding_how_to_file_a_month(
+    refiled, client, ch_async_client
+):
+    """R1's polls carry their route, so the probe for its latest day answers
+    from the rows as stored; only the day then read is filed."""
+    from api.main import app
+    from pipeline.live_filing import invalidate_schedule_joins
+    from pipeline.service_day import service_day_start_utc
+
+    spy = _Spy(ch_async_client)
+    app.state.ch_client = spy
+    for path in (f"today/route/{ROUTE}/trips?date={refiled.day}", f"today/route/{ROUTE}/stop-profile"):
+        invalidate_schedule_joins()
+        spy.queries.clear()
+        response = await client.get(f"/api/{refiled.agency_id}/{path}")
+        assert response.status_code == 200, response.text
+        assert response.json()["date"] == refiled.day.isoformat(), path
+        probed_from = [params["stamped_from"] for sql, params in spy.queries if "GROUP BY stem" in sql]
+        assert probed_from, path
+        assert min(probed_from) >= service_day_start_utc(refiled.day), path
