@@ -35,6 +35,10 @@ _PUBLIC_PATHS = frozenset({"/api/config"})
 # Public to read only: who-am-I answers a signed-out caller with null, while
 # DELETE /api/me (account erasure) stays behind the gate.
 _PUBLIC_READS = frozenset({"/api/me"})
+# A frozen snapshot is read by whoever holds its unguessable id, council
+# members without an account among them; creating, listing and deleting stay
+# under /api/admin/snapshots.
+_PUBLIC_READ_PREFIXES = ("/api/snapshots/",)
 _READ_METHODS = frozenset({"GET", "HEAD"})
 _GATED_PATHS = frozenset({"/docs", "/redoc", "/openapi.json"})
 
@@ -43,7 +47,7 @@ def needs_login(path: str, method: str) -> bool:
     """Whether ``method path`` is refused to a signed-out caller while the gate is enforced."""
     if path in _PUBLIC_PATHS or path.startswith(_PUBLIC_PREFIXES):
         return False
-    if path in _PUBLIC_READS and method in _READ_METHODS:
+    if method in _READ_METHODS and (path in _PUBLIC_READS or path.startswith(_PUBLIC_READ_PREFIXES)):
         return False
     return path in _GATED_PATHS or path.startswith("/api/")
 

@@ -60,6 +60,7 @@ const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ defa
 const HelpPage = lazy(() => import("./pages/HelpPage").then((m) => ({ default: m.HelpPage })));
 const ModelPage = lazy(() => import("./pages/ModelPage").then((m) => ({ default: m.ModelPage })));
 const LegalPage = lazy(() => import("./pages/LegalPage").then((m) => ({ default: m.LegalPage })));
+const SnapshotPage = lazy(() => import("./pages/SnapshotPage").then((m) => ({ default: m.SnapshotPage })));
 const AdminUsersPage = lazy(() => import("./pages/admin/AdminUsersPage").then((m) => ({ default: m.AdminUsersPage })));
 const AdminUserDetailPage = lazy(() =>
   import("./pages/admin/AdminUserDetailPage").then((m) => ({ default: m.AdminUserDetailPage })),
@@ -114,6 +115,9 @@ const router = createBrowserRouter([
   { path: "/login", element: el(<LoginPage />), errorElement: <RouteError /> },
   { path: "/privacy", element: el(<LegalPage doc="privacy" />), errorElement: <RouteError /> },
   { path: "/terms", element: el(<LegalPage doc="terms" />), errorElement: <RouteError /> },
+  // A frozen snapshot is read by whoever holds its link, an account or not,
+  // so it stands outside RequireAuth and the app shell like the pages above.
+  { path: "/s/:snapshotId", element: el(<SnapshotPage />), errorElement: <RouteError /> },
   {
     path: "/",
     element: <RequireAuth><App /></RequireAuth>,

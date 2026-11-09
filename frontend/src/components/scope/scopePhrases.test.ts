@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import i18n from "../../i18n";
 import { SCOPE_EXTRAS_NONE, type Scope } from "../../api/scope";
-import { periodDays, scopeTitle, scopeTokens, sentenceParts, suggestedViewName, tokenChanged } from "./scopePhrases";
+import {
+  isScopeConditionOff,
+  periodDays,
+  scopeTitle,
+  scopeTokens,
+  sentenceParts,
+  suggestedViewName,
+  tokenChanged,
+} from "./scopePhrases";
 
 const base: Scope = {
   ...SCOPE_EXTRAS_NONE,
@@ -192,5 +200,22 @@ describe("suggestedViewName", () => {
   it("falls back to the routes and the period when nothing is changed", () => {
     expect(suggestedViewName(base, ctx("ja"), period)).toBe("全路線・9/1〜9/28");
     expect(suggestedViewName(base, ctx("en"), period)).toBe("all routes, 9/1 – 9/28");
+  });
+});
+
+describe("isScopeConditionOff", () => {
+  const token = (scope: Partial<Scope>, key: string) => tokens("en", scope).find((tok) => tok.key === key)!;
+
+  it("strikes a set condition the screen's data reports it did not use", () => {
+    const scope = { ...base, time_band: "morning" } as Scope;
+    expect(isScopeConditionOff(token(scope, "time"), scope, { time_band: false })).toBe(true);
+  });
+
+  it("leaves a condition alone when it was used, when nothing is reported, or when it is at its default", () => {
+    const scope = { ...base, time_band: "morning" } as Scope;
+    expect(isScopeConditionOff(token(scope, "time"), scope, { time_band: true })).toBe(false);
+    expect(isScopeConditionOff(token(scope, "time"), scope, undefined)).toBe(false);
+    expect(isScopeConditionOff(token(base, "time"), base, { time_band: false })).toBe(false);
+    expect(isScopeConditionOff(token(base, "agency"), base, { time_band: false })).toBe(false);
   });
 });

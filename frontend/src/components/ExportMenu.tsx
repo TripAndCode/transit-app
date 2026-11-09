@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
-import { Download, Link2, Printer, Image as ImageIcon } from "lucide-react";
+import { Camera, Download, Link2, Printer, Image as ImageIcon } from "lucide-react";
 import type { Scope } from "../api/scope";
+import { createSnapshot, type SnapshotSpec } from "../api/snapshots";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { buildCsv, downloadCsv, triggerBlobDownload, type CsvColumn } from "./analysis/csv";
 import { svgToPngBlob } from "./exportPng";
 import { menuItems, nextMenuItem } from "./menuKeys";
@@ -28,20 +30,29 @@ type ExportMenuProps<T> = {
   csv?: CsvExportSpec<T> | null;
   /** Default `true`. */
   showPrint?: boolean;
+  /** The screen a frozen snapshot would store, with the query its own report
+   *  endpoint was asked. Omitted or `null` -> no snapshot item, which admins
+   *  alone see even when given. */
+  snapshot?: SnapshotSpec | null;
 };
+
+type Status = "idle" | "copied" | "fallback" | "pngFailed" | "snapshotPending" | "snapshotCopied" | "snapshotFallback" | "snapshotFailed";
 
 /**
  * One export menu per tab header: PNG (rasterized from the tab's primary
  * SVG), CSV (via the shared `buildCsv` helper), a link to the exact current
  * view (every `useUrlState`/`useScope` key is already in the URL, so
  * this is just the current location — no separate query-string assembly to
- * keep in sync), and print.
+ * keep in sync), print, and for an admin a frozen snapshot: a link to the
+ * figures the screen shows now, which a later re-analyze does not change.
  */
-export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint = true }: ExportMenuProps<T>) {
+export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint = true, snapshot }: ExportMenuProps<T>) {
   const { t } = useTranslation("design");
   const location = useLocation();
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState<"idle" | "copied" | "fallback" | "pngFailed">("idle");
+  const [status, setStatus] = useState<Status>("idle");
+  // The link a status line names: the current view's, or a new snapshot's.
+  const [statusUrl, setStatusUrl] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -63,7 +74,7 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
   }, [open]);
 
   useEffect(() => {
-    if (status === "fallback") fallbackInputRef.current?.select();
+    if (status === "fallback" || status === "snapshotFallback") fallbackInputRef.current?.select();
   }, [status]);
 
   function closeMenu() {
@@ -78,20 +89,41 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
     target.focus();
   }
 
-  async function handleCopyLink() {
+  /** Copies `url`, or hands it over in a selectable input where the
+   *  clipboard refuses. */
+  async function copyLink(url: string, copied: "copied" | "snapshotCopied", fallback: "fallback" | "snapshotFallback") {
+    setStatusUrl(url);
     const clipboard = navigator.clipboard;
     if (clipboard?.writeText) {
       try {
-        await clipboard.writeText(currentUrl);
-        setStatus("copied");
-        closeMenu();
-        return;
+        await clipboard.writeText(url);
+        setStatus(copied);
+        return true;
       } catch {
         // fall through to the selectable-input fallback below -- some
         // browsers (and every non-secure origin) have no working Clipboard API.
       }
     }
-    setStatus("fallback");
+    setStatus(fallback);
+    return false;
+  }
+
+  async function handleCopyLink() {
+    if (await copyLink(currentUrl, "copied", "fallback")) closeMenu();
+  }
+
+  async function handleSnapshot() {
+    if (!snapshot) return;
+    closeMenu();
+    setStatus("snapshotPending");
+    let url: string;
+    try {
+      url = `${window.location.origin}${(await createSnapshot(snapshot)).path}`;
+    } catch {
+      setStatus("snapshotFailed");
+      return;
+    }
+    await copyLink(url, "snapshotCopied", "snapshotFallback");
   }
 
   function handleCsvClick() {
@@ -176,18 +208,39 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
               {t("print")}
             </button>
           )}
+          {snapshot && <SnapshotItem onSelect={() => void handleSnapshot()} />}
         </div>
       )}
       {status === "copied" && <span role="status" className="export-menu__status">{t("copied")}</span>}
       {status === "pngFailed" && <span role="status" className="export-menu__status">{t("pngFailed")}</span>}
-      {status === "fallback" && (
+      {status === "snapshotPending" && <span role="status" className="export-menu__status">{t("snapshotPending")}</span>}
+      {status === "snapshotFailed" && <span role="status" className="export-menu__status">{t("snapshotFailed")}</span>}
+      {status === "snapshotCopied" && (
+        <span role="status" className="export-menu__status">
+          {t("snapshotCopied")} <a href={statusUrl}>{statusUrl}</a>
+        </span>
+      )}
+      {(status === "fallback" || status === "snapshotFallback") && (
         <span className="export-menu__fallback">
           <label>
-            {t("copyLinkFallback")}
-            <input ref={fallbackInputRef} type="text" readOnly value={currentUrl} onFocus={(e) => e.currentTarget.select()} />
+            {t(status === "fallback" ? "copyLinkFallback" : "snapshotFallback")}
+            <input ref={fallbackInputRef} type="text" readOnly value={statusUrl} onFocus={(e) => e.currentTarget.select()} />
           </label>
         </span>
       )}
     </div>
+  );
+}
+
+/** Freezing a screen's figures is an admin's act: the item shows only to
+ *  one, and asks who the reader is only once the menu is open. */
+function SnapshotItem({ onSelect }: { onSelect: () => void }) {
+  const { t } = useTranslation("design");
+  if (!useIsAdmin()) return null;
+  return (
+    <button type="button" role="menuitem" onClick={onSelect}>
+      <Camera size={13} aria-hidden="true" />
+      {t("snapshot")}
+    </button>
   );
 }

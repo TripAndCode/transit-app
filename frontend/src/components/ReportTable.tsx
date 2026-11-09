@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import type { TFunction } from "i18next";
 import { DELAY_THRESHOLDS, delayColor } from "../styles/tokens";
-import { useRouteNames } from "../api/useRouteNames";
+import { useRouteNames, type RouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "./RouteLabel";
 import { PendingNavLink } from "./navPending";
 import { usePendingNavTarget } from "./navPendingContext";
@@ -213,14 +213,27 @@ type Props = {
   /** The threshold an early-departure column counts past, from the
    *  response's definition; without it that column is left out. */
   earlyDepartureSec?: number | null;
+  /** Route labels to draw the rows with, in place of the agency's current
+   *  ones: a frozen snapshot keeps the catalogue it was taken with. */
+  names?: RouteNames;
 };
 
 type Caveat = { mark: string; tip?: string };
 
-export function ReportTable({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec }: Props) {
+export function ReportTable(props: Props) {
+  return props.names ? <Table {...props} names={props.names} /> : <TableWithAgencyNames {...props} />;
+}
+
+/** The open agency's current route labels, read only when no others are
+ *  given, so a snapshot's page asks the API for nothing beyond itself. */
+function TableWithAgencyNames(props: Props) {
+  const names = useRouteNames(useAgencyId());
+  return <Table {...props} names={names} />;
+}
+
+function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec, names }: Props & { names: RouteNames }) {
   const { t } = useTranslation();
   const id = useAgencyId();
-  const names = useRouteNames(id);
   const { search } = useLocation();
   const schema = SCHEMAS[reportType]?.filter((c) => !c.early || earlyDepartureSec != null);
   // The visible row last clicked to travel; by row, not route, since a route
