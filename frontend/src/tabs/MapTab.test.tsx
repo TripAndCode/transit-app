@@ -259,7 +259,7 @@ describe("MapTab's on-time rate", () => {
 
   it("says how many trips ran earlier than the window allows, since neither tile counts them", () => {
     renderMap();
-    expect(screen.getByTestId("live-early-note")).toHaveTextContent(/^The 2 trips more than 1\smin early are in neither figure\.$/);
+    expect(screen.getByTestId("live-early-note")).toHaveTextContent(/^2 trips more than 1\smin early count as neither late nor on time\.$/);
   });
 
   it("says nothing of early trips when none ran early beyond the window, or the window takes every early departure", () => {
