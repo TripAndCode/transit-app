@@ -952,11 +952,19 @@ summary::-webkit-details-marker { display: none; }
      header once at the top, the generated time pinned to every page's foot. */
   .print-frame { display: block !important; color: black; }
   .print-frame__header { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 1px solid #999; font-size: 11pt; }
-  .print-frame__footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 9pt; color: #444; text-align: right; }
+  .print-frame__footer { position: fixed; bottom: 0; left: 0; right: 0; font-size: 9pt; line-height: 1.3; color: #444; text-align: right; }
+  /* A screen's own line (printFootSlot.ts), above the generated time. Its
+     link is one long word, so it wraps anywhere rather than overflow. */
+  .print-frame__snapshot { display: block; overflow-wrap: anywhere; }
   /* The credit follows the content and stays whole on one page; its URLs are
      long unbroken words, so they wrap anywhere rather than overflow the page. */
   .print-frame__credit { margin-top: 16px; padding-top: 6px; border-top: 1px solid #999; font-size: 9pt; break-inside: avoid; }
   .print-frame__credit h2 { margin: 0 0 2px; font-size: 9pt; font-weight: 600; }
   .print-frame__credit p { margin: 0; overflow-wrap: anywhere; }
+  /* Room after the content's end, so its last lines clear the fixed foot:
+     one 9pt line at line-height 1.3 is about 4.1mm. 14mm holds the stamp;
+     with a screen's line in the foot, 20mm holds the stamp and that line
+     wrapped onto as many as three lines. */
   main { padding-bottom: 14mm; }
+  .app-shell:has(.print-frame__snapshot:not(:empty)) main { padding-bottom: 20mm; }
 }

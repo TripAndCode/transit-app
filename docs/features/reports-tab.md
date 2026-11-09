@@ -187,6 +187,8 @@ reports.
     the reason in words.
 - The document is called 協議会向け報告 / "Council report" wherever it is
   named: its tab, its subtitle, the report list and the printed header.
+- An admin's print of the council report takes a frozen snapshot of it and
+  prints the snapshot's link in the foot ([snapshots.md](snapshots.md#on-paper)).
 - Every printout of an agency page ends with the credit for the open data
   behind it. That covers the period summary, the council report, the delay
   record and any other screen sent to the browser's print. The credit is
@@ -273,7 +275,7 @@ than issuing their own requests.
 | `frontend/src/tabs/SavedExportTab.tsx` | Reports shell: the `doc` strip, the `view` → `doc` replacement, and which screen each document renders |
 | `frontend/src/tabs/ReportsHomeTab.tsx` | Period summary and saved views: trend with its spike, the ten slowest routes, saved-analysis list |
 | `frontend/src/components/ExportMenu.tsx` | The header Export menu: chart PNG, combined CSV, share link, print, and an admin's frozen snapshot where a screen offers one ([snapshots.md](snapshots.md)) |
-| `frontend/src/components/PrintFrame.tsx` | What a printout adds: `PrintFrame`'s header (agency and scope) and footer (print time), and `PrintCredit`'s data-source credit at the end |
+| `frontend/src/components/PrintFrame.tsx` | What a printout adds: `PrintFrame`'s header (agency and scope) and footer (print time, and the slot for a screen's own line: an admin's council report print puts its snapshot link there, [snapshots.md](snapshots.md#on-paper)), and `PrintCredit`'s data-source credit at the end |
 | `frontend/src/components/dataSources.ts`, `dataSources.json` | The open-data source list, `dataSourceOf` (feed URL → source) and `creditText` (a credit as plain text with its URLs) |
 | `frontend/src/routes/destinations.ts` | `savedTarget` (`view` → `doc`), and the `routeHref`/`routesHref`/`reportHref` links out of this screen |
 | `frontend/src/components/analysis/PeriodChart.tsx` | Daily mean-delay trend chart |

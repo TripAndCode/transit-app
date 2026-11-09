@@ -26,7 +26,10 @@
 .council-report__mark { align-self: flex-start; }
 .council-report__lede { color: var(--text-secondary); font-size: var(--text-sm); }
 .council-report__print { margin-top: 16px; }
+.council-report__print-note { margin: 8px 0 0; font-size: var(--text-sm); color: var(--text-secondary); overflow-wrap: anywhere; }
 
+/* The paper carries the snapshot's link in its foot (PrintFrame), so the
+   on-screen notes about it stay off the page with the button. */
 @media print {
-  .council-report__print { display: none; }
+  .council-report__print, .council-report__print-note { display: none; }
 }

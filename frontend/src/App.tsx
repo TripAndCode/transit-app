@@ -10,7 +10,7 @@ import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { Sidebar } from "./components/Sidebar";
 import { NavPendingProvider } from "./components/navPending";
-import { PrintCredit, PrintFrame } from "./components/PrintFrame";
+import { PrintCredit, PrintFootProvider, PrintFrame } from "./components/PrintFrame";
 import "./styles/viewTransitions.css";
 import { TopBar } from "./components/TopBar";
 import { FOCUSED_TAB_PATTERN } from "./routes/focusedTabs";
@@ -39,44 +39,46 @@ export default function App() {
   return (
     <AgencyDataEndProvider>
       <NavPendingProvider>
-        <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
-          <CommandPalette />
-          <PrintFrame />
-          <Sidebar />
-          <main ref={mainRef} className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
-            {agencyIdNum != null && <TopBar />}
-            <NoticeStack focused={focused} />
-            {!focused && <HelpHint />}
-            {/* flex: 1, not height: "100%" — main is now a flex column whose
-                other children (the banners/strip above) take variable height, so
-                a percentage here would overflow main's box; flex: 1 fills
-                exactly what's left, same trick the outer app shell used before
-                this block moved inside main. */}
-            {/* One Suspense boundary for every routed tab, kept above the Outlet
-                rather than wrapped around each route element. A per-route
-                boundary is newly mounted on arrival and therefore always shows
-                its fallback; this one already holds the outgoing tab, so the
-                router's startTransition (main.tsx) can leave that painted until
-                the incoming chunk resolves. A navigation started through
-                navPending.tsx then commits as a view transition of this pane
-                (styles/viewTransitions.css), without remounting it. */}
-            <ViewTransition default={{ nav: "page-nav", default: "none" }}>
-              <div style={{ display: "flex", flexDirection: "column", padding: "clamp(16px, 4vw, 24px)", flex: 1, minHeight: 0, boxSizing: "border-box" }}>
-                <Suspense fallback={<ChunkLoading />}>
-                  <Outlet key={agencyId ?? "root"} />
-                </Suspense>
-              </div>
-            </ViewTransition>
-            {/* Inside main, so the print stylesheet's room for the fixed
-                footer keeps the credit clear of it. */}
-            <PrintCredit />
-          </main>
-          {!focused && <CopilotPanel />}
-          {/* Persisted in localStorage (transit.tourSeen); a no-op render
-              once a visitor has finished or dismissed it. Leaving Live mid-tour
-              closes it for that visit without marking it seen. */}
-          <FirstRunTourOnLive />
-        </div>
+        <PrintFootProvider>
+          <div className="app-shell" style={{ display: "flex", height: "100dvh" }}>
+            <CommandPalette />
+            <PrintFrame />
+            <Sidebar />
+            <main ref={mainRef} className="app-main" style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto" }}>
+              {agencyIdNum != null && <TopBar />}
+              <NoticeStack focused={focused} />
+              {!focused && <HelpHint />}
+              {/* flex: 1, not height: "100%" — main is now a flex column whose
+                  other children (the banners/strip above) take variable height, so
+                  a percentage here would overflow main's box; flex: 1 fills
+                  exactly what's left, same trick the outer app shell used before
+                  this block moved inside main. */}
+              {/* One Suspense boundary for every routed tab, kept above the Outlet
+                  rather than wrapped around each route element. A per-route
+                  boundary is newly mounted on arrival and therefore always shows
+                  its fallback; this one already holds the outgoing tab, so the
+                  router's startTransition (main.tsx) can leave that painted until
+                  the incoming chunk resolves. A navigation started through
+                  navPending.tsx then commits as a view transition of this pane
+                  (styles/viewTransitions.css), without remounting it. */}
+              <ViewTransition default={{ nav: "page-nav", default: "none" }}>
+                <div style={{ display: "flex", flexDirection: "column", padding: "clamp(16px, 4vw, 24px)", flex: 1, minHeight: 0, boxSizing: "border-box" }}>
+                  <Suspense fallback={<ChunkLoading />}>
+                    <Outlet key={agencyId ?? "root"} />
+                  </Suspense>
+                </div>
+              </ViewTransition>
+              {/* Inside main, so the print stylesheet's room for the fixed
+                  footer keeps the credit clear of it. */}
+              <PrintCredit />
+            </main>
+            {!focused && <CopilotPanel />}
+            {/* Persisted in localStorage (transit.tourSeen); a no-op render
+                once a visitor has finished or dismissed it. Leaving Live mid-tour
+                closes it for that visit without marking it seen. */}
+            <FirstRunTourOnLive />
+          </div>
+        </PrintFootProvider>
       </NavPendingProvider>
     </AgencyDataEndProvider>
   );
