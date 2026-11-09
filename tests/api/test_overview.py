@@ -3085,6 +3085,21 @@ _GRAIN_PAYLOAD = {
         "samples": 31,
         "window_from": "2026-05-11",
         "window_to": "2026-05-24",
+        # The fixture seeds no aggregate, which the reference alone reads.
+        "reference": {
+            "avg_min": None,
+            "delta_min": None,
+            "delta_pct": None,
+            "samples": 0,
+            "window_from": "2026-02-10",
+            "window_to": "2026-05-10",
+            "days": 90,
+            "days_selected": 90,
+            "days_collected": 0,
+            "min_days": 72,
+            "min_samples": 100,
+            "reason": "no_data",
+        },
     },
     "movers": {
         "worse": [
