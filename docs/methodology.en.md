@@ -51,7 +51,15 @@ An operator's result will be referenced from this document once its validation i
 
 ### Feed quality
 
-A monthly feed-quality scorecard per operator is in preparation. Its measures and thresholds are not set yet. Today, the share of implausible readings and the share of planned trips observed are used in the [Comparability conditions](#comparability-conditions).
+A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) and shown in each operator's entry on the admin pages. Each month gives:
+
+- **Trips reported**: the share of the trips the timetable planned that the feed reported a plausible departure for, by the same rule as the coverage in the [Comparability conditions](#comparability-conditions);
+- **Stop events reported**: the share of the stops the planned trips call at that the feed reported;
+- **Message age**: per poll received live, the time it was captured minus the feed header's timestamp (the median and the 95th percentile);
+- **Implausible readings**: the share of reports dropped as in [Excluding implausible values](#excluding-implausible-values);
+- **Field coverage**: the share of reports carrying the stop ID, the arrival delay, and the trip's and the stop's status (`schedule_relationship`).
+
+A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. No pass or fail threshold is set for any of them yet. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
 
 ## Processing
 
@@ -188,7 +196,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | Passenger weighting | Partial | Only hand-entered relative weights per route, used only by the weighted on-time rate on the agency comparison screen. No ridership import |
 | Splitting running time from dwell time | Partial | The split exists. Whether a feed's arrival and departure delays are independent has not been checked feed by feed |
 | External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
-| Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The feed-quality scorecard is in preparation |
+| Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The monthly feed-quality scorecard is on the admin pages, with no pass or fail thresholds yet |
 | Stating the measurement point and definitions | Partial | "Download CSV" files, the council report, the delay record and the screens' "How this is calculated" block carry the definition stamp. CSVs a screen builds on the spot and chart images do not |
 | Transfers and total travel time | Out of scope | Passengers are not the Service's primary users. Connection reliability at feeder hubs is considered separately |
 | Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
@@ -330,10 +338,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.4`. Newest first, each version with the inputs it set.
+The current method is `2026.11.5`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.5` | `feed_quality_monthly` = 1 |
 | `2026.11.4` | `agg_daily_trend` 2 → 3, `agg_hour_daily` 3 → 4, `agg_route_daily` 2 → 3, `agg_route_daily_dist` 2 → 3, `agg_route_daily_dwell_run` 2 → 3, `agg_route_headway_daily` 2 → 3, `agg_route_hour` 3 → 4, `agg_route_hour_dow` 3 → 4, `agg_route_stats` 2 → 3, `agg_route_stop_daily` 3 → 4, `agg_service_delivered_daily` 1 → 2, `agg_stop_daily` 3 → 4, `route_delay_counts` 3 → 4 |
 | `2026.11.3` | `agg_daily_trend` 1 → 2, `agg_hour_daily` 2 → 3, `agg_route_daily` 1 → 2, `agg_route_daily_dist` 1 → 2, `agg_route_daily_dwell_run` 1 → 2, `agg_route_headway_daily` 1 → 2, `agg_route_hour` 2 → 3, `agg_route_hour_dow` 2 → 3, `agg_route_stats` 1 → 2, `agg_route_stop_daily` 2 → 3, `agg_schedule_revision_daily` 1 → 2, `agg_stop_daily` 2 → 3, `agg_stop_routes` 1 → 2, `route_delay_counts` 2 → 3, `stop_route_days` 1 → 2 |
 | `2026.11.2` | `agg_feed_health` 1 → 2 |
