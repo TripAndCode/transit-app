@@ -1,8 +1,10 @@
 import { useTranslation } from "react-i18next";
+import type { SnapshotSpec } from "../../api/snapshots";
 import type { ReportResponse } from "../../api/types";
 import { EM_DASH, fmtPct, formatDuration, formatMinutes, formatNumber } from "../../utils/format";
 import { unrankedReason } from "../comparabilityReason";
 import type { CouncilMark } from "../snapshotCompare";
+import { CouncilPrint } from "./CouncilPrint";
 import { councilTiles, gateFigures, type CouncilTile } from "./councilTiles";
 import "./CouncilSummaryBlock.css";
 
@@ -121,8 +123,18 @@ function comparedFigures(own: Figure[], compare: CouncilComparison, t: TFn): Fig
  *  trips say how many of the period's days a timetable plans, and a missing
  *  service-delivered rate says why, in the words the agencies board uses, as
  *  does the comparison tile for an agency the board would not rank. A
- *  snapshot compared with today marks each tile whose figures moved. */
-export function CouncilSummaryBlock({ report, compare }: { report: CouncilReport; compare?: CouncilComparison }) {
+ *  snapshot compared with today marks each tile whose figures moved. Given
+ *  `snapshot`, the live screen's query, its print carries a snapshot of the
+ *  figures (CouncilPrint). */
+export function CouncilSummaryBlock({
+  report,
+  compare,
+  snapshot,
+}: {
+  report: CouncilReport;
+  compare?: CouncilComparison;
+  snapshot?: SnapshotSpec | null;
+}) {
   const { t } = useTranslation();
   const own = councilFigures(report, t);
   const figures = compare ? comparedFigures(own, compare, t) : own;
@@ -156,9 +168,7 @@ export function CouncilSummaryBlock({ report, compare }: { report: CouncilReport
           {line}
         </p>
       ))}
-      <button type="button" className="btn-ghost council-report__print" onClick={() => window.print()}>
-        {t("reports.print")}
-      </button>
+      <CouncilPrint report={report} snapshot={snapshot} />
     </div>
   );
 }

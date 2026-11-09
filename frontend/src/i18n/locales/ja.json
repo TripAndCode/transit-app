@@ -1425,7 +1425,14 @@
       "comparison": "他事業者との比較",
       "comparison_agency_wide": "他事業者との比較（事業者全体）",
       "comparable": "比較できます",
-      "not_comparable": "比較できません"
+      "not_comparable": "比較できません",
+      "print_snapshot": {
+        "pending": "印刷するページのスナップショットを作成しています…",
+        "stored": "印刷したページの下部に、このスナップショットのリンクを載せました:",
+        "failed": "スナップショットを用意できなかったため、リンクを載せずに印刷しました。",
+        "moved": "このページを開いた後に数値が更新されたため、リンクを載せずに印刷しました。ページを再読み込みすると、リンク付きで印刷できます。",
+        "cancelled": "表示が変わったため、印刷を取り消しました。"
+      }
     },
     "print": "印刷 / PDFで保存",
     "certificate": {
@@ -2289,7 +2296,8 @@
   },
   "print": {
     "generated_at": "作成日時 {{time}}",
-    "routes": "路線: {{names}}"
+    "routes": "路線: {{names}}",
+    "snapshot": "スナップショット: {{url}}（手法 {{method}}）"
   },
   "model": {
     "title": "ML予測モデルの評価",

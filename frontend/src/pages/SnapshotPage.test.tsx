@@ -6,6 +6,7 @@ import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import type { DefinitionMeta, ReportResponse, Route } from "../api/types";
 import type { Snapshot, SnapshotToday } from "../api/snapshots";
+import * as adminHook from "../api/useIsAdmin";
 import { SnapshotPage } from "./SnapshotPage";
 
 const ID = "AbCdEfGhIjKlMnOpQrStUv";
@@ -132,6 +133,7 @@ function renderPage() {
 describe("SnapshotPage", () => {
   afterEach(async () => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     await i18n.changeLanguage("en");
   });
 
@@ -171,6 +173,17 @@ describe("SnapshotPage", () => {
     expect(screen.getByText(prose.en)).toBeInTheDocument();
     await i18n.changeLanguage("ja");
     expect(await screen.findByText(prose.ja)).toBeInTheDocument();
+  });
+
+  it("prints a stored council report as it is, taking no new snapshot of it, even for an admin", async () => {
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    const fetchMock = stubFetch(200, snapshot({ screen: "council_report", payloads: { report: { ja: council("報告"), en: council("Report") }, routes: [], credit: { ja: null, en: null } } })); // i18n-ignore: fixture prose
+    renderPage();
+    await userEvent.click(await screen.findByRole("button", { name: "Print / Save as PDF" }));
+    expect(print).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("names every condition the figures were computed under, marking one the screen did not use", async () => {

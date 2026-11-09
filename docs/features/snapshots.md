@@ -12,8 +12,9 @@ the number that was handed out.
   and the Routes table, an admin sees an Export menu whose "Create snapshot"
   item (「スナップショットを作成」) stores the screen as it is asked for (scope,
   on-time window, sort, order, sparse and left-out toggles, row count) and
-  copies the snapshot's link, `/s/{id}`. Everyone else sees no change on those
-  screens.
+  copies the snapshot's link, `/s/{id}`. An admin's print of the council
+  report takes one too and prints its link ([On paper](#on-paper)). Everyone
+  else sees no change on those screens.
 - **Anyone holding the link** reads it, signed in or not: the page
   (`frontend/src/pages/SnapshotPage.tsx`) sits outside the sign-in wall and the
   app shell, and `GET /api/snapshots/{id}` and `GET /api/snapshots/{id}/today`
@@ -68,6 +69,58 @@ figures.
 Only the screen's own report is frozen. The panels the Routes screen shows
 beside its table (headway quality, the agency's performance standards) come
 from endpoints of their own and are not part of a snapshot.
+
+## On paper
+
+An admin's print of the council report (its 「印刷 / PDFで保存」 / "Print /
+Save as PDF" button; its Export menu has no print item) traces to stored data.
+The print takes a snapshot of the report as it is asked for, the same create
+the Export menu's item sends, and prints its link in the page's foot above the
+print time: 「スナップショット: https://…/s/{id}（手法 2026.11.0）」 /
+"Snapshot: https://…/s/{id} (method 2026.11.0)". Each press takes one
+snapshot, and the button waits while it is taken.
+
+- **The figures on the page.** The server recomputes the report for the
+  query, so after the create the print reads the snapshot back
+  (`GET /api/snapshots/{id}`) and prints its link only when the stored
+  response in the page's language is the one on the page, all but the moment
+  each was served (`frontend/src/components/analysis/printSnapshot.ts`). A
+  page loaded before a rebuild prints without a link and says the figures
+  were updated after it opened; reloading lets the next print carry one. The
+  snapshot it took stays, a true record of the figures it holds, in the
+  admin list.
+- **Never held back.** A create the server refuses (409, 413), a network
+  failure, or a create and read that together take longer than
+  `PRINT_SNAPSHOT_WAIT_MS` (20 seconds) still prints, without a link, and the
+  screen says so calmly. A create the print stopped waiting for may still be
+  stored, and is listed like any other. A scope the aggregates cannot serve
+  is scanned live once per language, so its print is the likeliest to go
+  without a link: the wait is bounded for the reader's sake, not stretched
+  to fit the slowest scan. Figures held over from another scope while the
+  new one loads print without a snapshot.
+- **Called off when the view changes.** Each press holds its own
+  cancellation. Another scope, a new response or leaving the report while
+  its snapshot is taken stops the requests and calls the print off, since
+  the page it would print is no longer the one asked for (the printed header
+  already names the new scope). The screen says 「表示が変わったため、印刷を
+  取り消しました。」 / "Printing was cancelled because the view changed."
+- **One line, one response.** The line stays in the foot only while the page
+  shows the very response it was checked against: a scope change or any new
+  response takes it off (`frontend/src/components/analysis/CouncilPrint.tsx`).
+  A print the browser starts on its own (Ctrl+P) takes no snapshot; on a page
+  still showing a response a print button already checked, it carries that
+  snapshot's link.
+- **Unchanged elsewhere.** A reader who is not an admin prints the page as
+  before, with no snapshot and no link. A snapshot's own page (`/s/{id}`)
+  prints what it stores and takes no new snapshot, and the Routes table's
+  print, from its Export menu, takes none either.
+- **The delay record** prints no snapshot. Its printers are mostly readers
+  with no account, and only admins take snapshots; a snapshot for it waits on
+  letting anyone take one, rate-limited, which is not decided.
+
+The foot's line goes through `printFootSlot.ts`: `PrintFrame`'s footer
+(`frontend/src/components/PrintFrame.tsx`) holds a slot a screen draws its
+own line into, and the print stylesheet shows it.
 
 ## Compared with today
 

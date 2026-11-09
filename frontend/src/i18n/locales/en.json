@@ -1425,7 +1425,14 @@
       "comparison": "Comparison with other operators",
       "comparison_agency_wide": "Comparison with other operators (whole agency)",
       "comparable": "Comparable",
-      "not_comparable": "Not comparable"
+      "not_comparable": "Not comparable",
+      "print_snapshot": {
+        "pending": "Creating a snapshot for the printed page…",
+        "stored": "The printed page carries this snapshot's link at its foot:",
+        "failed": "Printed without a snapshot link, as one couldn't be prepared.",
+        "moved": "Printed without a snapshot link: the figures were updated after this page opened. Reload the page to print them with one.",
+        "cancelled": "Printing was cancelled because the view changed."
+      }
     },
     "print": "Print / Save as PDF",
     "certificate": {
@@ -2289,7 +2296,8 @@
   },
   "print": {
     "generated_at": "Generated {{time}}",
-    "routes": "Routes: {{names}}"
+    "routes": "Routes: {{names}}",
+    "snapshot": "Snapshot: {{url}} (method {{method}})"
   },
   "model": {
     "title": "ML forecast model evaluation",

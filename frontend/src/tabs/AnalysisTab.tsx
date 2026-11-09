@@ -45,6 +45,7 @@ import { pickReport } from "../routes/destinations";
 import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
 import { CsvLink } from "../components/analysis/CsvLink";
 import { ExportMenu } from "../components/ExportMenu";
+import type { SnapshotSpec } from "../api/snapshots";
 
 // The route lists these screens host, which leave retired route codes and
 // zero-delay routes out unless asked (api/routers/reports.py's
@@ -124,6 +125,12 @@ export function AnalysisTab({
   );
   const [rawRowsOpen, setRawRowsOpen] = useState(false);
   const isAdmin = useIsAdmin();
+  // What a snapshot of the council report stores: the one query its Export
+  // menu and its print both send, which only an admin's screen has.
+  const councilSnapshot: SnapshotSpec | null =
+    isAdmin && id != null && detail.data?.report_type === "council_summary"
+      ? { screen: "council_report", agencyId: id, query: reportQueryString(ctx, rankingOptions(detail.data.report_type, kept)) }
+      : null;
   // route_forecast is served by the forecast endpoints, so their own map
   // applies: one chosen route opens that route's forecast, which honours the
   // route; otherwise the agency-wide overview. A report's map counts only
@@ -220,19 +227,10 @@ export function AnalysisTab({
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
-              {/* The council report prints from its own button; the menu
-                  carries the snapshot, which only an admin takes. */}
-              {isAdmin && id != null && detail.data.report_type === "council_summary" && (
-                <ExportMenu
-                  csv={null}
-                  showPrint={false}
-                  snapshot={{
-                    screen: "council_report",
-                    agencyId: id,
-                    query: reportQueryString(ctx, rankingOptions(detail.data.report_type, kept)),
-                  }}
-                />
-              )}
+              {/* The council report prints from its own button, which for
+                  an admin takes a snapshot first; the menu takes one without
+                  printing. */}
+              {councilSnapshot && <ExportMenu csv={null} showPrint={false} snapshot={councilSnapshot} />}
             </div>
             <ReportMeta data={detail.data} />
             {detail.data.retired_rows != null && detail.data.retired_rows > 0 && (
@@ -256,7 +254,10 @@ export function AnalysisTab({
             ) : detail.data.report_type === "dwell_run" ? (
               id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
-              <CouncilSummaryBlock report={detail.data} />
+              // Figures held over from another scope while this one loads
+              // are not what the screen's query names, so their print
+              // carries no snapshot.
+              <CouncilSummaryBlock report={detail.data} snapshot={detail.isPlaceholderData ? null : councilSnapshot} />
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
               <>
                 <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />
