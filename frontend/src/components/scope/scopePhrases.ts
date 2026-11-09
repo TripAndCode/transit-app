@@ -95,6 +95,36 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   return tokens;
 }
 
+/** `scope_applied` as an endpoint reports it, keyed by URL param name
+ *  (api/scope_applied.py). */
+export type ScopeApplied = Partial<Record<ScopeField | (string & {}), boolean>> | null | undefined;
+
+/** Whether a condition narrows anything. A condition at its default filters
+ *  nothing, so a screen ignoring it is not worth striking through. */
+function conditionIsSet(key: TokenKey, scope: Scope): boolean {
+  switch (key) {
+    case "agency":
+      return false;
+    case "routes":
+      return scope.routes.length > 0;
+    case "days":
+      return scope.dow !== "all";
+    case "time":
+      return scope.hour != null || scope.time_band !== "all";
+    case "tolerance":
+      return scope.late != null;
+    default:
+      return true;
+  }
+}
+
+/** Whether a token's condition is set but the screen's data did not use it
+ *  (`applied[field] === false`), so the sentence strikes it through. An
+ *  absent `applied` means every condition was used. */
+export function isScopeConditionOff(token: ScopeToken, scope: Scope, applied: ScopeApplied): boolean {
+  return token.field != null && applied?.[token.field] === false && conditionIsSet(token.key, scope);
+}
+
 /** A locale template's text runs and `[slot]` placeholders, in order. Square
  *  brackets rather than `{{ }}` so i18next leaves the slots alone. */
 export function sentenceParts(template: string): ({ text: string } | { slot: string })[] {

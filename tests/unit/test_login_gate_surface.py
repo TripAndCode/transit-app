@@ -19,6 +19,9 @@ PUBLIC_ROUTES = {
     # Who-am-I answers a signed-out caller with null; it discloses nothing,
     # and the SPA asks it on every page, the landing page included.
     ("GET", "/api/me"),
+    # A frozen snapshot is council material handed to readers with no account;
+    # its unguessable id is the credential (api/routers/snapshots.py).
+    ("GET", "/api/snapshots/{snapshot_id}"),
     ("GET", "/health"),
     ("POST", "/internal/collector/updates/{agency_id}"),
     ("POST", "/internal/cron/ingest"),
@@ -47,6 +50,16 @@ def test_only_reading_who_am_i_is_public_under_api_me():
         assert needs_login("/api/me", method)
     assert needs_login("/api/me/sessions", "GET")
     assert needs_login("/api/me/export", "GET")
+
+
+def test_only_reading_a_snapshot_is_public():
+    assert not needs_login("/api/snapshots/abcdefghijklmnopqrstuv", "GET")
+    assert not needs_login("/api/snapshots/abcdefghijklmnopqrstuv", "HEAD")
+    for method in ("DELETE", "POST", "PUT", "PATCH"):
+        assert needs_login("/api/snapshots/abcdefghijklmnopqrstuv", method)
+    assert needs_login("/api/snapshots", "GET")
+    assert needs_login("/api/admin/snapshots", "GET")
+    assert needs_login("/api/admin/snapshots", "POST")
 
 
 def test_the_walk_sees_the_included_routers():

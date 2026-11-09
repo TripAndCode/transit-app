@@ -76,6 +76,11 @@ async def list_routes(
     most one of the two is true. All five are computed when the static feed
     loads (see ``pipeline.route_terminals``).
     """
+    return StaticRoutesResponse(rows=await fetch_static_routes(conn, agency_id))
+
+
+async def fetch_static_routes(conn: asyncpg.Connection, agency_id: int) -> list[StaticRoute]:
+    """``GET /routes``'s rows, which every route label is drawn from."""
     rows = await conn.fetch(
         "SELECT r.route_id, r.route_short_name, r.route_long_name, "
         f"  {route_code_sql('r.route_id')} AS route_code, "
@@ -91,7 +96,7 @@ async def list_routes(
         "WHERE r.agency_id=$1 ORDER BY r.route_id",
         agency_id,
     )
-    return StaticRoutesResponse(rows=[StaticRoute(**dict(r)) for r in rows])
+    return [StaticRoute(**dict(r)) for r in rows]
 
 
 @router.get("/stops", response_model=StaticStopsResponse)

@@ -297,6 +297,7 @@ The main endpoints are:
 | `/api/admin/audit` | Merged admin-action + login audit log |
 | `/api/admin/ops` | Read-only ops health snapshot (migrations, aggregate freshness) |
 | `/api/admin/flags` | Feature-flag registry: resolved values + DB overrides |
+| `/api/admin/snapshots*`, `GET /api/snapshots/{id}` | Frozen snapshots: admins create, list and delete; anyone with the link reads one ([guide](docs/features/snapshots.md)) |
 | `/api/admin/ask/*` | Ask query log, funnel, intent-cache promotion, eval result |
 | `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
 | `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |

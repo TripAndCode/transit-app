@@ -49,6 +49,13 @@ function isRouteTableSort(value: string | null): value is RouteTableSort {
   return (ROUTE_TABLE_SORTS as readonly (string | null)[]).includes(value);
 }
 
+/** Which way the sorted figure runs down the Routes table. A high on-time
+ *  rate is good and every other figure's high end needs attention, so the two
+ *  read opposite ways for the same order. */
+export function routeTableSortDirection({ sort, order }: RouteTableView): "ascending" | "descending" {
+  return (sort !== "on_time") === (order === "worst") ? "descending" : "ascending";
+}
+
 /** The sort and order a Routes URL asks the table for. A `report` naming one
  *  of the route lists, or a `sort` naming one, opens the table the way that
  *  list was ordered, so a link from before the table keeps its meaning;

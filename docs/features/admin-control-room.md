@@ -287,11 +287,28 @@ registry, precedence, and cache TTL, and `README.md`'s kill-switch section
 for the full key list.
 
 `login_required` is the sign-in gate (`api/middleware/login_gate.py`): on,
-every `/api/*` route except the sign-in flow, `/api/config` and a read of
-`/api/me` (who-am-I, `null` when signed out) refuses a signed-out caller while
-SSO is configured. Turning it off reopens the app to
+every `/api/*` route except the sign-in flow, `/api/config`, a read of
+`/api/me` (who-am-I, `null` when signed out) and a read of a frozen snapshot
+(`/api/snapshots/{id}`, see [snapshots.md](snapshots.md)) refuses a signed-out
+caller while SSO is configured. Turning it off reopens the app to
 signed-out visitors; it is the recovery switch when OAuth is down (see
 `docs/deploy-railway.md`).
+
+## Snapshots
+
+No page of its own: an admin takes a snapshot from the Export menu of the
+council report or the Routes table, and lists or deletes them through the API
+([snapshots.md](snapshots.md)).
+
+Endpoints:
+- `POST /api/admin/snapshots` — compute the named screen's response for the
+  given scope and store it; answers the id and its `/s/{id}` page.
+- `GET /api/admin/snapshots` — newest first, without the payloads.
+- `DELETE /api/admin/snapshots/{id}` — remove one for good.
+
+Tables: reads and writes `snapshots`. A create records `snapshot.create` and a
+delete `snapshot.delete` in `admin_audit`, each with the screen, agency,
+scope and method version, never the stored figures.
 
 ## Ask ops
 

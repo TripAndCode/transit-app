@@ -27,7 +27,7 @@ import re
 import types
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Literal, Union, get_args, get_origin
 
 import httpx
 import pytest
@@ -196,6 +196,8 @@ def _dummy_value(annotation: Any) -> Any:
     if _is_optional_origin(origin):
         non_none = [a for a in args if a is not type(None)]
         return _dummy_value(non_none[0]) if non_none else None
+    if origin is Literal:
+        return args[0]
     if annotation is str:
         return "x"
     if annotation in (int, float):

@@ -272,7 +272,7 @@ than issuing their own requests.
 |---|---|
 | `frontend/src/tabs/SavedExportTab.tsx` | Reports shell: the `doc` strip, the `view` → `doc` replacement, and which screen each document renders |
 | `frontend/src/tabs/ReportsHomeTab.tsx` | Period summary and saved views: trend with its spike, the ten slowest routes, saved-analysis list |
-| `frontend/src/components/ExportMenu.tsx` | The header Export menu: chart PNG, combined CSV, share link, print |
+| `frontend/src/components/ExportMenu.tsx` | The header Export menu: chart PNG, combined CSV, share link, print, and an admin's frozen snapshot where a screen offers one ([snapshots.md](snapshots.md)) |
 | `frontend/src/components/PrintFrame.tsx` | What a printout adds: `PrintFrame`'s header (agency and scope) and footer (print time), and `PrintCredit`'s data-source credit at the end |
 | `frontend/src/components/dataSources.ts`, `dataSources.json` | The open-data source list, `dataSourceOf` (feed URL → source) and `creditText` (a credit as plain text with its URLs) |
 | `frontend/src/routes/destinations.ts` | `savedTarget` (`view` → `doc`), and the `routeHref`/`routesHref`/`reportHref` links out of this screen |

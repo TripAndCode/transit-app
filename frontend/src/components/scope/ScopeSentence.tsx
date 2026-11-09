@@ -19,19 +19,18 @@ import { CONTROLS } from "./controlForToken";
 import { ScopePopover } from "./ScopePopover";
 import { readScopePinned, writeScopePinned } from "./scopePin";
 import {
+  isScopeConditionOff,
   periodDays,
   scopeTokens,
   sentenceParts,
   tokenChanged,
-  type ScopeField,
+  type ScopeApplied,
   type ScopeToken,
   type TokenKey,
 } from "./scopePhrases";
 import { useScopeActionsSlot } from "./scopeSlot";
 import "./scope.css";
 
-/** Keyed by URL param name, as the API reports it (api/scope_applied.py). */
-type Applied = Partial<Record<ScopeField | (string & {}), boolean>> | null | undefined;
 type ConditionKey = Exclude<TokenKey, "agency">;
 
 const RESET: ScopePatch = {
@@ -53,23 +52,6 @@ const DATA_KEYS: ReadonlySet<TokenKey> = new Set(["routes", "period", "days", "s
 
 /** Punctuation that must not start a line: it stays with the token before it. */
 const TRAILING_PUNCT = /^[、。・，,]+/; // i18n-ignore: punctuation set, not copy
-
-/** Whether a condition narrows anything. A condition at its default filters
- *  nothing, so a screen ignoring it is not worth striking through. */
-function isSet(key: ConditionKey, scope: Scope): boolean {
-  switch (key) {
-    case "routes":
-      return scope.routes.length > 0;
-    case "days":
-      return scope.dow !== "all";
-    case "time":
-      return scope.hour != null || scope.time_band !== "all";
-    case "tolerance":
-      return scope.late != null;
-    default:
-      return true;
-  }
-}
 
 /** Whether a patch removes the condition whose popover is open, taking its
  *  token (and the focus inside the popover) with it. */
@@ -154,7 +136,7 @@ function Token({
  *  `applied` means every condition was used. The saved views and the pin go
  *  on the page heading's row when the page has a ScopePageHeader, and beside
  *  the sentence otherwise. */
-export function ScopeSentence({ applied }: { applied?: Applied }) {
+export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const [scope, update] = useScope();
@@ -184,8 +166,7 @@ export function ScopeSentence({ applied }: { applied?: Applied }) {
   const { data: summary } = useScopeSummary(id, scope, pinned || (open != null && DATA_KEYS.has(open)));
   const separator = t("common.list_separator");
 
-  const isOff = (tok: ScopeToken & { key: ConditionKey }) =>
-    tok.field != null && applied?.[tok.field] === false && isSet(tok.key, scope);
+  const isOff = (tok: ScopeToken & { key: ConditionKey }) => isScopeConditionOff(tok, scope, applied);
 
   function apply(patch: ScopePatch) {
     update(patch);

@@ -44,6 +44,7 @@ import { certificateDayScope } from "../components/analysis/certificateDayScope"
 import { pickReport } from "../routes/destinations";
 import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
 import { CsvLink } from "../components/analysis/CsvLink";
+import { ExportMenu } from "../components/ExportMenu";
 
 // The route lists these screens host, which leave retired route codes and
 // zero-delay routes out unless asked (api/routers/reports.py's
@@ -219,6 +220,19 @@ export function AnalysisTab({
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
               <h2 style={{ margin: 0 }}>{reportLabel(t, detail.data.report_type)}</h2>
               {hasCsv(detail.data) && <CsvLink href={csvHref(detail.data.report_type)} />}
+              {/* The council report prints from its own button; the menu
+                  carries the snapshot, which only an admin takes. */}
+              {isAdmin && id != null && detail.data.report_type === "council_summary" && (
+                <ExportMenu
+                  csv={null}
+                  showPrint={false}
+                  snapshot={{
+                    screen: "council_report",
+                    agencyId: id,
+                    query: reportQueryString(ctx, rankingOptions(detail.data.report_type, kept)),
+                  }}
+                />
+              )}
             </div>
             <ReportMeta data={detail.data} />
             {detail.data.retired_rows != null && detail.data.retired_rows > 0 && (
