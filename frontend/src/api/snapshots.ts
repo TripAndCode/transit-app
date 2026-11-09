@@ -72,8 +72,8 @@ export type SnapshotToday = {
   unavailable: "agency_removed" | "not_computable" | null;
 };
 
-// How long one computation of today's figures is reused: the server's
-// compute caches keep a result as long, and the endpoint is rate-limited.
+// How long one computation of today's figures is reused: they change only
+// when the aggregates are rebuilt, and each ask is a rate-limited compute.
 const TODAY_STALE_MS = 5 * 60_000;
 
 /** Today's figures for the snapshot, asked only while `enabled`: each ask

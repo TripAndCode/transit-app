@@ -256,6 +256,23 @@ describe("SnapshotPage compared with today", () => {
     expect(urls).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`)), expect.stringMatching(new RegExp(`/api/snapshots/${ID}/today$`))]);
   });
 
+  it("keeps the stored rows' bars as they were when a route only today lists runs longer", async () => {
+    const byAvg = { ...withRows(routeTable("Route table"), [tableRow("42", "10.60", "12.3"), tableRow("9", "3.00", "80.0")]), sort: "avg" } as ReportResponse;
+    const today = { ...withRows(byAvg, [tableRow("42", "10.60", "12.3"), tableRow("7", "20.00", "50.0")]), sort: "avg" } as ReportResponse;
+    stubApi(snapshot({ payloads: { report: { en: byAvg, ja: byAvg }, routes: ROUTES, credit: {} } }), {
+      status: 200,
+      body: { report: today, unavailable: null },
+    });
+    renderPage();
+    const fill = (row: HTMLElement) => (row.querySelector('[data-testid="bar-track"] > div') as HTMLElement).style.width;
+    const first = () => within(screen.getByRole("table")).getAllByRole("row")[1];
+    await screen.findByRole("table");
+    const before = fill(first());
+    await userEvent.click(screen.getByRole("checkbox", { name: "Compare with today's figures" }));
+    await screen.findByText("only today");
+    expect(fill(first())).toBe(before);
+  });
+
   it("names each side's method, build and on-time definition, and says plainly when the method differs", async () => {
     const today = withRows(stored, stored.rows as unknown[][], { method_version: "2026.12.0", built_at: "2026-12-01T03:00:00Z" });
     stubApi(storedSnapshot, { status: 200, body: { report: today, unavailable: null } });

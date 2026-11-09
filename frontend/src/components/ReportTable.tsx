@@ -341,7 +341,9 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
     );
   }
 
-  const maxes = computeColumnMaxes(schema, rows);
+  // Scaled to the snapshot's own rows, so a route only today lists leaves
+  // the stored rows' bars as they were.
+  const maxes = computeColumnMaxes(schema, marks ? rows.filter((_, i) => marks[i]?.side !== "today") : rows);
   return (
     <div className="table-scroll" style={{ width: "100%", overflowX: "auto" }}>
       <table style={SHARED_TABLE}>
