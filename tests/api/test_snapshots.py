@@ -119,9 +119,7 @@ async def test_the_id_a_printed_council_report_carries_resolves_to_the_figures_o
     sid = (await seed_session(aconn, role="admin")).sid
     query = urlencode(print_flow["body"]["query"])
     assert query == print_flow["search"]
-    on_page = await client.get(
-        f"/api/{agency_id}/reports/council_summary?{query}", headers={"Accept-Language": locale}
-    )
+    on_page = await client.get(f"/api/{agency_id}/reports/council_summary?{query}", headers={"Accept-Language": locale})
 
     created = await client.post(
         "/api/admin/snapshots",
