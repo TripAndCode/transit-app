@@ -58,6 +58,9 @@ civic tech. It is not SaaS sold to operators.
   data behind it. A figure resting on thin data says so rather than ranking anything.
 - **The deliverable is close.** The council report is the persona's output, so it is
   never buried behind analyst screens.
+- **Readers need no account.** They read anonymously; only the deployment's admins
+  sign in. A figure is shared through a snapshot link, which an admin creates, and no
+  reader personal data is held.
 
 ## Screens
 
@@ -79,13 +82,11 @@ Admins also see the admin pages and **Model evaluation**.
 
 ## Knowing whether it works
 
-The cheapest signal is to count, monthly against production, the distinct users who
-made a signed-in request (by session or by API key) over the last 30 days:
-
-```sql
-SELECT count(DISTINCT user_id), max(day) FROM user_activity_daily
-WHERE day > (now() AT TIME ZONE 'Asia/Tokyo')::date - interval '30 days';
-```
+Readers are anonymous, so signed-in activity (`user_activity_daily`) counts admins,
+not readers. The reader signal is a cookie-free count kept on the server: distinct
+visitors per day and page by a salted hash of the address, or requests per report
+type. Until that count exists, the closest signal is the report endpoints' request
+volume in the server logs.
 
 The other signal is what readers say. The sidebar's **Send feedback** link opens the
 address the deployment sets in `FEEDBACK_URL` (an https form or a `mailto:` address);

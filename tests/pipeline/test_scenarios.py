@@ -236,6 +236,7 @@ _EVERY_STOP_SKIPPED = "CA"
 _SKIPPED_FROM_THE_START = "CK"
 _SKIPPED_AFTER_PREDICTIONS = "CP"
 _SKIPPED_THEN_NO_DATA = "CN"
+_CANCELLED_WITHOUT_STOPS_AFTER_PREDICTIONS = "CW"
 # Each route runs four trips of eight stops, six minutes apart, from these
 # first departures, all of a group's departures inside its hour.
 _CANCELLATION_TIMETABLE = {
@@ -249,6 +250,7 @@ _CANCELLATION_TIMETABLE = {
     (_UNREPORTED, "土曜"): "07:03:00",
     (_SKIPPED_AFTER_PREDICTIONS, "土曜"): "08:00:00",
     (_SKIPPED_THEN_NO_DATA, "土曜"): "07:04:00",
+    (_CANCELLED_WITHOUT_STOPS_AFTER_PREDICTIONS, "平日"): "09:00:00",
 }
 
 
@@ -269,6 +271,8 @@ def cancellations(day: date) -> Scenario:
     On the first day, a 平日, routes CL and CT each lose their last trip,
     cancelled with its stops listed and with none listed, and CC's last trip
     is predicted 90 s late and then cancelled two minutes before it was due.
+    CW's last trip is predicted the same way and then cancelled with no stop
+    listed.
     On the second day, a 土曜, CA's last trip does not run and the feed
     reports every stop of it SKIPPED, and CS's last trip does not run without
     the feed ever mentioning it. CN's last trip does not run either: the feed
@@ -289,6 +293,7 @@ def cancellations(day: date) -> Scenario:
         _UNREPORTED,
         _SKIPPED_AFTER_PREDICTIONS,
         _SKIPPED_THEN_NO_DATA,
+        _CANCELLED_WITHOUT_STOPS_AFTER_PREDICTIONS,
     )
     routes = {code: _route(code, f"Line {code}", 8, 34.45 + i * 0.02) for i, code in enumerate(codes)}
     trips = {
@@ -316,7 +321,12 @@ def cancellations(day: date) -> Scenario:
     not_run = {
         *(
             last(code, "平日").trip_id
-            for code in (_CANCELLED_LISTING_STOPS, _CANCELLED_WITHOUT_STOPS, _CANCELLED_AFTER_PREDICTIONS)
+            for code in (
+                _CANCELLED_LISTING_STOPS,
+                _CANCELLED_WITHOUT_STOPS,
+                _CANCELLED_AFTER_PREDICTIONS,
+                _CANCELLED_WITHOUT_STOPS_AFTER_PREDICTIONS,
+            )
         ),
         *(last(code, "土曜").trip_id for code in (_EVERY_STOP_SKIPPED, _UNREPORTED, _SKIPPED_THEN_NO_DATA)),
     }
@@ -346,6 +356,13 @@ def cancellations(day: date) -> Scenario:
                 last(_CANCELLED_AFTER_PREDICTIONS, "平日").trip_id,
                 day,
                 announced_sec=gtfs_seconds("08:16:00"),
+                predicted_delay_sec=90,
+            ),
+            Cancellation(
+                last(_CANCELLED_WITHOUT_STOPS_AFTER_PREDICTIONS, "平日").trip_id,
+                day,
+                announced_sec=gtfs_seconds("09:16:00"),
+                reported_as="canceled_without_stops",
                 predicted_delay_sec=90,
             ),
             Cancellation(last(_EVERY_STOP_SKIPPED, "土曜").trip_id, second, reported_as="every_stop_skipped"),

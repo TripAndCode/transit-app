@@ -34,13 +34,14 @@ its expiry.
 import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
+from pipeline.service_day import service_date_of, service_day_moment_utc, service_day_offset
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
-from pipeline.strategies._time import parse_departure_time
+from pipeline.strategies._time import Status, parse_departure_time
 
 _log = logging.getLogger(__name__)
 
@@ -53,6 +54,10 @@ REQUIRES_STATIC_TIMETABLE = True
 # the timetable rightly lacks (an added or late-night trip) to count.
 _MISS_WARN_FRACTION = 0.5
 _MISS_WARN_MIN_ROWS = 20
+
+# A stop time of a trip: its stop_sequence, stop_id and raw departure_time.
+_StopTime = tuple[int, str | None, str | None]
+
 
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
 # schedule_relationship_*/feed_timestamp -- necessary but not sufficient
@@ -463,11 +468,18 @@ def parse_feed(
                 feed_timestamp, scheduled_sec, static_version_id).
 
     A CANCELED trip that stores no stop row, because it lists no
-    StopTimeUpdate or none with a usable stop_sequence, gets one trip-level
-    row instead (pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE), so the
-    cancellation is kept: the trip's route, service and version as
-    static_trips names them, the CANCELED status, and no stop, delay or
-    schedule.
+    StopTimeUpdate or none with a usable stop_sequence, is stored as one
+    withdrawal per stop the loaded timetable schedules it at and it has not
+    left yet (``_stops_to_come``): each row has the stop's stop_sequence,
+    stop_id and schedule, the trip's route, service and version as a
+    prediction of that stop stores them, the CANCELED status and no delay. So
+    each such stop's latest report withdraws a departure the feed predicted
+    for it before (pipeline.db.latest_departure_ch), and a stop already left
+    keeps its reports: a CANCELED trip will not run the rest of its trip. A
+    trip with no stop still to come, or that the timetable lists no stop for,
+    gets one trip-level row instead
+    (pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE), which keeps the
+    cancellation with no stop, delay or schedule.
     """
     trip_updates = list(_decode_trip_updates(pb_bytes))
     decoded = list(_stop_rows(trip_updates))
@@ -539,19 +551,30 @@ def parse_feed(
             )
             static_routes = dict(cur.fetchall())
         cancelled_trips: dict[str, tuple[str | None, str | None, str | None]] = {}
+        cancelled_stops: dict[str, list[_StopTime]] = {}
         if cancelled:
+            # One read for every cancelled trip of the poll, however many: both
+            # tables are walked on their (agency_id, trip_id) key prefix, so it
+            # costs the poll's cancelled trips, never the agency's timetable.
             cur.execute(
-                "SELECT trip_id, route_id, service_id, static_version_id FROM static_trips "
-                "WHERE agency_id = %s AND trip_id = ANY(%s)",
+                "SELECT t.trip_id, t.route_id, t.service_id, t.static_version_id, "
+                "st.stop_sequence, st.stop_id, st.departure_time "
+                "FROM static_trips t LEFT JOIN static_stop_times st "
+                "  ON st.agency_id = t.agency_id AND st.trip_id = t.trip_id "
+                "WHERE t.agency_id = %s AND t.trip_id = ANY(%s) "
+                "ORDER BY t.trip_id, st.stop_sequence",
                 (agency_id, list({trip_id for trip_id, _route in cancelled})),
             )
-            cancelled_trips = {tid: (route, svc, ver) for tid, route, svc, ver in cur.fetchall()}
+            for tid, route, svc, ver, stop_seq, stop_id, departure in cur.fetchall():
+                cancelled_trips[tid] = (route, svc, ver)
+                stops = cancelled_stops.setdefault(tid, [])
+                if _uint16(stop_seq) is not None:
+                    stops.append((stop_seq, stop_id, departure))
 
     rows = []
     miss = 0
     no_route = 0
-    extended = 0
-    bad_sched = 0
+    statuses: list[Status] = []
     for trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop in raw_rows:
         svc, sched, static_version_id = joined.get((trip_id, stop_seq), (None, None, None))
         if svc is None and sched is None:
@@ -559,53 +582,12 @@ def parse_feed(
         route_code = rt_route_id or static_routes.get(trip_id)
         if route_code is None:
             no_route += 1
-        # Single parse drives the extended-hour handling, the zero-pad, AND
-        # the raw scheduled_sec value (see pipeline.strategies._time._GTFS_TIME_RE
-        # for why: two independent parses of the same field -- a sched[:2]
-        # check for the >=24 decision and hour_str.isdigit() for padding --
-        # can disagree on malformed multi-digit input, e.g. a 3-digit hour
-        # like "125:30:00" has a fine 2-char prefix but a broken zero-pad,
-        # storing an uncastable value). GTFS's departure_time is raw, unpadded,
-        # unvalidated text -- "7:05:00" is as valid as "07:05:00" per spec,
-        # and nothing guarantees the rest is even numeric. ClickHouse's plain
-        # String column does not validate it, so analyze()'s `_analyze_visits.
-        # scheduled_time time` column is the only place format errors
-        # surface -- and once a bad value is durably stored in ClickHouse,
-        # it fails analyze() for this ENTIRE agency on every subsequent
-        # run, not just drops one row. NULL is already a first-class value
-        # on this column (every downstream read site handles it -- WHERE
-        # scheduled_time IS NOT NULL / toUInt8OrNull).
-        sched, status, scheduled_sec = parse_departure_time(sched)
-        if status == "extended":
-            # GTFS allows departure_time like "25:30:00" for trips spanning
-            # midnight as continuation of the previous service day.
-            # scheduled_time (Nullable(String), read everywhere as a
-            # same-day HH:MM[:SS]) still can't represent it, so that column
-            # stays NULL here -- but scheduled_sec (Nullable(Int32)) holds
-            # the raw seconds-since-service-day-start value (e.g. 91800 for
-            # "25:30:00"), so the row is kept instead of dropped.
-            extended += 1
-        if status == "bad":
-            bad_sched += 1
-        rows.append(
-            (
-                file_name,
-                captured_at,
-                trip_id,
-                svc,
-                sched,
-                route_code,
-                stop_seq,
-                dep_delay,
-                stop_id,
-                arr_delay,
-                sched_rel_trip,
-                sched_rel_stop,
-                feed_timestamp,
-                scheduled_sec,
-                static_version_id,
-            )
+        row, status = _stored_row(
+            *(file_name, captured_at, trip_id, svc, sched, route_code, stop_seq, dep_delay, stop_id, arr_delay),
+            *(sched_rel_trip, sched_rel_stop, feed_timestamp, static_version_id),
         )
+        rows.append(row)
+        statuses.append(status)
 
     if miss and len(rows) >= _MISS_WARN_MIN_ROWS and miss > _MISS_WARN_FRACTION * len(rows):
         _log.warning(
@@ -618,19 +600,114 @@ def parse_feed(
         _log.info(
             f"[static_join] agency={agency_id} {no_route}/{len(rows)} rows have no route_id in the feed or static_trips"
         )
+    captured = _instant(captured_at) if cancelled else None
+    for trip_id, rt_route_id in cancelled:
+        route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
+        route_code = rt_route_id or route
+        stops = _stops_to_come(cancelled_stops.get(trip_id, []), captured)
+        if not stops:
+            rows.append(
+                (
+                    *(file_name, captured_at, trip_id, svc, None, route_code, TRIP_LEVEL_STOP_SEQUENCE),
+                    *(None, None, None, TRIP_CANCELED, None, feed_timestamp, None, static_version_id),
+                )
+            )
+        for stop_seq, stop_id, departure_time in stops:
+            row, status = _stored_row(
+                *(file_name, captured_at, trip_id, svc, departure_time, route_code, stop_seq, None, stop_id, None),
+                *(TRIP_CANCELED, None, feed_timestamp, static_version_id),
+            )
+            rows.append(row)
+            statuses.append(status)
+    extended = statuses.count("extended")
     if extended:
         _log.info(
             f"[static_join] agency={agency_id} {extended} rows had extended-hour (>=24) departure_time "
             "(kept, scheduled_sec set)"
         )
+    bad_sched = statuses.count("bad")
     if bad_sched:
         _log.warning(f"[static_join] agency={agency_id} {bad_sched} rows had a non-numeric departure_time hour")
-    for trip_id, rt_route_id in cancelled:
-        route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
-        rows.append(
-            (
-                *(file_name, captured_at, trip_id, svc, None, rt_route_id or route, TRIP_LEVEL_STOP_SEQUENCE),
-                *(None, None, None, TRIP_CANCELED, None, feed_timestamp, None, static_version_id),
-            )
-        )
     return rows
+
+
+def _stored_row(
+    file_name: str,
+    captured_at: str,
+    trip_id: str,
+    service_type: str | None,
+    departure_time: str | None,
+    route_code: str | None,
+    stop_sequence: int,
+    dep_delay: int | None,
+    stop_id: str | None,
+    arr_delay: int | None,
+    schedule_relationship_trip: int | None,
+    schedule_relationship_stop: int | None,
+    feed_timestamp: int | None,
+    static_version_id: str | None,
+) -> tuple[tuple, Status]:
+    """One stop row in ``parse_feed``'s shape, its schedule taken from the
+    timetable's raw *departure_time*, and how that parsed.
+
+    One parse drives the extended-hour handling, the zero-pad and the raw
+    scheduled_sec (see pipeline.strategies._time._GTFS_TIME_RE for why: two
+    independent parses of the same field -- a sched[:2] check for the >=24
+    decision and hour_str.isdigit() for padding -- can disagree on malformed
+    multi-digit input, e.g. a 3-digit hour like "125:30:00" has a fine 2-char
+    prefix but a broken zero-pad, storing an uncastable value). GTFS's
+    departure_time is raw, unpadded, unvalidated text -- "7:05:00" is as valid
+    as "07:05:00" per spec, and nothing guarantees the rest is even numeric.
+    ClickHouse's plain String column does not validate it, so analyze()'s
+    `_analyze_visits.scheduled_time time` column is the only place format
+    errors surface -- and once a bad value is durably stored in ClickHouse, it
+    fails analyze() for this ENTIRE agency on every subsequent run, not just
+    drops one row. NULL is already a first-class value on this column (every
+    downstream read site handles it -- WHERE scheduled_time IS NOT NULL /
+    toUInt8OrNull).
+
+    GTFS allows a departure_time like "25:30:00" for a trip running past
+    midnight as part of the previous service day. scheduled_time
+    (Nullable(String), read everywhere as a same-day HH:MM[:SS]) can't hold
+    it, so that column stays NULL, but scheduled_sec (Nullable(Int32)) holds
+    the raw seconds since the service day's start (91800 for "25:30:00"), so
+    the row is kept instead of dropped.
+    """
+    scheduled_time, status, scheduled_sec = parse_departure_time(departure_time)
+    row = (
+        *(file_name, captured_at, trip_id, service_type, scheduled_time, route_code, stop_sequence, dep_delay),
+        *(stop_id, arr_delay, schedule_relationship_trip, schedule_relationship_stop, feed_timestamp, scheduled_sec),
+        static_version_id,
+    )
+    return row, status
+
+
+def _instant(captured_at: str) -> datetime:
+    """*captured_at* as an aware instant; a naive one is read in UTC, the
+    zone of the column it is stored in."""
+    moment = datetime.fromisoformat(captured_at)
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
+def _stops_to_come(stops: list[_StopTime], captured: datetime | None) -> list[_StopTime]:
+    """The stops of *stops*, in stop_sequence order, after the last one the
+    trip has left by *captured*: a stop whose scheduled departure, on the
+    service day *captured* falls in (pipeline.service_day), is earlier than
+    *captured*. A stop with no usable departure time is left once a stop
+    after it is.
+
+    The schedule alone decides, not the trip's last predicted delay: a poll
+    that cancels a trip listing no stop carries no delay, and the feed's
+    earlier predictions are in ClickHouse, which ingest does not read. A
+    stop a late-running trip has not reached by its scheduled time therefore
+    counts as left, and its last prediction stands."""
+    if captured is None:
+        return stops
+    day = service_date_of(captured)
+    left = [
+        i
+        for i, (_seq, _stop_id, departure) in enumerate(stops)
+        if (sec := parse_departure_time(departure)[2]) is not None
+        and service_day_moment_utc(day, service_day_offset(sec)) < captured
+    ]
+    return stops[left[-1] + 1 :] if left else stops

@@ -67,6 +67,9 @@
     "feed_quality_monthly": 1
   },
   "2026.11.6": {
+    "feed_quality_monthly": 2
+  },
+  "2026.11.7": {
     "agg_service_delivered_daily": 3
   }
 }

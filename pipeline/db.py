@@ -74,6 +74,20 @@ def withdrawn_ch() -> str:
     )
 
 
+def timetable_cancellation_ch() -> str:
+    """Whether a row is one ingest writes from the timetable, for a stop of a
+    trip the feed cancelled without listing a stop
+    (pipeline.strategies.static_join.parse_feed): its trip CANCELED, with
+    neither delay nor a stop status. The feed sent no update for that stop,
+    so a count of the updates the feed sends leaves the row out. A stop update
+    the feed sends for a cancelled trip has that shape only when it carries
+    neither a delay nor a stop status, and is left out with them."""
+    return (
+        f"(ifNull(u.schedule_relationship_trip, 0) = {TRIP_CANCELED} AND u.schedule_relationship_stop IS NULL "
+        "AND u.dep_delay IS NULL AND u.arr_delay IS NULL)"
+    )
+
+
 def stop_event_filter_ch(extra_where: str = "") -> str:
     """The row-level WHERE of a read that picks each stop event's latest poll
     (:func:`latest_departure_ch`): the agency, a measured `dep_delay` inside
