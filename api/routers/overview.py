@@ -22,6 +22,7 @@ from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.day_types import DayType
 from pipeline.reports import compute_overview_summary
+from pipeline.reports.overview import ReferenceReason
 from pipeline.route_catalog import pooled_left_out_codes, route_list, rows_to_fetch
 from pipeline.strategies._time import MAX_SERVICE_HOUR
 
@@ -77,9 +78,36 @@ async def _all_time_left_out(conn: asyncpg.Connection, agency_id: int) -> dict[s
     return await pooled_left_out_codes(conn, agency_id, [r["route_code"] for r in rows])
 
 
+class HeadlineReference(BaseModel):
+    """The headline's figure over the ``days`` days before the period, under
+    the same scope: the agency's own usual level.
+
+    ``avg_min`` is None whenever ``reason`` names why the window cannot stand
+    as that level. ``days_selected`` counts the window's days the scope's
+    day-of-week and service filters keep, ``days_collected`` those the
+    agency's feed holds data on, and ``min_days`` / ``min_samples`` the
+    floors the figure needs; ``not_aggregated`` reads nothing, so its counts
+    are 0. ``delta_min`` / ``delta_pct`` are the headline's change from it, as
+    the baseline's are.
+    """
+
+    avg_min: float | None
+    delta_min: float | None
+    delta_pct: float | None
+    samples: int
+    window_from: str  # ISO date
+    window_to: str  # ISO date
+    days: int
+    days_selected: int
+    days_collected: int
+    min_days: int
+    min_samples: int
+    reason: ReferenceReason | None
+
+
 class Headline(BaseModel):
     """The period's avg + the same-width window before it as the baseline +
-    signed delta.
+    signed delta, and its trailing reference.
 
     ``window_from`` / ``window_to`` are the ISO dates of the window the
     headline covers: the requested period up to its last day with data, so
@@ -95,6 +123,7 @@ class Headline(BaseModel):
     samples: int
     window_from: str  # ISO date
     window_to: str  # ISO date
+    reference: HeadlineReference
 
 
 class Mover(BaseModel):

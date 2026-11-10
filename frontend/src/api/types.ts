@@ -1060,6 +1060,33 @@ export type OverviewHeadline = {
   /** ISO date of the end of the headline's window: the latest date that has
    *  data inside the period, not necessarily its last day. */
   window_to: string;
+  reference?: OverviewHeadlineReference;
+};
+
+/** Why a reference has no figure. `not_aggregated`: a time of day together
+ *  with a routes filter, which no aggregate holds by date. */
+type OverviewReferenceReason = "no_data" | "insufficient_days" | "insufficient_samples" | "not_aggregated";
+
+/** The headline's figure over the `days` days before the period, under the
+ *  same scope: the agency's own usual level. */
+export type OverviewHeadlineReference = {
+  /** Null whenever `reason` is set: the figure is withheld, not zero. */
+  avg_min: number | null;
+  /** The headline's change from it, as the baseline's `delta_min` / `delta_pct`. */
+  delta_min: number | null;
+  delta_pct: number | null;
+  samples: number;
+  window_from: string;
+  window_to: string;
+  days: number;
+  /** The window's days the scope's day-of-week and service filters keep. */
+  days_selected: number;
+  /** Of those, the days the agency's feed holds data on. */
+  days_collected: number;
+  /** The fewest collected days, and observations, the figure needs. */
+  min_days: number;
+  min_samples: number;
+  reason: OverviewReferenceReason | null;
 };
 
 type OverviewMover = {

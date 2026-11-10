@@ -443,6 +443,21 @@
       "latest_day_2": "The latest day, {{date}}, averaged {{avg}} min: the second slowest of the {{days}} days observed in {{range}}.",
       "latest_day_3": "The latest day, {{date}}, averaged {{avg}} min: the third slowest of the {{days}} days observed in {{range}}."
     },
+    "reference": {
+      "line": "Past {{days}} days ({{range}}): average delay {{value}} min",
+      "line_partial_one": "Past {{days}} days ({{range}}), on the one day with data: average delay {{value}} min",
+      "line_partial_other": "Past {{days}} days ({{range}}), on the {{count}} days with data: average delay {{value}} min",
+      "judgement_better": "Better than the past {{days}} days",
+      "judgement_flat": "About the same as the past {{days}} days",
+      "judgement_worse": "Worse than the past {{days}} days",
+      "no_data": "Past {{days}} days ({{range}}): no observations, so there is no usual level to compare with.",
+      "insufficient_days_one": "Past {{days}} days ({{range}}): data on only one day, short of the {{min}} needed for a usual level.",
+      "insufficient_days_other": "Past {{days}} days ({{range}}): data on only {{count}} days, short of the {{min}} needed for a usual level.",
+      "insufficient_samples": "Past {{days}} days ({{range}}): only {{samples}} observations, short of the {{min}} needed for a usual level.",
+      "not_aggregated": "With both a time of day and routes chosen, the past {{days}} days are not compared.",
+      "hint_title": "About the past {{days}} days",
+      "hint_body": "The average delay over the {{days}} days before the period ({{range}}), under the same conditions as the figure: days of the week, time of day, timetable and routes. It is shown when the feed has data on at least {{min_days}} of the {{selected}} days those conditions select, and there are at least {{min_samples}} observations. A difference under {{flat_min}} min, or under {{flat_pct}}% of the past {{days}} days' average, reads “about the same”, by the same rule as the comparison above. When either average is below 0 min (departures running early), neither is judged better or worse."
+    },
     "routes_to_check": {
       "title_one": "Routes to check (one day, {{range}})",
       "title_other": "Routes to check ({{count}} days, {{range}})",

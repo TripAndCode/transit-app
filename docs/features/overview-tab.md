@@ -42,6 +42,34 @@ What the user sees/does:
   a sparkline, so the hero and the scope sentence describe the same period.
   Every fact value, the delayed-route count included, prints in ink; the list
   below carries the delay colours.
+- **Trailing reference** — `frontend/src/components/overview/HeadlineReference.tsx`,
+  under the headline figure: the headline's own figure over the 90 days
+  ending the day before the period (`headline.reference`), under the same
+  scope, as the agency's usual level, with a neutral chip judging the period
+  better, about the same or worse. The chip takes the verdict's tolerance
+  (`FLAT_MAX_DELTA_MIN` / `FLAT_MAX_DELTA_PCT` in
+  `frontend/src/components/overview/storySentence.ts`: under 0.1 min or under
+  5%), and judges nothing when either average is below 0 min, where a lower
+  figure is no longer a better one. The baseline asks "did it change since
+  just before?", the reference "is this usual for the agency?"; when the
+  headline's window is 90 days wide the two are one window, and the line is
+  left to the verdict.
+  - The figure is withheld, with a stated reason, when the agency's feed has
+    data on fewer than four fifths of the window's days the scope selects
+    (`insufficient_days`: a new agency, or a long outage), when it rests on
+    fewer than 100 observations (`insufficient_samples`), when nothing was
+    observed (`no_data`), and under a time band with a routes filter
+    (`not_aggregated`: no aggregate holds a route's departures by date and
+    hour; decided before anything is read). Coverage counts the days the
+    feed was collected, not the days the scope's routes ran.
+  - A service filter is resolved over the reference window alone, so each of
+    its dates is filed under the timetable the agency's calendar ran then;
+    where the calendar changed its weekend timetables between the window and
+    the period, a filter such as 土曜 can select a different set of day types
+    in each.
+  - The fact rows take no reference: their populations (the routes over a
+    sample floor) and the concentration's spread change with the window's
+    length, so a 90-day value is not the same statistic as the period's.
 - **Routes to check** — `frontend/src/components/RoutesToCheckList.tsx`: the
   top-5 routes by absolute avg delay over the same window as the headline,
   each with its change from the window before. The movers compare the same
@@ -86,13 +114,14 @@ What the user sees/does:
     plus the days before it that the baseline (as wide as the range) and the
     movers' four-week sparkline read, and the service filter uses the same
     resolution, so where a feed changes its weekend timetables that whole span
-    decides the split.
+    decides the split. The 90-day reference resolves its own window instead,
+    so reaching back for it never moves the period's split.
 
 ## Request path
 
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
-| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). The three hour profiles (`peak_hour` and the modal's weekday/weekend split) all come from `_peak_hour_by_dow()` over the range: the per-day `agg_hour_daily`, filtering dates by day-of-week and by the service filter's dates, and the shared live scan only under a `routes` or `time_band` filter. Under a `routes` filter alone that scan is the request's only ClickHouse work, so a failure degrades just those three fields to null. Under a `time_band`, a scan past the ClickHouse client's row cap or its time budget is fetched again over the range's routes alone, and the fields that need the days before the range (the baseline and its deltas, `movers`, each listed route's change) and the three hour profiles degrade to null. |
+| `useOverviewSummary(agencyId, ctx)` | `GET /api/{agency_id}/overview/summary` (`api/routers/overview.py: overview_summary`) | `pipeline/reports/overview.py: compute_overview_summary()` — headline, movers, concentration, top-delayed, and service-split each fast-path off precomputed `agg_daily_trend` when `ctx.time_band == "all"`, falling back to a live ClickHouse scan of `updates` only for a `time_band`-narrowed request (module docstring at the top of `pipeline/reports/overview.py`). The three hour profiles (`peak_hour` and the modal's weekday/weekend split) all come from `_peak_hour_by_dow()` over the range: the per-day `agg_hour_daily`, filtering dates by day-of-week and by the service filter's dates, and the shared live scan only under a `routes` or `time_band` filter. Under a `routes` filter alone that scan is the request's only ClickHouse work, so a failure degrades just those three fields to null. Under a `time_band`, a scan past the ClickHouse client's row cap or its time budget is fetched again over the range's routes alone, and the fields that need the days before the range (the baseline and its deltas, `movers`, each listed route's change) and the three hour profiles degrade to null. `headline.reference` reads Postgres alone (`_reference`): `agg_daily_trend` through the headline's own `_headline_stats`, or `agg_hour_daily` under a time band (an hour taken modulo 24 against the band's whole-hour edges), plus one count of the agency's collected days; it never scans `updates`, so a degraded grain leaves it standing. |
 | `usePeakHourBreakdown(agencyId, hour, dow)` (fires only once an hour is clicked on the ribbon) | `GET /api/{agency_id}/peak-hour-breakdown` (`api/routers/overview.py: peak_hour_breakdown`) | `agg_route_hour_dow`, one row per route pooled across its raw service ids, and across DOWs when `dow` is omitted; routes with fewer than 3 samples are excluded. Returns up to 20 routes, worst avg delay first. |
 
 ## Key files
@@ -103,6 +132,7 @@ What the user sees/does:
 |---|---|
 | `frontend/src/tabs/OverviewTab.tsx` | Overview tab shell: modal-open state, peak-hour drill-down selection, empty-state gating |
 | `frontend/src/components/OverviewHeroRow.tsx` | Headline delta + sparkline + delayed-route count |
+| `frontend/src/components/overview/HeadlineReference.tsx` | The headline's trailing 90-day reference line, its judgement chip and hint |
 | `frontend/src/components/RoutesToCheckList.tsx` | Top-5 routes by absolute avg delay |
 | `frontend/src/components/ConcentrationBar.tsx` | Pareto bar (card/modal variants) + movers list |
 | `frontend/src/components/PeakHourRibbon.tsx` | Hour-by-hour avg-delay ribbon over the service day (card/modal variants) |
@@ -119,7 +149,7 @@ What the user sees/does:
 | File | Role |
 |---|---|
 | `api/routers/overview.py` | `GET /overview/summary`, `GET /peak-hour-breakdown` |
-| `pipeline/reports/overview.py` | `compute_overview_summary()` and its per-module helpers (headline, movers, concentration, top-delayed, peak-hour, service-split); fast-path-vs-live-scan pattern documented in the module docstring |
+| `pipeline/reports/overview.py` | `compute_overview_summary()` and its per-module helpers (headline and its reference, movers, concentration, top-delayed, peak-hour, service-split); fast-path-vs-live-scan pattern documented in the module docstring |
 | `pipeline/analyze.py`, `pipeline/ch_aggregates.py` | Build `agg_daily_trend`, `agg_hour_daily`, `agg_route_hour_dow` — the aggregates this tab reads. `ch_aggregates` computes them in ClickHouse; `analyze` copies them into Postgres |
 | `pipeline/day_types.py` | Files each service date under a day type from the agency's `static_calendar` / `static_calendar_dates` (loaded by `pipeline/static_loader.py`), with the weekday rule as fallback |
 
@@ -129,12 +159,15 @@ What the user sees/does:
 
 - Frontend: `frontend/src/tabs/OverviewTab.test.tsx`,
   `frontend/src/components/OverviewHeroRow.test.tsx`,
+  `frontend/src/components/overview/HeadlineReference.test.tsx`,
+  `frontend/src/components/overview/storySentence.test.ts`,
   `frontend/src/components/PeakHourModal.test.tsx`,
   `frontend/src/components/RoutesToCheckList.test.tsx`,
   `frontend/src/components/routesToCheckBands.test.ts`.
 - Backend: `tests/api/test_overview.py` (`/overview/summary`,
-  `/peak-hour-breakdown`), `tests/unit/test_day_types.py` (day-type
-  resolution).
+  `/peak-hour-breakdown`), `tests/api/test_overview_reference.py` (the
+  reference's window, its parity with the headline, its reasons),
+  `tests/unit/test_day_types.py` (day-type resolution).
 
 **Manual click-through** (`make serve` + `make frontend-dev`, or `make serve`
 alone for single-origin):

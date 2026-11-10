@@ -443,6 +443,21 @@
       "latest_day_2": "最新日の{{date}}は{{avg}}分で、{{range}}に観測した{{days}}日のうち2番目に遅い日でした。",
       "latest_day_3": "最新日の{{date}}は{{avg}}分で、{{range}}に観測した{{days}}日のうち3番目に遅い日でした。"
     },
+    "reference": {
+      "line": "過去{{days}}日（{{range}}）の平均遅延 {{value}}分",
+      "line_partial_one": "過去{{days}}日（{{range}}）のうちデータのある{{count}}日の平均遅延 {{value}}分",
+      "line_partial_other": "過去{{days}}日（{{range}}）のうちデータのある{{count}}日の平均遅延 {{value}}分",
+      "judgement_better": "過去{{days}}日より改善",
+      "judgement_flat": "過去{{days}}日とほぼ同じ",
+      "judgement_worse": "過去{{days}}日より悪化",
+      "no_data": "過去{{days}}日（{{range}}）は観測がなく、ふだんの水準と比べられません。",
+      "insufficient_days_one": "過去{{days}}日（{{range}}）はデータのある日が{{count}}日で、ふだんの水準とするのに必要な{{min}}日に足りません。",
+      "insufficient_days_other": "過去{{days}}日（{{range}}）はデータのある日が{{count}}日で、ふだんの水準とするのに必要な{{min}}日に足りません。",
+      "insufficient_samples": "過去{{days}}日（{{range}}）は観測が{{samples}}回で、ふだんの水準とするのに必要な{{min}}回に足りません。",
+      "not_aggregated": "時間帯と系統をあわせて絞り込んだときは、過去{{days}}日と比べません。",
+      "hint_title": "過去{{days}}日との比較について",
+      "hint_body": "期間の前日までの{{days}}日間（{{range}}）の平均遅延を、画面上部と同じ条件（曜日・時間帯・ダイヤ・系統）で求めています。条件に合う{{selected}}日のうち{{min_days}}日以上にデータがあり、観測が{{min_samples}}回以上あるときに示します。差が{{flat_min}}分未満か、過去{{days}}日の平均の{{flat_pct}}%未満なら「ほぼ同じ」とします。上の比較と同じ基準です。どちらかの平均が0分を下回る（早発が多い）ときは、改善・悪化を判定しません。"
+    },
     "routes_to_check": {
       "title_one": "確認が必要な系統（{{count}}日間・{{range}}）",
       "title_other": "確認が必要な系統（{{count}}日間・{{range}}）",

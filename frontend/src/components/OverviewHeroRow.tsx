@@ -14,6 +14,7 @@ import { InsightHint } from "./InsightHint";
 import { InlineSparkline } from "./InlineSparkline";
 import { latestDayStanding, storyVerdict, topRoutesShare, windowDays } from "./overview/storySentence";
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
+import { HeadlineReference } from "./overview/HeadlineReference";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
@@ -207,6 +208,7 @@ export function OverviewHeroRow({
             {headline.avg_min != null ? fixedTenth(avgMinDisplay) : "—"}
             <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
           </div>
+          <HeadlineReference headline={headline} hasBaseline={hasBaseline} />
           {sparklineMean != null && (
             <div className="ov-hero-baseline">
               {t("overview.hero_row.sparkline_baseline", { range: periodRange, value: fixedTenth(sparklineMean) })}
