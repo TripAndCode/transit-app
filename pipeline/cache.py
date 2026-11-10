@@ -28,11 +28,12 @@ import threading
 import time
 from collections import OrderedDict
 from contextvars import ContextVar
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, Generic, Hashable, TypeVar
 
 from pipeline import perf
 
 T = TypeVar("T")
+K = TypeVar("K", bound=Hashable)
 
 # Every decorated function registers its cache_clear here, for clear_all.
 _REGISTERED_CLEARS: list[Callable[[], None]] = []
@@ -71,7 +72,7 @@ def cache_briefly() -> None:
 
 
 def clear_all() -> None:
-    """Clear every async_lru_cache in the process. The perf debug endpoint
+    """Clear every async_lru_cache and TtlLru in the process. The perf debug endpoint
     calls it for cold-run benchmarks, and
     pipeline.reports.definition.stamp_build when analyze records a build, so
     rows served are never older than the build they are stamped with."""
@@ -201,6 +202,55 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
         return wrapper
 
     return decorator
+
+
+class TtlLru(Generic[K, T]):
+    """A bounded, thread-safe LRU for synchronous callers, each entry kept for
+    ``ttl_seconds`` after it is stored. :func:`clear_all` clears it too.
+
+    A value read from its source before a clear must not be stored after it,
+    so a caller takes :attr:`generation` before reading the source and hands it
+    to :meth:`put`, which drops the value when a clear came in between."""
+
+    def __init__(self, maxsize: int, ttl_seconds: float) -> None:
+        self._maxsize = maxsize
+        self._ttl = ttl_seconds
+        self._entries: OrderedDict[K, tuple[float, T]] = OrderedDict()
+        self._generation = 0
+        self._lock = threading.Lock()
+        _REGISTERED_CLEARS.append(self.clear)
+
+    @property
+    def generation(self) -> int:
+        with self._lock:
+            return self._generation
+
+    def get(self, key: K) -> T | None:
+        """The value stored under *key*, or None when there is none or it expired."""
+        now = _monotonic()
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None:
+                return None
+            if now > entry[0]:
+                del self._entries[key]
+                return None
+            self._entries.move_to_end(key)
+            return entry[1]
+
+    def put(self, key: K, value: T, generation: int) -> None:
+        with self._lock:
+            if generation != self._generation:
+                return
+            self._entries[key] = (_monotonic() + self._ttl, value)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._maxsize:
+                self._entries.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries.clear()
+            self._generation += 1
 
 
 def _keyable(obj: Any) -> Any:
