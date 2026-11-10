@@ -622,7 +622,8 @@
   "legal": {
     "privacy": "プライバシーポリシー",
     "terms": "利用規約",
-    "nav_label": "規約"
+    "nav_label": "規約と方針",
+    "methodology": "算出方法と公表方針"
   },
   "credits": {
     "title": "データの出典",

@@ -48,4 +48,11 @@ describe("shared print stylesheet", () => {
     expect(screenCss).toMatch(/\.print-frame\s*\{[^}]*display:\s*none/);
     expect(printBlock).toMatch(/\.print-frame[^{]*\{[^}]*display:\s*block/);
   });
+
+  // A stamp footnote writes its links out (the methodology document's URL),
+  // and a URL is one unbroken word: without this it runs past a narrow
+  // screen's edge and off the printed page.
+  it("lets a report footnote wrap a long link anywhere, on screen and on paper", () => {
+    expect(globalCss).toMatch(/(^|\n)\.report-footnote\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
 });

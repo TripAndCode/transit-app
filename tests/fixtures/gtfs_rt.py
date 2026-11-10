@@ -68,10 +68,12 @@ def trip_update(
     route_id: str | None = None,
     start_date: str | None = None,
     schedule_relationship: int | None = None,
+    vehicle: bytes | None = None,
 ) -> bytes:
     """A TripUpdate whose TripDescriptor carries trip_id, plus route_id,
     start_date ("YYYYMMDD", the trip's service date) and schedule_relationship
-    (GTFS-RT's enum value: SCHEDULED 0, CANCELED 3) when given."""
+    (GTFS-RT's enum value: SCHEDULED 0, CANCELED 3) when given, and the
+    TripUpdate's own `vehicle` (field 3, a :func:`vehicle_descriptor`)."""
     trip = _string(1, trip_id)
     if start_date is not None:
         trip += _string(3, start_date)
@@ -79,7 +81,25 @@ def trip_update(
         trip += _uint(4, schedule_relationship)
     if route_id is not None:
         trip += _string(5, route_id)
-    return _len_delimited(1, trip) + b"".join(_len_delimited(2, stu) for stu in stop_time_updates)
+    body = _len_delimited(1, trip) + b"".join(_len_delimited(2, stu) for stu in stop_time_updates)
+    return body if vehicle is None else body + _len_delimited(3, vehicle)
+
+
+def vehicle_descriptor(vehicle_id: str, *, label: str | None = None, license_plate: str | None = None) -> bytes:
+    """A VehicleDescriptor: id, label and license_plate (fields 1 to 3)."""
+    body = _string(1, vehicle_id)
+    if label is not None:
+        body += _string(2, label)
+    if license_plate is not None:
+        body += _string(3, license_plate)
+    return body
+
+
+def vehicle_position_entity(trip_id: str, vehicle: bytes) -> bytes:
+    """A FeedEntity (FeedMessage field 2) holding a VehiclePosition (entity
+    field 4) of *trip_id*, with its `vehicle` (VehiclePosition field 8)."""
+    position = _len_delimited(1, _string(1, trip_id)) + _len_delimited(8, vehicle)
+    return _len_delimited(2, _len_delimited(4, position))
 
 
 def trip_update_feed(*trip_updates: bytes, timestamp: int | None = None) -> bytes:

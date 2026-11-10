@@ -7,7 +7,10 @@ aggregates, and application data live in Postgres/PostGIS.
 
 It is an independent service-quality audit instrument for the transport-policy
 staff who prepare 地域公共交通協議会 material; [Audience and job](docs/features/audience.md)
-says who it is for and what each screen answers.
+says who it is for and what each screen answers. The
+[methodology and publication policy](docs/methodology.md) ([English](docs/methodology.en.md))
+says how every figure is computed, what is never computed, and how an operator hears
+of its figures before they are published.
 
 ## Start Here
 
