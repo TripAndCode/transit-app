@@ -9,6 +9,9 @@ cache never grows beyond ``maxsize`` entries.
 The cache is in-process — fine for the single-container deploy. Switch
 to a distributed cache only when we run multiple replicas.
 
+:class:`TtlLru` is the same bounded, expiring store for a synchronous
+caller that fills it itself.
+
 A raised failure is never cached. A function that returns a degraded result
 instead of raising (a figure left null because a read failed) calls
 :func:`cache_briefly`, so that result is cached for

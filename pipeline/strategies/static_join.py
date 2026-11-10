@@ -59,13 +59,11 @@ _MISS_WARN_MIN_ROWS = 20
 _StopTime = tuple[int, str | None, str | None]
 
 # The stop times of each trip a poll cancels without listing a stop, by
-# (agency, timetable version, trip): a cancelled trip stays in the feed until
-# its last scheduled departure, so every poll until then asks again. The
-# version comes from the poll's own static_trips read, so a timetable loaded
-# under a new name is never served the old one's stops. A load under a name
-# already loaded clears it in this process (load_static), and the TTL bounds
-# how long such a load in another process takes to show. A trip whose
-# timetable rows carry no version name is read afresh every poll.
+# (agency, version, trip), the version from the poll's own static_trips read:
+# a cancelled trip stays in the feed until its last departure. A reload under
+# a name already loaded clears it here (load_static), and the TTL bounds how
+# long one in another process takes to show. A trip with no version name is
+# read afresh every poll.
 _CANCELLED_TRIP_STOPS: TtlLru[tuple[int, str, str], tuple[_StopTime, ...]] = TtlLru(maxsize=1024, ttl_seconds=300)
 
 
