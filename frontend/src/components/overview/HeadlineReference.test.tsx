@@ -73,7 +73,7 @@ describe("HeadlineReference", () => {
     expect(screen.getByText("About the past 90 days")).toBeInTheDocument();
     expect(screen.getByText(/at least 52 of the 64 days/)).toBeInTheDocument();
     expect(screen.getByText(/at least 100 observations/)).toBeInTheDocument();
-    expect(screen.getByText(/within 0\.1 min or 5%/)).toBeInTheDocument();
+    expect(screen.getByText(/under 0\.1 min, or under 5%/)).toBeInTheDocument();
   });
 
   it("states why a reference is withheld instead of printing a figure", () => {

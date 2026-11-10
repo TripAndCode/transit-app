@@ -1,5 +1,10 @@
 import type { TFunction } from "i18next";
-import type { OverviewConcentration, OverviewHeadline, OverviewServiceSplitDay } from "../../api/types";
+import type {
+  OverviewConcentration,
+  OverviewHeadline,
+  OverviewHeadlineReference,
+  OverviewServiceSplitDay,
+} from "../../api/types";
 import { CONCENTRATION_TOP_N } from "./concentrationTopN";
 import { fixedTenth } from "../../utils/format";
 
@@ -24,6 +29,26 @@ function branchFor(deltaMin: number, deltaPct: number | null): StoryBranch {
   const flat = Math.abs(deltaMin) < FLAT_MAX_DELTA_MIN || (deltaPct != null && Math.abs(deltaPct) < FLAT_MAX_DELTA_PCT);
   if (flat) return "flat";
   return deltaMin > 0 ? "behind" : "ahead";
+}
+
+/** How the headline compares with its trailing reference. */
+export type ReferenceJudgement = "better" | "flat" | "worse";
+
+/**
+ * The headline's judgement against its trailing reference, by the verdict's
+ * own tolerance (`FLAT_MAX_DELTA_MIN`, `FLAT_MAX_DELTA_PCT`): a longer average
+ * delay is worse. Null without both figures, and when either average is below
+ * 0 min: departures then run early on average, and a lower figure is no
+ * longer a better one.
+ */
+export function referenceJudgement(
+  avgMin: number | null,
+  reference: Pick<OverviewHeadlineReference, "avg_min" | "delta_min" | "delta_pct">,
+): ReferenceJudgement | null {
+  if (avgMin == null || reference.avg_min == null || reference.delta_min == null) return null;
+  if (avgMin < 0 || reference.avg_min < 0) return null;
+  const branch = branchFor(reference.delta_min, reference.delta_pct);
+  return branch === "flat" ? "flat" : branch === "behind" ? "worse" : "better";
 }
 
 type ComparedHeadline = Pick<
