@@ -127,7 +127,7 @@ TRIP_CANCELED = 3
 STOP_SKIPPED = 1
 
 # The stop_sequence of a trip-level row: the one row a CANCELED trip that
-# stores no stop row gets when the timetable lists no stop for it either, so
+# stores no stop row gets when no stop of its timetable is still to come, so
 # the cancellation is kept (pipeline.strategies.static_join.parse_feed). No
 # stop row carries it (pipeline.strategies._pb._uint16), and the row has no
 # stop, delay or schedule, so no reader of departures or stop visits takes it

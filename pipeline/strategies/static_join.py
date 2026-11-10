@@ -34,12 +34,13 @@ its expiry.
 import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pipeline.cache import TtlLru
 from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
+from pipeline.service_day import service_date_of, service_day_moment_utc, service_day_offset
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
 from pipeline.strategies._time import Status, parse_departure_time
 
@@ -482,12 +483,15 @@ def parse_feed(
 
     A CANCELED trip that stores no stop row, because it lists no
     StopTimeUpdate or none with a usable stop_sequence, is stored as one
-    withdrawal per stop the loaded timetable schedules it at: each row has the
-    stop's stop_sequence, stop_id and schedule, the trip's route, service and
-    version as a prediction of that stop stores them, the CANCELED status and
-    no delay. So each stop's latest report withdraws a departure the feed
-    predicted for it before (pipeline.db.latest_departure_ch). A trip the
-    timetable lists no stop for gets one trip-level row instead
+    withdrawal per stop the loaded timetable schedules it at and it has not
+    left yet (``_stops_to_come``): each row has the stop's stop_sequence,
+    stop_id and schedule, the trip's route, service and version as a
+    prediction of that stop stores them, the CANCELED status and no delay. So
+    each such stop's latest report withdraws a departure the feed predicted
+    for it before (pipeline.db.latest_departure_ch), and a stop already left
+    keeps its reports: a CANCELED trip will not run the rest of its trip. A
+    trip with no stop still to come, or that the timetable lists no stop for,
+    gets one trip-level row instead
     (pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE), which keeps the
     cancellation with no stop, delay or schedule.
     """
@@ -602,10 +606,11 @@ def parse_feed(
         _log.info(
             f"[static_join] agency={agency_id} {no_route}/{len(rows)} rows have no route_id in the feed or static_trips"
         )
+    captured = _instant(captured_at) if cancelled else None
     for trip_id, rt_route_id in cancelled:
         route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
         route_code = rt_route_id or route
-        stops = cancelled_stops.get(trip_id, ())
+        stops = _stops_to_come(cancelled_stops.get(trip_id, ()), captured)
         if not stops:
             rows.append(
                 (
@@ -681,6 +686,37 @@ def _stored_row(
         static_version_id,
     )
     return row, status
+
+
+def _instant(captured_at: str) -> datetime:
+    """*captured_at* as an aware instant; a naive one is read in UTC, the
+    zone of the column it is stored in."""
+    moment = datetime.fromisoformat(captured_at)
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+
+
+def _stops_to_come(stops: tuple[_StopTime, ...], captured: datetime | None) -> tuple[_StopTime, ...]:
+    """The stops of *stops*, in stop_sequence order, after the last one the
+    trip has left by *captured*: a stop whose scheduled departure, on the
+    service day *captured* falls in (pipeline.service_day), is earlier than
+    *captured*. A stop with no usable departure time is left once a stop
+    after it is.
+
+    The schedule alone decides, not the trip's last predicted delay: a poll
+    that cancels a trip listing no stop carries no delay, and the feed's
+    earlier predictions are in ClickHouse, which ingest does not read. A
+    stop a late-running trip has not reached by its scheduled time therefore
+    counts as left, and its last prediction stands."""
+    if captured is None:
+        return stops
+    day = service_date_of(captured)
+    left = [
+        i
+        for i, (_seq, _stop_id, departure) in enumerate(stops)
+        if (sec := parse_departure_time(departure)[2]) is not None
+        and service_day_moment_utc(day, service_day_offset(sec)) < captured
+    ]
+    return stops[left[-1] + 1 :] if left else stops
 
 
 def _cancelled_trip_stops(cur, agency_id: int, versions: Mapping[str, str | None]) -> dict[str, tuple[_StopTime, ...]]:

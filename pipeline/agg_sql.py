@@ -80,9 +80,9 @@ def feed_health_ch_sql(date_where: str) -> str:
 # SKIPPED means the vehicle passes the stop without stopping, so a run
 # that skipped some stops ran; a feed that reports every stop of a trip
 # SKIPPED is reporting the trip not run. A cancellation that listed no
-# stop is a CANCELED row per stop its timetable schedules, or, for a trip
-# the timetable lacks, one trip-level row, which counts in the trip's
-# status and is no stop.
+# stop is a CANCELED row per stop of its timetable still to come, or, when
+# none is or the timetable lacks the trip, one trip-level row, which counts
+# in the trip's status and is no stop.
 #
 # Both subqueries read the rows the departure dedup reads
 # (pipeline.db.stop_event_filter_ch): a plausible departure, or a row
