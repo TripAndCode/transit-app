@@ -580,14 +580,32 @@ async def get_headway_quality(
 
 
 class NotJudged(BaseModel):
-    """Why an `on_time_pct` row has no figure to judge
-    (`pipeline.reports.performance_standard.on_time_reading`):
-    `too_few_observations` gives the route's `observations` in the scope and
-    the `floor` a verdict needs; `zero_delay_feed` gives neither."""
+    """Why an `on_time_pct`, `service_delivered_pct` or
+    `vehicle_km_delivered_pct` row has no figure to judge
+    (`pipeline.reports.performance_standard.on_time_reading` and
+    `delivered_reading`): `too_few_observations` gives the route's
+    `observations` in the scope and the `floor` a verdict needs, and
+    `too_few_planned_trips` its `planned_trips` and that `floor`.
+    `route_plan_unknown` says a planned day of the period has no saved split
+    by route, `no_shapes` that the timetable has no route shapes for vehicle-km,
+    and the agency's own reasons for having no service-delivered rate
+    (`pipeline.reports.service_delivered.DeliveredMissing`) stand for each of
+    its routes. Those, and `zero_delay_feed`, give no count."""
 
-    reason: Literal["too_few_observations", "zero_delay_feed"]
+    reason: Literal[
+        "too_few_observations",
+        "zero_delay_feed",
+        "too_few_planned_trips",
+        "route_plan_unknown",
+        "no_shapes",
+        "no_plan",
+        "feed_cannot_report",
+        "feed_unverified",
+        "feed_reports_no_cancellations",
+    ]
     observations: int | None
     floor: int | None
+    planned_trips: int | None = None
 
 
 class PerformanceStandardRow(BaseModel):
@@ -602,18 +620,15 @@ class PerformanceStandardRow(BaseModel):
     have no resolvable actual figure for the requested range (e.g. an
     `ewt_sec` standard on a route not classified high-frequency), or a
     `threshold_value` of exactly 0 makes the relative-deviation ratio
-    undefined. `metric_scope` is `"agency"` for `vehicle_km_delivered_pct`
-    (that figure has no per-route breakdown -- every route configured with
-    it is compared against its own agency's rate) and `"route"` for
-    `ewt_sec` and `on_time_pct`; the frontend must label an `"agency"`-scoped
-    row accordingly rather than implying a route-specific figure. An
-    `on_time_pct` row reads the Routes table's on-time figure for the route
-    (see `PerformanceStandardsResponse.on_time_definition`).
+    undefined. Every figure is the route's own. An `on_time_pct` row reads the
+    Routes table's on-time figure for the route (see
+    `PerformanceStandardsResponse.on_time_definition`); a
+    `service_delivered_pct` or `vehicle_km_delivered_pct` row reads the
+    route's service-delivered rate over the dates.
     """
 
     route_code: str
     metric_type: str
-    metric_scope: str
     threshold_value: float
     bonus_malus_rate: float
     actual_value: float | None
@@ -622,7 +637,9 @@ class PerformanceStandardRow(BaseModel):
     #: Whether `actual_value` is at least as good as `threshold_value`;
     #: `None` exactly when `actual_value` is.
     meets: bool | None
-    #: Why an `on_time_pct` row is not judged; `None` on every other row.
+    #: Why an `on_time_pct`, `service_delivered_pct` or
+    #: `vehicle_km_delivered_pct` row is not judged; `None` on a judged row and
+    #: on every `ewt_sec` row.
     not_judged: NotJudged | None = None
 
 

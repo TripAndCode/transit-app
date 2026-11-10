@@ -39,15 +39,25 @@ last day, or anywhere in a longer range. The evidence is a row in
 the check is an index probe in Postgres rather than a scan of ``updates``,
 whose status columns are outside its sort key and would need every raw row
 of the look-back read. The rate returns by itself once a feed reports one.
+
+A route's rate (:func:`compute_service_delivered_by_route`) is the same ratio
+on the route's own trips: the trips the plan gives the route, from each day's
+saved split by route or the loaded timetable's, less the trips the feed
+reported as not run under it. ``agg_service_delivered_daily`` counts each such
+trip under one route, so on the days every route is counted the routes' planned
+trips and trips not run sum to the agency's. A day saved before its split was
+saved cannot be attributed, and a route's figure is read only when every
+planned day of the range can be, so it always covers the agency's days.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Literal
 
-from pipeline.planned_trips import plan_ctes, stop_plan_ctes
+from pipeline.planned_trips import plan_ctes, route_plan_ctes, stop_plan_ctes
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, rt_field_coverage_confirmed_agencies
 
 #: Why an agency's rate is ``None``. ``"unreadable"`` marks a read that failed
@@ -278,3 +288,129 @@ async def compute_service_delivered_by_agency(
             "delivered_missing": None,
         }
     return result
+
+
+@dataclass(frozen=True)
+class RouteDelivered:
+    """One route's figures over the days a :class:`RouteDeliveredReading`
+    counts: its planned trips, the trips the feed reported as not run under
+    it, the difference (never below 0, as the agency's), that as a share of
+    the plan, ``None`` without one, and the observations the feed reported for
+    the route (``agg_route_daily.samples``)."""
+
+    planned_trips: int
+    non_executed_trips: int
+    executed_trips: int
+    service_delivered_pct: float | None
+    observations: int
+
+
+@dataclass(frozen=True)
+class RouteDeliveredReading:
+    """Every route's :class:`RouteDelivered` over a range, beside what decides
+    whether any of them may be read: the agency's own reason for having no
+    rate (:data:`DeliveredMissing`), which stands for each of its routes, and
+    whether every one of the ``plan_days`` days the agency's plan counts is
+    split by route (``split_days`` of them are). ``routes`` holds every code
+    the split plans, the feed reported a trip not run under, or the feed
+    observed, '' among them for the trips no report named a route for."""
+
+    delivered_missing: DeliveredMissing | None
+    plan_days: int
+    split_days: int
+    routes: dict[str, RouteDelivered]
+
+    @property
+    def split_known(self) -> bool:
+        return self.split_days == self.plan_days
+
+
+# A day's split is the one saved with its count when it was saved, and the
+# loaded timetable's when it is not saved; a saved day planning nothing needs
+# none. A saved day without one is a plan day no route can count, so it is
+# left out of every route's figures and split_days says so.
+_ROUTE_SERVICE_SQL = (
+    "WITH"
+    + plan_ctes("ARRAY[$1::int]", "$2::date", "$3::date")
+    + route_plan_ctes("ARRAY[$1::int]")
+    + """,
+    saved AS (
+        SELECT service_date AS day, planned_trips AS planned, planned_trips_by_route AS by_route
+        FROM planned_trips_daily
+        WHERE agency_id = $1 AND service_date BETWEEN $2 AND $3
+    ),
+    plan_days AS (
+        SELECT day, planned, by_route FROM saved
+        UNION ALL
+        SELECT tp.day, tp.planned, rp.by_route
+        FROM timetable_plan tp
+        JOIN timetable_route_plan rp ON rp.agency_id = tp.agency_id AND rp.day = tp.day
+        WHERE NOT EXISTS (SELECT 1 FROM saved s WHERE s.day = tp.day)
+    ),
+    split_days AS (
+        SELECT day, COALESCE(by_route, '{}') AS by_route FROM plan_days WHERE by_route IS NOT NULL OR planned = 0
+    ),
+    planned AS (
+        SELECT r.key AS route_code, SUM(r.value::int) AS planned
+        FROM split_days d, jsonb_each_text(d.by_route) AS r
+        GROUP BY r.key
+    ),
+    missed AS (
+        SELECT s.route_code, SUM(s.non_executed_trips) AS missed
+        FROM agg_service_delivered_daily s
+        JOIN split_days d ON d.day = s.date
+        WHERE s.agency_id = $1 AND s.date BETWEEN $2 AND $3
+        GROUP BY s.route_code
+    ),
+    observed AS (
+        SELECT o.route_code, SUM(o.samples) AS observations
+        FROM agg_route_daily o
+        JOIN split_days d ON d.day = o.date
+        WHERE o.agency_id = $1 AND o.date BETWEEN $2 AND $3
+        GROUP BY o.route_code
+    ),
+    routes AS (
+        SELECT route_code, COALESCE(p.planned, 0) AS planned, COALESCE(m.missed, 0) AS missed,
+               COALESCE(o.observations, 0) AS observations
+        FROM planned p
+        FULL JOIN missed m USING (route_code)
+        FULL JOIN observed o USING (route_code)
+    )
+    SELECT (SELECT COUNT(*) FROM plan_days) AS plan_days, (SELECT COUNT(*) FROM split_days) AS split_days,
+           r.route_code, r.planned, r.missed, r.observations
+    FROM (SELECT 1) AS one
+    LEFT JOIN routes r ON true
+"""
+)
+
+
+def _route_delivered(planned: int, missed: int, observations: int) -> RouteDelivered:
+    executed = max(planned - missed, 0)
+    return RouteDelivered(
+        planned_trips=planned,
+        non_executed_trips=missed,
+        executed_trips=executed,
+        service_delivered_pct=round(executed / planned * 100, 1) if planned > 0 else None,
+        observations=observations,
+    )
+
+
+async def compute_service_delivered_by_route(
+    conn, agency_id: int, from_date: date, to_date: date
+) -> RouteDeliveredReading:
+    """*agency_id*'s routes' service-delivered figures over ``[from_date,
+    to_date]`` (:class:`RouteDeliveredReading`), from the planned days the
+    agency's rate counts, under the gate the agency's rate applies
+    (:func:`compute_service_delivered_by_agency`). Reads Postgres only."""
+    agency = (await compute_service_delivered_by_agency(conn, [agency_id], from_date, to_date))[agency_id]
+    rows = await conn.fetch(_ROUTE_SERVICE_SQL, agency_id, from_date, to_date)
+    return RouteDeliveredReading(
+        delivered_missing=agency["delivered_missing"],
+        plan_days=int(rows[0]["plan_days"]),
+        split_days=int(rows[0]["split_days"]),
+        routes={
+            r["route_code"]: _route_delivered(int(r["planned"]), int(r["missed"]), int(r["observations"]))
+            for r in rows
+            if r["route_code"] is not None
+        },
+    )

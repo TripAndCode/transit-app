@@ -163,7 +163,7 @@ def _entries() -> list[AggTable]:
     entries = [
         AggTable("agg_feed_health", 2, Kind.DATED, Timetable.NONE, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
         AggTable(
-            "agg_service_delivered_daily", 2, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
+            "agg_service_delivered_daily", 3, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
         ),
         AggTable(
             "agg_schedule_revision_daily",
@@ -356,6 +356,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
         },
     ),
     MethodVersion("2026.11.5", {"feed_quality_monthly": 1}),
+    MethodVersion("2026.11.6", {"agg_service_delivered_daily": 3}),
 )
 
 # The method every report, CSV and council document names beside its figures
