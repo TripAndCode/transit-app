@@ -1110,6 +1110,62 @@ def test_analyze_counts_a_stop_reported_with_neither_a_delay_nor_a_status_neithe
         assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
 
 
+def test_analyze_leaves_no_departure_for_a_trip_predicted_and_then_cancelled_without_listing_a_stop(
+    pg_conn, agency_id, ch_client, tmp_path
+):
+    """Archive ingest stores the cancellation, which lists no stop, as a
+    withdrawal of each stop T1's timetable schedules, so T1's earlier
+    predictions leave no departure: T1 is not run and not observed, and only
+    T2's two departures count."""
+    from pipeline.ingest import ingest
+    from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Stop 1')", (agency_id,)
+        )
+        for trip_id, departures in (("T1", ("11:00:00", "11:05:00")), ("T2", ("11:30:00", "11:35:00"))):
+            cur.execute(
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id, static_version_id) "
+                "VALUES (%s, %s, 'R1', '平日', 'gtfs_static_20260401')",
+                (agency_id, trip_id),
+            )
+            for seq, departure in enumerate(departures, start=1):
+                cur.execute(
+                    "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                    "VALUES (%s, %s, %s, 'S1', %s)",
+                    (agency_id, trip_id, seq, departure),
+                )
+    pg_conn.commit()
+    predicted_at = int(datetime(2026, 4, 1, 1, 55, tzinfo=timezone.utc).timestamp())
+
+    def predicted(trip_id):
+        return trip_update(
+            trip_id, stop_time_update(1, departure_delay=60), stop_time_update(2, departure_delay=60), route_id="R1"
+        )
+
+    (tmp_path / "20260401").mkdir()
+    (tmp_path / "20260401" / "TripUpdate_015500.pb").write_bytes(
+        trip_update_feed(predicted("T1"), predicted("T2"), timestamp=predicted_at)
+    )
+    (tmp_path / "20260401" / "TripUpdate_015800.pb").write_bytes(
+        trip_update_feed(
+            trip_update("T1", schedule_relationship=3, route_id="R1"), predicted("T2"), timestamp=predicted_at + 180
+        )
+    )
+    assert ingest(str(tmp_path), agency_id, pg_conn, ch_client) == 8
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT samples, trips_observed FROM agg_route_daily WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(2, 1)]
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s", (agency_id,)
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
+
+
 def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):
     """An agency whose ingest_strategy isn't static_join must get zero rows in
     agg_service_delivered_daily regardless of what schedule_relationship_*

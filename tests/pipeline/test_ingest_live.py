@@ -180,3 +180,40 @@ def test_a_static_join_live_poll_with_early_stops_and_a_sequenceless_stop_is_sto
     captured = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     assert ingest_live_payload(aid, pb, captured, "oracle/20261002/TripUpdate_031500.pb", pg_conn, ch_client) == 2
     assert _stored(ch_client, aid) == [(1, -30, -45), (3, 0, None)]
+
+
+def test_a_live_poll_cancelling_a_trip_without_listing_a_stop_stores_a_withdrawal_per_scheduled_stop(
+    pg_conn, ch_client
+):
+    """Every realtime path stores a poll through ingest_live_payload, which
+    writes the cancellation as a CANCELED row with no delay for each stop the
+    timetable schedules the trip at."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES ('static_join_live_cancel', 'http://live-cancel.example.com/feed.pb', 'static_join') "
+            "RETURNING agency_id"
+        )
+        aid = cur.fetchone()[0]
+        cur.execute("INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, 'S1', 'Stop 1')", (aid,))
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, 'T1', 'R1', 'WKDY')",
+            (aid,),
+        )
+        for seq, stop_id, departure in ((1, "S1", "08:00:00"), (2, "S2", "08:05:00")):
+            cur.execute(
+                "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                "VALUES (%s, 'T1', %s, %s, %s)",
+                (aid, seq, stop_id, departure),
+            )
+    pg_conn.commit()
+
+    pb = trip_update_feed(trip_update("T1", schedule_relationship=3))
+    captured = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    assert ingest_live_payload(aid, pb, captured, "oracle/20261002/TripUpdate_031500.pb", pg_conn, ch_client) == 2
+    stored = ch_client.query(
+        "SELECT stop_sequence, stop_id, scheduled_time, route_code, dep_delay, schedule_relationship_trip "
+        "FROM updates_live WHERE agency_id = {a:UInt16} ORDER BY stop_sequence",
+        parameters={"a": aid},
+    ).result_rows
+    assert stored == [(1, "S1", "08:00:00", "R1", None, 3), (2, "S2", "08:05:00", "R1", None, 3)]
