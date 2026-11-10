@@ -38,7 +38,6 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from pipeline.cache import TtlLru
 from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
 from pipeline.service_day import service_date_of, service_day_moment_utc, service_day_offset
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
@@ -58,19 +57,6 @@ _MISS_WARN_MIN_ROWS = 20
 
 # A stop time of a trip: its stop_sequence, stop_id and raw departure_time.
 _StopTime = tuple[int, str | None, str | None]
-
-# The stop times of each trip a poll cancels without listing a stop, by
-# (agency, version, trip), the version from the poll's own static_trips read:
-# a cancelled trip stays in the feed until its last departure. A reload under
-# a name already loaded clears it here (load_static), and the TTL bounds how
-# long one in another process takes to show. A trip with no version name is
-# read afresh every poll.
-_CANCELLED_TRIP_STOPS: TtlLru[tuple[int, str, str], tuple[_StopTime, ...]] = TtlLru(maxsize=1024, ttl_seconds=300)
-
-
-def forget_cancelled_trip_stops() -> None:
-    """Drop every cached stop time of a cancelled trip, after a timetable load."""
-    _CANCELLED_TRIP_STOPS.clear()
 
 
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
@@ -565,17 +551,25 @@ def parse_feed(
             )
             static_routes = dict(cur.fetchall())
         cancelled_trips: dict[str, tuple[str | None, str | None, str | None]] = {}
-        cancelled_stops: dict[str, tuple[_StopTime, ...]] = {}
+        cancelled_stops: dict[str, list[_StopTime]] = {}
         if cancelled:
+            # One read for every cancelled trip of the poll, however many: both
+            # tables are walked on their (agency_id, trip_id) key prefix, so it
+            # costs the poll's cancelled trips, never the agency's timetable.
             cur.execute(
-                "SELECT trip_id, route_id, service_id, static_version_id FROM static_trips "
-                "WHERE agency_id = %s AND trip_id = ANY(%s)",
+                "SELECT t.trip_id, t.route_id, t.service_id, t.static_version_id, "
+                "st.stop_sequence, st.stop_id, st.departure_time "
+                "FROM static_trips t LEFT JOIN static_stop_times st "
+                "  ON st.agency_id = t.agency_id AND st.trip_id = t.trip_id "
+                "WHERE t.agency_id = %s AND t.trip_id = ANY(%s) "
+                "ORDER BY t.trip_id, st.stop_sequence",
                 (agency_id, list({trip_id for trip_id, _route in cancelled})),
             )
-            cancelled_trips = {tid: (route, svc, ver) for tid, route, svc, ver in cur.fetchall()}
-            cancelled_stops = _cancelled_trip_stops(
-                cur, agency_id, {tid: ver for tid, (_route, _svc, ver) in cancelled_trips.items()}
-            )
+            for tid, route, svc, ver, stop_seq, stop_id, departure in cur.fetchall():
+                cancelled_trips[tid] = (route, svc, ver)
+                stops = cancelled_stops.setdefault(tid, [])
+                if _uint16(stop_seq) is not None:
+                    stops.append((stop_seq, stop_id, departure))
 
     rows = []
     miss = 0
@@ -610,7 +604,7 @@ def parse_feed(
     for trip_id, rt_route_id in cancelled:
         route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
         route_code = rt_route_id or route
-        stops = _stops_to_come(cancelled_stops.get(trip_id, ()), captured)
+        stops = _stops_to_come(cancelled_stops.get(trip_id, []), captured)
         if not stops:
             rows.append(
                 (
@@ -695,7 +689,7 @@ def _instant(captured_at: str) -> datetime:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
 
 
-def _stops_to_come(stops: tuple[_StopTime, ...], captured: datetime | None) -> tuple[_StopTime, ...]:
+def _stops_to_come(stops: list[_StopTime], captured: datetime | None) -> list[_StopTime]:
     """The stops of *stops*, in stop_sequence order, after the last one the
     trip has left by *captured*: a stop whose scheduled departure, on the
     service day *captured* falls in (pipeline.service_day), is earlier than
@@ -717,34 +711,3 @@ def _stops_to_come(stops: tuple[_StopTime, ...], captured: datetime | None) -> t
         and service_day_moment_utc(day, service_day_offset(sec)) < captured
     ]
     return stops[left[-1] + 1 :] if left else stops
-
-
-def _cancelled_trip_stops(cur, agency_id: int, versions: Mapping[str, str | None]) -> dict[str, tuple[_StopTime, ...]]:
-    """Each trip's stop times in stop_sequence order, for *versions*, the
-    trips static_trips names with their version, leaving out a stop_sequence
-    no stop row can hold (_uint16). One read covers every trip the cache
-    lacks, so a poll cancelling many trips costs one query at most."""
-    generation = _CANCELLED_TRIP_STOPS.generation
-    found: dict[str, tuple[_StopTime, ...]] = {}
-    for trip_id, version in versions.items():
-        cached = None if version is None else _CANCELLED_TRIP_STOPS.get((agency_id, version, trip_id))
-        if cached is not None:
-            found[trip_id] = cached
-    missing = [trip_id for trip_id in versions if trip_id not in found]
-    if not missing:
-        return found
-    cur.execute(
-        "SELECT trip_id, stop_sequence, stop_id, departure_time FROM static_stop_times "
-        "WHERE agency_id = %s AND trip_id = ANY(%s) ORDER BY trip_id, stop_sequence",
-        (agency_id, missing),
-    )
-    read: dict[str, list[_StopTime]] = {trip_id: [] for trip_id in missing}
-    for trip_id, stop_seq, stop_id, departure_time in cur.fetchall():
-        if _uint16(stop_seq) is not None:
-            read[trip_id].append((stop_seq, stop_id, departure_time))
-    for trip_id, stops in read.items():
-        found[trip_id] = tuple(stops)
-        version = versions[trip_id]
-        if version is not None:
-            _CANCELLED_TRIP_STOPS.put((agency_id, version, trip_id), found[trip_id], generation)
-    return found

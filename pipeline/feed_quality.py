@@ -34,8 +34,11 @@ counts that same window:
   stored stop_time_updates carrying it, the unit the RT coverage probe
   measures a single poll in (``static_join.field_coverage``). The rows ingest
   writes from the timetable for a trip cancelled without listing a stop are
-  no stop_time_update the feed sent (:func:`pipeline.db.timetable_cancellation_ch`),
-  though each still reports its stop event.
+  no stop_time_update the feed sent, though each still reports its stop
+  event. They are told apart by their shape alone
+  (:func:`pipeline.db.timetable_cancellation_ch`), so a stop update the feed
+  does send for a cancelled trip with neither a delay nor a stop status is
+  left out with them.
 - **VehiclePositions available**: not recorded anywhere the app reads.
 
 A figure the feed or the app cannot supply is ``None`` beside a

@@ -85,7 +85,7 @@ A report carrying neither a delay nor a cancelled or skipped status counts neith
 - a trip whose last status is `CANCELED`;
 - a trip whose every stop reported with a delay or a status was last reported `SKIPPED`.
 
-A trip that skipped only some stops ran. A trip reported cancelled without listing any stop also counts as not run. Its cancellation withdraws the predictions received before it at each stop the timetable schedules the trip at and had not departed from by the time the cancellation arrived, by the scheduled time; a stop it had already left keeps its departure (`2026.11.6`). A trip whose last status is `CANCELED` counts as not run even when it was cancelled partway through, or after its last stop.
+A trip that skipped only some stops ran. A trip reported cancelled without listing any stop also counts as not run. Its cancellation withdraws the predictions received before it at each stop the timetable schedules the trip at whose scheduled departure was still to come when the cancellation arrived; a stop whose scheduled departure had passed keeps its departure (`2026.11.6`). The scheduled time decides, because the cancellation carries no delay: a trip running late and cancelled between a stop's scheduled and its delayed departure keeps that stop's last prediction. A trip whose last status is `CANCELED` counts as not run even when it was cancelled partway through, or after its last stop.
 
 ### Excluding implausible values
 

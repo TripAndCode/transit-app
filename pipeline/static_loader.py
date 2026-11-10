@@ -46,7 +46,6 @@ from pipeline.planned_trips import capture_before_reload
 from pipeline.route_terminals import load_route_terminals
 from pipeline.static_content import static_parts
 from pipeline.stop_clusters import rebuild_stop_clusters
-from pipeline.strategies import static_join
 from pipeline.timetable_in_force import version_span
 
 logger = logging.getLogger(__name__)
@@ -364,7 +363,6 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
     # whole static set rather than leaving a partial one (which `_static_loaded`,
     # gated only on static_stops, would treat as a complete load).
     conn.commit()
-    static_join.forget_cancelled_trip_stops()
 
     # static_join.parse_feed's keyed lookups depend on per-agency planner
     # statistics for static_stop_times and static_trips. A freshly inserted
