@@ -293,14 +293,12 @@ async def compute_service_delivered_by_agency(
 @dataclass(frozen=True)
 class RouteDelivered:
     """One route's figures over the days a :class:`RouteDeliveredReading`
-    counts: its planned trips, the trips the feed reported as not run under
-    it, the difference (never below 0, as the agency's), that as a share of
-    the plan, ``None`` without one, and the observations the feed reported for
-    the route (``agg_route_daily.samples``)."""
+    counts: its planned trips; the share of them the feed did not report as
+    not run under the route, never below 0 as the agency's, ``None`` without
+    a plan; and the observations the feed reported for the route
+    (``agg_route_daily.samples``)."""
 
     planned_trips: int
-    non_executed_trips: int
-    executed_trips: int
     service_delivered_pct: float | None
     observations: int
 
@@ -388,8 +386,6 @@ def _route_delivered(planned: int, missed: int, observations: int) -> RouteDeliv
     executed = max(planned - missed, 0)
     return RouteDelivered(
         planned_trips=planned,
-        non_executed_trips=missed,
-        executed_trips=executed,
         service_delivered_pct=round(executed / planned * 100, 1) if planned > 0 else None,
         observations=observations,
     )

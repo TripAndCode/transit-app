@@ -136,6 +136,15 @@ async def read_standards(conn, agency_id: int, route: str | None = None) -> list
     return await conn.fetch(_STANDARDS_SQL, agency_id, route)
 
 
+def _not_judged(
+    reason: str, *, observations: int | None = None, floor: int | None = None, planned_trips: int | None = None
+) -> dict[str, Any]:
+    """Why a row has no figure to judge, in the one shape every reason takes
+    (``api.routers.reports.NotJudged``): the counts a reason has, ``None``
+    where it has none."""
+    return {"reason": reason, "observations": observations, "floor": floor, "planned_trips": planned_trips}
+
+
 def on_time_reading(
     share: float | None, observations: int, *, zero_delay: bool
 ) -> tuple[float | None, dict[str, Any] | None]:
@@ -146,16 +155,10 @@ def on_time_reading(
     shows it. The count alone decides, so a share read below the floor is
     never judged and one at it always is."""
     if zero_delay:
-        return None, {"reason": "zero_delay_feed", "observations": None, "floor": None}
+        return None, _not_judged("zero_delay_feed")
     if share is None or observations < RANKING_MIN_SAMPLES:
-        return None, {"reason": "too_few_observations", "observations": observations, "floor": RANKING_MIN_SAMPLES}
+        return None, _not_judged("too_few_observations", observations=observations, floor=RANKING_MIN_SAMPLES)
     return share, None
-
-
-def _not_judged(
-    reason: str, *, observations: int | None = None, floor: int | None = None, planned_trips: int | None = None
-) -> dict[str, Any]:
-    return {"reason": reason, "observations": observations, "floor": floor, "planned_trips": planned_trips}
 
 
 def delivered_reading(
@@ -329,13 +332,17 @@ async def compute_performance_standards(
             one_route=route is not None,
         )
 
-    delivered_by_route: dict[str, tuple[float | None, dict[str, Any] | None]] = {}
-    delivered_codes = {r["route_code"] for r in rows if r["metric_type"] in _DELIVERED_METRICS}
-    if delivered_codes:
-        delivered_by_route = await _delivered_by_route(agency_id, ctx, conn, delivered_codes)
+    # A vehicle-km row without route shapes is `no_shapes` whatever its
+    # route's service delivered, so the shapes decide first whether the
+    # route split is read for it at all.
     has_shapes = any(r["metric_type"] == "vehicle_km_delivered_pct" for r in rows) and await _has_route_shapes(
         conn, agency_id
     )
+    delivered_metrics = _DELIVERED_METRICS if has_shapes else {"service_delivered_pct"}
+    delivered_by_route: dict[str, tuple[float | None, dict[str, Any] | None]] = {}
+    delivered_codes = {r["route_code"] for r in rows if r["metric_type"] in delivered_metrics}
+    if delivered_codes:
+        delivered_by_route = await _delivered_by_route(agency_id, ctx, conn, delivered_codes)
 
     out: list[dict[str, Any]] = []
     for r in rows:

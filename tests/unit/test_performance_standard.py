@@ -92,6 +92,11 @@ def test_meets_standard_is_unknown_without_a_figure():
     assert meets_standard("on_time_pct", 85.0, None) is None
 
 
+def _not_judged(reason, *, observations=None, floor=None, planned_trips=None):
+    """The one shape every row's not-judged reason takes."""
+    return {"reason": reason, "observations": observations, "floor": floor, "planned_trips": planned_trips}
+
+
 def test_an_on_time_share_over_the_floor_is_judged():
     assert on_time_reading(85.0, RANKING_MIN_SAMPLES, zero_delay=False) == (85.0, None)
 
@@ -102,30 +107,21 @@ def test_an_on_time_share_under_the_floor_says_how_many_observations_it_had(shar
     verdict needs the table's floor, and says so with the count."""
     assert on_time_reading(share, observations, zero_delay=False) == (
         None,
-        {"reason": "too_few_observations", "observations": observations, "floor": RANKING_MIN_SAMPLES},
+        _not_judged("too_few_observations", observations=observations, floor=RANKING_MIN_SAMPLES),
     )
 
 
 def test_a_feed_that_reports_zero_delay_only_is_not_judged_however_often_observed():
-    assert on_time_reading(100.0, 750, zero_delay=True) == (
-        None,
-        {"reason": "zero_delay_feed", "observations": None, "floor": None},
-    )
+    assert on_time_reading(100.0, 750, zero_delay=True) == (None, _not_judged("zero_delay_feed"))
 
 
 def _route(planned: int, missed: int, observations: int) -> RouteDelivered:
     executed = max(planned - missed, 0)
     return RouteDelivered(
         planned_trips=planned,
-        non_executed_trips=missed,
-        executed_trips=executed,
         service_delivered_pct=round(executed / planned * 100, 1) if planned else None,
         observations=observations,
     )
-
-
-def _not_judged(reason, *, observations=None, floor=None, planned_trips=None):
-    return {"reason": reason, "observations": observations, "floor": floor, "planned_trips": planned_trips}
 
 
 def test_a_routes_delivered_share_over_both_floors_is_judged():
@@ -174,6 +170,43 @@ def test_a_route_the_feed_rarely_reports_is_not_judged(observations):
     )
 
 
+async def test_a_vehicle_km_target_without_route_shapes_reads_no_route_split(monkeypatch):
+    """Without route shapes every vehicle-km row is `no_shapes`, so an agency
+    whose only delivered-type targets are vehicle-km reads nothing of its
+    routes' service delivered."""
+    from datetime import date
+
+    from api.range import RangeCtx
+    from pipeline.reports import performance_standard
+
+    async def no_shapes(conn, agency_id):
+        return False
+
+    split_reads: list[int] = []
+
+    async def spy(conn, agency_id, from_date, to_date):
+        split_reads.append(agency_id)
+        raise AssertionError("the route split was read")
+
+    monkeypatch.setattr(performance_standard, "_has_route_shapes", no_shapes)
+    monkeypatch.setattr(performance_standard, "compute_service_delivered_by_route", spy)
+    standards = [
+        {
+            "route_code": "R1",
+            "metric_type": "vehicle_km_delivered_pct",
+            "threshold_value": 80.0,
+            "bonus_malus_rate": 0.0,
+        }
+    ]
+
+    rows = await performance_standard.compute_performance_standards(
+        1, RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 30)), None, standards
+    )
+
+    assert split_reads == []
+    assert [(r["actual_value"], r["not_judged"]) for r in rows] == [(None, _not_judged("no_shapes"))]
+
+
 class _FakeTable:
     """compute_route_table standing in for the Routes table: each call returns
     the next of *answers*, at or over its floor, recording the routes and floor
@@ -212,7 +245,7 @@ async def test_a_route_page_reads_its_route_once_and_judges_the_count_itself(mon
     ctx = clamp_range_ctx(from_="2026-05-14", to="2026-05-14", routes=["R"])
     thin = _FakeTable({"R": (60.0, 42)})
     assert await _readings(monkeypatch, thin, ctx, {"R"}, one_route=True) == {
-        "R": (None, {"reason": "too_few_observations", "observations": 42, "floor": RANKING_MIN_SAMPLES})
+        "R": (None, _not_judged("too_few_observations", observations=42, floor=RANKING_MIN_SAMPLES))
     }
     busy = _FakeTable({"R": (80.0, RANKING_MIN_SAMPLES)})
     assert await _readings(monkeypatch, busy, ctx, {"R"}, one_route=True) == {"R": (80.0, None)}
@@ -237,5 +270,5 @@ async def test_a_thin_route_counted_at_the_floor_by_the_second_read_is_judged(mo
     assert readings == {
         "BUSY": (90.0, None),
         "GROWN": (75.0, None),
-        "THIN": (None, {"reason": "too_few_observations", "observations": 30, "floor": RANKING_MIN_SAMPLES}),
+        "THIN": (None, _not_judged("too_few_observations", observations=30, floor=RANKING_MIN_SAMPLES)),
     }

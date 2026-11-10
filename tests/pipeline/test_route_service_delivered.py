@@ -98,18 +98,15 @@ async def test_each_route_is_read_on_its_own_trips_and_the_routes_sum_to_the_age
     assert reading.delivered_missing is None
     assert reading.split_known is True
     r1, r2 = reading.routes["R1"], reading.routes["R2"]
-    assert (r1.planned_trips, r1.non_executed_trips, r1.executed_trips) == (150, 3, 147)
-    assert r1.service_delivered_pct == 98.0
-    assert r1.observations == 200
-    assert (r2.planned_trips, r2.non_executed_trips, r2.executed_trips) == (50, 5, 45)
-    assert r2.service_delivered_pct == 90.0
-    assert r2.observations == 0
+    assert (r1.planned_trips, r1.service_delivered_pct, r1.observations) == (150, 98.0, 200)
+    assert (r2.planned_trips, r2.service_delivered_pct, r2.observations) == (50, 90.0, 0)
     # The trip no report named a route for counts for the agency, under no route.
-    assert reading.routes[""].planned_trips == 0
-    assert reading.routes[""].service_delivered_pct is None
+    assert (reading.routes[""].planned_trips, reading.routes[""].service_delivered_pct) == (0, None)
     assert sum(r.planned_trips for r in reading.routes.values()) == agency["planned_trips"] == 200
-    assert sum(r.non_executed_trips for r in reading.routes.values()) == 9
-    assert agency["executed_trips"] == 200 - 9
+    not_run = await aconn.fetchval(
+        "SELECT SUM(non_executed_trips) FROM agg_service_delivered_daily WHERE agency_id = $1", a
+    )
+    assert agency["executed_trips"] == 200 - not_run == 200 - (3 + 5 + 1)
 
 
 async def test_a_saved_split_wins_over_the_loaded_timetable_on_its_day(aconn):
@@ -164,7 +161,7 @@ async def test_trips_not_run_count_only_on_planned_days(aconn):
 
     assert reading.plan_days == 4
     assert reading.routes["R1"].planned_trips == 4 * 30
-    assert reading.routes["R1"].non_executed_trips == 2
+    assert reading.routes["R1"].service_delivered_pct == round((4 * 30 - 2) / (4 * 30) * 100, 1)
 
 
 async def test_the_agencys_reason_stands_for_every_route(aconn):
