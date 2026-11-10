@@ -33,7 +33,8 @@ Aggregation tables produced:
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_feed_health      — per-day row counts (every row, those with a delay, and every row by ingest
   source) and implausible-delay count; doubles as the incremental ledger
-- agg_service_delivered_daily — per-day non-executed trip count (executed-vs-planned rate; static_join agencies only)
+- agg_service_delivered_daily — per-day, per-route non-executed trip count (executed-vs-planned rate;
+  static_join agencies only)
 - agg_route_headway    — scheduled-headway median + high-frequency classification + scheduled mean-wait
   per route (static GTFS only)
 - agg_route_headway_daily — per-day reconstructed ACTUAL headway median + sufficient statistics for
@@ -1470,12 +1471,13 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                 scopes["agg_route_headway"],
             )
 
-        # ── agg_service_delivered_daily (per-day non-executed trip count) ──
-        # Powers pipeline.reports.service_delivered's executed/planned ratio
-        # without a live per-request ClickHouse scan over `updates`. Agency-wide
-        # and independent of has_static above (a static schedule loaded only
-        # matters to the READ side's planned_trips count) -- pure aggregation
-        # queried directly against ClickHouse, same shape as agg_feed_health.
+        # ── agg_service_delivered_daily (per-day, per-route non-executed trip count) ──
+        # Powers pipeline.reports.service_delivered's executed/planned ratio,
+        # for an agency and for each of its routes, without a live per-request
+        # ClickHouse scan over `updates`. Independent of has_static above (a
+        # static schedule loaded only matters to the READ side's planned_trips
+        # count) -- pure aggregation queried directly against ClickHouse, same
+        # shape as agg_feed_health.
         #
         # Only feeds confirmed to send schedule_relationship_trip/_stop
         # populate this table (today: the static_join ingest strategy;
@@ -1499,7 +1501,7 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             where, params = _date_filter(scopes["agg_service_delivered_daily"], agency_id)
             _ch_build_and_insert(
                 "agg_service_delivered_daily",
-                "(agency_id, date, non_executed_trips)",
+                "(agency_id, date, route_code, non_executed_trips)",
                 agency_id,
                 ch_client,
                 agg_sql.service_delivered_ch_sql(where),

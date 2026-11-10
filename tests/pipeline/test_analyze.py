@@ -927,6 +927,7 @@ def _ch_service_delivered_row(
     schedule_relationship_trip=None,
     schedule_relationship_stop=None,
     dep_delay=60,
+    route_code="R1",
 ):
     """One ClickHouse `updates` row shaped for `pipeline.clickhouse.insert_updates`
     (agency_id excluded), with only the fields this builder reads populated."""
@@ -936,7 +937,7 @@ def _ch_service_delivered_row(
         trip_id,
         "平日",
         "11:00:00",
-        "R1",
+        route_code,
         stop_sequence,
         dep_delay,
         None,  # stop_id
@@ -1108,6 +1109,70 @@ def test_analyze_counts_a_stop_reported_with_neither_a_delay_nor_a_status_neithe
             (agency_id,),
         )
         assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
+
+
+def test_analyze_counts_each_trip_not_run_under_the_one_route_its_latest_report_names(pg_conn, agency_id, ch_client):
+    """Each trip-day not run lands under one route, so an agency's day is the
+    sum of its routes: the route its latest report naming one names, and ''
+    where no report names one. A trip both cancelled and skipped at every
+    stop counts once."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    early = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    later = datetime(2026, 4, 1, 2, 5, tzinfo=timezone.utc)
+    next_day = datetime(2026, 4, 2, 2, 0, tzinfo=timezone.utc)
+    canceled, skipped = 3, 1
+
+    def row(trip_id, at, route_code, *, trip_status=0, stop_status=None, stop_sequence=1, file_name="a.pb"):
+        return _ch_service_delivered_row(
+            trip_id,
+            at,
+            file_name=file_name,
+            stop_sequence=stop_sequence,
+            schedule_relationship_trip=trip_status,
+            schedule_relationship_stop=stop_status,
+            route_code=route_code,
+        )
+
+    rows = [
+        row("A1", early, "RA", trip_status=canceled),
+        row("A2", early, "RA", stop_status=skipped),
+        # Cancelled and skipped at its one stop: one trip not run, not two.
+        row("A3", early, "RA", trip_status=canceled, stop_status=skipped),
+        row("B1", early, "RB", trip_status=canceled),
+        # The later report names no route, so the earlier one's stands.
+        row("B2", early, "RB", stop_status=skipped),
+        row("B2", later, None, stop_status=skipped, file_name="b.pb"),
+        # Renamed mid-day: the latest report's route.
+        row("C1", early, "RA", trip_status=canceled),
+        row("C1", later, "RC", trip_status=canceled, file_name="b.pb"),
+        row(
+            "N1",
+            early,
+            None,
+            trip_status=canceled,
+            stop_sequence=TRIP_LEVEL_STOP_SEQUENCE,
+        ),
+        row("RAN", early, "RA"),
+        row("A1", next_day, "RA", trip_status=canceled),
+    ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, route_code, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        by_route = {(str(d), code): n for d, code, n in cur.fetchall()}
+    assert by_route == {
+        ("2026-04-01", "RA"): 3,
+        ("2026-04-01", "RB"): 2,
+        ("2026-04-01", "RC"): 1,
+        ("2026-04-01", ""): 1,
+        ("2026-04-02", "RA"): 1,
+    }
 
 
 def test_analyze_skips_agg_service_delivered_daily_for_non_static_join_agency(pg_conn, agency_id, ch_client):

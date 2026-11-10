@@ -6,11 +6,13 @@ import pytest
 
 from pipeline.reports.performance_standard import (
     _relative_deviation,
+    delivered_reading,
     meets_standard,
     on_time_reading,
     simulation_disclaimer,
 )
 from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+from pipeline.reports.service_delivered import RouteDelivered
 
 
 def test_relative_deviation_zero_exactly_at_threshold_lower_is_better():
@@ -74,6 +76,8 @@ def test_an_on_time_share_above_its_target_is_better():
         # A target of 0 is met by any share, though no achievement rate exists.
         ("on_time_pct", 0.0, 0.0, True),
         ("vehicle_km_delivered_pct", 90.0, 80.0, False),
+        ("service_delivered_pct", 98.0, 98.0, True),
+        ("service_delivered_pct", 98.0, 97.9, False),
         # Excess wait is lower-is-better.
         ("ewt_sec", 50.0, 50.0, True),
         ("ewt_sec", 50.0, 51.0, False),
@@ -106,6 +110,67 @@ def test_a_feed_that_reports_zero_delay_only_is_not_judged_however_often_observe
     assert on_time_reading(100.0, 750, zero_delay=True) == (
         None,
         {"reason": "zero_delay_feed", "observations": None, "floor": None},
+    )
+
+
+def _route(planned: int, missed: int, observations: int) -> RouteDelivered:
+    executed = max(planned - missed, 0)
+    return RouteDelivered(
+        planned_trips=planned,
+        non_executed_trips=missed,
+        executed_trips=executed,
+        service_delivered_pct=round(executed / planned * 100, 1) if planned else None,
+        observations=observations,
+    )
+
+
+def _not_judged(reason, *, observations=None, floor=None, planned_trips=None):
+    return {"reason": reason, "observations": observations, "floor": floor, "planned_trips": planned_trips}
+
+
+def test_a_routes_delivered_share_over_both_floors_is_judged():
+    route = _route(RANKING_MIN_SAMPLES, 3, RANKING_MIN_SAMPLES)
+    assert delivered_reading(None, True, route, zero_delay=False) == (97.0, None)
+
+
+@pytest.mark.parametrize(
+    "missing", ["no_plan", "feed_cannot_report", "feed_unverified", "feed_reports_no_cancellations"]
+)
+def test_the_agencys_reason_for_no_rate_stands_for_the_route(missing):
+    """A route's share needs what the agency's needs, first of all: a feed
+    that reports trips not run, or every route would read 100%."""
+    route = _route(500, 0, 500)
+    assert delivered_reading(missing, True, route, zero_delay=False) == (None, _not_judged(missing))
+
+
+def test_a_period_whose_plan_is_not_split_by_route_on_every_day_is_not_judged():
+    route = _route(500, 0, 500)
+    assert delivered_reading(None, False, route, zero_delay=False) == (None, _not_judged("route_plan_unknown"))
+
+
+@pytest.mark.parametrize("planned", [0, 42, RANKING_MIN_SAMPLES - 1])
+def test_a_route_planning_fewer_trips_than_the_floor_says_how_many(planned):
+    route = _route(planned, 0, 500) if planned else None
+    assert delivered_reading(None, True, route, zero_delay=False) == (
+        None,
+        _not_judged("too_few_planned_trips", floor=RANKING_MIN_SAMPLES, planned_trips=planned),
+    )
+
+
+def test_a_route_whose_feed_reports_zero_delay_only_is_not_judged_on_delivery_either():
+    """A feed echoing the timetable for a route reports none of its trips not
+    run, so the route would read 100% delivered."""
+    route = _route(500, 0, 500)
+    assert delivered_reading(None, True, route, zero_delay=True) == (None, _not_judged("zero_delay_feed"))
+
+
+@pytest.mark.parametrize("observations", [0, RANKING_MIN_SAMPLES - 1])
+def test_a_route_the_feed_rarely_reports_is_not_judged(observations):
+    """A route the feed never reports has no trip reported not run either."""
+    route = _route(500, 0, observations)
+    assert delivered_reading(None, True, route, zero_delay=False) == (
+        None,
+        _not_judged("too_few_observations", observations=observations, floor=RANKING_MIN_SAMPLES),
     )
 
 

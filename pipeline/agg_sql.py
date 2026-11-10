@@ -72,8 +72,8 @@ def feed_health_ch_sql(date_where: str) -> str:
 # from sending it more sparingly. Date-scoped like every
 # incremental table: both subqueries carry date_where, so a changed
 # day is recomputed from all of that day's rows and no other day is
-# touched. A day with zero non-executed trips has no matching row
-# in the inner UNION, so it emits no row here at all -- the read
+# touched. A day with zero non-executed trips has no trip passing
+# the outer WHERE, so it emits no row here at all -- the read
 # path sums with a zero default rather than assuming row-per-day
 # density.
 #
@@ -90,28 +90,36 @@ def feed_health_ch_sql(date_where: str) -> str:
 # leaves the withdrawal before it standing here exactly as it leaves that
 # stop without a departure there, and a stop the feed reported only so
 # counts neither way, so the trip's other stops decide.
+#
+# The route is picked once per trip-day, from the outer subquery's group:
+# the route its latest report naming one names (argMax skips a NULL
+# route_code), '' where none does. That subquery groups every row the
+# stop-level one reads, so every trip not run is one of its trip-days and
+# lands under exactly one route, and an agency's day is the sum of its
+# routes. The pick is aliased `route`, not `route_code`, because ClickHouse
+# substitutes a SELECT alias for a same-named column elsewhere in the query.
 def service_delivered_ch_sql(date_where: str) -> str:
-    """Per service date, the trips the feed reported as not run: a trip whose
-    latest status is CANCELED, or every stop of which it reports with a
-    plausible delay or a CANCELED or SKIPPED status has SKIPPED as its latest
-    such status. A stop reported only without either counts neither way."""
+    """Per service date and route, the trips the feed reported as not run: a
+    trip whose latest status is CANCELED, or every stop of which it reports
+    with a plausible delay or a CANCELED or SKIPPED status has SKIPPED as its
+    latest such status. A stop reported only without either counts neither
+    way."""
     return (
         """
-                SELECT svc_date, count() FROM (
-                    SELECT svc_date, trip_id FROM (
-                        SELECT """
+                SELECT svc_date, route, count() FROM (
+                    SELECT """
         + _SERVICE_DATE
         + """ AS svc_date, trip_id,
-                               argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel
-                        FROM updates AS u WHERE """
+                           argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel,
+                           ifNull(argMax(u.route_code, (captured_at, file_name)), '') AS route
+                    FROM updates AS u WHERE """
         + stop_event_filter_ch()
         + date_where
         + """
-                        GROUP BY svc_date, trip_id
-                    ) WHERE trip_rel = """
+                    GROUP BY svc_date, trip_id
+                ) WHERE trip_rel = """
         + str(TRIP_CANCELED)
-        + """
-                    UNION DISTINCT
+        + """ OR (svc_date, trip_id) IN (
                     SELECT svc_date, trip_id FROM (
                         SELECT """
         + _SERVICE_DATE
@@ -125,7 +133,8 @@ def service_delivered_ch_sql(date_where: str) -> str:
                     ) GROUP BY svc_date, trip_id HAVING countIf(stop_rel != """
         + str(STOP_SKIPPED)
         + """) = 0
-                ) GROUP BY svc_date
+                )
+                GROUP BY svc_date, route
                 """
     )
 

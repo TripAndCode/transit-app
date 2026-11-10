@@ -209,6 +209,22 @@ def test_patch_standards_refuses_an_on_time_target_over_100_and_writes_nothing()
     assert conn.audit == []
 
 
+def test_patch_standards_sets_a_service_delivered_target_and_audits_it():
+    conn = _EditorConn()
+    target = {
+        "route_code": "A1",
+        "metric_type": "service_delivered_pct",
+        "threshold_value": 98.0,
+        "bonus_malus_rate": 0.0,
+    }
+    response = _client(conn).patch("/api/admin/agencies/1/standards", json={"upsert": [target], "delete": []})
+
+    assert response.status_code == 200
+    assert response.json() == [target]
+    assert len(conn.audit) == 1
+    assert json.loads(conn.audit[0][5]) == [target]
+
+
 # ── PATCH /{agency_id}/weights ──────────────────────────────────────────
 
 

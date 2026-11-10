@@ -337,6 +337,36 @@ def test_standard_edits_reject_an_on_time_target_outside_0_to_100(threshold):
         )
 
 
+@pytest.mark.parametrize("threshold", [0.0, 97.5, 100.0])
+def test_standard_edits_accept_a_service_delivered_target_from_0_to_100(threshold):
+    ad.validate_standard_edits(
+        [
+            {
+                "route_code": "42",
+                "metric_type": "service_delivered_pct",
+                "threshold_value": threshold,
+                "bonus_malus_rate": 0.0,
+            }
+        ]
+    )
+
+
+@pytest.mark.parametrize("threshold", [-1.0, 100.5])
+def test_standard_edits_reject_a_service_delivered_target_outside_0_to_100(threshold):
+    """The target is a share of planned trips, in percent."""
+    with pytest.raises(ValueError, match="service_delivered_pct"):
+        ad.validate_standard_edits(
+            [
+                {
+                    "route_code": "42",
+                    "metric_type": "service_delivered_pct",
+                    "threshold_value": threshold,
+                    "bonus_malus_rate": 0.0,
+                }
+            ]
+        )
+
+
 def test_standard_edits_keep_the_other_metrics_unbounded_above_100():
     """An excess wait is in seconds, so 240 is an ordinary target."""
     ad.validate_standard_edits(

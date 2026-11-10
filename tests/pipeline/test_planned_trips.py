@@ -45,12 +45,12 @@ def _addition(pg_conn, agency_id: int, service_id: str, gtfs_date: str) -> None:
     pg_conn.commit()
 
 
-def _trips(pg_conn, agency_id: int, service_id: str, count: int) -> None:
+def _trips(pg_conn, agency_id: int, service_id: str, count: int, route_id: str | None = "R1") -> None:
     with pg_conn.cursor() as cur:
         for i in range(count):
             cur.execute(
-                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, 'R1', %s)",
-                (agency_id, f"{service_id}-{i}", service_id),
+                "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
+                (agency_id, f"{service_id}-{route_id}-{i}", route_id, service_id),
             )
     pg_conn.commit()
 
@@ -63,7 +63,7 @@ def _stop_times(pg_conn, agency_id: int, service_id: str, trips: int, stops: int
                 cur.execute(
                     "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
                     "VALUES (%s, %s, %s, %s, '08:00:00')",
-                    (agency_id, f"{service_id}-{i}", seq, f"S{seq}"),
+                    (agency_id, f"{service_id}-R1-{i}", seq, f"S{seq}"),
                 )
     pg_conn.commit()
 
@@ -72,6 +72,15 @@ def _saved_stop_events(pg_conn, agency_id: int) -> dict[date, int | None]:
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT service_date, planned_stop_events FROM planned_trips_daily WHERE agency_id = %s ORDER BY 1",
+            (agency_id,),
+        )
+        return dict(cur.fetchall())
+
+
+def _saved_by_route(pg_conn, agency_id: int) -> dict[date, dict[str, int] | None]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_date, planned_trips_by_route FROM planned_trips_daily WHERE agency_id = %s ORDER BY 1",
             (agency_id,),
         )
         return dict(cur.fetchall())
@@ -163,6 +172,47 @@ def test_a_day_saved_without_its_stop_events_keeps_them_unknown(pg_conn, agency_
     # timetable that planned it may not be the one loaded now.
     assert saved[date(2026, 4, 14)] is None
     assert saved[date(2026, 4, 13)] == 6
+
+
+def test_capture_saves_each_days_plan_by_route_beside_its_trips(pg_conn, agency_id):
+    """A day's routes sum to its planned trips. A route is keyed by its code,
+    the tail a parenthesised route_id carries, and a trip naming no route
+    under ''. A covered day nothing runs on has no route to plan."""
+    _weekly(pg_conn, agency_id, "WD", "1111100", date(2026, 4, 6), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "WD", 3, "R1")
+    _trips(pg_conn, agency_id, "WD", 2, "国道・古川線(1021)")
+    _addition(pg_conn, agency_id, "EX", "20260411")
+    _trips(pg_conn, agency_id, "EX", 1, "R1")
+    _trips(pg_conn, agency_id, "EX", 1, None)
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    expected = {d: {"R1": 3, "1021": 2} for d in _days(date(2026, 4, 6), date(2026, 4, 14))}
+    expected |= {date(2026, 4, 11): {"R1": 1, "": 1}, date(2026, 4, 12): {}}
+    assert _saved_by_route(pg_conn, agency_id) == expected
+    saved = _saved(pg_conn, agency_id)
+    assert all(sum(expected[d].values()) == saved[d] for d in expected)
+
+
+def test_a_day_saved_without_its_plan_by_route_keeps_it_unknown(pg_conn, agency_id):
+    _weekly(pg_conn, agency_id, "ALL", "1111111", date(2026, 4, 1), date(2026, 4, 30))
+    _trips(pg_conn, agency_id, "ALL", 3)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips) VALUES (%s, '2026-04-14', 3)",
+            (agency_id,),
+        )
+    pg_conn.commit()
+
+    capture_planned_trips(pg_conn, agency_id, today=date(2026, 4, 15))
+    pg_conn.commit()
+
+    saved = _saved_by_route(pg_conn, agency_id)
+    # The first count saved for a day stands, its routes included: the
+    # timetable that planned it may not be the one loaded now.
+    assert saved[date(2026, 4, 14)] is None
+    assert saved[date(2026, 4, 13)] == {"R1": 3}
 
 
 def test_capture_never_overwrites_a_saved_day(pg_conn, agency_id):
