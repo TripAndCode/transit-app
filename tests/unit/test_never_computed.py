@@ -34,20 +34,22 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCS = {"ja": ROOT / "docs" / "methodology.md", "en": ROOT / "docs" / "methodology.en.md"}
 SECTIONS = {"ja": "## 計算しないもの", "en": "## What is never computed"}
 
-# Each identifier the documents name, with every column name it stands for.
-# A name is matched whole, in snake case (:func:`_snake`), with each word
-# boundary optional so a folded spelling (`vehicleid`) matches too. Hence
-# `vehicle_km` (planned vehicle-kilometres of a timetable) and
-# `ridership_weights` (a route's relative weight) are not it.
+# Each identifier the documents name, with the names it stands for. A name
+# is read in snake case (:func:`_snake`), and any underscore-delimited run of
+# its words that matches counts, so `trip_vehicle_id` and `base_fare` are
+# caught and a folded spelling (`vehicleid`) too, while `vehicle_km` (planned
+# vehicle-kilometres of a timetable), `ridership_weights` (a route's relative
+# weight) and `rider_count` (a count, which identifies no one) are not.
+_ID = r"(?:ids?|identifiers?|labels?|refs?|no|numbers?|codes?|names?|keys?|hash(?:es)?|descriptors?)"
 NEVER_STORED: dict[str, str] = {
-    "vehicle_id": r"vehicles?(_?(id|ids|label|labels|ref|no|number|code|name|descriptor))?",
-    "license_plate": r"licen[cs]e_?plates?|plate_?(no|number)s?",
-    "driver_id": r"(driver|crew|staff|employee)\w*",
-    "passenger_id": r"(passenger|traveler|traveller|cardholder)\w*|riders?(_\w+|id|ids|no|number|name)?"
-    r"|(ic_?)?card_?(id|ids|no|number|hash)",
-    "fare": r"fare\w*",
+    "vehicle_id": rf"vehicles?_?{_ID}|^vehicles?$",
+    "license_plate": r"licen[cs]e_?plates?|plates?(?:_?(?:no|numbers?))?",
+    "driver_id": r"(?:driver|crew|staff|employee)[a-z0-9]*",
+    "passenger_id": rf"(?:passenger|traveler|traveller|cardholder)[a-z0-9]*|riders?_?(?:{_ID}|cards?|emails?)"
+    r"|(?:ic_?)?cards?_?(?:ids?|no|numbers?|hash(?:es)?)",
+    "fare": r"fares?[a-z0-9]*",
 }
-_NEVER = re.compile("|".join(f"(?:{pattern})" for pattern in NEVER_STORED.values()))
+_NEVER = re.compile("|".join(rf"(?:^|_)(?:{pattern})(?=_|$)" for pattern in NEVER_STORED.values()))
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 _SQL_COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
@@ -67,7 +69,7 @@ def _snake(name: str) -> str:
 
 
 def _never_stored(names: set[str]) -> list[str]:
-    return sorted(name for name in names if _NEVER.fullmatch(_snake(name)))
+    return sorted(name for name in names if _NEVER.search(_snake(name)))
 
 
 def _schema_sources() -> dict[str, set[str]]:
@@ -126,7 +128,25 @@ def test_the_scan_finds_such_a_name_however_it_is_spelt(name):
 
 
 @pytest.mark.parametrize(
-    "name", ["vehicle_km", "vehicleKm", "vehicle_km_delivered_pct", "ridership_weights", "ridershipWeights", "user_id"]
+    "name",
+    ["vehicle_license_plate", "trip_vehicle_id", "assigned_driver_id", "base_fare", "rt_vehicle_id", "vehicle_plate"],
+)
+def test_the_scan_finds_such_a_name_inside_a_longer_one(name):
+    assert _never_stored({name}) == [name]
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "vehicle_km",
+        "vehicleKm",
+        "vehicle_km_delivered_pct",
+        "ridership_weights",
+        "ridershipWeights",
+        "user_id",
+        "provider_id",
+        "rider_count",
+    ],
 )
 def test_the_scan_leaves_a_lookalike_alone(name):
     assert _never_stored({name}) == []
