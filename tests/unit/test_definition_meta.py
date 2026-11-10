@@ -22,6 +22,7 @@ from pipeline.reports import definition
 from pipeline.reports.definition import (
     DEDUP_RULE,
     MEASUREMENT_POINT,
+    METHODOLOGY_URLS,
     VALUE_BASIS,
     DefinitionMeta,
     SourceMix,
@@ -453,6 +454,10 @@ _VALUE_BASIS = {
     "en": "Value basis: computed from the delays the operator's feed last predicted for each stop "
     "(not observed passing times)",
 }
+_METHODOLOGY = {
+    "ja": f"算出方法の説明: {METHODOLOGY_URLS['ja']}",
+    "en": f"Methodology: {METHODOLOGY_URLS['en']}",
+}
 
 
 def test_csv_line_says_what_each_value_is_before_the_method_and_ends_with_the_timetables():
@@ -460,7 +465,7 @@ def test_csv_line_says_what_each_value_is_before_the_method_and_ends_with_the_ti
     line = format_definition_csv_line(meta)
     assert (
         "; 値の根拠=事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）; "
-        f"算出方法={METHOD_VERSION}; 集計日=2026-11-06; "
+        f"算出方法の説明={METHODOLOGY_URLS['ja']}; 算出方法={METHOD_VERSION}; 集計日=2026-11-06; "
         "時刻表=gtfs_static_20260401（2026-04-01取得）28日間、記録なし 3日間（全31日間）"
     ) in line
     assert line.endswith("（全31日間）")
@@ -481,8 +486,25 @@ def test_csv_line_without_timetables_ends_with_the_build_day():
 )
 def test_the_stamp_says_what_each_value_is_and_names_the_method_and_the_timetables(locale, timetable):
     meta = _DATED.model_copy(update={"timetable_versions": _TIMETABLES})
-    assert format_stamp_lines(meta, locale) == [_VALUE_BASIS[locale], format_method_stamp(meta, locale), timetable]
-    assert format_stamp_lines(_DATED, locale) == [_VALUE_BASIS[locale], format_method_stamp(_DATED, locale)]
+    assert format_stamp_lines(meta, locale) == [
+        _VALUE_BASIS[locale],
+        _METHODOLOGY[locale],
+        format_method_stamp(meta, locale),
+        timetable,
+    ]
+    assert format_stamp_lines(_DATED, locale) == [
+        _VALUE_BASIS[locale],
+        _METHODOLOGY[locale],
+        format_method_stamp(_DATED, locale),
+    ]
+
+
+def test_every_stamp_links_the_methodology_in_the_reader_s_language():
+    """The CSV preamble is Japanese, so it links the Japanese document; a
+    footnote links the document in its own language."""
+    assert f"; 算出方法の説明={METHODOLOGY_URLS['ja']}; " in format_definition_csv_line(_LIVE)
+    for locale in ("ja", "en"):
+        assert _METHODOLOGY[locale] in format_definition_footnotes(_DATED, locale)
 
 
 @pytest.mark.parametrize(

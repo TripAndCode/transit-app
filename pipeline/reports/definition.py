@@ -12,9 +12,11 @@ settings -- none of them re-derive or hardcode the values themselves.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date
 from itertools import groupby
+from pathlib import Path
 from typing import Literal
 
 import asyncpg
@@ -76,6 +78,16 @@ _VALUE_BASIS_TEXT: dict[tuple[str, str], str] = {
 # a second time.
 _MEASUREMENT_POINT_CSV_TEXT: dict[str, str] = {MEASUREMENT_POINT: _MEASUREMENT_POINT_TEXT[(MEASUREMENT_POINT, "ja")]}
 _DEDUP_RULE_CSV_TEXT: dict[str, str] = {DEDUP_RULE: _DEDUP_RULE_TEXT[(DEDUP_RULE, "ja")]}
+
+# Where the method every stamp names is published, per language: the
+# document each export's definition and the app footer link to. The frontend
+# file is the one home, read here as pipeline.data_sources reads its sources,
+# so the server and the screens cannot link different documents.
+METHODOLOGY_URLS: dict[str, str] = json.loads(
+    (Path(__file__).resolve().parents[2] / "frontend" / "src" / "components" / "methodology.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 # A named preset in a reader's words, said beside its window wherever a
 # definition is written out: the footnotes, the CSV preamble and, in the same
@@ -418,6 +430,7 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
         f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
         f"値の根拠={_VALUE_BASIS_TEXT[(meta.value_basis, 'ja')]}; "
+        f"算出方法の説明={METHODOLOGY_URLS['ja']}; "
         f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     )
     timetables = _timetable_text(meta, "ja")
@@ -449,6 +462,14 @@ def format_method_stamp(meta: DefinitionMeta, locale: str = "ja") -> str:
     if locale == "en":
         return f"Method version: {meta.method_version}, aggregates built: {_built_day(meta, 'en')}"
     return f"算出方法: {meta.method_version}、集計日: {_built_day(meta, 'ja')}"
+
+
+def _methodology_line(locale: str) -> str:
+    """Where the method the stamp names is explained, its link written out
+    because paper and a text body keep none."""
+    if locale == "en":
+        return f"Methodology: {METHODOLOGY_URLS['en']}"
+    return f"算出方法の説明: {METHODOLOGY_URLS['ja']}"
 
 
 def _days(n: int, locale: str) -> str:
@@ -521,14 +542,18 @@ def _source_mix_text(meta: DefinitionMeta, locale: str) -> str | None:
 
 def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     """The footnote lines that say where *meta*'s figures came from: what they
-    are made from, the method and build day (:func:`format_method_stamp`), and the
-    timetables in force and the source of each day's observations when a
-    router named them.
+    are made from, where the method is published, the method and build day
+    (:func:`format_method_stamp`), and the timetables in force and the source
+    of each day's observations when a router named them.
     :func:`format_definition_footnotes` ends with them, and the delay record's
     text is footnoted with them."""
     locale = "en" if locale == "en" else "ja"
     basis = _VALUE_BASIS_TEXT[(meta.value_basis, locale)]
-    lines = [f"Value basis: {basis}" if locale == "en" else f"値の根拠: {basis}", format_method_stamp(meta, locale)]
+    lines = [
+        f"Value basis: {basis}" if locale == "en" else f"値の根拠: {basis}",
+        _methodology_line(locale),
+        format_method_stamp(meta, locale),
+    ]
     timetables = _timetable_text(meta, locale)
     if timetables is not None:
         lines.append(f"Timetable: {timetables}" if locale == "en" else f"時刻表: {timetables}")

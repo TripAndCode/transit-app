@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from api.routers.reports import _REPORT_CSV_COLUMNS
+from pipeline.reports.definition import METHODOLOGY_URLS
 
 ROOT = Path(__file__).resolve().parents[2]
 # Shared with tests/unit/test_data_sources.py and the frontend's print tests.
@@ -74,7 +75,9 @@ async def test_a_feed_no_source_covers_adds_no_credit_row(client, agency_id, ch_
 
     rows = await _csv_rows(client, agency_id, report_type, "ja")
     header_idx = rows.index(_REPORT_CSV_COLUMNS[report_type])
-    assert not any("https://" in cell for row in rows[:header_idx] for cell in row)
+    # The definition line and any footnote link the methodology; no other link may appear.
+    linked = [cell.replace(METHODOLOGY_URLS["ja"], "") for row in rows[:header_idx] for cell in row]
+    assert not any("https://" in cell for cell in linked)
     if report_type == "ranking":
         assert header_idx == 1  # the definition line alone, as before
 

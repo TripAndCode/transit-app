@@ -8,6 +8,7 @@ import pytest
 from httpx import ASGITransport
 
 from pipeline.agg_registry import METHOD_VERSION
+from pipeline.reports.definition import METHODOLOGY_URLS
 from pipeline.reports.network import invalidate_network_summary
 from pipeline.reports.rankings import on_time_window
 from tests.api.test_network import (
@@ -434,10 +435,17 @@ _SOURCE_NOTE = (
     "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ"
 )
 _BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）"
+_METHODOLOGY_NOTE = f"※算出方法の説明: {METHODOLOGY_URLS['ja']}"
 _LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
 # The stamp of a one-day delay record with no timetable or source recorded for its day.
 _CERT_STAMP = "\n".join(
-    [_BASIS_NOTE, _LIVE_STAMP, "※時刻表: 記録なし 1日間（全1日間）", "※観測データ: 記録なし 1日間（全1日間）"]
+    [
+        _BASIS_NOTE,
+        _METHODOLOGY_NOTE,
+        _LIVE_STAMP,
+        "※時刻表: 記録なし 1日間（全1日間）",
+        "※観測データ: 記録なし 1日間（全1日間）",
+    ]
 )
 
 
@@ -700,7 +708,8 @@ async def test_the_council_report_text_names_the_method_the_build_day_the_timeta
     body = (await client.get(f"/api/{agency_id}/reports/council_summary?from=2026-05-18&to=2026-05-18")).json()
     lines = body["text"].split("\n")
     basis = lines.index(_BASIS_NOTE)
-    assert lines[basis + 1 : basis + 4] == [
+    assert lines[basis + 1 : basis + 5] == [
+        _METHODOLOGY_NOTE,
         f"※算出方法: {METHOD_VERSION}、集計日: 2026-11-06",
         "※時刻表: gtfs_static_20260401（2026-04-01取得）1日間（全1日間）",
         f"※観測データ: アーカイブ 1日間（全1日間）。{_SOURCE_NOTE}",

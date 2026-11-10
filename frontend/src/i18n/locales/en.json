@@ -607,7 +607,8 @@
   "legal": {
     "privacy": "Privacy Policy",
     "terms": "Terms of Service",
-    "nav_label": "Legal"
+    "nav_label": "Terms and policies",
+    "methodology": "Methodology"
   },
   "credits": {
     "title": "Data sources",
