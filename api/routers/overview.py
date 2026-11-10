@@ -86,8 +86,9 @@ class HeadlineReference(BaseModel):
     as that level. ``days_selected`` counts the window's days the scope's
     day-of-week and service filters keep, ``days_collected`` those the
     agency's feed holds data on, and ``min_days`` / ``min_samples`` the
-    floors the figure needs. ``delta_min`` / ``delta_pct`` are the headline's
-    change from it, as the baseline's are.
+    floors the figure needs; ``not_aggregated`` reads nothing, so its counts
+    are 0. ``delta_min`` / ``delta_pct`` are the headline's change from it, as
+    the baseline's are.
     """
 
     avg_min: float | None

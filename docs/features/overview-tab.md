@@ -60,8 +60,13 @@ What the user sees/does:
     fewer than 100 observations (`insufficient_samples`), when nothing was
     observed (`no_data`), and under a time band with a routes filter
     (`not_aggregated`: no aggregate holds a route's departures by date and
-    hour). Coverage counts the days the feed was collected, not the days the
-    scope's routes ran.
+    hour; decided before anything is read). Coverage counts the days the
+    feed was collected, not the days the scope's routes ran.
+  - A service filter is resolved over the reference window alone, so each of
+    its dates is filed under the timetable the agency's calendar ran then;
+    where the calendar changed its weekend timetables between the window and
+    the period, a filter such as 土曜 can select a different set of day types
+    in each.
   - The fact rows take no reference: their populations (the routes over a
     sample floor) and the concentration's spread change with the window's
     length, so a 90-day value is not the same statistic as the period's.
@@ -106,10 +111,11 @@ What the user sees/does:
     timetable is split 平日 / 土日祝, every other 平日 / 土曜 / 日祝; a day type
     under 3 days or 1,000 samples is flagged `insufficient` and left out of the
     comparison. The day types are resolved once per payload, over the range
-    plus the days before it that the baseline (as wide as the range), the
-    movers' four-week sparkline and the 90-day reference read, and the service
-    filter uses the same resolution, so where a feed changes its weekend
-    timetables that whole span decides the split.
+    plus the days before it that the baseline (as wide as the range) and the
+    movers' four-week sparkline read, and the service filter uses the same
+    resolution, so where a feed changes its weekend timetables that whole span
+    decides the split. The 90-day reference resolves its own window instead,
+    so reaching back for it never moves the period's split.
 
 ## Request path
 

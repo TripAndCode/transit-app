@@ -3,7 +3,7 @@
 Public surface
 --------------
 compute_overview_summary(agency_id, ctx, conn, *, pool=None, ch=None) -> dict
-    Build the full Overview tab payload.  Pass ``pool`` to run the ten
+    Build the full Overview tab payload.  Pass ``pool`` to run the
     stage queries concurrently (each task acquires its own connection);
     omit it (or pass ``None``) for the sequential single-connection path
     used by tests and ad-hoc callers.
@@ -132,15 +132,15 @@ def _grain_lookback_days(ctx: RangeCtx) -> int:
 def _calendar_from(ctx: RangeCtx) -> date:
     """The first day of the span the overview resolves its day types over.
 
-    The payload reads before ``ctx.from_date`` three times, whichever store
-    serves it: ``base_ctx`` reaches :func:`_baseline_reach_days` back, the
-    movers' sparkline ``_MOVER_HISTORY_WEEKS`` weeks back from a current window
-    that ends inside ``ctx``, and the reference ``REFERENCE_DAYS`` back. The day
-    types are resolved once over the whole span (api.range.ServiceDates), so the
-    service filter and the day-type split always agree.
+    The payload reads before ``ctx.from_date`` twice, whichever store serves it:
+    ``base_ctx`` reaches :func:`_baseline_reach_days` back, and the movers'
+    sparkline ``_MOVER_HISTORY_WEEKS`` weeks back from a current window that
+    ends inside ``ctx``. The day types are resolved once over the whole span
+    (api.range.ServiceDates), so the service filter and the day-type split
+    always agree. The reference resolves its own window instead
+    (:func:`_reference`), so reaching for it cannot move the period's split.
     """
-    reach = max(_baseline_reach_days(ctx), 7 * _MOVER_HISTORY_WEEKS - 1, REFERENCE_DAYS)
-    return ctx.from_date - timedelta(days=reach)
+    return ctx.from_date - timedelta(days=max(_baseline_reach_days(ctx), 7 * _MOVER_HISTORY_WEEKS - 1))
 
 
 def _listable(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[str]]) -> list:
@@ -154,7 +154,7 @@ def _listable(rows: Sequence[Sequence[Any]], left_out: Mapping[str, frozenset[st
 
 
 # How many pooled connections one overview request may hold at once on its
-# pool-gather path. Ten stages fan out per request; unbounded, two
+# pool-gather path. A dozen stages fan out per request; unbounded, two
 # concurrent cold requests alone would exhaust the pool and queue every other
 # endpoint behind them. The bound trades some of one request's overlap for
 # room for several requests at once.
@@ -1375,7 +1375,8 @@ async def _daily_sparkline(
 
 def _reference_ctx(ctx: RangeCtx) -> RangeCtx:
     """The ``REFERENCE_DAYS`` days ending the day before ``ctx`` starts, under
-    ``ctx``'s scope, as ``base_ctx`` copies it."""
+    ``ctx``'s scope, as ``base_ctx`` copies it, its service filter not yet
+    resolved: :func:`_reference` resolves it over this window alone."""
     to_date = ctx.from_date - timedelta(days=1)
     return RangeCtx(
         from_date=to_date - timedelta(days=REFERENCE_DAYS - 1),
@@ -1384,7 +1385,6 @@ def _reference_ctx(ctx: RangeCtx) -> RangeCtx:
         time_band=ctx.time_band,
         service=ctx.service,
         routes=ctx.routes,
-        service_dates=ctx.service_dates,
     )
 
 
@@ -1441,11 +1441,21 @@ async def _reference(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
     (:func:`_hour_band_stats`), which pools every route, so a time band with a
     routes filter has no aggregate to read and is ``not_aggregated``: a live
     scan of ``REFERENCE_DAYS`` days would cost several times the headline's own.
+    That is decided before anything is read, and its counts are then 0.
+
+    A service filter is resolved over this window alone, so each date is filed
+    under the timetable the agency's calendar ran in the window, and the
+    period's own day types stay those of the span the rest of the payload reads.
 
     Coverage is judged by the days the agency's feed was collected on, not the
     days the scope's routes ran, so a route that runs on fewer days than the
     agency is still judged by whether the feed was there to see it.
     """
+    hours = _whole_hour_band(ctx.time_band) if ctx.time_band != "all" and not ctx.routes else None
+    if ctx.time_band != "all" and hours is None:
+        return _reference_payload(ctx, "not_aggregated")
+
+    ctx = await resolve_service_dates(ctx, conn, agency_id)
     selected = _selected_days(ctx)
     collected = 0
     if selected:
@@ -1456,34 +1466,51 @@ async def _reference(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
         )
         collected = int(row["n"])
 
-    reason: ReferenceReason | None = None
     avg_min: float | None = None
     samples = 0
-    if ctx.time_band == "all":
+    if hours is None:
         avg_min, samples = await _headline_stats(agency_id, ctx, conn)
-    else:
-        hours = None if ctx.routes else _whole_hour_band(ctx.time_band)
-        if hours is None:
-            reason = "not_aggregated"
-        elif selected:
-            avg_min, samples = await _hour_band_stats(agency_id, selected, hours, conn)
+    elif selected:
+        avg_min, samples = await _hour_band_stats(agency_id, selected, hours, conn)
 
     min_days = ceil(REFERENCE_MIN_COVERAGE * len(selected))
-    if reason is None:
-        if samples == 0:
-            reason = "no_data"
-        elif collected < min_days:
-            reason = "insufficient_days"
-        elif samples < REFERENCE_MIN_SAMPLES:
-            reason = "insufficient_samples"
+    reason: ReferenceReason | None = None
+    if samples == 0:
+        reason = "no_data"
+    elif collected < min_days:
+        reason = "insufficient_days"
+    elif samples < REFERENCE_MIN_SAMPLES:
+        reason = "insufficient_samples"
+    return _reference_payload(
+        ctx,
+        reason,
+        avg_min=avg_min,
+        samples=samples,
+        days_selected=len(selected),
+        days_collected=collected,
+        min_days=min_days,
+    )
+
+
+def _reference_payload(
+    ctx: RangeCtx,
+    reason: ReferenceReason | None,
+    *,
+    avg_min: float | None = None,
+    samples: int = 0,
+    days_selected: int = 0,
+    days_collected: int = 0,
+    min_days: int = 0,
+) -> dict:
+    """The reference's payload over ``ctx``'s window; its figure only without a ``reason``."""
     return {
         "avg_min": avg_min if reason is None else None,
         "samples": samples,
         "window_from": ctx.from_date.isoformat(),
         "window_to": ctx.to_date.isoformat(),
         "days": ctx.days,
-        "days_selected": len(selected),
-        "days_collected": collected,
+        "days_selected": days_selected,
+        "days_collected": days_collected,
         "min_days": min_days,
         "min_samples": REFERENCE_MIN_SAMPLES,
         "reason": reason,
