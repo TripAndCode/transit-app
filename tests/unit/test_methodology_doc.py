@@ -7,6 +7,7 @@ the links every export and the app footer print lead to them. The
 comparability thresholds they state are the gate's own.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,12 @@ def _threshold_phrases(locale: str, coverage: float, half_width: float, clamp: f
     return [f"{coverage:g}% 未満", f"{half_width:.1f} ポイントを超える", f"{clamp:g}% を超える"]
 
 
+def _stated(phrase: str, section: str) -> bool:
+    """Whether *section* writes *phrase* with no digit or point running into
+    its number, so 15% never reads as 5%."""
+    return re.search(rf"(?<![\d.]){re.escape(phrase)}", section) is not None
+
+
 def _comparability_section(locale: str) -> str:
     text = changelog.DOCS[locale].read_text(encoding="utf-8")
     heading = COMPARABILITY_SECTIONS[locale]
@@ -86,13 +93,18 @@ def _comparability_section(locale: str) -> str:
     return text.split(f"\n{heading}\n", 1)[1].split("\n## ", 1)[0]
 
 
+def _unstated(section: str, locale: str, coverage: float, half_width: float, clamp: float) -> list[str]:
+    """The thresholds *section* does not state."""
+    phrases = _threshold_phrases(locale, coverage, half_width, clamp)
+    return [phrase for phrase in phrases if not _stated(phrase, section)]
+
+
+_CURRENT = (comparability.MIN_COVERAGE_PCT, comparability.MAX_CI_HALF_WIDTH_PP, comparability.MAX_CLAMP_PCT)
+
+
 @pytest.mark.parametrize("locale", sorted(changelog.DOCS))
 def test_the_documents_state_the_gate_s_current_thresholds(locale):
-    phrases = _threshold_phrases(
-        locale, comparability.MIN_COVERAGE_PCT, comparability.MAX_CI_HALF_WIDTH_PP, comparability.MAX_CLAMP_PCT
-    )
-    section = _comparability_section(locale)
-    missing = [phrase for phrase in phrases if phrase not in section]
+    missing = _unstated(_comparability_section(locale), locale, *_CURRENT)
     assert not missing, (
         f"{changelog.DOCS[locale].name}'s comparability section must state {missing}, the thresholds in "
         "pipeline/reports/comparability.py"
@@ -103,4 +115,14 @@ def test_the_documents_state_the_gate_s_current_thresholds(locale):
 def test_a_moved_threshold_is_not_what_the_documents_state(locale):
     section = _comparability_section(locale)
     for moved in ((75.0, 3.0, 5.0), (70.0, 2.5, 5.0), (70.0, 3.0, 4.0)):
-        assert not all(phrase in section for phrase in _threshold_phrases(locale, *moved))
+        assert _unstated(section, locale, *moved)
+
+
+@pytest.mark.parametrize("locale", sorted(changelog.DOCS))
+@pytest.mark.parametrize(("stated", "stale"), [("5%", "15%"), ("70%", "170%"), ("3.0", "13.0")])
+def test_a_longer_number_does_not_state_the_threshold(locale, stated, stale):
+    """A document stating 15% where the gate says 5% is stale, though the
+    current phrase's text is inside the stale one."""
+    section = _comparability_section(locale)
+    assert stated in section
+    assert _unstated(section.replace(stated, stale), locale, *_CURRENT)
