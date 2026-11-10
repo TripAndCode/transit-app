@@ -1118,7 +1118,9 @@ def test_analyze_leaves_no_departure_for_a_trip_predicted_and_then_cancelled_wit
     it set off, leaves no departure and is not observed. T3, cancelled after
     its first stop, keeps that departure. T4, cancelled after its last stop,
     keeps both. A trip whose last status is CANCELED is not run, so T1, T3 and
-    T4 all count as not run, and only T2 ran."""
+    T4 all count as not run, and only T2 ran. The predictions name the route
+    and the cancellations name none, so each withdrawal takes the route from
+    the timetable, which is the one the predictions named."""
     from pipeline.ingest import ingest
     from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
 
@@ -1158,7 +1160,7 @@ def test_analyze_leaves_no_departure_for_a_trip_predicted_and_then_cancelled_wit
     )
     (tmp_path / "20260401" / "TripUpdate_015800.pb").write_bytes(
         trip_update_feed(
-            *(trip_update(trip_id, schedule_relationship=3, route_id="R1") for trip_id in ("T1", "T3", "T4")),
+            *(trip_update(trip_id, schedule_relationship=3) for trip_id in ("T1", "T3", "T4")),
             predicted("T2"),
             timestamp=predicted_at + 180,
         )

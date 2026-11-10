@@ -340,3 +340,24 @@ def test_a_trip_cancelled_without_listing_a_stop_reports_its_stops_but_sends_no_
     assert {field: float(april[f"{field}_pct"]) for field in static_join.RT_COVERAGE_FIELDS} == dict.fromkeys(
         static_join.RT_COVERAGE_FIELDS, 100.0
     )
+
+
+def test_a_cancelled_trips_stop_update_with_neither_a_delay_nor_a_stop_status_is_left_out_of_field_coverage(
+    pg_conn, ch_client, closed_on_may_first
+):
+    """The rows ingest writes from the timetable are told apart by their shape
+    alone: trip CANCELED, no delay, no stop status. A stop update the feed
+    sends for a cancelled trip in that same shape is left out of the update
+    count and field coverage with them, though it still reports its stop
+    event."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    sent = [row for row in _one_poll(("ALL-3", 1, 30, 30, 0)) if row[2] != "ALL-3" or row[6] != 1]
+    name, captured, header = sent[0][0], sent[0][1], sent[0][12]
+    bare = (name, captured, "ALL-3", "平日", "11:00:00", "R1", 1, None, "S1", None, 3, None, header)
+    insert_updates(ch_client, agency, [*sent, bare])
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["observed_stop_events"], april["stop_time_updates"]) == (8, 7)

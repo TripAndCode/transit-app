@@ -1,7 +1,6 @@
 """static_join strategy tests: repeated-call regression + per-op fixture integration."""
 
 import pathlib
-from datetime import date
 
 import pytest
 
@@ -123,9 +122,9 @@ def test_static_join_isolates_results_across_agencies_sharing_one_connection(pg_
 
 
 def test_static_join_reads_the_schedule_as_it_stands_at_each_poll(pg_conn):
-    """A stop update's schedule is read afresh at each poll, so a reload
-    between two of them on one connection shows in the second, and no copy of
-    the schedule is left on the connection."""
+    """Nothing about the schedule is held between polls, so a reload between
+    two of them on one connection shows in the second, and no copy of the
+    schedule is left on the connection."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
@@ -560,7 +559,9 @@ def test_a_stop_less_cancellation_stores_each_stop_under_its_earlier_predictions
     """Each stop's latest report decides whether it departed only among the
     reports of that stop event, which every dedup keys on the trip, stop,
     route, service, schedule and version a row stores. The withdrawal of each
-    stop therefore carries the keys its prediction carried."""
+    stop therefore carries the keys its prediction carried, including the
+    route when the predictions name the static route and the cancellation
+    names none."""
     aid = _cancelled_trip_agency(
         pg_conn,
         "static_join_cancel_keys",
@@ -568,7 +569,9 @@ def test_a_stop_less_cancellation_stores_each_stop_under_its_earlier_predictions
         "gtfs_static_20260101",
     )
     predicted = trip_update_feed(
-        trip_update("T1", stop_time_update(1, departure_delay=60), stop_time_update(2, departure_delay=60)),
+        trip_update(
+            "T1", stop_time_update(1, departure_delay=60), stop_time_update(2, departure_delay=60), route_id="R1"
+        ),
         timestamp=1778295600,
     )
     cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295660)
@@ -583,35 +586,12 @@ def test_a_stop_less_cancellation_stores_each_stop_under_its_earlier_predictions
     assert [(r[7], r[10]) for r in after] == [(None, 3), (None, 3)]
 
 
-def _one_trip_timetable_zip(directory: pathlib.Path, departures: tuple[str, str]) -> str:
-    """A timetable zip named scenario_cancel_cache.zip in *directory*, running
-    trip T1 on route R1 at stops S1 and S2 at *departures*."""
-    from tests.fixtures.scenario import Route, Scenario, ScheduledTrip, ServiceDay, Stop, Unreported, static_gtfs_zip
-
-    day = date(2026, 5, 11)
-    route = Route("R1", "Line 1", (Stop("S1", "Stop 1", 34.4, 132.4), Stop("S2", "Stop 2", 34.41, 132.41)))
-    scenario = Scenario(
-        name="cancel_cache",
-        routes=(route,),
-        timetable=(ScheduledTrip("T1", "R1", "平日", departures),),
-        days=(ServiceDay(day, "平日"),),
-        runs=(),
-        unreported=(Unreported("T1", day),),
-    )
-    directory.mkdir()
-    path = directory / f"{scenario.versions[0].name}.zip"
-    path.write_bytes(static_gtfs_zip(scenario))
-    return str(path)
-
-
-def test_a_cancelled_trips_stops_are_read_once_per_timetable_version(pg_conn, ch_client, tmp_path):
-    """A cancelled trip stays in the feed poll after poll, and its stops are
-    read once for the version its timetable rows name. A load clears what was
-    read, even under the name already loaded, and so does a version the
-    timetable rows name anew."""
-    aid = _make_agency(pg_conn, "static_join_cancel_cache", "http://cancel-cache.example.com/feed.pb")
-    load_static(
-        _one_trip_timetable_zip(tmp_path / "first", ("07:00:00", "07:08:00")), aid, pg_conn, ch_client=ch_client
+def test_a_cancelled_trips_stops_are_read_afresh_at_each_poll(pg_conn):
+    """A cancelled trip stays in the feed poll after poll, and each poll reads
+    its stops as the timetable stands then, under the same version name too:
+    nothing is held between polls."""
+    aid = _cancelled_trip_agency(
+        pg_conn, "static_join_cancel_fresh", {"T1": [(1, "S1", "07:00:00"), (2, "S2", "07:08:00")]}, "v1"
     )
     cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295600)
 
@@ -623,18 +603,7 @@ def test_a_cancelled_trips_stops_are_read_once_per_timetable_version(pg_conn, ch
     with pg_conn.cursor() as cur:
         cur.execute("UPDATE static_stop_times SET departure_time = '07:01:00' WHERE agency_id = %s", (aid,))
     pg_conn.commit()
-    assert schedule("f2.bin") == [(1, "07:00:00"), (2, "07:08:00")]
-
-    load_static(
-        _one_trip_timetable_zip(tmp_path / "again", ("07:30:00", "07:38:00")), aid, pg_conn, ch_client=ch_client
-    )
-    assert schedule("f3.bin") == [(1, "07:30:00"), (2, "07:38:00")]
-
-    with pg_conn.cursor() as cur:
-        cur.execute("UPDATE static_stop_times SET departure_time = '07:31:00' WHERE agency_id = %s", (aid,))
-        cur.execute("UPDATE static_trips SET static_version_id = 'renamed' WHERE agency_id = %s", (aid,))
-    pg_conn.commit()
-    assert schedule("f4.bin") == [(1, "07:31:00"), (2, "07:31:00")]
+    assert schedule("f2.bin") == [(1, "07:01:00"), (2, "07:01:00")]
 
 
 # Integration tests against captured fixtures
