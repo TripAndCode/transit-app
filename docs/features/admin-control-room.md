@@ -71,8 +71,9 @@ Endpoints:
   operator-edited policy tables.
 - `PATCH /api/admin/agencies/{agency_id}/standards` and
   `PATCH /api/admin/agencies/{agency_id}/weights` — edit the policy tables.
-  A standard's metric is `ewt_sec`, `vehicle_km_delivered_pct` or
-  `on_time_pct`, whose target is a percentage from 0 to 100.
+  A standard's metric is `ewt_sec`, `vehicle_km_delivered_pct`,
+  `on_time_pct` or `service_delivered_pct`; the last two take a percentage
+  from 0 to 100.
 - `POST /api/admin/agencies/{agency_id}/probe` — on-demand RT coverage
   probe.
 - `POST /api/admin/agencies/{agency_id}/reanalyze` — single-agency ingest +

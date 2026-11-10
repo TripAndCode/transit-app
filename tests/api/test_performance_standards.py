@@ -1,12 +1,12 @@
 """API tests for GET /api/{agency_id}/performance_standards.
 
-Seeds `route_performance_standards` (migrations 0041 and 0089) directly via
-asyncpg, plus whichever figures a row's `metric_type` reads:
-`agg_route_headway`/`agg_route_headway_daily` for `ewt_sec`, and the same
+Seeds `route_performance_standards` (migrations 0041, 0089 and 0094)
+directly via asyncpg, plus whichever figures a row's `metric_type` reads:
+`agg_route_headway`/`agg_route_headway_daily` for `ewt_sec`, and the
 `static_calendar_dates`/`static_trips`/`agg_service_delivered_daily`/
-`agg_static_version_summary` fixture shape `tests/api/test_network.py` uses
-for `vehicle_km_delivered_pct`. Those two read precomputed Postgres
-aggregates only.
+`agg_route_daily`/`agg_static_version_summary` shape of one planned day for
+`service_delivered_pct` and `vehicle_km_delivered_pct`. Those read
+precomputed Postgres aggregates only.
 
 The `on_time_pct` tests read the Routes table's own figures, so they seed
 the way its tests do: `agg_route_daily_dist` rows directly, or observations
@@ -27,6 +27,8 @@ from tests.api.test_reports import (  # noqa: F401 -- reports_app/reports_client
     reports_client,
 )
 from tests.conftest import _test_pool, confirm_rt_field_coverage
+
+_DELIVERED_DAY = date(2026, 4, 1)
 
 
 @pytest.fixture
@@ -77,11 +79,10 @@ async def perf_client(apply_schema):
         ],
     )
 
-    # vehicle_km_delivered_pct fixtures: agency-level 4/5 executed trips
-    # (80% service-delivered ratio) applied to a 100.0 planned-vehicle-km
-    # static version -> vehicle_km_delivered_pct == 80.0 (same fixture shape
-    # as tests/api/test_network.py's
-    # test_compute_supply_metrics_vehicle_km_delivered_uses_service_delivered_ratio).
+    # service_delivered_pct and vehicle_km_delivered_pct fixtures, one planned
+    # day: RD plans 100 trips, 20 of them reported not run, and is observed
+    # 150 times -> 80.0%. RQ plans 100 too, but is observed 10 times. RTHIN
+    # plans 5. The agency's plan has a 100.0 planned-vehicle-km static version.
     await pool.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aid)
     await pool.execute(
         "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES ($1,$2,$3,1)",
@@ -90,14 +91,25 @@ async def perf_client(apply_schema):
         "20260401",
     )
     await pool.executemany(
-        "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1,$2,'R1',$3)",
-        [(aid, tid, "WD") for tid in ["T1", "T2", "T3", "T4", "T5"]],
+        "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES ($1,$2,$3,'WD')",
+        [
+            (aid, f"{route}-{i}", route)
+            for route, count in (("RD", 100), ("RQ", 100), ("RTHIN", 5))
+            for i in range(count)
+        ],
     )
     await pool.execute(
-        "INSERT INTO agg_service_delivered_daily (agency_id, date, non_executed_trips) VALUES ($1,$2,$3)",
+        "INSERT INTO agg_service_delivered_daily (agency_id, date, route_code, non_executed_trips) "
+        "VALUES ($1,$2,$3,$4)",
         aid,
-        date(2026, 4, 1),
-        1,
+        _DELIVERED_DAY,
+        "RD",
+        20,
+    )
+    await pool.executemany(
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        "trips_observed, samples, last_seen_at) VALUES ($1, $2, $3, '', 30, 30, 1, $4, NOW())",
+        [(aid, _DELIVERED_DAY, "RD", 150), (aid, _DELIVERED_DAY, "RQ", 10), (aid, _DELIVERED_DAY, "RTHIN", 150)],
     )
     await pool.execute(
         "INSERT INTO agg_static_version_summary (agency_id, static_version_id, trip_count, vehicle_km) "
@@ -113,8 +125,8 @@ async def perf_client(apply_schema):
     async with pool.acquire() as conn:
         await conn.execute(
             "TRUNCATE agencies, agg_route_headway, agg_route_headway_daily, "
-            "route_performance_standards, static_calendar_dates, static_trips, "
-            "agg_service_delivered_daily, agg_static_version_summary CASCADE"
+            "route_performance_standards, static_calendar_dates, static_trips, agg_route_daily, "
+            "agg_service_delivered_daily, agg_static_version_summary, planned_trips_daily CASCADE"
         )
     await pool.close()
 
@@ -144,7 +156,6 @@ async def test_route_exactly_at_ewt_threshold_yields_zero_bonus_deduction(perf_c
     row = next(x for x in r.json()["rows"] if x["route_code"] == "R_AT")
 
     assert row["metric_type"] == "ewt_sec"
-    assert row["metric_scope"] == "route"
     assert row["actual_value"] == pytest.approx(50.0, abs=1e-6)
     assert row["achievement_rate"] == pytest.approx(1.0, abs=1e-9)
     assert row["estimated_bonus_deduction"] == pytest.approx(0.0, abs=1e-9)
@@ -197,40 +208,164 @@ async def test_route_above_ewt_standard_yields_positive_bonus(perf_client):
     assert row["estimated_bonus_deduction"] > 0
 
 
-async def test_vehicle_km_delivered_pct_at_threshold_is_zero_and_scoped_to_agency(perf_client):
-    """The agency-wide vehicle_km_delivered_pct fixture resolves to exactly
-    80.0 (4/5 executed trips, see module docstring). A route standard
-    configured at threshold_value=80.0 must read achievement_rate==1.0 /
-    estimated_bonus_deduction==0.0, and must be labeled metric_scope=="agency"
-    since this figure has no per-route breakdown."""
+async def test_vehicle_km_delivered_pct_at_threshold_is_zero_and_read_on_the_routes_own_trips(perf_client):
+    """RD's own trips resolve to exactly 80.0 (80 of its 100 planned trips
+    run), whatever the agency's other routes did. A standard at 80.0 reads
+    achievement_rate==1.0 and estimated_bonus_deduction==0.0."""
     client, aid, pool = perf_client
-    await _seed_standard(pool, aid, "R_VKM", "vehicle_km_delivered_pct", 80.0, 2000.0)
+    await _seed_standard(pool, aid, "RD", "vehicle_km_delivered_pct", 80.0, 2000.0)
 
     r = await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")
     assert r.status_code == 200
-    row = next(x for x in r.json()["rows"] if x["route_code"] == "R_VKM")
+    row = next(x for x in r.json()["rows"] if x["route_code"] == "RD")
 
-    assert row["metric_scope"] == "agency"
     assert row["actual_value"] == pytest.approx(80.0, abs=1e-6)
     assert row["achievement_rate"] == pytest.approx(1.0, abs=1e-9)
     assert row["estimated_bonus_deduction"] == pytest.approx(0.0, abs=1e-9)
+    assert row["not_judged"] is None
 
 
 async def test_vehicle_km_delivered_pct_below_threshold_yields_deduction(perf_client):
-    """threshold_value=90.0 against the same 80.0 agency-wide actual:
+    """threshold_value=90.0 against RD's 80.0:
     relative_deviation = (80 - 90) / 90 (higher-is-better) -> negative ->
     a strictly negative estimated deduction."""
     client, aid, pool = perf_client
-    await _seed_standard(pool, aid, "R_VKM_BELOW", "vehicle_km_delivered_pct", 90.0, 2000.0)
+    await _seed_standard(pool, aid, "RD", "vehicle_km_delivered_pct", 90.0, 2000.0)
 
     r = await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")
     assert r.status_code == 200
-    row = next(x for x in r.json()["rows"] if x["route_code"] == "R_VKM_BELOW")
+    row = next(x for x in r.json()["rows"] if x["route_code"] == "RD")
 
     expected_deviation = (80.0 - 90.0) / 90.0
     assert row["achievement_rate"] == pytest.approx(1.0 + expected_deviation, abs=1e-9)
     assert row["estimated_bonus_deduction"] == pytest.approx(2000.0 * expected_deviation, abs=1e-6)
     assert row["estimated_bonus_deduction"] < 0
+
+
+async def test_vehicle_km_delivered_pct_needs_the_timetables_route_shapes(perf_client):
+    client, aid, pool = perf_client
+    await pool.execute("UPDATE agg_static_version_summary SET vehicle_km = NULL WHERE agency_id = $1", aid)
+    await _seed_standard(pool, aid, "RD", "vehicle_km_delivered_pct", 80.0, 0.0)
+    await _seed_standard(pool, aid, "RD", "service_delivered_pct", 80.0, 0.0)
+
+    r = await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")
+    by_metric = {x["metric_type"]: x for x in r.json()["rows"]}
+
+    assert by_metric["vehicle_km_delivered_pct"]["actual_value"] is None
+    assert by_metric["vehicle_km_delivered_pct"]["not_judged"] == _not_judged("no_shapes")
+    assert by_metric["service_delivered_pct"]["actual_value"] == 80.0
+
+
+# ── service-delivered targets ─────────────────────────────────────────────
+
+
+def _not_judged(reason, *, observations=None, floor=None, planned_trips=None):
+    return {"reason": reason, "observations": observations, "floor": floor, "planned_trips": planned_trips}
+
+
+async def test_a_service_delivered_target_is_judged_on_the_routes_own_share(perf_client):
+    client, aid, pool = perf_client
+    await _seed_standard(pool, aid, "RD", "service_delivered_pct", 80.0, 1000.0)
+    await _seed_standard(pool, aid, "RD", "on_time_pct", 50.0, 0.0)
+
+    r = await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")
+    assert r.status_code == 200
+    body = r.json()
+    row = next(x for x in body["rows"] if x["metric_type"] == "service_delivered_pct")
+
+    assert row["route_code"] == "RD"
+    assert row["actual_value"] == 80.0
+    assert row["meets"] is True
+    assert row["not_judged"] is None
+    assert row["achievement_rate"] == pytest.approx(1.0)
+    assert row["estimated_bonus_deduction"] == pytest.approx(0.0)
+
+
+async def test_a_service_delivered_target_reads_the_dates_only(perf_client):
+    """The share counts the route's planned trips over the period's days, so
+    neither the page's weekday filter nor its route filter moves it."""
+    client, aid, pool = perf_client
+    await _seed_standard(pool, aid, "RD", "service_delivered_pct", 80.0, 0.0)
+
+    body = (
+        await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01&dow=weekend&routes=RQ")
+    ).json()
+
+    assert body["rows"][0]["actual_value"] == 80.0
+    assert [k for k, v in body["scope_applied"].items() if v] == ["from", "to"]
+
+
+async def test_a_service_delivered_target_is_not_judged_on_thin_plans_or_rarely_reported_routes(perf_client):
+    from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+
+    client, aid, pool = perf_client
+    for code in ("RTHIN", "RQ", "UNPLANNED"):
+        await _seed_standard(pool, aid, code, "service_delivered_pct", 80.0, 0.0)
+
+    body = (await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")).json()
+    by_code = {x["route_code"]: x for x in body["rows"]}
+
+    for code in ("RTHIN", "RQ", "UNPLANNED"):
+        assert (by_code[code]["actual_value"], by_code[code]["meets"]) == (None, None), code
+    assert by_code["RTHIN"]["not_judged"] == _not_judged(
+        "too_few_planned_trips", floor=RANKING_MIN_SAMPLES, planned_trips=5
+    )
+    assert by_code["UNPLANNED"]["not_judged"] == _not_judged(
+        "too_few_planned_trips", floor=RANKING_MIN_SAMPLES, planned_trips=0
+    )
+    assert by_code["RQ"]["not_judged"] == _not_judged(
+        "too_few_observations", observations=10, floor=RANKING_MIN_SAMPLES
+    )
+
+
+async def test_a_service_delivered_target_is_not_judged_on_a_feed_that_reports_zero_delay(perf_client):
+    from tests.fixtures.route_dist import seed_route_dist_day
+
+    client, aid, pool = perf_client
+    await seed_route_dist_day(pool, aid, "RD", _DELIVERED_DAY, [0] * 150)
+    await _seed_standard(pool, aid, "RD", "service_delivered_pct", 80.0, 0.0)
+
+    body = (await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")).json()
+
+    assert body["rows"][0]["not_judged"] == _not_judged("zero_delay_feed")
+
+
+async def test_a_service_delivered_target_is_not_judged_where_the_agencys_rate_is_not(perf_client):
+    """A feed that has reported no trip not run would read every route 100%."""
+    client, aid, pool = perf_client
+    await pool.execute("DELETE FROM agg_service_delivered_daily WHERE agency_id = $1", aid)
+    await _seed_standard(pool, aid, "RD", "service_delivered_pct", 80.0, 0.0)
+    await _seed_standard(pool, aid, "RD", "vehicle_km_delivered_pct", 80.0, 0.0)
+
+    body = (await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")).json()
+
+    for row in body["rows"]:
+        assert row["actual_value"] is None
+        assert row["not_judged"] == _not_judged("feed_reports_no_cancellations"), row["metric_type"]
+
+
+async def test_a_service_delivered_target_is_not_judged_on_a_day_whose_plan_by_route_was_not_saved(perf_client):
+    client, aid, pool = perf_client
+    await pool.execute(
+        "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips) VALUES ($1, $2, 205)",
+        aid,
+        _DELIVERED_DAY,
+    )
+    await _seed_standard(pool, aid, "RD", "service_delivered_pct", 80.0, 0.0)
+
+    body = (await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01")).json()
+
+    assert body["rows"][0]["not_judged"] == _not_judged("route_plan_unknown")
+
+
+async def test_a_route_page_reads_its_service_delivered_target_alone(perf_client):
+    client, aid, pool = perf_client
+    await _seed_standard(pool, aid, "RD", "service_delivered_pct", 80.0, 0.0)
+    await _seed_standard(pool, aid, "RQ", "service_delivered_pct", 80.0, 0.0)
+
+    body = (await client.get(f"/api/{aid}/performance_standards?from=2026-04-01&to=2026-04-01&route=RD")).json()
+
+    assert [(x["route_code"], x["actual_value"]) for x in body["rows"]] == [("RD", 80.0)]
 
 
 async def test_zero_threshold_yields_undefined_achievement_rather_than_crash(perf_client):
@@ -378,7 +513,6 @@ async def test_an_on_time_target_is_judged_on_the_tables_figure_under_the_reques
 
     row = next(r for r in body["rows"] if r["route_code"] == "OT")
     assert row["metric_type"] == "on_time_pct"
-    assert row["metric_scope"] == "route"
     assert row["actual_value"] == float(table["rows"][0][2]) == share
     assert row["meets"] is meets
     assert row["not_judged"] is None
@@ -485,17 +619,13 @@ async def test_an_on_time_target_is_not_judged_on_thin_data_or_a_feed_that_repor
         assert (by_code[code]["actual_value"], by_code[code]["meets"]) == (None, None), code
     # Each says why it is not judged, so a figure shown elsewhere on the page
     # never meets an unexplained blank here.
-    assert by_code["THIN"]["not_judged"] == {
-        "reason": "too_few_observations",
-        "observations": RANKING_MIN_SAMPLES - 1,
-        "floor": RANKING_MIN_SAMPLES,
-    }
-    assert by_code["UNSEEN"]["not_judged"] == {
-        "reason": "too_few_observations",
-        "observations": 0,
-        "floor": RANKING_MIN_SAMPLES,
-    }
-    assert by_code["ZERO"]["not_judged"] == {"reason": "zero_delay_feed", "observations": None, "floor": None}
+    assert by_code["THIN"]["not_judged"] == _not_judged(
+        "too_few_observations", observations=RANKING_MIN_SAMPLES - 1, floor=RANKING_MIN_SAMPLES
+    )
+    assert by_code["UNSEEN"]["not_judged"] == _not_judged(
+        "too_few_observations", observations=0, floor=RANKING_MIN_SAMPLES
+    )
+    assert by_code["ZERO"]["not_judged"] == _not_judged("zero_delay_feed")
     assert by_code["REAL"]["actual_value"] == 100.0
     assert by_code["REAL"]["meets"] is True
     assert by_code["REAL"]["not_judged"] is None
@@ -525,11 +655,9 @@ async def test_a_route_page_counts_its_own_thin_route_alone(reports_client, monk
     body = await _standards(client, agency_id, "&route=THIN")
 
     assert scoped and all(routes == ("THIN",) for routes in scoped)
-    assert body["rows"][0]["not_judged"] == {
-        "reason": "too_few_observations",
-        "observations": 42,
-        "floor": RANKING_MIN_SAMPLES,
-    }
+    assert body["rows"][0]["not_judged"] == _not_judged(
+        "too_few_observations", observations=42, floor=RANKING_MIN_SAMPLES
+    )
 
 
 @pytest.mark.asyncio

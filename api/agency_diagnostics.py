@@ -61,9 +61,11 @@ __all__ = [
     "validate_weight_edits",
 ]
 
-#: An on-time target is a share of departures, in percent; the table's own
-#: CHECK holds it to the same range (migration 0089).
-_ON_TIME_TARGET_RANGE = (0.0, 100.0)
+#: The targets that are shares, in percent: of departures on time, and of
+#: planned trips run. The table's own CHECKs hold them to the same range
+#: (migrations 0089 and 0094).
+_SHARE_METRICS = frozenset({"on_time_pct", "service_delivered_pct"})
+_SHARE_TARGET_RANGE = (0.0, 100.0)
 
 #: Width of the clamp-rate sparkline, in whole days ending today.
 CLAMP_HISTORY_DAYS = 14
@@ -442,9 +444,9 @@ def validate_standard_edits(items: Sequence[Mapping[str, Any]]) -> None:
         # figure derived from such a threshold would silently be NaN.
         if threshold is None or not math.isfinite(float(threshold)):
             raise ValueError("threshold_value must be a finite number")
-        low, high = _ON_TIME_TARGET_RANGE
-        if metric_type == "on_time_pct" and not low <= float(threshold) <= high:
-            raise ValueError(f"an on_time_pct threshold_value is a percentage, from {low:g} to {high:g}")
+        low, high = _SHARE_TARGET_RANGE
+        if metric_type in _SHARE_METRICS and not low <= float(threshold) <= high:
+            raise ValueError(f"the {metric_type} threshold_value is a percentage, from {low:g} to {high:g}")
         rate = item.get("bonus_malus_rate")
         if rate is None or not math.isfinite(float(rate)) or float(rate) < 0:
             raise ValueError("bonus_malus_rate must be a finite, non-negative number")

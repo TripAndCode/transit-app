@@ -1334,13 +1334,18 @@
       "metric_label": {
         "ewt_sec": "Excess wait (sec)",
         "vehicle_km_delivered_pct": "Vehicle-km delivered (%)",
-        "on_time_pct": "On-time rate (%)"
+        "on_time_pct": "On-time rate (%)",
+        "service_delivered_pct": "Service delivered (%)"
       },
-      "scope_agency_note": "Agency-wide figure (no per-route breakdown available)",
       "meets": "Meets standard",
       "below": "Below standard",
       "not_judged_thin": "Not judged: fewer than {{floor}} observations ({{observations}})",
       "not_judged_zero_delay": "Not judged: the feed always reports zero delay",
+      "not_judged_few_planned": "Not judged: fewer than {{floor}} planned trips ({{planned}})",
+      "not_judged_route_plan": "Not judged: the timetable's trips by route aren't recorded for every day of this period",
+      "not_judged_no_shapes": "Not judged: no route shapes loaded",
+      "not_judged_delivered": "Not judged: {{reason}}",
+      "delivered_judged_on": "Service-delivered and vehicle-km standards are judged on each route's own planned trips over this page's period; its other filters don't apply.",
       "judged_on": "On-time standards are judged on this page's period and filters, under this definition of on time:"
     },
     "weather_delay": {

@@ -12,7 +12,8 @@ The loaded timetable covers only the days its calendar says anything about,
 and a reload (:mod:`pipeline.static_loader`) replaces an agency's calendar, so
 every day before the new calendar starts loses its plan when the new one
 lands. ``planned_trips_daily`` keeps each day's count as the loaded timetable
-planned it when it was captured, and the first count saved for a day stands.
+planned it when it was captured, with the stop events and the routes of those
+trips, and the first count saved for a day stands.
 
 :func:`capture_planned_trips` runs on every analyze run and saves the days
 before today. The day in progress is read from the loaded timetable until it
@@ -33,6 +34,7 @@ from collections.abc import Callable, Iterable, Sequence
 from datetime import date, datetime, timedelta, timezone
 
 from api.range import MAX_RANGE_DAYS
+from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import service_date_of
 
 logger = logging.getLogger(__name__)
@@ -141,6 +143,39 @@ def stop_plan_ctes(agency_ids: str) -> str:
     )"""
 
 
+def route_plan_ctes(agency_ids: str) -> str:
+    """The CTEs, after :func:`plan_ctes` in the same WITH, that end in
+    ``timetable_route_plan(agency_id, day, by_route)``: for each day
+    ``timetable_plan`` has, its planned trips by route as a JSONB object of
+    route_code to trips, ``{}`` on a covered day nothing runs. A route is
+    keyed by the code :func:`pipeline.route_catalog.route_code_sql` maps its
+    route_id to, the code the feed's trips and every route aggregate carry,
+    and a trip naming no route by ''. Counted once per service and multiplied
+    by its running days, as trips are, so a day's routes sum to its
+    ``timetable_plan.planned``."""
+    return f""",
+    service_route_trips AS (
+        SELECT agency_id, service_id, COALESCE({route_code_sql("route_id")}, '') AS route_code, COUNT(*) AS trips
+        FROM static_trips
+        WHERE agency_id = ANY({agency_ids})
+        GROUP BY agency_id, service_id, 3
+    ),
+    route_day_trips AS (
+        SELECT r.agency_id, r.day, s.route_code, SUM(s.trips)::int AS trips
+        FROM running r
+        JOIN service_route_trips s ON s.agency_id = r.agency_id AND s.service_id = r.service_id
+        GROUP BY r.agency_id, r.day, s.route_code
+    ),
+    timetable_route_plan AS (
+        SELECT cv.agency_id, cv.day,
+               COALESCE(jsonb_object_agg(rt.route_code, rt.trips) FILTER (WHERE rt.route_code IS NOT NULL), '{{}}')
+                   AS by_route
+        FROM covered cv
+        LEFT JOIN route_day_trips rt ON rt.agency_id = cv.agency_id AND rt.day = cv.day
+        GROUP BY cv.agency_id, cv.day
+    )"""
+
+
 _TRIP_IDS_SQL = (
     "WITH"
     + plan_ctes("$1::int[]", "$2::date", "$3::date")
@@ -188,11 +223,14 @@ _CAPTURE_SQL = (
     "WITH"
     + plan_ctes("ARRAY[%(agency_id)s]::int[]", "%(from_date)s::date", "%(to_date)s::date")
     + stop_plan_ctes("ARRAY[%(agency_id)s]::int[]")
+    + route_plan_ctes("ARRAY[%(agency_id)s]::int[]")
     + """
-    INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips, planned_stop_events)
-    SELECT p.agency_id, p.day, p.planned, sp.planned_stop_events
+    INSERT INTO planned_trips_daily
+        (agency_id, service_date, planned_trips, planned_stop_events, planned_trips_by_route)
+    SELECT p.agency_id, p.day, p.planned, sp.planned_stop_events, rp.by_route
     FROM timetable_plan p
     JOIN timetable_stop_plan sp ON sp.agency_id = p.agency_id AND sp.day = p.day
+    JOIN timetable_route_plan rp ON rp.agency_id = p.agency_id AND rp.day = p.day
     ON CONFLICT (agency_id, service_date) DO NOTHING
     """
 )

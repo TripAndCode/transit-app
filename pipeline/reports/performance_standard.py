@@ -1,8 +1,8 @@
 """Per-route "minimum performance standard" bonus/malus simulation, comparing
 each configured threshold against the route's on-time rate, its Excess Waiting
-Time, or the agency's vehicle-km delivered rate.
+Time, its service-delivered rate or its vehicle-km delivered rate.
 
-``route_performance_standards`` (migrations 0041 and 0089) is a small
+``route_performance_standards`` (migrations 0041, 0089 and 0094) is a small
 policy-input table, written by admins through the agency drawer's standards
 editor (``api.routers.admin_agencies.patch_standards``) -- the same convention
 as ``ridership_weights`` (migration 0035): a performance standard's threshold
@@ -14,6 +14,17 @@ for the route (:func:`pipeline.reports.route_table.compute_route_table`), over
 the request's scope and under the request's on-time definition, so the
 judgement always matches the figure the reader sees beside it. The definition
 is not stored with the target; the response names the one it was judged on.
+
+A ``service_delivered_pct`` target is judged on the route's own rate over the
+request's dates (:func:`pipeline.reports.service_delivered.
+compute_service_delivered_by_route`), and a ``vehicle_km_delivered_pct`` one
+on the same rate, the vehicle-km proxy ``pipeline.reports.supply`` applies,
+where the agency's timetable has route shapes. Either is judged only where the
+agency's own rate exists, every planned day of the range is split by route,
+and the route clears the on-time standard's floor in planned trips and in
+observations, and not on a feed that reports zero delay only for the route:
+such a feed reports none of the route's trips not run either
+(:func:`delivered_reading`).
 
 This module is explicitly an INTERNAL SIMULATION, never an actual invoice or
 contractual output -- it estimates what a bonus/malus mechanism keyed off
@@ -32,7 +43,7 @@ deviation between the two is defined so that a positive value always means
 "performed better than the standard" and a negative value always means
 "missed the standard", regardless of whether the underlying metric is
 lower-is-better (``ewt_sec``) or higher-is-better
-(``on_time_pct``, ``vehicle_km_delivered_pct``):
+(``on_time_pct``, ``service_delivered_pct``, ``vehicle_km_delivered_pct``):
 
     lower-is-better:  relative_deviation = (threshold - actual) / threshold
     higher-is-better: relative_deviation = (actual - threshold) / threshold
@@ -56,18 +67,25 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Collection
-from typing import Any, Literal
+from typing import Any
 
 from api.range import RangeCtx
 from pipeline.reports.headway_quality import compute_headway_quality
 from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC, RANKING_MIN_SAMPLES
 from pipeline.reports.route_table import compute_route_table
-from pipeline.reports.service_delivered import compute_service_delivered_by_agency
+from pipeline.reports.service_delivered import (
+    DeliveredMissing,
+    RouteDelivered,
+    compute_service_delivered_by_route,
+)
 from pipeline.reports.supply import compute_supply_metrics_by_agency
 from pipeline.route_catalog import zero_delay_route_codes
 
 #: The metric types ``route_performance_standards.metric_type``'s CHECK allows.
-METRIC_TYPES: tuple[str, ...] = ("ewt_sec", "vehicle_km_delivered_pct", "on_time_pct")
+METRIC_TYPES: tuple[str, ...] = ("ewt_sec", "vehicle_km_delivered_pct", "on_time_pct", "service_delivered_pct")
+
+#: The metrics read on the route's service-delivered rate.
+_DELIVERED_METRICS: frozenset[str] = frozenset({"service_delivered_pct", "vehicle_km_delivered_pct"})
 
 # Metrics for which a SMALLER actual value is better performance. Any
 # metric_type not listed here is treated as higher-is-better.
@@ -118,6 +136,15 @@ async def read_standards(conn, agency_id: int, route: str | None = None) -> list
     return await conn.fetch(_STANDARDS_SQL, agency_id, route)
 
 
+def _not_judged(
+    reason: str, *, observations: int | None = None, floor: int | None = None, planned_trips: int | None = None
+) -> dict[str, Any]:
+    """Why a row has no figure to judge, in the one shape every reason takes
+    (``api.routers.reports.NotJudged``): the counts a reason has, ``None``
+    where it has none."""
+    return {"reason": reason, "observations": observations, "floor": floor, "planned_trips": planned_trips}
+
+
 def on_time_reading(
     share: float | None, observations: int, *, zero_delay: bool
 ) -> tuple[float | None, dict[str, Any] | None]:
@@ -128,10 +155,60 @@ def on_time_reading(
     shows it. The count alone decides, so a share read below the floor is
     never judged and one at it always is."""
     if zero_delay:
-        return None, {"reason": "zero_delay_feed", "observations": None, "floor": None}
+        return None, _not_judged("zero_delay_feed")
     if share is None or observations < RANKING_MIN_SAMPLES:
-        return None, {"reason": "too_few_observations", "observations": observations, "floor": RANKING_MIN_SAMPLES}
+        return None, _not_judged("too_few_observations", observations=observations, floor=RANKING_MIN_SAMPLES)
     return share, None
+
+
+def delivered_reading(
+    agency_missing: DeliveredMissing | None,
+    split_known: bool,
+    route: RouteDelivered | None,
+    *,
+    zero_delay: bool,
+) -> tuple[float | None, dict[str, Any] | None]:
+    """A route's service-delivered share to judge, or ``None`` with why it is
+    not judged, in this order: the agency has no rate (*agency_missing*, its
+    reason), which a route's rate needs as much; a planned day of the range is
+    not split by route, so the route's figure would cover fewer days than the
+    range; the route plans fewer trips than the on-time standard's floor in
+    observations, :data:`RANKING_MIN_SAMPLES`; its feed reports zero delay
+    only; or the feed observed it fewer times than that floor. A route the
+    feed barely reports has no trip reported not run, and would read 100%."""
+    if agency_missing is not None:
+        return None, _not_judged(agency_missing)
+    if not split_known:
+        return None, _not_judged("route_plan_unknown")
+    planned = route.planned_trips if route is not None else 0
+    if route is None or planned < RANKING_MIN_SAMPLES:
+        return None, _not_judged("too_few_planned_trips", floor=RANKING_MIN_SAMPLES, planned_trips=planned)
+    if zero_delay:
+        return None, _not_judged("zero_delay_feed")
+    if route.observations < RANKING_MIN_SAMPLES:
+        return None, _not_judged("too_few_observations", observations=route.observations, floor=RANKING_MIN_SAMPLES)
+    return route.service_delivered_pct, None
+
+
+async def _delivered_by_route(
+    agency_id: int, ctx: RangeCtx, conn, codes: Collection[str]
+) -> dict[str, tuple[float | None, dict[str, Any] | None]]:
+    """:func:`delivered_reading` for each of *codes* over *ctx*'s dates."""
+    reading = await compute_service_delivered_by_route(conn, agency_id, ctx.from_date, ctx.to_date)
+    no_delay = await zero_delay_route_codes(conn, agency_id, ctx)
+    return {
+        code: delivered_reading(
+            reading.delivered_missing, reading.split_known, reading.routes.get(code), zero_delay=code in no_delay
+        )
+        for code in codes
+    }
+
+
+async def _has_route_shapes(conn, agency_id: int) -> bool:
+    """Whether the agency's current timetable has the planned vehicle-km that
+    the vehicle-km delivered rate needs (``pipeline.reports.supply``)."""
+    supply = await compute_supply_metrics_by_agency(conn, [agency_id], {})
+    return supply[agency_id]["planned_vehicle_km"] is not None
 
 
 async def _on_time_by_route(
@@ -199,8 +276,10 @@ async def compute_performance_standards(
     on-time window *early_tolerance_sec*/*late_tolerance_sec* name, as the
     Routes table does (:func:`_on_time_by_route`; *ch* serves its live scan).
     An on-time row with no figure carries ``not_judged``, why it has none
-    (:func:`on_time_reading`); every other row carries ``None`` there. The
-    other metric types read *ctx*'s dates only.
+    (:func:`on_time_reading`), as does a service-delivered or vehicle-km row
+    (:func:`delivered_reading`, or ``no_shapes`` for a vehicle-km row whose
+    timetable has no route shapes); every other row carries ``None`` there.
+    The other metric types read *ctx*'s dates only.
 
     ``ctx.routes`` (the page-level route filter shared with every other
     Analysis-tab panel) never changes WHICH configured rows come back, nor
@@ -253,11 +332,17 @@ async def compute_performance_standards(
             one_route=route is not None,
         )
 
-    vehicle_km_delivered_pct: float | None = None
-    if any(r["metric_type"] == "vehicle_km_delivered_pct" for r in rows):
-        delivered = await compute_service_delivered_by_agency(conn, [agency_id], ctx.from_date, ctx.to_date)
-        supply = await compute_supply_metrics_by_agency(conn, [agency_id], delivered)
-        vehicle_km_delivered_pct = supply.get(agency_id, {}).get("vehicle_km_delivered_pct")
+    # A vehicle-km row without route shapes is `no_shapes` whatever its
+    # route's service delivered, so the shapes decide first whether the
+    # route split is read for it at all.
+    has_shapes = any(r["metric_type"] == "vehicle_km_delivered_pct" for r in rows) and await _has_route_shapes(
+        conn, agency_id
+    )
+    delivered_metrics = _DELIVERED_METRICS if has_shapes else {"service_delivered_pct"}
+    delivered_by_route: dict[str, tuple[float | None, dict[str, Any] | None]] = {}
+    delivered_codes = {r["route_code"] for r in rows if r["metric_type"] in delivered_metrics}
+    if delivered_codes:
+        delivered_by_route = await _delivered_by_route(agency_id, ctx, conn, delivered_codes)
 
     out: list[dict[str, Any]] = []
     for r in rows:
@@ -265,21 +350,15 @@ async def compute_performance_standards(
         threshold = float(r["threshold_value"])
         bonus_malus_rate = float(r["bonus_malus_rate"])
 
-        metric_scope: Literal["route", "agency"] = "route"
         not_judged: dict[str, Any] | None = None
         if metric_type == "ewt_sec":
             actual = ewt_by_route.get(r["route_code"])
         elif metric_type == "on_time_pct":
             actual, not_judged = on_time_by_route[r["route_code"]]
+        elif metric_type == "vehicle_km_delivered_pct" and not has_shapes:
+            actual, not_judged = None, _not_judged("no_shapes")
         else:
-            actual = vehicle_km_delivered_pct
-            # vehicle_km_delivered_pct has no per-route breakdown (see
-            # pipeline.reports.supply's module docstring) -- every route
-            # configured with this metric_type is compared against its
-            # agency's own rate, which callers must surface (see
-            # PerformanceStandardRow.metric_scope), not present as if it
-            # were route-specific.
-            metric_scope = "agency"
+            actual, not_judged = delivered_by_route[r["route_code"]]
 
         achievement_rate: float | None = None
         estimated_bonus_deduction: float | None = None
@@ -293,7 +372,6 @@ async def compute_performance_standards(
             {
                 "route_code": r["route_code"],
                 "metric_type": metric_type,
-                "metric_scope": metric_scope,
                 "threshold_value": threshold,
                 "bonus_malus_rate": bonus_malus_rate,
                 "actual_value": actual,

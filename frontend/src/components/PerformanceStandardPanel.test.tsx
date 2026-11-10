@@ -53,7 +53,6 @@ function onTimeRow(
   return {
     route_code,
     metric_type: "on_time_pct",
-    metric_scope: "route",
     threshold_value: 85,
     bonus_malus_rate: 0,
     actual_value: actual,
@@ -80,7 +79,6 @@ describe("PerformanceStandardPanel", () => {
           {
             route_code: "100",
             metric_type: "ewt_sec",
-            metric_scope: "route",
             threshold_value: 50,
             bonus_malus_rate: 1000,
             actual_value: 50,
@@ -92,7 +90,6 @@ describe("PerformanceStandardPanel", () => {
           {
             route_code: "200",
             metric_type: "ewt_sec",
-            metric_scope: "route",
             threshold_value: 100,
             bonus_malus_rate: 1000,
             actual_value: 150,
@@ -124,7 +121,6 @@ describe("PerformanceStandardPanel", () => {
         {
           route_code: "100",
           metric_type: "ewt_sec",
-          metric_scope: "route",
           threshold_value: 50,
           bonus_malus_rate: 1000,
           actual_value: 50.00002,
@@ -140,27 +136,109 @@ describe("PerformanceStandardPanel", () => {
     expect(screen.queryByText("−0.0")).toBeNull();
   });
 
-  it("labels an agency-scoped row instead of implying a route-specific figure", () => {
+  it("judges a service-delivered target on the route's own share", () => {
     mockRoutes();
     mockPerformanceStandards({
       data: response([
         {
           route_code: "300",
-          metric_type: "vehicle_km_delivered_pct",
-          metric_scope: "agency",
-          threshold_value: 90,
-          bonus_malus_rate: 2000,
-          actual_value: 80,
-          achievement_rate: (80 - 90) / 90 + 1,
-          estimated_bonus_deduction: 2000 * ((80 - 90) / 90),
-          meets: false,
+          metric_type: "service_delivered_pct",
+          threshold_value: 98,
+          bonus_malus_rate: 0,
+          actual_value: 99.2,
+          achievement_rate: 99.2 / 98,
+          estimated_bonus_deduction: 0,
+          meets: true,
           not_judged: null,
         },
       ]),
     });
     renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
 
-    expect(screen.getByText("Agency-wide figure (no per-route breakdown available)")).toBeInTheDocument();
+    const [, row] = screen.getAllByRole("row");
+    expect(within(row).getByText("Service delivered (%)")).toBeInTheDocument();
+    expect(within(row).getByText("98.0%")).toBeInTheDocument();
+    expect(within(row).getByText("99.2%")).toBeInTheDocument();
+    expect(within(row).getByText("Meets standard")).toHaveClass("standard-chip", "standard-chip--meets");
+    expect(
+      screen.getByText("Service-delivered and vehicle-km standards are judged on each route's own planned trips over this page's period; its other filters don't apply."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^On-time standards are judged/)).toBeNull();
+  });
+
+  it("says why a service-delivered target is not judged, in each case", () => {
+    mockRoutes();
+    const unjudged = (route_code: string, not_judged: PerformanceStandardRow["not_judged"]): PerformanceStandardRow => ({
+      route_code,
+      metric_type: "service_delivered_pct",
+      threshold_value: 98,
+      bonus_malus_rate: 0,
+      actual_value: null,
+      achievement_rate: null,
+      estimated_bonus_deduction: null,
+      meets: null,
+      not_judged,
+    });
+    mockPerformanceStandards({
+      data: response([
+        unjudged("100", { reason: "too_few_planned_trips", observations: null, floor: 100, planned_trips: 42 }),
+        unjudged("200", { reason: "route_plan_unknown", observations: null, floor: null, planned_trips: null }),
+        unjudged("300", { reason: "feed_reports_no_cancellations", observations: null, floor: null, planned_trips: null }),
+        unjudged("400", { reason: "too_few_observations", observations: 7, floor: 100, planned_trips: null }),
+        { ...unjudged("500", { reason: "no_shapes", observations: null, floor: null, planned_trips: null }), metric_type: "vehicle_km_delivered_pct" },
+      ]),
+    });
+    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+
+    const [, fewPlanned, noSplit, noCancellations, thin, noShapes] = screen.getAllByRole("row");
+    expect(within(fewPlanned).getByText("Not judged: fewer than 100 planned trips (42)")).toHaveClass("standard-unjudged");
+    expect(
+      within(noSplit).getByText("Not judged: the timetable's trips by route aren't recorded for every day of this period"),
+    ).toBeInTheDocument();
+    expect(within(noCancellations).getByText("Not judged: this feed doesn't report cancellations")).toBeInTheDocument();
+    expect(within(thin).getByText("Not judged: fewer than 100 observations (7)")).toBeInTheDocument();
+    expect(within(noShapes).getByText("Vehicle-km delivered (%)")).toBeInTheDocument();
+    expect(within(noShapes).getByText("Not judged: no route shapes loaded")).toBeInTheDocument();
+  });
+
+  it("says why a service-delivered target is not judged in Japanese too", async () => {
+    await i18n.changeLanguage("ja");
+    mockRoutes();
+    mockPerformanceStandards({
+      data: response([
+        {
+          route_code: "100",
+          metric_type: "service_delivered_pct",
+          threshold_value: 98,
+          bonus_malus_rate: 0,
+          actual_value: null,
+          achievement_rate: null,
+          estimated_bonus_deduction: null,
+          meets: null,
+          not_judged: { reason: "too_few_planned_trips", observations: null, floor: 100, planned_trips: 42 },
+        },
+        {
+          route_code: "200",
+          metric_type: "service_delivered_pct",
+          threshold_value: 98,
+          bonus_malus_rate: 0,
+          actual_value: null,
+          achievement_rate: null,
+          estimated_bonus_deduction: null,
+          meets: null,
+          not_judged: { reason: "feed_unverified", observations: null, floor: null, planned_trips: null },
+        },
+      ]),
+    });
+    const { unmount } = renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    try {
+      expect(screen.getAllByText("運行率（%）")).toHaveLength(2);
+      expect(screen.getByText("計画便数が100便未満のため判定していません（42便）")).toBeInTheDocument();
+      expect(screen.getByText("判定していません（配信が運休を伝えるか未確認）")).toBeInTheDocument();
+    } finally {
+      unmount();
+      await i18n.changeLanguage("en");
+    }
   });
 
   it("says whether each on-time rate meets its target, in calm chips", () => {
@@ -256,7 +334,6 @@ describe("PerformanceStandardPanel", () => {
           {
             route_code: "200",
             metric_type: "ewt_sec",
-            metric_scope: "route",
             threshold_value: 50,
             bonus_malus_rate: 0,
             actual_value: 40,

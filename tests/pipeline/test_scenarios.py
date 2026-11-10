@@ -422,7 +422,7 @@ _TABLE_COLUMNS = {
     "agg_schedule_revision_daily": "date, static_version_id",
     "agg_static_version_summary": "static_version_id, trip_count",
     "planned_trips_daily": "service_date, planned_trips",
-    "agg_service_delivered_daily": "date, non_executed_trips",
+    "agg_service_delivered_daily": "date, route_code, non_executed_trips",
 }
 # Each read's report and query. The default, the industry window, puts
 # readings exactly a minute early and exactly five minutes late on its edges;
@@ -737,6 +737,15 @@ def _timetable_actual(observed: Observed) -> Cells:
     )
 
 
+def _not_run_by_route(scenario: Scenario) -> dict[tuple[date, str], int]:
+    """Each day's trips reported not run, under the route each one's trip runs on."""
+    counts: dict[tuple[date, str], int] = {}
+    for c in scenario.cancellations:
+        key = (c.service_date, scenario.trip(c.trip_id, c.service_date).route_id)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _service_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     """The trips reported not run on each day, and over each council window
     the executed trips and service-delivered rate and the observation
@@ -768,11 +777,7 @@ def _service_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     return (
         _cells(
             "agg_service_delivered_daily",
-            {
-                (day,): {"non_executed_trips": s.reported_not_run}
-                for day, s in found.service.items()
-                if s.reported_not_run
-            },
+            {key: {"non_executed_trips": n} for key, n in _not_run_by_route(observed.scenario).items()},
         )
         | _cells(_council_label("service delivered"), delivered)
         | _cells(_council_label("coverage"), coverage)
@@ -781,7 +786,7 @@ def _service_expected(observed: Observed, found: oracle.Outcome) -> Cells:
 
 def _service_actual(observed: Observed) -> Cells:
     return (
-        _keyed("agg_service_delivered_daily", observed.tables["agg_service_delivered_daily"], ("date",))
+        _keyed("agg_service_delivered_daily", observed.tables["agg_service_delivered_daily"], ("date", "route_code"))
         | _cells(_council_label("service delivered"), observed.council)
         | _cells(_council_label("coverage"), observed.council)
     )

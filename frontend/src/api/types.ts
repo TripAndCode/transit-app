@@ -666,18 +666,19 @@ export type HeadwayQualityResponse = {
  *
  *  `actual_value`/`achievement_rate`/`estimated_bonus_deduction` are always
  *  null together (insufficient data, or a zero threshold_value making the
- *  ratio undefined). `metric_scope` is `"agency"` for
- *  `vehicle_km_delivered_pct` (no per-route breakdown exists -- every route
- *  configured with it reads its own agency's rate) and `"route"` for
- *  `ewt_sec` and `on_time_pct`. `meets` says whether the actual value is at
- *  least as good as the threshold, null exactly when `actual_value` is.
- *  `not_judged` says why an `on_time_pct` row has no figure: too few
- *  observations in the scope (its count and the floor a verdict needs), or a
- *  feed that records zero delay only. Null on every other row. */
+ *  ratio undefined). Every figure is the route's own: a service-delivered or
+ *  vehicle-km row reads the route's service-delivered rate over the dates.
+ *  `meets` says whether the actual value is at least as good as the
+ *  threshold, null exactly when `actual_value` is. `not_judged` says why an
+ *  on-time, service-delivered or vehicle-km row has no figure: too few
+ *  observations or planned trips in the scope (the count and the floor a
+ *  verdict needs), a feed that records zero delay only, a period with a day
+ *  whose plan by route was never saved, a timetable without route shapes, or
+ *  the agency's own reason for having no service-delivered rate. Null on a
+ *  judged row and on every excess-wait row. */
 export type PerformanceStandardRow = {
   route_code: string;
-  metric_type: "ewt_sec" | "vehicle_km_delivered_pct" | "on_time_pct";
-  metric_scope: "route" | "agency";
+  metric_type: "ewt_sec" | "vehicle_km_delivered_pct" | "on_time_pct" | "service_delivered_pct";
   threshold_value: number;
   bonus_malus_rate: number;
   actual_value: number | null;
@@ -685,9 +686,16 @@ export type PerformanceStandardRow = {
   estimated_bonus_deduction: number | null;
   meets: boolean | null;
   not_judged: {
-    reason: "too_few_observations" | "zero_delay_feed";
+    reason:
+      | "too_few_observations"
+      | "zero_delay_feed"
+      | "too_few_planned_trips"
+      | "route_plan_unknown"
+      | "no_shapes"
+      | Exclude<DeliveredMissing, "unreadable">;
     observations: number | null;
     floor: number | null;
+    planned_trips?: number | null;
   } | null;
 };
 

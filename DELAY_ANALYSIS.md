@@ -70,6 +70,7 @@ build day.
 | `2026.11.4` | The feed's last report on a stop decides whether it departed. A trip reported CANCELED, or a stop reported SKIPPED, after a prediction of it leaves no departure, where the prediction had counted as one; a prediction reported after either restores it. A trip is not run when its last status is CANCELED, or when every stop it reports with a delay or a status was last so reported SKIPPED; a stop reported only without either counts neither way, and a trip that skipped only some stops ran, where any skipped stop had counted it as not run. A report with neither a delay nor a CANCELED or SKIPPED status leaves the report before it standing, in the delay figures and the service-delivered rate alike. A trip cancelled without listing any stop is kept and counts as not run, where it had been lost. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_service_delivered_daily`, `route_delay_counts` |
 | `2026.11.5` | Each agency's monthly feed-quality scorecard: RT and stop-event completeness, message age at capture, the clamp share and RT field coverage (see "Feed-quality scorecard" below). No delay or on-time figure changes. | `feed_quality_monthly` |
 | `2026.11.6` | A trip cancelled without listing any stop is stored as a cancellation of each stop its timetable schedules it at whose scheduled departure is still to come when the cancellation arrives, so an earlier prediction of such a stop no longer counts as a departure, as when the cancellation lists its stops; a stop whose scheduled departure has passed keeps its departure, even when the trip was running late. A trip with no stop still to come, or no stops in the timetable, keeps the one trip-level row. A trip whose last status is CANCELED counts as not run, so one cancelled partway, or after its last stop, does too. This changes how such a cancellation is ingested, not how any delay or service-delivered table is built, and days ingested earlier keep the one trip-level row unless ingested again. The feed-quality scorecard counts those rows as reported stop events but not as stop_time_updates; it tells them apart by their shape alone, so a stop update the feed sends for a cancelled trip with neither a delay nor a stop status is left out of its field coverage and update count too. | `feed_quality_monthly` |
+| `2026.11.7` | Each day's trips not run are counted per route: under the route the trip's latest report naming one names, or under no route where none does, so an agency's day is the sum of its routes. This gives each route its own service-delivered rate (see "Service delivered per route" below). No agency figure changes. | `agg_service_delivered_daily` |
 
 ## What counts as on time
 
@@ -138,6 +139,39 @@ gate's reason) and a plan (`no_plan`); stop events also need a known stop plan
 (`no_header`). Field coverage needs an ingest strategy that stores the fields
 (`feed_cannot_report`), and every figure needs an observation (`no_data`). The admin
 agency drawer shows the newest month and the five before it.
+
+## Service delivered per route
+
+A route's service-delivered rate is the agency's ratio on the route's own trips: its
+planned trips, less the trips the feed reported as not run under it, of its planned
+trips (`pipeline/reports/service_delivered.py`). Not run means what it means for the
+agency: the trip's latest status is CANCELED, or every stop it reports with a
+plausible delay or a status was last reported SKIPPED.
+
+- **Trips not run.** `agg_service_delivered_daily` counts them per service date and
+  route (`pipeline/agg_sql.py`). Each trip-day counts once, under the route its latest
+  report naming a route names, or under no route (`''`) where none does, so an
+  agency's day is the sum of its routes. It is rebuilt per changed date, as the other
+  dated tables are.
+- **Planned trips.** Each day's capture (`pipeline/planned_trips.py`) saves the plan
+  split by route beside its count, from the same timetable, so a day's routes sum to
+  its planned trips. A route is keyed by the code its static `route_id` maps to, and
+  a trip naming no route by `''`. A day the capture has not saved is split by the
+  loaded timetable. A day saved before the split was saved keeps it unknown: its
+  timetable may be gone.
+- **Which days count.** The days the agency's rate counts. A route's figure is read
+  only when every one of those days is split, so it covers the same days as the
+  agency's, and the routes' planned trips and trips not run then sum to the agency's.
+
+A performance standard on `service_delivered_pct` is judged on this rate over the
+request's dates (`pipeline/reports/performance_standard.py`), and a
+`vehicle_km_delivered_pct` standard on the same rate where the timetable has route
+shapes, the proxy `pipeline/reports/supply.py` applies. A route is judged only where
+the agency's own rate exists and every counted day is split, at the on-time
+standard's floor: at least `RANKING_MIN_SAMPLES` (100) planned trips and as many
+observations. A route the feed barely reports has no trip reported not run, and a
+route whose feed reports zero delay only echoes the timetable; either would read 100%.
+Each row that is not judged says why.
 
 ## Serving
 

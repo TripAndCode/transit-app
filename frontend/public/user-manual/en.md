@@ -214,7 +214,14 @@ The table shows the top 50 routes. When more qualify, the line under it says how
 
 **Download CSV** downloads the rows the table shows, in the table’s order.
 
-When the agency has set targets for its routes (on-time rate, excess wait or vehicle-km delivered), “Minimum performance standard” follows the table under every sort. It gives each target’s actual figure and says “Meets standard” or “Below standard”. An on-time target is judged against the on-time rate the table shows, over the same period and filters and with the same definition of on time, which the panel names beneath it. A route observed fewer than 100 times, or one whose feed always reports zero delay, is not judged, and the panel says which, with the number of observations. A route’s own page shows its on-time rate from 21 observations, so it can show a rate its panel does not judge. Admins set the targets under **Agencies**.
+When the agency has set targets for its routes (on-time rate, excess wait, service delivered or vehicle-km delivered), “Minimum performance standard” follows the table under every sort. It gives each target’s actual figure and says “Meets standard” or “Below standard”. An on-time target is judged against the on-time rate the table shows, over the same period and filters and with the same definition of on time, which the panel names beneath it. A route observed fewer than 100 times, or one whose feed always reports zero delay, is not judged, and the panel says which, with the number of observations. A route’s own page shows its on-time rate from 21 observations, so it can show a rate its panel does not judge. Admins set the targets under **Agencies**.
+
+A service-delivered or vehicle-km target is judged on the route’s own service delivered: the share of the route’s planned trips the feed did not report as not run, never the agency’s figure or another route’s. It reads the period alone, not the table’s other filters, and a line under the table says so. Vehicle-km delivered is the same share, and is not judged where the timetable has no route shapes (shapes.txt). The panel also leaves a route unjudged, and says why, when:
+
+- the agency’s service delivered isn’t shown (the panel gives its reason, such as “this feed doesn’t report cancellations”);
+- a day in the period has no record of its planned trips by route;
+- the route has fewer than 100 planned trips in the period (the panel gives the number);
+- the route is observed fewer than 100 times, or its feed always reports zero delay.
 
 ### 5-5. Sorted by on-time rate
 
