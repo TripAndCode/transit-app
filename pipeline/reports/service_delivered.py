@@ -311,7 +311,14 @@ class RouteDeliveredReading:
     whether every one of the ``plan_days`` days the agency's plan counts is
     split by route (``split_days`` of them are). ``routes`` holds every code
     the split plans, the feed reported a trip not run under, or the feed
-    observed, '' among them for the trips no report named a route for."""
+    observed, '' among them for the trips no report named a route for.
+
+    The two signals are filed differently where no report named a route. A
+    route's observations come from ``agg_route_daily``, which files a row
+    without a route under the timetable in force on its date. Its trips not
+    run come from ``agg_service_delivered_daily``, which keeps such a trip
+    under ''. So a trip reported not run without any route counts under '',
+    not under the route its observations count toward."""
 
     delivered_missing: DeliveredMissing | None
     plan_days: int
