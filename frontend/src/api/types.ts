@@ -613,6 +613,29 @@ type ReportEnvelope<T extends ReportType, Row> = {
    *  still showing this response while another sort loads labels them by. */
   sort?: RouteTableSort | null;
   order?: RouteTableOrder | null;
+  /** route_table and on_time only (null elsewhere): each listed route's own
+   *  figures over the 90 days before the period, under the same scope and
+   *  on-time window. */
+  reference?: RouteReferences | null;
+};
+
+/** One route's figures over the reference window: null whenever `reason`
+ *  names why the window cannot stand as the route's usual level. */
+export type RouteReference = {
+  on_time_pct: number | null;
+  avg_min: number | null;
+  samples: number;
+  reason: OverviewReferenceReason | null;
+};
+
+/** The reference window of a route list, and each listed route's figures over
+ *  it. `reason` is set when no route can be compared: the window as a whole
+ *  falls short, or it is `not_aggregated`, under a time band or an on-time
+ *  window the aggregates cannot split, either of which would need a live scan
+ *  of the whole window. That is decided before anything is read, so its
+ *  counts are 0. */
+export type RouteReferences = Omit<OverviewHeadlineReference, "avg_min" | "delta_min" | "delta_pct"> & {
+  routes: Record<string, RouteReference>;
 };
 
 /** Discriminated on `report_type`: each report's `rows` element type is

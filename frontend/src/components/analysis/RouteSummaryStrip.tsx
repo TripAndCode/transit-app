@@ -7,17 +7,32 @@ import { reportHref } from "../../routes/destinations";
 import { OnTimeDefinition } from "../DefinitionMetaBlock";
 import { EM_DASH, fixedTenth, formatNumber } from "../../utils/format";
 import { routeStanding } from "./routeDossier";
+import { RouteReferenceNote } from "./RouteReference";
 
 /** Every route the lists rank, so this route's place among them is known. */
 const WHOLE_LIST = { limit: REPORT_ROWS_MAX } as const;
 
-function Figure({ label, value, note, pending }: { label: string; value: string | null; note?: ReactNode; pending: boolean }) {
+function Figure({
+  label,
+  value,
+  note,
+  reference,
+  pending,
+}: {
+  label: string;
+  value: string | null;
+  note?: ReactNode;
+  /** The figure's trailing reference, under its note. */
+  reference?: ReactNode;
+  pending: boolean;
+}) {
   return (
     <div className="route-summary__figure">
       <dt>{label}</dt>
       <dd>
         <strong className="num">{pending ? "…" : (value ?? EM_DASH)}</strong>
         {!pending && note && <span className="focus-muted">{note}</span>}
+        {!pending && reference}
       </dd>
     </div>
   );
@@ -26,7 +41,9 @@ function Figure({ label, value, note, pending }: { label: string; value: string 
 /** One route's standing within its agency over the page's scope: its mean
  *  delay and rank, on-time rate, share over five minutes late and share of
  *  all lateness, read from the agency's own route lists and overview so
- *  this page and the Routes lists state the same figures. */
+ *  this page and the Routes lists state the same figures. The mean delay and
+ *  on-time rate each name the route's own reference beside them, from the
+ *  on-time list the rate is read from. */
 export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; route: string; ctx: Scope }) {
   const { t } = useTranslation("design");
   const agencyWide = { ...ctx, routes: [] };
@@ -43,6 +60,8 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
   const pct = (v: number | null) => (v == null ? null : t("summaryPct", { value: formatNumber(Math.round(v)) }));
   const routeQuery = scopeToQueryString({ ...ctx, routes: [route] });
   const topCount = overview.data?.concentration.top_routes.length ?? 0;
+  const refs = onTime.data?.reference ?? null;
+  const timeBand = onTime.data?.ctx?.time_band ?? ctx.time_band;
   return (
     <section className="route-summary" aria-label={t("summaryLabel")}>
       <dl className="route-summary__figures">
@@ -55,8 +74,20 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
               ? t("summaryRank", { rank: formatNumber(standing.rank), ranked: formatNumber(standing.ranked ?? 0) })
               : t(standing.avgMin == null ? "summaryNotListed" : "summaryUnranked")
           }
+          reference={
+            refs && <RouteReferenceNote refs={refs} route={route} figure="avg" value={standing.avgMin} timeBand={timeBand} />
+          }
         />
-        <Figure label={t("summaryOnTime")} pending={onTime.isPending} value={pct(standing.onTimePct)} />
+        <Figure
+          label={t("summaryOnTime")}
+          pending={onTime.isPending}
+          value={pct(standing.onTimePct)}
+          reference={
+            refs && (
+              <RouteReferenceNote refs={refs} route={route} figure="on_time" value={standing.onTimePct} timeBand={timeBand} primary />
+            )
+          }
+        />
         <Figure label={t("summaryLate5")} pending={worst.isPending} value={pct(standing.late5Pct)} />
         <Figure
           label={t("summaryShare")}

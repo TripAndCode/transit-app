@@ -243,9 +243,12 @@ async def test_the_csv_holds_every_figure_and_marks_a_wide_margin(reports_client
         "早発率(%)",
         "誤差大",
         "誤差(±ポイント)",
+        "過去90日(2026-02-13〜2026-05-13)の定時率(%)",
+        "過去90日の定時率を示さない理由",
     ]
-    # A 60% rate over 100 observations has a 95% interval wider than ±5 points.
-    assert lines[2] == ["W1", "2.67", "60.0", "40.0", "40", "100", "0.0", "誤差大", "9.5"]
+    # A 60% rate over 100 observations has a 95% interval wider than ±5 points;
+    # the 90 days before the day hold no observation of the route.
+    assert lines[2] == ["W1", "2.67", "60.0", "40.0", "40", "100", "0.0", "誤差大", "9.5", "", "観測なし"]
     assert "早発率=60秒を超える早発の割合" in lines[0][0]
 
 

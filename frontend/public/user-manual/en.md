@@ -191,6 +191,8 @@ The columns:
 - **Share over 5 min** and **Over 5 min (count)**: the departures that left more than five minutes late, as a share and as a count.
 - **Samples**: the number of observations behind the row. Fewer samples mean less certainty.
 
+“Better”, “About the same” and “Worse” beside an on-time rate compare it with the route’s own past 90 days: the 90 days up to the day before the period starts. The past 90 days’ rate keeps the scope sentence’s days of the week, timetable and routes and its on-time definition, and is worked out the same way as the table’s. Point at or focus the mark to see that rate. When the feed missed some days, it says how many days had data. A difference under 1 point reads “about the same”. An on-time rate is already a share, so unlike **Pulse**’s average delay it is not judged by a percentage of the past 90 days’ figure. A route observed fewer than 100 times in those days has no mark. When the feed has data on fewer than four in five of the days the conditions select (an agency collected only recently, or a long outage), no route is marked and the line above the table says why. With a time of day chosen, or an on-time window that is not aggregated, the past 90 days are not compared either. The ⓘ icon beside the line above the table explains how it is worked out.
+
 **Sort by** picks the figure the table is sorted by:
 
 | Sort | Order |
@@ -212,7 +214,7 @@ The table also leaves out route codes the current timetable no longer runs, and 
 
 The table shows the top 50 routes. When more qualify, the line under it says how many are shown (“Showing … of …”), and **Show all** lists the rest. Under the table, a line says what counted as on time (with the default conditions, “On time (industry standard) = no more than 5 min late and no more than 1 min early.”) and what the early-departure rate and “over 5 min” count.
 
-**Download CSV** downloads the rows the table shows, in the table’s order.
+**Download CSV** downloads the rows the table shows, in the table’s order. Its last two columns are the past 90 days’ on-time rate and, where there is none, why.
 
 When the agency has set targets for its routes (on-time rate, excess wait, service delivered or vehicle-km delivered), “Minimum performance standard” follows the table under every sort. It gives each target’s actual figure and says “Meets standard” or “Below standard”. An on-time target is judged against the on-time rate the table shows, over the same period and filters and with the same definition of on time, which the panel names beneath it. A route observed fewer than 100 times, or one whose feed always reports zero delay, is not judged, and the panel says which, with the number of observations. A route’s own page shows its on-time rate from 21 observations, so it can show a rate its panel does not judge. Admins set the targets under **Agencies**.
 
@@ -235,6 +237,7 @@ Clicking a route’s name — in a report, in **Routes to check** on Pulse, or i
 
 - At the top, “Routes / (route name)” leads back to the list, and the page states its question: “Where does delay build up?”. **Pin**, to the right of the heading, adds the route to **My routes** in the sidebar (chapter 2).
 - Below it are the route’s mean delay (and its place among the agency’s routes, most delayed first), on-time rate, share over 5 minutes late and share of all lateness — the same figures as the **Routes** lists. “This route by time of day” and “Why this route runs late” open **Time** and **Why** for this route.
+- Under the mean delay and the on-time rate are the route’s own past 90 days and a tag saying “Better than the past 90 days”, “About the same as the past 90 days” or “Worse than the past 90 days”. They are worked out as on the **Routes** table (5-3). “About the same” is judged for the on-time rate as on that table (a difference under 1 point), and for the mean delay as on **Pulse** (chapter 4: a difference under 0.1 min, or under 5% of the past 90 days’ average). A shorter mean delay and a higher on-time rate are better. When the past 90 days cannot be compared, the line under the on-time rate says why.
 - When the route has targets, “Minimum performance standard” follows, with this route’s targets alone (5-4).
 - The filters under it — “Route”, “Service pattern”, “From”, “To”, “Days” and “Time” — take effect when you press **Apply**. Until then the page says “Changes not applied yet”.
 - **Delay by stop** shows the mean departure delay at each stop. When the route runs more than one path, pick one under “Path”; “Other direction” switches to the path running the other way. The page says what share of the route’s observations the path holds.

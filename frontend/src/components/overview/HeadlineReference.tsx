@@ -54,6 +54,16 @@ export function HeadlineReference({ headline, hasBaseline }: Props) {
 
   const range = formatDateRange(ref.window_from, ref.window_to, { year: false });
   const judgement = ref.reason == null ? referenceJudgement(headline.avg_min, ref) : null;
+  // A scope with no aggregate read no days, so its counts are 0 and the
+  // floors they would state are left out.
+  const coverage =
+    ref.reason === "not_aggregated"
+      ? ""
+      : t("overview.reference.hint_coverage", {
+          selected: ref.days_selected,
+          min_days: ref.min_days,
+          min_samples: formatNumber(ref.min_samples),
+        });
   return (
     <div className="ov-hero-reference">
       <span className="ov-hero-reference-text">{describe(ref, range, t)}</span>
@@ -65,9 +75,7 @@ export function HeadlineReference({ headline, hasBaseline }: Props) {
         body={t("overview.reference.hint_body", {
           days: ref.days,
           range,
-          selected: ref.days_selected,
-          min_days: ref.min_days,
-          min_samples: formatNumber(ref.min_samples),
+          coverage,
           flat_min: FLAT_MAX_DELTA_MIN,
           flat_pct: FLAT_MAX_DELTA_PCT,
         })}

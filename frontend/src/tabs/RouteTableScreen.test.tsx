@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen, within } from "@testing-library/react";
+import { act, cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
 import * as snapshots from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
-import type { DefinitionMeta, ReportResponse } from "../api/types";
+import type { DefinitionMeta, ReportResponse, RouteReference, RouteReferences } from "../api/types";
 import { RouteTableScreen } from "./RouteTableScreen";
 
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
@@ -62,6 +62,26 @@ function setup(path: string, response: ReportResponse | undefined = tableRespons
   const params = () => new URLSearchParams(router.state.location.search);
   const options = () => useReport.mock.calls.at(-1)?.[3];
   return { useReport, router, params, options };
+}
+
+/** The 90 days before the table's 2026-09-24 start, each route's figures over
+ *  them as `routes` gives them. */
+function reference(routes: Record<string, Partial<RouteReference>>, overrides: Partial<RouteReferences> = {}): RouteReferences {
+  return {
+    samples: 90_000,
+    window_from: "2026-06-26",
+    window_to: "2026-09-23",
+    days: 90,
+    days_selected: 90,
+    days_collected: 90,
+    min_days: 72,
+    min_samples: 100,
+    reason: null,
+    routes: Object.fromEntries(
+      Object.entries(routes).map(([code, r]) => [code, { on_time_pct: null, avg_min: null, samples: 5000, reason: null, ...r }]),
+    ),
+    ...overrides,
+  };
 }
 
 const pressed = (name: string) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
@@ -233,5 +253,81 @@ describe("RouteTableScreen", () => {
       query: hooks.reportQueryString(scope, options()),
     });
     expect(create.mock.calls[0][0].query).toContain("sort=on_time");
+  });
+
+  describe("each route's past 90 days", () => {
+    // The response's rows in order: "42", then "70-3".
+    const rowOf = (code: string) => screen.getAllByRole("row")[code === "42" ? 1 : 2];
+
+    it("marks each on-time rate against the route's own past 90 days, with that rate in the mark's tip", () => {
+      setup("/agencies/1/routes", tableResponse({ reference: reference({ "42": { on_time_pct: 10.0 }, "70-3": { on_time_pct: 11.3 } }) }));
+      expect(screen.getByText(/compare it with the route’s own past 90 days \(.+\)\. Point at one/)).toBeInTheDocument();
+      const better = within(rowOf("42")).getByText("Better");
+      expect(better).toHaveClass("reference-chip");
+      expect(better.closest("td")).toHaveTextContent(/^12\.3%/);
+      expect(within(rowOf("70-3")).getByText("About the same")).toHaveClass("reference-chip");
+      act(() => better.focus());
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/^Past 90 days \(.+\): on time 10\.0%$/);
+    });
+
+    it("says how many days the feed had when it missed some", () => {
+      setup("/agencies/1/routes", tableResponse({ reference: reference({ "42": { on_time_pct: 10.0 } }, { days_collected: 80 }) }));
+      act(() => within(rowOf("42")).getByText("Better").focus());
+      expect(screen.getByRole("tooltip")).toHaveTextContent(/on the 80 days with data: on time 10\.0%$/);
+    });
+
+    it("leaves a route seen too rarely in those days unmarked", () => {
+      setup(
+        "/agencies/1/routes",
+        tableResponse({
+          reference: reference({ "42": { samples: 90, reason: "insufficient_samples" }, "70-3": { on_time_pct: 9.0 } }),
+        }),
+      );
+      expect(within(rowOf("42")).queryByText(/^(Better|About the same|Worse)$/)).not.toBeInTheDocument();
+      expect(within(rowOf("70-3")).getByText("Better")).toBeInTheDocument();
+    });
+
+    it("says once why no route is compared when the window falls short", () => {
+      setup(
+        "/agencies/1/routes",
+        tableResponse({
+          reference: reference(
+            { "42": { reason: "insufficient_days" }, "70-3": { reason: "insufficient_days" } },
+            { reason: "insufficient_days", days_collected: 60 },
+          ),
+        }),
+      );
+      expect(screen.getByText(/^Past 90 days \(.+\): data on only 60 days, short of the 72 needed for a usual level\.$/)).toBeInTheDocument();
+      expect(screen.queryByText(/^(Better|About the same|Worse)$/)).not.toBeInTheDocument();
+    });
+
+    it("says routes are not compared under a time of day", async () => {
+      const notAggregated = { reason: "not_aggregated" as const, samples: 0 };
+      setup(
+        "/agencies/1/routes?time_band=morning",
+        tableResponse({
+          ctx: { from: "2026-09-24", to: "2026-10-23", dow: "all", time_band: "morning", service: "all", routes: [] },
+          reference: reference({ "42": notAggregated, "70-3": notAggregated }, { ...notAggregated, days_selected: 0, days_collected: 0, min_days: 0 }),
+        }),
+      );
+      expect(screen.getByText("With a time of day chosen, routes are not compared with their past 90 days.")).toBeInTheDocument();
+      // No aggregate was read, so there are no days to count in the rules.
+      await userEvent.click(screen.getByRole("button", { name: "Hint" }));
+      expect(screen.getByText(/under 1 point in the on-time rate/)).toBeInTheDocument();
+      expect(screen.queryByText(/of the 0 days|at least 0/)).not.toBeInTheDocument();
+    });
+
+    it("explains the floors and the tolerances in the legend's hint", async () => {
+      setup("/agencies/1/routes", tableResponse({ reference: reference({ "42": { on_time_pct: 10.0 } }, { days_selected: 64, min_days: 52 }) }));
+      await userEvent.click(screen.getByRole("button", { name: "Hint" }));
+      expect(screen.getByText(/at least 52 of the 64 days/)).toBeInTheDocument();
+      expect(screen.getByText(/under 1 point in the on-time rate/)).toBeInTheDocument();
+      expect(screen.getByText(/under 0\.1 min, or under 5% of the past 90 days’ average/)).toBeInTheDocument();
+    });
+
+    it("names no reference for a table without one", () => {
+      setup("/agencies/1/routes");
+      expect(screen.queryByText(/past 90 days/i)).not.toBeInTheDocument();
+    });
   });
 });

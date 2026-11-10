@@ -1,6 +1,8 @@
 """The Routes screen's table: one row per route over the window, with its
 average delay, on-time rate, share of departures over five minutes late and
 early-departure rate, sorted by whichever of the first three the reader picks.
+Beside the rows, each route's on-time rate and average delay over its own
+trailing window (:func:`compute_route_references`).
 
 Every sort ranks the same routes under one observation floor, so a route keeps
 its figures and the table keeps its length however it is sorted. Each figure
@@ -16,11 +18,11 @@ rate counts the departures more than the early tolerance early
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from decimal import Decimal
 from typing import Any, Literal
 
-from api.range import RangeCtx
+from api.range import RangeCtx, resolve_service_dates
 from pipeline import perf
 from pipeline.cache import async_lru_cache
 from pipeline.histogram import (
@@ -42,6 +44,14 @@ from pipeline.reports.rankings import (
     _round1,
     early_departure_sec,
     tolerance_aggregates_serve,
+)
+from pipeline.reports.reference import (
+    Coverage,
+    ReferenceReason,
+    reference_coverage,
+    reference_ctx,
+    reference_reason,
+    reference_window,
 )
 
 # Each sort's row index, and whether the routes needing attention come first
@@ -192,3 +202,75 @@ def sort_route_table(rows: Sequence[tuple], sort: str, order: RouteTableOrder) -
     out = sorted(rows, key=lambda t: t[0])
     out.sort(key=lambda t: t[index], reverse=worst_descending == (order == "worst"))
     return out
+
+
+@perf.timed("reports.route_references")
+@async_lru_cache(maxsize=64, ttl_seconds=300)
+async def compute_route_references(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn,
+    early_tolerance_sec: int | None = DEFAULT_EARLY_TOLERANCE_SEC,
+    late_tolerance_sec: int = DEFAULT_LATE_TOLERANCE_SEC,
+) -> dict:
+    """Every route's on-time rate and average delay over the reference window
+    of the period ``ctx`` (:func:`~pipeline.reports.reference.reference_ctx`),
+    under ``ctx``'s scope and on-time window, and whether each may stand as the
+    route's usual level.
+
+    The figures are :func:`compute_route_table`'s own over the window, at an
+    observation floor of one, so each reads exactly as the table would print
+    it for those days, from one read of the aggregates for every route. Only a
+    scope the aggregates answer has a reference: a time band, or a bound in
+    the histogram's open end buckets, would need a live scan of the whole
+    window, so it is ``not_aggregated``, decided before anything is read.
+
+    The withholding rules are the shared ones
+    (:func:`~pipeline.reports.reference.reference_reason`): the window's
+    ``reason`` judges the scope's observations together, each route's its own.
+    """
+    window = reference_ctx(ctx)
+    if not tolerance_aggregates_serve(window, early_tolerance_sec, late_tolerance_sec):
+        return {**reference_window(window, Coverage(), "not_aggregated"), "routes": {}}
+
+    window = await resolve_service_dates(window, conn, agency_id)
+    _, coverage = await reference_coverage(agency_id, window, conn)
+    table = await compute_route_table(
+        agency_id,
+        window,
+        conn,
+        min_samples=1,
+        early_tolerance_sec=early_tolerance_sec,
+        late_tolerance_sec=late_tolerance_sec,
+    )
+    samples = sum(row[5] for row in table)
+    routes = {}
+    for code, avg_min, on_time_pct, _late5_pct, _late5_count, route_samples, _early_pct in table:
+        reason = reference_reason(route_samples, coverage)
+        routes[code] = _route_reference(reason, route_samples, on_time_pct, avg_min)
+    return {**reference_window(window, coverage, reference_reason(samples, coverage), samples), "routes": routes}
+
+
+def _route_reference(
+    reason: ReferenceReason | None, samples: int, on_time_pct: Decimal | None = None, avg_min: Decimal | None = None
+) -> dict:
+    """One route's reference; its figures only without a ``reason``."""
+    shown = reason is None
+    return {
+        "on_time_pct": float(on_time_pct) if shown and on_time_pct is not None else None,
+        "avg_min": float(avg_min) if shown and avg_min is not None else None,
+        "samples": samples,
+        "reason": reason,
+    }
+
+
+def route_references_for(references: dict, codes: Iterable[str]) -> dict:
+    """``references`` naming only ``codes``, the routes a response lists, each
+    with its reference: one the window never observed has none (``no_data``),
+    and under a scope with no aggregate every route shares that reason."""
+    routes = references["routes"]
+    absent: ReferenceReason = "not_aggregated" if references["reason"] == "not_aggregated" else "no_data"
+    return {
+        **references,
+        "routes": {code: routes[code] if code in routes else _route_reference(absent, 0) for code in codes},
+    }
