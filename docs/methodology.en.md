@@ -57,7 +57,11 @@ A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) 
 - **Stop events reported**: the share of the stops the planned trips call at that the feed reported;
 - **Message age**: per poll received live, the time it was captured minus the feed header's timestamp (the median and the 95th percentile);
 - **Implausible readings**: the share of reports dropped as in [Excluding implausible values](#excluding-implausible-values);
-- **Field coverage**: the share of reports carrying the stop ID, the arrival delay, and the trip's and the stop's status (`schedule_relationship`).
+- **Field coverage**: for each of four fields separately, the share of reports carrying that field; the four are never combined into one figure:
+  - the stop ID (`stop_id`);
+  - the arrival delay (`arr_delay`);
+  - the trip's status (the trip's `schedule_relationship`);
+  - the stop's status (the stop's `schedule_relationship`).
 
 A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. No pass or fail threshold is set for any of them yet. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
 
