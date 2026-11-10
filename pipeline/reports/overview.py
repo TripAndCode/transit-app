@@ -340,6 +340,17 @@ def _grain_sum_by(rows: Iterable[_RouteRow], key_index: int, value_index: int = 
     return {k: (v[0], v[1]) for k, v in acc.items()}
 
 
+def _route_sums(grain: _Grain | None, ctx: RangeCtx, value_index: int = _SUM_DELAY) -> dict:
+    """``{route_code: (samples, summed_value_sec)}`` over the grain's window,
+    for the routes a list can name. ClickHouse's ``route_code`` is Nullable: a
+    feed can send an observation no route resolves for. It can't be listed or
+    acted on per route, and the aggregates the default path reads hold none
+    (``route_code`` is NOT NULL there), so every route list and share leaves it
+    out; the agency totals still count it."""
+    by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1, value_index=value_index)
+    return {code: sums for code, sums in by_route.items() if code is not None}
+
+
 async def _fetch_grain(agency_id: int, ctx: RangeCtx, conn, ch, *, shape: _GrainShape = "full") -> _Grain:
     """Fetch the whole request's deduped ``updates`` in ONE ClickHouse query.
 
@@ -572,20 +583,9 @@ async def _per_route_avg(
     # Grouping by route_code means every emitted group has >= 1 sample, so
     # unlike _headline_stats there's no empty-input case to guard here. Values
     # stay UNROUNDED: _movers derives its deltas from them and does its own
-    # rounding.
-    #
-    # `route_code is not None` guard: ClickHouse's `route_code` is Nullable
-    # (both ingest strategies can produce a row with no resolvable route —
-    # see db/clickhouse/schema.sql), so a NULL-route group is reachable here.
-    # `_movers` feeds this dict's keys straight into `_route_weekly_history`'s
-    # `route_code IN {rw_route_codes:Array(String)}` parameter — a `None`
-    # element there isn't valid `Array(String)` and raises a ClickHouse
-    # DatabaseError, 500ing the whole /overview/summary request. There's no
-    # meaningful "route" to attribute a NULL-route mover to anyway.
-    by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1)
-    return {
-        route_code: ((total / n) / 60.0, n) for route_code, (n, total) in by_route.items() if route_code is not None
-    }
+    # rounding. The keys go on into _route_weekly_history's Array(String)
+    # parameter, which a NULL route would fail.
+    return {route_code: ((total / n) / 60.0, n) for route_code, (n, total) in _route_sums(grain, ctx).items()}
 
 
 async def _route_short_names(agency_id: int, route_codes: list[str], conn) -> dict[str, str | None]:
@@ -841,7 +841,7 @@ async def _concentration(
         # non-empty group, so no ORDER BY ... NULLS LAST equivalent is needed.
         # Ties break on route_code, so the top-20 cut is reproducible: the
         # pooling gives no order within a tie.
-        by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1, value_index=_SUM_LATE)
+        by_route = _route_sums(grain, ctx, value_index=_SUM_LATE)
         rows = [(code, late / 60.0) for code, (_n, late) in sorted(by_route.items(), key=lambda kv: (-kv[1][1], kv[0]))]
     rows = _listable(rows, left_out)
     if not rows:
@@ -975,7 +975,7 @@ async def _top_delayed_routes(
         # Grouping by route_code -> every group has >= 1 sample, no
         # empty-input case; the average is never NULL for a non-empty group.
         # Ties broken by route_code, as in _concentration().
-        by_route = _grain_sum_by(_grain_window(_require_grain(grain), cur_ctx), key_index=1)
+        by_route = _route_sums(grain, cur_ctx)
         rows = [
             (code, (total / n) / 60.0)
             for code, (n, total) in sorted(by_route.items(), key=lambda kv: (-(kv[1][1] / kv[1][0]), kv[0]))
