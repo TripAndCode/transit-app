@@ -93,6 +93,24 @@ describe("overview.css hero facts", () => {
     expect(decl(chip, "background")).toBe("var(--bg-soft)");
   });
 
+  it("keeps the trailing reference inside the column the sparkline fades under, wrapping there", () => {
+    const mask = decl(ruleBody(css, ".ov-hero-figure > svg {"), "mask-image") ?? "";
+    const faded = mask.match(/rgb\(0 0 0 \/ 20%\) (\d+px)/)?.[1];
+    expect(faded).toBeDefined();
+    const reference = ruleBody(css, ".ov-hero-reference {");
+    expect(decl(reference, "max-width")).toBe(faded);
+    expect(decl(reference, "flex-wrap")).toBe("wrap");
+    expect(decl(reference, "position")).toBe("relative");
+    // The chip is one unbroken pill; the line wraps around it instead.
+    expect(decl(ruleBody(css, ".ov-hero-reference-chip {"), "white-space")).toBe("nowrap");
+  });
+
+  it("the reference chip stays neutral, whichever way it judges", () => {
+    const chip = ruleBody(css, ".ov-hero-reference-chip {");
+    expect(decl(chip, "color")).toBe("var(--text-secondary)");
+    expect(chip).not.toMatch(/--delay-|--trend-bad|--danger|red/);
+  });
+
   it("prints every fact value in ink, the late-routes count included", () => {
     expect(css).not.toMatch(/\.ov-hero-fact--attn/);
     expect(decl(ruleBody(css, ".ov-hero-fact-value {"), "color")).toBe("var(--text-primary)");
