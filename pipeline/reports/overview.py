@@ -346,7 +346,7 @@ def _route_sums(grain: _Grain | None, ctx: RangeCtx, value_index: int = _SUM_DEL
     feed can send an observation no route resolves for. It can't be listed or
     acted on per route, and the aggregates the default path reads hold none
     (``route_code`` is NOT NULL there), so every route list and share leaves it
-    out; the agency totals still count it."""
+    out."""
     by_route = _grain_sum_by(_grain_window(_require_grain(grain), ctx), key_index=1, value_index=value_index)
     return {code: sums for code, sums in by_route.items() if code is not None}
 
