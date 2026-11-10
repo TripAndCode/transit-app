@@ -1155,7 +1155,7 @@ def test_analyze_counts_each_trip_not_run_under_the_one_route_its_latest_report_
             stop_sequence=TRIP_LEVEL_STOP_SEQUENCE,
         ),
         row("RAN", early, "RA"),
-        row("A1", next_day, "RA", trip_status=canceled),
+        row("A1", next_day, "RA", trip_status=canceled, file_name="c.pb"),
     ]
     insert_updates(ch_client, agency_id, rows)
     analyze(agency_id, pg_conn, ch_client)
