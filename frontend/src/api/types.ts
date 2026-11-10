@@ -1057,7 +1057,7 @@ export type OverviewHeadline = {
 
 /** Why a reference has no figure. `not_aggregated`: a time of day together
  *  with a routes filter, which no aggregate holds by date. */
-export type OverviewReferenceReason = "no_data" | "insufficient_days" | "insufficient_samples" | "not_aggregated";
+type OverviewReferenceReason = "no_data" | "insufficient_days" | "insufficient_samples" | "not_aggregated";
 
 /** The headline's figure over the `days` days before the period, under the
  *  same scope: the agency's own usual level. */
