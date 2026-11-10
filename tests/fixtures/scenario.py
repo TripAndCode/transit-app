@@ -605,7 +605,12 @@ def polls(scenario: Scenario) -> list[Poll]:
                 status, stops = item.listing(at)
                 trips.append(
                     TripEntry(
-                        item.trip.trip_id, item.trip.route_id, item.service_date, status, stops, len(item.trip.departures)
+                        item.trip.trip_id,
+                        item.trip.route_id,
+                        item.service_date,
+                        status,
+                        stops,
+                        len(item.trip.departures),
                     )
                 )
         for entry in trips:
