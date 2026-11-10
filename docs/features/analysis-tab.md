@@ -221,6 +221,18 @@ per route over the scope:
   - The route page's own on-time figure comes from the `on_time` list, which
     shows a route from 21 observations. Between 21 and 99, the page shows a
     rate the panel beneath it explains it does not judge.
+  - A `service_delivered_pct` target is judged on the route's own
+    service-delivered rate over the page's dates
+    (`compute_service_delivered_by_route` in
+    `pipeline/reports/service_delivered.py`), and a
+    `vehicle_km_delivered_pct` target on the same rate where the timetable
+    has route shapes. Neither follows the page's other filters, and the panel
+    says so beneath the table. A route is judged only where the agency's own
+    rate exists, every planned day of the dates has its plan by route saved,
+    and the route has at least 100 planned trips and 100 observations, and
+    not on a feed that reports zero delay only for it (`delivered_reading` in
+    `pipeline/reports/performance_standard.py`). Its row's `not_judged` says
+    which of these failed, with the count and floor for the two floors.
 - **Colour.** A delay bar's colour and length come from the figure the cell
   prints, rounded to a tenth, so two rows printing the same figure share a
   colour. The severe-delay dot other delay tables draw is left off.

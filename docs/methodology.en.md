@@ -154,6 +154,8 @@ An "observation" here is one departure: one trip, at one stop, on one day. It is
 
 Service delivered is shown only for an operator whose feed has been confirmed to report cancellations and has reported at least one trip not run in the 90 days up to the period's last day (or within the period, when it is longer). Otherwise it is shown as "—" with the reason.
 
+A route's service delivered is the same ratio on the route's own trips. A trip not run counts under the route its latest report names, so the routes add up to the operator. Its planned trips come from each day's saved split by route, or from the timetable loaded now. A period with a day saved before its split was saved has no route figure. The performance standards judge only a route with at least 100 planned trips and 100 observations.
+
 **Headway metrics**: a route whose median scheduled headway is 12 minutes or less is high-frequency, and gets these metrics:
 
 - actual headways, reconstructed from consecutive departures at the same stop;
@@ -196,7 +198,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 |---|---|---|
 | The on-time definition and early departures | Done | The industry-standard and legacy definitions, and any tolerance; the early-departure rate |
 | High-frequency headways, EWT and long gaps | Done | Routes whose median scheduled headway is 12 minutes or less |
-| The denominator: cancellations, missed trips and skipped stops | Partial | Cancellations and skips are counted. Service delivered is per operator only, not per route. A planned trip absent from the realtime data is not counted |
+| The denominator: cancellations, missed trips and skipped stops | Partial | Cancellations and skips are counted. Service delivered per route serves the performance standards only; no screen lists it. A planned trip absent from the realtime data is not counted |
 | Passenger weighting | Partial | Only hand-entered relative weights per route, used only by the weighted on-time rate on the agency comparison screen. No ridership import |
 | Splitting running time from dwell time | Partial | The split exists. Whether a feed's arrival and departure delays are independent has not been checked feed by feed |
 | External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
@@ -207,7 +209,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | Data coverage | Partial | The Hiroshima Bus Association's thirteen operators and Aomori City Bus. 中国バス and 井笠バスカンパニー, on the association's list, are not ingested |
 | Timetable slack and holding | Partial | Only an analysis on the Ask screen, against the current timetable. No aggregate and no route-page panel |
 | Supply: planned trips, vehicle-km, timetable changes | Partial | Planned trips and vehicle-km per timetable version, and the change dates, exist. Only the current version is shown, with no comparison of which routes lost trips between versions. Vehicle-km delivered is approximated from the trip ratio |
-| Contracts and incentives | Partial | Per-route standards (on-time rate, EWT, vehicle-km delivered) with an achievement and bonus/deduction simulation. No per-route service-delivered standard |
+| Contracts and incentives | Partial | Per-route standards (on-time rate, EWT, service delivered, vehicle-km delivered) with an achievement and bonus/deduction simulation. Service-delivered and vehicle-km standards are judged on the route's own service delivered |
 
 ## Comparability conditions
 

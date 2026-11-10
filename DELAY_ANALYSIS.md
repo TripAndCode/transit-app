@@ -125,6 +125,39 @@ gate's reason) and a plan (`no_plan`); stop events also need a known stop plan
 (`feed_cannot_report`), and every figure needs an observation (`no_data`). The admin
 agency drawer shows the newest month and the five before it.
 
+## Service delivered per route
+
+A route's service-delivered rate is the agency's ratio on the route's own trips: its
+planned trips, less the trips the feed reported as not run under it, of its planned
+trips (`pipeline/reports/service_delivered.py`). Not run means what it means for the
+agency: the trip's latest status is CANCELED, or every stop it reports with a
+plausible delay or a status was last reported SKIPPED.
+
+- **Trips not run.** `agg_service_delivered_daily` counts them per service date and
+  route (`pipeline/agg_sql.py`). Each trip-day counts once, under the route its latest
+  report naming a route names, or under no route (`''`) where none does, so an
+  agency's day is the sum of its routes. It is rebuilt per changed date, as the other
+  dated tables are.
+- **Planned trips.** Each day's capture (`pipeline/planned_trips.py`) saves the plan
+  split by route beside its count, from the same timetable, so a day's routes sum to
+  its planned trips. A route is keyed by the code its static `route_id` maps to, and
+  a trip naming no route by `''`. A day the capture has not saved is split by the
+  loaded timetable. A day saved before the split was saved keeps it unknown: its
+  timetable may be gone.
+- **Which days count.** The days the agency's rate counts. A route's figure is read
+  only when every one of those days is split, so it covers the same days as the
+  agency's, and the routes' planned trips and trips not run then sum to the agency's.
+
+A performance standard on `service_delivered_pct` is judged on this rate over the
+request's dates (`pipeline/reports/performance_standard.py`), and a
+`vehicle_km_delivered_pct` standard on the same rate where the timetable has route
+shapes, the proxy `pipeline/reports/supply.py` applies. A route is judged only where
+the agency's own rate exists and every counted day is split, at the on-time
+standard's floor: at least `RANKING_MIN_SAMPLES` (100) planned trips and as many
+observations. A route the feed barely reports has no trip reported not run, and a
+route whose feed reports zero delay only echoes the timetable; either would read 100%.
+Each row that is not judged says why.
+
 ## Serving
 
 By default a report endpoint just **reads** an `agg_*` table rather than scanning the raw
