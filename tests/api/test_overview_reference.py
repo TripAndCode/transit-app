@@ -8,7 +8,7 @@ import pytest
 from api.range import RangeCtx
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
-from tests.api.test_overview import _seed_agg_daily
+from tests.api.test_overview import _seed_agg_daily, _seed_weekend_split_change
 from tests.conftest import _test_pool
 from tests.pipeline.ch_agg_helpers import update_row
 
@@ -234,3 +234,26 @@ async def test_the_endpoint_returns_the_reference(client, aconn, aagency_id):
         "min_samples": 100,
         "reason": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_the_reference_leaves_the_periods_own_day_types_alone(aconn, aagency_id):
+    """The calendar runs 土曜 and 日祝 timetables until 9/27 and one 土日祝
+    timetable from 9/28. The period's own span (its 27 days before) starts
+    after 9/28, so it runs two ways and 土曜 selects the weekend: Saturday 10/31
+    and Sunday 11/1 alike. The reference window reaches back before 9/28 and
+    resolves its own day types, three ways, without moving the period's."""
+    await _seed_weekend_split_change(aconn, aagency_id)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 10, 31), "R_CAL", "", 5.0, 20)
+    await _seed_agg_daily(aconn, aagency_id, date(2026, 11, 1), "R_CAL", "", 8.0, 20)
+
+    ctx = RangeCtx(from_date=date(2026, 10, 26), to_date=date(2026, 11, 8), service="土曜")
+    out = await _summary(aconn, aagency_id, ctx)
+    assert out["headline"]["avg_min"] == pytest.approx(6.5, abs=0.001)
+    assert [b["day_type"] for b in out["service_split"]] == ["weekday", "weekend_holiday"]
+
+    ref = out["headline"]["reference"]
+    assert (ref["window_from"], ref["window_to"]) == ("2026-07-28", "2026-10-25")
+    saturdays = [d for d in _days(date(2026, 7, 28), date(2026, 10, 25)) if d.isoweekday() == 6]
+    assert ref["days_selected"] == len(saturdays)
+    assert ref["reason"] == "no_data"
