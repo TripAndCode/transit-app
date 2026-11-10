@@ -111,6 +111,7 @@ class FeedQualityMonth(BaseModel):
     stop_completeness_pct: float | None
     stop_completeness_missing: str | None
     message_age_polls: int
+    message_age_undated_polls: int
     message_age_p50_sec: float | None
     message_age_p95_sec: float | None
     message_age_missing: str | None
