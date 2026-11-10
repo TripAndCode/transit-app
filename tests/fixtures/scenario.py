@@ -410,13 +410,15 @@ class StopEntry:
 @dataclass(frozen=True)
 class TripEntry:
     """One TripUpdate of a poll: its trip of one service day, the trip's
-    schedule relationship and the stops it lists."""
+    schedule relationship, the stops it lists and how many stops the
+    timetable schedules the trip at."""
 
     trip_id: str
     route_id: str
     service_date: date
     status: int
     stops: tuple[StopEntry, ...]
+    scheduled_stops: int
 
 
 @dataclass(frozen=True)
@@ -436,9 +438,10 @@ class Poll:
 
     @property
     def stored_rows(self) -> int:
-        """The rows ingest stores for the poll: one per stop update, and one
-        for each trip it reports CANCELED without listing a stop."""
-        return self.stop_updates + sum(1 for t in self.trips if t.status == CANCELED and not t.stops)
+        """The rows ingest stores for the poll: one per stop update, and for
+        each trip it reports CANCELED without listing a stop, one per stop the
+        timetable schedules the trip at."""
+        return self.stop_updates + sum(t.scheduled_stops for t in self.trips if t.status == CANCELED and not t.stops)
 
     @property
     def payload(self) -> bytes:
@@ -600,7 +603,11 @@ def polls(scenario: Scenario) -> list[Poll]:
         for item in in_feed:
             if item.enters <= at < item.leaves:
                 status, stops = item.listing(at)
-                trips.append(TripEntry(item.trip.trip_id, item.trip.route_id, item.service_date, status, stops))
+                trips.append(
+                    TripEntry(
+                        item.trip.trip_id, item.trip.route_id, item.service_date, status, stops, len(item.trip.departures)
+                    )
+                )
         for entry in trips:
             reported |= _reports(entry)
         if trips:
