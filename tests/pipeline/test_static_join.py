@@ -411,36 +411,58 @@ def test_static_join_drops_only_the_stop_time_updates_without_a_stop_sequence(pg
     assert [(r[6], r[7], r[4]) for r in rows] == [(1, -30, "07:05:00")]
 
 
-def test_static_join_stores_a_cancelled_trip_with_no_stored_stop_as_one_trip_level_row(pg_conn):
-    """GTFS-RT lets a CANCELED TripUpdate list no StopTimeUpdate, and one
-    whose updates all lack a usable stop_sequence stores none either. Such a
-    trip gets one row: its route, service and timetable version, the
-    CANCELED status, and the reserved stop_sequence, with no stop, delay or
-    schedule a reader could take for a departure. A cancellation that stores
-    a stop row needs none, a SCHEDULED trip listing no stop says nothing, and
-    the probe still counts StopTimeUpdates alone. A poll holding nothing
-    else stores that row too."""
-    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
-
+def _cancelled_trip_agency(pg_conn, name: str, stop_times: dict[str, list[tuple[int, str, str]]], version=None):
+    """An agency whose timetable runs each trip of *stop_times* on route R<n>,
+    the n-th, calling at its (stop_sequence, stop_id, departure_time)s."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
             "VALUES (%s, %s, 'static_join') RETURNING agency_id",
-            ("static_join_cancelled_trip_test", "http://cancelled-trip-test.example.com/feed.pb"),
+            (name, f"http://{name}.example.com/feed.pb"),
         )
         aid = cur.fetchone()[0]
-        for trip_id, route_id in (("uuid-A", "R1"), ("uuid-B", "R2"), ("uuid-C", "R3"), ("uuid-D", "R4")):
+        for n, (trip_id, stops) in enumerate(stop_times.items(), start=1):
             cur.execute(
                 "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id, static_version_id) "
-                "VALUES (%s, %s, %s, '平日', 'gtfs_static_20260101')",
-                (aid, trip_id, route_id),
+                "VALUES (%s, %s, %s, '平日', %s)",
+                (aid, trip_id, f"R{n}", version),
             )
-            cur.execute(
-                "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
-                "VALUES (%s, %s, 1, 'S1', '07:05:00')",
-                (aid, trip_id),
-            )
+            for seq, stop_id, departure in stops:
+                cur.execute(
+                    "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, departure_time) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (aid, trip_id, seq, stop_id, departure),
+                )
     pg_conn.commit()
+    return aid
+
+
+def test_static_join_stores_a_cancelled_trip_listing_no_stop_as_a_withdrawal_per_scheduled_stop(pg_conn):
+    """GTFS-RT lets a CANCELED TripUpdate list no StopTimeUpdate, and one
+    whose updates all lack a usable stop_sequence stores none either. Such a
+    trip is stored as one row per stop its timetable schedules it at and it
+    has not left yet: the stop's sequence, stop and schedule, the trip's
+    route, service and version, the CANCELED status and no delay. A stop_sequence no stop row can hold is
+    left out. A trip the timetable lists no stop for keeps one trip-level row,
+    with no stop, delay or schedule. A cancellation that stores a stop row
+    needs neither, a SCHEDULED trip listing no stop says nothing, and the
+    probe still counts StopTimeUpdates alone. A poll holding nothing else
+    stores the rows too."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    version = "gtfs_static_20260101"
+    aid = _cancelled_trip_agency(
+        pg_conn,
+        "static_join_cancelled_trip_test",
+        {
+            "uuid-A": [(1, "S1", "12:05:00"), (2, "S2", "25:10:00"), (70000, "S3", "25:20:00")],
+            "uuid-B": [(1, "S1", "12:05:00")],
+            "uuid-C": [(1, "S1", "12:05:00")],
+            "uuid-D": [(1, "S1", "12:05:00")],
+            "uuid-E": [],
+        },
+        version,
+    )
     canceled, no_data = 3, 2
     pb = trip_update_feed(
         trip_update("uuid-A", schedule_relationship=canceled),
@@ -452,32 +474,136 @@ def test_static_join_stores_a_cancelled_trip_with_no_stored_stop_as_one_trip_lev
         ),
         trip_update("uuid-C", stop_time_update(1, schedule_relationship=no_data), schedule_relationship=canceled),
         trip_update("uuid-D", schedule_relationship=0),
+        trip_update("uuid-E", schedule_relationship=canceled),
         trip_update("uuid-unknown", schedule_relationship=canceled),
         timestamp=1778295600,
     )
     at = "2026-05-09T12:00:00+09:00"
     rows = static_join.parse_feed(pb, at, "f1.bin", aid, pg_conn)
 
-    def row(trip_id, service, scheduled_time, route, stop_sequence, stop_status, scheduled_sec, version):
+    def row(trip_id, service, scheduled_time, route, stop_sequence, stop_id, stop_status, scheduled_sec, version):
         # file_name, captured_at, trip_id, service_type, scheduled_time, route_code, stop_sequence,
         # dep_delay, stop_id, arr_delay, both relationships, feed_timestamp, scheduled_sec, version.
         return (
-            *("f1.bin", at, trip_id, service, scheduled_time, route, stop_sequence, None, None, None),
+            *("f1.bin", at, trip_id, service, scheduled_time, route, stop_sequence, None, stop_id, None),
             *(canceled, stop_status, 1778295600, scheduled_sec, version),
         )
 
-    trip_level, version = TRIP_LEVEL_STOP_SEQUENCE, "gtfs_static_20260101"
+    trip_level = TRIP_LEVEL_STOP_SEQUENCE
+    withdrawals_of_a = [
+        row("uuid-A", "平日", "12:05:00", "R1", 1, "S1", None, 43500, version),
+        row("uuid-A", "平日", None, "R1", 2, "S2", None, 90600, version),
+    ]
     assert sorted(rows, key=lambda r: (r[2], r[6])) == [
-        row("uuid-A", "平日", None, "R1", trip_level, None, None, version),
-        row("uuid-B", "平日", None, "RT-B", trip_level, None, None, version),
-        row("uuid-C", "平日", "07:05:00", "R3", 1, no_data, 25500, version),
-        row("uuid-unknown", None, None, None, trip_level, None, None, None),
+        *withdrawals_of_a,
+        row("uuid-B", "平日", "12:05:00", "RT-B", 1, "S1", None, 43500, version),
+        row("uuid-C", "平日", "12:05:00", "R3", 1, None, no_data, 43500, version),
+        row("uuid-E", "平日", None, "R5", trip_level, None, None, None, version),
+        row("uuid-unknown", None, None, None, trip_level, None, None, None, None),
     ]
     assert static_join.field_coverage(pb)["stop_time_updates"] == 2
     alone = trip_update_feed(trip_update("uuid-A", schedule_relationship=canceled), timestamp=1778295600)
-    assert static_join.parse_feed(alone, at, "f1.bin", aid, pg_conn) == [
-        row("uuid-A", "平日", None, "R1", trip_level, None, None, version)
-    ]
+    assert static_join.parse_feed(alone, at, "f1.bin", aid, pg_conn) == withdrawals_of_a
+
+
+@pytest.mark.parametrize(
+    ("captured_at", "withdrawn"),
+    [
+        ("2026-05-09T06:50:00+09:00", [1, 2, 3, 4, 5, 6]),
+        ("2026-05-09T07:00:00+09:00", [1, 2, 3, 4, 5, 6]),
+        ("2026-05-09T07:05:00+09:00", [2, 3, 4, 5, 6]),
+        ("2026-05-09T07:12:00+09:00", [4, 5, 6]),
+        ("2026-05-10T00:05:00+09:00", [6]),
+    ],
+    ids=["before_departure", "at_departure", "mid_run", "past_a_stop_with_no_time", "after_midnight"],
+)
+def test_a_stop_less_cancellation_withdraws_only_the_stops_still_to_come(pg_conn, captured_at, withdrawn):
+    """A CANCELED trip will not run the rest of its trip; a stop it already
+    left keeps its reports. A stop is left once its scheduled departure on the
+    service day the poll is captured in is earlier than the capture, and a
+    stop with no time once a stop after it is."""
+    aid = _cancelled_trip_agency(
+        pg_conn,
+        "static_join_cancel_to_come",
+        {
+            "T1": [
+                (1, "S1", "07:00:00"),
+                (2, "S2", ""),
+                (3, "S3", "07:10:00"),
+                (4, "S4", ""),
+                (5, "S5", "23:50:00"),
+                (6, "S6", "24:10:00"),
+            ]
+        },
+        "gtfs_static_20260101",
+    )
+    cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295600)
+    rows = static_join.parse_feed(cancelled, captured_at, "f1.bin", aid, pg_conn)
+    assert [r[6] for r in rows] == withdrawn
+
+
+def test_a_stop_less_cancellation_after_the_last_stop_keeps_only_the_trip_level_row(pg_conn):
+    """Every stop already left keeps its reports, so the cancellation is kept
+    as the trip-level row alone."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    aid = _cancelled_trip_agency(
+        pg_conn, "static_join_cancel_after_run", {"T1": [(1, "S1", "07:00:00"), (2, "S2", "07:10:00")]}, "v1"
+    )
+    cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295600)
+    rows = static_join.parse_feed(cancelled, "2026-05-09T07:11:00+09:00", "f1.bin", aid, pg_conn)
+    assert [(r[6], r[3], r[5], r[10], r[14]) for r in rows] == [(TRIP_LEVEL_STOP_SEQUENCE, "平日", "R1", 3, "v1")]
+
+
+def test_a_stop_less_cancellation_stores_each_stop_under_its_earlier_predictions_keys(pg_conn):
+    """Each stop's latest report decides whether it departed only among the
+    reports of that stop event, which every dedup keys on the trip, stop,
+    route, service, schedule and version a row stores. The withdrawal of each
+    stop therefore carries the keys its prediction carried, including the
+    route when the predictions name the static route and the cancellation
+    names none."""
+    aid = _cancelled_trip_agency(
+        pg_conn,
+        "static_join_cancel_keys",
+        {"T1": [(1, "S1", "07:05:00"), (2, "S2", "24:10:00")]},
+        "gtfs_static_20260101",
+    )
+    predicted = trip_update_feed(
+        trip_update(
+            "T1", stop_time_update(1, departure_delay=60), stop_time_update(2, departure_delay=60), route_id="R1"
+        ),
+        timestamp=1778295600,
+    )
+    cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295660)
+
+    def keys(rows):
+        # trip_id, service_type, scheduled_time, route_code, stop_sequence, scheduled_sec, static_version_id
+        return [(r[2], r[3], r[4], r[5], r[6], r[13], r[14]) for r in sorted(rows, key=lambda r: r[6])]
+
+    before = static_join.parse_feed(predicted, "2026-05-09T07:00:00+09:00", "f1.bin", aid, pg_conn)
+    after = static_join.parse_feed(cancelled, "2026-05-09T07:01:00+09:00", "f2.bin", aid, pg_conn)
+    assert keys(after) == keys(before)
+    assert [(r[7], r[10]) for r in after] == [(None, 3), (None, 3)]
+
+
+def test_a_cancelled_trips_stops_are_read_afresh_at_each_poll(pg_conn):
+    """A cancelled trip stays in the feed poll after poll, and each poll reads
+    its stops as the timetable stands then, under the same version name too:
+    nothing is held between polls."""
+    aid = _cancelled_trip_agency(
+        pg_conn, "static_join_cancel_fresh", {"T1": [(1, "S1", "07:00:00"), (2, "S2", "07:08:00")]}, "v1"
+    )
+    cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295600)
+
+    def schedule(poll: str) -> list:
+        rows = static_join.parse_feed(cancelled, "2026-05-11T06:50:00+09:00", poll, aid, pg_conn)
+        return [(r[6], r[4]) for r in rows]
+
+    assert schedule("f1.bin") == [(1, "07:00:00"), (2, "07:08:00")]
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE static_stop_times SET departure_time = '07:01:00' WHERE agency_id = %s", (aid,))
+    pg_conn.commit()
+    assert schedule("f2.bin") == [(1, "07:01:00"), (2, "07:01:00")]
 
 
 # Integration tests against captured fixtures

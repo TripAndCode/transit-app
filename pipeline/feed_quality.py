@@ -32,7 +32,13 @@ counts that same window:
 - **Field coverage**: per field of
   :data:`pipeline.strategies.static_join.RT_COVERAGE_FIELDS`, the share of
   stored stop_time_updates carrying it, the unit the RT coverage probe
-  measures a single poll in (``static_join.field_coverage``).
+  measures a single poll in (``static_join.field_coverage``). The rows ingest
+  writes from the timetable for a trip cancelled without listing a stop are
+  no stop_time_update the feed sent, though each still reports its stop
+  event. They are told apart by their shape alone
+  (:func:`pipeline.db.timetable_cancellation_ch`), so a stop update the feed
+  does send for a cancelled trip with neither a delay nor a stop status is
+  left out with them.
 - **VehiclePositions available**: not recorded anywhere the app reads.
 
 A figure the feed or the app cannot supply is ``None`` beside a
@@ -62,7 +68,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from pipeline.clickhouse import LIVE_SOURCED, TRIP_LEVEL_STOP_SEQUENCE
-from pipeline.db import plausible_delay_ch, withdrawn_ch
+from pipeline.db import plausible_delay_ch, timetable_cancellation_ch, withdrawn_ch
 from pipeline.reports import comparability
 from pipeline.reports.comparability import clamp_pct, coverage_pct, trips_matchable
 from pipeline.reports.service_delivered import coverage_of, planned_days_ctes, service_sql
@@ -125,14 +131,15 @@ COLUMNS: tuple[str, ...] = (
 # captured_at) sort key prunes the scan to the window.
 _WINDOW = "u.captured_at >= {window_start:DateTime64} AND u.captured_at < {window_end:DateTime64}"
 
-_FIELD_COUNTS = ", ".join(f"countIf(u.{field} IS NOT NULL) AS {field}_rows" for field in RT_COVERAGE_FIELDS)
-
 # Per service date: the stop_time_updates stored, how many carry each RT
-# coverage field, and the stop events reported. The trip-level row a
-# cancellation without stops leaves is no stop_time_update.
+# coverage field, and the stop events reported. A cancellation listing no stop
+# leaves a trip-level row or a row per stop written from the timetable, and
+# neither is a stop_time_update; a row per stop still reports its stop event.
+_SENT = f"NOT {timetable_cancellation_ch()}"
+_FIELD_COUNTS = ", ".join(f"countIf(u.{field} IS NOT NULL AND {_SENT}) AS {field}_rows" for field in RT_COVERAGE_FIELDS)
 _REPORTED = f"{plausible_delay_ch('u.dep_delay')} OR {plausible_delay_ch('u.arr_delay')} OR {withdrawn_ch()}"
 ROWS_CH_SQL = f"""
-    SELECT {service_date_ch("u.captured_at")} AS date, count() AS stop_time_updates, {_FIELD_COUNTS},
+    SELECT {service_date_ch("u.captured_at")} AS date, countIf({_SENT}) AS stop_time_updates, {_FIELD_COUNTS},
            uniqExactIf((u.trip_id, u.stop_sequence), {_REPORTED}) AS stop_events
     FROM updates AS u
     WHERE u.agency_id = {{agency_id:UInt16}} AND {_WINDOW} AND u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}

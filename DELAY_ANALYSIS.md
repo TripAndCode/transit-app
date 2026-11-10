@@ -19,7 +19,21 @@ After ingest, `analyze` turns the raw readings into summary tables:
 
 1. **dedup** — the same trip + stop + day is observed many times; keep only the latest
    reading per trip-stop-day. When that latest report says the trip was cancelled or the
-   stop skipped, the stop has no departure, however it was predicted before.
+   stop skipped, the stop has no departure, however it was predicted before. A trip the
+   feed cancels without listing any stop is stored as a cancellation of each stop its
+   timetable schedules it at whose scheduled departure is still to come when the
+   cancellation arrives, so an earlier prediction of such a stop no longer counts as a
+   departure. A stop whose scheduled departure has passed keeps its departure, so a
+   late-running trip cancelled between a stop's scheduled and its delayed departure keeps
+   that stop's last prediction: the cancellation carries no delay, and ingest goes by the
+   timetable alone. A trip with no stop still to come, or with no stops in the timetable,
+   is stored as one trip-level row: it counts as not run, and is not a stop. Days ingested
+   before method `2026.11.6` keep the earlier shape, the one trip-level row, unless they
+   are ingested again from the archive. Each stop's cancellation takes the route the
+   feed's cancellation names, or the timetable's when it names none, so it replaces a
+   prediction filed under the same route. A feed that names one route on its predictions
+   and a different one on the cancellation files the two apart, and the predictions keep
+   counting.
 2. **clamp** — drop impossible values (more than 120 minutes late), which come from
    frozen/stale feeds re-sending the same stuck estimate, not from real delays.
 3. **aggregate** — precompute averages and p90 sliced different ways into `agg_*` tables:
@@ -55,6 +69,7 @@ build day.
 | `2026.11.3` | Each reading is filed under the timetable in force on its service day: the newest loaded timetable whose feed dates, or else calendar, cover that day. Until now a reading took whichever timetable was loaded when it arrived, so a timetable published ahead of its first day was applied to the rest of the day before. Such readings now take the timetable in force for their scheduled time, day type and stop, and for their route where the feed named none. A day no known timetable covers keeps the timetable its readings joined. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_stop_routes`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_schedule_revision_daily`, `route_delay_counts`, `stop_route_days` |
 | `2026.11.4` | The feed's last report on a stop decides whether it departed. A trip reported CANCELED, or a stop reported SKIPPED, after a prediction of it leaves no departure, where the prediction had counted as one; a prediction reported after either restores it. A trip is not run when its last status is CANCELED, or when every stop it reports with a delay or a status was last so reported SKIPPED; a stop reported only without either counts neither way, and a trip that skipped only some stops ran, where any skipped stop had counted it as not run. A report with neither a delay nor a CANCELED or SKIPPED status leaves the report before it standing, in the delay figures and the service-delivered rate alike. A trip cancelled without listing any stop is kept and counts as not run, where it had been lost. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_service_delivered_daily`, `route_delay_counts` |
 | `2026.11.5` | Each agency's monthly feed-quality scorecard: RT and stop-event completeness, message age at capture, the clamp share and RT field coverage (see "Feed-quality scorecard" below). No delay or on-time figure changes. | `feed_quality_monthly` |
+| `2026.11.6` | A trip cancelled without listing any stop is stored as a cancellation of each stop its timetable schedules it at whose scheduled departure is still to come when the cancellation arrives, so an earlier prediction of such a stop no longer counts as a departure, as when the cancellation lists its stops; a stop whose scheduled departure has passed keeps its departure, even when the trip was running late. A trip with no stop still to come, or no stops in the timetable, keeps the one trip-level row. A trip whose last status is CANCELED counts as not run, so one cancelled partway, or after its last stop, does too. This changes how such a cancellation is ingested, not how any delay or service-delivered table is built, and days ingested earlier keep the one trip-level row unless ingested again. The feed-quality scorecard counts those rows as reported stop events but not as stop_time_updates; it tells them apart by their shape alone, so a stop update the feed sends for a cancelled trip with neither a delay nor a stop status is left out of its field coverage and update count too. | `feed_quality_monthly` |
 
 ## What counts as on time
 
@@ -113,7 +128,7 @@ and its next run catches up.
 | Stop events | Stop events the feed reported, counted once per trip, stop and service date however often reported, of the stop times the planned trips call at. A stop event is reported when any poll of it carries a plausible departure or arrival delay, or reports its trip CANCELED or its stop SKIPPED. This is reporting coverage, not the service-delivered rate: a cancellation is something the feed said about the stop, so it counts here, where the departure figures let the feed's last report decide whether the stop departed. Only the planned days whose stop events are known count (`stop_plan_days`): the day's capture saves them beside its planned trips, and a day saved before it did keeps them unknown. |
 | Message age | Per live poll, the instant it was captured minus its FeedHeader timestamp: the median and 95th percentile, interpolated linearly between the closest ranks (ClickHouse's `quantilesExactInclusive`, the rule of numpy's default), with the number of polls measured. Archive ingest stamps a row's capture time from that same header, so an archived poll's age is zero by construction and is not counted. |
 | Implausible readings | The board's clamp share: readings beyond the plausibility clamp, of the readings that carried a delay (`agg_feed_health`). |
-| Field coverage | For each of `stop_id`, `arr_delay`, the trip's and the stop's `schedule_relationship`, the share of stored stop_time_updates carrying it: the unit the RT field-coverage probe measures one poll in. |
+| Field coverage | For each of `stop_id`, `arr_delay`, the trip's and the stop's `schedule_relationship`, the share of stored stop_time_updates carrying it: the unit the RT field-coverage probe measures one poll in. The rows ingest writes from the timetable for a trip cancelled without listing any stop are no stop_time_update the feed sent, so they count here neither way, while each still reports its stop event. They are told apart by their shape alone (trip CANCELED, no delay, no stop status), so a stop update the feed sends for a cancelled trip in that same shape is left out with them. |
 | VehiclePositions | Not recorded: nothing the app reads says which feeds publish them. |
 
 A figure the feed or the app cannot supply is empty beside a reason, never 0. Trips and

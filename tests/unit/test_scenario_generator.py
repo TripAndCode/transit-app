@@ -362,11 +362,36 @@ def test_a_cancellation_is_predicted_until_announced_then_reported_canceled_with
 
 
 def test_a_cancellation_may_list_no_stop_at_all():
+    """Ingest stores such a cancellation as a row per stop not due yet:
+    three before the trip sets off, one once only its last stop is left."""
     scenario = _cancelling(Cancellation("R_0700", DAY, reported_as="canceled_without_stops"))
     morning = [trip for _at, trips in _statuses(polls(scenario)) for trip in trips if trip[0] == "R_0700"]
     assert morning
     assert all(trip_status == CANCELED and stops == [] for _trip_id, trip_status, stops in morning)
     assert all(p.stop_updates == len(list(_decode_rows(p.payload))) for p in polls(scenario))
+    stored = {p.captured_at: p.stored_rows for p in polls(scenario)}
+    assert stored[service_day_instant(DAY, gtfs_seconds("06:58:00"))] == 3
+    assert stored[service_day_instant(DAY, gtfs_seconds("07:08:00"))] == 2
+    assert stored[service_day_instant(DAY, gtfs_seconds("07:10:00"))] == 1
+    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+
+
+def test_a_cancellation_may_be_predicted_and_then_list_no_stop():
+    announced = gtfs_seconds("06:57:00")
+    scenario = _cancelling(
+        Cancellation(
+            "R_0700", DAY, announced_sec=announced, reported_as="canceled_without_stops", predicted_delay_sec=90
+        )
+    )
+    morning = [(at, trip) for at, trips in _statuses(polls(scenario)) for trip in trips if trip[0] == "R_0700"]
+    assert {at < service_day_instant(DAY, announced) for at, _trip in morning} == {True, False}
+    for at, (_trip_id, trip_status, stops) in morning:
+        if at < service_day_instant(DAY, announced):
+            assert trip_status == SCHEDULED
+            assert {(delay, status) for _seq, delay, status in stops} == {(90, SCHEDULED)}
+        else:
+            assert (trip_status, stops) == (CANCELED, [])
+    assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
     assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
 
 
