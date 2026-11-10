@@ -1121,6 +1121,34 @@ async def test_top_delayed_routes_falls_back_to_live_under_time_band(
 
 
 @pytest.mark.asyncio
+async def test_a_time_band_period_with_a_no_route_observation_lists_only_routes(
+    aconn, aagency_id, ch_client, ch_async_client, monkeypatch
+):
+    """An observation the feed sent with no route can't be listed or acted on
+    per route: under a time band the route lists leave it out, as the
+    aggregates' path does, and the summary still validates."""
+    monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 1)
+    when = datetime.combine(date(2026, 5, 18), time(8, 0), tzinfo=timezone.utc)
+    await _seed_update(aconn, aagency_id, when, "R_TD", 300, seq=1)
+    await _seed_update(aconn, aagency_id, when + timedelta(minutes=1), "R_TD", 360, seq=2)
+    await _seed_update(aconn, aagency_id, when + timedelta(minutes=2), None, 900, seq=3)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    from api.routers.overview import Concentration, TopDelayed
+    from pipeline.reports import compute_overview_summary
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
+    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["R_TD"]
+    assert [r["route_code"] for r in out["concentration"]["top_routes"]] == ["R_TD"]
+    assert out["concentration"]["top_routes"][0]["share_pct"] == 100.0
+    Concentration.model_validate(out["concentration"])
+    TopDelayed.model_validate(out["top_delayed"])
+
+
+@pytest.mark.asyncio
 async def test_top_delayed_routes_cover_the_headline_window(aconn, aagency_id):
     """top_delayed ranks over the headline's window, the whole period: a route
     late on the period's first day is listed and counted, and a route late
