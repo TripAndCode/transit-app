@@ -60,6 +60,7 @@ def stages(monkeypatch):
     started: list[str] = []
     gathered = {
         "_headline_stats": (2.5, 40),
+        "_reference": {"avg_min": 2.0},
         "_movers": [],
         "_concentration": None,
         "_top_delayed_routes": [],
@@ -83,11 +84,12 @@ async def test_fanout_never_holds_more_than_the_limit(stages):
 
     # The latest-date and left-out reads ahead of the fan-out share one, and
     # every stage takes its own.
-    assert pool.acquires == 11
+    assert pool.acquires == 12
     assert pool.peak <= ov.OVERVIEW_FANOUT_LIMIT
     assert pool.peak == ov.OVERVIEW_FANOUT_LIMIT, "the bound is a ceiling, not a serialiser"
     assert pool.active == 0
     assert payload["headline"]["avg_min"] == 2.5
+    assert payload["headline"]["reference"] == {"avg_min": 2.0, "delta_min": 0.5, "delta_pct": 25.0}
 
 
 @pytest.mark.asyncio

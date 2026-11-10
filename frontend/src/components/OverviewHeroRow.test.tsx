@@ -91,6 +91,33 @@ describe("OverviewHeroRow", () => {
     vi.restoreAllMocks();
   });
 
+  it("prints the trailing reference under the figure, apart from the verdict's comparison", () => {
+    mockFeed(0.1);
+    renderHero({
+      headline: headline({
+        reference: {
+          avg_min: 2.5,
+          delta_min: 0.8,
+          delta_pct: 32,
+          samples: 4200,
+          window_from: "2026-03-05",
+          window_to: "2026-06-02",
+          days: 90,
+          days_selected: 90,
+          days_collected: 90,
+          min_days: 72,
+          min_samples: 100,
+          reason: null,
+        },
+      }),
+    });
+    const range = formatDateRange("2026-03-05", "2026-06-02", { year: false });
+    const figure = document.querySelector(".ov-hero-figure") as HTMLElement;
+    expect(within(figure).getByText(`Past 90 days (${range}): average delay 2.5 min`)).toBeInTheDocument();
+    expect(within(figure).getByText("Worse than the past 90 days")).toBeInTheDocument();
+    expect(screen.getByText("+0.5 min on the 7 days before")).toBeInTheDocument();
+  });
+
   it("labels the primary figure with how many days it averages, and which", () => {
     mockFeed(0.1);
     renderHero();

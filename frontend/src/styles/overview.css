@@ -666,6 +666,29 @@
   color: var(--text-secondary);
   margin-left: 6px;
 }
+/* The trailing reference reads as a note under the figure, its judgement in
+   the verdict chip's neutral tone whichever way it falls. It wraps inside the
+   width the sparkline fades under (.ov-hero-figure > svg's mask), so the
+   chart's line never runs across it. */
+.ov-hero-reference {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  max-width: 250px;
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+.ov-hero-reference-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-weight: 700;
+  white-space: nowrap;
+}
 /* Legend for the sparkline's dashed reference line. HTML rather than SVG
    text: the chart behind it is stretched with preserveAspectRatio="none",
    which would distort any glyph drawn inside it. Positioned for the same

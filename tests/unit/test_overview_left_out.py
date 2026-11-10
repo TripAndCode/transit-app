@@ -113,6 +113,7 @@ async def test_every_route_list_reads_the_payloads_one_left_out_set(monkeypatch,
     monkeypatch.setattr(ov, "_latest_data_date", stage("_latest_data_date", date(2026, 10, 23)))
     for name, value in {
         "_headline_stats": (2.5, 40),
+        "_reference": {"avg_min": None},
         "_movers": {"worse": [], "better": []},
         "_concentration": {},
         "_top_delayed_routes": {},
