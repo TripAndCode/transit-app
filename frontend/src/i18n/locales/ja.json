@@ -1319,13 +1319,18 @@
       "metric_label": {
         "ewt_sec": "超過待ち時間（秒）",
         "vehicle_km_delivered_pct": "走行キロ達成率（%）",
-        "on_time_pct": "定時率（%）"
+        "on_time_pct": "定時率（%）",
+        "service_delivered_pct": "運行率（%）"
       },
-      "scope_agency_note": "事業者全体の値（路線別の内訳はありません）",
       "meets": "基準を満たす",
       "below": "基準に届かない",
       "not_judged_thin": "観測が{{floor}}回未満のため判定していません（{{observations}}回）",
       "not_judged_zero_delay": "遅れが常に0と報告されるため判定していません",
+      "not_judged_few_planned": "計画便数が{{floor}}便未満のため判定していません（{{planned}}便）",
+      "not_judged_route_plan": "この期間の一部の日について路線別の計画便数が記録されていないため判定していません",
+      "not_judged_no_shapes": "経路の形状データがないため判定していません",
+      "not_judged_delivered": "判定していません（{{reason}}）",
+      "delivered_judged_on": "運行率と走行キロ達成率の基準は、このページの期間について、路線ごとの計画便で判定しています（ほかの絞り込みは適用しません）。",
       "judged_on": "定時率の基準は、このページの期間と絞り込みで、次の定時の定義に基づいて判定しています。"
     },
     "weather_delay": {

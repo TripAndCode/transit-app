@@ -19,7 +19,10 @@ import { FeedQualityTrend } from "./FeedQualityTrend";
 import { useRowDrafts } from "./useRowDrafts";
 
 /** pipeline/reports/performance_standard.py's METRIC_TYPES. */
-const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct", "on_time_pct"] as const;
+const METRIC_TYPES = ["ewt_sec", "vehicle_km_delivered_pct", "on_time_pct", "service_delivered_pct"] as const;
+/** The targets that are shares, in percent, which the API and the table's
+ *  CHECKs hold to 0–100. */
+const SHARE_METRICS: ReadonlySet<string> = new Set(["on_time_pct", "service_delivered_pct"]);
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
@@ -176,12 +179,12 @@ function isNonNegativeNumber(raw: string): boolean {
   return raw.trim() !== "" && Number.isFinite(n) && n >= 0;
 }
 
-/** A finite target, and for an on-time target a percentage, as the API and
- *  the table's CHECK require. */
+/** A finite target, and for a share a percentage, as the API and the
+ *  table's CHECKs require. */
 function isThreshold(metricType: string, raw: string): boolean {
   const n = Number(raw);
   if (raw.trim() === "" || !Number.isFinite(n)) return false;
-  return metricType !== "on_time_pct" || (n >= 0 && n <= 100);
+  return !SHARE_METRICS.has(metricType) || (n >= 0 && n <= 100);
 }
 
 function StandardsEditor({
