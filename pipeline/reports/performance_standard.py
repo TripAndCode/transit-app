@@ -332,9 +332,7 @@ async def compute_performance_standards(
     delivered_by_route: dict[str, tuple[float | None, dict[str, Any] | None]] = {}
     delivered_codes = {r["route_code"] for r in rows if r["metric_type"] in _DELIVERED_METRICS}
     if delivered_codes:
-        delivered_by_route = await _delivered_by_route(
-            agency_id, dataclasses.replace(ctx, routes=route_scope, dow="all"), conn, delivered_codes
-        )
+        delivered_by_route = await _delivered_by_route(agency_id, ctx, conn, delivered_codes)
     has_shapes = any(r["metric_type"] == "vehicle_km_delivered_pct" for r in rows) and await _has_route_shapes(
         conn, agency_id
     )
