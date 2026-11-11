@@ -66,9 +66,11 @@ After ingest, `analyze` turns the raw readings into summary tables:
    timetable: headway quality leaves it out and counts it. A timetable kept before method
    `2026.11.10` has its median but not its sums, so its days are classified and their gaps
    count, but a route that pools one of them shows no excess wait, and headway quality
-   counts those days too. Two parts still read the timetable loaded now: the day type a
-   route's days are pooled by, and, for a period with no day to judge, whether the agency
-   has a high-frequency route at all.
+   counts those days too. Whether the agency has a high-frequency route at all, which an
+   empty panel says, is judged by the timetables in force over the period, for every route
+   they plan: the loaded timetable stands in only for a day no recorded timetable covers,
+   or whose timetable kept no figures. The day type a route's days are pooled by still
+   comes from the timetable loaded now.
 
 ## Method versions
 

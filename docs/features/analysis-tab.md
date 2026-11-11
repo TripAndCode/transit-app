@@ -115,8 +115,9 @@ What the user sees/does:
   can't serve (`time_band_supported: false`) gets its own `EmptyState`;
   neither state is ever drawn as a misleading zero. `/headway_quality`
   carries the same two fields, and names `no_high_frequency_routes` ahead of
-  any coverage reason when the timetable classified routes but none as
-  high-frequency. It judges each day by the timetable in force on it, and
+  any coverage reason when no timetable in force over the period classes a
+  route high-frequency (the loaded one standing in where those are unknown).
+  It judges each day by the timetable in force on it, and
   counts the days it could not: `days_timetable_not_kept` (left out, their
   timetable's scheduled headways not kept) and `days_scheduled_wait_not_kept`
   (pooled, but their timetable kept no scheduled wait, so the routes pooling

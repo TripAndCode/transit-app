@@ -13,9 +13,13 @@
 -- timetable keeps no scheduled headways, and the date is then not judged. A
 -- row built before this reads NULL until analyze rebuilds it, which the
 -- registry's version for the table requires.
+--
+-- agg_route_headway's scheduled_wait_mean_sec, the loaded timetable's mean
+-- wait, has no reader once each day reads its own timetable's sums.
 ALTER TABLE route_headway_by_content ADD COLUMN IF NOT EXISTS scheduled_headway_sum_sec DOUBLE PRECISION;
 ALTER TABLE route_headway_by_content ADD COLUMN IF NOT EXISTS scheduled_headway_sumsq_sec2 DOUBLE PRECISION;
 ALTER TABLE agg_route_headway_daily ADD COLUMN IF NOT EXISTS scheduled_headway_median_sec REAL;
 ALTER TABLE agg_route_headway_daily ADD COLUMN IF NOT EXISTS is_high_frequency BOOLEAN;
 ALTER TABLE agg_route_headway_daily ADD COLUMN IF NOT EXISTS scheduled_headway_sum_sec DOUBLE PRECISION;
 ALTER TABLE agg_route_headway_daily ADD COLUMN IF NOT EXISTS scheduled_headway_sumsq_sec2 DOUBLE PRECISION;
+ALTER TABLE agg_route_headway DROP COLUMN IF EXISTS scheduled_wait_mean_sec;

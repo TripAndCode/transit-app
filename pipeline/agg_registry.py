@@ -181,8 +181,9 @@ def _entries() -> list[AggTable]:
             3,
             Kind.STATIC_ONLY,
             Timetable.LOADED,
-            # pipeline.static_headways keeps each timetable's medians under this
-            # version, so the SQL computing them is rendered here too.
+            # pipeline.static_headways keeps each timetable's headways (median,
+            # sum and sum of squares) under this version, so the SQL computing
+            # them is rendered here too.
             lambda: [agg_sql.route_headway_sql(), agg_sql.route_headway_sql(all_routes=True)],
         ),
         AggTable(

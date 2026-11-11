@@ -1,7 +1,7 @@
 """route_headway_by_content keeps each timetable's scheduled headway sums
-beside its median, and agg_route_headway_daily carries each day's own
-timetable's figures. Rolling back loses the sums of every timetable no longer
-loaded, so the down is marked destructive."""
+beside its median, agg_route_headway_daily carries each day's own timetable's
+figures, and agg_route_headway's unread mean wait goes. Rolling back loses the
+sums of every timetable no longer loaded, so the down is marked destructive."""
 
 import os
 
@@ -20,13 +20,16 @@ _COLUMNS = {
 }
 
 
+_DROPPED = ("agg_route_headway", "scheduled_wait_mean_sec")
+
+
 def _columns(conn) -> set[tuple[str, str]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT table_name, column_name FROM information_schema.columns "
-            "WHERE table_name IN ('route_headway_by_content', 'agg_route_headway_daily')"
+            "WHERE table_name IN ('route_headway_by_content', 'agg_route_headway_daily', 'agg_route_headway')"
         )
-        return set(cur.fetchall()) & _COLUMNS
+        return set(cur.fetchall()) & (_COLUMNS | {_DROPPED})
 
 
 def test_the_down_is_marked_destructive():
@@ -50,7 +53,7 @@ def test_rolling_back_drops_the_columns_and_migrating_up_restores_them(apply_sch
     try:
         assert _columns(conn) == _COLUMNS
         migrate.migrate_down(below, conn, force_destructive=True)
-        assert _columns(conn) == set()
+        assert _columns(conn) == {_DROPPED}
 
         migrate.migrate_up(conn)
         assert _columns(conn) == _COLUMNS

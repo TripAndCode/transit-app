@@ -1466,7 +1466,6 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                     "scheduled_headway_median_sec",
                     "scheduled_samples",
                     "is_high_frequency",
-                    "scheduled_wait_mean_sec",
                 ],
                 p,
                 conn,
@@ -1625,12 +1624,12 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             # its long gaps against that median, its high-frequency test and
             # scheduled wait by the same timetable. A timetable with no kept
             # headways measures long gaps against the loaded one's median but
-            # judges nothing else (headways.schedules); a route with no median
-            # counts no long gaps (count_long_gaps).
+            # judges nothing else (headways.schedules).
             with _step("agg_route_headway_daily: reconstruct in Python"):
                 dominant = dominant_contents(headway_events, join.content_of())
             kept = static_headways.route_headways(conn, agency_id, {*dominant.values(), join.current})
-            not_kept = sum(1 for content in dominant.values() if content not in {c for c, _route in kept})
+            kept_contents = {content for content, _route in kept}
+            not_kept = sum(1 for content in dominant.values() if content not in kept_contents)
             if not_kept:
                 logger.info(
                     f"  agg_route_headway_daily: {not_kept} route-day(s) not judged, their own timetable keeping "

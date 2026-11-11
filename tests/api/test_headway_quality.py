@@ -66,23 +66,23 @@ async def headway_client(apply_schema):
 
     await pool.executemany(
         "INSERT INTO agg_route_headway "
-        "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-        " is_high_frequency, scheduled_wait_mean_sec) VALUES ($1,$2,$3,$4,$5,$6)",
+        "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, is_high_frequency) "
+        "VALUES ($1,$2,$3,$4,$5)",
         [
             # Perfectly regular 8-minute (480s) scheduled headway -> mean
             # wait = headway/2 = 240s (pipeline.headways.mean_wait_from_moments).
-            (aid, "R_EVEN", 480.0, 10, True, 240.0),
-            (aid, "R_BUNCH", 480.0, 10, True, 240.0),
+            (aid, "R_EVEN", 480.0, 10, True),
+            (aid, "R_BUNCH", 480.0, 10, True),
             # Classified NOT high-frequency -- must never appear below,
             # regardless of how much daily data it has.
-            (aid, "R_SLOW", 1800.0, 10, False, 900.0),
+            (aid, "R_SLOW", 1800.0, 10, False),
             # High-frequency, but every agg_route_headway_daily row seeded
             # for it below falls outside the requested date range.
-            (aid, "R_NODATA", 480.0, 10, True, 240.0),
+            (aid, "R_NODATA", 480.0, 10, True),
             # High-frequency, in-range daily data exists, but that data
             # predates migration 0040's sufficient-statistics columns and
             # hasn't been re-`analyze()`-d yet (see below).
-            (aid, "R_PREMIGRATE", 480.0, 10, True, 240.0),
+            (aid, "R_PREMIGRATE", 480.0, 10, True),
         ],
     )
     await _insert_days(
@@ -102,11 +102,10 @@ async def headway_client(apply_schema):
             # R_NODATA's only row is well outside the [2026-04-01, 2026-04-02]
             # range the tests below request.
             (aid, "R_NODATA", date(2026, 5, 1), 480.0, 2, 960.0, 460800.0, 0, *_EVERY_8_MIN),
-            # R_PREMIGRATE: `actual_samples` (pre-existing column) is
-            # populated, but the three migration-0040 sufficient-statistics
-            # columns are still NULL -- the transitional state between
-            # applying that migration and the next `make analyze-all` for
-            # this agency. Must degrade to None metrics, not a 500.
+            # R_PREMIGRATE: a route whose actual-side statistics are missing:
+            # `actual_samples` is populated, but the actual sums and long-gap
+            # count are NULL, as a row built before those columns existed
+            # reads. Must degrade to None metrics, not a 500.
             (aid, "R_PREMIGRATE", date(2026, 4, 1), 480.0, 2, None, None, None, *_EVERY_8_MIN),
         ],
     )
@@ -215,7 +214,7 @@ async def test_headway_quality_unconfirmed_static_join_agency_returns_no_rows(he
         await conn.execute(
             "INSERT INTO agg_route_headway "
             "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-            " is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_UNCONFIRMED', 480.0, 10, TRUE, 240.0)",
+            " is_high_frequency) VALUES ($1, 'R_UNCONFIRMED', 480.0, 10, TRUE)",
             unconfirmed_aid,
         )
     finally:
@@ -260,7 +259,7 @@ async def test_headway_quality_says_when_no_route_is_scheduled_often_enough(head
         await conn.execute(
             "INSERT INTO agg_route_headway "
             "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-            " is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_HOURLY', 3600.0, 10, FALSE, 1800.0)",
+            " is_high_frequency) VALUES ($1, 'R_HOURLY', 3600.0, 10, FALSE)",
             infrequent_aid,
         )
     finally:
@@ -294,7 +293,7 @@ async def _seed_weekday_dominant_route(aid: int) -> None:
     )
     await pool.execute(
         "INSERT INTO agg_route_headway (agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-        "is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_DAY', 600.0, 10, TRUE, 300.0)",
+        "is_high_frequency) VALUES ($1, 'R_DAY', 600.0, 10, TRUE)",
         aid,
     )
     every_10_min = (600.0, True, 6000.0, 3600000.0)
@@ -388,7 +387,7 @@ async def _a_route_whose_timetable_changed(aid: int) -> None:
     pool = app.state.pool
     await pool.execute(
         "INSERT INTO agg_route_headway (agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-        "is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_CHANGE', 1800.0, 10, FALSE, 900.0)",
+        "is_high_frequency) VALUES ($1, 'R_CHANGE', 1800.0, 10, FALSE)",
         aid,
     )
     await _insert_days(
@@ -425,7 +424,7 @@ async def test_a_day_whose_timetable_keeps_no_scheduled_headways_is_left_out_and
     client, aid = headway_client
     await app.state.pool.execute(
         "INSERT INTO agg_route_headway (agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-        "is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_UNKEPT', 480.0, 10, TRUE, 240.0)",
+        "is_high_frequency) VALUES ($1, 'R_UNKEPT', 480.0, 10, TRUE)",
         aid,
     )
     await _insert_days(
@@ -471,32 +470,118 @@ async def test_a_pooled_day_kept_without_its_scheduled_sums_leaves_the_excess_wa
     assert r.json()["days_scheduled_wait_not_kept"] == 1
 
 
-async def test_days_whose_own_timetables_class_no_route_high_frequency_say_so(headway_client):
-    """The days in range ran timetables with no high-frequency route, so the
-    loaded timetable classing one high-frequency does not hold the panel open."""
+async def _an_agency(name: str) -> int:
+    """A static_join agency whose feed coverage is confirmed, with nothing else seeded."""
     from api.main import app
 
-    client, _aid = headway_client
     pool = app.state.pool
     row = await pool.fetchrow(
         "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES ($1, $2, 'static_join') "
         "RETURNING agency_id",
-        "Headway Quality Once Infrequent Agency",
-        "http://headway-quality-once-infrequent.example.com",
+        name,
+        f"http://{name.lower().replace(' ', '-')}.example.com",
     )
-    aid = row["agency_id"]
-    await confirm_rt_field_coverage(pool, aid)
-    await pool.execute(
+    await confirm_rt_field_coverage(pool, row["agency_id"])
+    return row["agency_id"]
+
+
+async def _loaded_classes(aid: int, routes: dict[str, float]) -> None:
+    """The timetable loaded now's median per route (agg_route_headway)."""
+    from api.main import app
+
+    await app.state.pool.executemany(
         "INSERT INTO agg_route_headway (agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-        "is_high_frequency, scheduled_wait_mean_sec) VALUES ($1, 'R_NOW_FREQUENT', 480.0, 10, TRUE, 240.0)",
+        "is_high_frequency) VALUES ($1, $2, $3, 10, $4)",
+        [(aid, route, median, median <= 720) for route, median in routes.items()],
+    )
+
+
+async def _in_force(aid: int, first: date, last: date, content: str, routes: dict[str, float]) -> None:
+    """*content* in force from *first* to *last*, as analyze recorded it, and its kept medians per route."""
+    from api.main import app
+
+    pool = app.state.pool
+    await pool.execute(
+        "INSERT INTO agg_timetable_in_force (agency_id, first_day, last_day, static_version_id, content_hash) "
+        "VALUES ($1, $2, $3, $4, $4)",
         aid,
+        first,
+        last,
+        content,
     )
-    await _insert_days(
-        pool, [(aid, "R_NOW_FREQUENT", date(2026, 4, 1), 1800.0, 1, 1800.0, 3240000.0, 0, *_EVERY_30_MIN)]
+    await pool.executemany(
+        "INSERT INTO route_headway_by_content (agency_id, content_hash, route_code, logic_version, "
+        "scheduled_headway_median_sec) VALUES ($1, $2, $3, 3, $4)",
+        [(aid, content, route, median) for route, median in routes.items()],
     )
+
+
+_APRIL_1_DAY_OF_B = (date(2026, 4, 1), 1800.0, 1, 1800.0, 3240000.0, 0, *_EVERY_30_MIN)
+
+
+async def test_days_whose_own_timetables_class_no_route_high_frequency_say_so(headway_client):
+    """The timetable in force over the range has no high-frequency route, so the
+    loaded timetable classing one high-frequency does not hold the panel open."""
+    from api.main import app
+
+    client, _aid = headway_client
+    aid = await _an_agency("Headway Quality Once Infrequent Agency")
+    await _loaded_classes(aid, {"R_NOW_FREQUENT": 480.0})
+    await _in_force(aid, date(2026, 3, 1), date(2026, 4, 30), "c_then", {"R_NOW_FREQUENT": 1800.0})
+    await _insert_days(app.state.pool, [(aid, "R_NOW_FREQUENT", *_APRIL_1_DAY_OF_B)])
 
     r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-02")
 
     assert r.status_code == 200
     assert r.json()["rows"] == []
     assert r.json()["unavailable_reason"] == "no_high_frequency_routes"
+
+
+async def test_a_high_frequency_route_with_no_day_in_range_is_still_a_high_frequency_route(headway_client):
+    """A runs every 8 min but has no day in range; B has the only day, every 30
+    min. The panel is empty for want of A's data, not for want of a route."""
+    from api.main import app
+
+    client, _aid = headway_client
+    aid = await _an_agency("Headway Quality Quiet Frequent Route Agency")
+    await _loaded_classes(aid, {"A": 480.0, "B": 1800.0})
+    await _insert_days(app.state.pool, [(aid, "B", *_APRIL_1_DAY_OF_B)])
+
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+
+    assert r.status_code == 200
+    assert r.json()["rows"] == []
+    assert r.json()["unavailable_reason"] is None
+
+
+async def test_the_timetable_in_force_over_the_range_classes_a_route_the_loaded_one_does_not(headway_client):
+    """In force over the range, A ran every 8 min; the timetable loaded now runs it every 30."""
+    from api.main import app
+
+    client, _aid = headway_client
+    aid = await _an_agency("Headway Quality Once Frequent Agency")
+    await _loaded_classes(aid, {"A": 1800.0, "B": 1800.0})
+    await _in_force(aid, date(2026, 3, 1), date(2026, 4, 30), "c_then", {"A": 480.0, "B": 1800.0})
+    await _insert_days(app.state.pool, [(aid, "B", *_APRIL_1_DAY_OF_B)])
+
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+
+    assert r.json()["rows"] == []
+    assert r.json()["unavailable_reason"] is None
+
+
+async def test_a_range_the_timetables_in_force_leave_partly_uncovered_falls_back_to_the_loaded_one(headway_client):
+    """Only 4/1 has a timetable in force, and it has no high-frequency route; for
+    4/2 the timetable loaded now stands in, and it runs A every 8 min."""
+    from api.main import app
+
+    client, _aid = headway_client
+    aid = await _an_agency("Headway Quality Partly Covered Agency")
+    await _loaded_classes(aid, {"A": 480.0, "B": 1800.0})
+    await _in_force(aid, date(2026, 3, 1), date(2026, 4, 1), "c_then", {"A": 1800.0, "B": 1800.0})
+    await _insert_days(app.state.pool, [(aid, "B", *_APRIL_1_DAY_OF_B)])
+
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-04-01&to=2026-04-02")
+
+    assert r.json()["rows"] == []
+    assert r.json()["unavailable_reason"] is None
