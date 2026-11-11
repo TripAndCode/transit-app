@@ -775,6 +775,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         cur.execute("SELECT to_regclass(%s)", (IN_FORCE_TABLE,))
         if cur.fetchone()[0] is None:
             raise RuntimeError(f"Postgres has no {IN_FORCE_TABLE}; run `make migrate`")
+    static_archive.require_mirror(conn)
     content_key = None
     if has_static:
         # A backstop for a timetable loaded before the archive existed:

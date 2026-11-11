@@ -8,7 +8,9 @@ loaded (a backstop for one loaded before this existed): its stop times, and
 its schedule as ingest stamps a poll matching each stop time. Content, not the
 version name, is the key: a reload under a new name with the same content
 stores nothing new, and the version map says which content each name carried.
-The days each name covers are kept beside the map, as its span.
+The days each name covers are kept beside the map, as its span. Postgres
+mirrors the map, each name at its latest content (MIRROR), for the definition
+stamp, which reads it on every request.
 """
 
 import hashlib
@@ -18,6 +20,8 @@ from collections.abc import Callable, Iterable
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import NamedTuple
+
+import psycopg2.extras
 
 from pipeline.clickhouse import UPDATE_COLUMNS, UPDATES_TABLE, checked_table
 from pipeline.service_day import service_date_ch
@@ -30,6 +34,8 @@ ARCHIVE = "static_stop_times_archive"
 SCHEDULE = "static_schedule_archive"
 VERSION_MAP = "static_version_map"
 SPANS = "static_version_spans"
+# The Postgres mirror of VERSION_MAP (migration 0097).
+MIRROR = "static_version_contents"
 _BATCH = 50_000
 
 
@@ -85,6 +91,17 @@ def require_tables(ch) -> None:
     missing = [table for table in (ARCHIVE, SCHEDULE, VERSION_MAP, SPANS) if table not in names]
     if missing:
         raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; run `make ch-bootstrap`")
+
+
+def require_mirror(conn) -> None:
+    """Refuse to map names against a Postgres that predates the map's mirror:
+    a map row written without its mirror row would leave the stamp without the
+    name's content until the mirror is filled by hand."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (MIRROR,))
+        missing = cur.fetchone()[0] is None
+    if missing:
+        raise RuntimeError(f"Postgres has no {MIRROR}; run `make migrate`")
 
 
 def loaded_stem(conn, agency_id: int) -> str | None:
@@ -154,10 +171,11 @@ def is_archived(ch, agency_id: int, key: str) -> bool:
     return _holds(ch, ARCHIVE, agency_id, key)
 
 
-def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> str | None:
+def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None, mirror_conn=None) -> str | None:
     """Archive the agency's loaded timetable unless its content is already kept,
-    map its version name to that content, record the name's span unless one is
-    recorded, and return the content's key.
+    map its version name to that content, mirror the name's mapping into
+    Postgres, record the name's span unless one is recorded, and return the
+    content's key.
 
     None when no stop times are loaded, or when the timetable changed while it
     was being copied (a concurrent load_static committed): nothing is swapped
@@ -165,7 +183,9 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
     not promise the mapping: a name read after the timetable changed is left
     unmapped, for the next call to record. *parts*, when the
     caller already read them, saves reading them again; they must be the
-    loaded timetable's.
+    loaded timetable's. *mirror_conn* is the Postgres the map is mirrored in
+    (MIRROR), *conn* unless the timetable is loaded in another database than
+    the one the app reads (scripts/backfill_timetable_archive.py's scratch).
     """
     if parts is None:
         parts = static_parts(agency_id, conn, True)
@@ -176,7 +196,7 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None) -> 
     for kept, count in ((_STOP_TIMES, expected), (_SCHEDULE, None)):
         if not _holds(ch, kept.table, agency_id, key) and not _copy(conn, ch, agency_id, key, parts, kept, count):
             return None
-    _map(conn, ch, agency_id, key, parts)
+    _map(conn, ch, agency_id, key, parts, conn if mirror_conn is None else mirror_conn)
     _record_loaded_span(conn, ch, agency_id)
     return key
 
@@ -309,8 +329,10 @@ def clear_archive_joined_states(conn, agency_id: int) -> None:
         conn.commit()
 
 
-def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
-    """Record that the loaded version name carries *key*, unless that is already its latest mapping.
+def _map(conn, ch, agency_id: int, key: str, parts: list[str], mirror_conn) -> None:
+    """Record that the loaded version name carries *key*, unless that is
+    already its latest mapping, and mirror the name's latest mapping into
+    *mirror_conn*.
 
     A name already mapped to other content (a timetable refetched under the
     same name) leaves the dates ingested under it built against the other one,
@@ -320,13 +342,16 @@ def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
     if stem is None:
         return
     latest = ch.query(
-        f"SELECT argMax(content_hash, archived_at) FROM {VERSION_MAP} "
+        f"SELECT argMax(tuple(content_hash, archived_at), archived_at) FROM {VERSION_MAP} "
         "WHERE agency_id = {agency:Int32} AND static_version_id = {stem:String}",
         parameters={"agency": agency_id, "stem": stem},
     ).result_rows
-    # argMax over no rows is '', which no content is.
-    previous = latest[0][0] if latest else ""
+    # An aggregate over no rows is still one row, ('', the epoch), and '' is no content.
+    previous, previous_at = latest[0][0]
     if previous == key:
+        # Mirrored again from the map's own row: a name mapped before the
+        # mirror existed, or whose mirror write failed, catches up here.
+        mirror(mirror_conn, [Mapping(agency_id, stem, key, previous_at)])
         return
     # A load replaces the name and the content in one commit, so content read
     # after the name still matching *parts* means the name read was *key*'s.
@@ -341,11 +366,73 @@ def _map(conn, ch, agency_id: int, key: str, parts: list[str]) -> None:
         # Cleared and committed before the map row lands, so a process that
         # dies in between still rebuilds them; clearing again is harmless.
         clear_archive_joined_states(conn, agency_id)
+    archived_at = _map_time()
     ch.insert(
         VERSION_MAP,
-        [(agency_id, stem, key, datetime.now(timezone.utc))],
+        [(agency_id, stem, key, archived_at)],
         column_names=["agency_id", "static_version_id", "content_hash", "archived_at"],
     )
+    # After the map row, so the mirror never names a content the map does not.
+    mirror(mirror_conn, [Mapping(agency_id, stem, key, archived_at)])
+
+
+def _map_time() -> datetime:
+    """Now, at the map's millisecond precision, so the mirror holds the map row's own time."""
+    now = datetime.now(timezone.utc)
+    return now.replace(microsecond=now.microsecond - now.microsecond % 1000)
+
+
+class Mapping(NamedTuple):
+    """A version name's content in the map, and when the map recorded it."""
+
+    agency_id: int
+    stem: str
+    content: str
+    archived_at: datetime
+
+
+def _utc(at: datetime) -> datetime:
+    # The map's times are UTC, which a client may return without a zone.
+    return at.replace(tzinfo=timezone.utc) if at.tzinfo is None else at
+
+
+_LATEST_MAPPINGS_SQL = (
+    f"SELECT agency_id, static_version_id, argMax(tuple(content_hash, archived_at), archived_at) "
+    f"FROM {VERSION_MAP} GROUP BY agency_id, static_version_id ORDER BY agency_id, static_version_id"
+)
+
+
+def latest_mappings(ch) -> list[Mapping]:
+    """Every agency's mapped version names, each at its latest content, by agency then name."""
+    rows = ch.query(_LATEST_MAPPINGS_SQL).result_rows
+    return [Mapping(agency, stem, latest[0], _utc(latest[1])) for agency, stem, latest in rows]
+
+
+def mirror(conn, mappings: Iterable[tuple[int, str, str, datetime]]) -> int:
+    """Copy *mappings* (:class:`Mapping` or its tuple), each (agency, name) at
+    most once, into the map's Postgres mirror and commit; how many rows changed.
+
+    A name keeps its row unless *mappings* maps it later, so the mirror holds
+    each name at the latest content the map gives it, whichever copy lands
+    last, and copying a mapping again changes nothing. Committed at once: the
+    map has no rollback, and a mirror row left in a caller's transaction would
+    be lost with it.
+    """
+    rows = [(agency_id, stem, content, _utc(archived_at)) for agency_id, stem, content, archived_at in mappings]
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        written = psycopg2.extras.execute_values(
+            cur,
+            f"INSERT INTO {MIRROR} (agency_id, static_version_id, content_hash, archived_at) VALUES %s "
+            "ON CONFLICT (agency_id, static_version_id) DO UPDATE "
+            "SET content_hash = EXCLUDED.content_hash, archived_at = EXCLUDED.archived_at "
+            f"WHERE {MIRROR}.archived_at < EXCLUDED.archived_at RETURNING 1",
+            rows,
+            fetch=True,
+        )
+    conn.commit()
+    return len(written)
 
 
 class ScheduleJoin(NamedTuple):

@@ -174,6 +174,31 @@ describe("DefinitionMetaBlock", () => {
     expect(screen.getByTestId("definition-meta")).toHaveTextContent("Timetable: hiroden_static: 1 day (of 1 day).");
   });
 
+  const HASHED: TimetableVersion[] = [
+    { agency_id: 1, name: "gtfs_static_20260401", fetched_on: "2026-04-01", days: 20, content_hash: "a1b2c3d4" },
+    { agency_id: 1, name: "hiroden_static", fetched_on: null, days: 5, content_hash: "e5f60718" },
+    { agency_id: 1, name: "gtfs_static_20260501", fetched_on: "2026-05-01", days: 3, content_hash: null },
+    { agency_id: 1, name: null, fetched_on: null, days: 3 },
+  ];
+
+  it("names each timetable the archive maps by its content too, and an unmapped one without", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: HASHED }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Timetable: the version fetched Apr 1, 2026 (content hash a1b2c3d4): 20 days; " +
+        "hiroden_static (content hash e5f60718): 5 days; the version fetched May 1, 2026: 3 days; " +
+        "none recorded: 3 days (of 31 days).",
+    );
+  });
+
+  it("names each mapped timetable by its content the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, timetable_versions: HASHED }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "時刻表：2026年4月1日取得版（内容ハッシュ a1b2c3d4）20日間、hiroden_static（内容ハッシュ e5f60718）5日間、" +
+        "2026年5月1日取得版 3日間、記録なし 3日間（全31日間）。",
+    );
+  });
+
   it("says nothing of timetables the API did not name", () => {
     renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
     expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("Timetable");

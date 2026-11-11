@@ -22,6 +22,7 @@ from typing import Literal
 import asyncpg
 from pydantic import AwareDatetime, BaseModel
 
+from pipeline import static_archive
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.cache import clear_all
 from pipeline.clickhouse import jst_date
@@ -89,6 +90,10 @@ METHODOLOGY_URLS: dict[str, str] = json.loads(
     )
 )
 
+# How many leading hex digits of a timetable's content hash the stamp shows:
+# enough to tell an agency's timetables apart, short enough to read aloud.
+CONTENT_HASH_DIGITS = 8
+
 # A named preset in a reader's words, said beside its window wherever a
 # definition is written out: the footnotes, the CSV preamble and, in the same
 # words, the screens (frontend definitionMeta.preset).
@@ -106,12 +111,20 @@ class TimetableVersion(BaseModel):
     (agg_schedule_revision_daily). ``name`` is the loaded zip's version name,
     ``fetched_on`` the day that name says it was fetched; ``name`` is None for
     the days with no timetable recorded: none analyzed yet, or an ingest that
-    stamps no version."""
+    stamps no version.
+
+    ``content_hash`` is the first :data:`CONTENT_HASH_DIGITS` hex digits of
+    the content the timetable archive maps the name to
+    (:mod:`pipeline.static_archive`), read from the map's Postgres mirror: two
+    names with one hash carried the same timetable, and a name refetched with
+    other content shows the other hash. None for a name the archive does not
+    map, which no hash is guessed for, and for the days with none recorded."""
 
     agency_id: int
     name: str | None
     fetched_on: date | None
     days: int
+    content_hash: str | None = None
 
 
 class SourceMix(BaseModel):
@@ -216,12 +229,15 @@ ORDER BY a.agency_id, h.date
 
 
 async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedule: ScheduleDays) -> DefinitionMeta:
-    """*meta* with the timetables in force over *schedule*'s dates, the source
-    of each of those days' observations, and ``built_at``: the newest time
-    analyze rewrote any aggregate, all for *agency_id*, or for every agency
-    the board lists when it is None. *schedule* is that scope's
+    """*meta* with the timetables in force over *schedule*'s dates, each named
+    one with its content's short hash, the source of each of those days'
+    observations, and ``built_at``: the newest time analyze rewrote any
+    aggregate, all for *agency_id*, or for every agency the board lists when it
+    is None. *schedule* is that scope's
     :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
-    gets its timetables and sources and no build.
+    gets its timetables and sources and no build. Everything is read from
+    Postgres: the contents from the version map's mirror, never from
+    ClickHouse.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
     so when analyze has rewritten any table since this process last looked, every
@@ -229,8 +245,9 @@ async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedul
     than the build it names.
     """
     sources = await _read_source_days(conn, agency_id, schedule.from_date, schedule.to_date)
+    versions = _timetables(schedule)
     update: dict[str, object] = {
-        "timetable_versions": _timetables(schedule),
+        "timetable_versions": _with_contents(versions, await _read_contents(conn, versions)),
         "source_mix": None if sources is None else _source_mix(sources, schedule.from_date, schedule.to_date),
     }
     if meta.source == "aggregates":
@@ -261,30 +278,71 @@ def _timetables(schedule: ScheduleDays) -> list[TimetableVersion]:
     return versions
 
 
-# Whether this process has said its database lacks the source counts.
-_warned_no_sources = False
+# The stamp's enrichments this process has said its database lacks.
+_warned_missing: set[str] = set()
 
 
-async def _read_source_days(conn, agency_id: int | None, from_date: date, to_date: date) -> list | None:
-    """The :data:`_SOURCE_DAYS_SQL` rows, or None on a database not yet
-    migrated to the source counts. They only enrich the stamp, so their
-    absence leaves the observations line out rather than failing the figures.
+async def _fetch_enrichment(conn, what: str, sql: str, *args) -> list | None:
+    """*sql*'s rows, or None on a database not yet migrated to *what*. An
+    enrichment only adds to the stamp, so its absence leaves that part out
+    rather than failing the figures.
 
     Inside a caller's transaction the read runs in its own savepoint: a failed
     statement would otherwise abort that transaction, and the caller's next
     statement with it. Outside one, a failed statement leaves nothing behind.
     """
-    global _warned_no_sources
     try:
         if conn.is_in_transaction():
             async with conn.transaction():
-                return await conn.fetch(_SOURCE_DAYS_SQL, agency_id, from_date, to_date)
-        return await conn.fetch(_SOURCE_DAYS_SQL, agency_id, from_date, to_date)
+                return await conn.fetch(sql, *args)
+        return await conn.fetch(sql, *args)
     except (asyncpg.exceptions.UndefinedColumnError, asyncpg.exceptions.UndefinedTableError) as exc:
-        if not _warned_no_sources:
-            _log.warning("definition stamp: no source counts in agg_feed_health (migrations behind?): %s", exc)
-            _warned_no_sources = True
+        if what not in _warned_missing:
+            _log.warning("definition stamp: no %s (migrations behind?): %s", what, exc)
+            _warned_missing.add(what)
         return None
+
+
+async def _read_source_days(conn, agency_id: int | None, from_date: date, to_date: date) -> list | None:
+    """The :data:`_SOURCE_DAYS_SQL` rows, or None on a database not yet
+    migrated to the source counts, whose absence leaves the observations line out."""
+    return await _fetch_enrichment(
+        conn, "source counts in agg_feed_health", _SOURCE_DAYS_SQL, agency_id, from_date, to_date
+    )
+
+
+# The content the version map's Postgres mirror holds for each bound
+# (agency, name) pair: one primary-key probe per timetable named.
+_CONTENTS_SQL = f"""
+SELECT n.agency_id, n.static_version_id, m.content_hash
+FROM unnest($1::int[], $2::text[]) AS n(agency_id, static_version_id)
+JOIN {static_archive.MIRROR} m ON m.agency_id = n.agency_id AND m.static_version_id = n.static_version_id
+"""
+
+
+async def _read_contents(conn, versions: list[TimetableVersion]) -> dict[tuple[int, str], str]:
+    """The content the version map maps each named timetable of *versions*
+    to, by (agency, name), as its Postgres mirror holds it. Empty on a
+    database not yet migrated to the mirror, whose timetables then carry no
+    hash; nothing is read when *versions* names none."""
+    named = [(version.agency_id, version.name) for version in versions if version.name is not None]
+    if not named:
+        return {}
+    agencies, names = [agency for agency, _ in named], [name for _, name in named]
+    rows = await _fetch_enrichment(conn, static_archive.MIRROR, _CONTENTS_SQL, agencies, names)
+    return {} if rows is None else {(row[0], row[1]): row[2] for row in rows}
+
+
+def _with_contents(versions: list[TimetableVersion], contents: dict[tuple[int, str], str]) -> list[TimetableVersion]:
+    """*versions*, each named one whose agency and name *contents* maps
+    carrying the short form of its content."""
+    named = []
+    for version in versions:
+        content = None if version.name is None else contents.get((version.agency_id, version.name))
+        named.append(
+            version if content is None else version.model_copy(update={"content_hash": content[:CONTENT_HASH_DIGITS]})
+        )
+    return named
 
 
 def _day_source(archive_rows: int | None, live_rows: int | None) -> Literal["archive", "live"] | None:
@@ -496,15 +554,23 @@ def _timetable_text(meta: DefinitionMeta, locale: str) -> str | None:
 
 
 def _timetable_part(version: TimetableVersion, locale: str) -> str:
+    """One timetable and its days, noted with the day its zip was fetched and
+    its content's short hash where each is known. The Japanese text joins the
+    notes with 、, as the CSV preamble keeps no ASCII comma."""
     days = _days(version.days, locale)
+    en = locale == "en"
     if version.name is None:
-        return f"none recorded: {days}" if locale == "en" else f"記録なし {days}"
-    if locale == "en":
-        fetched = "" if version.fetched_on is None else f" (fetched {version.fetched_on.isoformat()})"
-        return f"{version.name}{fetched}: {days}"
-    if version.fetched_on is None:
-        return f"{version.name} {days}"
-    return f"{version.name}（{version.fetched_on.isoformat()}取得）{days}"
+        return f"none recorded: {days}" if en else f"記録なし {days}"
+    notes = []
+    if version.fetched_on is not None:
+        day = version.fetched_on.isoformat()
+        notes.append(f"fetched {day}" if en else f"{day}取得")
+    if version.content_hash is not None:
+        notes.append(f"content hash {version.content_hash}" if en else f"内容ハッシュ {version.content_hash}")
+    if en:
+        noted = f" ({', '.join(notes)})" if notes else ""
+        return f"{version.name}{noted}: {days}"
+    return f"{version.name}（{'、'.join(notes)}）{days}" if notes else f"{version.name} {days}"
 
 
 # What each source is, said wherever a day of either is counted.

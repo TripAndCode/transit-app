@@ -477,6 +477,12 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
     response = (await client.get(f"/api/{refiled.agency_id}/reports/route_table?{window}")).json()
     assert response["definition"]["source"] == "live"
     assert [(v["name"], v["days"]) for v in response["definition"]["timetable_versions"]] == [(refiled.a, 1)]
+    # Each name carries its own content, as the loads and analyze runs mapped it.
+    join = static_archive.schedule_join(ch_client, refiled.agency_id, None)
+    content = dict(zip(join.stems, join.hashes, strict=True))
+    assert content[refiled.a] != content[refiled.b]
+    hashes = [v["content_hash"] for v in response["definition"]["timetable_versions"]]
+    assert hashes == [content[refiled.a][:8]]
 
     # B's span now starts on the day read; analyze has not run since, so the
     # aggregates still name A, while a live scan files the day under B.
@@ -488,6 +494,7 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
     invalidate_schedule_joins()
     response = (await client.get(f"/api/{refiled.agency_id}/reports/route_table?{window}")).json()
     assert [(v["name"], v["days"]) for v in response["definition"]["timetable_versions"]] == [(refiled.b, 1)]
+    assert [v["content_hash"] for v in response["definition"]["timetable_versions"]] == [content[refiled.b][:8]]
     # Under B, b departs at 14:10, outside the band: f and g alone are fewer
     # departures than the table lists, so the rows computed under A are gone too.
     assert response["rows"] == []

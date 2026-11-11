@@ -222,9 +222,11 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
     """
     p = resolve_static_zip(path)
     # Before any work: the load keeps the outgoing timetable and records the
-    # incoming one's span there, and stopping partway would leave the outgoing
-    # plan saved for a reload that never happened.
+    # incoming one's span there, mirroring the outgoing name's mapping in
+    # Postgres, and stopping partway would leave the outgoing plan saved for a
+    # reload that never happened.
     static_archive.require_tables(ch_client)
+    static_archive.require_mirror(conn)
 
     # The loaded zip's filename stem (e.g. "gtfs_static_20260101" or the
     # legacy "hiroden_static") is the only identifier that survives past this

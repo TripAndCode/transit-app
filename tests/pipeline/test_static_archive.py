@@ -363,3 +363,144 @@ def test_a_names_span_is_its_latest_recording_both_ends_together(ch_client, agen
     assert static_archive.spans(ch_client, agency_id) == {
         "gtfs_static_20261025": (date(2026, 10, 20), date(2026, 12, 31))
     }
+
+
+# The Postgres mirror of the version map, which the stamp reads each name's content from.
+
+
+def _mirrored(pg_conn, agency_id):
+    pg_conn.rollback()
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            f"SELECT static_version_id, content_hash, archived_at FROM {static_archive.MIRROR} "
+            "WHERE agency_id = %s ORDER BY static_version_id",
+            (agency_id,),
+        )
+        return cur.fetchall()
+
+
+def _mapped_at(ch_client, agency_id):
+    rows = ch_client.query(
+        f"SELECT static_version_id, content_hash, archived_at FROM {static_archive.VERSION_MAP} "
+        "WHERE agency_id = {a:Int32} ORDER BY static_version_id, archived_at",
+        parameters={"a": agency_id},
+    ).result_rows
+    return [(stem, content, at if at.tzinfo else at.replace(tzinfo=timezone.utc)) for stem, content, at in rows]
+
+
+def test_a_mapped_name_is_mirrored_at_the_maps_own_time(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    mapped = _mapped_at(ch_client, agency_id)
+    assert [(stem, content) for stem, content, _ in mapped] == [("gtfs_static_20261025", key)]
+    assert _mirrored(pg_conn, agency_id) == mapped
+
+
+def test_a_new_name_for_the_same_content_is_mirrored_beside_the_old_one(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    _set_stem(pg_conn, agency_id, "gtfs_static_20261101")
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert [(stem, content) for stem, content, _ in _mirrored(pg_conn, agency_id)] == [
+        ("gtfs_static_20261025", key),
+        ("gtfs_static_20261101", key),
+    ]
+
+
+def test_a_name_remapped_to_new_content_mirrors_the_new_content(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    first = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    _change_the_content(pg_conn, agency_id)
+    second = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert second != first
+    assert _mirrored(pg_conn, agency_id) == [_mapped_at(ch_client, agency_id)[-1]]
+    assert _mirrored(pg_conn, agency_id)[0][1] == second
+
+
+def test_a_name_the_map_holds_and_the_mirror_lacks_is_mirrored_when_archived_again(pg_conn, agency_id, ch_client):
+    """A name mapped before the mirror existed reaches it the next time its
+    timetable is archived, at the map's own time, and the map gains no row."""
+    _seed(pg_conn, agency_id)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    with pg_conn.cursor() as cur:
+        cur.execute(f"DELETE FROM {static_archive.MIRROR} WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _mirrored(pg_conn, agency_id) == _mapped_at(ch_client, agency_id)
+    assert len(_mapped_at(ch_client, agency_id)) == 1
+
+
+def test_a_timetable_without_a_stem_mirrors_nothing(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    _set_stem(pg_conn, agency_id, None)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _mirrored(pg_conn, agency_id) == []
+
+
+def test_a_map_row_that_never_lands_is_never_mirrored(pg_conn, agency_id, ch_client, monkeypatch):
+    """The mirror never names a content the map does not: it is written after the map row."""
+    _seed(pg_conn, agency_id)
+    real_insert = ch_client.insert
+
+    def insert(table, *args, **kwargs):
+        if table == static_archive.VERSION_MAP:
+            raise RuntimeError("injected failure before the map row")
+        return real_insert(table, *args, **kwargs)
+
+    monkeypatch.setattr(ch_client, "insert", insert)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _mirrored(pg_conn, agency_id) == []
+
+
+def test_the_mirror_never_moves_back_to_an_older_mapping(pg_conn, agency_id):
+    newer = datetime(2026, 10, 2, tzinfo=timezone.utc)
+    older = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    assert static_archive.mirror(pg_conn, [(agency_id, "gtfs_static_20261001", "b" * 32, newer)]) == 1
+    assert static_archive.mirror(pg_conn, [(agency_id, "gtfs_static_20261001", "a" * 32, older)]) == 0
+    assert static_archive.mirror(pg_conn, [(agency_id, "gtfs_static_20261001", "b" * 32, newer)]) == 0
+    assert _mirrored(pg_conn, agency_id) == [("gtfs_static_20261001", "b" * 32, newer)]
+
+
+def test_a_load_mirrors_the_timetable_it_replaces(pg_conn, agency_id, ch_client, tmp_path):
+    from pipeline.static_loader import load_static
+
+    load_static(_zip(tmp_path, "gtfs_static_20261025", "08:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    outgoing = static_archive.content_hash(static_parts(agency_id, pg_conn, True))
+    load_static(_zip(tmp_path, "gtfs_static_20261028", "09:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    assert [(stem, content) for stem, content, _ in _mirrored(pg_conn, agency_id)] == [
+        ("gtfs_static_20261025", outgoing)
+    ]
+
+
+def test_a_load_without_the_mirror_fails_closed(pg_conn, agency_id, ch_client, tmp_path, monkeypatch):
+    """Before anything is mapped or replaced, so the map never runs ahead of a mirror that cannot follow."""
+    from pipeline.static_loader import load_static
+
+    load_static(_zip(tmp_path, "gtfs_static_20261025", "08:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    monkeypatch.setattr(static_archive, "MIRROR", "static_version_contents_absent")
+    with pytest.raises(RuntimeError, match="make migrate"):
+        load_static(_zip(tmp_path, "gtfs_static_20261028", "09:00:00"), agency_id, pg_conn, ch_client=ch_client)
+    pg_conn.rollback()
+    assert _stop_times(pg_conn, agency_id) == ["08:00:00", "08:00:00"]
+    assert _map(ch_client, agency_id) == []
+
+
+def test_analyze_mirrors_the_loaded_timetable(pg_conn, agency_id, ch_client):
+    from tests.pipeline.test_analyze import _analyze
+
+    _seed(pg_conn, agency_id)
+    _analyze(agency_id, pg_conn, ch_client)
+    key = static_archive.content_hash(static_parts(agency_id, pg_conn, True))
+    assert [(stem, content) for stem, content, _ in _mirrored(pg_conn, agency_id)] == [("gtfs_static_20261025", key)]
+
+
+def test_analyze_refuses_without_the_mirror(pg_conn, agency_id, ch_client, monkeypatch):
+    from tests.pipeline.test_analyze import _analyze
+
+    _seed(pg_conn, agency_id)
+    monkeypatch.setattr(static_archive, "MIRROR", "static_version_contents_absent")
+    with pytest.raises(RuntimeError, match="make migrate"):
+        _analyze(agency_id, pg_conn, ch_client)
+    pg_conn.rollback()
+    assert _map(ch_client, agency_id) == []
