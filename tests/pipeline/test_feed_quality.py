@@ -3,7 +3,7 @@ feed rows, and its completeness and clamp share are the board's.
 
 April 2026 starts on a Wednesday. The scorecard's clock is frozen on 2 May, so
 April is closed and May has one closed day; a month counts its days only as far
-as some agency's aggregates reach.
+as some agency's aggregates reach within it.
 """
 
 from datetime import date, datetime, timedelta, timezone
@@ -13,8 +13,9 @@ import pytest
 from pipeline import feed_quality
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
+from pipeline.reports import network
 from pipeline.reports.comparability import assess, clamp_pct
-from pipeline.reports.network import compute_agency_feed_quality, compute_network_summary
+from pipeline.reports.network import compute_agency_feed_quality, compute_network_summary, coverage_through
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from tests.fixtures.clock import freeze_now, jst_midday
 
@@ -37,14 +38,16 @@ def _agency(pg_conn, name: str, strategy: str) -> int:
     return agency_id
 
 
-def _timetable(pg_conn, agency_id: int, stops: int, last_day: str = "2026-04-30") -> None:
-    """Every trip of _TRIPS runs every day from 1 April to *last_day*, calling at *stops* stops."""
+def _timetable(
+    pg_conn, agency_id: int, stops: int, last_day: str = "2026-04-30", first_day: str = "2026-04-01"
+) -> None:
+    """Every trip of _TRIPS runs every day from *first_day* to *last_day*, calling at *stops* stops."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
             "saturday, sunday, start_date, end_date) VALUES (%s, 'ALL', true, true, true, true, true, true, true, "
-            "'2026-04-01', %s)",
-            (agency_id, last_day),
+            "%s, %s)",
+            (agency_id, first_day, last_day),
         )
         for trip in _TRIPS:
             cur.execute(
@@ -95,6 +98,14 @@ def _live_polls(day_start: datetime = _POLL) -> list[tuple]:
                 dep = 9000 if (i == 3 and trip == "ALL-0" and seq == 1) else 30
                 rows.append(_row(name, captured, trip, seq, dep, age))
     return rows
+
+
+def _implausible_poll(day: date) -> list[tuple]:
+    """One live poll of every trip at both stops on *day*, every delay beyond
+    the plausibility clamp: readings, but no observation."""
+    captured = jst_midday(day)
+    name = f"oracle/{captured:%Y%m%d}/TripUpdate_{captured:%H%M%S}.pb"
+    return [_row(name, captured, trip, seq, 9000, 10) for trip in _TRIPS for seq in (1, 2)]
 
 
 def _stored(pg_conn, agency_id: int) -> dict[date, dict]:
@@ -169,34 +180,74 @@ def _figure(value) -> float | None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("newest_in_april", "late_reasons"),
+    [(date(2026, 4, 30), (None, None)), (date(2026, 4, 20), ("no_plan_observed", "no_plan_observed"))],
+    ids=["its last day observed", "its last days unobserved"],
+)
 async def test_a_closed_months_stamp_states_the_completeness_and_clamp_share_the_scorecard_keeps(
-    pg_conn, aconn, ch_client, closed_on_may_first
+    pg_conn, aconn, ch_client, closed_on_may_first, newest_in_april, late_reasons
 ):
     """A report over a closed month footnotes the figures the scorecard keeps
     for it, and no figure where the scorecard keeps none, since both read the
-    gate's rule over the same days. Another agency observed the month's last
-    day, so the board's coverage reaches the end of the month as the
-    scorecard's does."""
-    unmatched = _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    gate's rules over the same days. The aggregates reach May, but within
+    April no agency's reach past *newest_in_april*, so neither counts the
+    planned days after it against any feed, while both count the whole
+    month's readings in the clamp share. A feed that observed nothing in
+    April reads no data on both, never 0, and one whose plan starts after the
+    last day observed reads that no plan covers the days observed."""
+    unmatched = _observed_elsewhere(pg_conn, ch_client, newest_in_april)
+    _observed_elsewhere(pg_conn, ch_client, _MAY)
+    # Observed on the 1st, and on the 25th sent only implausible readings.
     joined = _agency(pg_conn, "joined", "static_join")
     _timetable(pg_conn, joined, stops=2)
-    insert_updates(ch_client, joined, _live_polls())
+    insert_updates(ch_client, joined, _live_polls() + _implausible_poll(date(2026, 4, 25)))
     analyze(joined, pg_conn, ch_client)
+    # Observed only on 31 March, though its timetable plans April's every day.
+    silent = _agency(pg_conn, "silent", "static_join")
+    _timetable(pg_conn, silent, stops=2)
+    insert_updates(ch_client, silent, _live_polls(_POLL - timedelta(days=1)))
+    analyze(silent, pg_conn, ch_client)
+    # Observed on the 1st, though its timetable plans nothing before the 25th.
+    late = _agency(pg_conn, "late", "static_join")
+    _timetable(pg_conn, late, stops=2, first_day="2026-04-25")
+    insert_updates(ch_client, late, _live_polls())
+    analyze(late, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT (SELECT clamp_count FROM agg_feed_health WHERE agency_id = %(a)s AND date = '2026-04-25'), "
+            "EXISTS (SELECT 1 FROM agg_route_daily_dist WHERE agency_id = %(a)s AND date = '2026-04-25')",
+            {"a": joined},
+        )
+        assert cur.fetchone() == (8, False)
 
-    for agency in (joined, unmatched):
+    reasons = {}
+    for agency in (joined, silent, unmatched, late):
         month = _stored(pg_conn, agency)[_APRIL]
-        stamp = await compute_agency_feed_quality(aconn, agency, _APRIL, month["through_date"])
+        stamp = await compute_agency_feed_quality(aconn, agency, _APRIL, feed_quality.month_end(_APRIL))
         assert (stamp.coverage_pct, stamp.observed_trips, stamp.coverage_planned_trips) == (
             _figure(month["rt_completeness_pct"]),
             month["observed_trips"],
             month["planned_trips"],
         )
         assert stamp.clamp_pct == _figure(month["clamp_pct"])
-    assert (stamp.coverage_missing, month["rt_completeness_missing"]) == ("unmatched", "coverage_unknown")
+        assert (month["through_date"], month["window_days"]) == (newest_in_april, 30)
+        reasons[agency] = (stamp.coverage_missing, month["rt_completeness_missing"])
+    assert reasons == {
+        joined: (None, None),
+        silent: ("no_data", "no_data"),
+        unmatched: ("unmatched", "coverage_unknown"),
+        late: late_reasons,
+    }
+    april = _stored(pg_conn, joined)[_APRIL]
+    # The 4 trips reported on the 1st, of the 4 planned each day through the last one observed.
+    assert april["planned_trips"] == 4 * newest_in_april.day
+    # 1 of the 1st's 32 readings and all 8 of the 25th's.
+    assert (april["raw_samples"], april["clamp_count"]) == (40, 9)
 
 
 @pytest.mark.asyncio
-async def test_the_month_in_progress_reads_what_the_board_reads_through_its_newest_day(
+async def test_the_month_in_progress_counts_through_its_newest_day_and_reads_no_data_where_the_feed_observed_none(
     pg_conn, aconn, ch_client, ch_async_client, closed_on_may_first
 ):
     _observed_elsewhere(pg_conn, ch_client, _MAY)
@@ -206,11 +257,19 @@ async def test_the_month_in_progress_reads_what_the_board_reads_through_its_newe
     analyze(agency, pg_conn, ch_client)
 
     may = _stored(pg_conn, agency)[_MAY]
-    # May's one closed day plans 4 trips this feed never reported.
+    # May's one closed day plans 4 trips, but nothing of this feed's was observed in May.
     assert (may["through_date"], may["window_days"], may["covered_days"]) == (_MAY, 1, 1)
-    assert (may["observed_trips"], may["planned_trips"], float(may["rt_completeness_pct"])) == (0, 4, 0.0)
+    assert (may["observed_trips"], may["planned_trips"], may["rt_completeness_pct"]) == (None, None, None)
+    assert (may["observed_stop_events"], may["planned_stop_events"], may["stop_completeness_pct"]) == (
+        None,
+        None,
+        None,
+    )
+    assert (may["rt_completeness_missing"], may["stop_completeness_missing"]) == ("no_data", "no_data")
     board = await _board(aconn, ch_async_client, _MAY, may["through_date"])
-    assert float(may["rt_completeness_pct"]) == board[agency]["coverage_pct"]
+    assert board[agency]["comparable_reason"] == "no_data"
+    stamp = await compute_agency_feed_quality(aconn, agency, _MAY, feed_quality.month_end(_MAY))
+    assert (stamp.coverage_pct, stamp.coverage_missing) == (None, "no_data")
     assert (may["message_age_missing"], may["clamp_missing"], may["field_coverage_missing"]) == (
         "no_data",
         "no_data",
@@ -274,18 +333,74 @@ def test_a_deleted_agencys_later_days_do_not_stretch_a_live_agencys_window(pg_co
     assert (april["through_date"], april["planned_trips"]) == (_APRIL, 4)
 
 
+def _observed_on(pg_conn, ch_client, name: str, *days: date) -> int:
+    """A feed whose trips are not the timetable's, observed on each of *days*."""
+    agency_id = _agency(pg_conn, name, "aomori_regex")
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (f"{day:%Y%m%d}/TripUpdate_030000.pb", jst_midday(day), "T1", "平日", "11:00:00", "R9", 1, 60)
+            for day in days
+        ],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    return agency_id
+
+
+@pytest.mark.asyncio
+async def test_each_months_coverage_day_and_observation_are_what_the_stamp_reads_over_it(
+    pg_conn, aconn, ch_client, closed_on_may_first
+):
+    """The scorecard reads every month's bounds in one query, and the stamp
+    one range's. Over each month's window they agree: a deleted agency's days
+    move no coverage day but are its own observations, and a month no listed
+    agency observed counts through its window's end."""
+    joined = _observed_on(pg_conn, ch_client, "joined", date(2026, 2, 27), date(2026, 4, 1))
+    _observed_on(pg_conn, ch_client, "other", date(2026, 4, 10), _MAY)
+    gone = _observed_on(pg_conn, ch_client, "gone", date(2026, 3, 15), date(2026, 4, 25))
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = %s", (gone,))
+    pg_conn.commit()
+
+    windows = feed_quality.month_windows(date(2026, 2, 27), _MAY)
+    with pg_conn.cursor() as cur:
+        bounds = {agency: feed_quality.read_month_bounds(agency, windows, cur) for agency in (joined, gone)}
+    for agency, months in bounds.items():
+        for month, last in windows.items():
+            days = await aconn.fetch(network._AGENCY_DAYS_SQL, agency, month, last)
+            own = next(row["newest"] for row in days if row["agency_id"] == agency)
+            through = coverage_through(row["newest"] for row in days if row["listed"]) or last
+            assert months[month] == (through, own is not None), (agency, month)
+    assert bounds[joined] == {
+        date(2026, 2, 1): (date(2026, 2, 27), True),
+        date(2026, 3, 1): (date(2026, 3, 31), False),
+        _APRIL: (date(2026, 4, 10), True),
+        _MAY: (_MAY, False),
+    }
+    assert bounds[gone][date(2026, 3, 1)] == (date(2026, 3, 31), True)
+
+
 def _nodes(plan: dict):
     yield plan
     for child in plan.get("Plans", []):
         yield from _nodes(child)
 
 
-def test_the_newest_day_is_read_per_agency_off_the_index(pg_conn):
+@pytest.mark.parametrize(
+    ("sql", "params"),
+    [
+        (feed_quality.NEWEST_DAY_SQL, None),
+        (feed_quality.MONTH_DAYS_SQL, {"agency_id": 1, "first": _APRIL, "last": _MAY}),
+    ],
+    ids=["newest day", "newest day within each month"],
+)
+def test_the_newest_day_is_read_per_agency_off_the_index(pg_conn, sql, params):
     """Each live agency's newest day is an index probe on the (agency_id, date)
     key, never a scan of every agency's rows."""
     with pg_conn.cursor() as cur:
         cur.execute("SET LOCAL enable_seqscan = off")
-        cur.execute("EXPLAIN (FORMAT JSON) " + feed_quality.NEWEST_DAY_SQL)
+        cur.execute("EXPLAIN (FORMAT JSON) " + sql, params)
         plan = cur.fetchone()[0][0]["Plan"]
     pg_conn.rollback()
     scans = [node for node in _nodes(plan) if node.get("Relation Name") == "agg_route_daily_dist"]

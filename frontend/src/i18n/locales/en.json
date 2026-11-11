@@ -1921,7 +1921,7 @@
       "quality_section": "Feed quality by month",
       "quality_scope_note": "Trips reported and implausible readings use the agencies board's definitions.",
       "quality_empty": "No monthly feed-quality figures yet. The next aggregation run builds them.",
-      "quality_through": "{{month}} · counted through {{date}} ({{days}} days)",
+      "quality_through": "{{month}} · {{days}} days · trips and stop events counted through {{date}}",
       "quality_rt": "Trips reported",
       "quality_rt_detail": "{{observed, number}} of {{planned, number}} planned trips",
       "quality_stops": "Stop events",
@@ -1944,6 +1944,7 @@
       "quality_col_clamp": "Implausible",
       "quality_missing": {
         "coverage_unknown": "trip IDs are not the timetable's",
+        "no_plan_observed": "no timetable plans the days observed",
         "no_plan": "no trips planned",
         "no_stop_plan": "stop plan not saved for these days",
         "no_data": "nothing observed",

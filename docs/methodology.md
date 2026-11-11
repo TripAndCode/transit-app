@@ -350,10 +350,11 @@ CC0 のデータを使うのに法的な同意は要りません。それでも�
 <!-- method-changelog:start -->
 <!-- poetry run python scripts/render_method_changelog.py が METHOD_VERSIONS から書く。手で編集しない -->
 
-現在の算出方法は `2026.11.10` です。新しい版から順に、各版が設定した入力を示します。
+現在の算出方法は `2026.11.11` です。新しい版から順に、各版が設定した入力を示します。
 
 | 版 | 設定した入力 |
 |---|---|
+| `2026.11.11` | `feed_quality_monthly` 3 → 4 |
 | `2026.11.10` | `agg_route_headway` 2 → 3, `agg_route_headway_daily` 3 → 4 |
 | `2026.11.9` | `agg_route_headway` 1 → 2 |
 | `2026.11.8` | `feed_quality_monthly` 2 → 3 |

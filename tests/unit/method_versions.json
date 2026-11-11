@@ -32,6 +32,9 @@
     "agg_route_headway": 3,
     "agg_route_headway_daily": 4
   },
+  "2026.11.11": {
+    "feed_quality_monthly": 4
+  },
   "2026.11.2": {
     "agg_feed_health": 2
   },

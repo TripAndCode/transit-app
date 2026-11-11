@@ -1722,11 +1722,12 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         _rebuild_ch_aggregates(agency_id, conn, ch_client, ch_scopes, join, refit)
 
         # ── feed_quality_monthly (per-month feed-quality scorecard) ──
-        # After the ClickHouse tables, whose agg_route_daily copy it reads,
-        # and agg_feed_health above. A whole rebuild of agg_route_daily, which
-        # _ch_agg_scopes can decide beyond the plan, reaches every month.
+        # After the ClickHouse tables, whose agg_route_daily and
+        # agg_route_daily_dist copies it reads, and agg_feed_health above. A
+        # whole rebuild of either copy, which _ch_agg_scopes can decide beyond
+        # the plan, reaches every month.
         quality_scope = scopes[feed_quality.TABLE]
-        if ch_scopes.get("agg_route_daily", quality_scope) is None:
+        if any(ch_scopes.get(name, quality_scope) is None for name in ("agg_route_daily", "agg_route_daily_dist")):
             quality_scope = None
         with _step(f"{feed_quality.TABLE}: build"):
             quality_rewritten = feed_quality.rebuild(
