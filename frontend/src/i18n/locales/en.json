@@ -1913,7 +1913,7 @@
       "quality_stops_detail": "{{observed, number}} of {{planned, number}} planned · {{days}} days with a stop plan",
       "quality_age": "Message age",
       "quality_age_value": "median {{p50}} s · 95th percentile {{p95}} s",
-      "quality_age_detail": "{{polls, number}} live polls",
+      "quality_age_detail": "{{polls, number}} polls measured",
       "quality_seconds": "{{value}} s",
       "quality_clamp": "Implausible readings",
       "quality_fields": "Field coverage",
@@ -1932,7 +1932,7 @@
         "no_plan": "no trips planned",
         "no_stop_plan": "stop plan not saved for these days",
         "no_data": "nothing observed",
-        "archive_stamped": "archived polls take their time from the feed itself",
+        "archive_stamped": "archived polls' file names give no capture time",
         "no_header": "polls carry no feed timestamp",
         "feed_cannot_report": "not stored for this feed type",
         "not_recorded": "not recorded"

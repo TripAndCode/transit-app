@@ -71,5 +71,8 @@
   },
   "2026.11.7": {
     "agg_service_delivered_daily": 3
+  },
+  "2026.11.8": {
+    "feed_quality_monthly": 3
   }
 }

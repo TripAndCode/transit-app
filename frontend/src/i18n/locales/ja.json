@@ -1913,7 +1913,7 @@
       "quality_stops_detail": "計画 {{planned, number}} 件のうち {{observed, number}} 件 · 停留所計画のある日 {{days}} 日",
       "quality_age": "メッセージの経過時間",
       "quality_age_value": "中央値 {{p50}} 秒 · 95パーセンタイル {{p95}} 秒",
-      "quality_age_detail": "ライブ取得 {{polls, number}} 回",
+      "quality_age_detail": "計測した取得 {{polls, number}} 回",
       "quality_seconds": "{{value}} 秒",
       "quality_clamp": "異常値の割合",
       "quality_fields": "項目の充足",
@@ -1932,7 +1932,7 @@
         "no_plan": "計画便なし",
         "no_stop_plan": "この期間の停留所計画が未保存",
         "no_data": "観測なし",
-        "archive_stamped": "アーカイブ取得はフィード自身の時刻で記録される",
+        "archive_stamped": "アーカイブ取得のファイル名から取得時刻が分からない",
         "no_header": "フィードに時刻がない",
         "feed_cannot_report": "この形式のフィードでは保存されない",
         "not_recorded": "記録なし"

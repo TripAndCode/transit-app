@@ -23,10 +23,17 @@ counts that same window:
   said about the stop, so it counts here, where the departure figures let the
   feed's last report decide whether the stop departed.
 - **Message age**: per poll, the instant the poll was captured minus its
-  FeedHeader timestamp, summarized by :data:`MESSAGE_AGE_QUANTILES`. Only a
-  poll from the live path counts: archive ingest stamps a row's captured_at
-  from that same header (pipeline.strategies._pb.archive_captured_at), so an
-  archived poll's age reads zero by construction.
+  FeedHeader timestamp, summarized by :data:`MESSAGE_AGE_QUANTILES`. A poll
+  from the live path was captured at its captured_at. Archive ingest stamps
+  an archived poll's captured_at from that same header, or from its name read
+  as JST when the header is far from it
+  (pipeline.strategies._pb.archive_captured_at), so its capture instant is
+  read from its file name instead (:data:`ARCHIVE_POLL_INSTANT_CH`), whichever
+  way it was stamped. An archived poll whose name gives no instant is left out
+  and counted (``message_age_undated_polls``). A header frozen for hours reads
+  as hours of age on every poll that received it. The name is taken as the
+  fetch begins, so a message generated during a slow fetch reads a small
+  negative age, which stands as measured.
 - **Clamp share**: the gate's :func:`pipeline.reports.comparability.clamp_pct`
   over agg_feed_health's counts.
 - **Field coverage**: per field of
@@ -52,9 +59,10 @@ A figure the feed or the app cannot supply is ``None`` beside a
   known;
 - ``no_data``: nothing was observed in the window (for the clamp share, no
   observation carried a delay);
-- ``archive_stamped``: every poll came through archive ingest, whose
-  captured_at is the header itself;
-- ``no_header``: the live polls carried no FeedHeader timestamp;
+- ``archive_stamped``: no poll's capture instant is known: every poll came
+  through archive ingest, under a file name that gives none;
+- ``no_header``: no poll whose capture instant is known carried a FeedHeader
+  timestamp;
 - ``feed_cannot_report``: the ingest strategy never stores the fields;
 - ``not_recorded``: the app records no source for the figure.
 """
@@ -112,6 +120,7 @@ COLUMNS: tuple[str, ...] = (
     "stop_completeness_pct",
     "stop_completeness_missing",
     "message_age_polls",
+    "message_age_undated_polls",
     "message_age_p50_sec",
     "message_age_p95_sec",
     "message_age_missing",
@@ -146,17 +155,28 @@ ROWS_CH_SQL = f"""
     GROUP BY date
 """
 
-# Every poll of the live path in the window, one age each: its rows share the
-# poll's captured_at and header. A header of 0 is protobuf's absent value.
+#: An archived poll's capture instant, a UTC ``DateTime``, from the name
+#: archive ingest stores it under: the UTC day and time of day the collector
+#: (oracle_cloud/v3/bin/rt-poller.sh) takes from `date -u` as its fetch begins.
+#: NULL unless the whole name has that shape and names a real day and time:
+#: nothing establishes another name's zone, so none is guessed.
+ARCHIVE_POLL_INSTANT_CH = "parseDateTimeOrNull(file_name, '%Y%m%d/TripUpdate_%H%i%s.pb', 'UTC')"
+
+# Every poll in the window, one age each: its rows share the poll's file
+# name, captured_at and header. A live poll was captured at its captured_at,
+# an archived one at the instant its name gives. A header of 0 is protobuf's
+# absent value.
 MESSAGE_AGE_CH_SQL = f"""
-    SELECT count() AS live_polls, countIf(has_header) AS polls,
+    SELECT countIf(instant IS NOT NULL) AS dated_polls, countIf(instant IS NULL) AS undated_polls,
+           countIf(age IS NOT NULL) AS polls,
            quantilesExactInclusive({", ".join(map(str, MESSAGE_AGE_QUANTILES))})(age) AS ages
     FROM (
-        SELECT u.file_name AS poll, min(ifNull(u.feed_timestamp, 0)) > 0 AS has_header,
-               if(has_header, toInt64(toUnixTimestamp(min(u.captured_at))) - toInt64(min(u.feed_timestamp)), NULL)
-                   AS age
+        SELECT if({LIVE_SOURCED}, toInt64(toUnixTimestamp(min(u.captured_at))),
+                  toInt64(toUnixTimestamp({ARCHIVE_POLL_INSTANT_CH}))) AS instant,
+               min(ifNull(u.feed_timestamp, 0)) AS header,
+               if(header > 0 AND instant IS NOT NULL, instant - toInt64(header), NULL) AS age
         FROM updates AS u
-        WHERE u.agency_id = {{agency_id:UInt16}} AND {_WINDOW} AND {LIVE_SOURCED}
+        WHERE u.agency_id = {{agency_id:UInt16}} AND {_WINDOW}
         GROUP BY u.file_name
     )
 """
@@ -284,7 +304,8 @@ def shape(
     service: Mapping[str, Any],
     stop_plan: Mapping[date, int | None],
     day_rows: Mapping[date, Mapping[str, int]],
-    live_polls: int,
+    dated_polls: int,
+    undated_polls: int,
     polls: int,
     ages: tuple[float, float] | None,
     raw_samples: int,
@@ -296,8 +317,9 @@ def shape(
     *service* is the window's :func:`service_sql` row; *stop_plan* each
     planned day's stop events (None where unknown); *day_rows* each service
     date's ``stop_time_updates``, ``<field>_rows`` and ``stop_events`` counts;
-    *live_polls* of which *polls* carried a header, whose age quantiles are
-    *ages*; and agg_feed_health's sums.
+    *dated_polls* whose capture instant is known and *undated_polls* whose is
+    not, of which *polls* carried a header, whose age quantiles are *ages*; and
+    agg_feed_health's sums.
     """
     coverage = coverage_of(service, (through - month).days + 1)
     matchable = trips_matchable(ingest_strategy)
@@ -333,7 +355,7 @@ def shape(
     age_missing: Missing | None = None
     if total_rows == 0:
         age_missing = "no_data"
-    elif live_polls == 0:
+    elif dated_polls == 0:
         age_missing = "archive_stamped"
     elif polls == 0 or ages is None:
         age_missing = "no_header"
@@ -356,6 +378,7 @@ def shape(
         if stop_pct is not None
         else _completeness_missing(matchable, planned_any, stop_events_known),
         "message_age_polls": polls,
+        "message_age_undated_polls": undated_polls,
         "message_age_p50_sec": ages[0] if ages and not age_missing else None,
         "message_age_p95_sec": ages[1] if ages and not age_missing else None,
         "message_age_missing": age_missing,
@@ -396,7 +419,7 @@ def build_month(
         raw_samples, clamp_count, total_rows = (int(v) for v in cur.fetchone())
     rows = ch_client.query(ROWS_CH_SQL, parameters=params)
     day_rows = {row[0]: dict(zip(rows.column_names[1:], row[1:], strict=True)) for row in rows.result_rows}
-    live_polls, polls, ages = ch_client.query(MESSAGE_AGE_CH_SQL, parameters=params).result_rows[0]
+    dated_polls, undated_polls, polls, ages = ch_client.query(MESSAGE_AGE_CH_SQL, parameters=params).result_rows[0]
     return shape(
         agency_id=agency_id,
         month=month,
@@ -405,7 +428,8 @@ def build_month(
         service=service,
         stop_plan=stop_plan,
         day_rows=day_rows,
-        live_polls=int(live_polls),
+        dated_polls=int(dated_polls),
+        undated_polls=int(undated_polls),
         polls=int(polls),
         ages=(round(float(ages[0]), 1), round(float(ages[1]), 1)) if polls else None,
         raw_samples=raw_samples,

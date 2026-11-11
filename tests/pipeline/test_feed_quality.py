@@ -158,8 +158,10 @@ async def test_a_closed_month_reads_what_the_board_reads(
     assert (other["rt_completeness_pct"], other["rt_completeness_missing"]) == (None, "coverage_unknown")
     assert (other["stop_completeness_pct"], other["stop_completeness_missing"]) == (None, "coverage_unknown")
     assert other["field_coverage_missing"] == "feed_cannot_report"
-    # Archive ingest stamps captured_at from the header itself.
-    assert (other["message_age_p50_sec"], other["message_age_missing"]) == (None, "archive_stamped")
+    # Its one archived poll's name gives the instant it was captured, but the
+    # poll carried no FeedHeader timestamp to measure against.
+    assert (other["message_age_p50_sec"], other["message_age_missing"]) == (None, "no_header")
+    assert (other["message_age_polls"], other["message_age_undated_polls"]) == (0, 0)
 
 
 @pytest.mark.asyncio
@@ -361,3 +363,133 @@ def test_a_cancelled_trips_stop_update_with_neither_a_delay_nor_a_stop_status_is
 
     april = _stored(pg_conn, agency)[_APRIL]
     assert (april["observed_stop_events"], april["stop_time_updates"]) == (8, 7)
+
+
+def _instant(file_name: str, ch_client) -> int | None:
+    """The POSIX second ClickHouse reads from *file_name* as an archived
+    poll's capture instant, or None."""
+    sql = f"SELECT toUnixTimestamp({feed_quality.ARCHIVE_POLL_INSTANT_CH}) FROM (SELECT {{name:String}} AS file_name)"
+    return ch_client.query(sql, parameters={"name": file_name}).result_rows[0][0]
+
+
+@pytest.mark.parametrize(
+    ("file_name", "instant"),
+    [
+        # The collector names the poll's UTC day and time: read as JST, this
+        # name would be 21:00 UTC the day before.
+        ("20260410/TripUpdate_060000.pb", datetime(2026, 4, 10, 6, 0, tzinfo=timezone.utc)),
+        ("20260410/TripUpdate_235959.pb", datetime(2026, 4, 10, 23, 59, 59, tzinfo=timezone.utc)),
+        ("20260231/TripUpdate_060000.pb", None),
+        ("20260410/TripUpdate_246000.pb", None),
+        ("20260410/TripUpdate_256199.pb", None),
+        # A loose file outside any day directory.
+        ("/TripUpdate_060000.pb", None),
+        # Another collector's name, whose zone nothing establishes.
+        ("20260410/VehiclePosition_060000.pb", None),
+        ("20260410/feed_060000.pb", None),
+        ("20260410/TripUpdate_060000.pb.part", None),
+        # The live path's names: its captured_at is the instant, not its name.
+        ("oracle/20260410/TripUpdate_060000.pb", None),
+        ("live_20260410T060000Z", None),
+        ("", None),
+    ],
+)
+def test_an_archive_name_reads_as_the_utc_instant_its_poll_began(ch_client, file_name, instant):
+    assert _instant(file_name, ch_client) == (None if instant is None else int(instant.timestamp()))
+
+
+def _archive_poll(named: datetime, header: int, *, day_dir: bool = True) -> list[tuple]:
+    """One archived poll of every trip at both stops, as archive ingest stores
+    it: named by its UTC day and time as the collector names it (in no day
+    directory unless *day_dir*), stamped by archive_captured_at, its header
+    *header*."""
+    from pipeline.strategies._pb import archive_captured_at
+    from tests.fixtures.gtfs_rt import header_only_feed
+
+    day, pb_name = (f"{named:%Y%m%d}" if day_dir else ""), f"TripUpdate_{named:%H%M%S}.pb"
+    captured = datetime.fromisoformat(archive_captured_at(header_only_feed(header), day, pb_name))
+    name = f"{day}/{pb_name}"
+    return [
+        (name, captured, trip, "平日", "11:00:00", "R1", seq, 30, f"S{seq}", 30, 0, 0, header)
+        for trip in _TRIPS
+        for seq in (1, 2)
+    ]
+
+
+def test_an_archived_polls_age_is_its_named_instant_less_its_header(pg_conn, ch_client, closed_on_may_first):
+    """Archive ingest stamps each poll with its own header, so only its name
+    says when it was captured. A poll whose name gives no instant is left out
+    of the ages and counted."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    rows = []
+    for i, age in enumerate(_AGES):
+        named = _POLL + timedelta(minutes=i)
+        rows += _archive_poll(named, int(named.timestamp()) - age)
+    loose = _POLL + timedelta(minutes=10)
+    rows += _archive_poll(loose, int(loose.timestamp()) - 500, day_dir=False)
+    insert_updates(ch_client, agency, rows)
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["message_age_polls"], april["message_age_p50_sec"], april["message_age_p95_sec"]) == (4, 10.0, 35.5)
+    assert (april["message_age_missing"], april["message_age_undated_polls"]) == (None, 1)
+
+
+def test_a_frozen_header_reads_as_the_hours_its_polls_went_on_receiving_it(pg_conn, ch_client, closed_on_may_first):
+    """A feed that serves one message for hours: every poll after the first
+    is that much older than its header, whichever way archive ingest stamped
+    it."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    frozen = datetime(2026, 4, 9, 14, 0, tzinfo=timezone.utc)  # 23:00 JST
+    polls = [frozen + timedelta(seconds=20), frozen + timedelta(hours=1), frozen + timedelta(hours=16)]
+    rows = [row for named in polls for row in _archive_poll(named, int(frozen.timestamp()))]
+    stamps = sorted({row[1] for row in rows})
+    # The header falls on the first two polls' JST day, so they are stamped
+    # with it; the last poll's name is a JST day later, so it is stamped with
+    # its name read as JST.
+    assert stamps == [frozen, polls[2] - timedelta(hours=9)]
+    insert_updates(ch_client, agency, rows)
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    # Ages 20 s, 1 h and 16 h: the median and the 95th percentile between the
+    # last two.
+    assert (april["message_age_polls"], april["message_age_p50_sec"], april["message_age_p95_sec"]) == (
+        3,
+        3600.0,
+        52200.0,
+    )
+
+
+def test_a_header_newer_than_its_archive_name_reads_a_negative_age(pg_conn, ch_client, closed_on_may_first):
+    """The collector names a poll as its fetch begins, so a message generated
+    during a slow fetch is newer than the name. Its age stands as measured,
+    below zero, rather than being clamped."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    insert_updates(ch_client, agency, _archive_poll(_POLL, int(_POLL.timestamp()) + 20))
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["message_age_polls"], april["message_age_p50_sec"], april["message_age_p95_sec"]) == (
+        1,
+        -20.0,
+        -20.0,
+    )
+
+
+def test_a_month_whose_every_archived_poll_is_undated_has_no_message_age(pg_conn, ch_client, closed_on_may_first):
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    insert_updates(ch_client, agency, _archive_poll(_POLL, int(_POLL.timestamp()) - 10, day_dir=False))
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["message_age_polls"], april["message_age_undated_polls"]) == (0, 1)
+    assert (april["message_age_p50_sec"], april["message_age_missing"]) == (None, "archive_stamped")

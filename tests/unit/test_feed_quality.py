@@ -38,7 +38,8 @@ def _shape(**over):
         "service": _service(),
         "stop_plan": {date(2026, 10, 1): 50, date(2026, 10, 2): 50},
         "day_rows": {date(2026, 10, 1): _day(stop_events=45), date(2026, 10, 2): _day(stop_events=30)},
-        "live_polls": 4,
+        "dated_polls": 5,
+        "undated_polls": 2,
         "polls": 4,
         "ages": (10.0, 35.5),
         "raw_samples": 1000,
@@ -130,19 +131,20 @@ def test_no_stop_time_update_is_no_field_coverage_not_zero():
     assert all(row[f"{field}_pct"] is None for field in RT_COVERAGE_FIELDS)
 
 
-def test_message_age_comes_from_live_polls():
+def test_message_age_comes_from_the_polls_whose_capture_instant_is_known():
     row = _shape()
     assert (row["message_age_polls"], row["message_age_p50_sec"], row["message_age_p95_sec"]) == (4, 10.0, 35.5)
-    assert row["message_age_missing"] is None
+    assert (row["message_age_missing"], row["message_age_undated_polls"]) == (None, 2)
 
 
 @pytest.mark.parametrize(
-    ("total_rows", "live_polls", "polls", "reason"),
+    ("total_rows", "dated_polls", "polls", "reason"),
     [(0, 0, 0, "no_data"), (1200, 0, 0, "archive_stamped"), (1200, 3, 0, "no_header")],
 )
-def test_message_age_without_a_measurable_poll_says_why(total_rows, live_polls, polls, reason):
-    row = _shape(total_rows=total_rows, live_polls=live_polls, polls=polls, ages=None)
+def test_message_age_without_a_measurable_poll_says_why(total_rows, dated_polls, polls, reason):
+    row = _shape(total_rows=total_rows, dated_polls=dated_polls, polls=polls, ages=None)
     assert (row["message_age_p50_sec"], row["message_age_p95_sec"], row["message_age_missing"]) == (None, None, reason)
+    assert row["message_age_undated_polls"] == 2
 
 
 def test_vehicle_positions_are_not_recorded():
@@ -215,3 +217,8 @@ def test_the_render_names_the_gate_rules_it_applies():
     rendered = "\n".join(feed_quality.render())
     assert "def coverage_pct" in rendered and "def clamp_pct" in rendered
     assert "quantilesExactInclusive(0.5, 0.95)" in rendered
+
+
+def test_the_message_age_read_takes_an_archived_polls_instant_from_its_name():
+    assert feed_quality.ARCHIVE_POLL_INSTANT_CH in feed_quality.MESSAGE_AGE_CH_SQL
+    assert feed_quality.MESSAGE_AGE_CH_SQL in feed_quality.render()
