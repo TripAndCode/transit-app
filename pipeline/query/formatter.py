@@ -25,11 +25,13 @@ from pipeline.reports.comparability import (
     tenth_as_printed,
 )
 from pipeline.reports.definition import (
+    COVERAGE_MISSING_TEXT,
     DefinitionMeta,
     duration_text,
     format_definition_footnotes,
     format_stamp_lines,
 )
+from pipeline.reports.network import coverage_unknown_why
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {
@@ -228,14 +230,12 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_not_comparable_ci_wide", "en"): "On-time % interval ±{half} points (wider than ±{max})",
     ("council_not_comparable_clamp_high", "ja"): "異常値 {pct}%（{max}%超）",
     ("council_not_comparable_clamp_high", "en"): "Implausible readings {pct}% (above {max}%)",
-    ("council_coverage_unknown_unmatched", "ja"): "この配信の便は時刻表の便と照合できません",
-    ("council_coverage_unknown_unmatched", "en"): "this feed's trips can't be matched to the timetable",
-    ("council_coverage_unknown_no_plan", "ja"): "期間に時刻表の計画なし",
-    ("council_coverage_unknown_no_plan", "en"): "no timetable plans this period",
-    ("council_coverage_unknown_no_plan_observed", "ja"): "観測した日に時刻表の計画なし",
-    ("council_coverage_unknown_no_plan_observed", "en"): "no timetable plans the days observed",
-    ("council_coverage_unknown_unreadable", "ja"): "計画を読み込めませんでした",
-    ("council_coverage_unknown_unreadable", "en"): "the plan could not be read",
+    # The stamp's words for the same reasons, so a verdict and a footnote read alike.
+    **{
+        (f"council_coverage_unknown_{why}", locale): text
+        for (why, locale), text in COVERAGE_MISSING_TEXT.items()
+        if why != "no_data"
+    },
     ("delay_certificate_day_marker", "ja"): "({offset:+d}日)",
     ("delay_certificate_day_marker", "en"): " ({offset:+d} day)",
     ("delay_certificate_empty", "ja"): "遅延{threshold}秒超の便はありませんでした。",
@@ -564,28 +564,13 @@ def _threshold(value: float) -> str:
     return f"{value:g}"
 
 
-def _coverage_unknown_why(comparability: dict) -> str:
-    """Why coverage cannot be measured, read as the board reads it, from the
-    verdict's own plan figures only, so one verdict's reason comes from one
-    read. A failed read nulls the planned count too, so it is told apart
-    first. Otherwise a null coverage plan (the plan through the coverage
-    bound) is ``unmatched``, a feed whose trip_ids aren't the timetable's; a
-    zero coverage plan beside a nonzero whole-period plan is
-    ``no_plan_observed``; and zero for both is ``no_plan``."""
-    if comparability.get("delivered_missing") == "unreadable":
-        return "unreadable"
-    if comparability.get("coverage_planned_trips") is None:
-        return "unmatched"
-    return "no_plan_observed" if comparability.get("planned_trips") else "no_plan"
-
-
 def _comparison_reason(comparability: dict, locale: str) -> str:
     """The first check the gate fails, in the board's words, with the figure
     and the threshold it missed."""
     reason = comparability["reason"]
     key = f"council_not_comparable_{reason}"
     if reason == "coverage_unknown":
-        why = _t(f"council_coverage_unknown_{_coverage_unknown_why(comparability)}", locale)
+        why = _t(f"council_coverage_unknown_{coverage_unknown_why(comparability)}", locale)
         return _t(key, locale, why=why)
     if reason == "coverage_low":
         return _t(key, locale, pct=_tenth(comparability["coverage_pct"]), min=_threshold(MIN_COVERAGE_PCT))
@@ -639,11 +624,13 @@ def format_council_summary_footnotes(definition: DefinitionMeta, payload: dict, 
         lines.append(_t("council_agency_wide_caveat", locale))
     if payload.get("is_stale"):
         lines.append(_t("council_stale_caveat", locale))
+    # A stamp that states the period's clamp share has already footnoted it.
     clamp_pct = payload.get("clamp_pct")
-    if clamp_pct is None:
-        lines.append(_t("council_quality_unavailable", locale))
-    elif clamp_pct > 0:
-        lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
+    if definition.feed_quality is None:
+        if clamp_pct is None:
+            lines.append(_t("council_quality_unavailable", locale))
+        elif clamp_pct > 0:
+            lines.append(_t("council_quality_caveat", locale, clamp_pct=clamp_pct))
     missing = payload.get("delivered_missing")
     if payload.get("service_delivered_pct") is None and missing is not None:
         reason = _t(f"council_delivered_missing_{missing}", locale)

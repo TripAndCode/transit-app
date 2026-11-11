@@ -182,6 +182,20 @@ def ci_half_width_as_printed(ci_low: float, ci_high: float) -> float:
     return math.ceil(round((ci_high - ci_low) / 2 * 1000) / 100) / 10
 
 
+def coverage_is_low(coverage_pct: float) -> bool:
+    """Whether observation coverage, a one-decimal figure as printed, falls
+    short of :data:`MIN_COVERAGE_PCT`: the gate's ``coverage_low`` check, and
+    the flag the definition stamp states beside the figure."""
+    return coverage_pct < MIN_COVERAGE_PCT
+
+
+def clamp_is_high(clamp_pct: float) -> bool:
+    """Whether the clamp share, as printed to a tenth, exceeds
+    :data:`MAX_CLAMP_PCT`: the gate's ``clamp_high`` check, and the flag the
+    definition stamp states beside the figure."""
+    return tenth_as_printed(clamp_pct) > MAX_CLAMP_PCT
+
+
 def _first_failure(
     *,
     coverage_pct: float | None,
@@ -202,12 +216,12 @@ def _first_failure(
         return "no_data"
     if coverage_pct is None:
         return "coverage_unknown"
-    if coverage_pct < MIN_COVERAGE_PCT:
+    if coverage_is_low(coverage_pct):
         return "coverage_low"
     # Rounded as a reader would round the two printed bounds' difference, so
     # binary noise in the subtraction never flips a boundary case.
     if ci_low is None or ci_high is None or round((ci_high - ci_low) / 2, 2) > MAX_CI_HALF_WIDTH_PP:
         return "ci_wide"
-    if clamp_pct is not None and tenth_as_printed(clamp_pct) > MAX_CLAMP_PCT:
+    if clamp_pct is not None and clamp_is_high(clamp_pct):
         return "clamp_high"
     return None

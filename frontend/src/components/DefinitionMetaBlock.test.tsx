@@ -3,7 +3,7 @@ import { cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
-import type { DefinitionMeta, SourceMix, TimetableVersion } from "../api/types";
+import type { DefinitionMeta, FeedQuality, SourceMix, TimetableVersion } from "../api/types";
 
 const LEGACY: DefinitionMeta = {
   preset: "legacy_60s",
@@ -280,6 +280,95 @@ describe("DefinitionMetaBlock", () => {
     const block = screen.getByTestId("definition-meta");
     expect(block).toHaveTextContent("Observations");
     expect(block).toHaveTextContent(SOURCES_EXPLAINED_EN);
+  });
+
+  const QUALITY: FeedQuality = {
+    agency_id: 1,
+    coverage_pct: 93.2,
+    observed_trips: 11500,
+    coverage_planned_trips: 12345,
+    coverage_missing: null,
+    coverage_low: false,
+    clamp_pct: 0.42,
+    clamp_missing: null,
+    clamp_high: false,
+    min_coverage_pct: 70,
+    max_clamp_pct: 5,
+  };
+
+  it("states the period's completeness and clamp share for the whole agency", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, feed_quality: [QUALITY] }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Feed quality for the whole agency: Observation coverage 93.2% (11,500 of 12,345 planned trips). Implausible readings 0.4%.",
+    );
+  });
+
+  it("states the figures the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, feed_quality: [QUALITY] }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "フィード品質（事業者全体）：観測カバー率 93.2%（計画12,345便中11,500便）、異常値 0.4%。",
+    );
+  });
+
+  it("states a figure the gate flags in the board's own words, with no alarm styling", async () => {
+    const flagged: FeedQuality = { ...QUALITY, coverage_pct: 65, coverage_low: true, clamp_pct: 6.25, clamp_high: true };
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, feed_quality: [flagged] }} />);
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent(
+      "Feed quality for the whole agency: Observation coverage 65.0% (below 70%). Implausible readings 6.3% (above 5%).",
+    );
+    expect(block.querySelector("[class*='alert'], [class*='warn'], [class*='danger'], [style*='color']")).toBeNull();
+    await i18n.changeLanguage("ja");
+    expect(block).toHaveTextContent("フィード品質（事業者全体）：観測カバー率 65.0%（70%未満）、異常値 6.3%（5%超）。");
+  });
+
+  it.each([
+    ["no_data", "no analyzed observations in the period", "期間内の集計済みの観測なし"],
+    ["unmatched", "this feed's trips can't be matched to the timetable", "この配信の便は時刻表の便と照合できません"],
+    ["no_plan", "no timetable plans this period", "期間に時刻表の計画なし"],
+    ["no_plan_observed", "no timetable plans the days observed", "観測した日に時刻表の計画なし"],
+    ["unreadable", "the plan could not be read", "計画を読み込めませんでした"],
+  ] as const)("says why coverage reads no figure (%s), never 0", async (reason, en, ja) => {
+    const missing: FeedQuality = {
+      ...QUALITY,
+      coverage_pct: null,
+      observed_trips: null,
+      coverage_planned_trips: null,
+      coverage_missing: reason,
+      clamp_pct: null,
+      clamp_missing: "no_data",
+    };
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, feed_quality: [missing] }} />);
+    const block = screen.getByTestId("definition-meta");
+    expect(block).toHaveTextContent(
+      `Feed quality for the whole agency: Observation coverage — (${en}). Implausible readings — (no analyzed observations in the period).`,
+    );
+    expect(block).not.toHaveTextContent("0.0%");
+    await i18n.changeLanguage("ja");
+    expect(block).toHaveTextContent(`フィード品質（事業者全体）：観測カバー率 —（${ja}）、異常値 —（期間内の集計済みの観測なし）。`);
+  });
+
+  it("lists each agency's figures under its name when the figures span several", () => {
+    renderWithProviders(
+      <DefinitionMetaBlock
+        definition={{ ...LEGACY, feed_quality: [QUALITY, { ...QUALITY, agency_id: 2, clamp_pct: 0 }] }}
+        agencyNames={new Map([[1, "Hiroden"], [2, "HiroBus"]])}
+      />,
+    );
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Hiroden — Observation coverage 93.2% (11,500 of 12,345 planned trips). Implausible readings 0.4%",
+      "HiroBus — Observation coverage 93.2% (11,500 of 12,345 planned trips). Implausible readings 0.0%",
+    ]);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("Feed quality for the whole agency");
+  });
+
+  it("renders a definition saved before the stamp carried the figures", () => {
+    const saved: DefinitionMeta = { ...LEGACY };
+    delete saved.feed_quality;
+    renderWithProviders(<DefinitionMetaBlock definition={saved} />);
+    expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("Feed quality");
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("Average of every recorded departure at every stop.");
   });
 
   it("writes the live and unknown stamps the way a Japanese document does", async () => {

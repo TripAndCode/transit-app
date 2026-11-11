@@ -82,6 +82,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
+from pipeline.reports.network import feed_quality_of
 from pipeline.reports.rankings import DEFAULT_PRESET, EARLY_ANY, EarlyTolerance, on_time_window, report_reads_aggregates
 from pipeline.reports.reference import REFERENCE_MIN_SAMPLES, ReferenceReason
 from pipeline.reports.route_table import RouteTableOrder, compute_route_references, route_references_for
@@ -1900,6 +1901,11 @@ async def render_report(
             payload["early_departure_pct"],
         )
         gate = payload["comparability"]
+        if gate:
+            # The figures the verdict judges, from the board's cached row, so
+            # the document states one coverage and one clamp share.
+            quality = feed_quality_of(agency_id, gate, observed=gate["reason"] != "no_data")
+            definition = definition.model_copy(update={"feed_quality": [quality]})
         if format == "csv":
             # The CSV's caveat rows stay Japanese-only (see _csv_response's own
             # docstring), matching format_definition_csv_line's existing

@@ -10,7 +10,9 @@ from pipeline.reports.comparability import (
     _on_time_interval,
     assess,
     ci_half_width_as_printed,
+    clamp_is_high,
     clamp_pct,
+    coverage_is_low,
     coverage_pct,
     tenth_as_printed,
     trips_matchable,
@@ -108,6 +110,20 @@ def test_a_clamp_share_printed_over_the_ceiling_is_clamp_high(clamp):
 def test_no_clamp_share_passes():
     """No feed-health row is an aggregate gap, not evidence of implausible readings."""
     assert _verdict(clamp_pct=None) is None
+
+
+@pytest.mark.parametrize(("coverage", "low"), [(69.9, True), (70.0, False), (104.0, False)])
+def test_a_figure_is_flagged_by_the_check_the_gate_judges_it_by(coverage, low):
+    """The stamp flags a figure by the same check the gate fails it on, so a
+    footnote never calls low what the board passes."""
+    assert coverage_is_low(coverage) is low
+    assert (_verdict(coverage_pct=coverage) == "coverage_low") is low
+
+
+@pytest.mark.parametrize(("clamp", "high"), [(5.04, False), (5.05, True), (0.0, False)])
+def test_a_clamp_share_is_flagged_as_printed(clamp, high):
+    assert clamp_is_high(clamp) is high
+    assert (_verdict(clamp_pct=clamp) == "clamp_high") is high
 
 
 @pytest.mark.parametrize(

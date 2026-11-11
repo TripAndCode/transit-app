@@ -98,6 +98,31 @@ hold figures of the old one, so their stamp shows no hash until analyze rebuilds
 live scan shows the content of the join that filed its rows, which can lag a remap made in
 another process for as long as that join stays cached.
 
+The stamp also states the period's realtime completeness and clamp share for the whole
+agency, whatever filter narrows the figures beside it, by the comparability gate's own
+rules (`pipeline/reports/comparability.py`), so the agencies board, the feed-quality
+scorecard and a footnote over the same days state the same figure:
+
+- **Completeness** is the board's observation coverage: trips the feed reported of the
+  trips the timetable planned, over the planned days through the newest day any listed
+  agency has observations for (`pipeline/reports/network.py`'s
+  `compute_agency_feed_quality`).
+- **The clamp share** is the board's share of implausible readings, from `agg_feed_health`.
+- **Flags.** A figure the gate flags (coverage under 70%, or implausible readings over 5%
+  as printed to a tenth) is stated in the gate's own caveat words.
+- **Missing figures.** A figure the gate cannot compute is empty beside the board's
+  reason, never 0: no analyzed observation in the period (`no_data`), trip IDs not
+  matched to the timetable (`unmatched`), no plan for the period (`no_plan`) or for the
+  days observed (`no_plan_observed`), or a plan that could not be read (`unreadable`).
+  The figures read the aggregates, so a live scan such as the delay record can list
+  readings analyze has not reached yet while its figures read `no_data`.
+- **Where they come from.** Both are read from Postgres aggregates, never from
+  ClickHouse, beside a live scan too. A council report states the figures its comparison
+  verdict judges, from the board's cached row, and states its clamp share only there.
+  The board states each agency's from its own rows.
+
+Stating them changes no aggregate, so it is not a method version.
+
 | Version | What changed | Tables |
 |---|---|---|
 | `2026.11.0` | Baseline. The latest reading per trip, stop and service day counts, and readings more than 120 minutes off are dropped. Stop, dwell/run and headway rows join the timetable each reading's feed version archived, and each day's long gaps are measured against that timetable's own headway. | All |
@@ -179,7 +204,9 @@ gate's reason) and a plan (`no_plan`); stop events also need a known stop plan
 under an archive name that gives one (`archive_stamped`), with a header (`no_header`).
 Field coverage needs an ingest strategy that stores the fields (`feed_cannot_report`),
 and every figure needs an observation (`no_data`). The admin agency drawer shows the
-newest month and the five before it.
+newest month and the five before it. Every report's stamp states the trips reported
+and the implausible share over its own period, by the same rules (see "Method versions"
+above).
 
 ## Service delivered per route
 
