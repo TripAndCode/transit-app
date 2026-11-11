@@ -415,12 +415,13 @@ async def _record_timetables(pool, agency_id, versions):
         )
 
 
-async def _record_contents(pool, agency_id, contents):
-    """The version map's Postgres mirror as the archive writes it: {version name: content hash}."""
+async def _record_contents(pool, agency_id, contents, archived_at=None):
+    """The version map's Postgres mirror as the archive writes it: {version name: content hash}, each mapped
+    at *archived_at*, by default before _BUILT_AT."""
     await pool.executemany(
         "INSERT INTO static_version_contents (agency_id, static_version_id, content_hash, archived_at) "
-        "VALUES ($1, $2, $3, now())",
-        [(agency_id, name, content) for name, content in contents.items()],
+        "VALUES ($1, $2, $3, $4)",
+        [(agency_id, name, content, archived_at or _MAPPED_AT) for name, content in contents.items()],
     )
 
 
@@ -439,6 +440,8 @@ async def _record_sources(pool, agency_id, counts):
 
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+# When the version map's mirror rows a test records were mapped, before _BUILT_AT.
+_MAPPED_AT = datetime(2026, 10, 1, tzinfo=timezone.utc)
 _SOURCE_NOTE = (
     "アーカイブの日は収集サーバーがその日に取得した全データ、"
     "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ"
@@ -541,27 +544,39 @@ async def test_a_report_names_the_timetables_in_force_over_its_days(reports_clie
 @pytest.mark.asyncio
 async def test_a_report_names_each_timetable_the_archive_maps_by_its_content(reports_client):
     """A name the version map's Postgres mirror holds for this agency carries
-    the first digits of its content's hash; a name it holds only for another
-    agency, or not at all, carries none."""
+    the first digits of its content's hash, when the agency's aggregates were
+    built under it; a name it holds only for another agency, or not at all,
+    carries none, and so does one mapped since the aggregates were built."""
     client, agency_id, pool = reports_client
     other = await pool.fetchval(
         "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
     )
     await _record_timetables(
-        pool, agency_id, {"2026-05-18": "gtfs_static_20260401", "2026-05-19": "gtfs_static_20260520"}
+        pool,
+        agency_id,
+        {
+            "2026-05-18": "gtfs_static_20260401",
+            "2026-05-19": "gtfs_static_20260520",
+            "2026-05-20": "gtfs_static_20260515",
+        },
     )
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
     await _record_contents(pool, agency_id, {"gtfs_static_20260401": "a1b2c3d4" + "0" * 24})
     await _record_contents(pool, other, {"gtfs_static_20260520": "f" * 32})
-    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-19"
+    await _record_contents(
+        pool, agency_id, {"gtfs_static_20260515": "e" * 32}, archived_at=_BUILT_AT + timedelta(hours=1)
+    )
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-20"
 
     definition = (await client.get(url)).json()["definition"]
     assert [(v["name"], v["content_hash"]) for v in definition["timetable_versions"]] == [
         ("gtfs_static_20260401", "a1b2c3d4"),
         ("gtfs_static_20260520", None),
+        ("gtfs_static_20260515", None),
     ]
     assert (
         "; 時刻表=gtfs_static_20260401（2026-04-01取得、内容ハッシュ a1b2c3d4）1日間、"
-        "gtfs_static_20260520（2026-05-20取得）1日間（全2日間）; "
+        "gtfs_static_20260520（2026-05-20取得）1日間、gtfs_static_20260515（2026-05-15取得）1日間（全3日間）; "
     ) in _preamble(await client.get(f"{url}&format=csv"))
 
 

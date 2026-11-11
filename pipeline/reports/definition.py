@@ -118,7 +118,10 @@ class TimetableVersion(BaseModel):
     (:mod:`pipeline.static_archive`), read from the map's Postgres mirror: two
     names with one hash carried the same timetable, and a name refetched with
     other content shows the other hash. None for a name the archive does not
-    map, which no hash is guessed for, and for the days with none recorded."""
+    map, which no hash is guessed for, and for the days with none recorded.
+    Beside aggregates it is None as well while they hold figures built before
+    the name was mapped to that content, until analyze rebuilds them; beside a
+    live scan it names the content the scan joined."""
 
     agency_id: int
     name: str | None
@@ -247,7 +250,9 @@ async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedul
     sources = await _read_source_days(conn, agency_id, schedule.from_date, schedule.to_date)
     versions = _timetables(schedule)
     update: dict[str, object] = {
-        "timetable_versions": _with_contents(versions, await _read_contents(conn, versions)),
+        "timetable_versions": _with_contents(
+            versions, await _read_contents(conn, versions), live=meta.source == "live"
+        ),
         "source_mix": None if sources is None else _source_mix(sources, schedule.from_date, schedule.to_date),
     }
     if meta.source == "aggregates":
@@ -312,36 +317,53 @@ async def _read_source_days(conn, agency_id: int | None, from_date: date, to_dat
 
 
 # The content the version map's Postgres mirror holds for each bound
-# (agency, name) pair: one primary-key probe per timetable named.
+# (agency, name) pair, one primary-key probe per timetable named, and whether
+# the agency's archive-joined aggregates were last rebuilt since the name was
+# mapped to it. A remap clears their states
+# (static_archive.clear_archive_joined_states), so until analyze rebuilds them
+# they hold figures of the content the name had before, and no build time
+# stands after the remap. Both times are compared at the map's millisecond
+# precision (static_archive._map_time).
 _CONTENTS_SQL = f"""
-SELECT n.agency_id, n.static_version_id, m.content_hash
+SELECT n.agency_id, n.static_version_id, m.content_hash,
+       (date_trunc('milliseconds', m.archived_at) <= (
+           SELECT date_trunc('milliseconds', max(s.built_at)) FROM agg_table_state s
+           WHERE s.agency_id = n.agency_id AND s.table_name = ANY($3::text[])
+       )) IS TRUE AS built_under
 FROM unnest($1::int[], $2::text[]) AS n(agency_id, static_version_id)
 JOIN {static_archive.MIRROR} m ON m.agency_id = n.agency_id AND m.static_version_id = n.static_version_id
 """
 
 
-async def _read_contents(conn, versions: list[TimetableVersion]) -> dict[tuple[int, str], str]:
+async def _read_contents(conn, versions: list[TimetableVersion]) -> dict[tuple[int, str], tuple[str, bool]]:
     """The content the version map maps each named timetable of *versions*
-    to, by (agency, name), as its Postgres mirror holds it. Empty on a
-    database not yet migrated to the mirror, whose timetables then carry no
+    to, by (agency, name), as its Postgres mirror holds it, and whether the
+    agency's aggregates were built under it (:data:`_CONTENTS_SQL`). Empty on
+    a database not yet migrated to the mirror, whose timetables then carry no
     hash; nothing is read when *versions* names none."""
     named = [(version.agency_id, version.name) for version in versions if version.name is not None]
     if not named:
         return {}
     agencies, names = [agency for agency, _ in named], [name for _, name in named]
-    rows = await _fetch_enrichment(conn, static_archive.MIRROR, _CONTENTS_SQL, agencies, names)
-    return {} if rows is None else {(row[0], row[1]): row[2] for row in rows}
+    tables = static_archive.archive_joined_tables()
+    rows = await _fetch_enrichment(conn, static_archive.MIRROR, _CONTENTS_SQL, agencies, names, tables)
+    return {} if rows is None else {(row[0], row[1]): (row[2], row[3]) for row in rows}
 
 
-def _with_contents(versions: list[TimetableVersion], contents: dict[tuple[int, str], str]) -> list[TimetableVersion]:
+def _with_contents(
+    versions: list[TimetableVersion], contents: dict[tuple[int, str], tuple[str, bool]], *, live: bool
+) -> list[TimetableVersion]:
     """*versions*, each named one whose agency and name *contents* maps
-    carrying the short form of its content."""
+    carrying the short form of its content: beside a *live* scan, which joins
+    the map as it stands, always; beside aggregates, only when they were built
+    under that content."""
     named = []
     for version in versions:
-        content = None if version.name is None else contents.get((version.agency_id, version.name))
-        named.append(
-            version if content is None else version.model_copy(update={"content_hash": content[:CONTENT_HASH_DIGITS]})
-        )
+        found = None if version.name is None else contents.get((version.agency_id, version.name))
+        if found is None or not (live or found[1]):
+            named.append(version)
+        else:
+            named.append(version.model_copy(update={"content_hash": found[0][:CONTENT_HASH_DIGITS]}))
     return named
 
 

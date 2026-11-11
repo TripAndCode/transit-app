@@ -1,6 +1,6 @@
 """scripts/fill_version_contents.py fills the Postgres mirror from every name ClickHouse's version map holds."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from pipeline import static_archive
 from scripts import fill_version_contents as fill
@@ -81,3 +81,25 @@ def test_a_postgres_without_the_mirror_is_refused(pg_conn, agency_id, ch_client,
     monkeypatch.setattr(static_archive, "MIRROR", "static_version_contents_absent")
     assert fill.main(["--apply"]) == 1
     assert "make migrate" in capsys.readouterr().err
+
+
+async def test_after_the_fill_a_stamp_beside_aggregates_built_since_names_each_content(
+    pg_conn, aconn, agency_id, ch_client
+):
+    """The fill copies each mapping at the map's own time, so aggregates built
+    since then stand beside its hash at once, with no rebuild."""
+    from pipeline.reports.definition import resolve_definition_meta, stamp_build
+    from pipeline.reports.schedule_revision import ScheduleDays
+
+    _map(ch_client, [(agency_id, "gtfs_static_20261001", "a1b2c3d4" + "0" * 24, _EARLY)])
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES (%s, 'agg_stop_daily', 'x')",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    assert fill.main(["--apply"]) == 0
+    day = date(2026, 10, 2)
+    schedule = ScheduleDays(day, day, [(agency_id, day, "gtfs_static_20261001")])
+    meta = await stamp_build(aconn, resolve_definition_meta("ranking", None, None), agency_id, schedule)
+    assert meta.timetable_versions[0].content_hash == "a1b2c3d4"

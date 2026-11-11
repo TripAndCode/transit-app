@@ -310,16 +310,22 @@ def _record_loaded_span(conn, ch, agency_id: int) -> None:
         record_span(ch, agency_id, stem, span)
 
 
-def clear_archive_joined_states(conn, agency_id: int) -> None:
-    """Clear the states of the agency's tables that read the archive, so its next analyze rebuilds them in full."""
+def archive_joined_tables() -> list[str]:
+    """The tables that read the archive: by each row's version, or by the version in force on its service date."""
     # agg_registry imports ch_aggregates, which imports this module: imported here, at call time.
     from pipeline import agg_registry
     from pipeline.agg_registry import Timetable
-    from pipeline.locks import agency_ingest_lock
 
-    names = [
+    return [
         name for name, table in agg_registry.TABLES.items() if table.timetable is Timetable.ARCHIVED or table.in_force
     ]
+
+
+def clear_archive_joined_states(conn, agency_id: int) -> None:
+    """Clear the states of the agency's tables that read the archive, so its next analyze rebuilds them in full."""
+    from pipeline.locks import agency_ingest_lock
+
+    names = archive_joined_tables()
     # Under the agency lock: an analyze in flight would otherwise record these
     # states again at its end, as built, and the rebuild would be lost. Within
     # analyze itself the lock is the session's own, taken again.

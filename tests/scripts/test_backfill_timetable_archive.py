@@ -151,6 +151,21 @@ def test_a_target_without_the_mirror_is_refused_before_anything_is_mapped(
     assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems
 
 
+def test_a_scratch_without_the_mirror_is_refused_before_anything_is_mapped(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    """load_static refuses such a scratch too, but only once a run is under way."""
+    static_dir = _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client)
+    scratch = psycopg2.connect(scratch_url)
+    with scratch.cursor() as cur:
+        cur.execute(f"DROP TABLE {static_archive.MIRROR}")
+    scratch.commit()
+    scratch.close()
+    assert _run(agency_id, scratch_url, static_dir, "--apply") == 1
+    assert "make migrate" in capsys.readouterr().err
+    assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems
+
+
 def test_the_dry_run_lists_the_names_and_writes_nothing(tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys):
     static_dir = _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client)
     join, states = static_archive.schedule_join(ch_client, agency_id, None), _states(pg_conn, agency_id)

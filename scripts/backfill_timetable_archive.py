@@ -249,11 +249,14 @@ def main(argv: list[str] | None = None) -> int:
             if not args.apply:
                 print(f"dry run: {len(chosen)} name(s) would be archived; --apply archives them")
                 return 0
-            try:
-                static_archive.require_mirror(target_conn)
-            except RuntimeError as why:
-                raise Refusal(str(why)) from why
-            target_conn.rollback()
+            # Both, before anything is mapped: the target takes each mapping's
+            # mirror row, and load_static refuses a scratch without the mirror.
+            for which, conn in (("target", target_conn), ("scratch", scratch_conn)):
+                try:
+                    static_archive.require_mirror(conn)
+                except RuntimeError as why:
+                    raise Refusal(f"the {which} database: {why}") from why
+                conn.rollback()
             _ensure_agency(scratch_conn, args.agency, row)
             _backfill(args.agency, target_conn, ch, scratch_conn, chosen)
             print(f"next: analyze agency {args.agency}; its archive-joined tables rebuild in full")

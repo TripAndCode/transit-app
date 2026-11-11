@@ -63,7 +63,10 @@ build day. The stamp also names each timetable in force over the period: its ver
 name, the day it was fetched, and the first eight hex digits of the content hash the
 timetable archive maps the name to (`static_version_map`), read from its Postgres mirror
 `static_version_contents` rather than from ClickHouse. A name the archive does not map
-shows no hash.
+shows no hash. Beside aggregates, a hash is shown only when they were built under that
+content: once a name is remapped to new content, aggregates built before the remap still
+hold figures of the old one, so their stamp shows no hash until analyze rebuilds them. A
+live scan joins the content mapped now and shows its hash.
 
 | Version | What changed | Tables |
 |---|---|---|

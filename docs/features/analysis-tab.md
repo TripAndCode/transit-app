@@ -608,7 +608,13 @@ the scope as one sentence above their content
   (`static_version_contents`, written right after each map row by
   `pipeline/static_archive.py`), in one primary-key probe per name, never from
   ClickHouse. A name the archive does not map carries none, as does any name
-  on a database not yet migrated to the mirror. A live scan names its timetables too,
+  on a database not yet migrated to the mirror. Beside aggregates, a name
+  carries its hash only when the agency's archive-joined aggregates were last
+  rebuilt after the name was mapped to that content (`agg_table_state.built_at`
+  against the mirror's `archived_at`, both to the millisecond). A remap clears
+  those tables' states, so until analyze rebuilds them the stamp beside their
+  older figures carries none; a live scan joins the map as it stands and
+  carries the new hash. A live scan names its timetables too,
   and files every observation as analyze does, under the timetable in force on
   its service date (`pipeline/live_filing.py`), so its figures and the
   aggregates agree. Where a load or a span has moved the version in force since

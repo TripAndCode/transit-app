@@ -110,7 +110,7 @@ Each observation is matched with the timetable in force on its service day: the 
 - A day no known timetable covers keeps the timetable its observations were ingested against.
 - Figures read from the aggregates and figures scanned directly from the observations, such as a time-band filter, follow the same rule.
 - The stamp names each timetable version in force over the period, with the number of days it covered.
-  Where the timetable archive knows the version's contents, it adds a short content hash: the first eight characters of a fingerprint of the timetable's contents. Two versions with the same hash have the same contents, even under different names, and a version fetched again under its name with other contents shows another hash. A version the archive does not know shows none.
+  Where the timetable archive knows the version's contents, it adds a short content hash: the first eight characters of a fingerprint of the timetable's contents. Two versions with the same hash have the same contents, even under different names, and a version fetched again under its name with other contents shows another hash. A version the archive does not know shows none. Beside figures from the aggregates, the hash is shown only when the aggregates were built under that content: after a version is fetched again with other contents, it shows none until the aggregates are rebuilt.
 
 ### Where the observations came from
 

@@ -11,6 +11,7 @@ import asyncpg
 import pytest
 from pydantic import ValidationError
 
+from pipeline import static_archive
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
@@ -779,20 +780,35 @@ def test_each_named_timetable_takes_the_short_hash_of_its_own_agencys_content_an
         TimetableVersion(agency_id=2, name="v1", fetched_on=None, days=3),
         TimetableVersion(agency_id=2, name=None, fetched_on=None, days=1),
     ]
-    contents = {(1, "v1"): "0123456789abcdef" * 2, (2, "v2"): "f" * 32}
-    assert definition._with_contents(versions, contents) == [
+    contents = {(1, "v1"): ("0123456789abcdef" * 2, True), (2, "v2"): ("f" * 32, True)}
+    assert definition._with_contents(versions, contents, live=False) == [
         versions[0].model_copy(update={"content_hash": "01234567"}),
         *versions[1:],
     ]
 
 
+def test_a_content_mapped_since_the_aggregates_were_built_is_named_only_beside_a_live_scan():
+    """Aggregates built before a name's content was mapped hold figures of
+    another content, so the stamp beside them names none; a live scan joins
+    the content mapped now."""
+    versions = [TimetableVersion(agency_id=1, name="v1", fetched_on=None, days=2)]
+    contents = {(1, "v1"): ("0123456789abcdef" * 2, False)}
+    assert definition._with_contents(versions, contents, live=False) == versions
+    assert definition._with_contents(versions, contents, live=True) == [
+        versions[0].model_copy(update={"content_hash": "01234567"})
+    ]
+
+
 class _MirrorConn:
     """A connection whose mirror holds *contents* ({(agency, name): content}),
-    or that lacks the mirror when *error* is given; it records each mirror read."""
+    each mapped before the agency's aggregates were built but those named in
+    *unbuilt*, or that lacks the mirror when *error* is given; it records each
+    mirror read."""
 
-    def __init__(self, contents=None, error=None):
+    def __init__(self, contents=None, error=None, unbuilt=()):
         self.contents = contents or {}
         self.error = error
+        self.unbuilt = set(unbuilt)
         self.reads: list[tuple] = []
 
     def is_in_transaction(self):
@@ -804,9 +820,10 @@ class _MirrorConn:
         self.reads.append(args)
         if self.error is not None:
             raise self.error('relation "static_version_contents" does not exist')
-        agencies, names = args
+        agencies, names, tables = args
+        assert set(tables) == set(static_archive.archive_joined_tables())
         return [
-            (agency, name, self.contents[(agency, name)])
+            (agency, name, self.contents[(agency, name)], (agency, name) not in self.unbuilt)
             for agency, name in zip(agencies, names, strict=True)
             if (agency, name) in self.contents
         ]
@@ -831,7 +848,17 @@ async def test_the_stamp_reads_the_content_of_each_name_in_force_from_postgres(m
         ),
         TimetableVersion(agency_id=1, name="hiroden_static", fetched_on=None, days=1),
     ]
-    assert conn.reads == [([1, 1], ["gtfs_static_20260401", "hiroden_static"])]
+    assert [read[:2] for read in conn.reads] == [([1, 1], ["gtfs_static_20260401", "hiroden_static"])]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("live", "content"), [(False, None), (True, "a1b2c3d4")])
+async def test_a_content_mapped_since_the_build_is_named_beside_a_live_scan_alone(monkeypatch, live, content):
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    conn = _MirrorConn({(1, "gtfs_static_20260401"): "a1b2c3d4" + "0" * 24}, unbuilt={(1, "gtfs_static_20260401")})
+    schedule = _schedule([(1, date(2026, 5, 1), "gtfs_static_20260401")])
+    meta = await definition.stamp_build(conn, resolve_definition_meta("on_time", None, None, live=live), 1, schedule)
+    assert meta.timetable_versions[0].content_hash == content
 
 
 @pytest.mark.asyncio
