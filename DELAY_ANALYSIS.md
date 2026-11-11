@@ -102,13 +102,14 @@ The stamp also states the period's realtime completeness and clamp share for the
 agency, whatever filter narrows the figures beside it, by the comparability gate's own
 rules (`pipeline/reports/comparability.py`). The agencies board and a footnote over the
 same days state the same figure by construction, and the feed-quality scorecard states
-it for a month, as it follows the same rules (see "Feed-quality scorecard" below):
+it for a month, as it counts both the same way (see "Feed-quality scorecard" below):
 
 - **Completeness** is the board's observation coverage: trips the feed reported of the
   trips the timetable planned, over the planned days through the newest day any listed
   agency has observations for (`pipeline/reports/network.py`'s
   `compute_agency_feed_quality`).
-- **The clamp share** is the board's share of implausible readings, from `agg_feed_health`.
+- **The clamp share** is the board's share of implausible readings, from `agg_feed_health`,
+  over the whole period, wherever its coverage stops.
 - **Flags.** A figure the gate flags (coverage under 70%, or implausible readings over 5%
   as printed to a tenth) is stated in the gate's own caveat words.
 - **Missing figures.** A figure the gate cannot compute is empty beside the board's
@@ -140,7 +141,7 @@ Stating them changes no aggregate, so it is not a method version.
 | `2026.11.8` | The feed-quality scorecard's message age counts archived polls beside live ones. Archive ingest stamps an archived poll with its own FeedHeader timestamp, so the poll's capture instant is read from its file name: the UTC day and time of day the collector names it by as its fetch begins. A poll whose name gives no instant is left out of the ages and counted beside them. A header frozen for hours reads as hours of age on every poll that received it. Until now only live polls counted, so a month of archived polls had no message age. No delay or on-time figure changes. | `feed_quality_monthly` |
 | `2026.11.9` | A route's scheduled headway median is the mean of its two middle gaps when it has an even count of gaps, as the actual headway median already was, where it had been the lower of the two. A route whose scheduled gaps split evenly between long and short no longer reads as its short gap, so it can leave the high-frequency routes, and its long-gap threshold, 1.75 times that median, rises. A timetable replaced before this version keeps the median it was kept with, the lower middle, for the days measured against it until the operator records it again from its kept zip: `scripts/backfill_timetable_archive.py --headways --apply`, then analyze. A timetable whose zip was not kept keeps it for good, as no longer loaded it cannot be read again. | `agg_route_headway`, `agg_route_headway_daily` |
 | `2026.11.10` | Headway quality judges each day's high-frequency test and scheduled mean wait by the timetable in force that day, as its long gaps already were, where it had judged every day by the timetable loaded now. A day run under an earlier timetable can now enter or leave a route's high-frequency days, and its excess wait compares with that timetable's scheduled wait. Each timetable keeps the sum and sum of squares of its scheduled gaps beside its median, so days of several timetables pool their scheduled wait. A day whose timetable's figures were not kept is left out and counted, not judged by today's. A timetable replaced before this version keeps its median only, so a route pooling one of its days shows no excess wait, and headway quality counts those days, until the operator records the timetable again from its kept zip: `scripts/backfill_timetable_archive.py --headways --apply` records its median and sums at this version and clears the agency's daily headway state, so the next analyze rebuilds that table and judges those days again. A timetable whose zip was not kept stays so, and the script's dry run lists it. | `agg_route_headway`, `agg_route_headway_daily` |
-| `2026.11.11` | The feed-quality scorecard follows the comparability gate's rules throughout. A month in which the agency has no analyzed observation reads no data for its trips and stop events reported, the gate's first check, where it had read 0%. A month counts only through the newest day of it that any listed agency has observations for, where the agencies board's coverage over that month stops, so days at the end of a closed month that no agency observed, such as an outage of the shared collector, no longer count against every feed. Its trips reported and implausible share are now what the board and every report's stamp state over the same month. No delay or on-time figure changes. | `feed_quality_monthly` |
+| `2026.11.11` | The feed-quality scorecard counts a month the way the agencies board counts a range, under the comparability gate's rules. A month in which the agency has no analyzed observation reads no data for its trips and stop events reported, the gate's first check, where it had read 0%. Trips and stop events reported are measured against the plan only through the newest day of the month that any listed agency has observations for, where the board's coverage stops, so days at the end of a closed month that no agency observed, such as an outage of the shared collector, no longer count against every feed. A month whose plan starts only after that day reads that no timetable plans the days observed, as the board does, where it had read that no trips were planned. The other figures, the implausible share among them, count the whole month. Its trips reported and implausible share are now what the board and every report's stamp state over the same month. No delay or on-time figure changes. | `feed_quality_monthly` |
 
 ## What counts as on time
 
@@ -183,37 +184,51 @@ CSV preamble's `プリセット=` (with the preset's plain name, such as
 ## Feed-quality scorecard
 
 Each analyze run keeps `feed_quality_monthly`, one row per agency and calendar month of
-service date (`pipeline/feed_quality.py`). A month counts its service dates from the 1st
-through the newest day of it that any listed agency has observations for, where the
-agencies board's coverage over the month stops (`pipeline/reports/network.py`'s
-`coverage_through`): a later day is a lag or an outage every feed shares, not trips one
-feed missed. The month in progress reaches no further than the last closed service day,
-and a month no listed agency observed counts all of its days, as the board's coverage
-then does. `through_date` names where it stops. A month is rebuilt when a day of it
-changed or when its window has grown or shrunk since it was built, so a feed that stops
-reporting still has its planned days counted against it once other feeds' days move past
-it. An agency analyzed before the others in the same run counts the days they reached by
-its turn, and its next run catches up.
+service date (`pipeline/feed_quality.py`). A month's window runs from the 1st through its
+last day, or, for the month in progress, through the last closed service day, and never
+past the newest day any listed agency's aggregates reach (`window_days` counts it). Its
+figures are counted the way the agencies board counts a range:
+
+- **Against the plan, through the coverage day.** Trips and stop events reported count
+  the planned days only through the newest day of the window that any listed agency has
+  observations for (`through_date`; `pipeline/reports/network.py`'s `coverage_through`).
+  A later day is a lag or an outage every feed shares, not trips one feed missed. A
+  window no listed agency observed counts them through its end, as the board's coverage
+  then does.
+- **Everything else, over the whole window.** The implausible share, message age and
+  field coverage count every reading in the window, and `covered_days` every planned day.
+
+A month is rebuilt when a day of its window changed, or when its window or its coverage
+day has moved since it was built, so a feed that stops reporting still has its planned
+days counted against it once other feeds' days move past it. An agency analyzed before
+the others in the same run counts the days they reached by its turn, and its next run
+catches up.
 
 | Figure | Definition |
 |---|---|
-| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days. The agencies board's coverage, by the same rules and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board and a report's stamp read over it. |
-| Stop events | Stop events the feed reported, counted once per trip, stop and service date however often reported, of the stop times the planned trips call at. A stop event is reported when any poll of it carries a plausible departure or arrival delay, or reports its trip CANCELED or its stop SKIPPED. This is reporting coverage, not the service-delivered rate: a cancellation is something the feed said about the stop, so it counts here, where the departure figures let the feed's last report decide whether the stop departed. Only the planned days whose stop events are known count (`stop_plan_days`): the day's capture saves them beside its planned trips, and a day saved before it did keeps them unknown. |
+| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days through `through_date`. The agencies board's coverage, by the same rules and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board and a report's stamp read over it. |
+| Stop events | Stop events the feed reported, counted once per trip, stop and service date however often reported, of the stop times the planned trips call at, through `through_date`. A stop event is reported when any poll of it carries a plausible departure or arrival delay, or reports its trip CANCELED or its stop SKIPPED. This is reporting coverage, not the service-delivered rate: a cancellation is something the feed said about the stop, so it counts here, where the departure figures let the feed's last report decide whether the stop departed. Only the planned days whose stop events are known count (`stop_plan_days`): the day's capture saves them beside its planned trips, and a day saved before it did keeps them unknown. |
 | Message age | Per poll, the instant it was captured minus its FeedHeader timestamp: the median and 95th percentile, interpolated linearly between the closest ranks (ClickHouse's `quantilesExactInclusive`, the rule of numpy's default), with the number of polls measured. A live poll was captured at its stored capture time. An archived poll's stored time is its own header (or, where the header is far from its name, its name read as JST), so its capture instant is read from its file name instead: `YYYYMMDD/TripUpdate_HHMMSS.pb`, the UTC day and time of day the collector (`oracle_cloud/v3/bin/rt-poller.sh`) names it by as its fetch begins. A name of any other shape, or one naming no real day and time, gives no instant: the poll is left out of the ages and counted (`message_age_undated_polls`), its zone never guessed. A header frozen for hours reads as hours of age on every poll that received it. A message generated during a slow fetch is newer than the name and reads a small negative age, which stands as measured. |
-| Implausible readings | The board's clamp share: readings beyond the plausibility clamp, of the readings that carried a delay (`agg_feed_health`). |
+| Implausible readings | The board's clamp share: readings beyond the plausibility clamp, of the readings that carried a delay (`agg_feed_health`), over the whole window, so a day whose every reading was implausible counts even after `through_date`. |
 | Field coverage | For each of `stop_id`, `arr_delay`, the trip's and the stop's `schedule_relationship`, the share of stored stop_time_updates carrying it: the unit the RT field-coverage probe measures one poll in. The rows ingest writes from the timetable for a trip cancelled without listing any stop are no stop_time_update the feed sent, so they count here neither way, while each still reports its stop event. They are told apart by their shape alone (trip CANCELED, no delay, no stop status), so a stop update the feed sends for a cancelled trip in that same shape is left out with them. |
 | VehiclePositions | Not recorded: nothing the app reads says which feeds publish them. |
 
 A figure the feed or the app cannot supply is empty beside a reason, never 0. Trips and
-stop events need, in the gate's order, an analyzed observation of the agency in the month
-(`no_data` otherwise, the gate's first check, so a planned month the feed was never
-observed in reads no data rather than 0%), trip IDs matched to the timetable
-(`coverage_unknown`, the gate's reason) and a plan (`no_plan`); stop events also need a
-known stop plan (`no_stop_plan`). Message age needs a poll whose capture instant is
-known, live or under an archive name that gives one (`archive_stamped`), with a header
-(`no_header`). Field coverage needs an ingest strategy that stores the fields
-(`feed_cannot_report`), and every figure needs an observation (`no_data`). The admin agency drawer shows the
-newest month and the five before it. Every report's stamp states the trips reported
+stop events need, in the gate's order:
+
+1. an analyzed observation of the agency in the window (`no_data` otherwise, the gate's
+   first check, so a planned month the feed was never observed in reads no data rather
+   than 0%);
+2. trip IDs matched to the timetable (`coverage_unknown`, the gate's reason);
+3. a plan through `through_date` (`no_plan_observed` when the window plans trips only
+   after it, the board's reason, and `no_plan` when it plans none).
+
+Stop events also need a known stop plan (`no_stop_plan`). Message age needs a poll whose
+capture instant is known, live or under an archive name that gives one
+(`archive_stamped`), with a header (`no_header`). Field coverage needs an ingest
+strategy that stores the fields (`feed_cannot_report`), and every figure needs an
+observation (`no_data`). The admin agency drawer shows the newest month and the five
+before it. Every report's stamp states the trips reported
 and the implausible share over its own period, by the same rules (see "Method versions"
 above).
 

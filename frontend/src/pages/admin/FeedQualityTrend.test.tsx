@@ -60,7 +60,9 @@ describe("FeedQualityTrend", () => {
   it("shows the newest month in full and one trend row per month, newest first", async () => {
     await i18n.changeLanguage("en");
     renderTrend([month("2026-10"), month("2026-09", { rt_completeness_pct: 71.0 })]);
-    expect(screen.getByText(/2026-10 · counted through 2026-10-30 \(30 days\)/)).toBeInTheDocument();
+    expect(
+      screen.getByText("2026-10 · 30 days · trips and stop events counted through 2026-10-30"),
+    ).toBeInTheDocument();
     expect(screen.getByText("693 of 1,000 planned trips")).toBeInTheDocument();
     expect(screen.getByText("median 22 s · 95th percentile 38.3 s")).toBeInTheDocument();
     // Live and archived polls both count, so the count names neither source.
@@ -84,9 +86,12 @@ describe("FeedQualityTrend", () => {
         message_age_missing: "archive_stamped",
         stop_completeness_pct: null,
         stop_completeness_missing: "no_stop_plan",
+        rt_completeness_pct: null,
+        rt_completeness_missing: "no_plan_observed",
       }),
     ]);
     expect(screen.getByText("archived polls' file names give no capture time")).toBeInTheDocument();
+    expect(screen.getByText("no timetable plans the days observed")).toBeInTheDocument();
     expect(screen.getByText("not recorded")).toBeInTheDocument();
     const row = within(screen.getByRole("table")).getAllByRole("row")[1] as HTMLTableRowElement;
     expect(row.cells[2].textContent).toBe("—");
@@ -96,7 +101,8 @@ describe("FeedQualityTrend", () => {
 
   it("speaks Japanese", async () => {
     await i18n.changeLanguage("ja");
-    renderTrend([month("2026-10")]);
+    renderTrend([month("2026-10", { through_date: "2026-10-20" })]);
+    expect(screen.getByText("2026-10 · 30日分 · 便と停留所の報告率は2026-10-20まで")).toBeInTheDocument();
     expect(screen.getByText("計画 1,000 便のうち 693 便")).toBeInTheDocument();
     expect(screen.getByText("計測した取得 16 回")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "直近6か月" })).toBeInTheDocument();

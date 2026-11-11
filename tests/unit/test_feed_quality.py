@@ -8,6 +8,7 @@ from pipeline import feed_quality
 from pipeline.feed_quality import (
     COLUMNS,
     last_counted_day,
+    month_bounds,
     month_through,
     month_windows,
     plan_months,
@@ -20,9 +21,9 @@ from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 _OCT = date(2026, 10, 1)
 
 
-def _service(observed=900, coverage_planned=1000, covered_days=31):
+def _service(observed=900, coverage_planned=1000, covered_days=31, planned=None):
     return {
-        "planned": coverage_planned,
+        "planned": coverage_planned if planned is None else planned,
         "covered_days": covered_days,
         "non_executed": 0,
         "observed": observed,
@@ -42,6 +43,7 @@ def _shape(**over):
         "agency_id": 8,
         "month": _OCT,
         "through": date(2026, 10, 31),
+        "last": date(2026, 10, 31),
         "observed": True,
         "ingest_strategy": "static_join",
         "service": _service(),
@@ -87,6 +89,21 @@ def test_a_window_without_a_plan_reads_no_plan_not_zero():
     row = _shape(service=_service(observed=500, coverage_planned=0, covered_days=0), stop_plan={})
     assert (row["rt_completeness_pct"], row["rt_completeness_missing"]) == (None, "no_plan")
     assert (row["stop_completeness_pct"], row["stop_completeness_missing"]) == (None, "no_plan")
+
+
+def test_a_window_planned_only_after_its_coverage_day_reads_the_boards_reason():
+    """The window plans trips, but none through the newest day any listed
+    agency observed: the board reads that no timetable plans the days
+    observed, rather than that nothing is planned."""
+    row = _shape(service=_service(observed=0, coverage_planned=0, covered_days=6, planned=24))
+    assert (row["rt_completeness_pct"], row["rt_completeness_missing"]) == (None, "no_plan_observed")
+    assert row["covered_days"] == 6
+
+
+def test_completeness_counts_through_the_coverage_day_and_the_window_days_count_the_whole_month():
+    row = _shape(through=date(2026, 10, 20), service=_service(observed=500, coverage_planned=600, planned=900))
+    assert (row["through_date"], row["window_days"]) == (date(2026, 10, 20), 31)
+    assert (row["observed_trips"], row["planned_trips"], row["rt_completeness_pct"]) == (500, 600, 83.3)
 
 
 def test_a_planned_window_the_feed_was_observed_in_but_reported_none_of_reads_zero():
@@ -186,6 +203,11 @@ def test_the_month_in_progress_counts_through_the_last_closed_day():
     assert through_of(date(2024, 2, 1), date(2024, 11, 8)) == date(2024, 2, 29)
 
 
+def _spans(windows: dict[date, date]) -> dict[date, tuple[date, date]]:
+    """Each month's span when its coverage day is its window's last."""
+    return {month: (last, last) for month, last in windows.items()}
+
+
 def test_a_full_rebuild_builds_every_month_from_the_first_observed_one():
     windows = month_windows(date(2026, 9, 10), date(2026, 11, 8))
     assert windows == {
@@ -193,44 +215,58 @@ def test_a_full_rebuild_builds_every_month_from_the_first_observed_one():
         _OCT: date(2026, 10, 31),
         date(2026, 11, 1): date(2026, 11, 8),
     }
-    assert plan_months(None, windows, {}) == (None, [date(2026, 9, 1), _OCT, date(2026, 11, 1)])
+    assert plan_months(None, _spans(windows), {}) == (None, [date(2026, 9, 1), _OCT, date(2026, 11, 1)])
 
 
 def test_an_incremental_run_builds_the_changed_months_and_the_ones_whose_window_grew():
-    stored = {date(2026, 9, 1): date(2026, 9, 30), _OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 7)}
-    throughs = {**stored, date(2026, 11, 1): date(2026, 11, 8)}
-    purge, build = plan_months([date(2026, 9, 14)], throughs, stored)
+    stored = _spans(
+        {date(2026, 9, 1): date(2026, 9, 30), _OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 7)}
+    )
+    spans = {**stored, date(2026, 11, 1): (date(2026, 11, 8), date(2026, 11, 8))}
+    purge, build = plan_months([date(2026, 9, 14)], spans, stored)
     # September for its changed day, November because the 8th closed;
     # October already counts its whole window.
     assert purge == build == [date(2026, 9, 1), date(2026, 11, 1)]
 
 
-def test_a_changed_date_past_its_months_last_counted_day_builds_nothing_while_the_window_stands():
-    """October counts through the 20th, the last day any listed agency
-    observed in it, and the month in progress through the 8th; a change on
-    a later date of either is outside its window, so its row would come out
-    the same."""
-    stored = {_OCT: date(2026, 10, 20), date(2026, 11, 1): date(2026, 11, 8)}
-    assert plan_months([date(2026, 10, 25), date(2026, 11, 9)], stored, stored) == ([], [])
+def test_a_changed_date_in_the_window_past_its_coverage_day_still_builds_the_month():
+    """October's trips count through the 20th, the last day any listed agency
+    observed in it, but its clamp share counts the whole month, so a change on
+    the 25th reaches its row."""
+    stored = {_OCT: (date(2026, 10, 20), date(2026, 10, 31))}
+    assert plan_months([date(2026, 10, 25)], stored, stored) == ([_OCT], [_OCT])
+
+
+def test_a_changed_date_past_the_last_counted_day_builds_nothing_while_the_window_stands():
+    stored = _spans({_OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 8)})
+    assert plan_months([date(2026, 11, 9)], stored, stored) == ([], [])
 
 
 def test_a_window_that_shrank_is_rebuilt_too():
     """A stored month counted further than its window now reaches, as after
     the agency holding the newest day is deleted."""
-    stored = {_OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 8)}
-    throughs = {**stored, date(2026, 11, 1): date(2026, 11, 5)}
-    assert plan_months([], throughs, stored) == ([date(2026, 11, 1)], [date(2026, 11, 1)])
+    stored = _spans({_OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 8)})
+    spans = {**stored, date(2026, 11, 1): (date(2026, 11, 5), date(2026, 11, 5))}
+    assert plan_months([], spans, stored) == ([date(2026, 11, 1)], [date(2026, 11, 1)])
+
+
+def test_a_window_that_grew_past_an_unmoved_coverage_day_is_rebuilt():
+    """The month closed, so its window now reaches its last day, though no
+    agency observed a later day of it: its clamp share counts the new days."""
+    stored = {_OCT: (date(2026, 10, 28), date(2026, 10, 28))}
+    spans = {_OCT: (date(2026, 10, 28), date(2026, 10, 31)), date(2026, 11, 1): (date(2026, 11, 1), date(2026, 11, 1))}
+    assert plan_months([], spans, stored) == ([_OCT, date(2026, 11, 1)], [_OCT, date(2026, 11, 1)])
 
 
 def test_a_new_month_is_built_on_its_first_closed_day_without_a_changed_date():
-    stored = {_OCT: date(2026, 10, 31)}
-    throughs = {**stored, date(2026, 11, 1): date(2026, 11, 1)}
-    assert plan_months([], throughs, stored) == ([date(2026, 11, 1)], [date(2026, 11, 1)])
+    stored = _spans({_OCT: date(2026, 10, 31)})
+    spans = {**stored, date(2026, 11, 1): (date(2026, 11, 1), date(2026, 11, 1))}
+    assert plan_months([], spans, stored) == ([date(2026, 11, 1)], [date(2026, 11, 1)])
 
 
 def test_a_stored_month_outside_the_observed_months_is_purged_not_built():
-    stored = {date(2026, 8, 1): date(2026, 8, 31), _OCT: date(2026, 10, 31)}
-    purge, build = plan_months([], {_OCT: date(2026, 10, 31)}, stored)
+    stored = _spans({date(2026, 8, 1): date(2026, 8, 31), _OCT: date(2026, 10, 31)})
+    purge, build = plan_months([], _spans({_OCT: date(2026, 10, 31)}), stored)
     assert (purge, build) == ([date(2026, 8, 1)], [])
 
 
@@ -239,7 +275,7 @@ def test_an_agency_with_no_closed_observed_day_builds_nothing():
     assert month_windows(date(2026, 11, 9), date(2026, 11, 8)) == {}
     assert month_windows(date(2026, 10, 1), None) == {}
     assert plan_months(None, {}, {}) == (None, [])
-    assert plan_months([], {}, {_OCT: date(2026, 10, 31)}) == ([_OCT], [])
+    assert plan_months([], {}, _spans({_OCT: date(2026, 10, 31)})) == ([_OCT], [])
 
 
 def test_a_month_counts_through_the_newest_day_any_listed_agency_observed_within_it():
@@ -249,6 +285,24 @@ def test_a_month_counts_through_the_newest_day_any_listed_agency_observed_within
     newest = [date(2026, 10, 3), None, date(2026, 10, 20)]
     assert month_through(date(2026, 10, 31), newest) == date(2026, 10, 20)
     assert month_through(date(2026, 10, 31), [None]) == date(2026, 10, 31)
+
+
+def test_each_months_bounds_come_from_the_listed_agencies_days_and_its_own():
+    """Agency 8, deleted agency 9 and listed agency 10. A deleted agency's
+    later day does not move the coverage day, but its own observation is one."""
+    windows = {date(2026, 9, 1): date(2026, 9, 30), _OCT: date(2026, 10, 31), date(2026, 11, 1): date(2026, 11, 8)}
+    days = [
+        (date(2026, 9, 1), 10, True, date(2026, 9, 12)),
+        (_OCT, 8, True, date(2026, 10, 3)),
+        (_OCT, 9, False, date(2026, 10, 30)),
+        (_OCT, 10, True, date(2026, 10, 20)),
+    ]
+    assert month_bounds(8, windows, days) == {
+        date(2026, 9, 1): (date(2026, 9, 12), False),
+        _OCT: (date(2026, 10, 20), True),
+        date(2026, 11, 1): (date(2026, 11, 8), False),
+    }
+    assert month_bounds(9, windows, days)[_OCT] == (date(2026, 10, 20), True)
 
 
 def test_months_count_no_further_than_the_newest_day_any_agencys_aggregates_reach():
@@ -261,7 +315,7 @@ def test_the_render_names_the_gate_rules_it_applies():
     rendered = "\n".join(feed_quality.render())
     assert "def coverage_pct" in rendered and "def clamp_pct" in rendered
     assert "def matched_trips" in rendered and "def coverage_through" in rendered
-    assert feed_quality.AGENCY_DAYS_SQL in feed_quality.render()
+    assert feed_quality.MONTH_DAYS_SQL in feed_quality.render()
     assert "quantilesExactInclusive(0.5, 0.95)" in rendered
 
 

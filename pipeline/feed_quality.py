@@ -1,16 +1,23 @@
 """Each agency's feed-quality scorecard per calendar month of service date,
 built by analyze into ``feed_quality_monthly``.
 
-A month counts the service dates from its first day through the newest day
-of it that any agency the board lists has observations for, where the board's
-coverage over the month stops (:func:`pipeline.reports.network.coverage_through`
-over :func:`pipeline.reports.network.agency_days_sql`): a later day is a lag
-or an outage every feed shares, not trips one feed missed. The month in
-progress reaches no further than the last closed service day. A month no
-listed agency observed counts every day it can reach, as the board's coverage
-then runs to the end of its range. Every figure counts that same window, so a
-month's completeness and clamp share are what the agencies board and the
-definition stamp state over the month:
+A month's window runs from its first day through its last, or for the month
+in progress through the last closed service day, and never past the newest
+day any agency the board lists has aggregates for. Its figures are counted as
+the agencies board counts a range, so a month's completeness and clamp share
+are what the board and the definition stamp state over it:
+
+- the two completeness figures, measured against the plan, count its planned
+  days only through ``through_date``: the newest day of the window that any
+  listed agency has observations for, where the board's coverage stops
+  (:func:`pipeline.reports.network.coverage_through`). A later day is a lag or
+  an outage every feed shares, not trips one feed missed. A window no listed
+  agency observed counts them through its end, as the board's coverage then
+  runs to the end of its range;
+- every other figure, and ``covered_days`` of ``window_days``, counts the
+  whole window, as the board's clamp share counts its whole range.
+
+The figures:
 
 - **RT completeness**: the trips the feed reported of those the timetable
   planned, by the comparability gate's own rules and SQL
@@ -59,6 +66,8 @@ A figure the feed or the app cannot supply is ``None`` beside a
 - ``coverage_unknown``: the ingest strategy's trip_ids are not the
   timetable's, so its trips cannot be counted against the plan (the gate's
   reason);
+- ``no_plan_observed``: trips are planned in the window, but none through
+  ``through_date`` (the board's reason);
 - ``no_plan``: no trip is planned in the window;
 - ``no_stop_plan``: trips are planned, but no planned day's stop events are
   known;
@@ -86,7 +95,7 @@ from pipeline.clickhouse import LIVE_SOURCED, TRIP_LEVEL_STOP_SEQUENCE
 from pipeline.db import plausible_delay_ch, timetable_cancellation_ch, withdrawn_ch
 from pipeline.reports import comparability
 from pipeline.reports.comparability import clamp_pct, coverage_pct, matched_trips, trips_matchable
-from pipeline.reports.network import agency_days_sql, coverage_through
+from pipeline.reports.network import coverage_through
 from pipeline.reports.service_delivered import coverage_of, planned_days_ctes, service_sql
 from pipeline.service_day import service_date_ch, service_date_of, service_day_start_utc
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, RT_INGEST_STRATEGIES
@@ -98,6 +107,7 @@ TABLE = "feed_quality_monthly"
 #: Why a figure is ``None``; the module docstring defines each.
 Missing = Literal[
     "coverage_unknown",
+    "no_plan_observed",
     "no_plan",
     "no_stop_plan",
     "no_data",
@@ -144,7 +154,7 @@ COLUMNS: tuple[str, ...] = (
 )
 
 # The window's rows: from the first service day's start to the start of the
-# day after `through`, a range on the stored instant so the (agency_id,
+# day after its last, a range on the stored instant so the (agency_id,
 # captured_at) sort key prunes the scan to the window.
 _WINDOW = "u.captured_at >= {window_start:DateTime64} AND u.captured_at < {window_end:DateTime64}"
 
@@ -189,22 +199,24 @@ MESSAGE_AGE_CH_SQL = f"""
     )
 """
 
-# The window's stop-event plan per planned day, by the board's planned-day rule.
+# The stop-event plan per planned day through the coverage day, by the board's
+# planned-day rule.
 STOP_PLAN_SQL = (
     "WITH"
     + planned_days_ctes("ARRAY[%(agency_id)s]::int[]", "%(first)s::date", "%(through)s::date", stop_events=True)
     + " SELECT day, stop_events FROM planned_days"
 )
 
-# The board's service figures over the window, coverage measured through its end.
+# The board's service figures over the window, coverage measured through the
+# coverage day, as the board measures its range's.
 SERVICE_SQL = service_sql(
-    "ARRAY[%(agency_id)s]::int[]", "%(first)s::date", "%(through)s::date", "%(through)s::date", "%(through)s::date"
+    "ARRAY[%(agency_id)s]::int[]", "%(first)s::date", "%(last)s::date", "%(first)s::date", "%(through)s::date"
 )
 
 FEED_HEALTH_SQL = """
     SELECT COALESCE(SUM(raw_samples), 0), COALESCE(SUM(clamp_count), 0), COALESCE(SUM(total_rows), 0)
     FROM agg_feed_health
-    WHERE agency_id = %(agency_id)s AND date BETWEEN %(first)s AND %(through)s
+    WHERE agency_id = %(agency_id)s AND date BETWEEN %(first)s AND %(last)s
 """
 
 
@@ -220,9 +232,25 @@ NEWEST_DAY_SQL = """
     WHERE a.deleted_at IS NULL
 """
 
-# Within a month's window: each listed agency's newest observed day, and this
-# agency's, by the definition stamp's own read.
-AGENCY_DAYS_SQL = agency_days_sql("%(agency_id)s", "%(first)s::date", "%(through)s::date")
+# Per month from %(first)s, a month's first day, to %(last)s, the last counted
+# day: each listed agency's newest observed day in the month's window, and this
+# agency's whether listed or not, as the definition stamp reads a range's
+# (pipeline.reports.network._AGENCY_DAYS_SQL). One query, one probe of
+# agg_route_daily_dist's (agency_id, date) key per agency and month; a month
+# an agency has no observation in yields no row for it. The series is of
+# timestamps, as one of dates would be of timestamptz, read in the session's zone.
+MONTH_DAYS_SQL = """
+    SELECT m.month::date, a.agency_id, a.deleted_at IS NULL AS listed, newest.date
+    FROM generate_series(%(first)s::timestamp, %(last)s::timestamp, interval '1 month') AS m(month)
+    CROSS JOIN agencies a
+    CROSS JOIN LATERAL (
+        SELECT r.date FROM agg_route_daily_dist r
+        WHERE r.agency_id = a.agency_id
+          AND r.date BETWEEN m.month::date AND LEAST((m.month + interval '1 month - 1 day')::date, %(last)s::date)
+        ORDER BY r.date DESC LIMIT 1
+    ) newest
+    WHERE a.deleted_at IS NULL OR a.agency_id = %(agency_id)s
+"""
 
 
 def last_closed_day() -> date:
@@ -271,53 +299,66 @@ def month_windows(first_day: date | None, last_day: date | None) -> dict[date, d
     return {month: through_of(month, last_day) for month in _months_between(first_day, last_day)}
 
 
-def month_through(window_end: date, newest_days: Iterable[date | None]) -> date:
-    """The last service date a month counts, of its window ending at
-    *window_end*: the newest of *newest_days*, the listed agencies' newest
-    observed days within the window, where the board's coverage stops
-    (:func:`~pipeline.reports.network.coverage_through`). With none, the
-    whole window, as the board's coverage then runs to its range's end."""
-    return coverage_through(newest_days) or window_end
+def month_through(last: date, newest_days: Iterable[date | None]) -> date:
+    """The coverage day of a month whose window ends at *last*: the newest of
+    *newest_days*, the listed agencies' newest observed days within the
+    window, where the board's coverage stops
+    (:func:`~pipeline.reports.network.coverage_through`). With none, *last*,
+    as the board's coverage then runs to its range's end."""
+    return coverage_through(newest_days) or last
 
 
-def month_bounds(agency_id: int, month: date, window_end: date, cur) -> tuple[date, bool]:
-    """``(through, observed)``: the last day *month* counts
-    (:func:`month_through`), and whether *agency_id* has an analyzed
-    observation in its window, the gate's first check, both by the stamp's
-    read (:data:`AGENCY_DAYS_SQL`). A listed agency's newest observed day is
-    never past the month's, so it has one in the window exactly when it has
-    one by the month's last counted day."""
-    cur.execute(AGENCY_DAYS_SQL, {"agency_id": agency_id, "first": month, "through": window_end})
-    days = cur.fetchall()
-    through = month_through(window_end, (newest for _, _, listed, newest in days if listed))
-    observed = any(day_agency == agency_id and newest is not None for day_agency, _, _, newest in days)
-    return through, observed
+def month_bounds(
+    agency_id: int, windows: Mapping[date, date], days: Iterable[tuple[date, int, bool, date]]
+) -> dict[date, tuple[date, bool]]:
+    """``(through, observed)`` per month of *windows* (each month and its
+    window's last day): its coverage day (:func:`month_through`), and whether
+    *agency_id* has an analyzed observation in its window, the gate's first
+    check, from *days*, the rows :data:`MONTH_DAYS_SQL` reads."""
+    newest: dict[date, list[date]] = {month: [] for month in windows}
+    observed: set[date] = set()
+    for month, day_agency, listed, day in days:
+        if listed:
+            newest[month].append(day)
+        if day_agency == agency_id:
+            observed.add(month)
+    return {month: (month_through(last, newest[month]), month in observed) for month, last in windows.items()}
+
+
+def read_month_bounds(agency_id: int, windows: Mapping[date, date], cur) -> dict[date, tuple[date, bool]]:
+    """:func:`month_bounds` of *windows*, read in one query."""
+    if not windows:
+        return {}
+    cur.execute(MONTH_DAYS_SQL, {"agency_id": agency_id, "first": min(windows), "last": max(windows.values())})
+    return month_bounds(agency_id, windows, cur.fetchall())
 
 
 def plan_months(
-    scope: list[date] | None, throughs: Mapping[date, date], stored: Mapping[date, date]
+    scope: list[date] | None, spans: Mapping[date, tuple[date, date]], stored: Mapping[date, tuple[date, date]]
 ) -> tuple[list[date] | None, list[date]]:
     """``(purge, build)``: the months whose rows this run deletes (None for
     every month) and those it builds.
 
-    *throughs* is each month the agency's rows cover (:func:`month_windows`)
-    and the last day it counts (:func:`month_through`). *scope* is the service
-    dates whose rows changed (None for all of them), and *stored* each built
-    month's ``through_date``. Besides the months holding a changed date they
-    count, a month is built when it has no row yet or its row counts another
-    window than it has now: the window grows as the listed agencies'
-    aggregates reach later days, with or without this feed's own observations,
-    so a feed that stops reporting still has its planned days counted against
-    it, and shrinks when the agency holding the newest day goes. A stored month
-    outside the agency's months goes.
+    *spans* is each month the agency's rows cover (:func:`month_windows`) and
+    its ``(through, last)``: its coverage day (:func:`month_through`) and its
+    window's last day. *scope* is the service dates whose rows changed (None
+    for all of them), and *stored* each built month's span as its row records
+    it (``through_date``, and the last of its ``window_days``). Besides the
+    months whose window holds a changed date, a month is built when it has no
+    row yet or its row counts another span than it has now: the window and the
+    coverage day grow as the listed agencies' aggregates reach later days,
+    with or without this feed's own observations, so a feed that stops
+    reporting still has its planned days counted against it, and shrink when
+    the agency holding the newest day goes. A stored month outside the
+    agency's months goes.
     """
-    months = sorted(throughs)
+    months = sorted(spans)
     if scope is None:
         return None, months
-    # A date past its month's last counted day is in no window, so it rebuilds nothing.
-    wanted = {month_of(day) for day in scope if month_of(day) in throughs and day <= throughs[month_of(day)]}
-    wanted |= {month for month, through in throughs.items() if stored.get(month) != through}
-    wanted |= {month for month in stored if month not in throughs}
+    # A date past its month's window is in no window, so it rebuilds nothing.
+    wanted = {month_of(day) for day in scope if month_of(day) in spans and day <= spans[month_of(day)][1]}
+    wanted |= {month for month, span in spans.items() if stored.get(month) != span}
+    wanted |= {month for month in stored if month not in spans}
     return sorted(wanted), [month for month in months if month in wanted]
 
 
@@ -325,16 +366,20 @@ def _share_pct(count: int, total: int) -> float:
     return round(count / total * 100, 1)
 
 
-def _completeness_missing(observed: bool, matchable: bool, planned_any: bool, stop_events_known: bool) -> Missing:
-    """Why a completeness figure is None, in the gate's order: no analyzed
-    observation first, then unmatched trips, then no trip planned, then, for
-    stop events, no known stop plan on the days that plan trips."""
+def _completeness_missing(
+    observed: bool, matchable: bool, planned_any: bool, planned_in_window: bool, stop_events_known: bool
+) -> Missing:
+    """Why a completeness figure is None, in the gate's order
+    (:func:`pipeline.reports.comparability.coverage_unknown_why`): no analyzed
+    observation first, then unmatched trips, then no trip planned through the
+    coverage day, though the window plans some or not, then, for stop events,
+    no known stop plan on the days that plan trips."""
     if not observed:
         return "no_data"
     if not matchable:
         return "coverage_unknown"
     if not planned_any:
-        return "no_plan"
+        return "no_plan_observed" if planned_in_window else "no_plan"
     return "no_plan" if stop_events_known else "no_stop_plan"
 
 
@@ -343,6 +388,7 @@ def shape(
     agency_id: int,
     month: date,
     through: date,
+    last: date,
     observed: bool,
     ingest_strategy: str | None,
     service: Mapping[str, Any],
@@ -358,16 +404,18 @@ def shape(
 ) -> dict[str, Any]:
     """One ``feed_quality_monthly`` row from what the window's reads returned.
 
-    *observed* is whether the agency has an analyzed observation in the
-    window (:func:`month_bounds`), without which neither completeness figure
-    is counted; *service* is the window's :func:`service_sql` row; *stop_plan* each
-    planned day's stop events (None where unknown); *day_rows* each service
-    date's ``stop_time_updates``, ``<field>_rows`` and ``stop_events`` counts;
-    *dated_polls* whose capture instant is known and *undated_polls* whose is
-    not, of which *polls* carried a header, whose age quantiles are *ages*; and
-    agg_feed_health's sums.
+    The window runs from *month* to *last*, and the completeness figures
+    count its planned days through *through*, its coverage day. *observed* is
+    whether the agency has an analyzed observation in the window
+    (:func:`month_bounds`), without which neither completeness figure is
+    counted; *service* is the window's :func:`service_sql` row; *stop_plan*
+    each planned day's stop events through *through* (None where unknown);
+    *day_rows* each service date's ``stop_time_updates``, ``<field>_rows`` and
+    ``stop_events`` counts; *dated_polls* whose capture instant is known and
+    *undated_polls* whose is not, of which *polls* carried a header, whose age
+    quantiles are *ages*; and agg_feed_health's sums.
     """
-    coverage = coverage_of(service, (through - month).days + 1)
+    coverage = coverage_of(service, (last - month).days + 1)
     matchable = trips_matchable(ingest_strategy)
     observed_trips, planned = (None, None)
     if observed:
@@ -376,6 +424,7 @@ def shape(
         )
     rt_pct = coverage_pct(observed_trips, planned)
     planned_any = coverage["observed_trips"] is not None
+    planned_in_window = int(service["planned"]) > 0
 
     known = {day: n for day, n in stop_plan.items() if n is not None}
     events_observed, events_planned = (None, None)
@@ -423,14 +472,14 @@ def shape(
         "rt_completeness_pct": rt_pct,
         "rt_completeness_missing": None
         if rt_pct is not None
-        else _completeness_missing(observed, matchable, planned_any, True),
+        else _completeness_missing(observed, matchable, planned_any, planned_in_window, True),
         "observed_stop_events": events_observed,
         "planned_stop_events": events_planned,
         "stop_plan_days": len(known),
         "stop_completeness_pct": stop_pct,
         "stop_completeness_missing": None
         if stop_pct is not None
-        else _completeness_missing(observed, matchable, planned_any, stop_events_known),
+        else _completeness_missing(observed, matchable, planned_any, planned_in_window, stop_events_known),
         "message_age_polls": polls,
         "message_age_undated_polls": undated_polls,
         "message_age_p50_sec": ages[0] if ages and not age_missing else None,
@@ -448,21 +497,31 @@ def shape(
     }
 
 
-def _window_params(agency_id: int, month: date, through: date) -> dict[str, Any]:
+def _window_params(agency_id: int, month: date, through: date, last: date) -> dict[str, Any]:
+    """The window's service dates, from *first* to *last* with its coverage
+    day *through*, and its instants for ClickHouse, *window_end* exclusive."""
     return {
         "agency_id": agency_id,
         "first": month,
         "through": through,
+        "last": last,
         "window_start": service_day_start_utc(month),
-        "window_end": service_day_start_utc(through + timedelta(days=1)),
+        "window_end": service_day_start_utc(last + timedelta(days=1)),
     }
 
 
 def build_month(
-    agency_id: int, month: date, through: date, observed: bool, ingest_strategy: str | None, conn, ch_client
+    agency_id: int,
+    month: date,
+    through: date,
+    last: date,
+    observed: bool,
+    ingest_strategy: str | None,
+    conn,
+    ch_client,
 ) -> dict[str, Any]:
     """Read one month's window from both stores and shape its row."""
-    params = _window_params(agency_id, month, through)
+    params = _window_params(agency_id, month, through, last)
     with conn.cursor() as cur:
         cur.execute(SERVICE_SQL, params)
         names = [column.name for column in cur.description]
@@ -478,6 +537,7 @@ def build_month(
         agency_id=agency_id,
         month=month,
         through=through,
+        last=last,
         observed=observed,
         ingest_strategy=ingest_strategy,
         service=service,
@@ -505,14 +565,16 @@ def rebuild(
         first_day = cur.fetchone()[0]
         cur.execute(NEWEST_DAY_SQL)
         last_day = last_counted_day(last_closed, cur.fetchone()[0])
-        bounds = {
-            month: month_bounds(agency_id, month, window_end, cur)
-            for month, window_end in month_windows(first_day, last_day).items()
-        }
-        cur.execute(f"SELECT month, through_date FROM {TABLE} WHERE agency_id = %s", (agency_id,))
-        stored = dict(cur.fetchall())
-    purge, build = plan_months(scope, {month: through for month, (through, _) in bounds.items()}, stored)
-    rows = [build_month(agency_id, month, *bounds[month], ingest_strategy, conn, ch_client) for month in build]
+        windows = month_windows(first_day, last_day)
+        bounds = read_month_bounds(agency_id, windows, cur)
+        cur.execute(f"SELECT month, through_date, window_days FROM {TABLE} WHERE agency_id = %s", (agency_id,))
+        stored = {month: (through, month + timedelta(days=days - 1)) for month, through, days in cur.fetchall()}
+    spans = {month: (bounds[month][0], last) for month, last in windows.items()}
+    purge, build = plan_months(scope, spans, stored)
+    rows = [
+        build_month(agency_id, month, *spans[month], bounds[month][1], ingest_strategy, conn, ch_client)
+        for month in build
+    ]
     with conn.cursor() as cur:
         if purge is None:
             cur.execute(f"DELETE FROM {TABLE} WHERE agency_id = %s", (agency_id,))
@@ -546,7 +608,8 @@ def render() -> list[str]:
         NEWEST_DAY_SQL,
         inspect.getsource(month_windows),
         inspect.getsource(month_end),
-        AGENCY_DAYS_SQL,
+        MONTH_DAYS_SQL,
+        inspect.getsource(read_month_bounds),
         inspect.getsource(month_bounds),
         inspect.getsource(month_through),
         inspect.getsource(coverage_through),

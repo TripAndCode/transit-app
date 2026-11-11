@@ -13,8 +13,9 @@ import pytest
 from pipeline import feed_quality
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
+from pipeline.reports import network
 from pipeline.reports.comparability import assess, clamp_pct
-from pipeline.reports.network import compute_agency_feed_quality, compute_network_summary
+from pipeline.reports.network import compute_agency_feed_quality, compute_network_summary, coverage_through
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from tests.fixtures.clock import freeze_now, jst_midday
 
@@ -332,6 +333,54 @@ def test_a_deleted_agencys_later_days_do_not_stretch_a_live_agencys_window(pg_co
     assert (april["through_date"], april["planned_trips"]) == (_APRIL, 4)
 
 
+def _observed_on(pg_conn, ch_client, name: str, *days: date) -> int:
+    """A feed whose trips are not the timetable's, observed on each of *days*."""
+    agency_id = _agency(pg_conn, name, "aomori_regex")
+    insert_updates(
+        ch_client,
+        agency_id,
+        [
+            (f"{day:%Y%m%d}/TripUpdate_030000.pb", jst_midday(day), "T1", "平日", "11:00:00", "R9", 1, 60)
+            for day in days
+        ],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    return agency_id
+
+
+@pytest.mark.asyncio
+async def test_each_months_coverage_day_and_observation_are_what_the_stamp_reads_over_it(
+    pg_conn, aconn, ch_client, closed_on_may_first
+):
+    """The scorecard reads every month's bounds in one query, and the stamp
+    one range's. Over each month's window they agree: a deleted agency's days
+    move no coverage day but are its own observations, and a month no listed
+    agency observed counts through its window's end."""
+    joined = _observed_on(pg_conn, ch_client, "joined", date(2026, 2, 27), date(2026, 4, 1))
+    _observed_on(pg_conn, ch_client, "other", date(2026, 4, 10), _MAY)
+    gone = _observed_on(pg_conn, ch_client, "gone", date(2026, 3, 15), date(2026, 4, 25))
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = %s", (gone,))
+    pg_conn.commit()
+
+    windows = feed_quality.month_windows(date(2026, 2, 27), _MAY)
+    with pg_conn.cursor() as cur:
+        bounds = {agency: feed_quality.read_month_bounds(agency, windows, cur) for agency in (joined, gone)}
+    for agency, months in bounds.items():
+        for month, last in windows.items():
+            days = await aconn.fetch(network._AGENCY_DAYS_SQL, agency, month, last)
+            own = next(row["newest"] for row in days if row["agency_id"] == agency)
+            through = coverage_through(row["newest"] for row in days if row["listed"]) or last
+            assert months[month] == (through, own is not None), (agency, month)
+    assert bounds[joined] == {
+        date(2026, 2, 1): (date(2026, 2, 27), True),
+        date(2026, 3, 1): (date(2026, 3, 31), False),
+        _APRIL: (date(2026, 4, 10), True),
+        _MAY: (_MAY, False),
+    }
+    assert bounds[gone][date(2026, 3, 1)] == (date(2026, 3, 31), True)
+
+
 def _nodes(plan: dict):
     yield plan
     for child in plan.get("Plans", []):
@@ -342,9 +391,9 @@ def _nodes(plan: dict):
     ("sql", "params"),
     [
         (feed_quality.NEWEST_DAY_SQL, None),
-        (feed_quality.AGENCY_DAYS_SQL, {"agency_id": 1, "first": _APRIL, "through": date(2026, 4, 30)}),
+        (feed_quality.MONTH_DAYS_SQL, {"agency_id": 1, "first": _APRIL, "last": _MAY}),
     ],
-    ids=["newest day", "newest day within a month"],
+    ids=["newest day", "newest day within each month"],
 )
 def test_the_newest_day_is_read_per_agency_off_the_index(pg_conn, sql, params):
     """Each live agency's newest day is an index probe on the (agency_id, date)
