@@ -465,8 +465,9 @@ def bunching(day: date) -> Scenario:
 # The clamp scenario's runs, by first scheduled departure: delays in seconds,
 # per stop, of a line of six stops two minutes apart. The first two runs
 # truly leave about two hours late and early, across the clamp's edge: 7,200 s
-# either way is plausible and 7,201 s is not. The others run on time or close,
-# and the feed misreports them (_clamp_misreports).
+# either way is plausible and 7,201 s is not. The others run on time or close;
+# the feed misreports the 09:20, 09:30, 09:40 and 09:50 runs
+# (_clamp_misreports) and reports the 10:00 and 10:10 runs truly.
 _CLAMP_TRUTH = {
     "09:00:00": (7140, 7170, 7200, 7201, 7230, 7260),
     "09:10:00": (-7260, -7230, -7201, -7200, -7170, -7140),
@@ -653,9 +654,12 @@ class Observed:
     names; the route table's response for each time band the truth departs
     in; the headway quality response for every window ``_windows`` names;
     the agency's row of the agencies board over the whole period; and the
-    feed quality the route table's definition stamp states over it."""
+    feed quality the route table's definition stamp states over it. ``truth``
+    is the oracle's outcome of the scenario, derived once, since deriving it
+    simulates every poll."""
 
     scenario: Scenario
+    truth: oracle.Outcome
     batches: list[tuple[TimetableVersion, list[Poll]]]
     tables: dict[str, list[dict]]
     reports: dict[str, list]
@@ -686,6 +690,16 @@ def _windows(scenario: Scenario) -> list[tuple[date, date]]:
 def _council_label(part: str) -> str:
     """A label for one part of the council summary; its cells are keyed by (from, to)."""
     return f"GET reports/council_summary, {part}"
+
+
+def _board_label(scenario: Scenario) -> str:
+    """The label of the agency's row of the agencies board over the whole period."""
+    return _clamp_label(f"GET network/summary {_window(scenario)}")
+
+
+def _stamp_label(scenario: Scenario) -> str:
+    """The label of the feed quality the route table's definition stamp states over the whole period."""
+    return _clamp_label(f"definition stamp of GET reports/route_table {_window(scenario)}")
 
 
 # A comparison is a set of cells: (table or report, row key) -> {column: value}.
@@ -1090,15 +1104,14 @@ def _clamp_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     """Each service day's readings, implausible readings and rows, and the
     clamp share the board, the stamp, the council summary and each month of
     the scorecard state over their own days. Every row came in live."""
-    first, last = _windows(observed.scenario)[0]
-    in_period = [r for day, r in found.readings.items() if first <= day <= last]
-    share = oracle.clamp_share(found, first, last)
+    period = oracle.readings_over(found, *_windows(observed.scenario)[0])
+    share = period.clamp_share
     months = {
         (month,): {
-            "raw_samples": card.readings,
-            "clamp_count": card.implausible,
-            "clamp_pct": _share(card.clamp_share),
-            "clamp_missing": None if card.clamp_share is not None else "no_data",
+            "raw_samples": card.readings.readings,
+            "clamp_count": card.readings.implausible,
+            "clamp_pct": _share(card.readings.clamp_share),
+            "clamp_missing": None if card.readings.clamp_share is not None else "no_data",
         }
         for month, card in oracle.scorecard(found).items()
     }
@@ -1117,17 +1130,11 @@ def _clamp_expected(observed: Observed, found: oracle.Outcome) -> Cells:
             },
         )
         | _cells(
-            _clamp_label(f"GET network/summary {_window(observed.scenario)}"),
-            {
-                "agency": {
-                    "raw_samples": sum(r.readings for r in in_period),
-                    "clamp_count": sum(r.implausible for r in in_period),
-                    "clamp_pct": _share(share),
-                }
-            },
+            _board_label(observed.scenario),
+            {"agency": {"raw_samples": period.readings, "clamp_count": period.implausible, "clamp_pct": _share(share)}},
         )
         | _cells(
-            _clamp_label(f"definition stamp of GET reports/route_table {_window(observed.scenario)}"),
+            _stamp_label(observed.scenario),
             {
                 "agency": {
                     "clamp_pct": _share(share),
@@ -1138,18 +1145,20 @@ def _clamp_expected(observed: Observed, found: oracle.Outcome) -> Cells:
         )
         | _cells(
             _clamp_label(_council_label("comparability")),
-            {w: {"clamp_pct": _share(oracle.clamp_share(found, *w))} for w in _windows(observed.scenario)},
+            {
+                w: {"clamp_pct": _share(oracle.readings_over(found, *w).clamp_share)}
+                for w in _windows(observed.scenario)
+            },
         )
         | _cells(_month_label("implausible readings"), months)
     )
 
 
 def _clamp_actual(observed: Observed) -> Cells:
-    window = _window(observed.scenario)
     return (
         _keyed("agg_feed_health", observed.tables["agg_feed_health"], ("date",))
-        | _cells(_clamp_label(f"GET network/summary {window}"), {"agency": observed.board})
-        | _cells(_clamp_label(f"definition stamp of GET reports/route_table {window}"), {"agency": observed.stamp})
+        | _cells(_board_label(observed.scenario), {"agency": observed.board})
+        | _cells(_stamp_label(observed.scenario), {"agency": observed.stamp})
         | _cells(_clamp_label(_council_label("comparability")), observed.council)
         | _keyed(_month_label("implausible readings"), observed.tables["feed_quality_monthly"], ("month",))
     )
@@ -1161,7 +1170,8 @@ def _message_age_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     second."""
     months = {}
     for month, card in oracle.scorecard(found).items():
-        assert card.ages is not None
+        # No scenario leaves a month without a poll between two with one; such a month has no ages.
+        assert card.ages is not None, f"{observed.scenario.name}: no poll in {month:%Y-%m}"
         months[(month,)] = {
             "message_age_polls": card.polls,
             "message_age_undated_polls": 0,
@@ -1281,7 +1291,7 @@ def _outcomes(observed: Observed) -> list[tuple[tuple[Divergence, ...], oracle.O
     """The truth's outcome, then its view under each combination of the
     scenario's known divergences, each with the divergences it applies."""
     divergences = _KNOWN.get(observed.scenario.name, ())
-    truth = oracle.outcome(observed.scenario)
+    truth = observed.truth
     out = []
     for n in range(len(divergences) + 1):
         for chosen in itertools.combinations(divergences, n):
@@ -1371,7 +1381,7 @@ def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[s
     """The cells *divergence* moves and no other known divergence of the
     scenario does, against the truth alone."""
     others = [d for d in _KNOWN.get(observed.scenario.name, ()) if d is not divergence]
-    truth = oracle.outcome(observed.scenario)
+    truth = observed.truth
     lines: list[str] = []
     own_cells = 0
     for expect, read in _COMPARISONS:
@@ -1480,9 +1490,20 @@ def _council_figures(response: dict) -> dict[str, Any]:
     }
 
 
-async def _read_reports(
-    scenario: Scenario, agency_id: int
-) -> tuple[dict[str, list], dict, dict, dict, dict, dict, dict]:
+@dataclass(frozen=True)
+class _Reads:
+    """What the API returned for a run; ``Observed`` names each part."""
+
+    reports: dict[str, list]
+    trend: dict[str, Any]
+    council: dict[tuple[date, date], dict[str, Any]]
+    banded: dict[str, dict[str, Any]]
+    headways: dict[tuple[date, date], dict[str, Any]]
+    board: dict[str, Any]
+    stamp: dict[str, Any]
+
+
+async def _read_reports(scenario: Scenario, truth: oracle.Outcome, agency_id: int) -> _Reads:
     from api.main import app
 
     async def get(client, report: str, query: str, scoped: bool = True) -> dict:
@@ -1505,7 +1526,7 @@ async def _read_reports(
             window: _council_figures(await get(client, "reports/council_summary", f"from={window[0]}&to={window[1]}"))
             for window in _windows(scenario)
         }
-        bands = sorted({d.time_band for d in oracle.outcome(scenario).departures} - {None})
+        bands = sorted({d.time_band for d in truth.departures} - {None})
         banded = {
             band: await get(client, "reports/route_table", f"{_window(scenario)}&include_sparse=1&time_band={band}")
             for band in bands
@@ -1514,7 +1535,7 @@ async def _read_reports(
             window: await get(client, "headway_quality", f"from={window[0]}&to={window[1]}")
             for window in _windows(scenario)
         }
-    return reports, trend, council, banded, headways, board, stamp
+    return _Reads(reports, trend, council, banded, headways, board, stamp)
 
 
 def _empty_stores(pg_conn, ch_client, reset_sql: str) -> None:
@@ -1571,6 +1592,7 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
 
     now = datetime.now(timezone.utc)
     scenario = request.param(anchor_day(now))
+    truth = oracle.outcome(scenario)
     try:
         async with contextlib.AsyncExitStack() as stack:
             pg_conn = psycopg2.connect(_database_url())
@@ -1600,10 +1622,22 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             stack.push_async_callback(pool.close)
             await confirm_rt_field_coverage(pool, agency_id)
             app.state.pool, app.state.ch_client = pool, ch_async
-            reports, trend, council, banded, headways, board, stamp = await _read_reports(scenario, agency_id)
+            reads = await _read_reports(scenario, truth, agency_id)
     except AssertionError as exc:
         raise RuntimeError(f"scenario {scenario.name}: an assertion failed while the pipeline ran") from exc
-    return Observed(scenario, batches, tables, reports, trend, council, banded, headways, board, stamp)
+    return Observed(
+        scenario=scenario,
+        truth=truth,
+        batches=batches,
+        tables=tables,
+        reports=reads.reports,
+        trend=reads.trend,
+        council=reads.council,
+        banded=reads.banded,
+        headways=reads.headways,
+        board=reads.board,
+        stamp=reads.stamp,
+    )
 
 
 def _assert_clean(mismatches: list[str]) -> None:

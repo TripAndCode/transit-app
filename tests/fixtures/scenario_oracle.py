@@ -288,12 +288,18 @@ class Plan:
 
 @dataclass(frozen=True)
 class Readings:
-    """One service day's readings as its polls sent them: how many carried a
-    delay, how many of those were implausible, and the rows the polls stored."""
+    """Readings as the polls of one service day or more sent them: how many
+    carried a delay, how many of those were implausible, and the rows the
+    polls stored."""
 
     readings: int
     implausible: int
     rows: int
+
+    @property
+    def clamp_share(self) -> Fraction | None:
+        """The implausible readings of the readings, in percent; None without a reading."""
+        return Fraction(100 * self.implausible, self.readings) if self.readings else None
 
 
 @dataclass(frozen=True)
@@ -665,11 +671,14 @@ def no_high_frequency_route(found: Outcome, first: date, last: date) -> bool:
     return not any(plan.high_frequency for (_route, day), plan in found.wait_plans.items() if first <= day <= last)
 
 
-def clamp_share(found: Outcome, first: date, last: date) -> Fraction | None:
-    """The clamp share, in percent, of the service days *first* to *last*."""
+def readings_over(found: Outcome, first: date, last: date) -> Readings:
+    """The readings of the service days *first* to *last*, summed."""
     days = [r for day, r in found.readings.items() if first <= day <= last]
-    total = sum(r.readings for r in days)
-    return Fraction(100 * sum(r.implausible for r in days), total) if total else None
+    return Readings(
+        readings=sum(r.readings for r in days),
+        implausible=sum(r.implausible for r in days),
+        rows=sum(r.rows for r in days),
+    )
 
 
 def _printed(value: Fraction, places: int) -> Fraction:
@@ -700,18 +709,13 @@ def quantile(values: Iterable[int], q: Fraction) -> Fraction:
 @dataclass(frozen=True)
 class Scorecard:
     """One month of the feed-quality scorecard: its window's last day, its
-    readings and implausible readings, and its polls' count and message age
-    quantiles (None without a poll)."""
+    readings, and its polls' count and message age quantiles (None without a
+    poll)."""
 
     last: date
-    readings: int
-    implausible: int
+    readings: Readings
     polls: int
     ages: tuple[Fraction, ...] | None
-
-    @property
-    def clamp_share(self) -> Fraction | None:
-        return Fraction(100 * self.implausible, self.readings) if self.readings else None
 
 
 def _month(day: date) -> date:
@@ -726,18 +730,18 @@ def scorecard(found: Outcome) -> dict[date, Scorecard]:
     """Per calendar month, from the month of the first service day the feed
     stored a row on through the month of the newest service day with a
     departure, that month's scorecard."""
+    if not found.departures:
+        raise ValueError("the scorecard needs a departure: its window ends at the newest service day with one")
     newest = max(d.service_date for d in found.departures)
     first = min(day for day, r in found.readings.items() if r.rows)
     out = {}
     month = _month(first)
     while month <= newest:
         last = min(_month_end(month), newest)
-        days = [r for day, r in found.readings.items() if month <= day <= last]
         ages = [age for day, age in found.ages if month <= day <= last]
         out[month] = Scorecard(
             last=last,
-            readings=sum(r.readings for r in days),
-            implausible=sum(r.implausible for r in days),
+            readings=readings_over(found, month, last),
             polls=len(ages),
             ages=tuple(quantile(ages, q) for q in MESSAGE_AGE_QUANTILES) if ages else None,
         )
