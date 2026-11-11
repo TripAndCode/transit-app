@@ -43,7 +43,11 @@ def test_only_agg_route_headway_and_the_scorecard_are_built_from_the_loaded_time
 
 
 def test_the_scorecard_is_rebuilt_with_the_tables_it_reads():
-    assert agg_registry.TABLES[feed_quality.TABLE].depends_on == ("agg_route_daily", "agg_feed_health")
+    assert agg_registry.TABLES[feed_quality.TABLE].depends_on == (
+        "agg_route_daily",
+        "agg_route_daily_dist",
+        "agg_feed_health",
+    )
 
 
 def test_the_archive_joined_tables_are_the_stop_tables_dwell_and_the_daily_headways():

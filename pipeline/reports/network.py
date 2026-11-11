@@ -308,21 +308,31 @@ def board_feed_quality(rows: Iterable[Mapping[str, Any]]) -> list[FeedQuality]:
     ]
 
 
-# Every agency the board lists, and the one asked for whether listed or not:
-# its ingest strategy and the newest day in the range it has observations for,
-# one probe of agg_route_daily_dist's (agency_id, date) key each. The board's
-# coverage stops at the newest of the listed agencies' days (coverage_through),
-# and an agency without one has no observation in the range.
-_AGENCY_DAYS_SQL = """
+def agency_days_sql(agency_id: str, from_date: str, to_date: str) -> str:
+    """Every agency the board lists, and *agency_id* whether listed or not:
+    its ingest strategy and the newest day of ``[from_date, to_date]`` it has
+    observations for, one probe of agg_route_daily_dist's (agency_id, date)
+    key each. The board's coverage stops at the newest of the listed agencies'
+    days (:func:`coverage_through`), and an agency without one has no
+    observation in the range, the gate's first check.
+
+    The arguments are SQL expressions, as in
+    :func:`pipeline.reports.service_delivered.service_sql`, so the stamp's
+    asyncpg read and the feed-quality scorecard's psycopg2 build probe the
+    same days."""
+    return f"""
     SELECT a.agency_id, a.ingest_strategy, a.deleted_at IS NULL AS listed, newest.date AS newest
     FROM agencies a
     LEFT JOIN LATERAL (
         SELECT r.date FROM agg_route_daily_dist r
-        WHERE r.agency_id = a.agency_id AND r.date BETWEEN $2 AND $3
+        WHERE r.agency_id = a.agency_id AND r.date BETWEEN {from_date} AND {to_date}
         ORDER BY r.date DESC LIMIT 1
     ) newest ON true
-    WHERE a.deleted_at IS NULL OR a.agency_id = $1
+    WHERE a.deleted_at IS NULL OR a.agency_id = {agency_id}
 """
+
+
+_AGENCY_DAYS_SQL = agency_days_sql("$1", "$2", "$3")
 
 # _FEED_SQL for one agency.
 _AGENCY_FEED_SQL = """

@@ -653,11 +653,10 @@ the scope as one sentence above their content
   (フィード品質), whatever filter narrows the figures beside it. `feed_quality`
   holds, per agency, the agencies board's observation coverage
   (`coverage_pct`, `observed_trips` of `coverage_planned_trips`) and clamp share
-  (`clamp_pct`), by the comparability gate's own rules, so a report and the
-  board agree over the same days, as the feed-quality scorecard does for a month
-  but in the two cases `DELAY_ANALYSIS.md`'s "Method versions" names. Beside each are the
-  gate's flags (`coverage_low`, `clamp_high`) and the thresholds they were judged
-  against.
+  (`clamp_pct`), by the comparability gate's own rules, so a report, the
+  board and the feed-quality scorecard's month agree over the same days. Beside
+  each are the gate's flags (`coverage_low`, `clamp_high`) and the thresholds
+  they were judged against.
   - **Missing figures.** A figure that cannot be computed is null beside its
     reason (`coverage_missing`: `no_data`, `unmatched`, `no_plan`,
     `no_plan_observed`, `unreadable`; `clamp_missing`: `no_data`), never 0.
