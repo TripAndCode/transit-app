@@ -268,6 +268,13 @@ def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> s
 # not real zero-headway service) is excluded rather than let it
 # drag the median down.
 #
+# The median is PERCENTILE_CONT(0.5): for an even count of gaps, the
+# mean of the two middle ones, as statistics.median takes the actual
+# side's (pipeline.headways), so a route's scheduled and actual
+# headways are medians of one definition. PERCENTILE_DISC would take
+# the lower middle, so a timetable whose gaps split evenly between
+# long and short would read as its short gap.
+#
 # departure_time is raw GTFS text ("H:MM:SS" or similar) --
 # unlike `updates.scheduled_time` (normalized at ingest time by
 # pipeline.strategies._time.normalize_departure_time and capped
@@ -323,7 +330,7 @@ def route_headway_sql(all_routes: bool = False) -> str:
                 ),
                 medians AS (
                     SELECT route_code,
-                           PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
+                           PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
                            COUNT(*) AS scheduled_samples,
                            -- E[H^2] / (2*E[H]) over this route's scheduled headway
                            -- distribution -- the mean-wait-time formula

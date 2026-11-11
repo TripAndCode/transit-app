@@ -175,7 +175,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_headway",
-            1,
+            2,
             Kind.STATIC_ONLY,
             Timetable.LOADED,
             # pipeline.static_headways keeps each timetable's medians under this
@@ -359,6 +359,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.6", {"feed_quality_monthly": 2}),
     MethodVersion("2026.11.7", {"agg_service_delivered_daily": 3}),
     MethodVersion("2026.11.8", {"feed_quality_monthly": 3}),
+    MethodVersion("2026.11.9", {"agg_route_headway": 2}),
 )
 
 # The method every report, CSV and council document names beside its figures

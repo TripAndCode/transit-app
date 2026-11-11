@@ -305,7 +305,7 @@ def test_a_changed_date_rebuilds_its_stop_route_days_from_every_row_of_it():
 
 
 # The scheduled headway's median reads the static schedule and nothing else.
-_HEADWAY_MEDIAN = "PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec"
+_HEADWAY_MEDIAN = "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec"
 
 
 def test_a_noop_run_neither_purges_nor_rebuilds_the_scheduled_headway():

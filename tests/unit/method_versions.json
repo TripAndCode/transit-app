@@ -74,5 +74,8 @@
   },
   "2026.11.8": {
     "feed_quality_monthly": 3
+  },
+  "2026.11.9": {
+    "agg_route_headway": 2
   }
 }
