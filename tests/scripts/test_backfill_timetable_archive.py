@@ -651,3 +651,34 @@ def test_an_agency_the_target_does_not_hold_is_reported_and_skipped(
     out = capsys.readouterr().out
     assert f"agency {absent}: not in the target database; skipped" in out
     assert f"re-record {old}: timetable_old" in out
+    # Named on its own, it is refused, as the name backfill refuses it.
+    assert _run_headways(scratch_url, static_dir, agency=absent) == 1
+    assert f"refused: agency {absent} is not in the target database" in capsys.readouterr().err
+
+
+def test_a_copy_failing_in_the_target_reports_its_own_error_and_the_states_are_still_cleared(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys, monkeypatch
+):
+    """The failed statement leaves the target's transaction aborted; the clear at the end still runs."""
+    static_dir, old, new = _a_timetable_kept_before_its_sums(tmp_path, pg_conn, agency_id, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM route_headway_by_content WHERE agency_id = %s AND content_hash = %s", (agency_id, new))
+    pg_conn.commit()
+    states = _states(pg_conn, agency_id)
+    real = backfill.copy_medians
+    copies = []
+
+    def the_second_copy_fails(scratch_conn, target_conn, agency, key):
+        copies.append(key)
+        if len(copies) == 2:
+            with target_conn.cursor() as cur:
+                cur.execute("SELECT 1/0")
+        return real(scratch_conn, target_conn, agency, key)
+
+    monkeypatch.setattr(backfill, "copy_medians", the_second_copy_fails)
+    capsys.readouterr()
+    assert _run_headways(scratch_url, static_dir, "--apply", agency=agency_id) == 1
+    assert copies == [new, old]
+    assert f"agency {agency_id}: stopped, division by zero" in capsys.readouterr().err
+    assert static_headways.current_contents(pg_conn, agency_id) == {new}
+    assert _readers_cleared(pg_conn, agency_id, states)

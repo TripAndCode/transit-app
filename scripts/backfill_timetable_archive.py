@@ -33,10 +33,11 @@ Each agency whose headways it writes has the states of the tables built from
 the kept headways cleared (pipeline.static_headways.kept_headway_readers), so
 its next analyze rebuilds those, judging each day again by its timetable's
 headways, and leaves its other tables standing. Without --agency it takes every
-agency the map names; one the target does not hold is reported and skipped. A
-mapped content with no kept zip that loads and reproduces it keeps what it had,
-and is reported. --apply then exits 1, and goes on exiting 1 on every rerun
-until each such content is resolved, by its zip restored or otherwise.
+agency the map names, reporting and skipping one the target does not hold,
+which --agency naming it refuses. A mapped content with no kept zip that loads
+and reproduces it keeps what it had, and is reported. --apply then exits 1, and
+goes on exiting 1 on every rerun until each such content is resolved, by its zip
+restored or otherwise.
 
 The target is the environment's DATABASE_URL and CLICKHOUSE_*, as for every
 pipeline command. The scratch is --scratch-database-url: a throwaway Postgres,
@@ -409,6 +410,9 @@ def _rerecord(agency_id: int, target_conn, ch, scratch_conn, chosen: list[Archiv
                 print(f"  {archived.content}: not re-recorded; it keeps the headways it had")
     finally:
         if cleared:
+            # A statement that failed leaves the target's transaction aborted, which would refuse the
+            # clear and put its own error in place of the failure's.
+            _rollback(target_conn)
             static_archive.clear_states(target_conn, agency_id, readers)
 
 
@@ -425,6 +429,8 @@ def _headways(args, ch, target_conn, scratch_conn) -> int:
     for agency in agencies:
         row = _agency_row(target_conn, scratch_conn, agency)
         if row is None:
+            if args.agency is not None:
+                raise Refusal(f"agency {agency} is not in the target database")
             print(f"agency {agency}: not in the target database; skipped")
             continue
         rows[agency] = row
