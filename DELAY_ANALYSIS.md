@@ -124,8 +124,9 @@ too for a month, except in the two cases under "Unlike the scorecard" below:
 - **Caching.** One agency's figures are cached for five minutes, like the compute
   functions. Beside aggregates they are read after the build check, so a rebuild clears
   them first; a live stamp's figures can trail a rebuild by up to those five minutes.
-- **Unlike the scorecard.** A month that plans trips with no analyzed observation of the
-  agency reads 0% there and `no_data` here, the gate's first check. And the scorecard
+- **Unlike the scorecard.** A month with no analyzed observation of the agency reads
+  `no_data` here, the gate's first check. The scorecard reads 0% for it when the feed's
+  trips are matched and a plan exists, and otherwise gives its own reason. And the scorecard
   counts a closed month through its last day whenever some agency's aggregates reach
   past it, so a day at its end that no agency observed (an outage of every feed, for
   one) counts against each feed. The board and the stamp end coverage at the newest day
