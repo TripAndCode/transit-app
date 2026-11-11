@@ -4,9 +4,10 @@ Each scenario (``tests.fixtures.scenario``) declares an operation and its
 truth. Its static GTFS loads through ``load_static``, and each of its
 TripUpdate polls is POSTed to the collector's ingest endpoint. Promotion then
 moves the closed days into ``updates``, and ``analyze`` builds the aggregates.
-The aggregates and the report endpoints are compared with
-``tests.fixtures.scenario_oracle``, which computes the same figures from the
-truth alone.
+The aggregates, the report endpoints, the agencies board and the
+feed-quality scorecard are compared with ``tests.fixtures.scenario_oracle``,
+which computes the same figures from the truth and the polls its feed model
+sends.
 
 A scenario whose timetable is revised loads each version at the instant it
 declares, as an operator loads a newly published zip, and ingests each poll
@@ -55,6 +56,8 @@ from tests.fixtures.scenario import (
     JST,
     Cancellation,
     FeedModel,
+    Freeze,
+    Misreport,
     Poll,
     Route,
     Scenario,
@@ -459,6 +462,100 @@ def bunching(day: date) -> Scenario:
     )
 
 
+# The clamp scenario's runs, by first scheduled departure: delays in seconds,
+# per stop, of a line of six stops two minutes apart. The first two runs
+# truly leave about two hours late and early, across the clamp's edge: 7,200 s
+# either way is plausible and 7,201 s is not. The others run on time or close,
+# and the feed misreports them (_clamp_misreports).
+_CLAMP_TRUTH = {
+    "09:00:00": (7140, 7170, 7200, 7201, 7230, 7260),
+    "09:10:00": (-7260, -7230, -7201, -7200, -7170, -7140),
+    "09:20:00": (0, 20, 40, 60, 80, 100),
+    "09:30:00": (30, 60, 90, 60, 30, 0),
+    "09:40:00": (10, 20, 30, 40, 50, 60),
+    "09:50:00": (20, 20, 20, 20, 20, 20),
+    "10:00:00": (-30, 0, 30, 60, 120, 180),
+    "10:10:00": (0, 0, 0, 0, 0, 0),
+}
+# A day late and a day early, as a feed resending another day's prediction does.
+_DAY_SEC = 24 * 3600
+
+
+def _clamp_misreports(day: date) -> tuple[Misreport, ...]:
+    """The 09:20 run is reported a day late in every poll, so no reading of
+    it is plausible. The 09:30 run is reported a day early from 09:26 to
+    09:29 and then truly again. The 09:40 run is reported a day early from
+    09:43 until it ends, so each stop it has not left by then keeps the
+    reading before. From 09:50 the 09:50 run's second to fifth stops are
+    reported 7,200 s late, 7,201 s late, 7,200 s early and 7,201 s early,
+    each until the run leaves it: the plausible two become those stops' last
+    readings, and the other two keep their readings of 09:49."""
+    clock = gtfs_seconds
+    edges = ((2, 7200), (3, 7201), (4, -7200), (5, -7201))
+    return (
+        Misreport("K1_0920", day, _DAY_SEC, 0, clock("30:00:00")),
+        Misreport("K1_0930", day, -_DAY_SEC, clock("09:26:00"), clock("09:29:00")),
+        Misreport("K1_0940", day, -_DAY_SEC, clock("09:43:00"), clock("30:00:00")),
+        *(Misreport("K1_0950", day, delay, clock("09:50:00"), clock("30:00:00"), (seq,)) for seq, delay in edges),
+    )
+
+
+def clamp(day: date) -> Scenario:
+    """A ten-minute line on one weekday whose readings mix the plausible
+    with readings beyond the clamp: true delays across its edge, and runs
+    the feed misreports for a stretch, the whole run, or up to each stop's
+    departure."""
+    route = _route("K1", "Clamped line", 6, 34.53)
+    trips, runs = _runs(route, "平日", day, 120, _CLAMP_TRUTH)
+    return Scenario(
+        name="clamp",
+        routes=(route,),
+        timetable=tuple(trips),
+        days=(ServiceDay(day, "平日"),),
+        runs=tuple(runs),
+        feed=FeedModel(poll_interval_sec=60, lead_sec=300, misreports=_clamp_misreports(day)),
+    )
+
+
+# The frozen feed's runs from 08:00, six minutes apart, eight stops two
+# minutes apart each: delays in seconds, per stop.
+_FROZEN_TRUTH = {
+    "08:00:00": (0, 10, 20, 30, 40, 50, 60, 70),
+    "08:06:00": (-30, -20, 0, 30, 60, 90, 120, 150),
+    "08:12:00": (60, 120, 180, 240, 300, 330, 360, 400),
+    "08:18:00": (0, 0, 0, 0, 0, 0, 10, 10),
+    "08:24:00": (20, 40, 61, 90, 120, 180, 240, 301),
+}
+
+
+def frozen_feed(day: date) -> Scenario:
+    """A six-minute line on one weekday whose feed stops updating twice.
+    Each run enters the feed 44 minutes before it leaves, so every run is in
+    it by 07:40. From then until 08:28 the feed resends the 07:40 poll, its
+    header included: each poll reads a minute older than the last, and lists
+    every stop at its true delay long after the run has left it. From 08:28
+    to 08:34 it resends the 08:28 poll's TripUpdates under a header that
+    keeps the capture time, so the stale content reads as fresh."""
+    route = _route("F1", "Frozen line", 8, 34.55)
+    trips, runs = _runs(route, "平日", day, 120, _FROZEN_TRUTH)
+    clock = gtfs_seconds
+    return Scenario(
+        name="frozen_feed",
+        routes=(route,),
+        timetable=tuple(trips),
+        days=(ServiceDay(day, "平日"),),
+        runs=tuple(runs),
+        feed=FeedModel(
+            poll_interval_sec=60,
+            lead_sec=44 * 60,
+            freezes=(
+                Freeze(day, clock("07:40:00"), clock("08:28:00"), "frozen"),
+                Freeze(day, clock("08:28:00"), clock("08:34:00"), "advancing"),
+            ),
+        ),
+    )
+
+
 @dataclass(frozen=True, repr=False)
 class Rounded:
     """An exact figure a column or report holds rounded to *places* decimals.
@@ -531,6 +628,11 @@ _TABLE_COLUMNS = {
         "route_code, date, actual_headway_median_sec, actual_samples, actual_headway_sum_sec, "
         "actual_headway_sumsq_sec2, long_gap_count"
     ),
+    "agg_feed_health": "date, raw_samples, clamp_count, total_rows, archive_rows, live_rows",
+    "feed_quality_monthly": (
+        "month, raw_samples, clamp_count, clamp_pct, clamp_missing, message_age_polls, "
+        "message_age_undated_polls, message_age_p50_sec, message_age_p95_sec, message_age_missing"
+    ),
 }
 # Each read's report and query. The default, the industry window, puts
 # readings exactly a minute early and exactly five minutes late on its edges;
@@ -549,8 +651,9 @@ class Observed:
     ``interval`` as its ``HH:MM:SS`` text; each route report's rows; the trend
     report's first row; the council summary of every window ``_windows``
     names; the route table's response for each time band the truth departs
-    in; and the headway quality response for every window ``_windows``
-    names."""
+    in; the headway quality response for every window ``_windows`` names;
+    the agency's row of the agencies board over the whole period; and the
+    feed quality the route table's definition stamp states over it."""
 
     scenario: Scenario
     batches: list[tuple[TimetableVersion, list[Poll]]]
@@ -560,6 +663,8 @@ class Observed:
     council: dict[tuple[date, date], dict[str, Any]]
     banded: dict[str, dict[str, Any]]
     headways: dict[tuple[date, date], dict[str, Any]]
+    board: dict[str, Any]
+    stamp: dict[str, Any]
 
     @cached_property
     def choice(self) -> Choice:
@@ -968,6 +1073,109 @@ def _headway_quality_actual(observed: Observed) -> Cells:
     return cells
 
 
+def _share(share: Fraction | None) -> Rounded | None:
+    """A clamp share as the board, the stamp and the scorecard hold it, to two decimals."""
+    return None if share is None else Rounded(share, 2)
+
+
+def _clamp_label(surface: str) -> str:
+    return f"implausible readings, {surface}"
+
+
+def _month_label(part: str) -> str:
+    return f"feed_quality_monthly, {part}"
+
+
+def _clamp_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """Each service day's readings, implausible readings and rows, and the
+    clamp share the board, the stamp, the council summary and each month of
+    the scorecard state over their own days. Every row came in live."""
+    first, last = _windows(observed.scenario)[0]
+    in_period = [r for day, r in found.readings.items() if first <= day <= last]
+    share = oracle.clamp_share(found, first, last)
+    months = {
+        (month,): {
+            "raw_samples": card.readings,
+            "clamp_count": card.implausible,
+            "clamp_pct": _share(card.clamp_share),
+            "clamp_missing": None if card.clamp_share is not None else "no_data",
+        }
+        for month, card in oracle.scorecard(found).items()
+    }
+    return (
+        _cells(
+            "agg_feed_health",
+            {
+                (day,): {
+                    "raw_samples": r.readings,
+                    "clamp_count": r.implausible,
+                    "total_rows": r.rows,
+                    "live_rows": r.rows,
+                    "archive_rows": 0,
+                }
+                for day, r in found.readings.items()
+            },
+        )
+        | _cells(
+            _clamp_label(f"GET network/summary {_window(observed.scenario)}"),
+            {
+                "agency": {
+                    "raw_samples": sum(r.readings for r in in_period),
+                    "clamp_count": sum(r.implausible for r in in_period),
+                    "clamp_pct": _share(share),
+                }
+            },
+        )
+        | _cells(
+            _clamp_label(f"definition stamp of GET reports/route_table {_window(observed.scenario)}"),
+            {
+                "agency": {
+                    "clamp_pct": _share(share),
+                    "clamp_missing": None if share is not None else "no_data",
+                    "clamp_high": oracle.clamp_high(share),
+                }
+            },
+        )
+        | _cells(
+            _clamp_label(_council_label("comparability")),
+            {w: {"clamp_pct": _share(oracle.clamp_share(found, *w))} for w in _windows(observed.scenario)},
+        )
+        | _cells(_month_label("implausible readings"), months)
+    )
+
+
+def _clamp_actual(observed: Observed) -> Cells:
+    window = _window(observed.scenario)
+    return (
+        _keyed("agg_feed_health", observed.tables["agg_feed_health"], ("date",))
+        | _cells(_clamp_label(f"GET network/summary {window}"), {"agency": observed.board})
+        | _cells(_clamp_label(f"definition stamp of GET reports/route_table {window}"), {"agency": observed.stamp})
+        | _cells(_clamp_label(_council_label("comparability")), observed.council)
+        | _keyed(_month_label("implausible readings"), observed.tables["feed_quality_monthly"], ("month",))
+    )
+
+
+def _message_age_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """Each month's polls and the quantiles of their message ages, every poll
+    a live one whose capture instant is known, each quantile to a tenth of a
+    second."""
+    months = {}
+    for month, card in oracle.scorecard(found).items():
+        assert card.ages is not None
+        months[(month,)] = {
+            "message_age_polls": card.polls,
+            "message_age_undated_polls": 0,
+            "message_age_p50_sec": Rounded(card.ages[0], 1),
+            "message_age_p95_sec": Rounded(card.ages[1], 1),
+            "message_age_missing": None,
+        }
+    return _cells(_month_label("message age"), months)
+
+
+def _message_age_actual(observed: Observed) -> Cells:
+    return _keyed(_month_label("message age"), observed.tables["feed_quality_monthly"], ("month",))
+
+
 Expect = Callable[[Observed, oracle.Outcome], Cells]
 # Each test's comparison: the cells the oracle expects of an outcome, and the
 # cells the run produced.
@@ -980,6 +1188,8 @@ _SERVICE = (_service_expected, _service_actual)
 _BANDED = (_banded_expected, _banded_actual)
 _HEADWAY_DAILY = (_headway_daily_expected, _headway_daily_actual)
 _HEADWAY_QUALITY = (_headway_quality_expected, _headway_quality_actual)
+_CLAMP_SHARE = (_clamp_expected, _clamp_actual)
+_MESSAGE_AGE = (_message_age_expected, _message_age_actual)
 _COMPARISONS = (
     _DAILY,
     _REPORTS_COMPARED,
@@ -990,6 +1200,8 @@ _COMPARISONS = (
     _BANDED,
     _HEADWAY_DAILY,
     _HEADWAY_QUALITY,
+    _CLAMP_SHARE,
+    _MESSAGE_AGE,
 )
 
 
@@ -1264,23 +1476,30 @@ def _council_figures(response: dict) -> dict[str, Any]:
         "observed_trips": comparability.get("observed_trips"),
         "coverage_planned_trips": comparability.get("coverage_planned_trips"),
         "coverage_pct": comparability.get("coverage_pct"),
+        "clamp_pct": comparability.get("clamp_pct"),
     }
 
 
-async def _read_reports(scenario: Scenario, agency_id: int) -> tuple[dict[str, list], dict, dict, dict, dict]:
+async def _read_reports(
+    scenario: Scenario, agency_id: int
+) -> tuple[dict[str, list], dict, dict, dict, dict, dict, dict]:
     from api.main import app
 
-    async def get(client, report: str, query: str) -> dict:
-        resp = await client.get(f"/api/{agency_id}/{report}?{query}")
+    async def get(client, report: str, query: str, scoped: bool = True) -> dict:
+        path = f"/api/{agency_id}/{report}" if scoped else f"/api/{report}"
+        resp = await client.get(f"{path}?{query}")
         if resp.status_code != 200:
             raise RuntimeError(f"{report}?{query}: {resp.status_code} {resp.text}")
         return resp.json()
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        reports = {
-            name: (await get(client, f"reports/{report}", f"{_window(scenario)}{query}"))["rows"]
+        responses = {
+            name: await get(client, f"reports/{report}", f"{_window(scenario)}{query}")
             for name, (report, query) in _REPORTS.items()
         }
+        reports = {name: response["rows"] for name, response in responses.items()}
+        (stamp,) = responses["route_table"]["definition"]["feed_quality"]
+        (board,) = (await get(client, "network/summary", _window(scenario), scoped=False))["agencies"]
         trend = (await get(client, "reports/trend", _window(scenario)))["rows"][0]
         council = {
             window: _council_figures(await get(client, "reports/council_summary", f"from={window[0]}&to={window[1]}"))
@@ -1295,7 +1514,7 @@ async def _read_reports(scenario: Scenario, agency_id: int) -> tuple[dict[str, l
             window: await get(client, "headway_quality", f"from={window[0]}&to={window[1]}")
             for window in _windows(scenario)
         }
-    return reports, trend, council, banded, headways
+    return reports, trend, council, banded, headways, board, stamp
 
 
 def _empty_stores(pg_conn, ch_client, reset_sql: str) -> None:
@@ -1381,10 +1600,10 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             stack.push_async_callback(pool.close)
             await confirm_rt_field_coverage(pool, agency_id)
             app.state.pool, app.state.ch_client = pool, ch_async
-            reports, trend, council, banded, headways = await _read_reports(scenario, agency_id)
+            reports, trend, council, banded, headways, board, stamp = await _read_reports(scenario, agency_id)
     except AssertionError as exc:
         raise RuntimeError(f"scenario {scenario.name}: an assertion failed while the pipeline ran") from exc
-    return Observed(scenario, batches, tables, reports, trend, council, banded, headways)
+    return Observed(scenario, batches, tables, reports, trend, council, banded, headways, board, stamp)
 
 
 def _assert_clean(mismatches: list[str]) -> None:
@@ -1409,6 +1628,8 @@ _ALL = [
     _PUBLISHED_EARLY := pytest.param(timetable_published_early, id="timetable_published_early"),
     pytest.param(cancellations, id="cancellations"),
     pytest.param(bunching, id="bunching"),
+    pytest.param(clamp, id="clamp"),
+    pytest.param(frozen_feed, id="frozen_feed"),
 ]
 
 
@@ -1455,6 +1676,16 @@ def test_daily_headways_match_the_truth(observed):
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_headway_quality_matches_the_truth(observed):
     _assert_clean(_hard_mismatches(observed, _HEADWAY_QUALITY))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_the_clamp_share_counts_every_implausible_reading_each_poll_sent(observed):
+    _assert_clean(_hard_mismatches(observed, _CLAMP_SHARE))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_message_age_reads_each_polls_capture_less_its_header(observed):
+    _assert_clean(_hard_mismatches(observed, _MESSAGE_AGE))
 
 
 @pytest.mark.parametrize("observed", [_TIMETABLE_CHANGE], indirect=True)

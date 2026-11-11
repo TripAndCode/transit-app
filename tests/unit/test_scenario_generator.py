@@ -3,6 +3,7 @@
 import csv
 import io
 import zipfile
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
 
@@ -19,6 +20,8 @@ from tests.fixtures.scenario import (
     SKIPPED,
     Cancellation,
     FeedModel,
+    Freeze,
+    Misreport,
     Route,
     Scenario,
     ScheduledTrip,
@@ -180,9 +183,7 @@ def test_a_revision_is_in_force_from_its_first_day_and_ships_as_its_own_zip():
     assert found.day_versions == {DAY: "scenario_revised", NEXT: "timetable_b"}
     assert found.version_trips == {"scenario_revised": 2, "timetable_b": 2}
     assert oracle.revision_boundaries(found) == [NEXT]
-    assert {
-        (d.service_date, d.trip_id, d.scheduled_sec) for d in oracle.departures(scenario) if d.stop_sequence == 1
-    } == {
+    assert {(d.service_date, d.trip_id, d.scheduled_sec) for d in found.departures if d.stop_sequence == 1} == {
         (DAY, "R_0700", gtfs_seconds("07:00:00")),
         (DAY, "R_2350", gtfs_seconds("23:50:00")),
         (NEXT, "R_0700", gtfs_seconds("07:30:00")),
@@ -299,9 +300,9 @@ def test_a_skipped_stop_is_predicted_until_announced_then_reported_skipped_and_i
                 assert stop_status == SCHEDULED
     assert seen == {True: True, False: True}
     scenario = _skipping(announced)
-    assert [(d.stop_sequence, d.delay_sec) for d in oracle.departures(scenario)] == [(1, 30), (3, 90)]
+    assert [(d.stop_sequence, d.delay_sec) for d in oracle.outcome(scenario).departures] == [(1, 30), (3, 90)]
     # A run that skipped a stop still ran: executed, and observed.
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=1, reported_not_run=0, observed=1)}
+    assert oracle.outcome(scenario).service == {DAY: oracle.Service(planned=1, reported_not_run=0, observed=1)}
 
 
 def test_a_skipped_first_stop_is_predicted_at_the_delay_of_the_next_stop_served():
@@ -324,7 +325,7 @@ def test_a_skipped_first_stop_is_predicted_at_the_delay_of_the_next_stop_served(
     assert {listed for listed in first_stop.values()} == {(40, SCHEDULED), (None, SKIPPED)}
     # Listed until the run leaves stop 2, the next it serves.
     assert max(first_stop) < service_day_instant(DAY, gtfs_seconds("07:08:40"))
-    assert [(d.stop_sequence, d.delay_sec) for d in oracle.departures(scenario)] == [(2, 40), (3, 90)]
+    assert [(d.stop_sequence, d.delay_sec) for d in oracle.outcome(scenario).departures] == [(2, 40), (3, 90)]
 
 
 def test_a_skip_announced_only_after_the_stop_is_passed_is_refused():
@@ -356,9 +357,9 @@ def test_a_cancellation_is_predicted_until_announced_then_reported_canceled_with
             assert trip_status == CANCELED
             assert stops
             assert {(delay, status) for _seq, delay, status in stops} == {(None, NO_DATA)}
-    assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
-    assert oracle.service(scenario)[DAY].executed == 1
+    assert {d.trip_id for d in oracle.outcome(scenario).departures} == {"R_2350"}
+    assert oracle.outcome(scenario).service == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+    assert oracle.outcome(scenario).service[DAY].executed == 1
     assert oracle.delivered_rate_shown(oracle.outcome(scenario), DAY)
 
 
@@ -374,7 +375,7 @@ def test_a_cancellation_may_list_no_stop_at_all():
     assert stored[service_day_instant(DAY, gtfs_seconds("06:58:00"))] == 3
     assert stored[service_day_instant(DAY, gtfs_seconds("07:08:00"))] == 2
     assert stored[service_day_instant(DAY, gtfs_seconds("07:10:00"))] == 1
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+    assert oracle.outcome(scenario).service == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
 
 
 def test_a_cancellation_may_be_predicted_and_then_list_no_stop():
@@ -392,8 +393,8 @@ def test_a_cancellation_may_be_predicted_and_then_list_no_stop():
             assert {(delay, status) for _seq, delay, status in stops} == {(90, SCHEDULED)}
         else:
             assert (trip_status, stops) == (CANCELED, [])
-    assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+    assert {d.trip_id for d in oracle.outcome(scenario).departures} == {"R_2350"}
+    assert oracle.outcome(scenario).service == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
 
 
 def test_a_trip_reported_with_every_stop_skipped_did_not_run():
@@ -404,8 +405,8 @@ def test_a_trip_reported_with_every_stop_skipped_did_not_run():
         assert trip_status == SCHEDULED
         assert stops
         assert {(delay, status) for _seq, delay, status in stops} == {(None, SKIPPED)}
-    assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+    assert {d.trip_id for d in oracle.outcome(scenario).departures} == {"R_2350"}
+    assert oracle.outcome(scenario).service == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
 
 
 def test_a_trip_may_be_reported_skipped_at_every_stop_and_then_without_data_once_due():
@@ -418,8 +419,8 @@ def test_a_trip_may_be_reported_skipped_at_every_stop_and_then_without_data_once
         assert [seq for seq, _delay, _status in stops] == [1, 2, 3]
         statuses |= {(delay, status) for _seq, delay, status in stops}
     assert statuses == {(None, SKIPPED), (None, NO_DATA)}
-    assert {d.trip_id for d in oracle.departures(scenario)} == {"R_2350"}
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
+    assert {d.trip_id for d in oracle.outcome(scenario).departures} == {"R_2350"}
+    assert oracle.outcome(scenario).service == {DAY: oracle.Service(planned=2, reported_not_run=1, observed=1)}
 
 
 def test_an_unreported_trip_is_in_no_poll_and_counts_as_executed_but_not_observed():
@@ -434,8 +435,8 @@ def test_an_unreported_trip_is_in_no_poll_and_counts_as_executed_but_not_observe
     assert {trip[0] for _at, trips in _statuses(polls(scenario)) for trip in trips} == {"R_2350"}
     # Silence is not evidence the trip did not run: it counts as executed,
     # and only coverage, one observed trip of two planned, shows the gap.
-    assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=0, observed=1)}
-    assert oracle.service(scenario)[DAY].executed == 2
+    assert oracle.outcome(scenario).service == {DAY: oracle.Service(planned=2, reported_not_run=0, observed=1)}
+    assert oracle.outcome(scenario).service[DAY].executed == 2
     assert not oracle.delivered_rate_shown(oracle.outcome(scenario), DAY)
 
 
@@ -563,3 +564,207 @@ def test_two_departures_from_one_stop_in_the_same_second_are_refused():
     )
     with pytest.raises(ValueError, match="same second"):
         oracle.headway_days(oracle.outcome(scenario))
+
+
+def _one_run(delays: tuple[int, ...], feed: FeedModel | None = None, *, evening: tuple[int, ...] | None = None):
+    trips = (_MORNING,) if evening is None else (_MORNING, _EVENING)
+    runs = (TripRun.from_delays(_MORNING, DAY, delays),)
+    if evening is not None:
+        runs += (TripRun.from_delays(_EVENING, DAY, evening),)
+    return Scenario(
+        name="readings",
+        routes=(_ROUTE,),
+        timetable=trips,
+        days=(ServiceDay(DAY, "平日"),),
+        runs=runs,
+        feed=feed or FeedModel(poll_interval_sec=60, lead_sec=300),
+    )
+
+
+def test_a_true_delay_beyond_the_clamp_either_way_is_no_departure_and_each_of_its_readings_is_implausible():
+    """The run leaves at 05:00:00, 05:07:59 and 09:16:00 and is in the feed
+    from 04:55. Stop 1 is read 5 times at -7200 s, stop 2 13 times at
+    -7201 s and stop 3 261 times at 7200 s: 279 readings, 13 implausible."""
+    found = oracle.outcome(_one_run((-7200, -7201, 7200)))
+    assert [(d.stop_sequence, d.delay_sec) for d in found.departures] == [(1, -7200), (3, 7200)]
+    assert found.readings == {DAY: oracle.Readings(readings=279, implausible=13, rows=279)}
+    assert found.service == {DAY: oracle.Service(planned=1, reported_not_run=0, observed=1)}
+    share = oracle.clamp_share(found, DAY, DAY)
+    assert share == Fraction(1300, 279)
+    assert not oracle.clamp_high(share)
+    assert oracle.scorecard(found) == {
+        date(2026, 6, 1): oracle.Scorecard(last=DAY, readings=279, implausible=13, polls=261, ages=(0, 0))
+    }
+
+
+def test_a_misreport_beyond_the_clamp_leaves_the_last_plausible_reading_standing():
+    """From 07:05 the 07:00 run's stop 2 is read at 7201 s, 3 times before it
+    leaves at 07:08, so its reading of 07:04 stands. From 07:10 its stop 3 is
+    read at 7200 s, which is plausible and so its last reading. The evening
+    run is read a day early in each of its 39 readings, so it has no
+    departure and is not observed."""
+    feed = FeedModel(
+        poll_interval_sec=60,
+        lead_sec=300,
+        misreports=(
+            Misreport("R_0700", DAY, 7201, gtfs_seconds("07:05:00"), gtfs_seconds("30:00:00"), (2,)),
+            Misreport("R_0700", DAY, 7200, gtfs_seconds("07:10:00"), gtfs_seconds("30:00:00"), (3,)),
+            Misreport("R_2350", DAY, -86400, 0, gtfs_seconds("30:00:00")),
+        ),
+    )
+    scenario = _one_run((0, 0, 0), feed, evening=(0, 0, 0))
+    stop_2 = {
+        p.captured_at: s.departure_delay
+        for p in polls(scenario)
+        for t in p.trips
+        for s in t.stops
+        if (t.trip_id, s.stop_sequence) == ("R_0700", 2)
+    }
+    assert stop_2[service_day_instant(DAY, gtfs_seconds("07:04:00"))] == 0
+    assert stop_2[service_day_instant(DAY, gtfs_seconds("07:05:00"))] == 7201
+    found = oracle.outcome(scenario)
+    assert [(d.trip_id, d.stop_sequence, d.delay_sec) for d in found.departures] == [
+        ("R_0700", 1, 0),
+        ("R_0700", 2, 0),
+        ("R_0700", 3, 7200),
+    ]
+    assert found.readings == {DAY: oracle.Readings(readings=78, implausible=42, rows=78)}
+    assert found.service == {DAY: oracle.Service(planned=2, reported_not_run=0, observed=1)}
+    assert oracle.clamp_high(oracle.clamp_share(found, DAY, DAY))
+
+
+def _frozen(header: str) -> Scenario:
+    freeze = Freeze(DAY, gtfs_seconds("06:57:00"), gtfs_seconds("07:03:00"), header)  # type: ignore[arg-type]
+    return _one_run((0, 0, 0), FeedModel(poll_interval_sec=60, lead_sec=300, freezes=(freeze,)))
+
+
+def test_a_frozen_feed_resends_one_poll_header_and_all_so_each_repeat_reads_a_minute_older():
+    """The 06:57 poll is resent at 06:58 to 07:02, still listing stop 1 after
+    the run leaves it at 07:00. Readings: 3 in each of the 8 polls to 07:02,
+    then 2 in the 5 to 07:07 and 1 in the 8 to 07:15, 42 in all, for 3
+    departures. The 21 polls' ages are 16 zeros and 60 to 300 s."""
+    scenario = _frozen("frozen")
+    sent = {p.captured_at: p for p in polls(scenario)}
+    first = sent[service_day_instant(DAY, gtfs_seconds("06:57:00"))]
+    for minute in range(58, 63):
+        repeat = sent[
+            service_day_instant(DAY, gtfs_seconds(f"06:{minute:02d}:00" if minute < 60 else f"07:0{minute - 60}:00"))
+        ]
+        assert repeat.payload == first.payload
+        assert repeat.header == first.captured_at
+    stale = sent[service_day_instant(DAY, gtfs_seconds("07:02:00"))]
+    assert [s.stop_sequence for t in stale.trips for s in t.stops] == [1, 2, 3]
+    found = oracle.outcome(scenario)
+    assert [(d.stop_sequence, d.delay_sec) for d in found.departures] == [(1, 0), (2, 0), (3, 0)]
+    assert found.readings == {DAY: oracle.Readings(readings=42, implausible=0, rows=42)}
+    assert sorted(age for _day, age in found.ages) == [0] * 16 + [60, 120, 180, 240, 300]
+    # Rank 20 x 0.5 = 10 is a zero; rank 20 x 0.95 = 19 is the fourth repeat.
+    assert oracle.scorecard(found)[date(2026, 6, 1)].ages == (0, 240)
+
+
+def test_a_feed_whose_predictions_stop_moving_under_an_advancing_header_reads_no_age():
+    scenario = _frozen("advancing")
+    sent = {p.captured_at: p for p in polls(scenario)}
+    first = sent[service_day_instant(DAY, gtfs_seconds("06:57:00"))]
+    repeat = sent[service_day_instant(DAY, gtfs_seconds("07:02:00"))]
+    assert repeat.trips == first.trips
+    assert repeat.header == repeat.captured_at
+    assert repeat.payload != first.payload
+    found = oracle.outcome(scenario)
+    assert found.readings == {DAY: oracle.Readings(readings=42, implausible=0, rows=42)}
+    assert {age for _day, age in found.ages} == {0}
+
+
+def test_the_clamp_share_is_flagged_as_printed_to_two_decimals_then_to_a_tenth():
+    assert not oracle.clamp_high(Fraction(504, 100))
+    assert oracle.clamp_high(Fraction(505, 100))
+    # 5.046% prints 5.05%, which prints 5.1%, though 5.046% is nearer 5.0%.
+    assert oracle.clamp_high(Fraction(5046, 1000))
+    assert not oracle.clamp_high(Fraction(5044, 1000))
+    assert not oracle.clamp_high(None)
+
+
+def test_a_quantile_interpolates_linearly_between_the_two_closest_ranks():
+    assert oracle.quantile([300, 0, 120, 60], Fraction(1, 2)) == 90
+    # Rank 3 x 0.95 = 2.85: 120 and 85% of the way on to 300.
+    assert oracle.quantile([300, 0, 120, 60], Fraction(19, 20)) == 273
+    assert oracle.quantile([5, 1, 3], Fraction(1, 2)) == 3
+
+
+def test_a_reading_files_under_the_service_day_its_poll_was_captured_in():
+    assert oracle.service_day_of(datetime(2026, 6, 2, 3, 59, 59, tzinfo=JST)) == DAY
+    assert oracle.service_day_of(datetime(2026, 6, 2, 4, 0, tzinfo=JST)) == DAY + timedelta(days=1)
+    # The evening run's polls run past midnight, to 00:05 on the next calendar day.
+    found = oracle.outcome(_one_run((0, 0, 0), evening=(0, 0, 0)))
+    assert set(found.readings) == {DAY}
+
+
+def test_misreports_and_freezes_the_oracle_cannot_follow_are_refused():
+    skipping = TripRun.from_delays(_MORNING, DAY, (0, None, 0))
+    late = Misreport("R_0700", DAY, 9000, 0, gtfs_seconds("30:00:00"))
+    with pytest.raises(ValueError, match="skips a stop"):
+        replace(_one_run((0, 0, 0), FeedModel(misreports=(late,))), runs=(skipping,))
+    with pytest.raises(ValueError, match="only a run"):
+        _one_run((0, 0, 0), FeedModel(misreports=(replace(late, trip_id="R_2350"),)))
+    freeze = Freeze(DAY, gtfs_seconds("06:57:00"), gtfs_seconds("07:03:00"))
+    with pytest.raises(ValueError, match="neither cancel"):
+        Scenario(
+            name="frozen_cancellation",
+            routes=(_ROUTE,),
+            timetable=(_MORNING, _EVENING),
+            days=(ServiceDay(DAY, "平日"),),
+            runs=(TripRun.from_delays(_MORNING, DAY, (0, 0, 0)),),
+            cancellations=(Cancellation("R_2350", DAY),),
+            feed=FeedModel(freezes=(freeze,)),
+        )
+    with pytest.raises(ValueError, match="must not overlap"):
+        _one_run((0, 0, 0), FeedModel(freezes=(freeze, replace(freeze, from_sec=gtfs_seconds("07:00:00")))))
+    idle = Misreport("R_0700", DAY, 9000, gtfs_seconds("05:00:00"), gtfs_seconds("06:00:00"))
+    with pytest.raises(ValueError, match="no poll carries"):
+        polls(_one_run((0, 0, 0), FeedModel(misreports=(idle,))))
+    # The evening run enters the feed at 23:45, inside a freeze of the 23:40
+    # poll that lasts past its first departure, which no poll then reports.
+    earlier = ScheduledTrip("R_2330", "R", "平日", ("23:30:00", "23:38:00", "23:46:00"))
+    swallowing = Freeze(DAY, gtfs_seconds("23:40:00"), gtfs_seconds("23:55:00"))
+    scenario = Scenario(
+        name="swallowed",
+        routes=(_ROUTE,),
+        timetable=(_MORNING, _EVENING, earlier),
+        days=(ServiceDay(DAY, "平日"),),
+        runs=tuple(TripRun.from_delays(t, DAY, (0, 0, 0)) for t in (_MORNING, _EVENING, earlier)),
+        feed=FeedModel(poll_interval_sec=60, lead_sec=300, freezes=(swallowing,)),
+    )
+    with pytest.raises(ValueError, match="no poll reports"):
+        polls(scenario)
+
+
+def test_the_scorecard_keeps_a_month_per_service_month_and_files_an_after_midnight_poll_under_its_service_day():
+    """May 31 runs both trips and June 1 the morning one alone. The evening
+    run's polls to 00:05 on June 1 are May 31's, and so are the repeats of a
+    23:58 header frozen until 00:03: 78 readings and 42 polls in May, four of
+    them 60 to 240 s old, against 39 readings and 21 polls in June."""
+    may = date(2026, 5, 31)
+    freeze = Freeze(may, gtfs_seconds("23:58:00"), gtfs_seconds("24:03:00"))
+    scenario = Scenario(
+        name="month_boundary",
+        routes=(_ROUTE,),
+        timetable=(_MORNING, _EVENING),
+        days=(ServiceDay(may, "平日"), ServiceDay(DAY, "平日")),
+        runs=(
+            TripRun.from_delays(_MORNING, may, (0, 0, 0)),
+            TripRun.from_delays(_EVENING, may, (0, 0, 0)),
+            TripRun.from_delays(_MORNING, DAY, (0, 0, 0)),
+        ),
+        unreported=(Unreported("R_2350", DAY),),
+        feed=FeedModel(poll_interval_sec=60, lead_sec=300, freezes=(freeze,)),
+    )
+    found = oracle.outcome(scenario)
+    assert found.readings == {
+        may: oracle.Readings(readings=78, implausible=0, rows=78),
+        DAY: oracle.Readings(readings=39, implausible=0, rows=39),
+    }
+    # Rank 41 x 0.95 = 38.95: the first repeat's 60 s and 95% of the way on to 120 s.
+    assert oracle.scorecard(found) == {
+        date(2026, 5, 1): oracle.Scorecard(last=may, readings=78, implausible=0, polls=42, ages=(0, 117)),
+        date(2026, 6, 1): oracle.Scorecard(last=DAY, readings=39, implausible=0, polls=21, ages=(0, 0)),
+    }

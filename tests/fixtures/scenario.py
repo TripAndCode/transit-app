@@ -19,6 +19,10 @@ it ran (a ``TripRun``, which may skip stops), it did not run and the feed
 reported it cancelled (a ``Cancellation``), or it did not run and the feed
 never mentioned it (an ``Unreported`` trip). A scheduled trip declared in none
 of them is refused, so a forgotten run cannot pass for a cancellation.
+
+The feed model may also misreport: a ``Misreport`` replaces a run's
+predicted delays for a stretch, and a ``Freeze`` makes the feed repeat one
+poll's content, its header too or not, for a stretch.
 """
 
 from __future__ import annotations
@@ -210,6 +214,54 @@ class Unreported:
 
 
 @dataclass(frozen=True)
+class Misreport:
+    """A stretch in which the feed reports one run's stops at a delay other
+    than its prediction: every poll captured from ``from_sec`` until
+    ``until_sec`` on the service date's clock lists each of ``stops`` (stop
+    sequences; every stop it lists when empty) at ``delay_sec``. A run that
+    skips a stop cannot be misreported."""
+
+    trip_id: str
+    service_date: date
+    delay_sec: int
+    from_sec: int
+    until_sec: int
+    stops: tuple[int, ...] = ()
+
+    def replaces(self, seq: int, at: datetime) -> bool:
+        """Whether a poll captured *at* lists stop *seq* at the misreported delay."""
+        on = service_day_instant(self.service_date, self.from_sec) <= at
+        return (
+            on and at < service_day_instant(self.service_date, self.until_sec) and (not self.stops or seq in self.stops)
+        )
+
+
+@dataclass(frozen=True)
+class Freeze:
+    """A stretch in which the feed stops updating. The first poll captured
+    from ``from_sec`` on ``service_date``'s clock is made as usual, and every
+    later poll captured before ``until_sec`` repeats its TripUpdates. With
+    ``header`` ``frozen`` they repeat its FeedHeader timestamp too, so their
+    bytes are the first poll's; with ``advancing`` each carries the instant
+    it was captured, as a feed whose predictions stop moving while its
+    header advances. A scenario with a freeze may neither cancel a trip nor
+    skip a stop."""
+
+    service_date: date
+    from_sec: int
+    until_sec: int
+    header: Literal["frozen", "advancing"] = "frozen"
+
+    @property
+    def starts(self) -> datetime:
+        return service_day_instant(self.service_date, self.from_sec)
+
+    @property
+    def ends(self) -> datetime:
+        return service_day_instant(self.service_date, self.until_sec)
+
+
+@dataclass(frozen=True)
 class FeedModel:
     """How the feed reports the truth.
 
@@ -221,14 +273,21 @@ class FeedModel:
 
     Every TripUpdate and StopTimeUpdate carries its schedule relationship,
     SCHEDULED unless the truth says otherwise, as the confirmed feeds do.
+    Each poll's FeedHeader timestamp is the instant it was captured, unless a
+    freeze holds it.
 
     ``perfect``: every poll predicts each listed stop's true delay, so the last
-    poll before a departure carries the true delay too.
+    poll before a departure carries the true delay too, except where a
+    ``misreports`` stretch replaces it. ``freezes`` repeat a poll's content
+    over a stretch, so a stop it lists stays listed, at the delay it had,
+    after the run has left it.
     """
 
     prediction: Literal["perfect"] = "perfect"
     poll_interval_sec: int = 60
     lead_sec: int = 300
+    misreports: tuple[Misreport, ...] = ()
+    freezes: tuple[Freeze, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -287,6 +346,25 @@ class Scenario:
                 raise ValueError(
                     f"{cancellation.trip_id}: a cancellation must be announced before the trip is due to leave"
                 )
+        runs = {(r.trip_id, r.service_date): r for r in self.runs}
+        for misreport in self.feed.misreports:
+            run = runs.get((misreport.trip_id, misreport.service_date))
+            if run is None:
+                raise ValueError(f"{misreport.trip_id} {misreport.service_date}: only a run can be misreported")
+            if len(run.served) != len(run.actual_sec):
+                raise ValueError(f"{misreport.trip_id} {misreport.service_date} skips a stop and cannot be misreported")
+            if misreport.until_sec <= misreport.from_sec:
+                raise ValueError(f"{misreport.trip_id}: a misreport must end after it starts")
+            if any(not 1 <= seq <= len(run.actual_sec) for seq in misreport.stops):
+                raise ValueError(f"{misreport.trip_id}: a misreport names a stop the trip does not have")
+        freezes = sorted(self.feed.freezes, key=lambda f: f.starts)
+        for freeze in freezes:
+            if freeze.until_sec <= freeze.from_sec:
+                raise ValueError(f"a freeze on {freeze.service_date} must end after it starts")
+        if any(later.starts < earlier.ends for earlier, later in itertools.pairwise(freezes)):
+            raise ValueError("freezes must not overlap")
+        if freezes and (self.cancellations or any(len(r.served) != len(r.actual_sec) for r in self.runs)):
+            raise ValueError("a scenario with a freeze may neither cancel a trip nor skip a stop")
         accounted = {(e.trip_id, e.service_date) for e in events}
         for day in self.days:
             for trip in self.scheduled(day.date):
@@ -424,10 +502,16 @@ class TripEntry:
 
 @dataclass(frozen=True)
 class Poll:
-    """One captured TripUpdate feed: what it lists, and its wire bytes."""
+    """One captured TripUpdate feed: what it lists, its FeedHeader timestamp
+    (the capture instant when None), and its wire bytes."""
 
     captured_at: datetime
     trips: tuple[TripEntry, ...]
+    header_at: datetime | None = None
+
+    @property
+    def header(self) -> datetime:
+        return self.captured_at if self.header_at is None else self.header_at
 
     @property
     def service_dates(self) -> frozenset[date]:
@@ -465,7 +549,7 @@ class Poll:
                 )
                 for t in self.trips
             ),
-            timestamp=int(self.captured_at.timestamp()),
+            timestamp=int(self.header.timestamp()),
         )
 
     @property
@@ -500,6 +584,10 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
     announced = (
         None if run.skips_announced_sec is None else service_day_instant(run.service_date, run.skips_announced_sec)
     )
+    misreports = [m for m in feed.misreports if (m.trip_id, m.service_date) == (run.trip_id, run.service_date)]
+
+    def reported_delay(seq: int, predicted: int, at: datetime) -> int:
+        return next((m.delay_sec for m in misreports if m.replaces(seq, at)), predicted)
 
     def passes(i: int) -> datetime:
         later = [j for j in served if j > i]
@@ -514,7 +602,8 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
         for i, (stop, scheduled, actual) in enumerate(zip(stops, trip.scheduled_sec, run.actual_sec, strict=True)):
             if actual is not None:
                 if service_day_instant(run.service_date, actual) > at:
-                    entries.append(StopEntry(i + 1, stop.stop_id, _predicted_delay(feed, scheduled, actual), SCHEDULED))
+                    delay = reported_delay(i + 1, _predicted_delay(feed, scheduled, actual), at)
+                    entries.append(StopEntry(i + 1, stop.stop_id, delay, SCHEDULED))
             elif passes(i) > at:
                 if announced is None or at >= announced:
                     entries.append(StopEntry(i + 1, stop.stop_id, None, SKIPPED))
@@ -578,14 +667,47 @@ def _reports(entry: TripEntry) -> set[tuple[str, str, date, int]]:
     return out
 
 
+def _fresh_poll(in_feed: list[_InFeed], at: datetime) -> Poll:
+    trips = []
+    for item in in_feed:
+        if item.enters <= at < item.leaves:
+            status, stops = item.listing(at)
+            trips.append(
+                TripEntry(
+                    item.trip.trip_id,
+                    item.trip.route_id,
+                    item.service_date,
+                    status,
+                    stops,
+                    sum(1 for sec in item.trip.scheduled_sec if service_day_instant(item.service_date, sec) >= at),
+                )
+            )
+    return Poll(at, tuple(trips))
+
+
+def _misreported(scenario: Scenario, poll: Poll) -> set[Misreport]:
+    """The misreports *poll* carries: those whose run it lists a stop of at
+    the misreported delay while the stretch is on."""
+    return {
+        m
+        for m in scenario.feed.misreports
+        for entry in poll.trips
+        if (entry.trip_id, entry.service_date) == (m.trip_id, m.service_date)
+        and any(m.replaces(s.stop_sequence, poll.captured_at) and s.departure_delay == m.delay_sec for s in entry.stops)
+    }
+
+
 def polls(scenario: Scenario) -> list[Poll]:
     """The polls a collector captures under the scenario's feed model: one at
-    every multiple of the poll interval while some trip is in the feed.
+    every multiple of the poll interval while some trip is in the feed. A poll
+    inside a freeze after its first repeats that first poll's TripUpdates,
+    and its header too when the freeze holds it.
 
     Raises when a departure gets no poll before it, a skipped stop is never
     reported SKIPPED, or a trip that did not run is never reported so: the
     oracle would count something the pipeline never saw, so the scenario
-    would be at fault, not the pipeline.
+    would be at fault, not the pipeline. Raises too when no poll carries a
+    misreport, which would then test nothing.
     """
     in_feed = [_run_listing(scenario, r, scenario.trip(r.trip_id, r.service_date)) for r in scenario.runs]
     in_feed += [
@@ -598,26 +720,23 @@ def polls(scenario: Scenario) -> list[Poll]:
     end = max(w.leaves for w in in_feed)
     out: list[Poll] = []
     reported: set[tuple[str, str, date, int]] = set()
+    carried: set[Misreport] = set()
+    held: dict[Freeze, Poll] = {}
     at = datetime.fromtimestamp(start, timezone.utc)
     while at < end:
-        trips = []
-        for item in in_feed:
-            if item.enters <= at < item.leaves:
-                status, stops = item.listing(at)
-                trips.append(
-                    TripEntry(
-                        item.trip.trip_id,
-                        item.trip.route_id,
-                        item.service_date,
-                        status,
-                        stops,
-                        sum(1 for sec in item.trip.scheduled_sec if service_day_instant(item.service_date, sec) >= at),
-                    )
-                )
-        for entry in trips:
+        freeze = next((f for f in scenario.feed.freezes if f.starts <= at < f.ends), None)
+        first = None if freeze is None else held.get(freeze)
+        if freeze is None or first is None:
+            poll = _fresh_poll(in_feed, at)
+            if freeze is not None:
+                held[freeze] = poll
+        else:
+            poll = Poll(at, first.trips, first.header if freeze.header == "frozen" else None)
+        for entry in poll.trips:
             reported |= _reports(entry)
-        if trips:
-            out.append(Poll(at, tuple(trips)))
+        carried |= _misreported(scenario, poll)
+        if poll.trips:
+            out.append(poll)
         at += timedelta(seconds=step)
     expected = {
         ("departure" if sec is not None else "skip", run.trip_id, run.service_date, i + 1)
@@ -628,6 +747,9 @@ def polls(scenario: Scenario) -> list[Poll]:
     missed = sorted(expected - reported, key=str)
     if missed:
         raise ValueError(f"no poll reports these before they happen: {missed}")
+    idle = [m for m in scenario.feed.misreports if m not in carried]
+    if idle:
+        raise ValueError(f"no poll carries these misreports: {idle}")
     return out
 
 
