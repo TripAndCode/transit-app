@@ -1020,10 +1020,14 @@ def _scheduled_headway_is_the_lower_middle_gap(observed: Observed, found: oracle
 
 def _the_loaded_timetable_stands_for_every_day(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
     """Each day's high-frequency test and scheduled mean wait read the plan
-    the timetable loaded last gives the route on its newest day of the same
-    day type, and a route that timetable has no plan for is high-frequency
-    on no day. Long gaps keep each day's own plan."""
+    the timetable loaded last gives the route on its newest day, and a route
+    that timetable has no plan for is high-frequency on no day. Long gaps keep
+    each day's own plan. The pipeline stands the route's one dominant service
+    in for every day, which is that newest day's plan only while the scenario
+    runs one day type, so the view refuses any other."""
     scenario = observed.scenario
+    if len({d.day_type for d in scenario.days}) != 1:
+        raise ValueError(f"{scenario.name}: the loaded-timetable view models one day type only")
     loaded = scenario.versions[-1]
     newest = {
         d.day_type: d.date for d in sorted(scenario.days, key=lambda d: d.date) if scenario.version_on(d.date) == loaded
@@ -1396,7 +1400,8 @@ def _assert_clean(mismatches: list[str]) -> None:
 # the view of it under one combination of the scenario's known divergences,
 # chosen once for the whole run, so any other change to a cell still fails.
 # Each divergence's strict xfail holds the cells it alone moves to the truth;
-# fixing it turns that test into a pass.
+# fixing it makes that test pass, which strict mode fails until the marker and
+# the divergence's _KNOWN entry go with the fix.
 _ALL = [
     pytest.param(plain_weekday, id="plain_weekday"),
     pytest.param(night_route, id="night_route"),
