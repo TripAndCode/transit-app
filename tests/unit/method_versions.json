@@ -28,6 +28,10 @@
     "agg_stop_daily": 2,
     "route_delay_counts": 2
   },
+  "2026.11.10": {
+    "agg_route_headway": 3,
+    "agg_route_headway_daily": 4
+  },
   "2026.11.2": {
     "agg_feed_health": 2
   },

@@ -116,7 +116,11 @@ What the user sees/does:
   neither state is ever drawn as a misleading zero. `/headway_quality`
   carries the same two fields, and names `no_high_frequency_routes` ahead of
   any coverage reason when the timetable classified routes but none as
-  high-frequency.
+  high-frequency. It judges each day by the timetable in force on it, and
+  counts the days it could not: `days_timetable_not_kept` (left out, their
+  timetable's scheduled headways not kept) and `days_scheduled_wait_not_kept`
+  (pooled, but their timetable kept no scheduled wait, so the routes pooling
+  them show no excess wait). The panel states each count above its table.
   `route_forecast` instead renders `frontend/src/components/RouteForecastSection.tsx`
   (agency-wide landing view, or a per-route detail view when exactly one
   route is selected in the shared filter - see its own file-header comment).

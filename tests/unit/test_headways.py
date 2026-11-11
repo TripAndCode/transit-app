@@ -213,3 +213,30 @@ def test_no_route_changes_between_equal_medians():
     from pipeline.static_headways import changed_routes
 
     assert changed_routes({("a", "R1"): None, ("b", "R1"): None}, "a", "b") == []
+
+
+def test_a_route_changes_when_its_kept_sums_differ_under_the_same_median():
+    """Another trip pattern can keep the median and move the scheduled wait, and
+    a timetable kept before its sums were has none to compare."""
+    from pipeline.headways import ScheduledHeadways
+    from pipeline.static_headways import changed_routes
+
+    kept = {
+        ("a", "R1"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+        ("b", "R1"): ScheduledHeadways(600.0, 1800.0, 1080000.0),
+        ("a", "R2"): ScheduledHeadways(600.0, None, None),
+        ("b", "R2"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+        ("a", "R3"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+        ("b", "R3"): ScheduledHeadways(600.0, 1200.0, 720000.0),
+    }
+    assert changed_routes(kept, "a", "b") == ["R1", "R2"]
+
+
+def test_the_scheduled_wait_of_pooled_days_is_their_sums_ratio():
+    """(3360^2 + 2 x 240^2) / (2 x 3840): the count cancels, so the sums alone give it."""
+    from pipeline.headways import mean_wait_from_sums
+
+    gaps = [3360, 240, 240]
+    assert mean_wait_from_sums(sum(gaps), sum(g * g for g in gaps)) == 1485.0
+    assert mean_wait_from_sums(None, 1.0) is None
+    assert mean_wait_from_sums(0.0, 0.0) is None

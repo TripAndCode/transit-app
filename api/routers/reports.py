@@ -554,17 +554,19 @@ async def list_reports(
 
 
 class HeadwayQualityRow(BaseModel):
-    """One high-frequency route's pooled Excess Waiting Time / coefficient of
-    variation / long-gap rate over the request's range, on the days of its
+    """One route's pooled Excess Waiting Time / coefficient of variation /
+    long-gap rate over the days in the request's range that it is
+    high-frequency on, each by the timetable in force that day, and of its
     ``day_type`` — see ``pipeline.reports.headway_quality.compute_headway_quality_report``.
 
     ``ewt_sec``/``cov``/``long_gap_rate`` are independently nullable, not
-    nullable together: a route can appear here (it's classified
+    nullable together: a route can appear here (a day's timetable classes it
     high-frequency) yet still have no resolvable metric for the requested
-    range slice (e.g. its scheduled mean-wait predates this feature and
-    hasn't been re-analyzed). ``cov`` alone additionally requires at least
-    two pooled samples, so a route pooled from a single-sample day can have
-    a resolvable ``ewt_sec``/``long_gap_rate`` with a null ``cov``.
+    range slice (e.g. a pooled day's timetable was kept before its scheduled
+    sums were, which leaves ``ewt_sec`` null). ``cov`` alone additionally
+    requires at least two pooled samples, so a route pooled from a
+    single-sample day can have a resolvable ``ewt_sec``/``long_gap_rate``
+    with a null ``cov``.
     """
 
     route_code: str
@@ -589,6 +591,10 @@ class HeadwayQualityResponse(BaseModel):
     rows: list[HeadwayQualityRow]
     # High-frequency routes with data in range, none of it on a day of their class.
     routes_off_timetable: int = 0
+    # Days in range run under a timetable whose scheduled headways aren't kept, left out.
+    days_timetable_not_kept: int = 0
+    # Days pooled under a timetable kept without its scheduled wait, which hides the routes' excess wait.
+    days_scheduled_wait_not_kept: int = 0
     unavailable_reason: Literal["no_high_frequency_routes"] | CoverageGapReason | None = None
     last_checked: date | None = None
     ctx: ReportCtx
@@ -610,11 +616,13 @@ async def get_headway_quality(
     server-side by classification, not by a ranking/threshold the caller
     chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
-    rows, off_timetable, unavailable = await compute_headway_quality_report(agency_id, ctx, conn)
+    report = await compute_headway_quality_report(agency_id, ctx, conn)
     return HeadwayQualityResponse(
-        rows=[HeadwayQualityRow(**r) for r in rows],
-        routes_off_timetable=off_timetable,
-        **unavailable,
+        rows=[HeadwayQualityRow(**r) for r in report.rows],
+        routes_off_timetable=report.routes_off_timetable,
+        days_timetable_not_kept=report.days_timetable_not_kept,
+        days_scheduled_wait_not_kept=report.days_scheduled_wait_not_kept,
+        **report.unavailable,
         ctx=_report_ctx(ctx),
         scope_applied=_HEADWAY_SCOPE,
     )

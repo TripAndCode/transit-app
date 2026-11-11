@@ -2,12 +2,13 @@
  * Headway panel shown beside the `dwell_run` report on Why and the `on_time`
  * report on Routes (see AnalysisTab.tsx):
  * Excess Waiting Time, spacing coefficient of variation, and long-gap rate
- * for this agency's routes classified high-frequency by
- * `agg_route_headway.is_high_frequency` (pipeline/headways.py). Renders
- * nothing extra for a non-high-frequency route -- such routes simply never
- * appear in `rows` (see pipeline/reports/headway_quality.py), and the
- * report above this panel is completely unaffected either way. An empty
- * answer the API gives a reason for says that reason, not a lack of data.
+ * for this agency's routes over the days the timetable in force classes them
+ * high-frequency (pipeline/headways.py). Renders nothing extra for a route
+ * high-frequency on no selected day -- such routes simply never appear in
+ * `rows` (see pipeline/reports/headway_quality.py), and the report above
+ * this panel is completely unaffected either way. An empty answer the API
+ * gives a reason for says that reason, not a lack of data, and the days left
+ * out for a timetable whose scheduled headways weren't kept are counted.
  */
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -56,6 +57,16 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
       {data && data.rows.length > 0 && (data.routes_off_timetable ?? 0) > 0 && (
         <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-tertiary)" }}>
           {t("reports.headway_quality.some_off_timetable", { count: data.routes_off_timetable })}
+        </p>
+      )}
+      {data && !headwayNotShown(t, data) && (data.days_timetable_not_kept ?? 0) > 0 && (
+        <p style={{ margin: data.rows.length > 0 ? "0 0 8px" : "8px 0 0", fontSize: 12, color: "var(--text-tertiary)" }}>
+          {t("reports.headway_quality.timetable_not_kept", { count: data.days_timetable_not_kept })}
+        </p>
+      )}
+      {data && data.rows.length > 0 && (data.days_scheduled_wait_not_kept ?? 0) > 0 && (
+        <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--text-tertiary)" }}>
+          {t("reports.headway_quality.scheduled_wait_not_kept", { count: data.days_scheduled_wait_not_kept })}
         </p>
       )}
       {data && data.rows.length > 0 && (

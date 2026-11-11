@@ -293,13 +293,14 @@ def route_headway_sql(all_routes: bool = False) -> str:
     """Per route, the scheduled headway median, sample count, high-frequency flag and mean wait.
 
     *all_routes* selects instead every route of a dominant service with its
-    median, NULL where the timetable gives none: what pipeline.static_headways
-    keeps per timetable.
+    median, sum and sum of squares, NULL where the timetable gives none: what
+    pipeline.static_headways keeps per timetable.
     """
     hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
     if all_routes:
         selected = """
-                SELECT ds.route_code, m.scheduled_headway_median_sec
+                SELECT ds.route_code, m.scheduled_headway_median_sec,
+                       m.scheduled_headway_sum_sec, m.scheduled_headway_sumsq_sec2
                 FROM dominant_service ds LEFT JOIN medians m USING (route_code)
             """
     else:
@@ -340,7 +341,12 @@ def route_headway_sql(all_routes: bool = False) -> str:
                            -- near-impossible, since headway_sec > 0 is filtered
                            -- below) zero-mean case.
                            AVG(headway_sec::float8 * headway_sec::float8)
-                               / NULLIF(2 * AVG(headway_sec::float8), 0) AS scheduled_wait_mean_sec
+                               / NULLIF(2 * AVG(headway_sec::float8), 0) AS scheduled_wait_mean_sec,
+                           -- The same distribution's sum and sum of squares,
+                           -- which add across the days a report pools, each
+                           -- under its own timetable (pipeline.static_headways).
+                           SUM(headway_sec::float8) AS scheduled_headway_sum_sec,
+                           SUM(headway_sec::float8 * headway_sec::float8) AS scheduled_headway_sumsq_sec2
                     FROM gaps
                     WHERE headway_sec IS NOT NULL AND headway_sec > 0
                     GROUP BY route_code

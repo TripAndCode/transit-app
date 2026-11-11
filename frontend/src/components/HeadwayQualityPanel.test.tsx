@@ -83,6 +83,41 @@ describe("HeadwayQualityPanel", () => {
     expect(screen.getByText(/none of them runs its main timetable/i)).toBeInTheDocument();
   });
 
+  it("counts the selected days left out for running a timetable whose scheduled headways weren't kept", () => {
+    mockRoutes();
+    mockHeadwayQuality({
+      data: {
+        rows: [{ route_code: "100", ewt_sec: 0, cov: 0, long_gap_rate: 0, samples: 2 }],
+        days_timetable_not_kept: 3,
+        ctx: CTX,
+      },
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText("3 of the selected days ran under a timetable whose scheduled headways weren't kept, so they are left out.")).toBeInTheDocument();
+  });
+
+  it("says a day was left out for its timetable even when no route is shown", () => {
+    mockRoutes();
+    mockHeadwayQuality({ data: { rows: [], days_timetable_not_kept: 1, ctx: CTX } });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText("1 of the selected days ran under a timetable whose scheduled headways weren't kept, so it is left out.")).toBeInTheDocument();
+  });
+
+  it("says why excess wait is missing where a pooled day's timetable has no kept scheduled wait", () => {
+    mockRoutes();
+    mockHeadwayQuality({
+      data: {
+        rows: [{ route_code: "100", ewt_sec: null, cov: 0.2, long_gap_rate: 0, samples: 2 }],
+        days_scheduled_wait_not_kept: 2,
+        ctx: CTX,
+      },
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(
+      screen.getByText("2 of the selected days ran under a timetable whose scheduled wait wasn't kept, so excess wait isn't shown for the routes that include them."),
+    ).toBeInTheDocument();
+  });
+
   it("shows the empty state when there are zero high-frequency routes", () => {
     mockRoutes();
     mockHeadwayQuality({ data: { rows: [], ctx: CTX } });

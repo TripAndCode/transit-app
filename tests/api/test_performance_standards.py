@@ -68,14 +68,17 @@ async def perf_client(apply_schema):
             (aid, "R_BELOW", 400.0, 10, True, 200.0),
         ],
     )
+    # The day's own timetable runs both every 400 s, ten gaps: a 200 s scheduled wait.
+    every_400_sec = (400.0, True, 4000.0, 1600000.0)
     await pool.executemany(
         "INSERT INTO agg_route_headway_daily "
         "(agency_id, route_code, date, actual_headway_median_sec, actual_samples, "
-        " actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        " actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count, scheduled_headway_median_sec, "
+        " is_high_frequency, scheduled_headway_sum_sec, scheduled_headway_sumsq_sec2) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
         [
-            (aid, "R_AT", date(2026, 4, 1), 500.0, 2, 1000.0, 500000.0, 0),
-            (aid, "R_BELOW", date(2026, 4, 1), 700.0, 2, 1400.0, 980000.0, 0),
+            (aid, "R_AT", date(2026, 4, 1), 500.0, 2, 1000.0, 500000.0, 0, *every_400_sec),
+            (aid, "R_BELOW", date(2026, 4, 1), 700.0, 2, 1400.0, 980000.0, 0, *every_400_sec),
         ],
     )
 

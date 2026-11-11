@@ -1,4 +1,4 @@
-"""Each archived timetable keeps its per-route scheduled headway medians."""
+"""Each archived timetable keeps its per-route scheduled headways: their median, sum and sum of squares."""
 
 import dataclasses
 import logging
@@ -9,6 +9,7 @@ import pytest
 from pipeline import agg_registry, static_archive, static_headways
 from pipeline.analyze import analyze
 from pipeline.clickhouse import UPDATE_COLUMNS, insert_updates
+from pipeline.headways import ScheduledHeadways
 from pipeline.static_content import static_parts
 from pipeline.static_loader import load_static
 from tests.fixtures.synthetic_gtfs import build_static_zip
@@ -46,17 +47,55 @@ def _rows(pg_conn, agency_id):
         return cur.fetchall()
 
 
+def _medians(pg_conn, agency_id, contents):
+    return {key: kept.median_sec for key, kept in static_headways.route_headways(pg_conn, agency_id, contents).items()}
+
+
+def _scheduled(pg_conn, agency_id):
+    """Each daily row's scheduled figures, read from the timetable that judged its date."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, scheduled_headway_median_sec, is_high_frequency, scheduled_headway_sum_sec, "
+            "scheduled_headway_sumsq_sec2 FROM agg_route_headway_daily WHERE agency_id = %s ORDER BY date",
+            (agency_id,),
+        )
+        return cur.fetchall()
+
+
+def test_recording_keeps_the_loaded_timetables_scheduled_sums(pg_conn, agency_id):
+    """The scheduled wait of days pooled under several timetables needs each one's sums, not its median."""
+    key, parts = _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"])
+    static_headways.record_route_headways(pg_conn, agency_id, key, parts)
+    assert static_headways.route_headways(pg_conn, agency_id, [key]) == {
+        (key, "R1"): ScheduledHeadways(600.0, 1200.0, 720000.0)
+    }
+
+
+def test_a_content_kept_before_its_sums_were_reads_with_none(pg_conn, agency_id):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO route_headway_by_content "
+            "(agency_id, content_hash, route_code, logic_version, scheduled_headway_median_sec) "
+            "VALUES (%s, 'old', 'R1', 1, 600.0)",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    assert static_headways.route_headways(pg_conn, agency_id, ["old"]) == {
+        ("old", "R1"): ScheduledHeadways(600.0, None, None)
+    }
+
+
 def test_recording_keeps_the_loaded_timetables_medians(pg_conn, agency_id):
     key, parts = _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"])
     assert static_headways.record_route_headways(pg_conn, agency_id, key, parts) == 1
-    assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
+    assert _medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
 
 
 def test_the_kept_median_of_an_even_count_of_gaps_is_the_mean_of_the_middle_two(pg_conn, agency_id):
     """The long-gap threshold's median is the actual side's: gaps of 480 and 1200 s give 840 s, not 480 s."""
     key, parts = _seed(pg_conn, agency_id, ["08:00:00", "08:08:00", "08:28:00"])
     static_headways.record_route_headways(pg_conn, agency_id, key, parts)
-    assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 840.0}
+    assert _medians(pg_conn, agency_id, [key]) == {(key, "R1"): 840.0}
 
 
 def test_recording_twice_adds_nothing(pg_conn, agency_id):
@@ -69,7 +108,7 @@ def test_recording_twice_adds_nothing(pg_conn, agency_id):
 def test_a_route_with_no_median_still_gets_a_row(pg_conn, agency_id):
     key, parts = _seed(pg_conn, agency_id, ["08:00:00"])
     assert static_headways.record_route_headways(pg_conn, agency_id, key, parts) == 1
-    assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): None}
+    assert _medians(pg_conn, agency_id, [key]) == {(key, "R1"): None}
     assert static_headways.record_route_headways(pg_conn, agency_id, key, parts) == 0
 
 
@@ -87,7 +126,7 @@ def test_a_bump_of_agg_route_headway_records_again(pg_conn, agency_id, monkeypat
     monkeypatch.setitem(agg_registry.TABLES, "agg_route_headway", dataclasses.replace(table, version=table.version + 1))
     assert static_headways.record_route_headways(pg_conn, agency_id, key, parts) == 1
     assert [row[2] for row in _rows(pg_conn, agency_id)] == [table.version, table.version + 1]
-    assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
+    assert _medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
 
 
 def test_load_static_records_the_outgoing_timetables_medians(tmp_path, pg_conn, agency_id, ch_client):
@@ -101,7 +140,7 @@ def test_load_static_records_the_outgoing_timetables_medians(tmp_path, pg_conn, 
         filename="timetable_b.zip",
     )
     load_static(incoming, agency_id, pg_conn, ch_client=ch_client)
-    assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
+    assert _medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
 
 
 def test_analyze_records_the_loaded_timetables_medians(pg_conn, agency_id, ch_client):
@@ -110,7 +149,7 @@ def test_analyze_records_the_loaded_timetables_medians(pg_conn, agency_id, ch_cl
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
     key, _ = _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"])
     analyze(agency_id, pg_conn, ch_client)
-    assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
+    assert _medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
 
 
 def _departure(captured_at: str, trip: str, scheduled_sec: int, stem: str | None, route: str = "R1") -> tuple:
@@ -172,7 +211,7 @@ def test_each_dates_long_gaps_follow_its_own_timetable(pg_conn, agency_id, ch_cl
     key_a, key_b = _two_timetables(pg_conn, agency_id, ch_client)
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
-    assert static_headways.route_medians(pg_conn, agency_id, [key_a, key_b]) == {
+    assert _medians(pg_conn, agency_id, [key_a, key_b]) == {
         (key_a, "R1"): 600.0,
         (key_b, "R1"): 1200.0,
     }
@@ -188,7 +227,20 @@ def test_each_dates_long_gaps_follow_its_own_timetable(pg_conn, agency_id, ch_cl
     assert _long_gaps(pg_conn, agency_id) == [(date(2026, 6, 1), 1), (date(2026, 6, 2), 0)]
 
 
+def test_each_dates_high_frequency_test_and_scheduled_sums_follow_its_own_timetable(pg_conn, agency_id, ch_client):
+    """6/1 ran timetable A (every 10 min) and 6/2 timetable B (every 20 min),
+    loaded now: 6/1 is high-frequency by A, not by the loaded B."""
+    _two_timetables(pg_conn, agency_id, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _scheduled(pg_conn, agency_id) == [
+        (date(2026, 6, 1), 600.0, True, 1200.0, 720000.0),
+        (date(2026, 6, 2), 1200.0, False, 2400.0, 2880000.0),
+    ]
+
+
 def test_a_timetable_without_medians_measures_against_the_loaded_one(pg_conn, agency_id, ch_client, monkeypatch):
+    """Its long gaps take the loaded timetable's median, but its high-frequency
+    test and scheduled wait take nothing: the day is left unjudged."""
     key_a, _ = _two_timetables(pg_conn, agency_id, ch_client)
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -200,6 +252,7 @@ def test_a_timetable_without_medians_measures_against_the_loaded_one(pg_conn, ag
     monkeypatch.setitem(agg_registry.TABLES, table.name, dataclasses.replace(table, version=table.version + 1))
     analyze(agency_id, pg_conn, ch_client)
     assert _long_gaps(pg_conn, agency_id) == [(date(2026, 6, 1), 0), (date(2026, 6, 2), 0)]
+    assert _scheduled(pg_conn, agency_id)[0] == (date(2026, 6, 1), None, None, None, None)
 
 
 def test_a_content_is_read_at_its_latest_version_only(pg_conn, agency_id):
@@ -212,7 +265,7 @@ def test_a_content_is_read_at_its_latest_version_only(pg_conn, agency_id):
             [(agency_id, "R1", 1, 600.0), (agency_id, "R2", 1, 900.0), (agency_id, "R1", 2, 660.0)],
         )
     pg_conn.commit()
-    assert static_headways.route_medians(pg_conn, agency_id, ["c"]) == {("c", "R1"): 660.0}
+    assert _medians(pg_conn, agency_id, ["c"]) == {("c", "R1"): 660.0}
 
 
 def test_analyze_keeps_no_medians_for_an_agency_that_builds_no_daily_headways(pg_conn, agency_id, ch_client):
