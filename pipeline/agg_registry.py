@@ -71,7 +71,7 @@ class ArchivedInput(str, Enum):
     (pipeline.analyze._dates_the_move_reaches)."""
 
     STOP_TIMES = "stop_times"  # its trip's archived stop times
-    MEDIANS = "medians"  # its route's kept scheduled headway median (pipeline.static_headways)
+    MEDIANS = "medians"  # its route's kept scheduled headways, median and sums (pipeline.static_headways)
 
 
 @dataclass(frozen=True)
@@ -133,10 +133,13 @@ def _headway_daily() -> list[str]:
         inspect.getsource(headways.dominant_contents),
         inspect.getsource(static_archive.ScheduleJoin.content_of),
         inspect.getsource(headways.thresholds),
-        inspect.getsource(static_headways.route_medians),
+        inspect.getsource(headways.schedules),
+        inspect.getsource(static_headways.route_headways),
         inspect.getsource(headways.daily_headway_rows),
         inspect.getsource(headways.count_long_gaps),
+        inspect.getsource(headways.is_high_frequency),
         f"LONG_GAP_MULTIPLIER={headways.LONG_GAP_MULTIPLIER!r}",
+        f"HIGH_FREQUENCY_HEADWAY_SEC={headways.HIGH_FREQUENCY_HEADWAY_SEC!r}",
     ]
 
 
@@ -175,21 +178,23 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_headway",
-            2,
+            3,
             Kind.STATIC_ONLY,
             Timetable.LOADED,
-            # pipeline.static_headways keeps each timetable's medians under this
-            # version, so the SQL computing them is rendered here too.
+            # pipeline.static_headways keeps each timetable's headways (median,
+            # sum and sum of squares) under this version, so the SQL computing
+            # them is rendered here too.
             lambda: [agg_sql.route_headway_sql(), agg_sql.route_headway_sql(all_routes=True)],
         ),
         AggTable(
             "agg_route_headway_daily",
-            3,
+            4,
             Kind.DATED,
             Timetable.ARCHIVED,
             _headway_daily,
-            # Its thresholds are the medians agg_route_headway's SQL keeps per
-            # timetable, keyed by that table's version, not its rows.
+            # Its thresholds, high-frequency test and scheduled sums are the
+            # headways agg_route_headway's SQL keeps per timetable, keyed by
+            # that table's version, not its rows.
             versions_from=("agg_route_headway",),
             archived_input=ArchivedInput.MEDIANS,
             in_force=True,
@@ -360,6 +365,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.7", {"agg_service_delivered_daily": 3}),
     MethodVersion("2026.11.8", {"feed_quality_monthly": 3}),
     MethodVersion("2026.11.9", {"agg_route_headway": 2}),
+    MethodVersion("2026.11.10", {"agg_route_headway": 3, "agg_route_headway_daily": 4}),
 )
 
 # The method every report, CSV and council document names beside its figures

@@ -42,16 +42,35 @@ After ingest, `analyze` turns the raw readings into summary tables:
    - `agg_route_hour_dow` — route × day-of-week × scheduled hour → average delay
    - `agg_route_daily` — route × day → average delay
    - `agg_route_stats` — route overall (avg, p50, p90, on-time %)
-   - `agg_route_headway` — route → scheduled headway median, over the gaps between
-     consecutive departures at each stop of the timetable's dominant service; a median of
-     12 minutes or less makes the route high-frequency
-   - `agg_route_headway_daily` — route × day → actual headway median, and the gaps longer
-     than 1.75 times the scheduled median
+   - `agg_route_headway` — route → scheduled headway median of the timetable loaded now,
+     over the gaps between consecutive departures at each stop of the timetable's dominant
+     service; a median of 12 minutes or less makes the route high-frequency
+   - `agg_route_headway_daily` — route × day → actual headway median, the gaps longer
+     than 1.75 times the scheduled median, and that day's own scheduled median,
+     high-frequency test and scheduled gap sums
    - …and per-stop / per-hour / feed-health variants
 
    A headway median, scheduled or actual, is the middle gap, or the mean of the two middle
    gaps for an even count (`PERCENTILE_CONT(0.5)` on the scheduled side,
    `statistics.median` on the actual one).
+
+   A day's headways are judged by the timetable in force that day: the one most of the
+   route's readings that day are filed under. That timetable's scheduled median makes
+   the route high-frequency or not that day and sets the long-gap threshold, and the sum
+   and sum of squares of its scheduled gaps give the scheduled mean wait. Each timetable's
+   figures are kept per route while it is loaded and before it is replaced
+   (`pipeline/static_headways.py`). Headway quality pools, per route, the days it is
+   high-frequency on; its excess wait is the pooled actual mean wait minus the same days'
+   scheduled mean wait, the sum of their timetables' squared gaps over twice the sum of
+   their gaps. A day whose timetable's figures were not kept is judged by no other
+   timetable: headway quality leaves it out and counts it. A timetable kept before method
+   `2026.11.10` has its median but not its sums, so its days are classified and their gaps
+   count, but a route that pools one of them shows no excess wait, and headway quality
+   counts those days too. Whether the agency has a high-frequency route at all, which an
+   empty panel says, is judged by the timetables in force over the period, for every route
+   they plan: the loaded timetable stands in only for a day no recorded timetable covers,
+   or whose timetable kept no figures. The day type a route's days are pooled by still
+   comes from the timetable loaded now.
 
 ## Method versions
 
@@ -90,6 +109,7 @@ another process for as long as that join stays cached.
 | `2026.11.7` | Each day's trips not run are counted per route: under the route the trip's latest report naming one names, or under no route where none does, so an agency's day is the sum of its routes. This gives each route its own service-delivered rate (see "Service delivered per route" below). No agency figure changes. | `agg_service_delivered_daily` |
 | `2026.11.8` | The feed-quality scorecard's message age counts archived polls beside live ones. Archive ingest stamps an archived poll with its own FeedHeader timestamp, so the poll's capture instant is read from its file name: the UTC day and time of day the collector names it by as its fetch begins. A poll whose name gives no instant is left out of the ages and counted beside them. A header frozen for hours reads as hours of age on every poll that received it. Until now only live polls counted, so a month of archived polls had no message age. No delay or on-time figure changes. | `feed_quality_monthly` |
 | `2026.11.9` | A route's scheduled headway median is the mean of its two middle gaps when it has an even count of gaps, as the actual headway median already was, where it had been the lower of the two. A route whose scheduled gaps split evenly between long and short no longer reads as its short gap, so it can leave the high-frequency routes, and its long-gap threshold, 1.75 times that median, rises. A timetable replaced before this version keeps the median it was kept with for the days measured against it: a timetable no longer loaded cannot be read again. | `agg_route_headway`, `agg_route_headway_daily` |
+| `2026.11.10` | Headway quality judges each day's high-frequency test and scheduled mean wait by the timetable in force that day, as its long gaps already were, where it had judged every day by the timetable loaded now. A day run under an earlier timetable can now enter or leave a route's high-frequency days, and its excess wait compares with that timetable's scheduled wait. Each timetable keeps the sum and sum of squares of its scheduled gaps beside its median, so days of several timetables pool their scheduled wait. A day whose timetable's figures were not kept is left out and counted, not judged by today's. A timetable replaced before this version keeps its median only, so a route pooling one of its days shows no excess wait until the timetable is recorded again, and headway quality counts those days. | `agg_route_headway`, `agg_route_headway_daily` |
 
 ## What counts as on time
 

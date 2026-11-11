@@ -47,35 +47,38 @@ async def perf_client(apply_schema):
     # production trusts only agencies with a recorded live-coverage verdict.
     await confirm_rt_field_coverage(pool, aid)
 
-    # ewt_sec fixtures: two high-frequency routes, both scheduled_wait_mean_sec
-    # = 200.0, differing only in their pooled actual headway so the resulting
-    # ewt_sec lands on a clean, hand-checkable number.
+    # ewt_sec fixtures: two high-frequency routes whose day runs a timetable
+    # of ten even 400 s gaps (every_400_sec: median, high-frequency, sum, sum
+    # of squares), so mean_wait_from_sums gives a scheduled wait of
+    # 1600000 / (2 x 4000) = 200.0. They differ only in their pooled actual
+    # headway, so the resulting ewt_sec lands on a clean, hand-checkable number.
     #
     # A perfectly regular n-gap headway of h seconds (sum_sec=n*h,
-    # sumsq_sec2=n*h^2) makes mean_wait_from_moments reduce to the familiar
-    # headway/2 (zero variance): mean_headway=h, mean_headway_sq=h^2,
-    # mean_wait=h^2/(2h)=h/2.
+    # sumsq_sec2=n*h^2) makes the mean wait reduce to the familiar
+    # headway/2 (zero variance): h^2/(2h)=h/2.
     # R_AT: two identical 500s gaps -> mean_wait = 500/2 = 250.0 ->
     # ewt_sec = 250.0 - 200.0 = 50.0.
     # R_BELOW: two identical 700s gaps -> mean_wait = 700/2 = 350.0 ->
     # ewt_sec = 350.0 - 200.0 = 150.0.
     await pool.executemany(
         "INSERT INTO agg_route_headway "
-        "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, "
-        " is_high_frequency, scheduled_wait_mean_sec) VALUES ($1,$2,$3,$4,$5,$6)",
+        "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, is_high_frequency) "
+        "VALUES ($1,$2,$3,$4,$5)",
         [
-            (aid, "R_AT", 400.0, 10, True, 200.0),
-            (aid, "R_BELOW", 400.0, 10, True, 200.0),
+            (aid, "R_AT", 400.0, 10, True),
+            (aid, "R_BELOW", 400.0, 10, True),
         ],
     )
+    every_400_sec = (400.0, True, 4000.0, 1600000.0)
     await pool.executemany(
         "INSERT INTO agg_route_headway_daily "
         "(agency_id, route_code, date, actual_headway_median_sec, actual_samples, "
-        " actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        " actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count, scheduled_headway_median_sec, "
+        " is_high_frequency, scheduled_headway_sum_sec, scheduled_headway_sumsq_sec2) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
         [
-            (aid, "R_AT", date(2026, 4, 1), 500.0, 2, 1000.0, 500000.0, 0),
-            (aid, "R_BELOW", date(2026, 4, 1), 700.0, 2, 1400.0, 980000.0, 0),
+            (aid, "R_AT", date(2026, 4, 1), 500.0, 2, 1000.0, 500000.0, 0, *every_400_sec),
+            (aid, "R_BELOW", date(2026, 4, 1), 700.0, 2, 1400.0, 980000.0, 0, *every_400_sec),
         ],
     )
 

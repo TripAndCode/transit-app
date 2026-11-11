@@ -1041,8 +1041,8 @@ def _the_loaded_timetable_stands_for_every_day(observed: Observed, found: oracle
     return replace(found, wait_plans=wait_plans)
 
 
-# Met by no scenario (_KNOWN): its test holds every cell this rule would move
-# to the truth, so the rule cannot come back unnoticed.
+# The two below are met by no scenario (_KNOWN): each one's test holds every
+# cell its rule would move to the truth, so the rule cannot come back unnoticed.
 _LOWER_MIDDLE_DIVERGENCE = Divergence(
     name="scheduled headway is the lower middle gap",
     reason=(
@@ -1055,16 +1055,14 @@ _LOWER_MIDDLE_DIVERGENCE = Divergence(
 _LOADED_TIMETABLE_DIVERGENCE = Divergence(
     name="headway quality reads the loaded timetable",
     reason=(
-        "Headway quality classes a route high-frequency, and measures each day's excess wait, against the "
-        "timetable loaded now (agg_route_headway), not the one in force on that day"
+        "Classing a route high-frequency, and measuring each day's excess wait, against the timetable loaded "
+        "now (agg_route_headway) rather than the one in force on that day judges a day run under an earlier "
+        "timetable by today's"
     ),
     view=_the_loaded_timetable_stands_for_every_day,
 )
 # The divergences each scenario is known to meet, by scenario name.
-_KNOWN: dict[str, tuple[Divergence, ...]] = {
-    "timetable_change": (_LOADED_TIMETABLE_DIVERGENCE,),
-    "timetable_published_early": (_LOADED_TIMETABLE_DIVERGENCE,),
-}
+_KNOWN: dict[str, tuple[Divergence, ...]] = {}
 
 
 def _outcomes(observed: Observed) -> list[tuple[tuple[Divergence, ...], oracle.Outcome]]:
@@ -1160,7 +1158,7 @@ def _moved(truth: Cells, view: Cells) -> set[tuple[str, Hashable]]:
 def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[str]:
     """The cells *divergence* moves and no other known divergence of the
     scenario does, against the truth alone."""
-    others = [d for d in _KNOWN[observed.scenario.name] if d is not divergence]
+    others = [d for d in _KNOWN.get(observed.scenario.name, ()) if d is not divergence]
     truth = oracle.outcome(observed.scenario)
     lines: list[str] = []
     own_cells = 0
@@ -1459,7 +1457,6 @@ def test_headway_quality_matches_the_truth(observed):
     _assert_clean(_hard_mismatches(observed, _HEADWAY_QUALITY))
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_LOADED_TIMETABLE_DIVERGENCE.reason)
 @pytest.mark.parametrize("observed", [_TIMETABLE_CHANGE], indirect=True)
 def test_headway_quality_judges_each_day_by_the_timetable_in_force_that_day(observed):
     _assert_clean(_divergence_mismatches(observed, _LOADED_TIMETABLE_DIVERGENCE))

@@ -157,14 +157,16 @@ Service delivered is shown only for an operator whose feed has been confirmed to
 
 A route's service delivered is the same ratio on the route's own trips. A trip not run counts under the route its latest report names, so the routes add up to the operator. Its planned trips come from each day's saved split by route, or from the timetable loaded now. A period with a day saved before its split was saved has no route figure. The performance standards judge only a route with at least 100 planned trips and 100 observations.
 
-**Headway metrics**: a route whose median scheduled headway is 12 minutes or less is high-frequency, and gets these metrics:
+**Headway metrics**: a route is high-frequency on a day when the median scheduled headway of the timetable in force that day is 12 minutes or less. Over a period, these metrics pool the days a route is high-frequency on:
 
 - actual headways, reconstructed from consecutive departures at the same stop;
-- Excess Waiting Time (EWT): actual mean wait − scheduled mean wait;
+- Excess Waiting Time (EWT): actual mean wait − scheduled mean wait, the scheduled side taken from each pooled day's own timetable;
 - the coefficient of variation of headways;
-- the long-gap rate: the share of gaps longer than 1.75 times the scheduled headway.
+- the long-gap rate: the share of gaps longer than 1.75 times the scheduled headway of that day's timetable.
 
 A headway median is taken the same way for scheduled and actual gaps: for an even count of gaps, it is the mean of the two middle gaps (from method `2026.11.9`).
+
+Each day is judged by the timetable in force that day, not by the one loaded now (from method `2026.11.10`). A day whose timetable's scheduled headways were not kept is not judged by another timetable instead: it is left out, and the panel says how many days were. For a timetable kept before `2026.11.10`, only its median was kept, so its days are still classified and their gaps count, but EWT is not shown for a route whose period includes them, and the panel says how many such days there are.
 
 **Dwell and running time**: dwell time is the difference between arrival and departure delay at the same stop, and running time the difference from the previous stop's departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
 
@@ -347,10 +349,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.9`. Newest first, each version with the inputs it set.
+The current method is `2026.11.10`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.10` | `agg_route_headway` 2 → 3, `agg_route_headway_daily` 3 → 4 |
 | `2026.11.9` | `agg_route_headway` 1 → 2 |
 | `2026.11.8` | `feed_quality_monthly` 2 → 3 |
 | `2026.11.7` | `agg_service_delivered_daily` 2 → 3 |

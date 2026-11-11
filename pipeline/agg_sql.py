@@ -290,24 +290,24 @@ def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> s
 # otherwise sort it before the morning's first departure, where
 # GTFS's "24:10:00" sorts after 23:50.
 def route_headway_sql(all_routes: bool = False) -> str:
-    """Per route, the scheduled headway median, sample count, high-frequency flag and mean wait.
+    """Per route, the scheduled headway median, sample count and high-frequency flag.
 
     *all_routes* selects instead every route of a dominant service with its
-    median, NULL where the timetable gives none: what pipeline.static_headways
-    keeps per timetable.
+    median, sum and sum of squares, NULL where the timetable gives none: what
+    pipeline.static_headways keeps per timetable.
     """
     hf_thr = HIGH_FREQUENCY_HEADWAY_SEC
     if all_routes:
         selected = """
-                SELECT ds.route_code, m.scheduled_headway_median_sec
+                SELECT ds.route_code, m.scheduled_headway_median_sec,
+                       m.scheduled_headway_sum_sec, m.scheduled_headway_sumsq_sec2
                 FROM dominant_service ds LEFT JOIN medians m USING (route_code)
             """
     else:
         selected = f"""
                 SELECT %(agency_id)s AS agency_id, route_code,
                        scheduled_headway_median_sec, scheduled_samples,
-                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency,
-                       scheduled_wait_mean_sec
+                       scheduled_headway_median_sec <= {hf_thr} AS is_high_frequency
                 FROM medians
             """
     return f"""
@@ -332,15 +332,13 @@ def route_headway_sql(all_routes: bool = False) -> str:
                     SELECT route_code,
                            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY headway_sec) AS scheduled_headway_median_sec,
                            COUNT(*) AS scheduled_samples,
-                           -- E[H^2] / (2*E[H]) over this route's scheduled headway
-                           -- distribution -- the mean-wait-time formula
-                           -- (pipeline.headways.mean_wait_from_moments), computed
-                           -- here in SQL instead of pulling every raw headway_sec
-                           -- back into Python. NULLIF guards the (already
-                           -- near-impossible, since headway_sec > 0 is filtered
-                           -- below) zero-mean case.
-                           AVG(headway_sec::float8 * headway_sec::float8)
-                               / NULLIF(2 * AVG(headway_sec::float8), 0) AS scheduled_wait_mean_sec
+                           -- The distribution's sum and sum of squares, which
+                           -- add across the days a report pools, each under its
+                           -- own timetable (pipeline.static_headways): the
+                           -- scheduled mean wait is their E[H^2] / (2*E[H])
+                           -- (pipeline.headways.mean_wait_from_sums).
+                           SUM(headway_sec::float8) AS scheduled_headway_sum_sec,
+                           SUM(headway_sec::float8 * headway_sec::float8) AS scheduled_headway_sumsq_sec2
                     FROM gaps
                     WHERE headway_sec IS NOT NULL AND headway_sec > 0
                     GROUP BY route_code

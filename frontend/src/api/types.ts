@@ -657,10 +657,11 @@ export type ReportResponse =
   | ReportEnvelope<"council_summary", CouncilSummaryRow>
   | ReportEnvelope<"delay_certificate", DelayCertificateRow>;
 
-/** One high-frequency route's pooled Excess Waiting Time / coefficient of
- *  variation / long-gap rate over the request's range -- see
- *  pipeline/reports/headway_quality.py's compute_headway_quality. A
- *  non-high-frequency route never appears in this list at all. */
+/** One route's pooled Excess Waiting Time / coefficient of variation /
+ *  long-gap rate over the days in the request's range that it is
+ *  high-frequency on, each by the timetable in force that day -- see
+ *  pipeline/reports/headway_quality.py's compute_headway_quality. A route
+ *  high-frequency on no such day never appears in this list at all. */
 type HeadwayQualityRow = {
   route_code: string;
   ewt_sec: number | null;
@@ -676,6 +677,10 @@ export type HeadwayQualityResponse = {
   rows: HeadwayQualityRow[];
   /** Routes with data in range but none of it on a day of their main timetable. */
   routes_off_timetable?: number;
+  /** Days in range left out because the timetable in force on them has no kept scheduled headways. */
+  days_timetable_not_kept?: number;
+  /** Days pooled whose timetable keeps its median but not its scheduled wait, so the routes pooling them show no EWT. */
+  days_scheduled_wait_not_kept?: number;
   /** Why `rows` is bound to be empty: the timetable has no high-frequency
    *  route, or the feed's fields aren't trusted. Null when the rows are worth reading. */
   unavailable_reason?: "no_high_frequency_routes" | CoverageGapReason | null;

@@ -102,7 +102,7 @@ from pipeline import (
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visits_ch_sql
-from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, thresholds
+from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, schedules, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
 from pipeline.service_day import service_date_ch
@@ -519,18 +519,19 @@ def _dates_of_changed_medians(
     """The service dates holding any of the agency's rows whose long-gap
     threshold can come from the loaded timetable (headways.thresholds: a
     version name mapping to no content with kept medians) on a route whose
-    median differs between *before* and the loaded timetable; every such date
-    when either keeps no medians."""
+    kept headways, the median or the sums its high-frequency test and
+    scheduled wait read, differ between *before* and the loaded timetable;
+    every such date when either keeps no medians."""
     after = join.current
     contents = {*join.hashes, after, *([before] if before else [])} - {""}
-    medians = static_headways.route_medians(conn, agency_id, contents)
+    medians = static_headways.route_headways(conn, agency_id, contents)
     kept = {content for content, _route in medians}
     stems = [stem for stem, content in zip(join.stems, join.hashes, strict=True) if content in kept]
     if before not in kept or after not in kept:
         logger.info("  a timetable keeps no medians: every following date rebuilds its daily headways")
         return _dates_following_the_loaded_timetable(agency_id, ch_client, stems, join)
     routes = static_headways.changed_routes(medians, before, after)
-    logger.info(f"  {len(routes)} route(s) changed their median")
+    logger.info(f"  {len(routes)} route(s) changed their kept headways")
     if not routes:
         return []
     result = _ch_query(
@@ -1465,7 +1466,6 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                     "scheduled_headway_median_sec",
                     "scheduled_samples",
                     "is_high_frequency",
-                    "scheduled_wait_mean_sec",
                 ],
                 p,
                 conn,
@@ -1618,25 +1618,30 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             # GROUP BY. Knowing how much of its cost is here decides that.
             with _step("agg_route_headway_daily: reconstruct in Python"):
                 pooled = pool_daily_gaps(headway_events)
-            # Each (route, date) is measured against the scheduled median of its
-            # dominant timetable (the one most of its events were ingested
-            # against), kept per archived timetable by pipeline.static_headways.
-            # A timetable with no kept medians falls back to the loaded one's;
-            # a route with no median counts no long gaps (count_long_gaps).
+            # Each (route, date) is judged by the scheduled headways of its
+            # dominant timetable (the one most of its events were filed
+            # under), kept per archived timetable by pipeline.static_headways:
+            # its long gaps against that median, its high-frequency test and
+            # scheduled wait by the same timetable. A timetable with no kept
+            # headways measures long gaps against the loaded one's median but
+            # judges nothing else (headways.schedules).
             with _step("agg_route_headway_daily: reconstruct in Python"):
                 dominant = dominant_contents(headway_events, join.content_of())
-            medians = static_headways.route_medians(conn, agency_id, {*dominant.values(), join.current})
-            fell_back = sum(1 for content in dominant.values() if content not in {c for c, _route in medians})
-            if fell_back:
+            kept = static_headways.route_headways(conn, agency_id, {*dominant.values(), join.current})
+            kept_contents = {content for content, _route in kept}
+            not_kept = sum(1 for content in dominant.values() if content not in kept_contents)
+            if not_kept:
                 logger.info(
-                    f"  agg_route_headway_daily: {fell_back} route-day(s) measured against the loaded timetable's "
-                    "medians, their own timetable having none kept"
+                    f"  agg_route_headway_daily: {not_kept} route-day(s) not judged, their own timetable keeping "
+                    "no scheduled headways; their long gaps are measured against the loaded timetable's medians"
                 )
 
             # Same label as the pooling above — `_step` accumulates, so the
             # summary reports one figure for this aggregate's Python build.
             with _step("agg_route_headway_daily: reconstruct in Python"):
-                headway_rows = daily_headway_rows(agency_id, pooled, thresholds(dominant, medians, join.current))
+                headway_rows = daily_headway_rows(
+                    agency_id, pooled, thresholds(dominant, kept, join.current), schedules(dominant, kept)
+                )
             _insert_agg(
                 "agg_route_headway_daily",
                 [
@@ -1648,6 +1653,10 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                     "actual_headway_sum_sec",
                     "actual_headway_sumsq_sec2",
                     "long_gap_count",
+                    "scheduled_headway_median_sec",
+                    "is_high_frequency",
+                    "scheduled_headway_sum_sec",
+                    "scheduled_headway_sumsq_sec2",
                 ],
                 headway_rows,
                 conn,

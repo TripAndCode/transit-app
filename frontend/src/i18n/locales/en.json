@@ -1317,6 +1317,10 @@
       "empty_off_timetable": "There are high-frequency routes, but none of them runs its main timetable on the selected days.",
       "some_off_timetable_one": "{{count}} more high-frequency route runs no day of its main timetable on the selected days, so it is left out.",
       "some_off_timetable_other": "{{count}} more high-frequency routes run no day of their main timetable on the selected days, so they are left out.",
+      "timetable_not_kept_one": "{{count}} of the selected days ran under a timetable whose scheduled headways weren't kept, so it is left out.",
+      "timetable_not_kept_other": "{{count}} of the selected days ran under a timetable whose scheduled headways weren't kept, so they are left out.",
+      "scheduled_wait_not_kept_one": "{{count}} of the selected days ran under a timetable whose scheduled wait wasn't kept, so excess wait isn't shown for the routes that include it.",
+      "scheduled_wait_not_kept_other": "{{count}} of the selected days ran under a timetable whose scheduled wait wasn't kept, so excess wait isn't shown for the routes that include them.",
       "col": {
         "ewt": "Excess wait",
         "cov": "Spacing CoV",

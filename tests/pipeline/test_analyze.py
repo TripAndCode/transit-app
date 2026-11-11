@@ -1370,6 +1370,18 @@ def _seed_route_headway_schedule(pg_conn, agency_id, route_id, service_id, stop_
     pg_conn.commit()
 
 
+def _kept_wait(pg_conn, agency_id, route_code):
+    """The scheduled mean wait the loaded timetable's kept sums give *route_code*
+    (agg_sql.route_headway_sql(all_routes=True), what pipeline.static_headways keeps)."""
+    from pipeline import agg_sql
+    from pipeline.headways import mean_wait_from_sums
+
+    with pg_conn.cursor() as cur:
+        cur.execute(agg_sql.route_headway_sql(all_routes=True), {"agency_id": agency_id})
+        kept = {route: (total, squares) for route, _median, total, squares in cur.fetchall()}
+    return mean_wait_from_sums(*kept[route_code])
+
+
 def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, agency_id, ch_client):
     """An ~8-minute scheduled-headway route is classified high-frequency; a
     30-minute one is not. Purely static-schedule-derived -- no RT `updates`
@@ -1395,17 +1407,17 @@ def test_analyze_classifies_high_frequency_route_from_static_schedule(pg_conn, a
 
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT route_code, scheduled_headway_median_sec, is_high_frequency, scheduled_wait_mean_sec "
+            "SELECT route_code, scheduled_headway_median_sec, is_high_frequency "
             "FROM agg_route_headway WHERE agency_id = %s ORDER BY route_code",
             (agency_id,),
         )
-        by_route = {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
+        by_route = {r[0]: (r[1], r[2], _kept_wait(pg_conn, agency_id, r[0])) for r in cur.fetchall()}
 
     freq_median, freq_hf, freq_wait = by_route["R_FREQ"]
     assert abs(freq_median - 480) < 1  # hand-computed: 480s (8 min) between every pair
     assert freq_hf is True
     # Perfectly regular headway -> mean wait reduces to headway/2 (the
-    # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_moments).
+    # E[H^2]/(2E[H]) formula, see pipeline.headways.mean_wait_from_sums).
     assert abs(freq_wait - 240) < 1
 
     slow_median, slow_hf, slow_wait = by_route["R_SLOW"]
@@ -1491,13 +1503,13 @@ def test_agg_route_headway_places_an_after_midnight_departure_on_its_service_day
 
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT scheduled_samples, scheduled_headway_median_sec, scheduled_wait_mean_sec FROM agg_route_headway "
+            "SELECT scheduled_samples, scheduled_headway_median_sec FROM agg_route_headway "
             "WHERE agency_id = %s AND route_code = 'R_NIGHT'",
             (agency_id,),
         )
-        samples, median, wait_mean = cur.fetchone()
+        samples, median = cur.fetchone()
     assert (samples, median) == (2, 1200)
-    assert wait_mean == pytest.approx(600)
+    assert _kept_wait(pg_conn, agency_id, "R_NIGHT") == pytest.approx(600)
 
 
 def _ch_headway_row(

@@ -1,15 +1,18 @@
 """Excess Waiting Time / coefficient of variation / long-gap rate for
-high-frequency routes, built on `agg_route_headway` /
-`agg_route_headway_daily`.
+high-frequency routes, built on `agg_route_headway_daily`.
 
-Restricted to routes `agg_route_headway.is_high_frequency` classifies
-high-frequency -- a route this repo hasn't classified as frequent has
-nothing meaningful to compare an "excess" wait against, so it is omitted
-from this report entirely, not returned with null metrics. This is a
-second, narrower panel alongside the existing `on_time` report (see
-`api/routers/reports.py`'s dedicated `/headway_quality` endpoint), not a
-replacement for it -- a non-high-frequency route's `on_time` row is
-completely unaffected.
+Each day is judged by the timetable in force on it: `agg_route_headway_daily`
+carries, per (route, date), that timetable's scheduled median, high-frequency
+test and scheduled sums (see `pipeline.analyze`'s builder and
+`pipeline.static_headways`), and only the days a route is high-frequency on
+are pooled. A route high-frequency on no day in range has nothing meaningful
+to compare an "excess" wait against, so it is omitted from this report
+entirely, not returned with null metrics. A day whose timetable keeps no
+scheduled headways is not judged by another timetable in its place: it is
+left out, and the answer counts it. This is a second, narrower panel
+alongside the existing `on_time` report (see `api/routers/reports.py`'s
+dedicated `/headway_quality` endpoint), not a replacement for it -- a
+non-high-frequency route's `on_time` row is completely unaffected.
 
 See `pipeline.headways` for the shared reconstruction/formula module both
 `pipeline.analyze`'s two headway builders and the query-time pooling below
@@ -18,9 +21,17 @@ depend on.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+from typing import NamedTuple
+
 from api.range import RangeCtx, dow_clause
 from pipeline.day_types import agrees, load_day_types, load_dominant_day_types
-from pipeline.headways import coefficient_of_variation_from_pooled, mean_wait_from_pooled
+from pipeline.headways import (
+    HIGH_FREQUENCY_HEADWAY_SEC,
+    coefficient_of_variation_from_pooled,
+    mean_wait_from_pooled,
+    mean_wait_from_sums,
+)
 from pipeline.strategies.static_join import rt_field_coverage_gap
 
 
@@ -62,44 +73,121 @@ def _sum(values: list) -> float | None:
     return sum(present) if present else None
 
 
-# How many of the agency's routes the static timetable classified, and how
-# many of those as high-frequency.
+def _sum_of_all(values: list) -> float | None:
+    """The sum, or None when any value is: a total missing one day's part is no total."""
+    return None if any(v is None for v in values) else sum(values)
+
+
+# How many of the agency's routes the static timetable loaded now classified,
+# and how many of those as high-frequency: the stand-in for what the
+# timetables in force over a range leave unknown.
 _FREQUENCY_SQL = """
     SELECT count(*) AS routes, count(*) FILTER (WHERE is_high_frequency) AS high_frequency
     FROM agg_route_headway
     WHERE agency_id = $1
 """
 
+# The timetables in force over a range, as analyze last recorded them
+# (pipeline.analyze._record_in_force), in date order.
+_IN_FORCE_SQL = """
+    SELECT first_day, last_day, content_hash FROM agg_timetable_in_force
+    WHERE agency_id = $1 AND first_day <= $3::date AND last_day >= $2::date
+    ORDER BY first_day
+"""
+
+# Of the contents named, how many keep scheduled headways, and how many of
+# their routes they class, and class as high-frequency: every route each one
+# plans, each content at its highest version, as
+# pipeline.static_headways.route_headways reads them.
+_KEPT_CLASSES_SQL = f"""
+    SELECT count(DISTINCT r.content_hash) AS kept,
+           count(r.scheduled_headway_median_sec) AS classified,
+           count(*) FILTER (WHERE r.scheduled_headway_median_sec <= {HIGH_FREQUENCY_HEADWAY_SEC}) AS high_frequency
+    FROM route_headway_by_content r
+    JOIN (SELECT content_hash, max(logic_version) AS logic_version FROM route_headway_by_content
+          WHERE agency_id = $1 AND content_hash = ANY($2::text[]) GROUP BY content_hash) latest
+      USING (content_hash, logic_version)
+    WHERE r.agency_id = $1
+"""
+
 _AVAILABLE = {"unavailable_reason": None, "last_checked": None}
 _NO_HIGH_FREQUENCY = {"unavailable_reason": "no_high_frequency_routes", "last_checked": None}
 
 
-async def _no_high_frequency_route(agency_id: int, conn) -> bool:
-    """Whether the timetable classified routes but none as high-frequency."""
+class HeadwayQualityReport(NamedTuple):
+    """:func:`compute_headway_quality_report`'s answer."""
+
+    rows: list[dict]
+    # High-frequency routes with data in range, none of it on a day of their class.
+    routes_off_timetable: int
+    # Days in range holding a route-day whose timetable keeps no scheduled headways.
+    days_timetable_not_kept: int
+    # Days pooled whose timetable keeps its median but not its scheduled sums,
+    # which leaves the excess wait of every route pooling one of them None.
+    days_scheduled_wait_not_kept: int
+    # {"unavailable_reason", "last_checked"}
+    unavailable: dict
+
+
+def _covers(segments: list, first: date, last: date) -> bool:
+    """Whether *segments*, in date order, leave no day from *first* to *last* uncovered."""
+    day = first
+    for segment in segments:
+        if segment["first_day"] > day:
+            return False
+        day = max(day, segment["last_day"] + timedelta(days=1))
+    return day > last
+
+
+async def _no_high_frequency_route(agency_id: int, ctx: RangeCtx, conn) -> bool:
+    """Whether no timetable in force over *ctx*'s dates classes any route
+    high-frequency, while one classes some route.
+
+    Read from the scheduled headways each timetable in force keeps, for every
+    route it plans, whether or not the route has a day in range. A day no
+    recorded timetable covers, or a timetable in force that keeps no
+    headways, is unknown, and the timetable loaded now stands in for it: then
+    the loaded one must also class routes but none as high-frequency.
+    """
+    segments = await conn.fetch(_IN_FORCE_SQL, agency_id, ctx.from_date, ctx.to_date)
+    contents = sorted({segment["content_hash"] for segment in segments})
+    kept = await conn.fetchrow(_KEPT_CLASSES_SQL, agency_id, contents) if contents else None
+    if kept is not None and kept["high_frequency"]:
+        return False
+    if kept is not None and kept["kept"] == len(contents) and _covers(segments, ctx.from_date, ctx.to_date):
+        return bool(kept["classified"])
     frequency = await conn.fetchrow(_FREQUENCY_SQL, agency_id)
     return bool(frequency["routes"]) and not frequency["high_frequency"]
 
 
 async def compute_headway_quality(agency_id: int, ctx: RangeCtx, conn) -> list[dict]:
     """:func:`compute_headway_quality_report`'s rows."""
-    rows, _, _ = await compute_headway_quality_report(agency_id, ctx, conn)
-    return rows
+    return (await compute_headway_quality_report(agency_id, ctx, conn)).rows
 
 
-async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) -> tuple[list[dict], int, dict]:
-    """Per-route EWT / CoV / long-gap-rate, high-frequency routes only, how
-    many routes had data in range but none on a day of their class, and why
-    the panel is empty when it is bound to be.
+async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) -> HeadwayQualityReport:
+    """Per-route EWT / CoV / long-gap-rate over the days each route is
+    high-frequency on, how many routes had such days in range but none of
+    their class, how many days in range were not judged, and why the panel is
+    empty when it is bound to be.
 
-    The third value is ``{"unavailable_reason", "last_checked"}``. The reason
-    is ``no_high_frequency_routes`` when the timetable classified routes but
-    none as high-frequency: that comes from the static schedule alone, so no
-    renewed feed check could fill the panel, and it is told ahead of any
-    coverage gap. Otherwise it is the agency's
+    Each day is judged by the timetable in force on it (its row's scheduled
+    columns, see the module docstring). A day whose timetable keeps no
+    scheduled headways (`is_high_frequency` NULL) is pooled for no route and
+    counted in `days_timetable_not_kept`, by its date.
+
+    The unavailable value is ``{"unavailable_reason", "last_checked"}``. The
+    reason is ``no_high_frequency_routes`` when no timetable in force over the
+    range classes any route high-frequency, for every route it plans and not
+    only those with a day in range (:func:`_no_high_frequency_route`, which
+    lets the timetable loaded now stand in where the range's timetables are
+    unknown). It is never told while a day in range is not judged. It comes
+    from timetables alone, so no renewed feed check could fill the panel, and
+    it is told ahead of any coverage gap. Otherwise it is the agency's
     ``pipeline.strategies.static_join.CoverageGap`` when the feed's fields
     are not trusted, and None when the rows are worth reading. The
-    classification is read only to explain an empty answer, so a response
-    with rows never pays for it.
+    timetables' classification is read only to explain an empty answer, so
+    a response with rows never pays for it.
 
     Pools `agg_route_headway_daily`'s per-day sufficient statistics
     (`actual_headway_sum_sec` / `actual_headway_sumsq_sec2` /
@@ -107,24 +195,29 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     would sum them -- additive across any partition of the same gap population
     (see `pipeline.headways`'s module docstring), so this is bit-for-bit the
     same as computing the formulas directly over those days' gaps
-    concatenated. EWT compares the pooled actual mean wait against
-    `agg_route_headway.scheduled_wait_mean_sec` -- the SAME mean-wait
-    formula applied to the static schedule's own headway distribution (see
-    `pipeline.analyze`'s `agg_route_headway` builder) -- an apples-to-apples
-    comparison, not actual-vs-median.
+    concatenated. EWT compares the pooled actual mean wait against the
+    scheduled mean wait of the same days, pooled from each day's own
+    timetable's sums (`scheduled_headway_sum_sec` /
+    `scheduled_headway_sumsq_sec2`) -- the SAME mean-wait formula applied to
+    the timetables' own headway distributions -- an apples-to-apples
+    comparison, not actual-vs-median. A pooled day whose timetable was kept
+    before its sums were leaves EWT None: its median judges it high-frequency
+    and its gaps count, but the scheduled wait would be missing its part.
+    `days_scheduled_wait_not_kept` counts such days, by their date.
 
     The scheduled side is the route's dominant service alone (see
     `pipeline.headways.dominant_service_ctes`), so a day running another
-    timetable -- a weekday route's weekends and holidays -- would read as late
+    service -- a weekday route's weekends and holidays -- would read as late
     against it. Only the days whose day type (`pipeline.day_types`) agrees with
-    that service's class are pooled, and `day_type` names the class. A route
-    whose dominant service has no class is pooled over every day, with
-    `day_type` None.
+    the loaded timetable's dominant service's class are pooled, and `day_type`
+    names the class. A route whose dominant service has no class is pooled
+    over every day, with `day_type` None.
 
-    A high-frequency route with zero `agg_route_headway_daily` rows in
-    range (no RT-reconstructed headway data has accumulated yet), or none on
-    a day of its class, is omitted entirely rather than returned with null
-    metrics -- there is nothing yet to report for it.
+    A route with no high-frequency `agg_route_headway_daily` row in range (no
+    RT-reconstructed headway data has accumulated yet, or no day's timetable
+    runs it often enough), or none on a day of its class, is omitted entirely
+    rather than returned with null metrics -- there is nothing yet to report
+    for it.
 
     `agg_route_headway_daily` is materialized (see `pipeline.analyze`'s
     builder) for any `ingest_strategy` that CAN populate `stop_id`, which is
@@ -139,24 +232,29 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     """
     gap = await rt_field_coverage_gap(agency_id, conn)
     if gap is not None:
-        if await _no_high_frequency_route(agency_id, conn):
-            return [], 0, dict(_NO_HIGH_FREQUENCY)
-        return [], 0, gap.payload()
+        if await _no_high_frequency_route(agency_id, ctx, conn):
+            return HeadwayQualityReport([], 0, 0, 0, dict(_NO_HIGH_FREQUENCY))
+        return HeadwayQualityReport([], 0, 0, 0, gap.payload())
 
     frag, params, _ = _daily_filter(ctx, 2)
-    sql = f"""
-        SELECT h.route_code, h.scheduled_wait_mean_sec, d.date, d.actual_samples,
-               d.actual_headway_sum_sec, d.actual_headway_sumsq_sec2, d.long_gap_count
-        FROM agg_route_headway h
-        JOIN agg_route_headway_daily d
-          ON d.agency_id = h.agency_id AND d.route_code = h.route_code
-        WHERE h.agency_id = $1 AND h.is_high_frequency
-          AND {frag}
-        ORDER BY h.route_code, d.date
-    """
-    rows = await conn.fetch(sql, agency_id, *params)
-    if not rows and await _no_high_frequency_route(agency_id, conn):
-        return [], 0, dict(_NO_HIGH_FREQUENCY)
+    # One scan for the days pooled (high-frequency) and the days not judged
+    # (NULL), told apart below.
+    judged = await conn.fetch(
+        f"""
+        SELECT d.route_code, d.date, d.is_high_frequency, d.actual_samples, d.actual_headway_sum_sec,
+               d.actual_headway_sumsq_sec2, d.long_gap_count, d.scheduled_headway_sum_sec,
+               d.scheduled_headway_sumsq_sec2
+        FROM agg_route_headway_daily d
+        WHERE d.agency_id = $1 AND d.is_high_frequency IS NOT FALSE AND {frag}
+        ORDER BY d.route_code, d.date
+        """,
+        agency_id,
+        *params,
+    )
+    rows = [r for r in judged if r["is_high_frequency"]]
+    days_not_kept = len({r["date"] for r in judged if r["is_high_frequency"] is None})
+    if not rows and not days_not_kept and await _no_high_frequency_route(agency_id, ctx, conn):
+        return HeadwayQualityReport([], 0, 0, 0, dict(_NO_HIGH_FREQUENCY))
     classes = await load_dominant_day_types(conn, agency_id) if rows else {}
     day_types = (
         await load_day_types(conn, agency_id, ctx.from_date, ctx.to_date)
@@ -176,7 +274,10 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
         sum_sec = _sum([d["actual_headway_sum_sec"] for d in days])
         sumsq_sec2 = _sum([d["actual_headway_sumsq_sec2"] for d in days])
         actual_wait_mean_sec = mean_wait_from_pooled(n, sum_sec, sumsq_sec2)
-        scheduled_wait_mean_sec = days[0]["scheduled_wait_mean_sec"]
+        scheduled_wait_mean_sec = mean_wait_from_sums(
+            _sum_of_all([d["scheduled_headway_sum_sec"] for d in days]),
+            _sum_of_all([d["scheduled_headway_sumsq_sec2"] for d in days]),
+        )
         ewt_sec = (
             None
             if actual_wait_mean_sec is None or scheduled_wait_mean_sec is None
@@ -196,4 +297,10 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
             }
         )
     off_timetable = len({r["route_code"] for r in rows} - by_route.keys())
-    return out, off_timetable, dict(_AVAILABLE)
+    wait_not_kept = {
+        d["date"]
+        for days in by_route.values()
+        for d in days
+        if d["scheduled_headway_sum_sec"] is None or d["scheduled_headway_sumsq_sec2"] is None
+    }
+    return HeadwayQualityReport(out, off_timetable, days_not_kept, len(wait_not_kept), dict(_AVAILABLE))

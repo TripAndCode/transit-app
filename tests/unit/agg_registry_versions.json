@@ -24,12 +24,12 @@
     "version": 3
   },
   "agg_route_headway": {
-    "hash": "7f5467c7a93ccb42b7348da26b3d63f3b12600a6de78b2daff82f4f4ce35bfc6",
-    "version": 2
+    "hash": "59c7793e572155272ca955c345ed97630c829327b3baf9656f9f2a27c43edb92",
+    "version": 3
   },
   "agg_route_headway_daily": {
-    "hash": "cebb5b4782c1b7e973a364dd96c785a0c1ba672e761b8cf6c211f4dd4abe7bbf",
-    "version": 3
+    "hash": "40f2b5f8da28f49fd802685854aab5467290b3830bcaf259f3a13b41794c99b5",
+    "version": 4
   },
   "agg_route_hour": {
     "hash": "84084a78b009b0cd4b460458a56e02ec0e2e2389a2fca9c45ac3cc9a70bf6800",

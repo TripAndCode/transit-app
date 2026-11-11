@@ -253,18 +253,23 @@ def test_the_medians_kept_in_the_scratch_reach_the_target(pg_conn, agency_id, sc
         cur.execute(
             "INSERT INTO agencies (agency_id, agency_name, feed_url) VALUES (%s, 'x', 'http://x')", (agency_id,)
         )
-        cur.execute("INSERT INTO route_headway_by_content VALUES (%s, 'k', 'R1', 1, 600)", (agency_id,))
+        cur.execute(
+            "INSERT INTO route_headway_by_content (agency_id, content_hash, route_code, logic_version, "
+            "scheduled_headway_median_sec, scheduled_headway_sum_sec, scheduled_headway_sumsq_sec2) "
+            "VALUES (%s, 'k', 'R1', 1, 600, 1200, 720000)",
+            (agency_id,),
+        )
     scratch.commit()
     assert backfill.copy_medians(scratch, pg_conn, agency_id, "k") == 1
     assert backfill.copy_medians(scratch, pg_conn, agency_id, "k") == 0
     scratch.close()
     with pg_conn.cursor() as cur:
         cur.execute(
-            "SELECT route_code, scheduled_headway_median_sec FROM route_headway_by_content "
-            "WHERE agency_id = %s AND content_hash = 'k'",
+            "SELECT route_code, scheduled_headway_median_sec, scheduled_headway_sum_sec, scheduled_headway_sumsq_sec2 "
+            "FROM route_headway_by_content WHERE agency_id = %s AND content_hash = 'k'",
             (agency_id,),
         )
-        assert cur.fetchall() == [("R1", 600.0)]
+        assert cur.fetchall() == [("R1", 600.0, 1200.0, 720000.0)]
 
 
 def test_a_failed_median_copy_leaves_the_name_for_a_rerun(

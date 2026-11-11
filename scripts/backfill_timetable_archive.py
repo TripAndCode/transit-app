@@ -10,9 +10,10 @@ scratch Postgres with the real load_static, whose archive writes go to the
 target ClickHouse: it records the name's span from the zip.
 static_archive.archive_loaded then keeps its stop times and schedule there and
 maps the name to them, mirroring the mapping in the target Postgres, and its
-route medians (pipeline.static_headways) are copied there too. Last, the agency's archive-joined tables' states
-are cleared, so its next analyze rebuilds them in full against the timetable
-in force on each row's service date. --every-zip also takes each kept zip whose
+route headways (pipeline.static_headways) are copied there too. Last, the
+agency's archive-joined tables' states are cleared, so its next analyze
+rebuilds them in full against the timetable in force on each row's service
+date. --every-zip also takes each kept zip whose
 name no row carries: a timetable fetched but never loaded while its days were
 ingested can still be the one in force on them.
 
@@ -143,11 +144,17 @@ def _ensure_agency(scratch_conn, agency_id: int, row: tuple) -> None:
     scratch_conn.commit()
 
 
+# Every column route_headway_by_content keeps of a route, beside its key.
+_KEPT_COLUMNS = (
+    "route_code, logic_version, scheduled_headway_median_sec, scheduled_headway_sum_sec, scheduled_headway_sumsq_sec2"
+)
+
+
 def copy_medians(scratch_conn, target_conn, agency_id: int, key: str) -> int:
-    """Copy content *key*'s kept medians from the scratch to the target; the rows inserted."""
+    """Copy content *key*'s kept headways, medians and sums, from the scratch to the target; the rows inserted."""
     with scratch_conn.cursor() as cur:
         cur.execute(
-            f"SELECT route_code, logic_version, scheduled_headway_median_sec FROM {static_headways.TABLE} "
+            f"SELECT {_KEPT_COLUMNS} FROM {static_headways.TABLE} "
             "WHERE agency_id = %s AND content_hash = %s ORDER BY route_code, logic_version",
             (agency_id, key),
         )
@@ -158,8 +165,7 @@ def copy_medians(scratch_conn, target_conn, agency_id: int, key: str) -> int:
     with target_conn.cursor() as cur:
         inserted = psycopg2.extras.execute_values(
             cur,
-            f"INSERT INTO {static_headways.TABLE} "
-            "(agency_id, content_hash, route_code, logic_version, scheduled_headway_median_sec) "
+            f"INSERT INTO {static_headways.TABLE} (agency_id, content_hash, {_KEPT_COLUMNS}) "
             "VALUES %s ON CONFLICT DO NOTHING RETURNING 1",
             [(agency_id, key, *row) for row in rows],
             fetch=True,
