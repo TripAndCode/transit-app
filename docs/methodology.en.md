@@ -163,6 +163,8 @@ A route's service delivered is the same ratio on the route's own trips. A trip n
 - the coefficient of variation of headways;
 - the long-gap rate: the share of gaps longer than 1.75 times the scheduled headway.
 
+A headway median is taken the same way for scheduled and actual gaps: for an even count of gaps, it is the mean of the two middle gaps (from method `2026.11.9`).
+
 **Dwell and running time**: dwell time is the difference between arrival and departure delay at the same stop, and running time the difference from the previous stop's departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
 
 ### What is not observed
@@ -344,10 +346,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.8`. Newest first, each version with the inputs it set.
+The current method is `2026.11.9`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.9` | `agg_route_headway` 1 → 2 |
 | `2026.11.8` | `feed_quality_monthly` 2 → 3 |
 | `2026.11.7` | `agg_service_delivered_daily` 2 → 3 |
 | `2026.11.6` | `feed_quality_monthly` 1 → 2 |

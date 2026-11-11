@@ -1041,12 +1041,14 @@ def _the_loaded_timetable_stands_for_every_day(observed: Observed, found: oracle
     return replace(found, wait_plans=wait_plans)
 
 
+# Met by no scenario (_KNOWN): its test holds every cell this rule would move
+# to the truth, so the rule cannot come back unnoticed.
 _LOWER_MIDDLE_DIVERGENCE = Divergence(
     name="scheduled headway is the lower middle gap",
     reason=(
-        "A route's scheduled headway is the lower of its two middle scheduled gaps (PERCENTILE_DISC(0.5)), not "
-        "their mean, so a timetable whose gaps split evenly between long and short reads as its short gap and "
-        "the route is classed high-frequency"
+        "Taking the lower of a route's two middle scheduled gaps (PERCENTILE_DISC(0.5)) rather than their mean "
+        "reads a timetable whose gaps split evenly between long and short as its short gap, and classes the "
+        "route high-frequency"
     ),
     view=_scheduled_headway_is_the_lower_middle_gap,
 )
@@ -1061,7 +1063,7 @@ _LOADED_TIMETABLE_DIVERGENCE = Divergence(
 # The divergences each scenario is known to meet, by scenario name.
 _KNOWN: dict[str, tuple[Divergence, ...]] = {
     "timetable_change": (_LOADED_TIMETABLE_DIVERGENCE,),
-    "timetable_published_early": (_LOWER_MIDDLE_DIVERGENCE, _LOADED_TIMETABLE_DIVERGENCE),
+    "timetable_published_early": (_LOADED_TIMETABLE_DIVERGENCE,),
 }
 
 
@@ -1172,7 +1174,7 @@ def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[s
         own_cells += len(moved)
         lines += _compare(read(observed), expected, moved.__contains__)
     if not own_cells:
-        raise RuntimeError("the divergence moves no cell of its own, so its xfail would test nothing")
+        raise RuntimeError("the divergence moves no cell of its own, so its test would test nothing")
     return lines
 
 
@@ -1463,7 +1465,6 @@ def test_headway_quality_judges_each_day_by_the_timetable_in_force_that_day(obse
     _assert_clean(_divergence_mismatches(observed, _LOADED_TIMETABLE_DIVERGENCE))
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_LOWER_MIDDLE_DIVERGENCE.reason)
 @pytest.mark.parametrize("observed", [_PUBLISHED_EARLY], indirect=True)
 def test_the_scheduled_headway_of_an_even_count_of_gaps_is_the_mean_of_the_middle_two(observed):
     _assert_clean(_divergence_mismatches(observed, _LOWER_MIDDLE_DIVERGENCE))

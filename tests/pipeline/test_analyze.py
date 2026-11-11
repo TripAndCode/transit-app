@@ -1462,14 +1462,30 @@ def test_agg_route_headway_counts_whitespace_padded_departure_times(pg_conn, age
     assert median == 600
 
 
+def test_agg_route_headway_takes_the_mean_of_the_two_middle_gaps_of_an_even_count(pg_conn, agency_id, ch_client):
+    """Gaps of 8 and 20 minutes have a 14-minute median, the mean of the two
+    middles, as the actual side's statistics.median takes it, so the route is
+    not high-frequency. The lower middle alone would read 8 minutes."""
+    _seed_route_headway_schedule(pg_conn, agency_id, "R_EVEN", "WD", "s1", ["08:00:00", "08:08:00", "08:28:00"])
+    _analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT scheduled_samples, scheduled_headway_median_sec, is_high_frequency FROM agg_route_headway "
+            "WHERE agency_id = %s AND route_code = 'R_EVEN'",
+            (agency_id,),
+        )
+        assert cur.fetchone() == (2, 840, False)
+
+
 @pytest.mark.parametrize("after_midnight", ["00:10:00", "24:10:00"])
 def test_agg_route_headway_places_an_after_midnight_departure_on_its_service_day(
     pg_conn, agency_id, ch_client, after_midnight
 ):
     """23:30, 23:50 and an after-midnight departure written either as GTFS's
     extended 24:10 or as a plain clock 00:10: both are 20 minutes after 23:50,
-    never a departure before the evening's first. The median alone cannot tell
-    (it is the smaller gap either way); the mean wait sees the false 23:30 gap."""
+    never a departure before the evening's first, which would add a false gap
+    of 23 h 20 min that both the median of the two gaps and the mean wait take in."""
     _seed_route_headway_schedule(pg_conn, agency_id, "R_NIGHT", "WD", "s1", ["23:30:00", "23:50:00", after_midnight])
     _analyze(agency_id, pg_conn, ch_client)
 
