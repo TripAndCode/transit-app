@@ -27,6 +27,7 @@ from tests.fixtures.scenario import (
     TimetableVersion,
     TripRun,
     Unreported,
+    gtfs_clock,
     gtfs_seconds,
     poll_batches,
     polls,
@@ -436,3 +437,129 @@ def test_an_unreported_trip_is_in_no_poll_and_counts_as_executed_but_not_observe
     assert oracle.service(scenario) == {DAY: oracle.Service(planned=2, reported_not_run=0, observed=1)}
     assert oracle.service(scenario)[DAY].executed == 2
     assert not oracle.delivered_rate_shown(oracle.outcome(scenario), DAY)
+
+
+def _every(first: str, n: int, headway_sec: int, prefix: str) -> tuple[ScheduledTrip, ...]:
+    """*n* trips of ``_ROUTE`` *headway_sec* apart from *first*, eight minutes between stops."""
+    start = gtfs_seconds(first)
+    return tuple(
+        ScheduledTrip(
+            f"{prefix}{k}",
+            "R",
+            "平日",
+            tuple(gtfs_clock(start + k * headway_sec + i * 480) for i in range(len(_STOPS))),
+        )
+        for k in range(n)
+    )
+
+
+# Four trips six minutes apart. The first runs late from the second stop on,
+# so the second overtakes it there and at the last stop; the third does not
+# run and the feed never mentions it; the fourth skips the middle stop.
+_SIX_MINUTES = _every("07:00:00", 4, 360, "R_")
+
+
+def _bunched_runs(day: date) -> tuple[TripRun, ...]:
+    a, b, _c, d = _SIX_MINUTES
+    return (
+        TripRun.from_delays(a, day, (0, 400, 400)),
+        TripRun.from_delays(b, day, (0, 0, 30)),
+        TripRun.from_delays(d, day, (0, None, -50)),
+    )
+
+
+def _bunched(*, next_day: tuple[TripRun, ...] | None = None, revisions=()) -> Scenario:
+    days = (ServiceDay(DAY, "平日"),) if next_day is None else (ServiceDay(DAY, "平日"), ServiceDay(NEXT, "平日"))
+    unreported = [Unreported("R_2", DAY)]
+    return Scenario(
+        name="bunched",
+        routes=(_ROUTE,),
+        timetable=_SIX_MINUTES,
+        days=days,
+        runs=(*_bunched_runs(DAY), *(next_day or ())),
+        unreported=tuple(unreported),
+        revisions=revisions,
+    )
+
+
+def test_the_oracle_takes_each_stops_gaps_in_departure_order_and_pools_them_over_the_route():
+    """Stop 1 leaves at 07:00, 07:06 and 07:18: gaps 360 and 720, the missing
+    trip's slot open. Stop 2 sees the second trip at 07:14:00 and the late
+    first at 07:14:40, the fourth skipping it: one gap of 40. Stop 3 sees
+    07:22:30, 07:22:40 and 07:33:10: gaps 10 and 630. The timetable plans
+    360 s at every stop, the missing trip included, so 630 = 1.75 x 360 is
+    not long and 720 is."""
+    found = oracle.outcome(_bunched())
+    assert found.plans == {("R", DAY): oracle.Plan(gaps=(360,) * 9, headway_sec=Fraction(360))}
+    assert found.wait_plans == found.plans
+    day = oracle.headway_days(found)[("R", DAY)]
+    assert day == oracle.HeadwayDay(gaps=(10, 40, 360, 630, 720), long_gaps=1)
+    assert (day.samples, day.median_sec, day.sum_sec, day.sumsq_sec2) == (5, 360, 1760, 1046600)
+
+    quality = oracle.headway_quality(found, DAY, DAY)
+    assert list(quality) == ["R"]
+    # Waits: 1046600 / (2 x 1760) actual, 9 x 360^2 / (2 x 9 x 360) = 180 scheduled.
+    assert quality["R"].actual_wait_sec == Fraction(26165, 88)
+    assert quality["R"].scheduled_wait_sec == 180
+    assert quality["R"].excess_wait_sec == Fraction(10325, 88)
+    # Mean 352, mean square 209320: variance 85416.
+    assert quality["R"].cov_squared == Fraction(85416, 352**2)
+    assert quality["R"].long_gap_share == Fraction(1, 5)
+    assert quality["R"].samples == 5
+    assert not oracle.no_high_frequency_route(found, DAY, DAY)
+
+
+def test_the_oracle_pools_a_periods_days_by_their_sums_not_by_averaging_each_days_figures():
+    """A second day running every trip on time adds nine gaps of 360 s."""
+    on_time = tuple(TripRun.from_delays(t, NEXT, (0, 0, 0)) for t in _SIX_MINUTES)
+    found = oracle.outcome(_bunched(next_day=on_time))
+    assert oracle.headway_days(found)[("R", NEXT)] == oracle.HeadwayDay(gaps=(360,) * 9, long_gaps=0)
+    pooled = oracle.headway_quality(found, DAY, NEXT)["R"]
+    assert (pooled.samples, pooled.sum_sec, pooled.sumsq_sec2, pooled.long_gaps) == (14, 5000, 2213000, 1)
+    assert pooled.excess_wait_sec == Fraction(413, 10)
+    assert pooled.long_gap_share == Fraction(1, 14)
+
+
+def test_each_day_is_judged_by_the_timetable_in_force_that_day():
+    """From the second day the trips run fourteen minutes apart, not
+    high-frequency, so a period pools the first day alone. The second day's
+    long gaps are judged against 1.75 x 840 = 1470 s: 1480 is long, the
+    840 s gaps are not, as they would be against the first day's 630."""
+    revised = _every("07:00:00", 3, 840, "S_")
+    revision = TimetableVersion("fourteen_minutes", NEXT, revised)
+    runs = tuple(
+        TripRun.from_delays(t, NEXT, d) for t, d in zip(revised, ((0, 0, 0), (0, 0, 640), (0, 0, 0)), strict=True)
+    )
+    found = oracle.outcome(_bunched(next_day=runs, revisions=(revision,)))
+    assert found.plans[("R", NEXT)] == oracle.Plan(gaps=(840,) * 6, headway_sec=Fraction(840))
+    assert oracle.headway_days(found)[("R", NEXT)] == oracle.HeadwayDay(
+        gaps=(200, 840, 840, 840, 840, 1480), long_gaps=1
+    )
+    assert oracle.headway_quality(found, DAY, NEXT) == oracle.headway_quality(found, DAY, DAY)
+    assert oracle.headway_quality(found, NEXT, NEXT) == {}
+    assert oracle.no_high_frequency_route(found, NEXT, NEXT)
+
+
+def test_the_median_of_an_even_count_is_the_mean_of_its_middle_two():
+    assert oracle.median([630, 10, 360, 40]) == 200
+    assert oracle.median([10, 40, 360]) == 40
+    assert oracle.median([]) is None
+
+
+def test_two_departures_from_one_stop_in_the_same_second_are_refused():
+    a, b, _c, d = _SIX_MINUTES
+    runs = (
+        TripRun.from_delays(a, DAY, (360, 360, 360)),
+        TripRun.from_delays(b, DAY, (0, 0, 0)),
+        TripRun.from_delays(d, DAY, (0, 0, 0)),
+    )
+    scenario = Scenario(
+        name="same_second",
+        routes=(_ROUTE,),
+        timetable=_SIX_MINUTES,
+        days=(ServiceDay(DAY, "平日"),),
+        runs=runs,
+        unreported=(Unreported("R_2", DAY),),
+    )
+    with pytest.raises(ValueError, match="same second"):
+        oracle.headway_days(oracle.outcome(scenario))

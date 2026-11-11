@@ -55,7 +55,7 @@ A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) 
 
 - **Trips reported**: the share of the trips the timetable planned that the feed reported a plausible departure for, by the same rule as the coverage in the [Comparability conditions](#comparability-conditions);
 - **Stop events reported**: the share of the stops the planned trips call at that the feed reported;
-- **Message age**: per poll received live, the time it was captured minus the feed header's timestamp (the median and the 95th percentile);
+- **Message age**: per poll, the time it was captured minus the feed header's timestamp (the median and the 95th percentile). A poll from the collector's archive is timed by its file name, which records when the poll began; a poll whose name records no time is left out and counted (from method `2026.11.8`);
 - **Implausible readings**: the share of reports dropped as in [Excluding implausible values](#excluding-implausible-values);
 - **Field coverage**: for each of four fields separately, the share of reports carrying that field; the four are never combined into one figure:
   - the stop ID (`stop_id`);
@@ -345,10 +345,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.7`. Newest first, each version with the inputs it set.
+The current method is `2026.11.8`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.8` | `feed_quality_monthly` 2 → 3 |
 | `2026.11.7` | `agg_service_delivered_daily` 2 → 3 |
 | `2026.11.6` | `feed_quality_monthly` 1 → 2 |
 | `2026.11.5` | `feed_quality_monthly` = 1 |

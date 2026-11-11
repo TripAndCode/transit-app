@@ -474,6 +474,7 @@ export type AgencyFeedQualityMonth = {
   stop_completeness_pct: number | null;
   stop_completeness_missing: FeedQualityMissing | null;
   message_age_polls: number;
+  message_age_undated_polls: number;
   message_age_p50_sec: number | null;
   message_age_p95_sec: number | null;
   message_age_missing: FeedQualityMissing | null;

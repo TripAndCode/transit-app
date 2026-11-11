@@ -35,7 +35,7 @@ import contextlib
 import itertools
 import os
 from collections.abc import Callable, Hashable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta, timezone
 from fractions import Fraction
 from functools import cached_property, partial
@@ -373,6 +373,92 @@ def cancellations(day: date) -> Scenario:
     )
 
 
+# The bunching scenario's lines, eight stops two minutes apart. The bunching
+# line runs eleven trips six minutes apart, so its long-gap edge is 1.75 x 360
+# = 630 s. The second line runs three trips 12 min 1 s apart, a second over
+# the high-frequency edge, so its long-gap edge, 1261.75 s, falls between two
+# whole seconds.
+_BUNCHING_HEADWAY_SEC = 360
+_OVER_THE_EDGE_HEADWAY_SEC = 721
+# Delays in seconds, per stop, of the bunching line's trips from 07:00, one
+# row per trip and None for a trip that did not run. Each pair's leader falls
+# further behind along the line and its follower catches it up, so the gap
+# inside the pair closes while the gap to the next pair opens past the edge:
+# 630 s is not long and 631 s is. On the first day the fourth trip overtakes
+# the third before the last stop.
+_BUNCHED = (
+    (0, 30, 60, 90, 120, 150, 180, 210),
+    (0, -10, -20, -30, -40, -50, -60, -70),
+    (20, 60, 100, 140, 180, 220, 260, 300),
+    (10, -10, -30, -50, -70, -80, -90, -100),
+    (30, 60, 100, 140, 170, 191, 230, 270),
+    (20, 10, 0, -10, -20, -30, -40, -40),
+    (0, 20, 50, 80, 110, 140, 170, 200),
+    (0, 0, 0, 0, 0, 0, 0, 0),
+    (10, 40, 70, 100, 130, 160, 190, 220),
+    (0, -10, -20, -30, -40, -50, -60, -60),
+    (0, 30, 60, 90, 120, 150, 180, 200),
+)
+# The second day bunches less, but its sixth trip does not run and the feed
+# never mentions it, which leaves a gap past the edge at every stop.
+_GAPPED = (
+    (0, 10, 20, 30, 40, 50, 60, 70),
+    (0, 0, 10, 10, 20, 20, 30, 30),
+    (30, 60, 90, 120, 150, 180, 210, 240),
+    (0, -10, -10, -20, -20, -30, -30, -40),
+    (0, 0, 0, 0, 0, 0, 0, 0),
+    None,
+    (-30, -30, -40, -40, -50, -50, -60, -60),
+    (30, 60, 90, 120, 150, 180, 210, 240),
+    (0, 0, 0, 0, 0, 0, 0, 0),
+    (0, 10, 20, 30, 40, 50, 60, 70),
+    (10, 25, 40, 55, 70, 85, 100, 115),
+)
+# The second line's three trips on each day: a gap of 1262 s at the last
+# stop of the first day, and one of 1261 s there on the second.
+_OVER_THE_EDGE = (
+    ((0, 0, 0, 0, 0, 0, 0, 0), (0, 100, 200, 300, 400, 500, 520, 541), (0, 50, 100, 150, 200, 250, 300, 350)),
+    ((0, 0, 0, 0, 0, 0, 0, 0), (0, 100, 200, 300, 400, 500, 520, 540), (0, 0, 0, 0, 0, 0, 0, 0)),
+)
+
+
+def _every(route: Route, first: str, n: int, headway_sec: int) -> tuple[ScheduledTrip, ...]:
+    start = gtfs_seconds(first)
+    return tuple(
+        _trip(route, "平日", gtfs_clock(start + k * headway_sec), 120, f"{route.route_id}_{k}") for k in range(n)
+    )
+
+
+def bunching(day: date) -> Scenario:
+    """A high-frequency line whose trips run in pairs on two weekdays, with
+    a trip missing on the second, beside a line a second too sparse to be
+    high-frequency. Every day runs the one timetable."""
+    second = day + timedelta(days=1)
+    line = _route("B1", "Bunching line", 8, 34.49)
+    sparse = _route("B2", "Twelve-minute line", 8, 34.51)
+    line_trips = _every(line, "07:00:00", len(_BUNCHED), _BUNCHING_HEADWAY_SEC)
+    sparse_trips = _every(sparse, "07:00:00", len(_OVER_THE_EDGE[0]), _OVER_THE_EDGE_HEADWAY_SEC)
+    runs, unreported = [], []
+    for service_date, line_delays, sparse_delays in zip(
+        (day, second), (_BUNCHED, _GAPPED), _OVER_THE_EDGE, strict=True
+    ):
+        for trip, delays in zip(line_trips, line_delays, strict=True):
+            if delays is None:
+                unreported.append(Unreported(trip.trip_id, service_date))
+            else:
+                runs.append(TripRun.from_delays(trip, service_date, delays))
+        runs += [TripRun.from_delays(t, service_date, d) for t, d in zip(sparse_trips, sparse_delays, strict=True)]
+    return Scenario(
+        name="bunching",
+        routes=(line, sparse),
+        timetable=(*line_trips, *sparse_trips),
+        days=(ServiceDay(day, "平日"), ServiceDay(second, "平日")),
+        runs=tuple(runs),
+        unreported=tuple(unreported),
+        feed=FeedModel(poll_interval_sec=60, lead_sec=300),
+    )
+
+
 @dataclass(frozen=True, repr=False)
 class Rounded:
     """An exact figure a column or report holds rounded to *places* decimals.
@@ -392,8 +478,26 @@ class Rounded:
         return f"{float(self.exact):.{self.places + 2}f} (to {self.places} dp)"
 
 
+@dataclass(frozen=True, repr=False)
+class Single:
+    """An exact figure a single-precision (``REAL``) column holds. A reading
+    within the column's rounding of it, half a unit in its 24-bit mantissa,
+    matches; the tolerance is twice that, for a figure rounded once more on
+    its way into the column."""
+
+    exact: Fraction
+
+    def matches(self, actual) -> bool:
+        if actual is None:
+            return False
+        return abs(Fraction(actual) - self.exact) <= abs(self.exact) / 2**23
+
+    def __repr__(self) -> str:
+        return f"{float(self.exact)!r} (single precision)"
+
+
 def _matches(expected, actual) -> bool:
-    if isinstance(expected, Rounded):
+    if isinstance(expected, (Rounded, Single)):
         return expected.matches(actual)
     return expected == actual
 
@@ -423,6 +527,10 @@ _TABLE_COLUMNS = {
     "agg_static_version_summary": "static_version_id, trip_count",
     "planned_trips_daily": "service_date, planned_trips",
     "agg_service_delivered_daily": "date, route_code, non_executed_trips",
+    "agg_route_headway_daily": (
+        "route_code, date, actual_headway_median_sec, actual_samples, actual_headway_sum_sec, "
+        "actual_headway_sumsq_sec2, long_gap_count"
+    ),
 }
 # Each read's report and query. The default, the industry window, puts
 # readings exactly a minute early and exactly five minutes late on its edges;
@@ -440,8 +548,9 @@ class Observed:
     and what the pipeline produced: each table's rows, a ``time`` or an
     ``interval`` as its ``HH:MM:SS`` text; each route report's rows; the trend
     report's first row; the council summary of every window ``_windows``
-    names; and the route table's response for each time band the truth
-    departs in."""
+    names; the route table's response for each time band the truth departs
+    in; and the headway quality response for every window ``_windows``
+    names."""
 
     scenario: Scenario
     batches: list[tuple[TimetableVersion, list[Poll]]]
@@ -450,6 +559,7 @@ class Observed:
     trend: dict[str, Any]
     council: dict[tuple[date, date], dict[str, Any]]
     banded: dict[str, dict[str, Any]]
+    headways: dict[tuple[date, date], dict[str, Any]]
 
     @cached_property
     def choice(self) -> Choice:
@@ -792,6 +902,72 @@ def _service_actual(observed: Observed) -> Cells:
     )
 
 
+def _headway_daily_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """Each route's actual headways on each service day: their median,
+    count, sum and sum of squares, and how many are long."""
+    return _cells(
+        "agg_route_headway_daily",
+        {
+            key: {
+                "actual_headway_median_sec": Single(day.median_sec),
+                "actual_samples": day.samples,
+                "actual_headway_sum_sec": Single(Fraction(day.sum_sec)),
+                "actual_headway_sumsq_sec2": Single(Fraction(day.sumsq_sec2)),
+                "long_gap_count": day.long_gaps,
+            }
+            for key, day in oracle.headway_days(found).items()
+        },
+    )
+
+
+def _headway_daily_actual(observed: Observed) -> Cells:
+    return _keyed("agg_route_headway_daily", observed.tables["agg_route_headway_daily"], ("route_code", "date"))
+
+
+def _headway_label(window: tuple[date, date]) -> str:
+    return f"GET headway_quality from={window[0]}&to={window[1]}"
+
+
+# The headway quality columns compared, and the reason the panel gives for
+# being empty when no route is high-frequency.
+_HEADWAY_COLUMNS = ("ewt_sec", "cov", "long_gap_rate", "samples")
+_NO_HIGH_FREQUENCY_ROUTES = "no_high_frequency_routes"
+
+
+def _headway_quality_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """Over every window ``_windows`` names, each route's headway quality,
+    and whether the panel says no route is high-frequency. The excess wait
+    comes from single-precision sums, so it is held to a hundredth of a
+    second."""
+    cells: Cells = {}
+    for window in _windows(observed.scenario):
+        label = _headway_label(window)
+        cells |= _cells(
+            label,
+            {
+                route: {
+                    "ewt_sec": Rounded(quality.excess_wait_sec, 2),
+                    "cov": None if quality.cov is None else Rounded(Fraction(quality.cov), 4),
+                    "long_gap_rate": Rounded(quality.long_gap_share, 4),
+                    "samples": quality.samples,
+                }
+                for route, quality in oracle.headway_quality(found, *window).items()
+            },
+        )
+        reason = _NO_HIGH_FREQUENCY_ROUTES if oracle.no_high_frequency_route(found, *window) else None
+        cells |= _cells(label, {"panel": {"unavailable_reason": reason}})
+    return cells
+
+
+def _headway_quality_actual(observed: Observed) -> Cells:
+    cells: Cells = {}
+    for window, response in observed.headways.items():
+        label = _headway_label(window)
+        cells |= _cells(label, {r["route_code"]: {c: r[c] for c in _HEADWAY_COLUMNS} for r in response["rows"]})
+        cells |= _cells(label, {"panel": {"unavailable_reason": response["unavailable_reason"]}})
+    return cells
+
+
 Expect = Callable[[Observed, oracle.Outcome], Cells]
 # Each test's comparison: the cells the oracle expects of an outcome, and the
 # cells the run produced.
@@ -802,7 +978,19 @@ _AFTER_MIDNIGHT = (partial(_hourly_expected, after=True), partial(_hourly_actual
 _TIMETABLE = (_timetable_expected, _timetable_actual)
 _SERVICE = (_service_expected, _service_actual)
 _BANDED = (_banded_expected, _banded_actual)
-_COMPARISONS = (_DAILY, _REPORTS_COMPARED, _BEFORE_MIDNIGHT, _AFTER_MIDNIGHT, _TIMETABLE, _SERVICE, _BANDED)
+_HEADWAY_DAILY = (_headway_daily_expected, _headway_daily_actual)
+_HEADWAY_QUALITY = (_headway_quality_expected, _headway_quality_actual)
+_COMPARISONS = (
+    _DAILY,
+    _REPORTS_COMPARED,
+    _BEFORE_MIDNIGHT,
+    _AFTER_MIDNIGHT,
+    _TIMETABLE,
+    _SERVICE,
+    _BANDED,
+    _HEADWAY_DAILY,
+    _HEADWAY_QUALITY,
+)
 
 
 @dataclass(frozen=True)
@@ -817,8 +1005,64 @@ class Divergence:
     view: Callable[[Observed, oracle.Outcome], oracle.Outcome]
 
 
+def _lower_middle(plan: oracle.Plan) -> oracle.Plan:
+    ordered = sorted(plan.gaps)
+    return replace(plan, headway_sec=Fraction(ordered[(len(ordered) - 1) // 2]) if ordered else None)
+
+
+def _scheduled_headway_is_the_lower_middle_gap(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    return replace(
+        found,
+        plans={key: _lower_middle(plan) for key, plan in found.plans.items()},
+        wait_plans={key: _lower_middle(plan) for key, plan in found.wait_plans.items()},
+    )
+
+
+def _the_loaded_timetable_stands_for_every_day(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """Each day's high-frequency test and scheduled mean wait read the plan
+    the timetable loaded last gives the route on its newest day, and a route
+    that timetable has no plan for is high-frequency on no day. Long gaps keep
+    each day's own plan. The pipeline stands the route's one dominant service
+    in for every day, which is that newest day's plan only while the scenario
+    runs one day type, so the view refuses any other."""
+    scenario = observed.scenario
+    if len({d.day_type for d in scenario.days}) != 1:
+        raise ValueError(f"{scenario.name}: the loaded-timetable view models one day type only")
+    loaded = scenario.versions[-1]
+    newest = {
+        d.day_type: d.date for d in sorted(scenario.days, key=lambda d: d.date) if scenario.version_on(d.date) == loaded
+    }
+    wait_plans = {}
+    for route_id, day in found.wait_plans:
+        stand_in = newest.get(scenario.day_type(day))
+        plan = None if stand_in is None else found.plans.get((route_id, stand_in))
+        if plan is not None:
+            wait_plans[(route_id, day)] = plan
+    return replace(found, wait_plans=wait_plans)
+
+
+_LOWER_MIDDLE_DIVERGENCE = Divergence(
+    name="scheduled headway is the lower middle gap",
+    reason=(
+        "A route's scheduled headway is the lower of its two middle scheduled gaps (PERCENTILE_DISC(0.5)), not "
+        "their mean, so a timetable whose gaps split evenly between long and short reads as its short gap and "
+        "the route is classed high-frequency"
+    ),
+    view=_scheduled_headway_is_the_lower_middle_gap,
+)
+_LOADED_TIMETABLE_DIVERGENCE = Divergence(
+    name="headway quality reads the loaded timetable",
+    reason=(
+        "Headway quality classes a route high-frequency, and measures each day's excess wait, against the "
+        "timetable loaded now (agg_route_headway), not the one in force on that day"
+    ),
+    view=_the_loaded_timetable_stands_for_every_day,
+)
 # The divergences each scenario is known to meet, by scenario name.
-_KNOWN: dict[str, tuple[Divergence, ...]] = {}
+_KNOWN: dict[str, tuple[Divergence, ...]] = {
+    "timetable_change": (_LOADED_TIMETABLE_DIVERGENCE,),
+    "timetable_published_early": (_LOWER_MIDDLE_DIVERGENCE, _LOADED_TIMETABLE_DIVERGENCE),
+}
 
 
 def _outcomes(observed: Observed) -> list[tuple[tuple[Divergence, ...], oracle.Outcome]]:
@@ -904,6 +1148,32 @@ def _hard_mismatches(observed: Observed, comparison: tuple[Expect, Callable[[Obs
     choice = observed.choice
     lines = _compare(read(observed), expect(observed, choice.outcome), lambda _cell: True)
     return [f"({choice.describe()})", *lines] if lines else []
+
+
+def _moved(truth: Cells, view: Cells) -> set[tuple[str, Hashable]]:
+    """The cells *view* gives another figure than *truth* does, or a row it lacks."""
+    return {cell for cell in set(truth) | set(view) if truth.get(cell) != view.get(cell)}
+
+
+def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[str]:
+    """The cells *divergence* moves and no other known divergence of the
+    scenario does, against the truth alone."""
+    others = [d for d in _KNOWN[observed.scenario.name] if d is not divergence]
+    truth = oracle.outcome(observed.scenario)
+    lines: list[str] = []
+    own_cells = 0
+    for expect, read in _COMPARISONS:
+        expected = expect(observed, truth)
+        # Assumes each divergence moves cells on its own; one that shows only in
+        # combination needs this extended, never the RuntimeError below weakened.
+        moved = _moved(expected, expect(observed, divergence.view(observed, truth)))
+        for other in others:
+            moved -= _moved(expected, expect(observed, other.view(observed, truth)))
+        own_cells += len(moved)
+        lines += _compare(read(observed), expected, moved.__contains__)
+    if not own_cells:
+        raise RuntimeError("the divergence moves no cell of its own, so its xfail would test nothing")
+    return lines
 
 
 async def _run_scenario(
@@ -997,31 +1267,35 @@ def _council_figures(response: dict) -> dict[str, Any]:
     }
 
 
-async def _read_reports(scenario: Scenario, agency_id: int) -> tuple[dict[str, list], dict, dict, dict]:
+async def _read_reports(scenario: Scenario, agency_id: int) -> tuple[dict[str, list], dict, dict, dict, dict]:
     from api.main import app
 
     async def get(client, report: str, query: str) -> dict:
-        resp = await client.get(f"/api/{agency_id}/reports/{report}?{query}")
+        resp = await client.get(f"/api/{agency_id}/{report}?{query}")
         if resp.status_code != 200:
-            raise RuntimeError(f"reports/{report}?{query}: {resp.status_code} {resp.text}")
+            raise RuntimeError(f"{report}?{query}: {resp.status_code} {resp.text}")
         return resp.json()
 
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         reports = {
-            name: (await get(client, report, f"{_window(scenario)}{query}"))["rows"]
+            name: (await get(client, f"reports/{report}", f"{_window(scenario)}{query}"))["rows"]
             for name, (report, query) in _REPORTS.items()
         }
-        trend = (await get(client, "trend", _window(scenario)))["rows"][0]
+        trend = (await get(client, "reports/trend", _window(scenario)))["rows"][0]
         council = {
-            window: _council_figures(await get(client, "council_summary", f"from={window[0]}&to={window[1]}"))
+            window: _council_figures(await get(client, "reports/council_summary", f"from={window[0]}&to={window[1]}"))
             for window in _windows(scenario)
         }
         bands = sorted({d.time_band for d in oracle.outcome(scenario).departures} - {None})
         banded = {
-            band: await get(client, "route_table", f"{_window(scenario)}&include_sparse=1&time_band={band}")
+            band: await get(client, "reports/route_table", f"{_window(scenario)}&include_sparse=1&time_band={band}")
             for band in bands
         }
-    return reports, trend, council, banded
+        headways = {
+            window: await get(client, "headway_quality", f"from={window[0]}&to={window[1]}")
+            for window in _windows(scenario)
+        }
+    return reports, trend, council, banded, headways
 
 
 def _empty_stores(pg_conn, ch_client, reset_sql: str) -> None:
@@ -1107,10 +1381,10 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             stack.push_async_callback(pool.close)
             await confirm_rt_field_coverage(pool, agency_id)
             app.state.pool, app.state.ch_client = pool, ch_async
-            reports, trend, council, banded = await _read_reports(scenario, agency_id)
+            reports, trend, council, banded, headways = await _read_reports(scenario, agency_id)
     except AssertionError as exc:
         raise RuntimeError(f"scenario {scenario.name}: an assertion failed while the pipeline ran") from exc
-    return Observed(scenario, batches, tables, reports, trend, council, banded)
+    return Observed(scenario, batches, tables, reports, trend, council, banded, headways)
 
 
 def _assert_clean(mismatches: list[str]) -> None:
@@ -1125,12 +1399,16 @@ def _assert_clean(mismatches: list[str]) -> None:
 # Each comparison test holds every cell of every scenario to the truth, or to
 # the view of it under one combination of the scenario's known divergences,
 # chosen once for the whole run, so any other change to a cell still fails.
+# Each divergence's strict xfail holds the cells it alone moves to the truth;
+# fixing it makes that test pass, which strict mode fails until the marker and
+# the divergence's _KNOWN entry go with the fix.
 _ALL = [
     pytest.param(plain_weekday, id="plain_weekday"),
     pytest.param(night_route, id="night_route"),
-    pytest.param(timetable_change, id="timetable_change"),
-    pytest.param(timetable_published_early, id="timetable_published_early"),
+    _TIMETABLE_CHANGE := pytest.param(timetable_change, id="timetable_change"),
+    _PUBLISHED_EARLY := pytest.param(timetable_published_early, id="timetable_published_early"),
     pytest.param(cancellations, id="cancellations"),
+    pytest.param(bunching, id="bunching"),
 ]
 
 
@@ -1167,3 +1445,25 @@ def test_service_delivered_and_coverage_match_the_truth(observed):
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_time_band_live_scans_match_the_truth(observed):
     _assert_clean(_hard_mismatches(observed, _BANDED))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_daily_headways_match_the_truth(observed):
+    _assert_clean(_hard_mismatches(observed, _HEADWAY_DAILY))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_headway_quality_matches_the_truth(observed):
+    _assert_clean(_hard_mismatches(observed, _HEADWAY_QUALITY))
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_LOADED_TIMETABLE_DIVERGENCE.reason)
+@pytest.mark.parametrize("observed", [_TIMETABLE_CHANGE], indirect=True)
+def test_headway_quality_judges_each_day_by_the_timetable_in_force_that_day(observed):
+    _assert_clean(_divergence_mismatches(observed, _LOADED_TIMETABLE_DIVERGENCE))
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=_LOWER_MIDDLE_DIVERGENCE.reason)
+@pytest.mark.parametrize("observed", [_PUBLISHED_EARLY], indirect=True)
+def test_the_scheduled_headway_of_an_even_count_of_gaps_is_the_mean_of_the_middle_two(observed):
+    _assert_clean(_divergence_mismatches(observed, _LOWER_MIDDLE_DIVERGENCE))

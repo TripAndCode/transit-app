@@ -22,6 +22,7 @@ def _month(month: date, **over):
         "stop_completeness_pct": None,
         "stop_completeness_missing": "no_stop_plan",
         "message_age_polls": 0,
+        "message_age_undated_polls": 0,
         "message_age_p50_sec": None,
         "message_age_p95_sec": None,
         "message_age_missing": "archive_stamped",

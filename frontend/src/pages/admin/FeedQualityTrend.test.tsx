@@ -21,6 +21,7 @@ function month(m: string, over: Partial<AgencyFeedQualityMonth> = {}): AgencyFee
     stop_completeness_pct: 3.3,
     stop_completeness_missing: null,
     message_age_polls: 16,
+    message_age_undated_polls: 0,
     message_age_p50_sec: 22,
     message_age_p95_sec: 38.3,
     message_age_missing: null,
@@ -62,6 +63,8 @@ describe("FeedQualityTrend", () => {
     expect(screen.getByText(/2026-10 · counted through 2026-10-30 \(30 days\)/)).toBeInTheDocument();
     expect(screen.getByText("693 of 1,000 planned trips")).toBeInTheDocument();
     expect(screen.getByText("median 22 s · 95th percentile 38.3 s")).toBeInTheDocument();
+    // Live and archived polls both count, so the count names neither source.
+    expect(screen.getByText("16 polls measured")).toBeInTheDocument();
     expect(screen.getByText(/arrival 7\.2%/)).toBeInTheDocument();
     const rows = within(screen.getByRole("table", { name: "Last six months" })).getAllByRole(
       "row",
@@ -77,23 +80,25 @@ describe("FeedQualityTrend", () => {
         message_age_p50_sec: null,
         message_age_p95_sec: null,
         message_age_polls: 0,
+        message_age_undated_polls: 412,
         message_age_missing: "archive_stamped",
         stop_completeness_pct: null,
         stop_completeness_missing: "no_stop_plan",
       }),
     ]);
-    expect(screen.getByText("archived polls take their time from the feed itself")).toBeInTheDocument();
+    expect(screen.getByText("archived polls' file names give no capture time")).toBeInTheDocument();
     expect(screen.getByText("not recorded")).toBeInTheDocument();
     const row = within(screen.getByRole("table")).getAllByRole("row")[1] as HTMLTableRowElement;
     expect(row.cells[2].textContent).toBe("—");
     expect(row.cells[2].getAttribute("title")).toBe("stop plan not saved for these days");
-    expect(row.cells[3].getAttribute("title")).toBe("archived polls take their time from the feed itself");
+    expect(row.cells[3].getAttribute("title")).toBe("archived polls' file names give no capture time");
   });
 
   it("speaks Japanese", async () => {
     await i18n.changeLanguage("ja");
     renderTrend([month("2026-10")]);
     expect(screen.getByText("計画 1,000 便のうち 693 便")).toBeInTheDocument();
+    expect(screen.getByText("計測した取得 16 回")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "直近6か月" })).toBeInTheDocument();
     await i18n.changeLanguage("en");
   });
