@@ -102,7 +102,7 @@ The stamp also states the period's realtime completeness and clamp share for the
 agency, whatever filter narrows the figures beside it, by the comparability gate's own
 rules (`pipeline/reports/comparability.py`). The agencies board and a footnote over the
 same days state the same figure by construction, and the feed-quality scorecard states
-it for a month, as it counts both the same way (see "Feed-quality scorecard" below):
+it for a month the aggregates have reached the end of, as it counts both the same way (see "Feed-quality scorecard" below):
 
 - **Completeness** is the board's observation coverage: trips the feed reported of the
   trips the timetable planned, over the planned days through the newest day any listed

@@ -4,8 +4,9 @@ built by analyze into ``feed_quality_monthly``.
 A month's window runs from its first day through its last, or for the month
 in progress through the last closed service day, and never past the newest
 day any agency the board lists has aggregates for. Its figures are counted as
-the agencies board counts a range, so a month's completeness and clamp share
-are what the board and the definition stamp state over it:
+the agencies board counts a range, so once the aggregates reach a month's end
+its completeness and clamp share are what the board and the definition stamp
+state over it:
 
 - the two completeness figures, measured against the plan, count its planned
   days only through ``through_date``: the newest day of the window that any
@@ -233,13 +234,10 @@ NEWEST_DAY_SQL = """
     WHERE a.deleted_at IS NULL
 """
 
-# Per month from %(first)s, a month's first day, to %(last)s, the last counted
-# day: each listed agency's newest observed day in the month's window, and this
-# agency's whether listed or not, as the definition stamp reads a range's
-# (pipeline.reports.network._AGENCY_DAYS_SQL). One query, one probe of
-# agg_route_daily_dist's (agency_id, date) key per agency and month; a month
-# an agency has no observation in yields no row for it. The series is of
-# timestamps, as one of dates would be of timestamptz, read in the session's zone.
+# Each month's newest observed day per listed agency, and this agency's listed
+# or not, read as the stamp reads a range (pipeline.reports.network._AGENCY_DAYS_SQL),
+# in one query probing agg_route_daily_dist's (agency_id, date) key. The series is of
+# timestamps, as one of dates would be of timestamptz in the session's zone.
 MONTH_DAYS_SQL = """
     SELECT m.month::date, a.agency_id, a.deleted_at IS NULL AS listed, newest.date
     FROM generate_series(%(first)s::timestamp, %(last)s::timestamp, interval '1 month') AS m(month)
