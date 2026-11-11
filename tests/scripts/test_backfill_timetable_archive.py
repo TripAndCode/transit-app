@@ -4,7 +4,7 @@ and with --headways re-records each archived timetable's kept headways from its 
 import logging
 import os
 import zipfile
-from datetime import date
+from datetime import date, datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 
 import psycopg2
@@ -292,16 +292,18 @@ def test_a_failed_median_copy_leaves_the_name_for_a_rerun(
         assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems
 
 
-def _headway_timetable(folder, name: str, departures: list[str], first: str, last: str) -> str:
+def _headway_timetable(
+    folder, name: str, departures: list[str], first: str, last: str, stop_sequence: str = "1"
+) -> str:
     """A timetable zip named *name* in *folder*, covering *first* to *last*: route R1 at stop s1, trip Tn
-    leaving at the nth of *departures*, all under service WD."""
+    leaving at the nth of *departures*, all under service WD, each its stop *stop_sequence*."""
     folder.mkdir(parents=True, exist_ok=True)
     files = {
         "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\ns1,Stop 1,34.39,132.45\n",
         "routes.txt": "route_id,route_short_name\nR1,1\n",
         "trips.txt": "trip_id,route_id,service_id\n" + "".join(f"T{n},R1,WD\n" for n in range(len(departures))),
         "stop_times.txt": "trip_id,stop_sequence,stop_id,arrival_time,departure_time\n"
-        + "".join(f"T{n},1,s1,{at},{at}\n" for n, at in enumerate(departures)),
+        + "".join(f"T{n},{stop_sequence},s1,{at},{at}\n" for n, at in enumerate(departures)),
         "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
         f"WD,1,1,1,1,1,1,1,{first},{last}\n",
     }
@@ -316,8 +318,8 @@ def _headway_timetable(folder, name: str, departures: list[str], first: str, las
 _OLD_HEADWAYS = ScheduledHeadways(900.0, 1800.0, 600.0**2 + 1200.0**2)
 
 
-def _old_timetable(folder, departures=("08:00:00", "08:10:00", "08:30:00")) -> str:
-    return _headway_timetable(folder, "timetable_old", list(departures), "20260101", "20260601")
+def _old_timetable(folder, departures=("08:00:00", "08:10:00", "08:30:00"), stop_sequence: str = "1") -> str:
+    return _headway_timetable(folder, "timetable_old", list(departures), "20260101", "20260601", stop_sequence)
 
 
 def _a_timetable_kept_before_its_sums(tmp_path, pg_conn, agency_id, ch_client):
@@ -415,7 +417,10 @@ def test_the_headways_dry_run_lists_every_agencys_timetables_and_writes_nothing(
     capsys.readouterr()
     assert _run_headways(scratch_url, static_dir) == 0
     out = capsys.readouterr().out
-    assert f"agency {agency_id}: 2 archived timetable(s): 1 to re-record, 1 current, 0 without a kept zip" in out
+    assert (
+        f"agency {agency_id}: 2 archived timetable(s): 1 to re-record, 1 current, 0 without a kept zip, "
+        "0 whose kept zips cannot be loaded"
+    ) in out
     assert f"re-record {old}: timetable_old" in out
     assert f"current {new}: timetable_new" in out
     assert "dry run: 1 timetable(s) would be re-recorded" in out
@@ -524,6 +529,11 @@ def test_a_zip_whose_span_is_not_the_recorded_one_is_not_loaded(
     static_archive.record_span(ch_client, agency_id, "timetable_old", (date(2026, 1, 1), date(2026, 5, 31)))
     kept, archive = _kept_rows(pg_conn, agency_id), _archive_rows(ch_client, agency_id)
     capsys.readouterr()
+    # The dry run lists the zip as the apply treats it.
+    assert _run_headways(scratch_url, static_dir, agency=agency_id) == 0
+    out = capsys.readouterr().out
+    assert "its span is not the one recorded for timetable_old; not loaded" in out
+    assert "0 to re-record" in out and "1 whose kept zips cannot be loaded" in out and "re-record " not in out
     assert _run_headways(scratch_url, static_dir, "--apply", agency=agency_id) == 1
     assert "its span is not the one recorded for timetable_old; not loaded" in capsys.readouterr().out
     assert _kept_rows(pg_conn, agency_id) == kept
@@ -539,3 +549,105 @@ def test_the_headways_apply_refuses_a_database_without_the_sums(
     assert _run_headways(scratch_url, static_dir, "--apply", agency=agency_id) == 1
     assert "make migrate" in capsys.readouterr().err
     assert _kept_rows(pg_conn, agency_id) == kept
+
+
+def _another_agency(pg_conn) -> int:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id",
+            ("別の交通", "http://example.com/other.pb"),
+        )
+        other = cur.fetchone()[0]
+    pg_conn.commit()
+    return other
+
+
+def _two_agencies_kept_before_their_sums(tmp_path, pg_conn, agency_id, ch_client):
+    """The agency_id fixture's agency and a later one, each with a timetable kept before its sums, in one
+    static dir."""
+    static_dir, old, _ = _a_timetable_kept_before_its_sums(tmp_path, pg_conn, agency_id, ch_client)
+    other = _another_agency(pg_conn)
+    _a_timetable_kept_before_its_sums(tmp_path, pg_conn, other, ch_client)
+    return static_dir, old, other
+
+
+def _readers_cleared(pg_conn, agency_id, states) -> bool:
+    return _states(pg_conn, agency_id) == {
+        name: state for name, state in states.items() if name not in _KEPT_HEADWAY_READERS
+    }
+
+
+def test_a_zip_that_will_not_load_is_reported_and_the_next_agency_is_still_re_recorded(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    static_dir, old, other = _two_agencies_kept_before_their_sums(tmp_path, pg_conn, agency_id, ch_client)
+    # It reads, but its stop sequences are not numbers, so load_static fails on it.
+    _old_timetable(static_dir / str(agency_id), stop_sequence="x")
+    states, other_states = _states(pg_conn, agency_id), _states(pg_conn, other)
+    capsys.readouterr()
+    assert _run_headways(scratch_url, static_dir, "--apply") == 1
+    captured = capsys.readouterr()
+    assert f"could not load {static_dir / str(agency_id) / 'timetable_old.zip'}:" in captured.out
+    assert f"{old}: not re-recorded" in captured.out
+    assert f"next: analyze agencies {other};" in captured.out
+    assert "1 timetable(s) not re-recorded" in captured.err
+    assert old not in static_headways.current_contents(pg_conn, agency_id)
+    assert _states(pg_conn, agency_id) == states
+    assert old in static_headways.current_contents(pg_conn, other)
+    assert _readers_cleared(pg_conn, other, other_states)
+
+
+def test_an_unreadable_zip_is_listed_as_not_loaded_and_left(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    static_dir, old, _ = _a_timetable_kept_before_its_sums(tmp_path, pg_conn, agency_id, ch_client)
+    (static_dir / str(agency_id) / "timetable_old.zip").write_bytes(b"not a zip")
+    kept, states = _kept_rows(pg_conn, agency_id), _states(pg_conn, agency_id)
+    capsys.readouterr()
+    assert _run_headways(scratch_url, static_dir, agency=agency_id) == 0
+    out = capsys.readouterr().out
+    assert "timetable_old.zip: could not read it:" in out and f"no loadable zip {old}" in out
+    assert _run_headways(scratch_url, static_dir, "--apply", agency=agency_id) == 1
+    assert _kept_rows(pg_conn, agency_id) == kept
+    assert _states(pg_conn, agency_id) == states
+
+
+def test_an_agency_that_fails_outside_its_zips_is_reported_and_the_next_still_re_recorded(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys, monkeypatch
+):
+    static_dir, _, other = _two_agencies_kept_before_their_sums(tmp_path, pg_conn, agency_id, ch_client)
+    real = backfill.copy_medians
+
+    def the_first_agency_cannot_be_written(scratch_conn, target_conn, agency, key):
+        if agency == agency_id:
+            raise RuntimeError("the target refused the write")
+        return real(scratch_conn, target_conn, agency, key)
+
+    monkeypatch.setattr(backfill, "copy_medians", the_first_agency_cannot_be_written)
+    other_states = _states(pg_conn, other)
+    capsys.readouterr()
+    assert _run_headways(scratch_url, static_dir, "--apply") == 1
+    captured = capsys.readouterr()
+    assert f"agency {agency_id}: stopped, the target refused the write" in captured.err
+    assert f"next: analyze agencies {other};" in captured.out
+    assert _readers_cleared(pg_conn, other, other_states)
+
+
+def test_an_agency_the_target_does_not_hold_is_reported_and_skipped(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    static_dir, old, _ = _a_timetable_kept_before_its_sums(tmp_path, pg_conn, agency_id, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT max(agency_id) + 1000 FROM agencies")
+        absent = cur.fetchone()[0]
+    pg_conn.rollback()
+    ch_client.insert(
+        static_archive.VERSION_MAP,
+        [(absent, "timetable_elsewhere", "c0ffee", datetime.now(timezone.utc))],
+        column_names=["agency_id", "static_version_id", "content_hash", "archived_at"],
+    )
+    capsys.readouterr()
+    assert _run_headways(scratch_url, static_dir) == 0
+    out = capsys.readouterr().out
+    assert f"agency {absent}: not in the target database; skipped" in out
+    assert f"re-record {old}: timetable_old" in out
