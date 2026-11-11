@@ -14,6 +14,7 @@ from pipeline.reports.comparability import (
     clamp_pct,
     coverage_is_low,
     coverage_pct,
+    matched_trips,
     tenth_as_printed,
     trips_matchable,
 )
@@ -238,3 +239,8 @@ def test_only_timetable_matched_strategies_have_countable_trips():
     assert trips_matchable("static_join")
     assert not trips_matchable("aomori_regex")
     assert not trips_matchable(None)
+
+
+@pytest.mark.parametrize(("strategy", "counts"), [("static_join", (900, 1000)), ("aomori_regex", (None, None))])
+def test_only_a_matched_strategys_trip_counts_are_kept(strategy, counts):
+    assert matched_trips(strategy, 900, 1000) == counts

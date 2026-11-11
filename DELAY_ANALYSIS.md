@@ -100,8 +100,9 @@ another process for as long as that join stays cached.
 
 The stamp also states the period's realtime completeness and clamp share for the whole
 agency, whatever filter narrows the figures beside it, by the comparability gate's own
-rules (`pipeline/reports/comparability.py`), so the agencies board, the feed-quality
-scorecard and a footnote over the same days state the same figure:
+rules (`pipeline/reports/comparability.py`). The agencies board and a footnote over the
+same days state the same figure by construction; the feed-quality scorecard states it
+too for a month, except in the two cases under "Unlike the scorecard" below:
 
 - **Completeness** is the board's observation coverage: trips the feed reported of the
   trips the timetable planned, over the planned days through the newest day any listed
@@ -120,6 +121,15 @@ scorecard and a footnote over the same days state the same figure:
   ClickHouse, beside a live scan too. A council report states the figures its comparison
   verdict judges, from the board's cached row, and states its clamp share only there.
   The board states each agency's from its own rows.
+- **Caching.** One agency's figures are cached for five minutes, like the compute
+  functions. Beside aggregates they are read after the build check, so a rebuild clears
+  them first; a live stamp's figures can trail a rebuild by up to those five minutes.
+- **Unlike the scorecard.** A month that plans trips with no analyzed observation of the
+  agency reads 0% there and `no_data` here, the gate's first check. And the scorecard
+  counts a closed month through its last day whenever some agency's aggregates reach
+  past it, so a day at its end that no agency observed (an outage of every feed, for
+  one) counts against each feed. The board and the stamp end coverage at the newest day
+  any agency observed within their own range, so they leave such a day out.
 
 Stating them changes no aggregate, so it is not a method version.
 
@@ -190,7 +200,7 @@ and its next run catches up.
 
 | Figure | Definition |
 |---|---|
-| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days. The agencies board's coverage, by the same rule and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board reads over the same days. |
+| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days. The agencies board's coverage, by the same rule and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board reads over the same days, unless no agency observed its last days (see the stamp's "Unlike the scorecard" above). |
 | Stop events | Stop events the feed reported, counted once per trip, stop and service date however often reported, of the stop times the planned trips call at. A stop event is reported when any poll of it carries a plausible departure or arrival delay, or reports its trip CANCELED or its stop SKIPPED. This is reporting coverage, not the service-delivered rate: a cancellation is something the feed said about the stop, so it counts here, where the departure figures let the feed's last report decide whether the stop departed. Only the planned days whose stop events are known count (`stop_plan_days`): the day's capture saves them beside its planned trips, and a day saved before it did keeps them unknown. |
 | Message age | Per poll, the instant it was captured minus its FeedHeader timestamp: the median and 95th percentile, interpolated linearly between the closest ranks (ClickHouse's `quantilesExactInclusive`, the rule of numpy's default), with the number of polls measured. A live poll was captured at its stored capture time. An archived poll's stored time is its own header (or, where the header is far from its name, its name read as JST), so its capture instant is read from its file name instead: `YYYYMMDD/TripUpdate_HHMMSS.pb`, the UTC day and time of day the collector (`oracle_cloud/v3/bin/rt-poller.sh`) names it by as its fetch begins. A name of any other shape, or one naming no real day and time, gives no instant: the poll is left out of the ages and counted (`message_age_undated_polls`), its zone never guessed. A header frozen for hours reads as hours of age on every poll that received it. A message generated during a slow fetch is newer than the name and reads a small negative age, which stands as measured. |
 | Implausible readings | The board's clamp share: readings beyond the plausibility clamp, of the readings that carried a delay (`agg_feed_health`). |

@@ -52,10 +52,9 @@ figure or the executed/planned trip ratio isn't available for this agency.
 """
 
 import logging
-from collections.abc import AsyncIterator, Iterable, Mapping
-from contextlib import asynccontextmanager
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timezone
-from typing import Any, Literal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from api.clickhouse import max_captured_at_before_by_agency
@@ -70,9 +69,12 @@ from pipeline.reports.comparability import (
     assess,
     clamp_is_high,
     coverage_is_low,
+    coverage_unknown_why,
+    matched_trips,
 )
 from pipeline.reports.definition import CoverageMissing, FeedQuality
 from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_agency
+from pipeline.reports.savepoint import savepoint
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.reports.supply import compute_supply_metrics_by_agency
 from pipeline.service_day import service_date_of
@@ -265,23 +267,6 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     return ranked + [r for r in rows if not r["comparable"]]
 
 
-def coverage_unknown_why(
-    figures: Mapping[str, Any],
-) -> Literal["unreadable", "unmatched", "no_plan", "no_plan_observed"]:
-    """Why an agency's observation coverage cannot be measured, read as the
-    board reads it, from a row's own plan figures only, so one reason comes
-    from one read. A failed read nulls the planned count too, so it is told
-    apart first. Otherwise a null coverage plan (the plan through the coverage
-    bound) is ``unmatched``, a feed whose trip_ids aren't the timetable's; a
-    zero coverage plan beside a nonzero whole-period plan is
-    ``no_plan_observed``; and zero for both is ``no_plan``."""
-    if figures.get("delivered_missing") == "unreadable":
-        return "unreadable"
-    if figures.get("coverage_planned_trips") is None:
-        return "unmatched"
-    return "no_plan_observed" if figures.get("planned_trips") else "no_plan"
-
-
 def feed_quality_of(agency_id: int, figures: Mapping[str, Any], *, observed: bool) -> FeedQuality:
     """The definition stamp's completeness and clamp share for *agency_id*
     from the figures its board row prints, which a council report's verdict
@@ -347,19 +332,6 @@ _AGENCY_FEED_SQL = """
 """
 
 
-@asynccontextmanager
-async def _savepoint(conn) -> AsyncIterator[None]:
-    """A savepoint inside the caller's open transaction, so a statement that
-    fails within it leaves the transaction usable for the caller's next one;
-    nothing outside a transaction, where a failed statement leaves nothing
-    behind."""
-    if conn.is_in_transaction():
-        async with conn.transaction():
-            yield
-    else:
-        yield
-
-
 @async_lru_cache(maxsize=128, ttl_seconds=300)
 async def compute_agency_feed_quality(conn, agency_id: int, from_date: date, to_date: date) -> FeedQuality | None:
     """*agency_id*'s completeness and clamp share over [from_date, to_date],
@@ -374,7 +346,7 @@ async def compute_agency_feed_quality(conn, agency_id: int, from_date: date, to_
     None, which leaves the stamp without the figures rather than failing the
     report; so does an agency that does not exist."""
     try:
-        async with _savepoint(conn):
+        async with savepoint(conn):
             agencies = await conn.fetch(_AGENCY_DAYS_SQL, agency_id, from_date, to_date)
             own = next((row for row in agencies if row["agency_id"] == agency_id), None)
             if own is None:
@@ -396,7 +368,7 @@ async def compute_agency_feed_quality(conn, agency_id: int, from_date: date, to_
     if observed:
         through = coverage_through(row["newest"] for row in agencies if row["listed"])
         try:
-            async with _savepoint(conn):
+            async with savepoint(conn):
                 delivered = await compute_service_delivered_by_agency(
                     conn, [agency_id], from_date, to_date, observed_through=through
                 )
@@ -405,9 +377,9 @@ async def compute_agency_feed_quality(conn, agency_id: int, from_date: date, to_
             _log.warning("feed quality: the plan is unavailable for agency %s", agency_id, exc_info=True)
             cache_briefly()
             d = unreadable_service_delivered(from_date, to_date)
-        matchable = comparability.trips_matchable(own["ingest_strategy"])
-        observed_trips = d["observed_trips"] if matchable else None
-        planned = d["coverage_planned_trips"] if matchable else None
+        observed_trips, planned = matched_trips(
+            own["ingest_strategy"], d["observed_trips"], d["coverage_planned_trips"]
+        )
         figures.update(
             coverage_pct=comparability.coverage_pct(observed_trips, planned),
             observed_trips=observed_trips,

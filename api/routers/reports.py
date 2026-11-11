@@ -82,7 +82,7 @@ from pipeline.reports.forecast import (
     summarize_agency_overview,
     summarize_expected_delay_heatmap,
 )
-from pipeline.reports.network import feed_quality_of
+from pipeline.reports.network import compute_agency_feed_quality, feed_quality_of
 from pipeline.reports.rankings import DEFAULT_PRESET, EARLY_ANY, EarlyTolerance, on_time_window, report_reads_aggregates
 from pipeline.reports.reference import REFERENCE_MIN_SAMPLES, ReferenceReason
 from pipeline.reports.route_table import RouteTableOrder, compute_route_references, route_references_for
@@ -1712,6 +1712,8 @@ async def render_report(
         agency_id,
         schedule,
         joined,
+        # The council report states the figures its verdict reads instead.
+        read_feed_quality=report_type != "council_summary",
     )
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
@@ -1901,11 +1903,15 @@ async def render_report(
             payload["early_departure_pct"],
         )
         gate = payload["comparability"]
-        if gate:
-            # The figures the verdict judges, from the board's cached row, so
-            # the document states one coverage and one clamp share.
-            quality = feed_quality_of(agency_id, gate, observed=gate["reason"] != "no_data")
-            definition = definition.model_copy(update={"feed_quality": [quality]})
+        # The figures the verdict judges, from the board's cached row, so the
+        # document states one coverage and one clamp share; without a verdict,
+        # this agency's own, read the board's way.
+        quality = (
+            feed_quality_of(agency_id, gate, observed=gate["reason"] != "no_data")
+            if gate
+            else await compute_agency_feed_quality(conn, agency_id, ctx.from_date, ctx.to_date)
+        )
+        definition = definition.model_copy(update={"feed_quality": None if quality is None else [quality]})
         if format == "csv":
             # The CSV's caveat rows stay Japanese-only (see _csv_response's own
             # docstring), matching format_definition_csv_line's existing

@@ -3650,6 +3650,44 @@ async def test_a_council_report_states_the_figures_its_verdict_reads_once(report
 
 
 @pytest.mark.asyncio
+async def test_a_council_report_with_a_verdict_reads_no_figures_of_its_own(reports_client, monkeypatch):
+    """The verdict's board row already holds the figures, so the council
+    report never pays for a read it would discard; another report reads them,
+    and a council report without a verdict reads its own."""
+    from api.routers import reports as reports_router
+    from pipeline.reports import council, network
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    reads = []
+    read = network.compute_agency_feed_quality
+
+    async def recorded(conn, aid, from_date, to_date):
+        reads.append(aid)
+        return await read(conn, aid, from_date, to_date)
+
+    monkeypatch.setattr(network, "compute_agency_feed_quality", recorded)
+    monkeypatch.setattr(reports_router, "compute_agency_feed_quality", recorded)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"] is not None
+    assert body["definition"]["feed_quality"][0]["coverage_pct"] == 90.0
+    assert reads == []
+
+    await client.get(f"/api/{agency_id}/reports/on_time?from={_GATE_DAY}&to={_GATE_DAY}")
+    assert reads == [agency_id]
+
+    async def broken_board(*args, **kwargs):
+        raise RuntimeError("simulated failure building the board")
+
+    monkeypatch.setattr(council, "compute_network_summary", broken_board)
+    body = (await client.get(_council_url(agency_id, extra="&routes=R1"))).json()
+    assert body["comparability"] is None
+    assert body["definition"]["feed_quality"][0]["coverage_pct"] == 90.0
+    assert reads == [agency_id, agency_id]
+
+
+@pytest.mark.asyncio
 async def test_council_summary_csv_carries_the_comparability_columns(reports_client):
     import csv
     import io

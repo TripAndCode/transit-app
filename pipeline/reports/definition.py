@@ -35,6 +35,7 @@ from pipeline.reports.rankings import (
     early_departure_sec,
     on_time_window,
 )
+from pipeline.reports.savepoint import savepoint
 from pipeline.reports.schedule_revision import ScheduleDays
 from pipeline.timetable_in_force import fetch_day
 
@@ -147,11 +148,9 @@ class SourceMix(BaseModel):
 
 
 #: Why a :class:`FeedQuality` coverage is None: ``no_data`` is the gate's
-#: first check, no observation in the period; the rest say why coverage cannot
-#: be measured, in the agencies board's terms (frontend
-#: network.coverage_unknown_why): the plan could not be read, the feed's
-#: trip_ids are not the timetable's, no timetable plans the period, or none
-#: plans the days observed.
+#: first check, no observation in the period's aggregates; the rest say why
+#: coverage cannot be measured, in the agencies board's terms
+#: (:func:`pipeline.reports.comparability.coverage_unknown_why`).
 CoverageMissing = Literal["no_data", "unreadable", "unmatched", "no_plan", "no_plan_observed"]
 
 
@@ -282,6 +281,8 @@ async def stamp_build(
     agency_id: int | None,
     schedule: ScheduleDays,
     joined: dict[tuple[int, str], str] | None = None,
+    *,
+    read_feed_quality: bool = True,
 ) -> DefinitionMeta:
     """*meta* with the timetables in force over *schedule*'s dates, each named
     one with its content's short hash, the source of each of those days'
@@ -294,8 +295,10 @@ async def stamp_build(
 
     One agency's stamp also states its completeness and clamp share over the
     range (:func:`pipeline.reports.network.compute_agency_feed_quality`), read
-    from the aggregates beside a live scan too. The board's stamp is left
-    without them: the board states each agency's from its own rows
+    from the aggregates beside a live scan too, unless *read_feed_quality* is
+    False: a caller that already holds the figures, such as the council report
+    from its verdict's board row, states them itself. The board's stamp is
+    left without them: the board states each agency's from its own rows
     (``api.routers.network``), which already hold them.
 
     Beside aggregates, the contents are read from the version map's Postgres
@@ -321,11 +324,13 @@ async def stamp_build(
         builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
         _note_builds((builds, stamps))
         update["built_at"] = built_at
-    if agency_id is not None:
+    if agency_id is not None and read_feed_quality:
         # Imported here: pipeline.reports.network reads the gate, whose module imports this one.
         from pipeline.reports import network
 
-        # Read after the builds are noted, so a figure cached before a rebuild is forgotten first.
+        # Beside aggregates this follows the build check, so a figure cached before
+        # a rebuild is forgotten first. A live stamp's figures follow the reader's
+        # own cache, which holds them for up to its TTL.
         quality = await network.compute_agency_feed_quality(conn, agency_id, schedule.from_date, schedule.to_date)
         update["feed_quality"] = None if quality is None else [quality]
     return meta.model_copy(update=update)
@@ -361,15 +366,13 @@ async def _fetch_enrichment(conn, what: str, sql: str, *args) -> list | None:
     enrichment only adds to the stamp, so its absence leaves that part out
     rather than failing the figures.
 
-    Inside a caller's transaction the read runs in its own savepoint: a failed
-    statement would otherwise abort that transaction, and the caller's next
-    statement with it. Outside one, a failed statement leaves nothing behind.
+    Inside a caller's transaction the read runs in its own savepoint
+    (:func:`pipeline.reports.savepoint.savepoint`): a failed statement would
+    otherwise abort that transaction, and the caller's next statement with it.
     """
     try:
-        if conn.is_in_transaction():
-            async with conn.transaction():
-                return await conn.fetch(sql, *args)
-        return await conn.fetch(sql, *args)
+        async with savepoint(conn):
+            return await conn.fetch(sql, *args)
     except (asyncpg.exceptions.UndefinedColumnError, asyncpg.exceptions.UndefinedTableError) as exc:
         if what not in _warned_missing:
             _log.warning("definition stamp: no %s (migrations behind?): %s", what, exc)
@@ -696,15 +699,10 @@ def _source_mix_text(meta: DefinitionMeta, locale: str) -> str | None:
     return f"{text}。{_SOURCE_NOTE['ja']}" if counts[0] or counts[1] else text
 
 
-# The feed-quality figures in the agencies board's words: the figure as its
-# observation-coverage column prints it, a figure the gate flags as its
-# unranked reason words it (frontend network.observed_coverage and
-# network.unranked_reason), and a figure it cannot compute with the board's
-# reason (network.coverage_unknown_why), so a footnote and the board read alike.
-# No data says the aggregates hold no observation, as the figures are read from
-# them: a live scan beside them can list readings analyze has not reached yet.
+# Worded as the agencies board words the same figures, so a footnote and the board read alike.
 _FEED_QUALITY_LABEL = {"ja": "フィード品質（事業者全体）", "en": "Feed quality (whole agency)"}
 COVERAGE_MISSING_TEXT: dict[tuple[str, str], str] = {
+    # The figures read the aggregates, which a live scan beside them can outrun.
     ("no_data", "ja"): "期間内の集計済みの観測なし",
     ("no_data", "en"): "no analyzed observations in the period",
     ("unreadable", "ja"): "計画を読み込めませんでした",

@@ -22,6 +22,7 @@ from pipeline.reports.comparability import (
     MAX_CLAMP_PCT,
     MIN_COVERAGE_PCT,
     ci_half_width_as_printed,
+    coverage_unknown_why,
     tenth_as_printed,
 )
 from pipeline.reports.definition import (
@@ -31,7 +32,6 @@ from pipeline.reports.definition import (
     format_definition_footnotes,
     format_stamp_lines,
 )
-from pipeline.reports.network import coverage_unknown_why
 from pipeline.reports.rankings import _round1, _weighted_avg_min
 
 _LOCALES: dict[tuple[str, str], str] = {

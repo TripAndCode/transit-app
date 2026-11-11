@@ -653,8 +653,9 @@ the scope as one sentence above their content
   (フィード品質), whatever filter narrows the figures beside it. `feed_quality`
   holds, per agency, the agencies board's observation coverage
   (`coverage_pct`, `observed_trips` of `coverage_planned_trips`) and clamp share
-  (`clamp_pct`), by the comparability gate's own rules, so a report, the board
-  and the feed-quality scorecard agree over the same days. Beside each are the
+  (`clamp_pct`), by the comparability gate's own rules, so a report and the
+  board agree over the same days, as the feed-quality scorecard does for a month
+  but in the two cases `DELAY_ANALYSIS.md`'s "Method versions" names. Beside each are the
   gate's flags (`coverage_low`, `clamp_high`) and the thresholds they were judged
   against.
   - **Missing figures.** A figure that cannot be computed is null beside its
@@ -668,10 +669,13 @@ the scope as one sentence above their content
     `pipeline/reports/network.py: compute_agency_feed_quality`: a probe per
     listed agency for its newest observed day, the board's service-delivered
     read for the plan, and `agg_feed_health`. The result is cached as the
-    compute functions are, after the build check, and a live scan states them
-    too.
+    compute functions are. Beside aggregates it is read after the build check,
+    so a rebuild clears it first; a live scan states the figures too, from that
+    cache, which can trail a rebuild by up to its TTL.
   - **The council report** states the figures its verdict judges, from the
-    board's cached row, and then leaves out its own quality note.
+    board's cached row, without reading its own (`stamp_build`'s
+    `read_feed_quality=False`), and then leaves out its own quality note. Only
+    without a verdict does it read them the board's way itself.
   - **Old definitions.** One saved before the stamp carried the figures has no
     `feed_quality`, and renders without the line. If the read fails, the
     figures are left out; if only the plan read fails, coverage reads

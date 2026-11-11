@@ -14,7 +14,7 @@ from pipeline import feed_quality
 from pipeline.analyze import analyze
 from pipeline.clickhouse import insert_updates
 from pipeline.reports.comparability import assess, clamp_pct
-from pipeline.reports.network import compute_network_summary
+from pipeline.reports.network import compute_agency_feed_quality, compute_network_summary
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from tests.fixtures.clock import freeze_now, jst_midday
 
@@ -162,6 +162,37 @@ async def test_a_closed_month_reads_what_the_board_reads(
     # poll carried no FeedHeader timestamp to measure against.
     assert (other["message_age_p50_sec"], other["message_age_missing"]) == (None, "no_header")
     assert (other["message_age_polls"], other["message_age_undated_polls"]) == (0, 0)
+
+
+def _figure(value) -> float | None:
+    return None if value is None else float(value)
+
+
+@pytest.mark.asyncio
+async def test_a_closed_months_stamp_states_the_completeness_and_clamp_share_the_scorecard_keeps(
+    pg_conn, aconn, ch_client, closed_on_may_first
+):
+    """A report over a closed month footnotes the figures the scorecard keeps
+    for it, and no figure where the scorecard keeps none, since both read the
+    gate's rule over the same days. Another agency observed the month's last
+    day, so the board's coverage reaches the end of the month as the
+    scorecard's does."""
+    unmatched = _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    joined = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, joined, stops=2)
+    insert_updates(ch_client, joined, _live_polls())
+    analyze(joined, pg_conn, ch_client)
+
+    for agency in (joined, unmatched):
+        month = _stored(pg_conn, agency)[_APRIL]
+        stamp = await compute_agency_feed_quality(aconn, agency, _APRIL, month["through_date"])
+        assert (stamp.coverage_pct, stamp.observed_trips, stamp.coverage_planned_trips) == (
+            _figure(month["rt_completeness_pct"]),
+            month["observed_trips"],
+            month["planned_trips"],
+        )
+        assert stamp.clamp_pct == _figure(month["clamp_pct"])
+    assert (stamp.coverage_missing, month["rt_completeness_missing"]) == ("unmatched", "coverage_unknown")
 
 
 @pytest.mark.asyncio

@@ -7,10 +7,12 @@ from datetime import date
 
 import pytest
 
+from pipeline.query.pooled_conn import PooledConnection
 from pipeline.reports import definition, network
 from pipeline.reports.comparability import MAX_CLAMP_PCT, MIN_COVERAGE_PCT
 from pipeline.reports.definition import FeedQuality, resolve_definition_meta
 from pipeline.reports.network import feed_quality_of
+from pipeline.reports.savepoint import savepoint
 from pipeline.reports.schedule_revision import ScheduleDays
 
 # A board row's figures for an agency the gate passes.
@@ -138,3 +140,51 @@ async def test_the_boards_stamp_is_left_to_the_board_which_reads_every_agencys_f
     monkeypatch.setattr(network, "compute_agency_feed_quality", fail)
     stamped = await definition.stamp_build(_Conn(), resolve_definition_meta("on_time", None, None), None, _SCHEDULE)
     assert stamped.feed_quality is None
+
+
+@pytest.mark.asyncio
+async def test_a_caller_that_states_the_figures_itself_reads_none(monkeypatch):
+    async def fail(*_args):
+        raise AssertionError("the caller states the figures itself")
+
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(network, "compute_agency_feed_quality", fail)
+    meta = resolve_definition_meta("council_summary", None, None)
+    stamped = await definition.stamp_build(_Conn(), meta, 7, _SCHEDULE, read_feed_quality=False)
+    assert stamped.feed_quality is None
+
+
+class _Transacting(_Conn):
+    def __init__(self):
+        self.savepoints = 0
+
+    def is_in_transaction(self):
+        return True
+
+    def transaction(self):
+        outer = self
+
+        class _Savepoint:
+            async def __aenter__(self):
+                outer.savepoints += 1
+
+            async def __aexit__(self, *_exc):
+                return False
+
+        return _Savepoint()
+
+
+@pytest.mark.asyncio
+async def test_a_read_inside_a_transaction_runs_in_its_own_savepoint():
+    conn = _Transacting()
+    async with savepoint(conn):
+        pass
+    assert conn.savepoints == 1
+
+
+@pytest.mark.asyncio
+async def test_a_connection_with_no_transactions_reads_without_a_savepoint():
+    """A pooled stand-in runs each statement on its own connection and has no
+    transaction to keep, so asking for one is not an error."""
+    async with savepoint(PooledConnection(pool=None)):
+        pass
