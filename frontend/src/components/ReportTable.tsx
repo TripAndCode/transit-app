@@ -222,9 +222,15 @@ type Props = {
    *  a row only one side lists says which. A row only today lists has no
    *  rank in the snapshot's order. */
   marks?: readonly RowMark[];
+  /** A caller's own mark after a column's figure, by the column's row index:
+   *  the Routes table's comparison of a route's on-time rate with the
+   *  route's own reference. */
+  cellMarks?: Readonly<Record<number, (row: unknown[]) => Caveat | undefined>>;
 };
 
-type Caveat = { mark: string; tip?: string };
+/** A mark after a figure: a muted caveat, or with `tone: "reference"` a
+ *  neutral chip comparing the figure with a reference. */
+type Caveat = { mark: string; tip?: string; tone?: "reference" };
 
 export function ReportTable(props: Props) {
   return props.names ? <Table {...props} names={props.names} /> : <TableWithAgencyNames {...props} />;
@@ -237,7 +243,7 @@ function TableWithAgencyNames(props: Props) {
   return <Table {...props} names={names} />;
 }
 
-function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec, names, marks }: Props & { names: RouteNames }) {
+function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec, names, marks, cellMarks }: Props & { names: RouteNames }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { search } = useLocation();
@@ -265,7 +271,8 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
   const caveatsOf = (c: Schema, row: unknown[]): Caveat[] => {
     const own = c.caveat?.(row, t);
     const thin = c.samples && minSamples != null && Number(row[c.index]) < minSamples;
-    return [...(own ? [own] : []), ...(thin ? [{ mark: t("reports.confidence_low_mark") }] : [])];
+    const caller = cellMarks?.[c.index]?.(row);
+    return [...(own ? [own] : []), ...(thin ? [{ mark: t("reports.confidence_low_mark") }] : []), ...(caller ? [caller] : [])];
   };
   const sideOf = (i: number) => {
     const side = marks?.[i]?.side;
@@ -521,18 +528,18 @@ function CellValue({
   return (
     <>
       {text}
-      {caveats.map(({ mark, tip }) => (
+      {caveats.map(({ mark, tip, tone }) => (
         <span key={mark}>
           {" "}
           {tip ? (
             <Tooltip label={tip}>
-              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so the margin it stands for is reachable */}
-              <span className="caveat-badge" tabIndex={0}>
+              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- plain badge, not a control; keyboard-focusable only so what it stands for is reachable */}
+              <span className={tone === "reference" ? "reference-chip" : "caveat-badge"} tabIndex={0}>
                 {mark}
               </span>
             </Tooltip>
           ) : (
-            <span className="caveat-badge">{mark}</span>
+            <span className={tone === "reference" ? "reference-chip" : "caveat-badge"}>{mark}</span>
           )}
         </span>
       ))}

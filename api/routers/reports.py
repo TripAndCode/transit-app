@@ -83,7 +83,8 @@ from pipeline.reports.forecast import (
     summarize_expected_delay_heatmap,
 )
 from pipeline.reports.rankings import DEFAULT_PRESET, EARLY_ANY, EarlyTolerance, on_time_window, report_reads_aggregates
-from pipeline.reports.route_table import RouteTableOrder
+from pipeline.reports.reference import REFERENCE_MIN_SAMPLES, ReferenceReason
+from pipeline.reports.route_table import RouteTableOrder, compute_route_references, route_references_for
 from pipeline.reports.schedule_revision import ScheduleDays, read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
 from pipeline.reports.suggest import compute_suggestion
@@ -436,6 +437,42 @@ class CouncilComparability(BaseModel):
     thresholds: ComparabilityThresholds
 
 
+class RouteReference(BaseModel):
+    """One route's on-time rate and average delay over its reference window,
+    as the Routes table computes them; both are None whenever ``reason``
+    names why the window cannot stand as the route's usual level."""
+
+    on_time_pct: float | None
+    avg_min: float | None
+    samples: int
+    reason: ReferenceReason | None
+
+
+class RouteReferences(BaseModel):
+    """The ``days`` days before the period, under the report's scope and
+    on-time window (pipeline.reports.route_table.compute_route_references),
+    and each listed route's figures over them.
+
+    ``days_selected`` counts the window's days the scope's day-of-week and
+    service filters keep, ``days_collected`` those the agency's feed holds
+    data on, and ``min_days`` / ``min_samples`` the floors a figure needs.
+    ``samples`` and ``reason`` judge the scope's observations together:
+    ``not_aggregated`` reads nothing, so its counts are 0, and a reason here
+    withholds every route's figure.
+    """
+
+    samples: int
+    window_from: str  # ISO date
+    window_to: str  # ISO date
+    days: int
+    days_selected: int
+    days_collected: int
+    min_days: int
+    min_samples: int
+    reason: ReferenceReason | None
+    routes: dict[str, RouteReference]
+
+
 class ReportResponse(BaseModel):
     """Payload returned by ``GET /reports/{report_type}`` in JSON mode."""
 
@@ -494,6 +531,10 @@ class ReportResponse(BaseModel):
     # label the rows it holds rather than the ones it asked for.
     sort: str | None = None
     order: str | None = None
+    # route_table and on_time only (None elsewhere): each listed route's own
+    # figures over the 90 days before the period, under the same scope and
+    # on-time window, so a screen can say whether its figure is usual for it.
+    reference: RouteReferences | None = None
 
 
 def _report_ctx(ctx: RangeCtx) -> ReportCtx:
@@ -1282,6 +1323,38 @@ _REPORT_CSV_COLUMNS: dict[str, list[str]] = {
     ],
 }
 
+# Why a route's reference has no figure, in the route table's CSV.
+_REFERENCE_REASON_CSV: dict[str, str] = {
+    "no_data": "観測なし",
+    "insufficient_days": "データのある日が{days_collected}日で、必要な{min_days}日に満たない",
+    "insufficient_samples": "観測が{samples}回で、必要な{min_samples}回に満たない",
+    "not_aggregated": "集計のない条件のため比べない",
+}
+
+
+def _reference_csv_columns(reference: dict) -> list[str]:
+    days = reference["days"]
+    return [
+        f"過去{days}日({reference['window_from']}〜{reference['window_to']})の定時率(%)",
+        f"過去{days}日の定時率を示さない理由",
+    ]
+
+
+def _reference_csv_cells(reference: dict, route_code: str) -> list:
+    """A route's reference rate and, where it has none, why, in the words of
+    the rules the screen states."""
+    entry = reference["routes"][route_code]
+    if entry["reason"] is None:
+        return [entry["on_time_pct"], ""]
+    reason = _REFERENCE_REASON_CSV[entry["reason"]].format(
+        days_collected=reference["days_collected"],
+        min_days=reference["min_days"],
+        samples=entry["samples"],
+        min_samples=REFERENCE_MIN_SAMPLES,
+    )
+    return ["", reason]
+
+
 # A downloaded file's name, where the report's user-facing name differs from
 # its type identifier: the delay_certificate type is shown to users as a
 # delay record, which is not an official certificate.
@@ -1297,6 +1370,7 @@ def _csv_response(
     credit: str | None,
     unavailable_message: str | None = None,
     extra_footnotes: list[str] | None = None,
+    reference: dict | None = None,
 ) -> StreamingResponse:
     """Stream a UTF-8 BOM CSV (BOM lets Excel auto-detect Japanese encoding).
 
@@ -1327,8 +1401,12 @@ def _csv_response(
     (`dwell_run`'s `available`/`time_band_supported` flags), an empty CSV
     with only a header row would silently collapse that same distinction
     back into a misleading blank/zero.
+
+    `reference`, the route table's (``RouteReferences``), adds each route's
+    reference rate and why it has none as the last two columns.
     """
-    cols = _REPORT_CSV_COLUMNS.get(report_type, [])
+    with_reference = reference if report_type == "route_table" else None
+    cols = _REPORT_CSV_COLUMNS.get(report_type, []) + (_reference_csv_columns(with_reference) if with_reference else [])
     buf = io.StringIO()
     buf.write("﻿")  # BOM
     w = csv.writer(buf)
@@ -1347,7 +1425,8 @@ def _csv_response(
     elif report_type in ("on_time", "route_table"):
         for r in rows:
             *lead, low_confidence, margin_pp = r
-            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else "", margin_pp])
+            tail = _reference_csv_cells(with_reference, r[0]) if with_reference else []
+            w.writerow([*lead, _LOW_CONFIDENCE_CSV_MARK if low_confidence else "", margin_pp, *tail])
     elif report_type == "delay_certificate":
         # A stop the loaded timetable does not name is left blank, not called
         # a non-origin: whether the trip starts there is unknown.
@@ -1493,6 +1572,27 @@ async def get_report(
     )
 
 
+async def _listed_references(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    rows: list,
+    early_tolerance_sec: int | None,
+    late_tolerance_sec: int | None,
+) -> dict | None:
+    """The reference of each route ``rows`` lists, under the rows' own window,
+    or None when it cannot be read: it is context beside the rows, so a failed
+    read leaves the list standing without it."""
+    try:
+        references = await compute_route_references(
+            agency_id, ctx, conn, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
+        )
+    except Exception:
+        _log.exception("route references: could not read agency %s's trailing window", agency_id)
+        return None
+    return route_references_for(references, [r[0] for r in rows])
+
+
 async def render_report(
     report_type: str,
     *,
@@ -1612,6 +1712,7 @@ async def render_report(
     left_out_rows = dict.fromkeys(left_out, 0)
     table_sort: str | None = None
     table_order: RouteTableOrder | None = None
+    reference: dict | None = None
 
     def listed(route_rows: list) -> list:
         """pipeline.route_catalog.route_list over this request, recording each
@@ -1642,6 +1743,7 @@ async def render_report(
         rows_total = listed_total(table)
         rows = [(*r, on_time_pct_low_confidence(r[2], r[5]), on_time_pct_margin_pp(r[2], r[5])) for r in listed(table)]
         left_out_rows.update(left_out_counts(table, left_out))
+        reference = await _listed_references(agency_id, ctx, conn, rows, early_tolerance_sec, late_tolerance_sec)
         intent = {
             "query_type": "route_table",
             "sort": table_sort,
@@ -1683,6 +1785,9 @@ async def render_report(
         # the Ask tools' columns are unaffected. See pipeline/stats.py.
         rows = [(*r, on_time_pct_margin_pp(r[2], r[4])) for r in annotate_on_time_pct_confidence(listed(rated))]
         intent = {"query_type": "on_time", "sort_order": sort_order, "service": _service_label(ctx)}
+        # The on-time list's CSV writes no reference, so it reads none.
+        if format != "csv":
+            reference = await _listed_references(agency_id, ctx, conn, rows, early_tolerance_sec, late_tolerance_sec)
     elif report_type == "worst_5min":
         rows = await compute_worst_5min(
             agency_id, ctx, conn, ch=ch, limit=n_fetch, late_tolerance_sec=late_tolerance_sec
@@ -1842,7 +1947,7 @@ async def render_report(
         raise HTTPException(status_code=500, detail="unreachable")
 
     if format == "csv":
-        return _csv_response(report_type, rows, ctx, definition, credit=credit)
+        return _csv_response(report_type, rows, ctx, definition, credit=credit, reference=reference)
 
     text = format_result(intent["query_type"], rows, intent, locale=locale)
     return ReportResponse(
@@ -1859,4 +1964,5 @@ async def render_report(
         zero_delay_rows=left_out_rows.get(ZERO_DELAY),
         sort=table_sort if report_type == "route_table" else None,
         order=table_order if report_type == "route_table" else None,
+        reference=RouteReferences.model_validate(reference) if reference is not None else None,
     )

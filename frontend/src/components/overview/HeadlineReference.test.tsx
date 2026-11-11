@@ -76,6 +76,15 @@ describe("HeadlineReference", () => {
     expect(screen.getByText(/under 0\.1 min, or under 5%/)).toBeInTheDocument();
   });
 
+  it("leaves the floors out of the explanation when no aggregate was read, where there are no days to count", async () => {
+    const counts = { samples: 0, days_selected: 0, days_collected: 0, min_days: 0 };
+    renderReference(headline(reference({ avg_min: null, delta_min: null, delta_pct: null, reason: "not_aggregated", ...counts })));
+    await userEvent.click(screen.getByRole("button", { name: "Hint" }));
+    expect(screen.getByText(/under 0\.1 min, or under 5%/)).toBeInTheDocument();
+    expect(screen.queryByText(/of the 0 days|at least 0/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/It is shown when/)).not.toBeInTheDocument();
+  });
+
   it("states why a reference is withheld instead of printing a figure", () => {
     const cases: [Partial<OverviewHeadlineReference>, string][] = [
       [{ reason: "no_data", samples: 0, days_collected: 0 }, `Past 90 days (${RANGE}): no observations, so there is no usual level to compare with.`],

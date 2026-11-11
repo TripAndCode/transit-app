@@ -54,8 +54,6 @@ import asyncio
 import logging
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
-from fractions import Fraction
-from math import ceil
 from typing import Any, Final, Iterable, Iterator, Literal, Mapping, Sequence
 
 from api.range import (
@@ -66,7 +64,6 @@ from api.range import (
     dow_isodays,
     resolve_service_dates,
     scheduled_hour_ch,
-    selected_service_dates,
     service_date_clause,
 )
 from pipeline import perf
@@ -76,6 +73,8 @@ from pipeline.day_types import DayTypes
 from pipeline.query.pooled_conn import PooledConnection
 from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2, ctx_filing
 from pipeline.reports.rankings import RANKING_MIN_SAMPLES, _round1
+from pipeline.reports.reference import Coverage, reference_coverage, reference_reason, reference_window
+from pipeline.reports.reference import reference_ctx as _reference_ctx
 from pipeline.route_catalog import left_out_unless_named, route_list
 
 _log = logging.getLogger(__name__)
@@ -83,25 +82,6 @@ _log = logging.getLogger(__name__)
 # How many weekly buckets ``_movers`` draws each route's sparkline from
 # (:func:`_route_weekly_history`), ending at the current window's last day.
 _MOVER_HISTORY_WEEKS = 4
-
-#: How many days the headline's reference covers: the agency's own trailing
-#: window, ending the day before the period starts (:func:`_reference`).
-REFERENCE_DAYS = 90
-
-#: The share of the days the scope selects in the reference window that the
-#: agency's feed must hold data on. Under it the window shows little of the
-#: agency's usual level (a new agency, or a long outage), so the figure is
-#: withheld as ``insufficient_days`` rather than printed as that level.
-REFERENCE_MIN_COVERAGE = Fraction(4, 5)
-
-#: The fewest observations behind a reference figure: the Routes ranking's
-#: floor, under which a route's figure is marked as thinly observed.
-REFERENCE_MIN_SAMPLES = RANKING_MIN_SAMPLES
-
-#: Why a reference has no figure. ``not_aggregated``: no aggregate holds the
-#: scope's departures by date, so the figure would need a live scan of the
-#: whole window.
-ReferenceReason = Literal["no_data", "insufficient_days", "insufficient_samples", "not_aggregated"]
 
 
 def _baseline_reach_days(ctx: RangeCtx) -> int:
@@ -1373,29 +1353,6 @@ async def _daily_sparkline(
     return pts, mean
 
 
-def _reference_ctx(ctx: RangeCtx) -> RangeCtx:
-    """The ``REFERENCE_DAYS`` days ending the day before ``ctx`` starts, under
-    ``ctx``'s scope, as ``base_ctx`` copies it, its service filter not yet
-    resolved: :func:`_reference` resolves it over this window alone."""
-    to_date = ctx.from_date - timedelta(days=1)
-    return RangeCtx(
-        from_date=to_date - timedelta(days=REFERENCE_DAYS - 1),
-        to_date=to_date,
-        dow=ctx.dow,
-        time_band=ctx.time_band,
-        service=ctx.service,
-        routes=ctx.routes,
-    )
-
-
-def _selected_days(ctx: RangeCtx) -> list[date]:
-    """The days of ``ctx``'s window its day-of-week and service filters keep."""
-    service_dates = selected_service_dates(ctx)
-    kept = None if service_dates is None else set(service_dates)
-    days = (ctx.from_date + timedelta(days=i) for i in range(ctx.days))
-    return [d for d in days if _dow_matches(d, ctx.dow) and (kept is None or d in kept)]
-
-
 def _whole_hour_band(band: str) -> tuple[int, int] | None:
     """``band``'s ``[start, end)`` hours on the wall clock, or None when an edge
     falls inside an hour, which ``agg_hour_daily``'s hours cannot split."""
@@ -1443,28 +1400,17 @@ async def _reference(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
     scan of ``REFERENCE_DAYS`` days would cost several times the headline's own.
     That is decided before anything is read, and its counts are then 0.
 
-    A service filter is resolved over this window alone, so each date is filed
-    under the timetable the agency's calendar ran in the window, and the
-    period's own day types stay those of the span the rest of the payload reads.
-
-    Coverage is judged by the days the agency's feed was collected on, not the
-    days the scope's routes ran, so a route that runs on fewer days than the
-    agency is still judged by whether the feed was there to see it.
+    A service filter is resolved over this window alone, so the period's own
+    day types stay those of the span the rest of the payload reads. Coverage and
+    the reasons a figure is withheld are the shared rules of
+    :mod:`pipeline.reports.reference`.
     """
     hours = _whole_hour_band(ctx.time_band) if ctx.time_band != "all" and not ctx.routes else None
     if ctx.time_band != "all" and hours is None:
-        return _reference_payload(ctx, "not_aggregated")
+        return {"avg_min": None, **reference_window(ctx, Coverage(), "not_aggregated")}
 
     ctx = await resolve_service_dates(ctx, conn, agency_id)
-    selected = _selected_days(ctx)
-    collected = 0
-    if selected:
-        row = await conn.fetchrow(
-            "SELECT COUNT(DISTINCT date) AS n FROM agg_daily_trend WHERE agency_id = $1 AND date = ANY($2::date[])",
-            agency_id,
-            selected,
-        )
-        collected = int(row["n"])
+    selected, coverage = await reference_coverage(agency_id, ctx, conn)
 
     avg_min: float | None = None
     samples = 0
@@ -1473,48 +1419,8 @@ async def _reference(agency_id: int, ctx: RangeCtx, conn, ch=None, grain: _Grain
     elif selected:
         avg_min, samples = await _hour_band_stats(agency_id, selected, hours, conn)
 
-    min_days = ceil(REFERENCE_MIN_COVERAGE * len(selected))
-    reason: ReferenceReason | None = None
-    if samples == 0:
-        reason = "no_data"
-    elif collected < min_days:
-        reason = "insufficient_days"
-    elif samples < REFERENCE_MIN_SAMPLES:
-        reason = "insufficient_samples"
-    return _reference_payload(
-        ctx,
-        reason,
-        avg_min=avg_min,
-        samples=samples,
-        days_selected=len(selected),
-        days_collected=collected,
-        min_days=min_days,
-    )
-
-
-def _reference_payload(
-    ctx: RangeCtx,
-    reason: ReferenceReason | None,
-    *,
-    avg_min: float | None = None,
-    samples: int = 0,
-    days_selected: int = 0,
-    days_collected: int = 0,
-    min_days: int = 0,
-) -> dict:
-    """The reference's payload over ``ctx``'s window; its figure only without a ``reason``."""
-    return {
-        "avg_min": avg_min if reason is None else None,
-        "samples": samples,
-        "window_from": ctx.from_date.isoformat(),
-        "window_to": ctx.to_date.isoformat(),
-        "days": ctx.days,
-        "days_selected": days_selected,
-        "days_collected": days_collected,
-        "min_days": min_days,
-        "min_samples": REFERENCE_MIN_SAMPLES,
-        "reason": reason,
-    }
+    reason = reference_reason(samples, coverage)
+    return {"avg_min": avg_min if reason is None else None, **reference_window(ctx, coverage, reason, samples)}
 
 
 def _change(avg_min: float | None, against: float | None) -> tuple[float | None, float | None]:

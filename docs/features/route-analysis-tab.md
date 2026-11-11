@@ -53,6 +53,17 @@ What the user sees/does:
   the ranking floor are the Routes lists' own) and the overview's
   `concentration`, which names only its top routes. Links open the route on
   the Time (`trend`) and Why (`dwell_run`) pages.
+  - Under the mean delay and the on-time rate, the route's own trailing 90
+    days from the `on_time` report's `reference` (`RouteReferenceNote` in
+    `frontend/src/components/analysis/RouteReference.tsx`; computed and
+    withheld as `analysis-tab.md` ▸ The Routes table ▸ Trailing reference
+    states): the reference's figure and a neutral chip,
+    「過去90日より改善」, 「過去90日とほぼ同じ」 or 「過去90日より悪化」. The
+    mean delay is judged as Pulse judges its headline
+    (`avgDelayReferenceJudgement`: under 0.1 min or under 5% is about the
+    same), the rate as the Routes table judges it
+    (`onTimeReferenceJudgement`: under 1 point). A withheld reference states its reason
+    once, under the on-time rate, which also holds the rules' ⓘ.
 - **Path picker** — `frontend/src/components/analysis/RouteVariantPicker.tsx`:
   the route's observed variants (GTFS shapes) with their share of the
   route's observations, and an "other direction" button for the most
@@ -109,7 +120,7 @@ What the user sees/does:
 | Frontend hook (`frontend/src/api/hooks.ts`) | Endpoint | Data source |
 |---|---|---|
 | `useRouteShape(agencyId, route, ctx, shape)` (current window; a second call for the previous window on the same `shape_id` fires only when the compare checkbox is on) | `GET /api/{agency_id}/route-shape?route=...&shape=...` (`api/routers/map.py: route_shape`) | `pipeline/reports/map.py: compute_route_shape()` — a cheap Postgres `agg_route_daily` existence precheck, then a live ClickHouse dedup scan of `updates` to vote the route's most-frequent `shape_id` (or pin the requested one when it is the route's) and compute per-stop mean departure delay, joined to Postgres `static_stops`/`static_shapes` for geometry and stop labels. It also returns `variants` (each observed shape's end stops and share) and `segments` (per consecutive stop pair, the mean increase over the trip-days seen at both, leaving out the segment from the first stop). No precomputed-aggregate fast path exists for this endpoint — every request scans ClickHouse live. |
-| `useReport(agencyId, "ranking" \| "on_time" \| "worst_5min", agencyCtx, { limit: REPORT_ROWS_MAX })`, `useOverviewSummary(agencyId, agencyCtx)` | `GET /api/{agency_id}/reports/{type}`, `GET /api/{agency_id}/overview/summary` | The summary strip's figures, with the scope's `routes` emptied so each list ranks every route. |
+| `useReport(agencyId, "ranking" \| "on_time" \| "worst_5min", agencyCtx, { limit: REPORT_ROWS_MAX })`, `useOverviewSummary(agencyId, agencyCtx)` | `GET /api/{agency_id}/reports/{type}`, `GET /api/{agency_id}/overview/summary` | The summary strip's figures, with the scope's `routes` emptied so each list ranks every route. The `on_time` response's `reference` holds the route's trailing 90 days, so the references need no request of their own. |
 | `useRouteTrips(agencyId, route, { timeBand })` (current day; a second call for the same day one week earlier fires only when compare is on, once the current day's date is known) | `GET /api/{agency_id}/today/route/{route}/trips` (`api/routers/map.py: route_trips`) | Per-trip, per-stop delay for one route on one service day, feeding the Marey diagram's polylines. Read-only ClickHouse dedup query, capped at `MAX_ROUTE_TRIPS`; date defaults to the route's own latest observed day, independent of the shared filter's date range. |
 
 ## Key files

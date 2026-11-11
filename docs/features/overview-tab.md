@@ -70,6 +70,10 @@ What the user sees/does:
   - The fact rows take no reference: their populations (the routes over a
     sample floor) and the concentration's spread change with the window's
     length, so a 90-day value is not the same statistic as the period's.
+  - The window and the withholding rules live in
+    `pipeline/reports/reference.py`, which each route's own reference on
+    Routes and the route page reads as well (`analysis-tab.md` ▸ The Routes
+    table ▸ Trailing reference).
 - **Routes to check** — `frontend/src/components/RoutesToCheckList.tsx`: the
   top-5 routes by absolute avg delay over the same window as the headline,
   each with its change from the window before. The movers compare the same
