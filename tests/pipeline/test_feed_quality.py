@@ -37,14 +37,16 @@ def _agency(pg_conn, name: str, strategy: str) -> int:
     return agency_id
 
 
-def _timetable(pg_conn, agency_id: int, stops: int, last_day: str = "2026-04-30") -> None:
-    """Every trip of _TRIPS runs every day from 1 April to *last_day*, calling at *stops* stops."""
+def _timetable(
+    pg_conn, agency_id: int, stops: int, last_day: str = "2026-04-30", first_day: str = "2026-04-01"
+) -> None:
+    """Every trip of _TRIPS runs every day from *first_day* to *last_day*, calling at *stops* stops."""
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
             "saturday, sunday, start_date, end_date) VALUES (%s, 'ALL', true, true, true, true, true, true, true, "
-            "'2026-04-01', %s)",
-            (agency_id, last_day),
+            "%s, %s)",
+            (agency_id, first_day, last_day),
         )
         for trip in _TRIPS:
             cur.execute(
@@ -95,6 +97,14 @@ def _live_polls(day_start: datetime = _POLL) -> list[tuple]:
                 dep = 9000 if (i == 3 and trip == "ALL-0" and seq == 1) else 30
                 rows.append(_row(name, captured, trip, seq, dep, age))
     return rows
+
+
+def _implausible_poll(day: date) -> list[tuple]:
+    """One live poll of every trip at both stops on *day*, every delay beyond
+    the plausibility clamp: readings, but no observation."""
+    captured = jst_midday(day)
+    name = f"oracle/{captured:%Y%m%d}/TripUpdate_{captured:%H%M%S}.pb"
+    return [_row(name, captured, trip, seq, 9000, 10) for trip in _TRIPS for seq in (1, 2)]
 
 
 def _stored(pg_conn, agency_id: int) -> dict[date, dict]:
@@ -170,33 +180,48 @@ def _figure(value) -> float | None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "newest_in_april",
-    [date(2026, 4, 30), date(2026, 4, 20)],
+    ("newest_in_april", "late_reasons"),
+    [(date(2026, 4, 30), (None, None)), (date(2026, 4, 20), ("no_plan_observed", "no_plan_observed"))],
     ids=["its last day observed", "its last days unobserved"],
 )
 async def test_a_closed_months_stamp_states_the_completeness_and_clamp_share_the_scorecard_keeps(
-    pg_conn, aconn, ch_client, closed_on_may_first, newest_in_april
+    pg_conn, aconn, ch_client, closed_on_may_first, newest_in_april, late_reasons
 ):
     """A report over a closed month footnotes the figures the scorecard keeps
     for it, and no figure where the scorecard keeps none, since both read the
     gate's rules over the same days. The aggregates reach May, but within
     April no agency's reach past *newest_in_april*, so neither counts the
-    days after it against any feed. A feed that observed nothing in April
-    reads no data on both, never 0."""
+    planned days after it against any feed, while both count the whole
+    month's readings in the clamp share. A feed that observed nothing in
+    April reads no data on both, never 0, and one whose plan starts after the
+    last day observed reads that no plan covers the days observed."""
     unmatched = _observed_elsewhere(pg_conn, ch_client, newest_in_april)
     _observed_elsewhere(pg_conn, ch_client, _MAY)
+    # Observed on the 1st, and on the 25th sent only implausible readings.
     joined = _agency(pg_conn, "joined", "static_join")
     _timetable(pg_conn, joined, stops=2)
-    insert_updates(ch_client, joined, _live_polls())
+    insert_updates(ch_client, joined, _live_polls() + _implausible_poll(date(2026, 4, 25)))
     analyze(joined, pg_conn, ch_client)
     # Observed only on 31 March, though its timetable plans April's every day.
     silent = _agency(pg_conn, "silent", "static_join")
     _timetable(pg_conn, silent, stops=2)
     insert_updates(ch_client, silent, _live_polls(_POLL - timedelta(days=1)))
     analyze(silent, pg_conn, ch_client)
+    # Observed on the 1st, though its timetable plans nothing before the 25th.
+    late = _agency(pg_conn, "late", "static_join")
+    _timetable(pg_conn, late, stops=2, first_day="2026-04-25")
+    insert_updates(ch_client, late, _live_polls())
+    analyze(late, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT (SELECT clamp_count FROM agg_feed_health WHERE agency_id = %(a)s AND date = '2026-04-25'), "
+            "EXISTS (SELECT 1 FROM agg_route_daily_dist WHERE agency_id = %(a)s AND date = '2026-04-25')",
+            {"a": joined},
+        )
+        assert cur.fetchone() == (8, False)
 
     reasons = {}
-    for agency in (joined, silent, unmatched):
+    for agency in (joined, silent, unmatched, late):
         month = _stored(pg_conn, agency)[_APRIL]
         stamp = await compute_agency_feed_quality(aconn, agency, _APRIL, feed_quality.month_end(_APRIL))
         assert (stamp.coverage_pct, stamp.observed_trips, stamp.coverage_planned_trips) == (
@@ -205,15 +230,19 @@ async def test_a_closed_months_stamp_states_the_completeness_and_clamp_share_the
             month["planned_trips"],
         )
         assert stamp.clamp_pct == _figure(month["clamp_pct"])
-        assert month["through_date"] == newest_in_april
+        assert (month["through_date"], month["window_days"]) == (newest_in_april, 30)
         reasons[agency] = (stamp.coverage_missing, month["rt_completeness_missing"])
     assert reasons == {
         joined: (None, None),
         silent: ("no_data", "no_data"),
         unmatched: ("unmatched", "coverage_unknown"),
+        late: late_reasons,
     }
+    april = _stored(pg_conn, joined)[_APRIL]
     # The 4 trips reported on the 1st, of the 4 planned each day through the last one observed.
-    assert _stored(pg_conn, joined)[_APRIL]["planned_trips"] == 4 * newest_in_april.day
+    assert april["planned_trips"] == 4 * newest_in_april.day
+    # 1 of the 1st's 32 readings and all 8 of the 25th's.
+    assert (april["raw_samples"], april["clamp_count"]) == (40, 9)
 
 
 @pytest.mark.asyncio
