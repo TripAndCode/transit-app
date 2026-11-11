@@ -85,7 +85,15 @@ history records its headline on-time rate and average delay before and after, ov
 days it rewrote, on the admin board's run timeline (`pipeline/rebuild_headline.py`).
 Figures from a live scan of the
 observations, such as a time-band view or the delay record, name the version but no
-build day.
+build day. The stamp also names each timetable in force over the period: its version
+name, the day it was fetched, and the first eight hex digits of the content hash the
+timetable archive maps the name to (`static_version_map`), read from its Postgres mirror
+`static_version_contents` rather than from ClickHouse. A name the archive does not map
+shows no hash. Beside aggregates, a hash is shown only when they were built under that
+content: once a name is remapped to new content, aggregates built before the remap still
+hold figures of the old one, so their stamp shows no hash until analyze rebuilds them. A
+live scan shows the content of the join that filed its rows, which can lag a remap made in
+another process for as long as that join stays cached.
 
 | Version | What changed | Tables |
 |---|---|---|

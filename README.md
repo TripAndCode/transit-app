@@ -181,6 +181,12 @@ FastAPI + React SPA  <-------------------------------------------------+
   `scripts/backfill_timetable_archive.py` fills the archive for names loaded
   before it kept them, from the kept zips. A ClickHouse that predates these
   tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
+  Postgres mirrors the map in `static_version_contents`, each name at its
+  latest content, written right after each map row, so the definition stamp
+  names each timetable's content without reading ClickHouse.
+  `scripts/fill_version_contents.py` copies the mappings written before the
+  mirror existed; a Postgres without the mirror needs `make migrate` before
+  the next `load_static` or `analyze`.
 - Each day's planned trips are saved into `planned_trips_daily` while the
   timetable that plans the day is loaded: every `analyze` run saves each day
   before today the loaded timetable covers that has no saved count yet, and

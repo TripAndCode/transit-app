@@ -84,7 +84,7 @@ def test_an_empty_list_says_whether_the_feed_reported_the_scope(observed, locale
         (
             "ja",
             f"遅延300秒超の便: 2件\n{_BASIS_AND_LINK['ja']}\n※算出方法: {METHOD_VERSION}、集計日: 2026-11-06\n"
-            "※時刻表: gtfs_static_20260601（2026-06-01取得）1日間（全1日間）\n"
+            "※時刻表: gtfs_static_20260601（2026-06-01取得、内容ハッシュ a1b2c3d4）1日間（全1日間）\n"
             "※観測データ: ライブ 1日間（全1日間）。アーカイブの日は収集サーバーがその日に取得した全データ、"
             "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ",
         ),
@@ -92,7 +92,7 @@ def test_an_empty_list_says_whether_the_feed_reported_the_scope(observed, locale
             "en",
             f"2 trip(s) exceeded the 300s delay threshold.\n{_BASIS_AND_LINK['en']}\n"
             f"* Method version: {METHOD_VERSION}, aggregates built: 2026-11-06\n"
-            "* Timetable: gtfs_static_20260601 (fetched 2026-06-01): 1 day (of 1 day)\n"
+            "* Timetable: gtfs_static_20260601 (fetched 2026-06-01, content hash a1b2c3d4): 1 day (of 1 day)\n"
             "* Observations: live 1 day (of 1 day). Archive days hold every poll the collector made that day; "
             "live days hold only the part the app received in real time",
         ),
@@ -106,7 +106,13 @@ def test_the_summary_is_footnoted_with_whatever_stamp_the_definition_carries(loc
         update={
             "built_at": datetime(2026, 11, 6, 1, tzinfo=timezone.utc),
             "timetable_versions": [
-                TimetableVersion(agency_id=1, name="gtfs_static_20260601", fetched_on=date(2026, 6, 1), days=1)
+                TimetableVersion(
+                    agency_id=1,
+                    name="gtfs_static_20260601",
+                    fetched_on=date(2026, 6, 1),
+                    days=1,
+                    content_hash="a1b2c3d4",
+                )
             ],
             "source_mix": [SourceMix(agency_id=1, archive_days=0, live_days=1, none_days=0)],
         }
