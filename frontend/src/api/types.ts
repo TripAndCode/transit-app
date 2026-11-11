@@ -347,12 +347,16 @@ export type SourceMix = {
 /** A timetable an agency's observations were ingested against, and on how
  *  many of the request's days it was the one most of them carried. `name` is
  *  the loaded zip's version name and `fetched_on` (ISO date) the day it says
- *  the zip was fetched; `name` is null for the days with none recorded. */
+ *  the zip was fetched; `name` is null for the days with none recorded.
+ *  `content_hash` is the first digits of the hash of the content the
+ *  timetable archive maps the name to: null for a name it does not map, and
+ *  absent from a definition saved before the stamp carried it. */
 export type TimetableVersion = {
   agency_id: number;
   name: string | null;
   fetched_on: string | null;
   days: number;
+  content_hash?: string | null;
 };
 
 /** A report cell the backend computes as a Python `Decimal` (chosen so its

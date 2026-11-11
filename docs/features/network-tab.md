@@ -93,9 +93,10 @@ What the user sees/does:
   late) — surfaced explicitly so it can be checked against a per-agency
   report's own `definition` block instead of assumed.
   It ends with the method version, the newest day any listed agency's
-  aggregates changed, and each listed agency's timetables and observation
-  sources (archive, live or none recorded, in days) over the range, listed
-  under the agency's name.
+  aggregates changed, and each listed agency's timetables (each with its
+  content hash where the archive maps it, as `docs/features/analysis-tab.md`
+  describes) and observation sources (archive, live or none recorded, in
+  days) over the range, listed under the agency's name.
 - **Ridership-weighted on-time toggle** — a checkbox next to the from/to date
   pickers, present only when at least one agency in the current list has a
   manually-configured ridership weight (`pipeline/reports/ridership.py`,

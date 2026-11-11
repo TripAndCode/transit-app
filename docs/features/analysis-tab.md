@@ -600,13 +600,31 @@ the scope as one sentence above their content
   many of the request's days it covers, then the days with none recorded (時刻表).
   These are days not yet analyzed, or days from an ingest that stamps no
   version. A version is named by its loaded zip's name, with the fetch day
-  that `gtfs_static_YYYYMMDD` carries. A live scan names its timetables too,
+  that `gtfs_static_YYYYMMDD` carries, and by `content_hash`, the first eight
+  hex digits of the content the timetable archive maps the name to
+  (`static_version_map`), so two names with one hash carried the same
+  timetable and a name refetched with other content shows the other one
+  (内容ハッシュ). It is read from the map's Postgres mirror
+  (`static_version_contents`, written right after each map row by
+  `pipeline/static_archive.py`), in one primary-key probe per name, never from
+  ClickHouse. A name the archive does not map carries none, as does any name
+  on a database not yet migrated to the mirror. Beside aggregates, a name
+  carries its hash only when the agency's archive-joined aggregates were last
+  rebuilt after the name was mapped to that content (`agg_table_state.built_at`
+  against the mirror's `archived_at`, both to the millisecond). A remap clears
+  those tables' states, so until analyze rebuilds them the stamp beside their
+  older figures carries none. A live scan carries the content the join that
+  filed its rows maps each name to (`pipeline/live_filing.py: schedule_join`,
+  read once per request in `api/routers/reports.py: _scanned_schedule`),
+  never the mirror's: a remap made in another process reaches both its rows
+  and its stamp once that cached join expires. An agency whose ingest stamps
+  no version has no such join, and its live stamp carries none. A live scan names its timetables too,
   and files every observation as analyze does, under the timetable in force on
   its service date (`pipeline/live_filing.py`), so its figures and the
   aggregates agree. Where a load or a span has moved the version in force since
   analyze last ran, the live scan already files those days under the new one,
   and its stamp names that one rather than the one analyze recorded.
-  They come from one indexed read per request
+  The names come from one indexed read per request
   (`pipeline/reports/schedule_revision.py: read_schedule_days`), which also
   gives the trend chart its timetable-revision markers, and they render in the
   same four places as the method stamp.

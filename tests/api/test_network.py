@@ -755,7 +755,8 @@ async def test_the_board_names_the_method_version_and_its_newest_build(net_clien
 async def test_the_board_names_each_listed_agencys_timetables(net_client):
     """The board's figures rest on every agency it lists, so its stamp names
     each one's timetables over the range, every agency accounting for every
-    day, and leaves out an agency it no longer lists."""
+    day, and leaves out an agency it no longer lists. Each name the version
+    map's Postgres mirror holds for its agency carries its short content hash."""
     client, pool, a, b, cc = net_client
     params = {"from": "2026-04-01", "to": "2026-04-07"}
     async with pool.acquire() as c:
@@ -765,15 +766,32 @@ async def test_the_board_names_each_listed_agencys_timetables(net_client):
             + [(a, date(2026, 4, day), "gtfs_static_20260405") for day in (6, 7)]
             + [(b, date(2026, 4, 2), "hiroden_static")],
         )
+        await c.executemany(
+            "INSERT INTO static_version_contents (agency_id, static_version_id, content_hash, archived_at) "
+            "VALUES ($1, $2, $3, '2026-03-01T00:00:00Z')",
+            [(a, "gtfs_static_20260301", "a1b2c3d4" + "0" * 24), (cc, "hiroden_static", "f" * 32)],
+        )
+        # The aggregates a's hash stands beside were built after its content was mapped.
+        await c.execute(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint, built_at) "
+            "VALUES ($1, 'agg_route_daily_dist', 'x', '2026-04-08T00:00:00Z')",
+            a,
+        )
         await c.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", cc)
 
     definition = (await client.get("/api/network/summary", params=params)).json()["definition"]
     assert definition["value_basis"] == "feed_prediction"
     assert definition["timetable_versions"] == [
-        {"agency_id": a, "name": "gtfs_static_20260301", "fetched_on": "2026-03-01", "days": 5},
-        {"agency_id": a, "name": "gtfs_static_20260405", "fetched_on": "2026-04-05", "days": 2},
-        {"agency_id": b, "name": "hiroden_static", "fetched_on": None, "days": 1},
-        {"agency_id": b, "name": None, "fetched_on": None, "days": 6},
+        {
+            "agency_id": a,
+            "name": "gtfs_static_20260301",
+            "fetched_on": "2026-03-01",
+            "days": 5,
+            "content_hash": "a1b2c3d4",
+        },
+        {"agency_id": a, "name": "gtfs_static_20260405", "fetched_on": "2026-04-05", "days": 2, "content_hash": None},
+        {"agency_id": b, "name": "hiroden_static", "fetched_on": None, "days": 1, "content_hash": None},
+        {"agency_id": b, "name": None, "fetched_on": None, "days": 6, "content_hash": None},
     ]
 
 

@@ -477,6 +477,12 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
     response = (await client.get(f"/api/{refiled.agency_id}/reports/route_table?{window}")).json()
     assert response["definition"]["source"] == "live"
     assert [(v["name"], v["days"]) for v in response["definition"]["timetable_versions"]] == [(refiled.a, 1)]
+    # Each name carries its own content, as the loads and analyze runs mapped it.
+    join = static_archive.schedule_join(ch_client, refiled.agency_id, None)
+    content = dict(zip(join.stems, join.hashes, strict=True))
+    assert content[refiled.a] != content[refiled.b]
+    hashes = [v["content_hash"] for v in response["definition"]["timetable_versions"]]
+    assert hashes == [content[refiled.a][:8]]
 
     # B's span now starts on the day read; analyze has not run since, so the
     # aggregates still name A, while a live scan files the day under B.
@@ -488,9 +494,52 @@ async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_un
     invalidate_schedule_joins()
     response = (await client.get(f"/api/{refiled.agency_id}/reports/route_table?{window}")).json()
     assert [(v["name"], v["days"]) for v in response["definition"]["timetable_versions"]] == [(refiled.b, 1)]
+    assert [v["content_hash"] for v in response["definition"]["timetable_versions"]] == [content[refiled.b][:8]]
     # Under B, b departs at 14:10, outside the band: f and g alone are fewer
     # departures than the table lists, so the rows computed under A are gone too.
     assert response["rows"] == []
+
+
+async def test_a_live_stamp_names_the_content_of_the_join_that_filed_its_rows(
+    refiled, pg_conn, ch_client, client, aconn, ch_async_client, monkeypatch
+):
+    """A name remapped in another process reaches a live scan only once the
+    process forgets its cached join. Until then the scan files its rows under
+    the join it holds, and its stamp names that join's content, not the one
+    the mirror already holds."""
+    from pipeline import live_filing, static_archive
+
+    monkeypatch.setattr(live_filing, "_ARCHIVE_STATE_TTL_SECONDS", 3600)
+    agency_id = refiled.agency_id
+    static_archive.record_span(ch_client, agency_id, refiled.b, (refiled.day, refiled.day + timedelta(days=180)))
+    live_filing.invalidate_schedule_joins()
+    url = f"/api/{agency_id}/reports/route_table?from={refiled.day}&to={refiled.day}&time_band=noon&include_sparse=1"
+
+    def stamped(response):
+        return [(v["name"], v["content_hash"]) for v in response.json()["definition"]["timetable_versions"]]
+
+    join = static_archive.schedule_join(ch_client, agency_id, None)
+    before = dict(zip(join.stems, join.hashes, strict=True))[refiled.b]
+    assert stamped(await client.get(url)) == [(refiled.b, before[:8])]
+
+    # B fetched again under its name with other content, mapped as a load in another process maps it.
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE static_stop_times SET departure_time = '23:59:00' WHERE agency_id = %s "
+            "AND trip_id = (SELECT min(trip_id) FROM static_stop_times WHERE agency_id = %s)",
+            (agency_id, agency_id),
+        )
+    pg_conn.commit()
+    after = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert after != before
+
+    response = await client.get(url)
+    held = await live_filing.schedule_join(aconn, ch_async_client, agency_id)
+    assert dict(zip(held.stems, held.hashes, strict=True))[refiled.b] == before
+    assert stamped(response) == [(refiled.b, before[:8])]
+
+    live_filing.invalidate_schedule_joins()
+    assert stamped(await client.get(url)) == [(refiled.b, after[:8])]
 
 
 async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(withdrawn, aconn, ch_async_client):

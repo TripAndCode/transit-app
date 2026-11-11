@@ -117,6 +117,55 @@ def test_a_pre_archive_name_joins_its_own_timetable_after_the_backfill(
     assert _stop_days(pg_conn, agency_id) == [(date(2026, 6, 1), "SA"), (date(2026, 6, 2), "SB")]
 
 
+def _mirrored(url, agency_id) -> dict:
+    conn = psycopg2.connect(url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT static_version_id, content_hash FROM {static_archive.MIRROR} WHERE agency_id = %s",
+                (agency_id,),
+            )
+            return dict(cur.fetchall())
+    finally:
+        conn.close()
+
+
+def test_each_name_the_backfill_maps_is_mirrored_in_the_target_not_the_scratch(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url
+):
+    static_dir = _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client)
+    assert _run(agency_id, scratch_url, static_dir, "--apply") == 0
+    join = static_archive.schedule_join(ch_client, agency_id, None)
+    old = dict(zip(join.stems, join.hashes, strict=True))["timetable_old"]
+    assert _mirrored(os.environ["DATABASE_URL"], agency_id)["timetable_old"] == old
+    assert _mirrored(scratch_url, agency_id) == {}
+
+
+def test_a_target_without_the_mirror_is_refused_before_anything_is_mapped(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys, monkeypatch
+):
+    static_dir = _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client)
+    monkeypatch.setattr(static_archive, "MIRROR", "static_version_contents_absent")
+    assert _run(agency_id, scratch_url, static_dir, "--apply") == 1
+    assert "make migrate" in capsys.readouterr().err
+    assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems
+
+
+def test_a_scratch_without_the_mirror_is_refused_before_anything_is_mapped(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    """load_static refuses such a scratch too, but only once a run is under way."""
+    static_dir = _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client)
+    scratch = psycopg2.connect(scratch_url)
+    with scratch.cursor() as cur:
+        cur.execute(f"DROP TABLE {static_archive.MIRROR}")
+    scratch.commit()
+    scratch.close()
+    assert _run(agency_id, scratch_url, static_dir, "--apply") == 1
+    assert "make migrate" in capsys.readouterr().err
+    assert "timetable_old" not in static_archive.schedule_join(ch_client, agency_id, None).stems
+
+
 def test_the_dry_run_lists_the_names_and_writes_nothing(tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys):
     static_dir = _a_pre_archive_name(tmp_path, pg_conn, agency_id, ch_client)
     join, states = static_archive.schedule_join(ch_client, agency_id, None), _states(pg_conn, agency_id)

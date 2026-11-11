@@ -137,14 +137,21 @@ function groupByAgency(versions: TimetableVersion[]): Map<number, TimetableVersi
 
 /** One agency's timetables as the `versions` and the range's day `count` the
  *  timetable sentences interpolate. A version is named by the day its zip was
- *  fetched where its name carries one, else by its name. */
+ *  fetched where its name carries one, else by its name, and by its content's
+ *  short hash too where the archive maps it. */
 function timetableParts(versions: TimetableVersion[], t: TFunction): { versions: string; count: number } {
   const parts = versions.map((version) => {
     if (version.name == null) return t("definitionMeta.timetable_unrecorded", { count: version.days });
+    const hash = version.content_hash;
     if (version.fetched_on != null) {
-      return t("definitionMeta.timetable_fetched", { count: version.days, day: formatDate(version.fetched_on) });
+      const day = formatDate(version.fetched_on);
+      return hash != null
+        ? t("definitionMeta.timetable_fetched_hashed", { count: version.days, day, hash })
+        : t("definitionMeta.timetable_fetched", { count: version.days, day });
     }
-    return t("definitionMeta.timetable_named", { count: version.days, name: version.name });
+    return hash != null
+      ? t("definitionMeta.timetable_named_hashed", { count: version.days, name: version.name, hash })
+      : t("definitionMeta.timetable_named", { count: version.days, name: version.name });
   });
   const count = versions.reduce((days, version) => days + version.days, 0);
   return { versions: parts.join(t("definitionMeta.timetable_separator")), count };

@@ -415,6 +415,16 @@ async def _record_timetables(pool, agency_id, versions):
         )
 
 
+async def _record_contents(pool, agency_id, contents, archived_at=None):
+    """The version map's Postgres mirror as the archive writes it: {version name: content hash}, each mapped
+    at *archived_at*, by default before _BUILT_AT."""
+    await pool.executemany(
+        "INSERT INTO static_version_contents (agency_id, static_version_id, content_hash, archived_at) "
+        "VALUES ($1, $2, $3, $4)",
+        [(agency_id, name, content, archived_at or _MAPPED_AT) for name, content in contents.items()],
+    )
+
+
 async def _record_sources(pool, agency_id, counts):
     """agg_feed_health rows as analyze records them: {day: (archive_rows, live_rows)}."""
     async with pool.acquire() as conn:
@@ -430,6 +440,8 @@ async def _record_sources(pool, agency_id, counts):
 
 # 00:30 JST on 2026-11-06, which is still 2026-11-05 in UTC.
 _BUILT_AT = datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc)
+# When the version map's mirror rows a test records were mapped, before _BUILT_AT.
+_MAPPED_AT = datetime(2026, 10, 1, tzinfo=timezone.utc)
 _SOURCE_NOTE = (
     "アーカイブの日は収集サーバーがその日に取得した全データ、"
     "ライブの日はアプリがリアルタイムで受け取った一部のデータのみ"
@@ -507,13 +519,64 @@ async def test_a_report_names_the_timetables_in_force_over_its_days(reports_clie
     definition = (await client.get(url)).json()["definition"]
     assert definition["value_basis"] == "feed_prediction"
     assert definition["timetable_versions"] == [
-        {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 3},
-        {"agency_id": agency_id, "name": "gtfs_static_20260520", "fetched_on": "2026-05-20", "days": 1},
-        {"agency_id": agency_id, "name": None, "fetched_on": None, "days": 3},
+        {
+            "agency_id": agency_id,
+            "name": "gtfs_static_20260401",
+            "fetched_on": "2026-04-01",
+            "days": 3,
+            "content_hash": None,
+        },
+        {
+            "agency_id": agency_id,
+            "name": "gtfs_static_20260520",
+            "fetched_on": "2026-05-20",
+            "days": 1,
+            "content_hash": None,
+        },
+        {"agency_id": agency_id, "name": None, "fetched_on": None, "days": 3, "content_hash": None},
     ]
     assert (
         "; 集計日=不明; 時刻表=gtfs_static_20260401（2026-04-01取得）3日間、"
         "gtfs_static_20260520（2026-05-20取得）1日間、記録なし 3日間（全7日間）; 観測データ="
+    ) in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_a_report_names_each_timetable_the_archive_maps_by_its_content(reports_client):
+    """A name the version map's Postgres mirror holds for this agency carries
+    the first digits of its content's hash, when the agency's aggregates were
+    built under it; a name it holds only for another agency, or not at all,
+    carries none, and so does one mapped since the aggregates were built."""
+    client, agency_id, pool = reports_client
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    await _record_timetables(
+        pool,
+        agency_id,
+        {
+            "2026-05-18": "gtfs_static_20260401",
+            "2026-05-19": "gtfs_static_20260520",
+            "2026-05-20": "gtfs_static_20260515",
+        },
+    )
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT_AT))
+    await _record_contents(pool, agency_id, {"gtfs_static_20260401": "a1b2c3d4" + "0" * 24})
+    await _record_contents(pool, other, {"gtfs_static_20260520": "f" * 32})
+    await _record_contents(
+        pool, agency_id, {"gtfs_static_20260515": "e" * 32}, archived_at=_BUILT_AT + timedelta(hours=1)
+    )
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-20"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert [(v["name"], v["content_hash"]) for v in definition["timetable_versions"]] == [
+        ("gtfs_static_20260401", "a1b2c3d4"),
+        ("gtfs_static_20260520", None),
+        ("gtfs_static_20260515", None),
+    ]
+    assert (
+        "; 時刻表=gtfs_static_20260401（2026-04-01取得、内容ハッシュ a1b2c3d4）1日間、"
+        "gtfs_static_20260520（2026-05-20取得）1日間、gtfs_static_20260515（2026-05-15取得）1日間（全3日間）; "
     ) in _preamble(await client.get(f"{url}&format=csv"))
 
 
@@ -573,7 +636,13 @@ async def test_a_database_without_the_source_counts_still_serves_the_report(repo
         assert definition["source_mix"] is None
         assert datetime.fromisoformat(definition["built_at"]) == _BUILT_AT
         assert definition["timetable_versions"] == [
-            {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 1}
+            {
+                "agency_id": agency_id,
+                "name": "gtfs_static_20260401",
+                "fetched_on": "2026-04-01",
+                "days": 1,
+                "content_hash": None,
+            }
         ]
         assert _preamble(await client.get(f"{url}&format=csv")).endswith(
             "; 時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）"
@@ -604,6 +673,36 @@ async def test_a_failed_source_read_leaves_the_callers_transaction_usable(report
             schedule = await read_schedule_days(conn, agency_id, date(2026, 5, 18), date(2026, 5, 18))
             meta = await stamp_build(conn, resolve_definition_meta("ranking", None, None), agency_id, schedule)
             assert (meta.source_mix, meta.built_at) == (None, _BUILT_AT)
+            assert await conn.fetchval("SELECT count(*) FROM agencies WHERE agency_id = $1", agency_id) == 1
+        finally:
+            await tx.rollback()
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_a_database_without_the_version_map_mirror_names_its_timetables_with_no_hash(reports_client):
+    """The content hash is enrichment too. Inside a caller's open transaction,
+    a database not yet migrated to the mirror names its timetables without one,
+    and the caller's next statement still runs."""
+    import asyncpg
+
+    from pipeline.reports.definition import resolve_definition_meta, stamp_build
+    from pipeline.reports.schedule_revision import read_schedule_days
+
+    _client, agency_id, pool = reports_client
+    await _record_timetables(pool, agency_id, {"2026-05-18": "gtfs_static_20260401"})
+    await _record_contents(pool, agency_id, {"gtfs_static_20260401": "a1b2c3d4" + "0" * 24})
+    conn = await asyncpg.connect(os.environ["DATABASE_URL"])
+    try:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute("DROP TABLE static_version_contents")
+            schedule = await read_schedule_days(conn, agency_id, date(2026, 5, 18), date(2026, 5, 18))
+            meta = await stamp_build(conn, resolve_definition_meta("ranking", None, None), agency_id, schedule)
+            assert [(v.name, v.content_hash) for v in meta.timetable_versions] == [("gtfs_static_20260401", None)]
+            assert meta.source_mix is not None
             assert await conn.fetchval("SELECT count(*) FROM agencies WHERE agency_id = $1", agency_id) == 1
         finally:
             await tx.rollback()
@@ -733,7 +832,13 @@ async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_
     assert (body["definition"]["source"], body["definition"]["built_at"]) == ("live", None)
     # The scan joins the same timetables, so it names them all the same.
     assert body["definition"]["timetable_versions"] == [
-        {"agency_id": agency_id, "name": "gtfs_static_20260401", "fetched_on": "2026-04-01", "days": 1}
+        {
+            "agency_id": agency_id,
+            "name": "gtfs_static_20260401",
+            "fetched_on": "2026-04-01",
+            "days": 1,
+            "content_hash": None,
+        }
     ]
     assert body["definition"]["source_mix"] == [
         {"agency_id": agency_id, "archive_days": 0, "live_days": 0, "none_days": 1}
@@ -1297,8 +1402,8 @@ async def test_reports_trend_surfaces_schedule_revision_boundary(reports_client,
     assert rows_out[0]["revision_boundaries"] == ["2026-05-03"]
     # The same read names the timetables in the definition.
     assert resp.json()["definition"]["timetable_versions"] == [
-        {"agency_id": agency_id, "name": "v1", "fetched_on": None, "days": 2},
-        {"agency_id": agency_id, "name": "v2", "fetched_on": None, "days": 1},
+        {"agency_id": agency_id, "name": "v1", "fetched_on": None, "days": 2, "content_hash": None},
+        {"agency_id": agency_id, "name": "v2", "fetched_on": None, "days": 1, "content_hash": None},
     ]
     # Every row came from an archive file, which analyze counted per day.
     assert resp.json()["definition"]["source_mix"] == [

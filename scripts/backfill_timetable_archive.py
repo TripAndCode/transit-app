@@ -9,8 +9,8 @@ fetcher kept (<static-dir>/<agency>/<name>.zip), --apply loads the zip into the
 scratch Postgres with the real load_static, whose archive writes go to the
 target ClickHouse: it records the name's span from the zip.
 static_archive.archive_loaded then keeps its stop times and schedule there and
-maps the name to them, and its route medians (pipeline.static_headways) are
-copied to the target Postgres. Last, the agency's archive-joined tables' states
+maps the name to them, mirroring the mapping in the target Postgres, and its
+route medians (pipeline.static_headways) are copied there too. Last, the agency's archive-joined tables' states
 are cleared, so its next analyze rebuilds them in full against the timetable
 in force on each row's service date. --every-zip also takes each kept zip whose
 name no row carries: a timetable fetched but never loaded while its days were
@@ -198,7 +198,7 @@ def _backfill(agency_id: int, target_conn, ch, scratch_conn, chosen: list[Candid
             scratch_conn.commit()
             copy_medians(scratch_conn, target_conn, agency_id, key)
             mapping = True
-            if static_archive.archive_loaded(scratch_conn, ch, agency_id, parts) != key:
+            if static_archive.archive_loaded(scratch_conn, ch, agency_id, parts, mirror_conn=target_conn) != key:
                 raise Refusal(f"{candidate.stem} was not archived")
             done.append((candidate.stem, key))
             print(f"archived {candidate.stem} as {key}")
@@ -249,6 +249,14 @@ def main(argv: list[str] | None = None) -> int:
             if not args.apply:
                 print(f"dry run: {len(chosen)} name(s) would be archived; --apply archives them")
                 return 0
+            # Both, before anything is mapped: the target takes each mapping's
+            # mirror row, and load_static refuses a scratch without the mirror.
+            for which, conn in (("target", target_conn), ("scratch", scratch_conn)):
+                try:
+                    static_archive.require_mirror(conn)
+                except RuntimeError as why:
+                    raise Refusal(f"the {which} database: {why}") from why
+                conn.rollback()
             _ensure_agency(scratch_conn, args.agency, row)
             _backfill(args.agency, target_conn, ch, scratch_conn, chosen)
             print(f"next: analyze agency {args.agency}; its archive-joined tables rebuild in full")
