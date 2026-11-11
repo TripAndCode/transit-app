@@ -182,6 +182,27 @@ def _count_calendar_trips(cur, agency_id: int) -> None:
     )
 
 
+def _read_calendars(
+    zf: zipfile.ZipFile, names_in_zip: set[str]
+) -> tuple[dict[str, list[list]], list[list], list[tuple[date, date]]]:
+    """The calendar files' rows as read, calendar.txt's typed for ``static_calendar``, and the day ranges
+    they cover (_covered_ranges)."""
+    read = {name: read_static_rows(zf, name) for name in _CALENDAR_FILES if name in names_in_zip}
+    calendar_rows = _calendar_rows(read.get("calendar.txt", []))
+    return read, calendar_rows, _covered_ranges(calendar_rows, read.get("calendar_dates.txt", []))
+
+
+def _span(zf: zipfile.ZipFile, names_in_zip: set[str], covered: list[tuple[date, date]]) -> tuple[date, date] | None:
+    return version_span(*_feed_dates(zf, names_in_zip), covered)
+
+
+def zip_span(path: str) -> tuple[date, date] | None:
+    """The span load_static records for the zip *path* resolves to, or None for one that names no days."""
+    with zipfile.ZipFile(resolve_static_zip(path)) as zf:
+        names_in_zip = set(zf.namelist())
+        return _span(zf, names_in_zip, _read_calendars(zf, names_in_zip)[2])
+
+
 def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
     """Load a GTFS static zip into the ``static_*`` tables for ``agency_id``.
 
@@ -237,12 +258,10 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
 
     with zipfile.ZipFile(p) as zf, conn.cursor() as cur:
         names_in_zip = set(zf.namelist())
-        read_first = {name: read_static_rows(zf, name) for name in _CALENDAR_FILES if name in names_in_zip}
-        calendar_rows = _calendar_rows(read_first.get("calendar.txt", []))
+        read_first, calendar_rows, incoming = _read_calendars(zf, names_in_zip)
         # Before any table is replaced, trips.txt's included: the outgoing
         # timetable's plan is its calendar and its trips together. Committed
         # now, so a concurrent analyze's capture never waits on this load.
-        incoming = _covered_ranges(calendar_rows, read_first.get("calendar_dates.txt", []))
         capture_before_reload(conn, agency_id, incoming)
         # The outgoing timetable is kept before any table is replaced: a day
         # ingested against it is joined to it after this load. Raising here
@@ -256,7 +275,7 @@ def load_static(path: str, agency_id: int, conn, *, ch_client) -> None:
             conn.commit()
         # Recorded before the load commits: a span left by a load that then
         # fails names a timetable no row is filed under, and a retry records it again.
-        span = version_span(*_feed_dates(zf, names_in_zip), incoming)
+        span = _span(zf, names_in_zip, incoming)
         if span is not None:
             static_archive.record_span(ch_client, agency_id, static_version_id, span)
             logger.info(f"  {static_version_id} covers {span[0]} to {span[1]}")

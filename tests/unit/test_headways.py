@@ -240,3 +240,13 @@ def test_the_scheduled_wait_of_pooled_days_is_their_sums_ratio():
     assert mean_wait_from_sums(sum(gaps), sum(g * g for g in gaps)) == 1485.0
     assert mean_wait_from_sums(None, 1.0) is None
     assert mean_wait_from_sums(0.0, 0.0) is None
+
+
+def test_the_kept_headways_readers_are_the_daily_headways_and_not_every_archive_joined_table():
+    """A re-record of a timetable's headways rebuilds these, and no other archive-joined table."""
+    from pipeline.static_archive import archive_joined_tables
+    from pipeline.static_headways import kept_headway_readers
+
+    readers = kept_headway_readers()
+    assert "agg_route_headway_daily" in readers
+    assert set(readers) < set(archive_joined_tables())

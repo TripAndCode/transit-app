@@ -179,7 +179,9 @@ FastAPI + React SPA  <-------------------------------------------------+
   archives the outgoing timetable before it replaces it, and `analyze`
   archives the loaded one when its content or span is missing.
   `scripts/backfill_timetable_archive.py` fills the archive for names loaded
-  before it kept them, from the kept zips. A ClickHouse that predates these
+  before it kept them, from the kept zips; with `--headways` it records again,
+  from the same zips, the headways of archived timetables kept before the
+  current `agg_route_headway` version. A ClickHouse that predates these
   tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
   Postgres mirrors the map in `static_version_contents`, each name at its
   latest content, written right after each map row, so the definition stamp
