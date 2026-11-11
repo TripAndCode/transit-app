@@ -22,6 +22,8 @@ import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { CsvLink } from "../components/analysis/CsvLink";
 import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
+import { RouteReferenceLegend } from "../components/analysis/RouteReference";
+import { onTimeReferenceMark } from "../components/analysis/routeReferenceText";
 import {
   ROUTE_TABLE_SORTS,
   ROUTE_TABLE_SORT_LABELS,
@@ -77,6 +79,7 @@ export function RouteTableScreen() {
   // The table's sort marks follow the rows on screen: while another sort
   // loads, the rows held are still in the order they arrived in.
   const shown: RouteTableView = data?.sort ? { sort: data.sort, order: data.order ?? "worst" } : view;
+  const reference = data?.reference ?? null;
 
   /** Writes the table's params. The current sort and order go into `sort`
    *  and `order` first, in place of a former list's `report`, so changing one
@@ -124,6 +127,9 @@ export function RouteTableScreen() {
                 range: formatDateRange(data.ctx.from, data.ctx.to, { year: false }),
               })}
             </p>
+          )}
+          {reference && data && data.rows.length > 0 && (
+            <RouteReferenceLegend refs={reference} timeBand={data.ctx?.time_band ?? ctx.time_band} />
           )}
           {data?.definition && <DefinitionMetaBlock definition={data.definition} />}
           <div className="route-table__controls">
@@ -180,6 +186,7 @@ export function RouteTableScreen() {
                   sortBy={shown.sort}
                   sortDirection={routeTableSortDirection(shown)}
                   earlyDepartureSec={data.definition.early_departure_sec}
+                  cellMarks={reference ? { 2: (row) => onTimeReferenceMark(reference, row, t) } : undefined}
                 />
                 {data.rows_total != null && data.rows_total > data.rows.length && (
                   <RowsShown

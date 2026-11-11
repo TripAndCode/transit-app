@@ -821,7 +821,9 @@ async def test_an_exact_window_reads_the_exact_columns_without_merging_histogram
     """Merging every route's histogram is the expensive read. A window the
     exact columns answer, the default and the industry window among them,
     never runs it; only an early tolerance off the bucket edges, or a late
-    one other than one or five minutes, does."""
+    one other than one or five minutes, does. The Routes table and the
+    on-time list then merge once more for their routes' reference window,
+    which the two share for one scope and window."""
     from pipeline.reports import council, rankings, route_table
 
     client, agency_id, pool = reports_client
@@ -866,9 +868,14 @@ async def test_an_exact_window_reads_the_exact_columns_without_merging_histogram
     await read("council_summary", "&early=90")
     await read("on_time", "&early=90&late=300")
     assert merged == [
+        # route_table early=90: its rows, then its reference window.
+        "pipeline.reports.route_table",
+        "pipeline.reports.route_table",
+        # route_table late=120: the same.
         "pipeline.reports.route_table",
         "pipeline.reports.route_table",
         "pipeline.reports.council",
+        # on_time early=90: its rows; its reference is route_table's above.
         "pipeline.reports.rankings",
     ]
 

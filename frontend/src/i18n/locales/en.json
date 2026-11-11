@@ -456,7 +456,8 @@
       "insufficient_samples": "Past {{days}} days ({{range}}): only {{samples}} observations, short of the {{min}} needed for a usual level.",
       "not_aggregated": "With both a time of day and routes chosen, the past {{days}} days are not compared.",
       "hint_title": "About the past {{days}} days",
-      "hint_body": "The average delay over the {{days}} days before the period ({{range}}), under the same conditions as the figure: days of the week, time of day, timetable and routes. It is shown when the feed has data on at least {{min_days}} of the {{selected}} days those conditions select, and there are at least {{min_samples}} observations. A difference under {{flat_min}} min, or under {{flat_pct}}% of the past {{days}} days' average, reads “about the same”, by the same rule as the comparison above. When either average is below 0 min (departures running early), neither is judged better or worse."
+      "hint_body": "The average delay over the {{days}} days before the period ({{range}}), under the same conditions as the figure: days of the week, time of day, timetable and routes. {{coverage}}A difference under {{flat_min}} min, or under {{flat_pct}}% of the past {{days}} days' average, reads “about the same”, by the same rule as the comparison above. When either average is below 0 min (departures running early), neither is judged better or worse.",
+      "hint_coverage": "It is shown when the feed has data on at least {{min_days}} of the {{selected}} days those conditions select, and there are at least {{min_samples}} observations. "
     },
     "routes_to_check": {
       "title_one": "Routes to check (one day, {{range}})",
@@ -1523,6 +1524,19 @@
     },
     "early_note": "Early = departures more than {{early}} early, as a share of the route's observations.",
     "late5_note": "Over 5 min = departures more than 5 minutes late: the share of the route's observations, and how many."
+  },
+  "routeReference": {
+    "on_time": "Past {{days}} days ({{range}}): on time {{value}}%",
+    "on_time_partial_one": "Past {{days}} days ({{range}}), on the one day with data: on time {{value}}%",
+    "on_time_partial_other": "Past {{days}} days ({{range}}), on the {{count}} days with data: on time {{value}}%",
+    "chip_better": "Better",
+    "chip_flat": "About the same",
+    "chip_worse": "Worse",
+    "legend": "“Better”, “About the same” and “Worse” beside an on-time rate compare it with the route’s own past {{days}} days ({{range}}). Point at one for the past {{days}} days’ rate. Routes observed fewer than {{min}} times in those days have none.",
+    "not_aggregated_band": "With a time of day chosen, routes are not compared with their past {{days}} days.",
+    "not_aggregated_window": "The chosen on-time window is not aggregated, so routes are not compared with their past {{days}} days.",
+    "hint_body": "Each route’s on-time rate and average delay over the {{days}} days before the period ({{range}}), under the same conditions as the figures (days of the week, timetable and routes) and the same on-time definition. {{coverage}}A difference under {{flat_pp}} point in the on-time rate reads “about the same”, and a higher rate is better. An average delay is judged by the same rule as Pulse’s comparison with the past {{days}} days: a difference under {{flat_min}} min, or under {{flat_pct}}% of the past {{days}} days’ average, reads “about the same”, and a shorter delay is better; when either average is below 0 min (departures running early), it is not judged better or worse. With a time of day chosen, or an on-time window that is not aggregated, nothing is compared.",
+    "hint_coverage": "They are shown when the feed has data on at least {{min_days}} of the {{selected}} days those conditions select and the route has at least {{min_samples}} observations. "
   },
   "snapshot": {
     "page_title": "Snapshot",

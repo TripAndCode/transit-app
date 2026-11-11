@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import * as hooks from "../../api/hooks";
 import { SCOPE_EXTRAS_NONE, type Scope } from "../../api/scope";
+import type { RouteReference, RouteReferences } from "../../api/types";
 import { RouteSummaryStrip } from "./RouteSummaryStrip";
 
 const CTX: Scope = {
@@ -17,12 +18,34 @@ const DEFINITION = {
   source_mix: null,
 };
 
-function reports(byType: Record<string, unknown[]>, rowsTotal = 174, pending: string[] = []) {
+function reports(byType: Record<string, unknown[]>, rowsTotal = 174, pending: string[] = [], reference: RouteReferences | null = null) {
   return vi.spyOn(hooks, "useReport").mockImplementation((_id, type) => (pending.includes(type ?? "") ? { data: undefined, isPending: true } : {
-    data: { report_type: type, rows: byType[type ?? ""] ?? [], rows_total: rowsTotal, definition: DEFINITION },
+    data: {
+      report_type: type,
+      rows: byType[type ?? ""] ?? [],
+      rows_total: rowsTotal,
+      definition: DEFINITION,
+      ...(type === "on_time" ? { reference } : null),
+    },
     isPending: false,
   }) as never);
 }
+
+/** The 90 days before the page's 2026-09-24 start, route R's figures over
+ *  them as `route` gives them. */
+function reference(route: Partial<RouteReference>): RouteReferences {
+  return {
+    samples: 400_000, window_from: "2026-06-26", window_to: "2026-09-23", days: 90, days_selected: 90,
+    days_collected: 90, min_days: 72, min_samples: 100, reason: null,
+    routes: { R: { on_time_pct: null, avg_min: null, samples: 400_000, reason: null, ...route } },
+  };
+}
+
+const FIGURES = {
+  ranking: [["A", null, "5.1", "4", "9", 500], ["R", null, "3.06", "2", "8", 143516]],
+  on_time: [["R", null, "49.0", "3.06", 143516, false, 0.3]],
+  worst_5min: [["R", null, 26192, "3.06", 143516]],
+};
 
 function overview(topRoutes: { route_code: string; share_pct: number }[]) {
   vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({
@@ -89,5 +112,34 @@ describe("RouteSummaryStrip", () => {
     const strip = render();
     expect(strip).toHaveTextContent("Mean delay…");
     expect(strip).not.toHaveTextContent("Not ranked");
+  });
+
+  it("names the route's own past 90 days beside its mean delay and on-time rate, judged against each", () => {
+    reports(FIGURES, 174, [], reference({ on_time_pct: 45.0, avg_min: 2.5 }));
+    overview([]);
+    const strip = render();
+    const [avg, onTime] = within(strip).getAllByRole("definition");
+    expect(avg).toHaveTextContent(/Past 90 days \(.+\): average delay 2\.5 min\s*Worse than the past 90 days$/);
+    expect(onTime).toHaveTextContent(/^49%Past 90 days \(.+\): on time 45\.0%\s*Better than the past 90 days/);
+    expect(within(onTime).getByText("Better than the past 90 days")).toHaveClass("reference-chip");
+    // The rules' popover is offered once, beside the on-time rate.
+    expect(within(onTime).getAllByRole("button")).toHaveLength(1);
+    expect(within(avg).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("says once, under the on-time rate, why the route has no past 90 days to compare with", () => {
+    reports(FIGURES, 174, [], reference({ samples: 90, reason: "insufficient_samples" }));
+    overview([]);
+    const strip = render();
+    expect(within(strip).getAllByText(/only 90 observations, short of the 100 needed for a usual level/)).toHaveLength(1);
+    const [, onTime] = within(strip).getAllByRole("definition");
+    expect(onTime).toHaveTextContent(/only 90 observations/);
+    expect(within(strip).queryByText(/(Better|Worse) than the past 90 days|About the same as/)).not.toBeInTheDocument();
+  });
+
+  it("names no past 90 days for a route the reference does not list", () => {
+    reports(FIGURES, 174, [], { ...reference({}), routes: {} });
+    overview([]);
+    expect(render()).not.toHaveTextContent(/past 90 days/i);
   });
 });
