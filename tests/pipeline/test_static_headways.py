@@ -52,6 +52,13 @@ def test_recording_keeps_the_loaded_timetables_medians(pg_conn, agency_id):
     assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 600.0}
 
 
+def test_the_kept_median_of_an_even_count_of_gaps_is_the_mean_of_the_middle_two(pg_conn, agency_id):
+    """The long-gap threshold's median is the actual side's: gaps of 480 and 1200 s give 840 s, not 480 s."""
+    key, parts = _seed(pg_conn, agency_id, ["08:00:00", "08:08:00", "08:28:00"])
+    static_headways.record_route_headways(pg_conn, agency_id, key, parts)
+    assert static_headways.route_medians(pg_conn, agency_id, [key]) == {(key, "R1"): 840.0}
+
+
 def test_recording_twice_adds_nothing(pg_conn, agency_id):
     key, parts = _seed(pg_conn, agency_id, ["08:00:00", "08:10:00", "08:20:00"])
     static_headways.record_route_headways(pg_conn, agency_id, key, parts)

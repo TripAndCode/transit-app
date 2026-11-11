@@ -42,7 +42,16 @@ After ingest, `analyze` turns the raw readings into summary tables:
    - `agg_route_hour_dow` — route × day-of-week × scheduled hour → average delay
    - `agg_route_daily` — route × day → average delay
    - `agg_route_stats` — route overall (avg, p50, p90, on-time %)
+   - `agg_route_headway` — route → scheduled headway median, over the gaps between
+     consecutive departures at each stop of the timetable's dominant service; a median of
+     12 minutes or less makes the route high-frequency
+   - `agg_route_headway_daily` — route × day → actual headway median, and the gaps longer
+     than 1.75 times the scheduled median
    - …and per-stop / per-hour / feed-health variants
+
+   A headway median, scheduled or actual, is the middle gap, or the mean of the two middle
+   gaps for an even count (`PERCENTILE_CONT(0.5)` on the scheduled side,
+   `statistics.median` on the actual one).
 
 ## Method versions
 
@@ -79,6 +88,7 @@ live scan joins the content mapped now and shows its hash.
 | `2026.11.6` | A trip cancelled without listing any stop is stored as a cancellation of each stop its timetable schedules it at whose scheduled departure is still to come when the cancellation arrives, so an earlier prediction of such a stop no longer counts as a departure, as when the cancellation lists its stops; a stop whose scheduled departure has passed keeps its departure, even when the trip was running late. A trip with no stop still to come, or no stops in the timetable, keeps the one trip-level row. A trip whose last status is CANCELED counts as not run, so one cancelled partway, or after its last stop, does too. This changes how such a cancellation is ingested, not how any delay or service-delivered table is built, and days ingested earlier keep the one trip-level row unless ingested again. The feed-quality scorecard counts those rows as reported stop events but not as stop_time_updates; it tells them apart by their shape alone, so a stop update the feed sends for a cancelled trip with neither a delay nor a stop status is left out of its field coverage and update count too. | `feed_quality_monthly` |
 | `2026.11.7` | Each day's trips not run are counted per route: under the route the trip's latest report naming one names, or under no route where none does, so an agency's day is the sum of its routes. This gives each route its own service-delivered rate (see "Service delivered per route" below). No agency figure changes. | `agg_service_delivered_daily` |
 | `2026.11.8` | The feed-quality scorecard's message age counts archived polls beside live ones. Archive ingest stamps an archived poll with its own FeedHeader timestamp, so the poll's capture instant is read from its file name: the UTC day and time of day the collector names it by as its fetch begins. A poll whose name gives no instant is left out of the ages and counted beside them. A header frozen for hours reads as hours of age on every poll that received it. Until now only live polls counted, so a month of archived polls had no message age. No delay or on-time figure changes. | `feed_quality_monthly` |
+| `2026.11.9` | A route's scheduled headway median is the mean of its two middle gaps when it has an even count of gaps, as the actual headway median already was, where it had been the lower of the two. A route whose scheduled gaps split evenly between long and short no longer reads as its short gap, so it can leave the high-frequency routes, and its long-gap threshold, 1.75 times that median, rises. A timetable replaced before this version keeps the median it was kept with for the days measured against it: a timetable no longer loaded cannot be read again. | `agg_route_headway`, `agg_route_headway_daily` |
 
 ## What counts as on time
 
