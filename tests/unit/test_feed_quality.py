@@ -89,6 +89,9 @@ def test_a_window_without_a_plan_reads_no_plan_not_zero():
     row = _shape(service=_service(observed=500, coverage_planned=0, covered_days=0), stop_plan={})
     assert (row["rt_completeness_pct"], row["rt_completeness_missing"]) == (None, "no_plan")
     assert (row["stop_completeness_pct"], row["stop_completeness_missing"]) == (None, "no_plan")
+    # Neither side of a figure the window cannot state, as the stamp states none.
+    assert (row["observed_trips"], row["planned_trips"]) == (None, None)
+    assert (row["observed_stop_events"], row["planned_stop_events"]) == (None, None)
 
 
 def test_a_window_planned_only_after_its_coverage_day_reads_the_boards_reason():
@@ -97,7 +100,7 @@ def test_a_window_planned_only_after_its_coverage_day_reads_the_boards_reason():
     observed, rather than that nothing is planned."""
     row = _shape(service=_service(observed=0, coverage_planned=0, covered_days=6, planned=24))
     assert (row["rt_completeness_pct"], row["rt_completeness_missing"]) == (None, "no_plan_observed")
-    assert row["covered_days"] == 6
+    assert (row["observed_trips"], row["planned_trips"], row["covered_days"]) == (None, None, 6)
 
 
 def test_completeness_counts_through_the_coverage_day_and_the_window_days_count_the_whole_month():

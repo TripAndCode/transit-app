@@ -61,7 +61,8 @@ The figures:
 - **VehiclePositions available**: not recorded anywhere the app reads.
 
 A figure the feed or the app cannot supply is ``None`` beside a
-:data:`Missing` reason, never 0:
+:data:`Missing` reason, never 0, and a completeness figure's two counts are
+``None`` beside it, as the definition stamp states them:
 
 - ``coverage_unknown``: the ingest strategy's trip_ids are not the
   timetable's, so its trips cannot be counted against the plan (the gate's
@@ -438,6 +439,12 @@ def shape(
     # A day that plans trips but whose stop events are unknown leaves the
     # stop-event figure without a plan; one that plans no trip has none either way.
     stop_events_known = bool(events_planned)
+    # A ratio's two sides are stated only beside the figure they make, as the
+    # definition stamp states them, so a missing figure has neither.
+    if rt_pct is None:
+        observed_trips, planned = None, None
+    if stop_pct is None:
+        events_observed, events_planned = None, None
 
     stop_time_updates = sum(row["stop_time_updates"] for row in day_rows.values())
     stores_fields = ingest_strategy in RT_INGEST_STRATEGIES
