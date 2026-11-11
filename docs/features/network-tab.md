@@ -96,7 +96,10 @@ What the user sees/does:
   aggregates changed, and each listed agency's timetables (each with its
   content hash where the archive maps it, as `docs/features/analysis-tab.md`
   describes) and observation sources (archive, live or none recorded, in
-  days) over the range, listed under the agency's name.
+  days) over the range, listed under the agency's name, then each listed
+  agency's feed quality (observation coverage and implausible share), which
+  `api/routers/network.py` states from the board's own rows
+  (`pipeline/reports/network.py: board_feed_quality`).
 - **Ridership-weighted on-time toggle** — a checkbox next to the from/to date
   pickers, present only when at least one agency in the current list has a
   manually-configured ridership weight (`pipeline/reports/ridership.py`,

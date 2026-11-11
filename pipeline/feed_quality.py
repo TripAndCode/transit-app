@@ -11,7 +11,9 @@ counts that same window:
   planned, by the comparability gate's own rule and SQL
   (:func:`pipeline.reports.comparability.coverage_pct` over
   :func:`pipeline.reports.service_delivered.service_sql`), so a month reads
-  what the agencies board reads over the same days.
+  what the agencies board reads over the same days, unless no agency observed
+  the month's last days: the window then still ends with the month, where the
+  board's coverage ends at the newest day any agency observed within its range.
 - **Stop-event completeness**: the stop events the feed reported (one per
   trip, stop and service date, however often reported) of those the planned
   trips' stop times plan, over the planned days whose stop events are known.

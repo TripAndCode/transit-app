@@ -35,6 +35,7 @@ from pipeline.reports.rankings import (
     early_departure_sec,
     on_time_window,
 )
+from pipeline.reports.savepoint import savepoint
 from pipeline.reports.schedule_revision import ScheduleDays
 from pipeline.timetable_in_force import fetch_day
 
@@ -146,6 +147,43 @@ class SourceMix(BaseModel):
     none_days: int
 
 
+#: Why a :class:`FeedQuality` coverage is None: ``no_data`` is the gate's
+#: first check, no observation in the period's aggregates; the rest say why
+#: coverage cannot be measured, in the agencies board's terms
+#: (:func:`pipeline.reports.comparability.coverage_unknown_why`).
+CoverageMissing = Literal["no_data", "unreadable", "unmatched", "no_plan", "no_plan_observed"]
+
+
+class FeedQuality(BaseModel):
+    """An agency's realtime completeness and clamp share over a request's
+    range, for the whole agency whatever filter narrows the figures beside it,
+    by the comparability gate's own rules (:mod:`pipeline.reports.comparability`)
+    over the figures the agencies board reads
+    (:func:`pipeline.reports.network.feed_quality_of`).
+
+    ``coverage_pct`` is ``observed_trips`` of ``coverage_planned_trips``, the
+    board's observation coverage, measured through the newest day any agency
+    it lists has observations for; ``clamp_pct`` is the share of readings the
+    plausibility clamp dropped. Each is None beside its reason, never 0:
+    ``coverage_missing`` (:data:`CoverageMissing`) and ``clamp_missing``,
+    ``no_data`` when no reading carried a delay. ``coverage_low`` and
+    ``clamp_high`` are whether the gate flags the figure, judged as printed
+    against ``min_coverage_pct`` and ``max_clamp_pct``, the thresholds in
+    force when the stamp was made."""
+
+    agency_id: int
+    coverage_pct: float | None
+    observed_trips: int | None
+    coverage_planned_trips: int | None
+    coverage_missing: CoverageMissing | None
+    coverage_low: bool
+    clamp_pct: float | None
+    clamp_missing: Literal["no_data"] | None
+    clamp_high: bool
+    min_coverage_pct: float
+    max_clamp_pct: float
+
+
 class DefinitionMeta(BaseModel):
     """On-time/late definition actually used to produce a report or
     comparison view's numbers -- surfaced alongside any such view (and in
@@ -180,7 +218,10 @@ class DefinitionMeta(BaseModel):
     ``source_mix`` says, the same way, which ingest source each of those days'
     observations came from (:class:`SourceMix`), counted in days rather than
     observations because a live day holds far fewer of them; it stays ``None``
-    on a database not yet migrated to the source counts.
+    on a database not yet migrated to the source counts. ``feed_quality`` is
+    each listed agency's completeness and clamp share over the range
+    (:class:`FeedQuality`); ``None`` until a router states them, and on a
+    definition saved before the stamp carried them.
     """
 
     preset: str | None
@@ -196,6 +237,7 @@ class DefinitionMeta(BaseModel):
     value_basis: Literal["feed_prediction"] = VALUE_BASIS
     timetable_versions: list[TimetableVersion] | None = None
     source_mix: list[SourceMix] | None = None
+    feed_quality: list[FeedQuality] | None = None
 
 
 # The builds analyze had recorded, for every agency, when this process last
@@ -239,6 +281,8 @@ async def stamp_build(
     agency_id: int | None,
     schedule: ScheduleDays,
     joined: dict[tuple[int, str], str] | None = None,
+    *,
+    read_feed_quality: bool = True,
 ) -> DefinitionMeta:
     """*meta* with the timetables in force over *schedule*'s dates, each named
     one with its content's short hash, the source of each of those days'
@@ -248,6 +292,14 @@ async def stamp_build(
     :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
     gets its timetables and sources and no build. Nothing is read from
     ClickHouse.
+
+    One agency's stamp also states its completeness and clamp share over the
+    range (:func:`pipeline.reports.network.compute_agency_feed_quality`), read
+    from the aggregates beside a live scan too, unless *read_feed_quality* is
+    False: a caller that already holds the figures, such as the council report
+    from its verdict's board row, states them itself. The board's stamp is
+    left without them: the board states each agency's from its own rows
+    (``api.routers.network``), which already hold them.
 
     Beside aggregates, the contents are read from the version map's Postgres
     mirror (:func:`_read_contents`). Beside a live scan they are *joined*: the
@@ -272,6 +324,15 @@ async def stamp_build(
         builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
         _note_builds((builds, stamps))
         update["built_at"] = built_at
+    if agency_id is not None and read_feed_quality:
+        # Imported here: pipeline.reports.network reads the gate, whose module imports this one.
+        from pipeline.reports import network
+
+        # Beside aggregates this follows the build check, so a figure cached before
+        # a rebuild is forgotten first. A live stamp's figures follow the reader's
+        # own cache, which holds them for up to its TTL.
+        quality = await network.compute_agency_feed_quality(conn, agency_id, schedule.from_date, schedule.to_date)
+        update["feed_quality"] = None if quality is None else [quality]
     return meta.model_copy(update=update)
 
 
@@ -305,15 +366,13 @@ async def _fetch_enrichment(conn, what: str, sql: str, *args) -> list | None:
     enrichment only adds to the stamp, so its absence leaves that part out
     rather than failing the figures.
 
-    Inside a caller's transaction the read runs in its own savepoint: a failed
-    statement would otherwise abort that transaction, and the caller's next
-    statement with it. Outside one, a failed statement leaves nothing behind.
+    Inside a caller's transaction the read runs in its own savepoint
+    (:func:`pipeline.reports.savepoint.savepoint`): a failed statement would
+    otherwise abort that transaction, and the caller's next statement with it.
     """
     try:
-        if conn.is_in_transaction():
-            async with conn.transaction():
-                return await conn.fetch(sql, *args)
-        return await conn.fetch(sql, *args)
+        async with savepoint(conn):
+            return await conn.fetch(sql, *args)
     except (asyncpg.exceptions.UndefinedColumnError, asyncpg.exceptions.UndefinedTableError) as exc:
         if what not in _warned_missing:
             _log.warning("definition stamp: no %s (migrations behind?): %s", what, exc)
@@ -526,7 +585,10 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     if timetables is not None:
         line = f"{line}; 時刻表={timetables}"
     sources = _source_mix_text(meta, "ja")
-    return line if sources is None else f"{line}; 観測データ={sources}"
+    if sources is not None:
+        line = f"{line}; 観測データ={sources}"
+    quality = _feed_quality_text(meta, "ja", grouped=False)
+    return line if quality is None else f"{line}; {_FEED_QUALITY_LABEL['ja']}={quality}"
 
 
 _LIVE_DAY = {"ja": "対象外（ライブ集計）", "en": "not applicable (live scan)"}
@@ -637,11 +699,92 @@ def _source_mix_text(meta: DefinitionMeta, locale: str) -> str | None:
     return f"{text}。{_SOURCE_NOTE['ja']}" if counts[0] or counts[1] else text
 
 
+# Worded as the agencies board words the same figures, so a footnote and the board read alike.
+_FEED_QUALITY_LABEL = {"ja": "フィード品質（事業者全体）", "en": "Feed quality (whole agency)"}
+COVERAGE_MISSING_TEXT: dict[tuple[str, str], str] = {
+    # The figures read the aggregates, which a live scan beside them can outrun.
+    ("no_data", "ja"): "期間内の集計済みの観測なし",
+    ("no_data", "en"): "no analyzed observations in the period",
+    ("unreadable", "ja"): "計画を読み込めませんでした",
+    ("unreadable", "en"): "the plan could not be read",
+    ("unmatched", "ja"): "この配信の便は時刻表の便と照合できません",
+    ("unmatched", "en"): "this feed's trips can't be matched to the timetable",
+    ("no_plan", "ja"): "期間に時刻表の計画なし",
+    ("no_plan", "en"): "no timetable plans this period",
+    ("no_plan_observed", "ja"): "観測した日に時刻表の計画なし",
+    ("no_plan_observed", "en"): "no timetable plans the days observed",
+}
+
+
+def _feed_quality_text(meta: DefinitionMeta, locale: str, *, grouped: bool = True) -> str | None:
+    """Each listed agency's completeness and clamp share, named by its agency
+    when there are several; None when no router stated them. *grouped* puts
+    thousands separators in the trip counts, which the CSV preamble's single
+    cell leaves out, as it keeps no ASCII comma."""
+    if not meta.feed_quality:
+        return None
+    several = len(meta.feed_quality) > 1
+    parts = []
+    for quality in meta.feed_quality:
+        part = _feed_quality_part(quality, locale, grouped)
+        if several:
+            part = f"agency {quality.agency_id}: {part}" if locale == "en" else f"事業者{quality.agency_id}：{part}"
+        parts.append(part)
+    return ("; " if locale == "en" else "／").join(parts)
+
+
+def _feed_quality_part(quality: FeedQuality, locale: str, grouped: bool) -> str:
+    # Imported here: the gate's module imports this one.
+    from pipeline.reports.comparability import tenth_as_printed
+
+    en = locale == "en"
+
+    def pct(value: float) -> str:
+        return f"{tenth_as_printed(value):.1f}"
+
+    def count(n: int) -> str:
+        return f"{n:,}" if grouped else str(n)
+
+    if quality.coverage_pct is None:
+        why = COVERAGE_MISSING_TEXT[(quality.coverage_missing or "no_data", locale)]
+        coverage = f"observation coverage — ({why})" if en else f"観測カバー率 —（{why}）"
+    elif quality.coverage_low:
+        floor = f"{quality.min_coverage_pct:g}"
+        coverage = (
+            f"observation coverage {pct(quality.coverage_pct)}% (below {floor}%)"
+            if en
+            else f"観測カバー率 {pct(quality.coverage_pct)}%（{floor}%未満）"
+        )
+    elif quality.observed_trips is not None and quality.coverage_planned_trips is not None:
+        observed, planned = count(quality.observed_trips), count(quality.coverage_planned_trips)
+        coverage = (
+            f"observation coverage {pct(quality.coverage_pct)}% ({observed} of {planned} planned trips)"
+            if en
+            else f"観測カバー率 {pct(quality.coverage_pct)}%（計画{planned}便中{observed}便）"
+        )
+    else:
+        coverage = "observation coverage —" if en else "観測カバー率 —"
+    if quality.clamp_pct is None:
+        none = COVERAGE_MISSING_TEXT[("no_data", locale)]
+        clamp = f"implausible readings — ({none})" if en else f"異常値 —（{none}）"
+    elif quality.clamp_high:
+        ceiling = f"{quality.max_clamp_pct:g}"
+        clamp = (
+            f"implausible readings {pct(quality.clamp_pct)}% (above {ceiling}%)"
+            if en
+            else f"異常値 {pct(quality.clamp_pct)}%（{ceiling}%超）"
+        )
+    else:
+        clamp = f"implausible readings {pct(quality.clamp_pct)}%" if en else f"異常値 {pct(quality.clamp_pct)}%"
+    return f"{coverage}, {clamp}" if en else f"{coverage}、{clamp}"
+
+
 def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     """The footnote lines that say where *meta*'s figures came from: what they
     are made from, where the method is published, the method and build day
-    (:func:`format_method_stamp`), and the timetables in force and the source
-    of each day's observations when a router named them.
+    (:func:`format_method_stamp`), and the timetables in force, the source
+    of each day's observations and the period's completeness and clamp share
+    when a router named them.
     :func:`format_definition_footnotes` ends with them, and the delay record's
     text is footnoted with them."""
     locale = "en" if locale == "en" else "ja"
@@ -657,6 +800,9 @@ def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     sources = _source_mix_text(meta, locale)
     if sources is not None:
         lines.append(f"Observations: {sources}" if locale == "en" else f"観測データ: {sources}")
+    quality = _feed_quality_text(meta, locale)
+    if quality is not None:
+        lines.append(f"{_FEED_QUALITY_LABEL[locale]}: {quality}")
     return lines
 
 

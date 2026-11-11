@@ -19,7 +19,7 @@ from pipeline.reports.comparability import (
     ComparableReason,
 )
 from pipeline.reports.definition import DefinitionMeta, stamp_build
-from pipeline.reports.network import compute_network_summary, coverage_through
+from pipeline.reports.network import board_feed_quality, compute_network_summary, coverage_through
 from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
 
@@ -144,6 +144,8 @@ async def network_summary(
     schedule = await read_schedule_days(conn, None, ctx.from_date, ctx.to_date)
     definition = await stamp_build(conn, BOARD_ON_TIME_DEFINITION, None, schedule)
     rows = await compute_network_summary(conn, ch, ctx.from_date, ctx.to_date)
+    # Each agency's completeness and clamp share, as its row states them.
+    definition = definition.model_copy(update={"feed_quality": board_feed_quality(rows)})
     # The same rule compute_network_summary bounded each row's coverage by,
     # over the same per-agency last days.
     through = coverage_through(date.fromisoformat(r["data_to"]) for r in rows if r["data_to"])

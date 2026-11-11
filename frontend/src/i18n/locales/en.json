@@ -382,6 +382,13 @@
     "observations_unrecorded_other": "none recorded {{count}} days",
     "observations_separator": ", ",
     "observations_explained": "Archive days hold every poll the collector made that day; live days hold only the part the app received in real time.",
+    "feed_quality": "Feed quality for the whole agency: {{coverage}}. {{clamp}}.",
+    "feed_quality_heading": "Feed quality for the whole agency",
+    "feed_quality_agency": "{{agency}} — {{coverage}}. {{clamp}}",
+    "feed_quality_coverage_missing": "Observation coverage — ({{reason}})",
+    "feed_quality_no_data": "no analyzed observations in the period",
+    "feed_quality_clamp": "Implausible readings {{pct}}%",
+    "feed_quality_clamp_missing": "Implausible readings — (no analyzed observations in the period)",
     "sentence_separator": " "
   },
   "app": {

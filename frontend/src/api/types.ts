@@ -332,6 +332,36 @@ export type DefinitionMeta = {
   /** Which ingest source each of the request's days' observations came from,
    *  per listed agency, adding up to the range; null when the API named none. */
   source_mix: SourceMix[] | null;
+  /** Each listed agency's realtime completeness and clamp share over the
+   *  period; null when the API stated none, and absent from a definition
+   *  saved before the stamp carried them. */
+  feed_quality?: FeedQuality[] | null;
+};
+
+/** Why a feed-quality coverage is null: no observation in the period, or why
+ *  the agencies board cannot measure it (network.coverage_unknown_why). */
+type CoverageMissing = "no_data" | "unreadable" | "unmatched" | "no_plan" | "no_plan_observed";
+
+/** An agency's realtime completeness (`coverage_pct`, `observed_trips` of
+ *  `coverage_planned_trips`, the agencies board's observation coverage) and
+ *  the share of readings dropped as implausible (`clamp_pct`) over the
+ *  period, for the whole agency, by the comparability gate's own rules. A
+ *  null figure comes with its reason, never as 0. `coverage_low` and
+ *  `clamp_high` are whether the gate flags the figure, against the
+ *  thresholds in force when the stamp was made. See
+ *  pipeline/reports/definition.py's FeedQuality. */
+export type FeedQuality = {
+  agency_id: number;
+  coverage_pct: number | null;
+  observed_trips: number | null;
+  coverage_planned_trips: number | null;
+  coverage_missing: CoverageMissing | null;
+  coverage_low: boolean;
+  clamp_pct: number | null;
+  clamp_missing: "no_data" | null;
+  clamp_high: boolean;
+  min_coverage_pct: number;
+  max_clamp_pct: number;
 };
 
 /** How many of the request's days an agency's observations came mostly from

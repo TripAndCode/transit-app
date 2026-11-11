@@ -98,6 +98,42 @@ hold figures of the old one, so their stamp shows no hash until analyze rebuilds
 live scan shows the content of the join that filed its rows, which can lag a remap made in
 another process for as long as that join stays cached.
 
+The stamp also states the period's realtime completeness and clamp share for the whole
+agency, whatever filter narrows the figures beside it, by the comparability gate's own
+rules (`pipeline/reports/comparability.py`). The agencies board and a footnote over the
+same days state the same figure by construction; the feed-quality scorecard states it
+too for a month, except in the two cases under "Unlike the scorecard" below:
+
+- **Completeness** is the board's observation coverage: trips the feed reported of the
+  trips the timetable planned, over the planned days through the newest day any listed
+  agency has observations for (`pipeline/reports/network.py`'s
+  `compute_agency_feed_quality`).
+- **The clamp share** is the board's share of implausible readings, from `agg_feed_health`.
+- **Flags.** A figure the gate flags (coverage under 70%, or implausible readings over 5%
+  as printed to a tenth) is stated in the gate's own caveat words.
+- **Missing figures.** A figure the gate cannot compute is empty beside the board's
+  reason, never 0: no analyzed observation in the period (`no_data`), trip IDs not
+  matched to the timetable (`unmatched`), no plan for the period (`no_plan`) or for the
+  days observed (`no_plan_observed`), or a plan that could not be read (`unreadable`).
+  The figures read the aggregates, so a live scan such as the delay record can list
+  readings analyze has not reached yet while its figures read `no_data`.
+- **Where they come from.** Both are read from Postgres aggregates, never from
+  ClickHouse, beside a live scan too. A council report states the figures its comparison
+  verdict judges, from the board's cached row, and states its clamp share only there.
+  The board states each agency's from its own rows.
+- **Caching.** One agency's figures are cached for five minutes, like the compute
+  functions. Beside aggregates they are read after the build check, so a rebuild clears
+  them first; a live stamp's figures can trail a rebuild by up to those five minutes.
+- **Unlike the scorecard.** A month with no analyzed observation of the agency reads
+  `no_data` here, the gate's first check. The scorecard reads 0% for it when the feed's
+  trips are matched and a plan exists, and otherwise gives its own reason. And the scorecard
+  counts a closed month through its last day whenever some agency's aggregates reach
+  past it, so a day at its end that no agency observed (an outage of every feed, for
+  one) counts against each feed. The board and the stamp end coverage at the newest day
+  any agency observed within their own range, so they leave such a day out.
+
+Stating them changes no aggregate, so it is not a method version.
+
 | Version | What changed | Tables |
 |---|---|---|
 | `2026.11.0` | Baseline. The latest reading per trip, stop and service day counts, and readings more than 120 minutes off are dropped. Stop, dwell/run and headway rows join the timetable each reading's feed version archived, and each day's long gaps are measured against that timetable's own headway. | All |
@@ -165,7 +201,7 @@ and its next run catches up.
 
 | Figure | Definition |
 |---|---|
-| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days. The agencies board's coverage, by the same rule and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board reads over the same days. |
+| Trips reported (RT completeness) | Trips the feed reported a plausible departure for, of the trips the timetable planned, over the month's planned days. The agencies board's coverage, by the same rule and SQL (`pipeline/reports/comparability.py`, `pipeline/reports/service_delivered.py`), so a month reads what the board reads over the same days, unless no agency observed its last days (see the stamp's "Unlike the scorecard" above). |
 | Stop events | Stop events the feed reported, counted once per trip, stop and service date however often reported, of the stop times the planned trips call at. A stop event is reported when any poll of it carries a plausible departure or arrival delay, or reports its trip CANCELED or its stop SKIPPED. This is reporting coverage, not the service-delivered rate: a cancellation is something the feed said about the stop, so it counts here, where the departure figures let the feed's last report decide whether the stop departed. Only the planned days whose stop events are known count (`stop_plan_days`): the day's capture saves them beside its planned trips, and a day saved before it did keeps them unknown. |
 | Message age | Per poll, the instant it was captured minus its FeedHeader timestamp: the median and 95th percentile, interpolated linearly between the closest ranks (ClickHouse's `quantilesExactInclusive`, the rule of numpy's default), with the number of polls measured. A live poll was captured at its stored capture time. An archived poll's stored time is its own header (or, where the header is far from its name, its name read as JST), so its capture instant is read from its file name instead: `YYYYMMDD/TripUpdate_HHMMSS.pb`, the UTC day and time of day the collector (`oracle_cloud/v3/bin/rt-poller.sh`) names it by as its fetch begins. A name of any other shape, or one naming no real day and time, gives no instant: the poll is left out of the ages and counted (`message_age_undated_polls`), its zone never guessed. A header frozen for hours reads as hours of age on every poll that received it. A message generated during a slow fetch is newer than the name and reads a small negative age, which stands as measured. |
 | Implausible readings | The board's clamp share: readings beyond the plausibility clamp, of the readings that carried a delay (`agg_feed_health`). |
@@ -179,7 +215,9 @@ gate's reason) and a plan (`no_plan`); stop events also need a known stop plan
 under an archive name that gives one (`archive_stamped`), with a header (`no_header`).
 Field coverage needs an ingest strategy that stores the fields (`feed_cannot_report`),
 and every figure needs an observation (`no_data`). The admin agency drawer shows the
-newest month and the five before it.
+newest month and the five before it. Every report's stamp states the trips reported
+and the implausible share over its own period, by the same rules (see "Method versions"
+above).
 
 ## Service delivered per route
 

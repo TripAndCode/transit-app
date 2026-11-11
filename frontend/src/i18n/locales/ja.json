@@ -382,6 +382,13 @@
     "observations_unrecorded_other": "記録なし {{count}}日間",
     "observations_separator": "、",
     "observations_explained": "アーカイブの日は収集サーバーがその日に取得した全データ、ライブの日はアプリがリアルタイムで受け取った一部のデータのみです。",
+    "feed_quality": "フィード品質（事業者全体）：{{coverage}}、{{clamp}}。",
+    "feed_quality_heading": "フィード品質（事業者全体）",
+    "feed_quality_agency": "{{agency}}：{{coverage}}、{{clamp}}",
+    "feed_quality_coverage_missing": "観測カバー率 —（{{reason}}）",
+    "feed_quality_no_data": "期間内の集計済みの観測なし",
+    "feed_quality_clamp": "異常値 {{pct}}%",
+    "feed_quality_clamp_missing": "異常値 —（期間内の集計済みの観測なし）",
     "sentence_separator": ""
   },
   "app": {
