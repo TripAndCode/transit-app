@@ -1174,7 +1174,7 @@ def _divergence_mismatches(observed: Observed, divergence: Divergence) -> list[s
         own_cells += len(moved)
         lines += _compare(read(observed), expected, moved.__contains__)
     if not own_cells:
-        raise RuntimeError("the divergence moves no cell of its own, so its xfail would test nothing")
+        raise RuntimeError("the divergence moves no cell of its own, so its test would test nothing")
     return lines
 
 
