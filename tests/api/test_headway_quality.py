@@ -69,19 +69,18 @@ async def headway_client(apply_schema):
         "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, is_high_frequency) "
         "VALUES ($1,$2,$3,$4,$5)",
         [
-            # Perfectly regular 8-minute (480s) scheduled headway -> mean
-            # wait = headway/2 = 240s (pipeline.headways.mean_wait_from_moments).
+            # The loaded timetable's classes. They stand in only where no
+            # timetable in force over the range keeps figures; each day's own
+            # figures (_EVERY_8_MIN and the like) judge the rows below.
             (aid, "R_EVEN", 480.0, 10, True),
             (aid, "R_BUNCH", 480.0, 10, True),
-            # Classified NOT high-frequency -- must never appear below,
-            # regardless of how much daily data it has.
+            # Not high-frequency under the loaded timetable either.
             (aid, "R_SLOW", 1800.0, 10, False),
             # High-frequency, but every agg_route_headway_daily row seeded
             # for it below falls outside the requested date range.
             (aid, "R_NODATA", 480.0, 10, True),
-            # High-frequency, in-range daily data exists, but that data
-            # predates migration 0040's sufficient-statistics columns and
-            # hasn't been re-`analyze()`-d yet (see below).
+            # High-frequency, with in-range daily data whose actual-side
+            # statistics are missing (see below).
             (aid, "R_PREMIGRATE", 480.0, 10, True),
         ],
     )
