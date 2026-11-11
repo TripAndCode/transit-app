@@ -613,8 +613,12 @@ the scope as one sentence above their content
   rebuilt after the name was mapped to that content (`agg_table_state.built_at`
   against the mirror's `archived_at`, both to the millisecond). A remap clears
   those tables' states, so until analyze rebuilds them the stamp beside their
-  older figures carries none; a live scan joins the map as it stands and
-  carries the new hash. A live scan names its timetables too,
+  older figures carries none. A live scan carries the content the join that
+  filed its rows maps each name to (`pipeline/live_filing.py: schedule_join`,
+  read once per request in `api/routers/reports.py: _scanned_schedule`),
+  never the mirror's: a remap made in another process reaches both its rows
+  and its stamp once that cached join expires. An agency whose ingest stamps
+  no version has no such join, and its live stamp carries none. A live scan names its timetables too,
   and files every observation as analyze does, under the timetable in force on
   its service date (`pipeline/live_filing.py`), so its figures and the
   aggregates agree. Where a load or a span has moved the version in force since

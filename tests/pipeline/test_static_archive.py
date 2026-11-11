@@ -506,15 +506,23 @@ def test_analyze_refuses_without_the_mirror(pg_conn, agency_id, ch_client, monke
     assert _map(ch_client, agency_id) == []
 
 
-async def _stamped_content(aconn, agency_id, stem, *, live=False):
-    """The content hash a stamp names *stem* by, on a day it was in force, beside aggregates or a live scan."""
+async def _stamped_content(aconn, agency_id, stem, *, joined=None):
+    """The content hash a stamp names *stem* by, on a day it was in force:
+    beside aggregates, or beside a live scan whose join mapped each (agency,
+    name) to the content in *joined*."""
     from pipeline.reports.definition import resolve_definition_meta, stamp_build
     from pipeline.reports.schedule_revision import ScheduleDays
 
     day = date(2026, 10, 25)
-    meta = resolve_definition_meta("ranking", None, None, live=live)
-    meta = await stamp_build(aconn, meta, agency_id, ScheduleDays(day, day, [(agency_id, day, stem)]))
+    meta = resolve_definition_meta("ranking", None, None, live=joined is not None)
+    schedule = ScheduleDays(day, day, [(agency_id, day, stem)])
+    meta = await stamp_build(aconn, meta, agency_id, schedule, joined=joined)
     return meta.timetable_versions[0].content_hash
+
+
+def _joined(ch_client, agency_id):
+    join = static_archive.schedule_join(ch_client, agency_id, None)
+    return {(agency_id, stem): content for stem, content in zip(join.stems, join.hashes, strict=True)}
 
 
 async def test_a_remapped_name_is_named_by_its_new_content_beside_aggregates_only_once_they_are_rebuilt(
@@ -522,7 +530,8 @@ async def test_a_remapped_name_is_named_by_its_new_content_beside_aggregates_onl
 ):
     """Aggregates built before a name was remapped hold figures of its old
     content, so the stamp beside them names no content until analyze rebuilds
-    them under the new one; a live scan joins the new content at once."""
+    them under the new one; a live scan whose join holds the remap names the
+    new content at once."""
     from tests.pipeline.test_analyze import _analyze
 
     _seed(pg_conn, agency_id)
@@ -534,7 +543,36 @@ async def test_a_remapped_name_is_named_by_its_new_content_beside_aggregates_onl
     second = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
     assert second != first
     assert await _stamped_content(aconn, agency_id, "gtfs_static_20261025") is None
-    assert await _stamped_content(aconn, agency_id, "gtfs_static_20261025", live=True) == second[:8]
+    assert (
+        await _stamped_content(aconn, agency_id, "gtfs_static_20261025", joined=_joined(ch_client, agency_id))
+        == (second[:8])
+    )
 
     _analyze(agency_id, pg_conn, ch_client)
     assert await _stamped_content(aconn, agency_id, "gtfs_static_20261025") == second[:8]
+
+
+def test_a_mirror_write_that_fails_after_a_remap_still_leaves_the_rebuild_to_come(
+    pg_conn, agency_id, ch_client, monkeypatch
+):
+    """The states are cleared before the map row lands and the mirror row
+    after it, so a mirror that fails then still has the archive-joined tables
+    rebuilt, and the next archive mirrors the remap at the map row's own time."""
+    _seed(pg_conn, agency_id)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    _give_every_table_a_state(pg_conn, agency_id)
+    _change_the_content(pg_conn, agency_id)
+    real_mirror = static_archive.mirror
+
+    def mirror(*args, **kwargs):
+        raise RuntimeError("injected failure of the mirror write")
+
+    monkeypatch.setattr(static_archive, "mirror", mirror)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert not _state_names(pg_conn, agency_id) & _archive_joined()
+    pg_conn.rollback()
+    monkeypatch.setattr(static_archive, "mirror", real_mirror)
+    second = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _mirrored(pg_conn, agency_id) == [_mapped_at(ch_client, agency_id)[-1]]
+    assert _mirrored(pg_conn, agency_id)[0][1] == second

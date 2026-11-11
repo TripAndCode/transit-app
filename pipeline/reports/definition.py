@@ -120,8 +120,10 @@ class TimetableVersion(BaseModel):
     other content shows the other hash. None for a name the archive does not
     map, which no hash is guessed for, and for the days with none recorded.
     Beside aggregates it is None as well while they hold figures built before
-    the name was mapped to that content, until analyze rebuilds them; beside a
-    live scan it names the content the scan joined."""
+    the name was mapped to that content, until analyze rebuilds them. Beside a
+    live scan it is the content the join that filed the scan's rows maps the
+    name to (:func:`pipeline.live_filing.schedule_join`), and None for an
+    agency whose ingest stamps no version, which has no such join."""
 
     agency_id: int
     name: str | None
@@ -231,16 +233,28 @@ ORDER BY a.agency_id, h.date
 """
 
 
-async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedule: ScheduleDays) -> DefinitionMeta:
+async def stamp_build(
+    conn,
+    meta: DefinitionMeta,
+    agency_id: int | None,
+    schedule: ScheduleDays,
+    joined: dict[tuple[int, str], str] | None = None,
+) -> DefinitionMeta:
     """*meta* with the timetables in force over *schedule*'s dates, each named
     one with its content's short hash, the source of each of those days'
     observations, and ``built_at``: the newest time analyze rewrote any
     aggregate, all for *agency_id*, or for every agency the board lists when it
     is None. *schedule* is that scope's
     :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
-    gets its timetables and sources and no build. Everything is read from
-    Postgres: the contents from the version map's mirror, never from
+    gets its timetables and sources and no build. Nothing is read from
     ClickHouse.
+
+    Beside aggregates, the contents are read from the version map's Postgres
+    mirror (:func:`_read_contents`). Beside a live scan they are *joined*: the
+    content the join that filed the scan's rows maps each (agency, name) to.
+    The mirror can already hold a remap that join, cached per process, has not
+    seen yet, or still lag one it has, so it never names a live scan's
+    content. A live stamp given no join names none.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
     so when analyze has rewritten any table since this process last looked, every
@@ -249,10 +263,9 @@ async def stamp_build(conn, meta: DefinitionMeta, agency_id: int | None, schedul
     """
     sources = await _read_source_days(conn, agency_id, schedule.from_date, schedule.to_date)
     versions = _timetables(schedule)
+    contents = (joined or {}) if meta.source == "live" else await _read_contents(conn, versions)
     update: dict[str, object] = {
-        "timetable_versions": _with_contents(
-            versions, await _read_contents(conn, versions), live=meta.source == "live"
-        ),
+        "timetable_versions": _with_contents(versions, contents),
         "source_mix": None if sources is None else _source_mix(sources, schedule.from_date, schedule.to_date),
     }
     if meta.source == "aggregates":
@@ -335,35 +348,31 @@ JOIN {static_archive.MIRROR} m ON m.agency_id = n.agency_id AND m.static_version
 """
 
 
-async def _read_contents(conn, versions: list[TimetableVersion]) -> dict[tuple[int, str], tuple[str, bool]]:
+async def _read_contents(conn, versions: list[TimetableVersion]) -> dict[tuple[int, str], str]:
     """The content the version map maps each named timetable of *versions*
-    to, by (agency, name), as its Postgres mirror holds it, and whether the
-    agency's aggregates were built under it (:data:`_CONTENTS_SQL`). Empty on
-    a database not yet migrated to the mirror, whose timetables then carry no
-    hash; nothing is read when *versions* names none."""
+    to, by (agency, name), as its Postgres mirror holds it, for each name the
+    agency's aggregates were built under that content (:data:`_CONTENTS_SQL`):
+    what a stamp beside aggregates names. Empty on a database not yet migrated
+    to the mirror, whose timetables then carry no hash; nothing is read when
+    *versions* names none."""
     named = [(version.agency_id, version.name) for version in versions if version.name is not None]
     if not named:
         return {}
     agencies, names = [agency for agency, _ in named], [name for _, name in named]
     tables = static_archive.archive_joined_tables()
     rows = await _fetch_enrichment(conn, static_archive.MIRROR, _CONTENTS_SQL, agencies, names, tables)
-    return {} if rows is None else {(row[0], row[1]): (row[2], row[3]) for row in rows}
+    return {} if rows is None else {(row[0], row[1]): row[2] for row in rows if row[3]}
 
 
-def _with_contents(
-    versions: list[TimetableVersion], contents: dict[tuple[int, str], tuple[str, bool]], *, live: bool
-) -> list[TimetableVersion]:
+def _with_contents(versions: list[TimetableVersion], contents: dict[tuple[int, str], str]) -> list[TimetableVersion]:
     """*versions*, each named one whose agency and name *contents* maps
-    carrying the short form of its content: beside a *live* scan, which joins
-    the map as it stands, always; beside aggregates, only when they were built
-    under that content."""
+    carrying the short form of its content."""
     named = []
     for version in versions:
-        found = None if version.name is None else contents.get((version.agency_id, version.name))
-        if found is None or not (live or found[1]):
-            named.append(version)
-        else:
-            named.append(version.model_copy(update={"content_hash": found[0][:CONTENT_HASH_DIGITS]}))
+        content = None if version.name is None else contents.get((version.agency_id, version.name))
+        named.append(
+            version if content is None else version.model_copy(update={"content_hash": content[:CONTENT_HASH_DIGITS]})
+        )
     return named
 
 

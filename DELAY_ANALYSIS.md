@@ -75,7 +75,8 @@ timetable archive maps the name to (`static_version_map`), read from its Postgre
 shows no hash. Beside aggregates, a hash is shown only when they were built under that
 content: once a name is remapped to new content, aggregates built before the remap still
 hold figures of the old one, so their stamp shows no hash until analyze rebuilds them. A
-live scan joins the content mapped now and shows its hash.
+live scan shows the content of the join that filed its rows, which can lag a remap made in
+another process for as long as that join stays cached.
 
 | Version | What changed | Tables |
 |---|---|---|

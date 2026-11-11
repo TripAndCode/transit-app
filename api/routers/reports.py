@@ -745,12 +745,13 @@ async def get_performance_standards(
         live = not report_reads_aggregates(
             "route_table", ctx, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
         )
-        schedule = await _scanned_schedule(conn, ch, agency_id, ctx, live)
+        schedule, joined = await _scanned_schedule(conn, ch, agency_id, ctx, live)
         on_time_definition = await stamp_build(
             conn,
             resolve_definition_meta("on_time", early_tolerance_sec, late_tolerance_sec, live=live),
             agency_id,
             schedule,
+            joined,
         )
     rows = await compute_performance_standards(
         agency_id,
@@ -773,15 +774,23 @@ async def get_performance_standards(
 
 async def _scanned_schedule(
     conn: asyncpg.Connection, ch: AsyncClient, agency_id: int, ctx: RangeCtx, live: bool
-) -> ScheduleDays:
+) -> tuple[ScheduleDays, dict[tuple[int, str], str] | None]:
     """The timetables the request's figures were computed under, for its
     definition stamp: as analyze recorded them, or for a live scan, each day
-    named after the version the scan filed it under."""
+    named after the version the scan filed it under, with the content the
+    scan's join maps each (agency, name) to. Read here first in the request,
+    it is the join the process's cache then files the rows under, unless that
+    cache is cleared or its archive state expires before they are read. No
+    contents beside aggregates, or for an agency whose ingest stamps no
+    version, which has no join."""
     schedule = await read_schedule_days(conn, agency_id, ctx.from_date, ctx.to_date)
     if not live:
-        return schedule
+        return schedule, None
     join = await schedule_join(conn, ch, agency_id)
-    return schedule if join is None else schedule.filed_under(agency_id, join.force)
+    if join is None:
+        return schedule, None
+    joined = {(agency_id, stem): content for stem, content in zip(join.stems, join.hashes, strict=True)}
+    return schedule.filed_under(agency_id, join.force), joined
 
 
 class WeatherStation(BaseModel):
@@ -1687,12 +1696,13 @@ async def render_report(
         early_tolerance_sec=early_tolerance_sec,
         late_tolerance_sec=late_tolerance_sec,
     )
-    schedule = await _scanned_schedule(conn, ch, agency_id, ctx, live)
+    schedule, joined = await _scanned_schedule(conn, ch, agency_id, ctx, live)
     definition = await stamp_build(
         conn,
         resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live),
         agency_id,
         schedule,
+        joined,
     )
     credit = (
         credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang or locale)
