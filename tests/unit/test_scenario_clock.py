@@ -12,17 +12,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures import scenario_oracle as oracle
 from tests.fixtures.scenario import poll_batches
 from tests.fixtures.scenario_clock import JST, LIVE_TTL, RUN_BOUND, anchor_day, check_closed_and_live
-from tests.pipeline.test_scenarios import (
-    cancellations,
-    night_route,
-    plain_weekday,
-    timetable_change,
-    timetable_published_early,
-)
+from tests.pipeline.test_scenarios import _ALL
 
-_SCENARIOS = (plain_weekday, night_route, timetable_change, timetable_published_early, cancellations)
+_SCENARIOS = tuple(param.values[0] for param in _ALL)
 _DAY = datetime(2026, 11, 8).date()
 
 
@@ -40,6 +35,13 @@ def _captures(build, now: datetime) -> list[datetime]:
 def test_every_scenario_fits_the_live_window_whenever_it_runs(build, clock):
     now = _at(clock)
     check_closed_and_live(_captures(build, now), now)
+
+
+@pytest.mark.parametrize("build", _SCENARIOS, ids=lambda build: build.__name__)
+def test_the_oracle_gives_every_scenario_each_figure_the_runner_compares(build):
+    found = oracle.outcome(build(_DAY))
+    oracle.headway_days(found)
+    assert oracle.scorecard(found)
 
 
 def test_a_run_just_before_the_service_day_turns_anchors_three_calendar_days_back():
