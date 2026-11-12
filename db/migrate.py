@@ -8,6 +8,7 @@ Driven by `gtfs_pipeline.py migrate up|down`.
 import functools
 import logging
 import pathlib
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,154 @@ def is_destructive_down(sql: str) -> bool:
     does not trip the gate.
     """
     return any(line.strip().startswith(_DESTRUCTIVE_MARKER) for line in sql.splitlines())
+
+
+@functools.cache
+def rebuildable_agg_tables() -> frozenset[str]:
+    """Aggregates a later analyze run rebuilds in full from source data: its
+    rebuild set and its agg_meta bookkeeping, plus agg_route_dow and
+    agg_stop_seq, which analyze built until they were retired. Any other
+    `agg_*` table, such as one analyze only upserts or one an ingest fills,
+    holds rows no rebuild restores.
+
+    Imported lazily: the API's health poll imports this module, and must not
+    pull in analyze with it.
+    """
+    from pipeline.analyze import _AGG_TABLES_ORDERED
+
+    return frozenset(_AGG_TABLES_ORDERED) | {"agg_meta", "agg_route_dow", "agg_stop_seq"}
+
+
+_SPECIAL = re.compile(r"""--|/\*|['";$]""")
+_DOLLAR_QUOTE = re.compile(r"\$(?:[^\W\d]\w*)?\$")
+
+
+def _is_word_char(ch: str) -> bool:
+    return bool(ch) and (ch.isalnum() or ch in "_$")
+
+
+def _quoted_end(sql: str, start: int) -> int:
+    """The index just past the quoted text opening at *start*. A doubled quote
+    escapes itself; in an E'' string a backslash escapes the next character."""
+    quote = sql[start]
+    backslash = quote == "'" and sql[start - 1 : start] in ("e", "E") and not _is_word_char(sql[start - 2 : start - 1])
+    pos = start + 1
+    while pos < len(sql):
+        if backslash and sql[pos] == "\\":
+            pos += 2
+        elif sql[pos] != quote:
+            pos += 1
+        elif sql.startswith(quote * 2, pos):
+            pos += 2
+        else:
+            return pos + 1
+    return len(sql)
+
+
+def _top_level_statements(sql: str) -> list[str]:
+    """The statements of *sql*, split at the semicolons outside quotes and
+    comments.
+
+    A comment becomes a space, a string literal `''` and a dollar-quoted body
+    `$$`, so no text, quote or semicolon inside them reads as SQL. A quoted
+    identifier is kept, since it may name a table. Block comments nest, as
+    in Postgres. A `$` after an identifier character, or before a digit, does
+    not open a dollar quote.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    pos = 0
+    while (special := _SPECIAL.search(sql, pos)) is not None:
+        start = special.start()
+        current.append(sql[pos:start])
+        token = special.group()
+        if token == "--":
+            end = sql.find("\n", start)
+            pos = len(sql) if end < 0 else end
+            current.append(" ")
+        elif token == "/*":
+            depth, pos = 1, start + 2
+            while depth and pos < len(sql):
+                step = sql[pos : pos + 2]
+                depth += 1 if step == "/*" else -1 if step == "*/" else 0
+                pos += 2 if step in ("/*", "*/") else 1
+            current.append(" ")
+        elif token == "'":
+            pos = _quoted_end(sql, start)
+            current.append("''")
+        elif token == '"':
+            pos = _quoted_end(sql, start)
+            current.append(sql[start:pos])
+        elif token == ";":
+            statements.append("".join(current))
+            current = []
+            pos = start + 1
+        elif (dollar := _DOLLAR_QUOTE.match(sql, start)) and not _is_word_char(sql[start - 1 : start]):
+            end = sql.find(dollar.group(), dollar.end())
+            pos = len(sql) if end < 0 else end + len(dollar.group())
+            current.append("$$")
+        else:
+            current.append(token)
+            pos = start + 1
+    current.append(sql[pos:])
+    statements.append("".join(current))
+    return [statement for statement in statements if statement.strip()]
+
+
+_NAME = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)'
+_TABLE = rf"{_NAME}(?:\s*\.\s*{_NAME})?"
+_TABLES = rf"{_TABLE}(?:\s*,\s*{_TABLE})*"
+# In ALTER TABLE, a DROP followed by none of these drops a column, with or
+# without the COLUMN keyword.
+_KEPT_ON_ALTER_DROP = r"(?:CONSTRAINT|DEFAULT|NOT|EXPRESSION|IDENTITY)\b"
+_DATA_LOSS = re.compile(
+    rf"^\s*(?:DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<drop>{_TABLES})"
+    rf"|DELETE\s+FROM\s+(?:ONLY\s+)?(?P<delete>{_TABLE})"
+    rf"|TRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?(?P<truncate>{_TABLES})"
+    rf"|ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s.*?\bDROP\s+(?!{_KEPT_ON_ALTER_DROP}))",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _table_names(group: str) -> list[str]:
+    """Bare table names in a matched (possibly comma-listed, schema-qualified,
+    quoted) group."""
+    names = re.findall(_TABLE, group)
+    return [re.findall(_NAME, name)[-1].strip('"') for name in names]
+
+
+def data_losing_tables(sql: str) -> list[str]:
+    """Tables outside `rebuildable_agg_tables()` that a top-level statement in
+    *sql* drops, drops a column from, or deletes or truncates rows of.
+
+    A down migration it flags must carry the `-- DESTRUCTIVE` marker
+    (tests/unit/test_migration_destructive_markers.py), and a pending up
+    migration it flags stops scripts/dev_upgrade.py until the owner names it.
+    The rebuildable aggregates are exempt in both directions: their rows derive
+    from source data, and an analyze rebuild restores them. A plain
+    analyze-all rebuilds an incremental aggregate only for the dates its
+    ledger or its table fingerprint marks, so a migration that deletes such
+    rows also bumps that table's registry version, or the rebuild needs FULL=1.
+
+    Scope: DROP TABLE, DELETE FROM, TRUNCATE, and ALTER TABLE ... DROP [COLUMN]
+    statements, read past comments, string literals and dollar-quoted bodies.
+    An UPDATE is not counted: a backfill in a reviewed migration rewrites
+    values on purpose. Not detected: statements inside a DO block or a function
+    body, a data-modifying WITH ... DELETE, MERGE ... DELETE, a narrowing ALTER
+    COLUMN ... TYPE, DROP SCHEMA/EXTENSION/TYPE ... CASCADE, rows a TRUNCATE
+    ... CASCADE reaches in tables it does not name, and a called function that
+    deletes. A migration losing data that way needs the marker, or the owner's
+    word, by its author's own judgment.
+    """
+    rebuildable = rebuildable_agg_tables()
+    tables: list[str] = []
+    for statement in _top_level_statements(sql):
+        m = _DATA_LOSS.match(statement)
+        if not m:
+            continue
+        group = m.group("drop") or m.group("delete") or m.group("truncate") or m.group("alter")
+        tables.extend(name for name in _table_names(group) if name.lower() not in rebuildable)
+    return tables
 
 
 _CREATE_TRACKING = """

@@ -23,19 +23,19 @@ tier routing, the high-risk overlay and the fix cap.
 
 ## Hard rules
 
-- **Dev databases are read-only, with one sanctioned way forward.** Dev Postgres and
-  dev ClickHouse (`docker compose exec clickhouse`) hold real data. SELECT/EXPLAIN is
+- **Dev databases are read-only but for two sanctioned paths.** Dev Postgres and dev
+  ClickHouse (`docker compose exec clickhouse`) hold real data. SELECT/EXPLAIN is
   allowed. The only writes an agent makes there:
   - `scripts/dev_upgrade.py`, after a merge: migrations up, the ClickHouse schema,
-    analyze-all, then check-aggs. Its `--check` comes first. It runs only from the
-    primary checkout, with a clean tree at `origin/main`, and refuses anything else.
-  - A one-time operator script that a merged PR's body names for dev, run from that
-    same checkout. Read its dry run before `--apply`.
+    analyze-all, then check-aggs. Its `--check` comes first; its docstring lists the
+    preconditions it enforces.
+  - A one-time operator script that a merged PR's body names for dev. Run it from the
+    primary checkout at `origin/main`, so it runs merged code, and read its dry run
+    before `--apply`.
 
-  A pending up migration that changes or removes rows waits for the owner to name
-  it with `--allow-destructive-up`. Nothing else is allowed: other writes, DDL,
-  resets, down migrations, prunes, ingests, or a destructive Make target on a
-  command line.
+  A pending up migration that loses data waits for the owner to name it with
+  `--allow-destructive-up`. Nothing else is allowed: other writes, DDL, resets, down
+  migrations, prunes, ingests, or a destructive Make target.
   - Dev Postgres is whichever port the live container publishes. `compose.yml`
     declares `:5433`, but the instance holding the data can be published elsewhere,
     so read `DATABASE_URL` rather than assuming.

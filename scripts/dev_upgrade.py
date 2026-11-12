@@ -5,14 +5,18 @@ This is the one path by which an agent writes to the dev stores (AGENTS.md), so
 it refuses everything that could carry unreviewed code or schema into real
 data:
 - it runs only from the primary checkout, never a linked worktree;
-- that checkout's tracked tree is clean, and its HEAD is origin/main after a
-  fetch;
-- one run at a time, under a lock in the git directory.
+- that checkout's tracked tree is clean, it holds no untracked file a step
+  could pick up (`_PICKED_UP`), and its HEAD is origin/main after a fetch;
+- one run at a time, under a lock in the git directory;
+- with migrations pending, it starts at step 1, since the later steps expect
+  the migrated schema.
 
-A pending up migration that drops, deletes, truncates or updates rows stops the
-run before anything is written, unless the owner names that version with
---allow-destructive-up. The check is a conservative reading of the SQL, so a
-false stop costs one question and never a dataset.
+A pending up migration that `db.migrate.data_losing_tables` flags, one that
+drops a table or column or deletes or truncates rows outside the aggregates
+analyze rebuilds from source, stops the run before anything is written, until the
+owner names that version with --allow-destructive-up. A backfill UPDATE does
+not stop it. That function's docstring lists the shapes it does not detect;
+catching those is the migration's review.
 
 --check prints the preconditions, the pending migrations and the plan, and
 writes nothing. --start N resumes at step N once the earlier steps succeeded.
@@ -37,18 +41,18 @@ import sys
 from collections.abc import Iterator
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+from db.migrate import data_losing_tables, pending_migrations  # noqa: E402  (sys.path injection above)
+
 MIGRATIONS = REPO / "db" / "migrations"
 LOG_DIR = pathlib.Path.home() / ".cache" / "transit-app"
 STEPS = ("migrate", "ch-bootstrap", "analyze-all", "check-aggs")
-
-# A DROP of anything that holds rows: what is not one of these schema objects.
-_HARMLESS_DROP = re.compile(
-    r"DROP\s+(IF\s+EXISTS\s+)?(CONSTRAINT|DEFAULT|NOT\s+NULL|INDEX|TRIGGER|FUNCTION|VIEW|MATERIALIZED\s+VIEW|POLICY)\b",
-    re.IGNORECASE,
-)
-# A foreign key's ON UPDATE / ON DELETE action is a rule, not a write. The text
-# is whitespace-normalised first, so one space separates the words.
-_DATA_CHANGE = re.compile(r"\b(DROP|DELETE FROM|TRUNCATE|(?<!ON )UPDATE)\b", re.IGNORECASE)
+# Untracked files a step would run although no review saw them: a module
+# Python imports, SQL, anything under db/ (migrate globs db/migrations by
+# name), and the makefiles GNU make reads ahead of Makefile.
+_PICKED_UP = ("*.py", "*.sql", "db", "GNUmakefile", "makefile")
+_URL_USERINFO = re.compile(r"(?<=://)[^/@\s]+@")
 
 
 class Refusal(Exception):
@@ -56,10 +60,16 @@ class Refusal(Exception):
 
 
 def _git(*args: str, cwd: pathlib.Path = REPO) -> str:
-    return subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True).stdout.strip()
+    try:
+        done = subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as failed:
+        first = (failed.stderr or "").strip().splitlines()[:1] or [f"exit {failed.returncode}"]
+        # A remote URL in git's message can carry a token.
+        raise Refusal(f"git {args[0]} failed in {cwd}: {_URL_USERINFO.sub('', first[0])}") from None
+    return done.stdout.strip()
 
 
-def check_checkout(repo: pathlib.Path = REPO, *, fetch: bool = True) -> None:
+def check_checkout(repo: pathlib.Path = REPO) -> None:
     """Refuse unless *repo* is the primary checkout, clean, at origin/main."""
     git_dir = pathlib.Path(_git("rev-parse", "--absolute-git-dir", cwd=repo))
     common = (repo / _git("rev-parse", "--git-common-dir", cwd=repo)).resolve()
@@ -67,8 +77,11 @@ def check_checkout(repo: pathlib.Path = REPO, *, fetch: bool = True) -> None:
         raise Refusal(f"{repo} is a linked worktree; run from the primary checkout")
     if _git("status", "--porcelain", "--untracked-files=no", cwd=repo):
         raise Refusal(f"{repo} has uncommitted changes to tracked files")
-    if fetch:
-        _git("fetch", "-q", "origin", "main", cwd=repo)
+    if untracked := _git("ls-files", "-z", "--others", "--exclude-standard", "--", *_PICKED_UP, cwd=repo):
+        paths = untracked.strip("\0").split("\0")
+        listed = ", ".join(paths[:5]) + (f" and {len(paths) - 5} more" if len(paths) > 5 else "")
+        raise Refusal(f"{repo} has untracked files a step could pick up: {listed}; commit or remove them")
+    _git("fetch", "-q", "origin", "main", cwd=repo)
     head, main = _git("rev-parse", "HEAD", cwd=repo), _git("rev-parse", "origin/main", cwd=repo)
     if head != main:
         raise Refusal(f"HEAD {head[:8]} is not origin/main {main[:8]}; fast-forward the primary checkout first")
@@ -89,51 +102,34 @@ def upgrade_lock(repo: pathlib.Path = REPO) -> Iterator[pathlib.Path]:
         lock.rmdir()
 
 
-def data_changes(sql: str) -> list[str]:
-    """The statements in *sql* that may drop, delete or rewrite rows: every
-    DROP but those of schema objects that hold none, and every DELETE FROM,
-    TRUNCATE and UPDATE. Comments are left out."""
-    code = "\n".join(line.split("--", 1)[0] for line in sql.splitlines())
-    flagged = []
-    for statement in code.split(";"):
-        text = " ".join(statement.split())
-        if not text:
-            continue
-        for match in _DATA_CHANGE.finditer(text):
-            if match.group(1).upper() == "DROP" and _HARMLESS_DROP.match(text, match.start()):
-                continue
-            flagged.append(text)
-            break
-    return flagged
-
-
 def destructive_pending(pending: list[str], migrations: pathlib.Path = MIGRATIONS) -> dict[str, list[str]]:
-    """Each pending version whose up migration changes or removes rows, with
-    the statements that do."""
+    """Each pending version whose up migration loses data, with the tables it
+    loses it from."""
     found = {}
     for version in pending:
         for path in sorted(migrations.glob(f"{version}_*.up.sql")):
-            if statements := data_changes(path.read_text()):
-                found[path.stem.removesuffix(".up")] = statements
+            if tables := data_losing_tables(path.read_text()):
+                found[path.stem.removesuffix(".up")] = tables
     return found
 
 
 def dev_database_url(repo: pathlib.Path = REPO) -> str:
-    """DATABASE_URL as the Makefile reads it, from the checkout's .env."""
+    """DATABASE_URL as the Makefile reads it from the checkout's .env: the
+    last assignment wins, as Make's `-include .env` makes it."""
     env = repo / ".env"
+    url = ""
     if env.exists():
         for line in env.read_text().splitlines():
             key, sep, value = line.strip().removeprefix("export ").partition("=")
             if sep and key.strip() == "DATABASE_URL":
-                return value.strip().strip("'\"")
-    raise Refusal(f"no DATABASE_URL in {env}")
+                url = value.strip().strip("'\"")
+    if not url:
+        raise Refusal(f"no DATABASE_URL in {env}")
+    return url
 
 
 def pending_versions(url: str) -> list[str]:
     import psycopg2
-
-    sys.path.insert(0, str(REPO))
-    from db.migrate import pending_migrations
 
     conn = psycopg2.connect(url)
     try:
@@ -141,6 +137,22 @@ def pending_versions(url: str) -> list[str]:
         return pending_migrations(conn)
     finally:
         conn.close()
+
+
+def _stop_reason(
+    pending: list[str], destructive: dict[str, list[str]], plan: tuple[str, ...], approved: list[str]
+) -> str | None:
+    """Why a real run must not start, or None."""
+    if pending and "migrate" not in plan:
+        return "pending migrations; start from step 1, since the later steps expect the migrated schema"
+    unapproved = [name for name in destructive if name.split("_")[0] not in approved]
+    if unapproved:
+        return (
+            "pending up migrations lose data: "
+            + ", ".join(unapproved)
+            + ". The owner names each with --allow-destructive-up VERSION before it runs."
+        )
+    return None
 
 
 def _run(step: str, log) -> None:
@@ -169,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="VERSION",
-        help="the owner's go-ahead for a pending up migration that changes or removes rows",
+        help="the owner's go-ahead for a pending up migration that loses data",
     )
     args = parser.parse_args(argv)
     try:
@@ -177,23 +189,17 @@ def main(argv: list[str] | None = None) -> int:
         pending = pending_versions(dev_database_url())
         destructive = destructive_pending(pending)
         print(f"pending migrations: {', '.join(pending) or 'none'}")
-        for name, statements in destructive.items():
-            print(f"changes or removes rows: {name}")
-            for statement in statements:
-                print(f"    {statement[:160]}")
-        unapproved = [name for name in destructive if name.split("_")[0] not in args.allow_destructive_up]
+        for name, tables in destructive.items():
+            print(f"loses data in {', '.join(tables)}: {name}")
         plan = STEPS[args.start - 1 :]
         print(f"plan: {' -> '.join(plan)}")
+        stop = _stop_reason(pending, destructive, plan, args.allow_destructive_up)
         if args.check:
-            if unapproved:
-                print("a real run stops here until the owner names each version above with --allow-destructive-up")
+            if stop:
+                print(f"a real run refuses: {stop}")
             return 0
-        if unapproved and "migrate" in plan:
-            raise Refusal(
-                "pending up migrations change or remove rows: "
-                + ", ".join(unapproved)
-                + ". The owner names each with --allow-destructive-up VERSION before it runs."
-            )
+        if stop:
+            raise Refusal(stop)
         with upgrade_lock():
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             log_path = LOG_DIR / f"dev-upgrade-{dt.datetime.now():%Y%m%d-%H%M%S}.log"
