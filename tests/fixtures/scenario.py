@@ -27,6 +27,11 @@ poll's content, its header too or not, for a stretch.
 A timetable may plan a dwell, an arrival before the departure at a stop, and
 a feed model may report arrivals beside departures, as the feeds confirmed to
 send them do: each run then declares when it reached every stop as well.
+
+The collector archives every poll it captures and may push the app only some
+of them. Each JST calendar day of capture reaches the app by the live path,
+the polls pushed, by the collector's archive, every poll, or by both in an
+order the scenario states (``Delivery``).
 """
 
 from __future__ import annotations
@@ -36,7 +41,7 @@ import io
 import itertools
 import math
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
@@ -341,6 +346,16 @@ class FeedModel:
     on reaching its last stop. Such a feed neither misreports nor freezes,
     and runs every trip it schedules: none is cancelled or goes unreported,
     and no run skips a stop.
+
+    ``push_interval_sec``: the collector polls every ``poll_interval_sec``
+    and archives every poll, but pushes the app one poll every
+    ``push_interval_sec``, a whole multiple of the poll interval, or every
+    poll when None. The collector pushes every n-th poll it makes; a poll
+    is pushed here when its capture instant is a whole multiple of the push
+    interval on the POSIX clock, which fixes the phase so a scenario can
+    tell which polls are pushed. A feed pushed more sparsely than it is
+    polled neither cancels a trip nor skips a stop, since the polls it
+    pushes might not carry the report.
     """
 
     prediction: Literal["perfect"] = "perfect"
@@ -349,12 +364,46 @@ class FeedModel:
     misreports: tuple[Misreport, ...] = ()
     freezes: tuple[Freeze, ...] = ()
     arrivals: bool = False
+    push_interval_sec: int | None = None
+
+    @property
+    def sparse(self) -> bool:
+        """Whether the collector pushes fewer polls than it captures."""
+        return self.push_interval_sec is not None and self.push_interval_sec != self.poll_interval_sec
+
+    def pushes(self, poll: Poll) -> bool:
+        """Whether the collector pushes *poll* to the app."""
+        return self.push_interval_sec is None or int(poll.captured_at.timestamp()) % self.push_interval_sec == 0
+
+
+@dataclass(frozen=True)
+class Delivery:
+    """How the polls captured on one JST calendar day ``day`` reach the app.
+
+    ``live``: the collector pushes them as it captures them (``FeedModel``),
+    and promotion copies the day into history once it has closed.
+    ``archive``: the operator ingests the collector's archive of the day,
+    which holds every poll it captured. A day offered both ways has its
+    archive ingested after promotion has run, as the daily archive job
+    follows the promotion run, unless ``archive_first``: the archive is
+    ingested before promotion reaches the day, as a backfill can be. A day
+    no ``Delivery`` names reaches the app by the live path alone."""
+
+    day: date
+    live: bool = True
+    archive: bool = False
+    archive_first: bool = False
 
 
 @dataclass(frozen=True)
 class Scenario:
     """An operation and its truth. ``timetable`` is in force from the first
-    service day; each of ``revisions`` replaces it from its own first day."""
+    service day; each of ``revisions`` replaces it from its own first day.
+    ``deliveries`` says how the polls of each JST calendar day of capture
+    reach the app. A scenario that declares a delivery runs one timetable,
+    so that every day's polls are taken in the one order ``handoff`` gives,
+    and one whose archive is ingested freezes no feed, since archive ingest
+    stamps a poll with its FeedHeader timestamp, not its capture instant."""
 
     name: str
     routes: tuple[Route, ...]
@@ -365,8 +414,10 @@ class Scenario:
     revisions: tuple[TimetableVersion, ...] = ()
     cancellations: tuple[Cancellation, ...] = ()
     unreported: tuple[Unreported, ...] = ()
+    deliveries: tuple[Delivery, ...] = ()
 
     def __post_init__(self) -> None:
+        self._check_deliveries()
         events: list[TripRun | Cancellation | Unreported] = [*self.runs, *self.cancellations, *self.unreported]
         _unique("route", [r.route_id for r in self.routes])
         _unique("service day", [d.date for d in self.days])
@@ -452,6 +503,29 @@ class Scenario:
                     raise ValueError(
                         f"{trip.trip_id} is scheduled on {day.date} but has no run, cancellation or unreported entry"
                     )
+
+    def _check_deliveries(self) -> None:
+        feed = self.feed
+        _unique("delivery day", [d.day for d in self.deliveries])
+        for delivery in self.deliveries:
+            if not (delivery.live or delivery.archive):
+                raise ValueError(f"{delivery.day} reaches the app by no path")
+            if delivery.archive_first and not (delivery.live and delivery.archive):
+                raise ValueError(f"{delivery.day}: only a day offered both ways is archived first")
+        if feed.push_interval_sec is not None and feed.push_interval_sec <= 0:
+            raise ValueError("a push interval must be positive")
+        if feed.push_interval_sec is not None and feed.push_interval_sec % feed.poll_interval_sec:
+            raise ValueError(f"a push every {feed.push_interval_sec} s is not a multiple of the poll interval")
+        if feed.sparse and (self.cancellations or any(None in r.actual_sec for r in self.runs)):
+            raise ValueError("a feed pushed more sparsely than it is polled neither cancels a trip nor skips a stop")
+        if self.deliveries and self.revisions:
+            raise ValueError("a scenario that declares a delivery runs one timetable")
+        if any(d.archive for d in self.deliveries) and feed.freezes:
+            raise ValueError("a scenario whose archive is ingested freezes no feed")
+
+    def delivery(self, day: date) -> Delivery:
+        """How the polls captured on JST calendar *day* reach the app."""
+        return next((d for d in self.deliveries if d.day == day), Delivery(day))
 
     @property
     def versions(self) -> tuple[TimetableVersion, ...]:
@@ -923,3 +997,41 @@ def poll_batches(scenario: Scenario) -> list[tuple[TimetableVersion, list[Poll]]
                 raise ValueError(f"{poll.source_file} carries {day} before its timetable is loaded")
         batches[index][1].append(poll)
     return batches
+
+
+def capture_day(poll: Poll) -> date:
+    """The JST calendar day *poll* was captured on."""
+    return poll.captured_at.astimezone(JST).date()
+
+
+@dataclass(frozen=True)
+class Handoff:
+    """What the app is handed of some captured polls, by the step that hands
+    it over, in the order the operator takes the steps: the archive ingested
+    before promotion runs, the polls the collector pushed, which promotion
+    copies into history, and the archive ingested after promotion."""
+
+    archived_first: tuple[Poll, ...]
+    pushed: tuple[Poll, ...]
+    archived_after: tuple[Poll, ...]
+
+
+def handoff(scenario: Scenario, captured: Sequence[Poll]) -> Handoff:
+    """*captured* as each day's ``Delivery`` hands it to the app.
+
+    Raises when a delivery names a day no poll of *captured* was captured
+    on, which would then test nothing."""
+    days = {capture_day(poll) for poll in captured}
+    idle = sorted(d.day for d in scenario.deliveries if d.day not in days)
+    if idle:
+        raise ValueError(f"no poll is captured on these delivery days: {idle}")
+    first: list[Poll] = []
+    pushed: list[Poll] = []
+    after: list[Poll] = []
+    for poll in captured:
+        delivery = scenario.delivery(capture_day(poll))
+        if delivery.live and scenario.feed.pushes(poll):
+            pushed.append(poll)
+        if delivery.archive:
+            (first if delivery.archive_first else after).append(poll)
+    return Handoff(tuple(first), tuple(pushed), tuple(after))

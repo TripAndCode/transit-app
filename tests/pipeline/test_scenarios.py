@@ -1,27 +1,31 @@
 """Scenarios with known truth, pushed through the real ingest path.
 
 Each scenario (``tests.fixtures.scenario``) declares an operation and its
-truth. Its static GTFS loads through ``load_static``, and each of its
-TripUpdate polls is POSTed to the collector's ingest endpoint. Promotion then
-moves the closed days into ``updates``, and ``analyze`` builds the aggregates.
-The aggregates, the report endpoints, the agencies board and the
-feed-quality scorecard are compared with ``tests.fixtures.scenario_oracle``,
-which computes the same figures from the truth and the polls its feed model
-sends.
+truth. Its static GTFS loads through ``load_static``. Each TripUpdate poll the
+collector pushes is POSTed to the collector's ingest endpoint, and promotion
+moves the closed days into ``updates``; each poll of a day the scenario
+delivers by the archive is written as the collector's archive file and read
+by archive ingest, before or after promotion as the scenario says.
+``analyze`` builds the aggregates after each step. The aggregates, the
+report endpoints, the agencies board and the feed-quality scorecard are
+compared with ``tests.fixtures.scenario_oracle``, which computes the same
+figures from the truth and the polls of its feed that reach ``updates``.
 
 A scenario whose timetable is revised loads each version at the instant it
 declares, as an operator loads a newly published zip, and ingests each poll
 against the version loaded when it was captured. After each version's polls
 the runner promotes and analyzes, as the daily jobs would before the next
 version arrives, so the run that sees the new version updates aggregates
-built under the old one.
+built under the old one. A scenario that delivers a day by the archive runs
+one timetable.
 
-The service days sit two days before the service day in progress, and every
-poll must land on a closed JST day and outlast the run in ``updates_live``
-(``tests.fixtures.scenario_clock``). Day types are declared with each day,
-not read from its weekday. A table keyed on the day of the week is compared
-under the service date's own weekday, which the oracle reads from the same
-date.
+The service days sit from two days before the service day in progress, and
+every poll must land on a closed JST day; every pushed poll must also outlast
+the run in ``updates_live`` (``tests.fixtures.scenario_clock``), so a day
+delivered by the archive alone may sit earlier. Day types are declared with
+each day, not read from its weekday. A table keyed on the day of the week is
+compared under the service date's own weekday, which the oracle reads from
+the same date.
 
 Each scenario runs through the pipeline once per module (the ``observed``
 fixture), and every test compares that one snapshot with the oracle. Every
@@ -57,6 +61,7 @@ from tests.fixtures import scenario_oracle as oracle
 from tests.fixtures.scenario import (
     JST,
     Cancellation,
+    Delivery,
     FeedModel,
     Freeze,
     Misreport,
@@ -71,10 +76,11 @@ from tests.fixtures.scenario import (
     Unreported,
     gtfs_clock,
     gtfs_seconds,
+    handoff,
     poll_batches,
     static_gtfs_zip,
 )
-from tests.fixtures.scenario_clock import anchor_day, check_closed_and_live
+from tests.fixtures.scenario_clock import anchor_day, check_closed, check_closed_and_live
 
 _COLLECTOR_SECRET = "scenario-secret"
 
@@ -658,6 +664,77 @@ def dwell(day: date) -> Scenario:
     )
 
 
+# The source-mix scenario's day line: six stops two minutes apart, four
+# trips ten minutes apart, delays in seconds per stop, the same on every
+# day. Each run enters the feed two minutes before it leaves, and the
+# collector pushes the app one poll in five, on the clock's fifth minutes.
+# No push falls between the 07:10 and 07:30 runs entering the feed and
+# leaving their first stops, so the live path never sees those departures.
+_SOURCE_DAY_LINE = {
+    "07:00:00": (20, 40, 60, 61, 90, 120),
+    "07:10:00": (0, 60, 120, 180, 240, 300),
+    "07:20:00": (30, 30, 30, 30, 30, 30),
+    "07:30:00": (-90, -70, -50, -30, 0, 10),
+}
+# The 07:20 run is predicted 400 s late at its third stop onward until
+# 07:23. Its third stop is last pushed at 07:20, inside that stretch, and
+# last archived at 07:24, after it.
+_STALE_FROM, _STALE_UNTIL, _STALE_DELAY_SEC = "07:15:00", "07:23:00", 400
+# The night line's one trip runs past midnight on the 平日.
+_SOURCE_NIGHT_LINE = ("23:52:00", (0, 30, 60, 90, 120, 150))
+
+
+def source_mix(day: date) -> Scenario:
+    """A day line run to the same truth on three days that reach the app by
+    different paths, the collector archiving every poll it captures each
+    minute and pushing the app every fifth.
+
+    The 土曜 before *day* reaches the app by the archive alone, as dense as
+    the collector captured it. *day*, a 平日, is offered both ways, its
+    archive ingested before promotion reaches it, so promotion must leave
+    it to the archive. The 土曜 after is offered both ways too, promoted
+    before its archive is ingested, so it stays as sparse as the pushes:
+    the departures no push caught are missing, a stale prediction stands,
+    and a gap opens where a departure went unseen. A night line runs only
+    on *day*, past midnight into the next calendar day, which the live path
+    holds, so *day*'s service day holds rows of both paths."""
+    before, after = day - timedelta(days=1), day + timedelta(days=1)
+    line = _route("M1", "Day line", 6, 34.63)
+    night = _route("M2", "Night line", 6, 34.65)
+    trips, runs, misreports = [], [], []
+    for service_date, day_type, code in ((before, "土曜", "sa"), (day, "平日", "wd"), (after, "土曜", "sa")):
+        for first, delays in _SOURCE_DAY_LINE.items():
+            trip = _trip(line, day_type, first, 120, f"M1_{code}{first[:5].replace(':', '')}")
+            if trip not in trips:
+                trips.append(trip)
+            runs.append(TripRun.from_delays(trip, service_date, delays))
+        stale = next(t for t in trips if t.trip_id == f"M1_{code}0720")
+        misreports.append(
+            Misreport(
+                stale.trip_id,
+                service_date,
+                _STALE_DELAY_SEC,
+                gtfs_seconds(_STALE_FROM),
+                gtfs_seconds(_STALE_UNTIL),
+                (3, 4, 5, 6),
+            )
+        )
+    night_trip = _trip(night, "平日", _SOURCE_NIGHT_LINE[0], 120, "M2_wd2352")
+    return Scenario(
+        name="source_mix",
+        routes=(line, night),
+        timetable=(*trips, night_trip),
+        days=(ServiceDay(before, "土曜"), ServiceDay(day, "平日"), ServiceDay(after, "土曜")),
+        runs=(*runs, TripRun.from_delays(night_trip, day, _SOURCE_NIGHT_LINE[1])),
+        feed=FeedModel(poll_interval_sec=60, lead_sec=120, push_interval_sec=300, misreports=tuple(misreports)),
+        deliveries=(
+            Delivery(before, live=False, archive=True),
+            Delivery(day, archive=True, archive_first=True),
+            Delivery(after, archive=True),
+        ),
+    )
+
+
 @dataclass(frozen=True, repr=False)
 class Rounded:
     """An exact figure a column or report holds rounded to *places* decimals.
@@ -753,11 +830,12 @@ _REPORTS = {
 
 @dataclass(frozen=True)
 class Observed:
-    """One scenario's run: the polls ingested under each timetable version,
+    """One scenario's run: the polls captured under each timetable version,
     and what the pipeline produced: each table's rows, a ``time`` or an
     ``interval`` as its ``HH:MM:SS`` text; each route report's rows; the trend
     report's first row; the council summary of every window ``_windows``
-    names; the route table's response for each time band the truth departs
+    names, with its definition stamp's source mix; the route table's
+    response for each time band the truth departs
     in; the headway quality response for every window ``_windows`` names;
     the agency's row of the agencies board over the whole period; the feed
     quality the route table's definition stamp states over it; and the dwell
@@ -1213,7 +1291,7 @@ def _month_label(part: str) -> str:
 def _clamp_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     """Each service day's readings, implausible readings and rows, and the
     clamp share the board, the stamp, the council summary and each month of
-    the scorecard state over their own days. Every row came in live."""
+    the scorecard state over their own days."""
     period = oracle.readings_over(found, *_windows(observed.scenario)[0])
     share = period.clamp_share
     months = {
@@ -1233,8 +1311,6 @@ def _clamp_expected(observed: Observed, found: oracle.Outcome) -> Cells:
                     "raw_samples": r.readings,
                     "clamp_count": r.implausible,
                     "total_rows": r.rows,
-                    "live_rows": r.rows,
-                    "archive_rows": 0,
                 }
                 for day, r in found.readings.items()
             },
@@ -1274,10 +1350,43 @@ def _clamp_actual(observed: Observed) -> Cells:
     )
 
 
+def _sources_label(surface: str) -> str:
+    return f"observations by path, {surface}"
+
+
+def _sources_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """Each service day's rows by the path they reached history by, and over
+    every window ``_windows`` names the days by source the definition stamp
+    states, so each single day's window names the source that day ended
+    with."""
+    return _cells(
+        _sources_label("agg_feed_health"),
+        {(day,): {"archive_rows": s.archive_rows, "live_rows": s.live_rows} for day, s in found.sources.items()},
+    ) | _cells(
+        _sources_label("definition stamp of GET reports/council_summary"),
+        {
+            window: {
+                "source_archive_days": mix.archive_days,
+                "source_live_days": mix.live_days,
+                "source_none_days": mix.none_days,
+            }
+            for window in _windows(observed.scenario)
+            for mix in (oracle.source_mix(found, *window),)
+        },
+    )
+
+
+def _sources_actual(observed: Observed) -> Cells:
+    return _keyed(_sources_label("agg_feed_health"), observed.tables["agg_feed_health"], ("date",)) | _cells(
+        _sources_label("definition stamp of GET reports/council_summary"), observed.council
+    )
+
+
 def _message_age_expected(observed: Observed, found: oracle.Outcome) -> Cells:
-    """Each month's polls and the quantiles of their message ages, every poll
-    a live one whose capture instant is known, each quantile to a tenth of a
-    second."""
+    """Each month's polls and the quantiles of their message ages, each
+    quantile to a tenth of a second. Every poll's capture instant is known,
+    whichever path delivered it: live by its capture time, archived by its
+    collector's file name."""
     months = {}
     for month, card in oracle.scorecard(found).items():
         # No scenario leaves a month without a poll between two with one; such a month has no ages.
@@ -1393,6 +1502,7 @@ _HEADWAY_DAILY = (_headway_daily_expected, _headway_daily_actual)
 _HEADWAY_QUALITY = (_headway_quality_expected, _headway_quality_actual)
 _CLAMP_SHARE = (_clamp_expected, _clamp_actual)
 _MESSAGE_AGE = (_message_age_expected, _message_age_actual)
+_SOURCES = (_sources_expected, _sources_actual)
 _DWELL_DAILY = (_dwell_daily_expected, _dwell_daily_actual)
 _DWELL_REPORT = (_dwell_report_expected, _dwell_report_actual)
 _COMPARISONS = (
@@ -1407,6 +1517,7 @@ _COMPARISONS = (
     _HEADWAY_QUALITY,
     _CLAMP_SHARE,
     _MESSAGE_AGE,
+    _SOURCES,
     _DWELL_DAILY,
     _DWELL_REPORT,
 )
@@ -1599,16 +1710,31 @@ async def _run_scenario(
     scenario: Scenario, pg_conn, ch_client, tmp_dir: Path, now: datetime
 ) -> tuple[int, list[tuple[TimetableVersion, list[Poll]]]]:
     """Load, ingest, promote and analyze *scenario* for a new agency; return
-    its id and the polls ingested under each timetable version.
+    its id and the polls captured under each timetable version.
 
     Each timetable version is loaded as ``refresh_static`` loads a fetched
-    zip, its polls are ingested, and the closed days are promoted and
-    analyzed before the next version is loaded."""
+    zip, and its polls are handed over step by step (``handoff``) before the
+    next version is loaded: the polls the collector pushed are ingested
+    live, the archive taken before promotion is ingested and analyzed, as
+    the archive job runs, the closed days are promoted and analyzed, as the
+    promotion run does, and then the archive taken after promotion is
+    ingested and analyzed."""
     from api.main import app
     from pipeline import day_types, live_filing, route_catalog, service_hours
     from pipeline.analyze import analyze
+    from pipeline.ingest import ingest
     from pipeline.promote import promote_closed_days
     from pipeline.static_loader import load_static
+
+    def ingest_archive(archived: tuple[Poll, ...], folder: Path) -> None:
+        """Ingest *archived* as the collector's archive lays it out, then analyze."""
+        for poll in archived:
+            path = folder / poll.source_file
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(poll.payload)
+        ingest(str(folder), agency_id, pg_conn, ch_client, strict=True)
+        analyze(agency_id, pg_conn, ch_client)
+        pg_conn.commit()
 
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -1620,9 +1746,11 @@ async def _run_scenario(
     pg_conn.commit()
 
     batches = poll_batches(scenario)
-    check_closed_and_live([poll.captured_at for _version, batch in batches for poll in batch], now)
+    steps = [(version, handoff(scenario, batch)) for version, batch in batches]
+    check_closed([poll.captured_at for _version, batch in batches for poll in batch], now)
+    check_closed_and_live([poll.captured_at for _version, step in steps for poll in step.pushed], now)
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        for version, batch in batches:
+        for version, step in steps:
             zip_path = tmp_dir / f"{version.name}.zip"
             zip_path.write_bytes(static_gtfs_zip(scenario, version))
             load_static(str(zip_path), agency_id, pg_conn, ch_client=ch_client)
@@ -1630,7 +1758,7 @@ async def _run_scenario(
             route_catalog.invalidate_retired_routes()
             service_hours.invalidate_service_hours()
             live_filing.invalidate_schedule_joins()
-            for poll in batch:
+            for poll in step.pushed:
                 resp = await client.post(
                     f"/internal/collector/updates/{agency_id}",
                     content=poll.payload,
@@ -1643,9 +1771,13 @@ async def _run_scenario(
                 )
                 if resp.status_code != 200 or resp.json()["inserted"] != poll.stored_rows:
                     raise RuntimeError(f"{poll.source_file} ({poll.stored_rows} rows): {resp.status_code} {resp.text}")
+            if step.archived_first:
+                ingest_archive(step.archived_first, tmp_dir / f"{version.name}_archived_first")
             promote_closed_days(agency_id, pg_conn, ch_client)
             analyze(agency_id, pg_conn, ch_client)
             pg_conn.commit()
+            if step.archived_after:
+                ingest_archive(step.archived_after, tmp_dir / f"{version.name}_archived_after")
     return agency_id, batches
 
 
@@ -1673,6 +1805,7 @@ def _council_figures(response: dict) -> dict[str, Any]:
     #           service_delivered_pct, early_departure_pct)
     row = response["rows"][0]
     comparability = response["comparability"] or {}
+    (mix,) = response["definition"]["source_mix"] or ({},)
     return {
         "planned_trips": row[3],
         "executed_trips": row[4],
@@ -1684,6 +1817,7 @@ def _council_figures(response: dict) -> dict[str, Any]:
         "coverage_planned_trips": comparability.get("coverage_planned_trips"),
         "coverage_pct": comparability.get("coverage_pct"),
         "clamp_pct": comparability.get("clamp_pct"),
+        **{f"source_{k}": mix.get(k) for k in ("archive_days", "live_days", "none_days")},
     }
 
 
@@ -1868,6 +2002,7 @@ _ALL = [
     pytest.param(clamp, id="clamp"),
     pytest.param(frozen_feed, id="frozen_feed"),
     pytest.param(dwell, id="dwell"),
+    pytest.param(source_mix, id="source_mix"),
 ]
 
 
@@ -1924,6 +2059,11 @@ def test_the_clamp_share_counts_every_implausible_reading_each_poll_sent(observe
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_message_age_reads_each_polls_capture_less_its_header(observed):
     _assert_clean(_hard_mismatches(observed, _MESSAGE_AGE))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_each_day_holds_the_rows_of_the_path_that_reached_it_first_and_is_stamped_with_its_majority(observed):
+    _assert_clean(_hard_mismatches(observed, _SOURCES))
 
 
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
