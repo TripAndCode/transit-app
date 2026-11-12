@@ -13,6 +13,7 @@ After that, each nightly run adds only the archives that have become final.
 
 | Timer (Asia/Tokyo) | Job | Output |
 |---|---|---|
+| daily 09:40 | `scripts/rt_validate_sample.py` (`transit-ml-validate`) | per agency, the GTFS-RT validator's counts per rule over the previous day's 09:00–10:00 JST polls, uploaded to `validation/<id>/<YYYYMMDD>.json` in the `transit-ml` bucket (see GTFS-RT validator sample) |
 | daily 10:30 | `python -m ml.cli sync` | R2 archives replayed into the replica in timeline order; done-set in `/var/lib/transit-ml/sync-state.json` |
 | Sundays 04:00 | `backtest` → `train-eval` → `report` → `train` → `publish-eval`, chained | `/var/lib/transit-ml/backtests/latest.json`, `models.json`, `/var/lib/transit-ml/reports/latest/index.html`; `train` publishes a new model only if it clears the adoption bar (see Models); `publish-eval` uploads `evaluations/<run_date>/summary.json` to the `transit-ml` bucket whatever the verdict |
 | after the Sunday chain, whatever its outcome | `python -m ml.cli live-score --publish` (`transit-ml-live-score.service`, started by the chain's `OnSuccess=`/`OnFailure=`; no timer of its own) | `/var/lib/transit-ml/backtests/live.json`, uploaded to `evaluations/<run_date>/live.json` (see Live scorecard) |
@@ -23,7 +24,7 @@ report, and `publish-eval` runs last so a failed summary upload can never stop a
 adopted model going out (`train` exits 0 on a rejected week, so the summary is
 still published). Each job reports to healthchecks.io through
 `deploy/vps/run-with-ping.sh` (`HC_PING_URL_SYNC`, `HC_PING_URL_BACKTEST`,
-`HC_PING_URL_PREDICT`, `HC_PING_URL_LIVE_SCORE`). The live scorecard has its own
+`HC_PING_URL_PREDICT`, `HC_PING_URL_LIVE_SCORE`, `HC_PING_URL_VALIDATE`). The live scorecard has its own
 check, so its failure never reads as the weekly job's.
 
 The evaluation summary is the web app's copy of that week's verdict: `adopted`,
@@ -42,7 +43,7 @@ The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, s
 
 ## Setup
 
-1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. Two separate R2 tokens are required: a read-only one scoped to `transit-archives` (`OBJECT_STORE_*`, what `sync` reads from) and a read-write one scoped to `transit-ml` (`ML_STORE_*`, what `train`/`predict`/`publish-eval`/`live-score` publish to). Each of those jobs swaps `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to the `ML_STORE_*` pair only for its own short-lived process, so the read-only pair is never exposed to a process that writes.
+1. Copy `deploy/vps/env.example` to `/etc/transit-ml/env` (root, mode 600) and fill it. Two separate R2 tokens are required: a read-only one scoped to `transit-archives` (`OBJECT_STORE_*`, what `sync` reads from) and a read-write one scoped to `transit-ml` (`ML_STORE_*`, what `train`/`predict`/`publish-eval`/`live-score` and the validator sample publish to). Each of those jobs swaps `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` to the `ML_STORE_*` pair only within its own short-lived process, so `sync` never holds the write pair. A job that also reads `transit-archives`, the validator sample, swaps only after its last read there, and the write pair is scoped to `transit-ml` alone.
 2. `bash deploy/vps/bootstrap.sh` from `/root/transit-app`. It is safe to re-run.
 
 ## Operating it
@@ -58,11 +59,58 @@ The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, s
 
 - The replica keeps every day it syncs, and nothing expires it. ClickHouse stores `updates` compressed at a few bytes per row, so a year of every agency comes to the order of ten gigabytes, well inside the VPS disk.
 - Postgres grows with each timetable version the collector archived.
-- Nothing else accumulates. Downloads are deleted after each sync action, ClickHouse's own logs either expire after a few days or are turned off, and each report replaces the last.
+- Nothing else accumulates. Downloads are deleted after each sync action, ClickHouse's own logs either expire after a few days or are turned off, and each report replaces the last. The validator sample deletes its downloads and results after each agency's run, and each summary once it is published.
 
 ## Trimming it
 
 R2 keeps everything, so old history can leave the replica whenever the disk needs it. `updates` is partitioned by UTC month of `captured_at`, so removing one is a metadata operation rather than a rewrite: `ALTER TABLE updates DROP PARTITION 202603` through `clickhouse-client` in the `ml-ch` service. The done-set still lists those archives, so the nightly sync leaves them out. Bringing a removed month back means a replay from scratch, because the replay has to load each timetable version before the days it governs.
+
+## GTFS-RT validator sample
+
+`transit-ml-validate` runs MobilityData's GTFS Realtime validator once a day on a
+sampled hour of each agency's archived TripUpdates, for the previous JST day D.
+`scripts/rt_validate_sample.py`'s docstring is the full contract; in short:
+
+- **Sample:** the polls of 09:00–10:00 JST on D, the first hour of R2's
+  `rt/<id>/<D>.tar.gz`, renamed so the validator times each poll by its capture
+  instant (`-sort name`) rather than by when it was unpacked.
+- **Timetable:** the newest `static/<id>/gtfs_static_*.zip` dated on or before D,
+  cut to the core GTFS files, since the validator's reader rejects GTFS-JP's
+  legacy `translations.txt`.
+- **Validator:** the official image `ghcr.io/mobilitydata/gtfs-realtime-validator`
+  at the digest the script pins (`IMAGE`), which `bootstrap.sh` pulls. It runs
+  with no network and no environment, under the script's heap, memory and CPU
+  caps and time limit (`HEAP_MAX_MB`, `CONTAINER_MEMORY`, `CONTAINER_CPUS`,
+  `TIMEOUT_SEC`): docker runs the JVM outside the unit's cgroup, so the unit's
+  `Nice=` does not reach it.
+  The project publishes no versioned release, so each summary names the image
+  digest, its source revision and the jar's sha256.
+- **Output:** one summary per agency and day at `validation/<id>/<YYYYMMDD>.json`
+  in the `transit-ml` bucket: the polls given and validated, the timetable used,
+  the runtime, a `status` (`ok`, `no_archive`, `no_timetable` or
+  `validator_failed`; `no_archive` also when the archive holds no poll in the
+  window) with its reason, and per rule its severity, title,
+  occurrences and the polls it fired in. The validator's own per-poll results are
+  deleted with the run. A summary whose upload fails stays under
+  `/var/lib/transit-ml/validation/<id>/`.
+- **Failure:** one agency's failure is its summary's status and never stops the
+  others; the job fails, and pings `/fail`, only when no agency's summary was ok
+  and published. A run budget (`RUN_BUDGET_SEC`), counted from the run's own
+  start, bounds the validator time: an agency starts only while its
+  validator's time limit still fits, and each agency left over gets
+  `validator_failed`, reason "run budget exhausted". An on-time 09:40 run so
+  leaves the 10:30 sync a margin for the downloads and uploads, which the
+  budget does not time; a catch-up run after downtime (`Persistent=true`) can
+  overlap the sync, which costs contention, not correctness.
+  So does a run whose validator wrote no results, or results the script cannot
+  read.
+
+The job reads `transit-archives` with the read-only pair and swaps in the
+`ML_STORE_*` pair only after its last read there. To validate a past day from a
+developer machine without Docker, pass the image's own jar (`IMAGE_JAR` inside
+the pinned image) to a local Java with `--jar`, which checks its sha256, with
+`--date` and `--no-upload`; `--dry-run` prints the plan
+from R2's listing alone.
 
 ## Baselines
 

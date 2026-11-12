@@ -199,7 +199,7 @@ def _adopted_train(tmp_path, monkeypatch, run):
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-key")
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-secret")
-    # Pre-registered so monkeypatch restores them: _use_store_credentials
+    # Pre-registered so monkeypatch restores them: use_store_credentials
     # writes os.environ directly (it must, to reach the real aws CLI), and
     # monkeypatch only undoes a variable it itself set.
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
@@ -306,7 +306,7 @@ def _stub_predict(monkeypatch, raw, origin):
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-key")
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-secret")
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
-    # Pre-registered so monkeypatch restores them: _use_store_credentials
+    # Pre-registered so monkeypatch restores them: use_store_credentials
     # writes os.environ directly (it must, to reach the real aws CLI), and
     # monkeypatch only undoes a variable it itself set.
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
@@ -420,33 +420,6 @@ def test_sync_passes_the_operators_skipped_archives_to_the_replay(monkeypatch, t
     assert key in capsys.readouterr().err
 
 
-def test_use_store_credentials_swaps_in_the_write_capable_pair(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "archive-readonly-key")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "archive-readonly-secret")
-    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-write-key")
-    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-write-secret")
-
-    cli._use_store_credentials()
-
-    assert os.environ["AWS_ACCESS_KEY_ID"] == "store-write-key"
-    assert os.environ["AWS_SECRET_ACCESS_KEY"] == "store-write-secret"
-
-
-def test_use_store_credentials_rejects_an_unset_but_present_variable(monkeypatch):
-    # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=`,
-    # exactly what env.example ships as a template -- os.environ[...] would
-    # return "" rather than raise, silently swapping in an empty credential.
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "archive-readonly-key")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "archive-readonly-secret")
-    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "")
-    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-write-secret")
-
-    with pytest.raises(SystemExit):
-        cli._use_store_credentials()
-
-    assert os.environ["AWS_ACCESS_KEY_ID"] == "archive-readonly-key"
-
-
 def _rejected_backtest(path):
     """A one-agency result with no slice rows: unmeasured, so judge() rejects it."""
     from ml.backtest import AgencyResult
@@ -472,7 +445,7 @@ def _store_env(monkeypatch, key="store-key", secret="store-secret"):
     monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
     monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", key)
     monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", secret)
-    # Pre-registered so monkeypatch restores them: _use_store_credentials
+    # Pre-registered so monkeypatch restores them: use_store_credentials
     # writes os.environ directly.
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "unused")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "unused")
