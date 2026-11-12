@@ -95,9 +95,13 @@ sampled hour of each agency's archived TripUpdates, for the previous JST day D.
   `/var/lib/transit-ml/validation/<id>/`.
 - **Failure:** one agency's failure is its summary's status and never stops the
   others; the job fails, and pings `/fail`, only when no agency's summary was ok
-  and published. A run budget (`RUN_BUDGET_SEC`) keeps it clear of the 10:30
-  sync: an agency starts only while its validator's time limit still fits, and
-  each agency left over gets `validator_failed`, reason "run budget exhausted".
+  and published. A run budget (`RUN_BUDGET_SEC`), counted from the run's own
+  start, bounds the validator time: an agency starts only while its
+  validator's time limit still fits, and each agency left over gets
+  `validator_failed`, reason "run budget exhausted". An on-time 09:40 run so
+  leaves the 10:30 sync a margin for the downloads and uploads, which the
+  budget does not time; a catch-up run after downtime (`Persistent=true`) can
+  overlap the sync, which costs contention, not correctness.
   So does a run whose validator wrote no results, or results the script cannot
   read.
 

@@ -32,10 +32,12 @@ One summary per agency and date (summary(), schema SCHEMA) is written to
 whose upload fails stays. A run that fails for one agency is that agency's
 status (STATUSES) and reason, and never stops the others; so is a validator
 that wrote no results, or results of a shape rule_counts cannot read. Agencies
-run one after another within RUN_BUDGET_SEC: one starts only while its
-validator's TIMEOUT_SEC still fits, and each left over is stated as
-validator_failed, "run budget exhausted". The run exits 1 only when no
-agency's summary is ok and published.
+run one after another within RUN_BUDGET_SEC, counted from the run's start:
+one starts only while its validator's TIMEOUT_SEC still fits, and each left
+over is stated as validator_failed, "run budget exhausted". The budget times
+the validator, not the downloads or the uploads. A summary that cannot be
+written is reported and skipped. The run exits 1 only when no agency's
+summary is ok and published (ok, with --no-upload).
 
 Credentials: transit-archives is read with the AWS_ACCESS_KEY_ID /
 AWS_SECRET_ACCESS_KEY pair in the environment, OBJECT_STORE_BUCKET and
@@ -564,18 +566,31 @@ def main(
                 reason=f"run budget exhausted: the run's {RUN_BUDGET_SEC} s left no room for this agency",
             )
         else:
-            doc = validate_agency(
-                agency_id,
-                service_date,
-                archives,
-                fetch=fetch,
-                run_validator=run_validator,
-                runner=runner,
-                work_root=args.work,
-            )
+            try:
+                doc = validate_agency(
+                    agency_id,
+                    service_date,
+                    archives,
+                    fetch=fetch,
+                    run_validator=run_validator,
+                    runner=runner,
+                    work_root=args.work,
+                )
+            except OSError as exc:
+                doc = summary(
+                    agency_id=agency_id,
+                    service_date=service_date,
+                    validator=validator_identity(runner),
+                    status="validator_failed",
+                    reason=f"its work directory failed: {exc}"[:300],
+                )
         path = args.out / str(agency_id) / f"{service_date:%Y%m%d}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(doc, indent=1) + "\n")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(doc, indent=1) + "\n")
+        except OSError as exc:
+            sys.stderr.write(f"agency {agency_id}: writing its summary ({path}) failed: {exc}\n")
+            continue
         written[agency_id] = path
         if doc["status"] == "ok":
             ok.add(agency_id)

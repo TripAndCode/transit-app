@@ -705,3 +705,36 @@ def test_a_summary_that_cannot_be_removed_after_publishing_stops_no_other(tmp_pa
         "s3://transit-ml/validation/10/20261110.json",
     ]
     assert not (tmp_path / "out" / "10" / "20261110.json").exists()
+
+
+def test_a_summary_that_cannot_be_written_stops_no_other(tmp_path, store_env, monkeypatch):
+    real_write_text = Path.write_text
+
+    def write_text(self, data, *args, **kwargs):
+        if self.parent.name == "8":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_write_text(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", write_text)
+    store = _Store(tmp_path)
+    assert _main(store, tmp_path) == 0
+    published = [cmd[4] for _, cmd in store.calls if cmd[4].startswith("s3://transit-ml/")]
+    assert published == ["s3://transit-ml/validation/10/20261110.json"]
+
+
+def test_a_work_directory_that_cannot_be_made_fails_only_its_agency(tmp_path, archive_env, monkeypatch):
+    real = rv.tempfile.TemporaryDirectory
+    calls = []
+
+    def temporary_directory(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError(28, "No space left on device")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(rv.tempfile, "TemporaryDirectory", temporary_directory)
+    assert _main(_Store(tmp_path), tmp_path, "--no-upload") == 0
+    eight = json.loads((tmp_path / "out" / "8" / "20261110.json").read_text())
+    ten = json.loads((tmp_path / "out" / "10" / "20261110.json").read_text())
+    assert eight["status"] == "validator_failed" and "No space left on device" in eight["reason"]
+    assert ten["status"] == "ok"
