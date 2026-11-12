@@ -5,6 +5,8 @@ import { EM_DASH, fixedTenth, formatNumber } from "../../utils/format";
 
 const MUTED = { color: "var(--text-tertiary)" } as const;
 
+type TFunction = ReturnType<typeof useTranslation>["t"];
+
 function pctText(v: number): string {
   return `${fixedTenth(v)}%`;
 }
@@ -15,6 +17,31 @@ function clampText(v: number): string {
 
 function secondsText(v: number): string {
   return formatNumber(v, { maximumFractionDigits: 1 });
+}
+
+/** Why a month has its grade: the criteria it cannot be judged on and why,
+ *  then those it misses, or that it meets them all. */
+function gradeReasons(t: TFunction, m: AgencyFeedQualityMonth): string[] {
+  const separator = t("admin.agency_diag.quality_list_separator");
+  const criterion = (name: string) => t(`admin.agency_diag.quality_criterion.${name}`);
+  const reasons: string[] = [];
+  if (m.grade_missing.length > 0) {
+    const items = m.grade_missing.map((g) =>
+      t("admin.agency_diag.quality_grade_missing_item", {
+        criterion: criterion(g.criterion),
+        reason: t(`admin.agency_diag.quality_missing.${g.reason}`),
+      }),
+    );
+    reasons.push(t("admin.agency_diag.quality_grade_ungraded", { items: items.join(separator) }));
+  }
+  if (m.grade_failing.length > 0) {
+    reasons.push(
+      t("admin.agency_diag.quality_grade_failing", { criteria: m.grade_failing.map(criterion).join(separator) }),
+    );
+  } else if (m.grade != null) {
+    reasons.push(t("admin.agency_diag.quality_grade_pass"));
+  }
+  return reasons;
 }
 
 /** A figure, or a dash with the reason the scorecard gives for its absence:
@@ -98,6 +125,18 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
           days: latest.window_days,
         })}
       </div>
+      <div style={{ display: "grid", gap: 2, fontSize: 12.5 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span style={MUTED}>{t("admin.agency_diag.quality_grade")}</span>
+          <span style={{ fontWeight: 600 }}>{latest.grade ?? EM_DASH}</span>
+        </div>
+        {gradeReasons(t, latest).map((reason) => (
+          <div key={reason} style={{ fontSize: "var(--text-xs)", ...MUTED }}>
+            {reason}
+          </div>
+        ))}
+        <div style={{ fontSize: "var(--text-xs)", ...MUTED }}>{t("admin.agency_diag.quality_grade_note")}</div>
+      </div>
       <div
         style={{
           display: "grid",
@@ -145,6 +184,17 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
             {t("admin.agency_diag.quality_age_detail", { polls: latest.message_age_polls })}
           </Figure>
         </Row>
+        <Row label={t("admin.agency_diag.quality_stale")}>
+          <Figure
+            value={latest.message_age_stale_pct == null ? null : clampText(latest.message_age_stale_pct)}
+            missing={latest.message_age_missing}
+          >
+            {t("admin.agency_diag.quality_stale_detail", {
+              stale: latest.message_age_stale_polls ?? 0,
+              polls: latest.message_age_polls,
+            })}
+          </Figure>
+        </Row>
         <Row label={t("admin.agency_diag.quality_clamp")}>
           <Figure value={latest.clamp_pct == null ? null : clampText(latest.clamp_pct)} missing={latest.clamp_missing} />
         </Row>
@@ -173,6 +223,7 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
             <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_stops")}</th>
             <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_age")}</th>
             <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_clamp")}</th>
+            <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_grade")}</th>
           </tr>
         </thead>
         <tbody>
@@ -196,6 +247,12 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
                 missing={m.message_age_missing}
               />
               <Cell value={m.clamp_pct == null ? null : clampText(m.clamp_pct)} missing={m.clamp_missing} />
+              <td
+                title={gradeReasons(t, m).join(" · ")}
+                style={{ textAlign: "right", padding: "3px 0 3px 8px", ...(m.grade == null ? MUTED : {}) }}
+              >
+                {m.grade ?? EM_DASH}
+              </td>
             </tr>
           ))}
         </tbody>

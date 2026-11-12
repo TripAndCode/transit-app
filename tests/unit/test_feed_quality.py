@@ -52,6 +52,7 @@ def _shape(**over):
         "dated_polls": 5,
         "undated_polls": 2,
         "polls": 4,
+        "stale_polls": 1,
         "ages": (10.0, 35.5),
         "raw_samples": 1000,
         "clamp_count": 3,
@@ -195,6 +196,25 @@ def test_message_age_without_a_measurable_poll_says_why(total_rows, dated_polls,
     assert row["message_age_undated_polls"] == 2
 
 
+def test_the_share_of_polls_older_than_65_s_is_of_the_polls_measured():
+    row = _shape(polls=8, stale_polls=1)
+    assert (row["message_age_stale_polls"], row["message_age_stale_pct"]) == (1, 12.5)
+    assert _shape(polls=3, stale_polls=1)["message_age_stale_pct"] == 33.33
+    assert _shape(stale_polls=0)["message_age_stale_pct"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("total_rows", "dated_polls", "polls"),
+    [(0, 0, 0), (1200, 0, 0), (1200, 3, 0)],
+)
+def test_without_a_measurable_poll_the_stale_share_is_missing_with_the_message_ages_reason(
+    total_rows, dated_polls, polls
+):
+    row = _shape(total_rows=total_rows, dated_polls=dated_polls, polls=polls, stale_polls=0, ages=None)
+    assert (row["message_age_stale_polls"], row["message_age_stale_pct"]) == (None, None)
+    assert row["message_age_missing"] is not None
+
+
 def test_vehicle_positions_are_not_recorded():
     row = _shape()
     assert (row["vehicle_positions_available"], row["vehicle_positions_missing"]) == (None, "not_recorded")
@@ -320,6 +340,11 @@ def test_the_render_names_the_gate_rules_it_applies():
     assert "def matched_trips" in rendered and "def coverage_through" in rendered
     assert feed_quality.MONTH_DAYS_SQL in feed_quality.render()
     assert "quantilesExactInclusive(0.5, 0.95)" in rendered
+
+
+def test_a_poll_is_stale_only_when_its_message_is_older_than_65_s():
+    assert feed_quality.STALE_MESSAGE_AGE_SEC == 65
+    assert "countIf(age > 65) AS stale_polls" in feed_quality.MESSAGE_AGE_CH_SQL
 
 
 def test_the_message_age_read_takes_an_archived_polls_instant_from_its_name():

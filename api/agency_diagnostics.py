@@ -22,6 +22,7 @@ from typing import Any, Mapping, Sequence
 
 from api.admin_runs import jst_date
 from pipeline.feed_quality import COLUMNS as FEED_QUALITY_COLUMNS
+from pipeline.feed_quality_grade import grade_month
 from pipeline.reports.comparability import clamp_pct
 from pipeline.reports.performance_standard import METRIC_TYPES
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
@@ -364,7 +365,9 @@ def build_clamp_history(
 def build_feed_quality(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """The scorecard's months in the order read, each value as JSON carries
     it: a date as ISO text, a NUMERIC share as a float, a missing figure as
-    ``None`` beside its reason."""
+    ``None`` beside its reason. Each month carries its grade
+    (:func:`pipeline.feed_quality_grade.grade_month`), which only this admin
+    bundle states."""
     out: list[dict[str, Any]] = []
     for row in rows:
         month: dict[str, Any] = {}
@@ -375,6 +378,10 @@ def build_feed_quality(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
                 month[key] = float(value)
             else:
                 month[key] = value
+        graded = grade_month(month)
+        month["grade"] = graded.grade
+        month["grade_failing"] = list(graded.failing)
+        month["grade_missing"] = [{"criterion": criterion, "reason": reason} for criterion, reason in graded.missing]
         out.append(month)
     return out
 

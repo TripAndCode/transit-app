@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import asyncpg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -41,6 +41,7 @@ from api.deps import get_conn
 from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.range import current_service_date
 from api.security import User, csrf_guard, require_admin
+from pipeline.feed_quality_grade import Criterion
 from pipeline.locks import AGENCY_RUN_REQUEST_LOCK_KEY
 from pipeline.reports.network import invalidate_network_summary
 
@@ -93,9 +94,15 @@ class ClampDay(BaseModel):
     clamp_pct: float | None
 
 
+class FeedQualityGradeMissing(BaseModel):
+    criterion: Criterion
+    reason: str
+
+
 class FeedQualityMonth(BaseModel):
     """One month of the feed-quality scorecard (pipeline.feed_quality). Each
-    figure is ``None`` exactly when its ``*_missing`` reason is set."""
+    figure is ``None`` exactly when its ``*_missing`` reason is set. The grade
+    (pipeline.feed_quality_grade) is admin-only: no other response carries it."""
 
     month: str
     through_date: str
@@ -112,6 +119,8 @@ class FeedQualityMonth(BaseModel):
     stop_completeness_missing: str | None
     message_age_polls: int
     message_age_undated_polls: int
+    message_age_stale_polls: int | None
+    message_age_stale_pct: float | None
     message_age_p50_sec: float | None
     message_age_p95_sec: float | None
     message_age_missing: str | None
@@ -127,6 +136,9 @@ class FeedQualityMonth(BaseModel):
     field_coverage_missing: str | None
     vehicle_positions_available: bool | None
     vehicle_positions_missing: str | None
+    grade: Literal["A", "B", "C", "D", "F"] | None
+    grade_failing: list[Criterion]
+    grade_missing: list[FeedQualityGradeMissing]
 
 
 class WeatherStation(BaseModel):

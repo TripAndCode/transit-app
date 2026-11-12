@@ -458,8 +458,12 @@ export type FeedQualityMissing =
   | "feed_cannot_report"
   | "not_recorded";
 
+/** A criterion of the month's grade (pipeline/feed_quality_grade.py's `CRITERIA`). */
+type FeedQualityCriterion = "rt_completeness" | "stale_polls" | "clamp" | "field_coverage";
+
 /** One month of an agency's feed-quality scorecard. Each figure is null
- *  exactly when its `*_missing` reason is set. */
+ *  exactly when its `*_missing` reason is set. The grade is null exactly
+ *  when `grade_missing` names a criterion whose figure the month lacks. */
 export type AgencyFeedQualityMonth = {
   month: string;
   through_date: string;
@@ -476,6 +480,8 @@ export type AgencyFeedQualityMonth = {
   stop_completeness_missing: FeedQualityMissing | null;
   message_age_polls: number;
   message_age_undated_polls: number;
+  message_age_stale_polls: number | null;
+  message_age_stale_pct: number | null;
   message_age_p50_sec: number | null;
   message_age_p95_sec: number | null;
   message_age_missing: FeedQualityMissing | null;
@@ -491,6 +497,9 @@ export type AgencyFeedQualityMonth = {
   field_coverage_missing: FeedQualityMissing | null;
   vehicle_positions_available: boolean | null;
   vehicle_positions_missing: FeedQualityMissing | null;
+  grade: "A" | "B" | "C" | "D" | "F" | null;
+  grade_failing: FeedQualityCriterion[];
+  grade_missing: { criterion: FeedQualityCriterion; reason: FeedQualityMissing }[];
 };
 
 type AgencyDiagnostics = {

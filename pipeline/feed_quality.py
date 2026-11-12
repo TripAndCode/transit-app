@@ -47,6 +47,10 @@ The figures:
   as hours of age on every poll that received it. The name is taken as the
   fetch begins, so a message generated during a slow fetch reads a small
   negative age, which stands as measured.
+- **Stale polls**: of the polls message age measures, those whose message was
+  more than :data:`STALE_MESSAGE_AGE_SEC` old when captured, and their share,
+  stated exactly when message age is. A frozen run too short to reach the
+  95th percentile still shows here.
 - **Clamp share**: the gate's :func:`pipeline.reports.comparability.clamp_pct`
   over agg_feed_health's counts.
 - **Field coverage**: per field of
@@ -124,6 +128,10 @@ Missing = Literal[
 #: numpy's default and Excel's PERCENTILE.INC), in seconds to one decimal.
 MESSAGE_AGE_QUANTILES = (0.5, 0.95)
 
+#: Older than this at capture, a poll's message is stale: Cal-ITP's freshness
+#: threshold, and the MobilityData GTFS-RT validator's W008.
+STALE_MESSAGE_AGE_SEC = 65
+
 COLUMNS: tuple[str, ...] = (
     "agency_id",
     "month",
@@ -141,6 +149,8 @@ COLUMNS: tuple[str, ...] = (
     "stop_completeness_missing",
     "message_age_polls",
     "message_age_undated_polls",
+    "message_age_stale_polls",
+    "message_age_stale_pct",
     "message_age_p50_sec",
     "message_age_p95_sec",
     "message_age_missing",
@@ -188,7 +198,7 @@ ARCHIVE_POLL_INSTANT_CH = "parseDateTimeOrNull(file_name, '%Y%m%d/TripUpdate_%H%
 # absent value.
 MESSAGE_AGE_CH_SQL = f"""
     SELECT countIf(instant IS NOT NULL) AS dated_polls, countIf(instant IS NULL) AS undated_polls,
-           countIf(age IS NOT NULL) AS polls,
+           countIf(age IS NOT NULL) AS polls, countIf(age > {STALE_MESSAGE_AGE_SEC}) AS stale_polls,
            quantilesExactInclusive({", ".join(map(str, MESSAGE_AGE_QUANTILES))})(age) AS ages
     FROM (
         SELECT if({LIVE_SOURCED}, toInt64(toUnixTimestamp(min(u.captured_at))),
@@ -396,6 +406,7 @@ def shape(
     dated_polls: int,
     undated_polls: int,
     polls: int,
+    stale_polls: int,
     ages: tuple[float, float] | None,
     raw_samples: int,
     clamp_count: int,
@@ -412,7 +423,8 @@ def shape(
     *day_rows* each service date's ``stop_time_updates``, ``<field>_rows`` and
     ``stop_events`` counts; *dated_polls* whose capture instant is known and
     *undated_polls* whose is not, of which *polls* carried a header, whose age
-    quantiles are *ages*; and agg_feed_health's sums.
+    quantiles are *ages* and of which *stale_polls* were stale; and
+    agg_feed_health's sums.
     """
     coverage = coverage_of(service, (last - month).days + 1)
     matchable = trips_matchable(ingest_strategy)
@@ -487,6 +499,8 @@ def shape(
         else _completeness_missing(observed, matchable, planned_any, planned_in_window, stop_events_known),
         "message_age_polls": polls,
         "message_age_undated_polls": undated_polls,
+        "message_age_stale_polls": None if age_missing else stale_polls,
+        "message_age_stale_pct": None if age_missing else round(stale_polls / polls * 100, 2),
         "message_age_p50_sec": ages[0] if ages and not age_missing else None,
         "message_age_p95_sec": ages[1] if ages and not age_missing else None,
         "message_age_missing": age_missing,
@@ -537,7 +551,9 @@ def build_month(
         raw_samples, clamp_count, total_rows = (int(v) for v in cur.fetchone())
     rows = ch_client.query(ROWS_CH_SQL, parameters=params)
     day_rows = {row[0]: dict(zip(rows.column_names[1:], row[1:], strict=True)) for row in rows.result_rows}
-    dated_polls, undated_polls, polls, ages = ch_client.query(MESSAGE_AGE_CH_SQL, parameters=params).result_rows[0]
+    dated_polls, undated_polls, polls, stale_polls, ages = ch_client.query(
+        MESSAGE_AGE_CH_SQL, parameters=params
+    ).result_rows[0]
     return shape(
         agency_id=agency_id,
         month=month,
@@ -551,6 +567,7 @@ def build_month(
         dated_polls=int(dated_polls),
         undated_polls=int(undated_polls),
         polls=int(polls),
+        stale_polls=int(stale_polls),
         ages=(round(float(ages[0]), 1), round(float(ages[1]), 1)) if polls else None,
         raw_samples=raw_samples,
         clamp_count=clamp_count,
