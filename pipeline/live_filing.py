@@ -19,14 +19,14 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterable
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import NamedTuple
 
 from api.range import TimeBand, UpdatesFilter, time_band_clause_ch_for
 from pipeline import static_archive
 from pipeline.cache import async_lru_cache, clear_all
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
-from pipeline.service_day import service_date_of, service_day_start_utc
+from pipeline.service_day import filed_capture_span
 from pipeline.static_archive import ScheduleJoin, Stamp
 from pipeline.strategies.static_join import VERSION_STAMPING_STRATEGIES
 
@@ -178,34 +178,37 @@ def refits(join: ScheduleJoin, stamped: Iterable[tuple[str, date, date]]) -> boo
 
 
 # Each version name the agency's rows in the window were stamped with, and
-# its first and last capture. It reads the rows the read it decides about
-# reads, but only two of their columns, grouped by one LowCardinality column,
-# so it costs a fraction of that read.
+# the first and last service date its rows are filed under. It reads the rows
+# the read it decides about reads, but only the columns that file them,
+# grouped by one LowCardinality column, so it costs a fraction of that read.
 _STAMPED_SPANS_SQL = (
-    "SELECT ifNull(u.static_version_id, '') AS stem, min(u.captured_at), max(u.captured_at) FROM {table} AS u "
+    f"SELECT ifNull(u.static_version_id, '') AS stem, min({static_archive.FILED_DATE_SQL}), "
+    f"max({static_archive.FILED_DATE_SQL}) FROM {{table}} AS u "
     "WHERE u.agency_id = {{agency_id:UInt16}} AND u.captured_at >= {{stamped_from:DateTime64}} "
-    "AND u.captured_at < {{stamped_to:DateTime64}} GROUP BY stem"
+    "AND u.captured_at < {{stamped_to:DateTime64}} "
+    f"AND {static_archive.FILED_DATE_SQL} BETWEEN {{{{stamped_first:Date}}}} AND {{{{stamped_last:Date}}}} "
+    "GROUP BY stem"
 )
 
 
 async def _stamped_spans(
     ch, agency_id: int, between: tuple[date, date], table: str, since: datetime | None = None
 ) -> list[tuple[str, date, date]]:
-    """Each version name *table*'s rows of the service dates *between*,
-    captured from *since* when given, carry, with the first and last date it is on."""
+    """Each version name *table*'s rows filed under the service dates
+    *between* (static_archive.FILED_DATE_SQL), captured from *since* when
+    given, carry, with the first and last date it is filed on."""
+    start, end = filed_capture_span(*between)
     result = await ch.query(
         _STAMPED_SPANS_SQL.format(table=checked_table(table)),
         parameters={
             "agency_id": agency_id,
-            "stamped_from": since or service_day_start_utc(between[0]),
-            "stamped_to": service_day_start_utc(between[1] + timedelta(days=1)),
+            "stamped_from": since or start,
+            "stamped_to": end,
+            "stamped_first": between[0],
+            "stamped_last": between[1],
         },
     )
-    return [(stem, _service_date(first), _service_date(last)) for stem, first, last in result.result_rows]
-
-
-def _service_date(moment: datetime) -> date:
-    return service_date_of(moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc))
+    return [(stem, first, last) for stem, first, last in result.result_rows]
 
 
 def band_candidates(where: UpdatesFilter, band: TimeBand, filing: Filing) -> UpdatesFilter:

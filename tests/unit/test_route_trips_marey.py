@@ -23,7 +23,7 @@ from api.routers.map import (
     resolve_route_trips_date,
 )
 from pipeline.db import departure_ch
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import filed_between_ch
 from pipeline.static_archive import Stamp
 
 # --- rendered SQL -----------------------------------------------------------
@@ -31,7 +31,7 @@ from pipeline.static_archive import Stamp
 
 def test_route_trips_sql_filters_the_target_date_in_jst():
     sql, params = build_route_trips_sql("all", stamp=Stamp.INGESTED)
-    assert f"{service_date_ch('u.captured_at')} = {{target_date:Date}}" in sql
+    assert filed_between_ch("{target_date:Date}", "{target_date:Date}") in sql
     # A bare toDate() buckets captured_at by UTC day, so a JST evening
     # observation would fall under the previous day -- one day off the JST
     # bucketing the rest of this query and the response's `date` depend on.

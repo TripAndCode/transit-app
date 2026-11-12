@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import clickhouse_connect
 
-from pipeline.service_day import service_date_of
+from pipeline.service_day import FILING_REACH_HOURS, filed_date_ch, service_date_of
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -316,8 +316,8 @@ def max_captured_at(client, agency_id: int) -> datetime | None:
     `updates` holds only closed JST days; the current day lives in
     `updates_live`, so this never reflects today and is not a feed-liveness
     probe (the async twin in `api.clickhouse` takes a `table` argument for
-    that). For "what's the latest COMPLETED day" checks, use
-    `max_captured_at_before` instead — do not add a same-day exclusion here,
+    that). For "what's the newest COMPLETED day" checks, use
+    `newest_filed_date_before` instead — do not add a same-day exclusion here,
     it would silently change this function's meaning for existing callers.
 
     Uses `ORDER BY captured_at DESC LIMIT 1` rather than `maxOrNull(captured_at)`:
@@ -338,28 +338,25 @@ def max_captured_at(client, agency_id: int) -> datetime | None:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def max_captured_at_before(client, agency_id: int, before: datetime) -> datetime | None:
-    """Latest `captured_at` strictly before `before` (a tz-aware UTC cutoff).
+# The newest service date a stop event of the agency's rows captured before
+# {before} is filed under (pipeline.service_day.filed_date_ch): the day the
+# aggregates' newest date answers to. Read over the rows captured within
+# FILING_REACH_HOURS of the newest such capture, the scalar subquery, which
+# the sort index serves and the range then prunes on. Every reading filed
+# under a later day than the newest capture's own lies in that reach; one
+# filed under that day from further back, while every reading in the reach
+# files under the day before, reads a day early, which can only call stale
+# aggregates current, never current ones stale. NULL with no row before it.
+NEWEST_FILED_DATE_BEFORE_SQL = (
+    f"SELECT maxOrNull({filed_date_ch('u.')}) FROM updates AS u "
+    "WHERE u.agency_id = {agency_id:UInt16} AND u.captured_at < {before:DateTime64} AND u.captured_at >= ("
+    "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64} "
+    f"ORDER BY captured_at DESC LIMIT 1) - INTERVAL {FILING_REACH_HOURS} HOUR"
+)
 
-    For "what's the latest COMPLETED day" freshness checks: filtering rows
-    BEFORE taking the max means the result already IS the latest completed
-    day's max, with no further accept/reject needed by the caller — unlike
-    calling `max_captured_at` and then checking `< before` in Python, which
-    would incorrectly return "no completed day" whenever a later (e.g.
-    today's, still-ingesting) row also exists, instead of falling back to
-    the latest prior completed day.
 
-    Same `ORDER BY captured_at DESC LIMIT 1` index-served form as
-    `max_captured_at` (see its docstring) instead of `maxOrNull` — the
-    `captured_at < {before}` predicate composes fine with the sort-key scan.
-    """
-    result = client.query(
-        "SELECT captured_at FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64} "
-        "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id, "before": before},
-    )
-    if not result.result_rows:
-        return None
-    value = result.result_rows[0][0]
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+def newest_filed_date_before(client, agency_id: int, before: datetime) -> date | None:
+    """The newest service date the agency's rows captured before *before* (a
+    tz-aware UTC cutoff) file a stop event under (NEWEST_FILED_DATE_BEFORE_SQL)."""
+    rows = client.query(NEWEST_FILED_DATE_BEFORE_SQL, parameters={"agency_id": agency_id, "before": before}).result_rows
+    return rows[0][0] if rows else None

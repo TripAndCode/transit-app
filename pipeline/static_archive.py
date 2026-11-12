@@ -24,7 +24,7 @@ from typing import NamedTuple
 import psycopg2.extras
 
 from pipeline.clickhouse import UPDATE_COLUMNS, UPDATES_TABLE, checked_table
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import filed_date_ch
 from pipeline.static_content import static_parts
 from pipeline.timetable_in_force import Segment, Version, gtfs_date, in_force, schedule_row, version_span
 
@@ -499,7 +499,9 @@ class ScheduleJoin(NamedTuple):
         *between*, the first and last service dates a read can reach (both
         inclusive), keeps only the segments overlapping them, so a REFIT read
         loads only those versions' schedules. A read must not reach a date
-        outside it: a row there would be read as having none in force.
+        outside it: a row there would be read as having none in force. The
+        dates are those its rows are filed under (FILED_DATE_SQL), which for a
+        read selecting rows by capture reach a day either side of theirs.
         """
         mapped = dict(zip(self.stems, self.hashes, strict=True))
         force = [s for s in self.force if between is None or (s.first <= between[1] and between[0] <= s.last)]
@@ -559,9 +561,9 @@ class Stamp(str, Enum):
 
     INGESTED: the one ingest joined, as it stamped the row.
 
-    IN_FORCE: the version in force on the row's service date
-    (ScheduleJoin.force) names the row, and its schedule columns stay as
-    ingested. Exact where that version's content is the one ingest joined,
+    IN_FORCE: the version in force on the service date the row is filed
+    under (ScheduleJoin.force, FILED_DATE_SQL) names the row, and its schedule
+    columns stay as ingested. Exact where that version's content is the one ingest joined,
     which is every row but those REFIT reads.
 
     REFIT: IN_FORCE, and a row whose ingest joined other content than the
@@ -585,11 +587,14 @@ class Stamp(str, Enum):
     REFIT = "refit"
 
 
+# The service date a stored row is filed under (pipeline.service_day.filed_date_ch).
+FILED_DATE_SQL = filed_date_ch("u.")
+
 # The row's place in the bound segments in force (ScheduleJoin.params), 0 for
 # a service date none covers; element 0 of an array is its type's default, ''.
 _FORCE_AT = (
     "arrayFirstIndex((a, b) -> "
-    + service_date_ch("u.captured_at")
+    + FILED_DATE_SQL
     + " BETWEEN a AND b, {force_firsts:Array(Date32)}, {force_lasts:Array(Date32)})"
 )
 
@@ -615,7 +620,8 @@ def _marked_rows(where: str, table: str, source: str | None = None) -> str:
     archive."""
     rows = f"{checked_table(table)} AS u WHERE {where}" if source is None else f"{source} AS u"
     return (
-        f"SELECT u.*, {_FORCE_AT} AS force_at, {{force_contents:Array(String)}}[force_at] AS force_content, "
+        f"SELECT u.*, {FILED_DATE_SQL} AS filed_date, {_FORCE_AT} AS force_at, "
+        "{force_contents:Array(String)}[force_at] AS force_content, "
         f"force_content != '' AND force_content != {_STAMPED_CONTENT} AS refit, "
         "if(refit, force_content, '') AS refit_content "
         f"FROM {rows}"
@@ -637,7 +643,8 @@ _STOP_EVENT_KEYS = (
 
 def _stop_events(where: str, table: str) -> str:
     """*table*'s rows matching *where*, one per stop event (a trip's stop on
-    one service day) and stored schedule and version name, with `updates`'
+    the service day it is filed under, FILED_DATE_SQL) and stored schedule and
+    version name, with `updates`'
     columns: the latest poll's capture, file name, departure delay and both
     schedule relationships, by (captured_at, file_name), and any poll's of the
     rest. Every poll grouped together is filed alike, so a read keeping only
@@ -668,12 +675,12 @@ def _stop_events(where: str, table: str) -> str:
     return (
         f"(SELECT {', '.join(f'event_{column} AS {column}' for column in UPDATE_COLUMNS)} FROM "
         f"(SELECT {columns} FROM {checked_table(table)} AS u WHERE {where} "
-        f"GROUP BY {keys}, {service_date_ch('u.captured_at')}))"
+        f"GROUP BY {keys}, {FILED_DATE_SQL}))"
     )
 
 
 def _filed_columns(refit: bool) -> str:
-    columns = []
+    columns = ["u.filed_date AS filed_date"]
     for column in UPDATE_COLUMNS:
         if column == "static_version_id":
             expression = "if(u.force_at = 0, u.static_version_id, {force_stems:Array(String)}[u.force_at])"
@@ -704,7 +711,8 @@ def observation_rows(
     REFIT gives it one. A test of those goes in *filed_where*, on the filed
     row. Under INGESTED the clause is the table itself; otherwise a subquery
     that binds ScheduleJoin.params, which files a row only by the segments in
-    force. REFIT also joins the schedule archive, so a read whose rows need
+    force, and carries `filed_date`, the service date FILED_DATE_SQL files the
+    row as stored under (filed_date_sql). REFIT also joins the schedule archive, so a read whose rows need
     none of it (refit_dates) is cheaper under IN_FORCE, with the same result.
 
     *live_form*, for a read inside the API's time budget
@@ -739,6 +747,13 @@ def observation_rows(
     )
 
 
+def filed_date_sql(stamp: Stamp) -> str:
+    """The service date a row read through observation_rows under *stamp* is
+    filed under: FILED_DATE_SQL of the row as stored, which a refiled row
+    carries as `filed_date` because its schedule columns are the archive's."""
+    return FILED_DATE_SQL if stamp is Stamp.INGESTED else "u.filed_date"
+
+
 def refit_dates(
     ch, agency_id: int, where: str, params: dict, join: ScheduleJoin, between: tuple[date, date] | None = None
 ) -> set[date]:
@@ -746,7 +761,7 @@ def refit_dates(
     schedule Stamp.REFIT reads from the archive. *between* bounds the dates
     *where* can reach (ScheduleJoin.force_params)."""
     sql = (
-        f"SELECT DISTINCT {service_date_ch('captured_at')} FROM "
+        "SELECT DISTINCT filed_date FROM "
         f"({_marked_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', UPDATES_TABLE)}) WHERE refit"
     )
     rows = ch.query(sql, parameters={"agency_id": agency_id, **params, **join.params(between=between)}).result_rows

@@ -17,7 +17,7 @@ from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, 
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.service_day import service_date_ch, service_day_offset_ch, service_day_seconds_sql
-from pipeline.static_archive import Stamp, observation_rows
+from pipeline.static_archive import FILED_DATE_SQL, Stamp, filed_date_sql, observation_rows
 
 _SERVICE_DATE = service_date_ch()
 
@@ -109,7 +109,7 @@ def service_delivered_ch_sql(date_where: str) -> str:
         """
                 SELECT svc_date, route, count() FROM (
                     SELECT """
-        + _SERVICE_DATE
+        + FILED_DATE_SQL
         + """ AS svc_date, trip_id,
                            argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel,
                            ifNull(argMax(u.route_code, (captured_at, file_name)), '') AS route
@@ -123,7 +123,7 @@ def service_delivered_ch_sql(date_where: str) -> str:
         + """ OR (svc_date, trip_id) IN (
                     SELECT svc_date, trip_id FROM (
                         SELECT """
-        + _SERVICE_DATE
+        + FILED_DATE_SQL
         + """ AS svc_date, trip_id,
                                argMax(coalesce(schedule_relationship_stop, -1), (captured_at, file_name)) AS stop_rel
                         FROM updates AS u WHERE """
@@ -153,7 +153,7 @@ def schedule_revision_ch_sql(date_where: str, stamp: Stamp = Stamp.IN_FORCE) -> 
             SELECT svc_date, argMax(version, cnt) AS static_version_id
             FROM (
                 SELECT """
-        + _SERVICE_DATE
+        + filed_date_sql(stamp)
         + """ AS svc_date,
                        static_version_id AS version,
                        count() AS cnt
@@ -209,7 +209,7 @@ def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> s
         """
                 WITH per_event AS (
                     SELECT route_code, stop_id, """
-        + _SERVICE_DATE
+        + filed_date_sql(stamp)
         + """ AS svc_date, trip_id,
                            stop_sequence,
                            argMax(

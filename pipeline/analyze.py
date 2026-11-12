@@ -105,7 +105,7 @@ from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visi
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, schedules, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import service_date_ch, service_day_start_utc
 from pipeline.static_archive import Stamp
 from pipeline.static_content import static_parts as _static_parts
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
@@ -466,7 +466,9 @@ def _parts_fingerprints(ingest_strategy: str | None, has_static: bool, static_pa
 # the archive maps (static_archive.JOIN_CONTENT_SQL). A version in force is
 # always a mapped name, so only a row of a date with none in force can.
 _FOLLOWS_THE_LOADED_TIMETABLE = "NOT has({stems:Array(String)}, " + static_archive.IN_FORCE_STEM_SQL + ")"
-_SERVICE_DATE_U = service_date_ch("u.captured_at")
+# The service date each row is filed under, which the dates these plan
+# queries return are dates of, as the aggregates they scope are.
+_FILED_DATE_U = static_archive.FILED_DATE_SQL
 
 
 def _dates_following_the_loaded_timetable(
@@ -478,7 +480,7 @@ def _dates_following_the_loaded_timetable(
     result = _ch_query(
         "plan: dates following the loaded timetable",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " ORDER BY date",
         {"agency_id": agency_id, "stems": stems, **join.force_params()},
     )
@@ -505,7 +507,7 @@ def _dates_of_changed_trips(
     result = _ch_query(
         "plan: dates of changed trips",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
         "AND u.trip_id IN " + static_archive.changed_trips_sql() + " ORDER BY date",
         {"agency_id": agency_id, "stems": join.stems, "before": before, "after": after, **join.force_params()},
@@ -537,7 +539,7 @@ def _dates_of_changed_medians(
     result = _ch_query(
         "plan: dates of changed medians",
         ch_client,
-        "SELECT DISTINCT " + _SERVICE_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
+        "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
         "AND " + _FOLLOWS_THE_LOADED_TIMETABLE + " "
         "AND u.route_code IN {routes:Array(String)} ORDER BY date",
         {"agency_id": agency_id, "stems": stems, "routes": routes, **join.force_params()},
@@ -596,7 +598,10 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     that date held when it was last built. Comparing that ledger against the
     same counts in ClickHouse names exactly the dates that moved, in both
     directions: a date the ledger has and ClickHouse no longer does is listed
-    too, so the caller's purge clears aggregate rows whose source is gone.
+    too, so the caller's purge clears aggregate rows whose source is gone. The
+    ledger counts a row on its capture's service date, so the dates a moved
+    date's rows file a stop event under besides it are listed with it
+    (:func:`_dates_filed_from`).
 
     Deliberately not "the last N days". A collector outage followed by a
     backlog ingest writes rows whose dates are weeks old, and any fixed window
@@ -640,7 +645,43 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
-    return sorted(stale)
+    return sorted(stale | _dates_filed_from(agency_id, ch_client, stale, stored, live_counts))
+
+
+def _dates_filed_from(agency_id: int, ch_client, stale: set, stored: dict, live_counts: dict) -> set:
+    """The service dates besides *stale* that a stop event of rows captured on
+    a stale date can be filed under (static_archive.FILED_DATE_SQL).
+
+    The ledger counts rows by their capture's service date, while a stop event
+    near the cutover is filed under its trip's, the day before or after. A date
+    whose rows grew lends to the dates its rows are filed under now. One that
+    lost rows may have lent the rows it lost, which are gone, so it lends to
+    both neighbours.
+    """
+    shrunk = {
+        day
+        for day in stale
+        if day not in live_counts
+        or (day in stored and any(now < before for now, before in zip(live_counts[day], stored[day], strict=True)))
+    }
+    lent = {day + timedelta(days=step) for day in shrunk for step in (-1, 1)}
+    grown = sorted(stale - shrunk)
+    if grown:
+        clauses: list[str] = []
+        params: dict = {"agency_id": agency_id}
+        for i, day in enumerate(grown):
+            clauses.append(f"(u.captured_at >= {{from_{i}:DateTime64}} AND u.captured_at < {{to_{i}:DateTime64}})")
+            params[f"from_{i}"] = service_day_start_utc(day)
+            params[f"to_{i}"] = service_day_start_utc(day + timedelta(days=1))
+        result = _ch_query(
+            "plan: dates filed from changed dates",
+            ch_client,
+            "SELECT DISTINCT " + _FILED_DATE_U + " AS date FROM updates AS u WHERE u.agency_id = {agency_id:UInt16} "
+            f"AND ({' OR '.join(clauses)}) AND {_FILED_DATE_U} != {service_date_ch('u.captured_at')}",
+            params,
+        )
+        lent |= {row[0] for row in result.result_rows}
+    return lent - stale
 
 
 def mark_for_full_rebuild(conn, agency_ids: list[int]) -> None:
@@ -861,30 +902,27 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     return Plan(current, scopes, content_key, join, reasons)
 
 
-def _date_predicate(rebuild_dates: list | None, column: str = "captured_at") -> str:
-    """A ClickHouse predicate restricting a builder to *rebuild_dates*.
+def _date_filter(rebuild_dates: list | None, agency_id: int, *, filed: bool = True) -> tuple[str, dict]:
+    """A WHERE suffix restricting a builder to *rebuild_dates*, with the
+    parameters it needs.
 
-    ``None`` yields an empty string, so a full rebuild runs the query these
-    builders always ran. The predicate names the raw ``captured_at`` column
-    rather than a date alias: ClickHouse substitutes a SELECT-list alias into
-    WHERE, which turns a filter over an aliased aggregate into an illegal one
-    (see ``build_dedup_ch_sql``'s docstring, which hit this). *column* exists
-    for the callers whose own query qualifies it with a table alias, for the
-    same reason.
+    *filed* selects the rows of the stop events filed under those dates
+    (ch_aggregates.days_where, on `u.` columns), for a builder keyed on the
+    stop event's day; otherwise the rows captured on them, for one counting
+    readings. ``None`` yields an empty suffix, so a full rebuild runs the query
+    these builders always ran. The predicates name raw columns rather than a
+    date alias: ClickHouse substitutes a SELECT-list alias into WHERE, which
+    turns a filter over an aliased aggregate into an illegal one (see
+    ``build_dedup_ch_sql``'s docstring, which hit this).
     """
-    if rebuild_dates is None:
-        return ""
-    return f"{service_date_ch(column)} IN {{rebuild_dates:Array(Date)}}"
-
-
-def _date_filter(rebuild_dates: list | None, agency_id: int) -> tuple[str, dict]:
-    """:func:`_date_predicate` as a WHERE suffix, with the parameters it needs."""
     params: dict = {"agency_id": agency_id}
-    predicate = _date_predicate(rebuild_dates)
-    if not predicate:
+    if rebuild_dates is None:
         return "", params
+    if filed:
+        where, scoped = ch_aggregates.days_where(rebuild_dates)
+        return f" AND ({where})", {**params, **scoped}
     params["rebuild_dates"] = rebuild_dates
-    return f" AND {predicate}", params
+    return f" AND {service_date_ch('captured_at')} IN {{rebuild_dates:Array(Date)}}", params
 
 
 def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
@@ -1421,9 +1459,11 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         # Agency-wide — does NOT require static data, so it runs outside the
         # has_static block. Pure aggregation (no static-table JOIN), so it
         # queries ClickHouse directly and bulk-loads the small per-day result
-        # into Postgres. The service date (pipeline.service_day), the same day
-        # every other aggregate is filed under — never a bare toDate().
-        where, params = _date_filter(scopes["agg_feed_health"], agency_id)
+        # into Postgres. Each reading counts on its own capture's service date
+        # (pipeline.service_day), never a bare toDate(), unlike the stop-event
+        # aggregates, which file a stop event under its trip's day; the rebuild
+        # ledger reads these counts keyed by capture (_dates_needing_rebuild).
+        where, params = _date_filter(scopes["agg_feed_health"], agency_id, filed=False)
         _ch_build_and_insert(
             "agg_feed_health",
             "(agency_id, date, raw_samples, clamp_count, total_rows, archive_rows, live_rows)",

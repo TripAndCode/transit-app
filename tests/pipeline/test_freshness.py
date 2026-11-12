@@ -226,6 +226,30 @@ def test_check_agg_freshness_files_a_post_midnight_capture_under_its_service_day
     assert check_agg_freshness(pg_conn, ch_client, [agency_id]) == []
 
 
+def test_check_agg_freshness_compares_the_day_the_newest_reading_is_filed_under(pg_conn, ch_client, agency_id):
+    """A night trip's last stop, scheduled at 27:56 on 01-01 and reported at
+    04:03 JST on 01-02, belongs to service day 01-01, so aggregates ending on
+    01-01 are current although the reading's own service day is 01-02."""
+    from pipeline.clickhouse import insert_updates
+
+    late = 27 * 3600 + 56 * 60
+    insert_updates(
+        ch_client,
+        agency_id,
+        [("late.pb", "2026-01-01T19:03:00Z", "T1", "平日", None, "44372", 1, 60, None, None, None, None, None, late)],
+    )
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, "
+            "avg_delay_sec, worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES (%s, %s, %s, '平日', 60, 120, 1, 1, %s, 60)",
+            (agency_id, date(2026, 1, 1), "44372", "2026-01-01T19:03:00+00:00"),
+        )
+    pg_conn.commit()
+
+    assert check_agg_freshness(pg_conn, ch_client, [agency_id]) == []
+
+
 def test_check_agg_freshness_falls_back_to_latest_completed_day_when_today_has_rows(pg_conn, ch_client, agency_id):
     """An agency ingesting continuously (a completed day from several days
     ago PLUS a row from right now, no agg_route_daily seeded at all) must be

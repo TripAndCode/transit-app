@@ -75,7 +75,7 @@ _JST = ZoneInfo("Asia/Tokyo")
 
 async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshness]:
     """Per-agency freshness using agg_meta, agg_route_daily, and ClickHouse `updates`."""
-    from api.clickhouse import max_captured_at_before_by_agency, min_captured_at_by_agency
+    from api.clickhouse import min_captured_at_by_agency, newest_filed_date_before_by_agency
     from pipeline.freshness import is_stale
 
     now_utc = datetime.now(timezone.utc)
@@ -90,7 +90,7 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     agg_max_rows = await conn.fetch(_AGG_MAX_SQL)
     agg_max = {r["agency_id"]: r["d"] for r in agg_max_rows}
 
-    # One indexed read per agency (`api.clickhouse.max_captured_at_before` —
+    # One indexed read per agency (`api.clickhouse.newest_filed_date_before` —
     # see its docstring) instead of an unfiltered `GROUP BY agency_id` over
     # the whole `updates` table: the GROUP BY form has no `agency_id`
     # predicate at all, so it reads the `captured_at` column for every row in
@@ -109,13 +109,12 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
     # clamp_pct) comes from Postgres. So a ClickHouse hiccup for ONE agency
     # must not fail the whole call: is_stale(agg_day, None) is "not stale"
     # (see its docstring), which is the correct degrade here.
-    # max_captured_at_before_by_agency runs the per-agency probes concurrently
+    # newest_filed_date_before_by_agency runs the per-agency probes concurrently
     # and degrades a failing agency's probe to None internally; shared with
     # pipeline.reports.network.compute_network_summary's identical shape.
-    probed = await max_captured_at_before_by_agency(
+    live_max = await newest_filed_date_before_by_agency(
         ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
     )
-    live_max: dict[int, date | None] = {aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()}
 
     # A never-analyzed agency (agg_day is None) needs the earliest live day
     # too, to size agg_behind_days off the real unaggregated span instead of

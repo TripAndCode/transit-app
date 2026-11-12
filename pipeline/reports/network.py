@@ -57,7 +57,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from api.clickhouse import max_captured_at_before_by_agency
+from api.clickhouse import newest_filed_date_before_by_agency
 from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.freshness import is_stale
 from pipeline.histogram import on_time_count_sql
@@ -77,7 +77,6 @@ from pipeline.reports.ridership import compute_ridership_weighted_on_time_by_age
 from pipeline.reports.savepoint import savepoint
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
 from pipeline.reports.supply import compute_supply_metrics_by_agency
-from pipeline.service_day import service_date_of
 
 _log = logging.getLogger(__name__)
 
@@ -132,9 +131,8 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
         datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     )
 
-    # One indexed read per agency (api.clickhouse.max_captured_at_before —
-    # same index-served ORDER BY ... LIMIT 1 form as
-    # pipeline.clickhouse.max_captured_at_before) instead of `maxOrNull`, which is a
+    # One indexed read per agency (api.clickhouse.newest_filed_date_before,
+    # which ranges off the newest capture the sort index serves) instead of a
     # full per-agency scan, materially slower than the indexed form.
     #
     # This probe backs ONLY the `is_stale` field below — every other field in
@@ -147,15 +145,12 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # is_stale(agg_day, None) is defined as "not stale" (see its docstring:
     # no completed day / can't determine → nothing owed), which is the
     # correct degrade here.
-    # max_captured_at_before_by_agency runs the per-agency probes concurrently
+    # newest_filed_date_before_by_agency runs the per-agency probes concurrently
     # and preserves the try/except degrade described above; shared with
     # pipeline.health.aggregate_freshness's identical shape.
-    probed = await max_captured_at_before_by_agency(
+    live_max = await newest_filed_date_before_by_agency(
         ch, [a["agency_id"] for a in agencies], today_jst_midnight_utc, _log
     )
-    live_max: dict[int, "date | None"] = {
-        aid: None if mx is None else service_date_of(mx) for aid, mx in probed.items()
-    }
 
     through = coverage_through(perf[a["agency_id"]]["data_to"] for a in agencies if a["agency_id"] in perf)
     # planned_trips reads the saved and loaded plans; executed_trips and

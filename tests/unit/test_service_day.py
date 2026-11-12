@@ -5,7 +5,10 @@ import pytest
 
 from pipeline.clickhouse import jst_midnight_utc
 from pipeline.service_day import (
+    FILING_REACH_HOURS,
     SERVICE_DAY_CUTOVER_HOURS,
+    filed_capture_span,
+    filed_date_of,
     service_date_ch,
     service_date_of,
     service_day_moment_utc,
@@ -93,3 +96,48 @@ def test_the_seconds_fragment_names_the_expression_it_is_given():
     fragment = service_day_seconds_sql("x.secs")
     assert "x.secs" in fragment
     assert str(SERVICE_DAY_CUTOVER_HOURS * 3600) in fragment
+
+
+@pytest.mark.parametrize(
+    ("captured", "scheduled", "expected"),
+    [
+        # A stop predicted before the cutover for a departure after it is the next day's.
+        (_jst(2026, 3, 7, 3, 58), 4 * 3600 + 5 * 60, date(2026, 3, 7)),
+        # Reported after the cutover for a departure before it, the previous day's,
+        # whether the timetable writes the clock past 24:00 or not.
+        (_jst(2026, 3, 7, 4, 3), 27 * 3600 + 56 * 60, date(2026, 3, 6)),
+        (_jst(2026, 3, 7, 4, 3), 3 * 3600 + 56 * 60, date(2026, 3, 6)),
+        # A departure of its own capture's service day stays.
+        (_jst(2026, 3, 7, 4, 3), 4 * 3600 + 5 * 60, date(2026, 3, 7)),
+        (_jst(2026, 3, 7, 0, 30), 24 * 3600 + 40 * 60, date(2026, 3, 6)),
+        (_jst(2026, 3, 7, 12, 0), 12 * 3600 + 5 * 60, date(2026, 3, 7)),
+        # Beyond the reach, or with no scheduled time, the capture's own day.
+        (_jst(2026, 3, 6, 23, 50), 4 * 3600 + 5 * 60, date(2026, 3, 6)),
+        (_jst(2026, 3, 7, 3, 58), None, date(2026, 3, 6)),
+    ],
+)
+def test_a_reading_is_filed_under_its_trips_service_day(captured, scheduled, expected):
+    assert filed_date_of(captured, scheduled) == expected
+
+
+def test_a_reading_moves_at_most_a_day_and_only_near_the_cutover():
+    start = _jst(2026, 3, 6, 0, 0)
+    for minute in range(0, 48 * 60, 7):
+        captured = start + timedelta(minutes=minute)
+        own = service_date_of(captured)
+        for scheduled in range(0, 30 * 3600, 1800):
+            filed = filed_date_of(captured, scheduled)
+            assert abs((filed - own).days) <= 1
+            if filed != own:
+                assert captured.hour < SERVICE_DAY_CUTOVER_HOURS + FILING_REACH_HOURS
+
+
+def test_the_filed_capture_span_holds_every_reading_filed_under_its_days():
+    first, last = date(2026, 3, 6), date(2026, 3, 7)
+    span_start, span_end = filed_capture_span(first, last)
+    start = _jst(2026, 3, 4, 0, 0)
+    for minute in range(0, 5 * 24 * 60, 11):
+        captured = start + timedelta(minutes=minute)
+        for scheduled in range(0, 30 * 3600, 1800):
+            if first <= filed_date_of(captured, scheduled) <= last:
+                assert span_start <= captured < span_end

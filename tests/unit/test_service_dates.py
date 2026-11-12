@@ -25,7 +25,7 @@ from pipeline.day_types import TWO_WAY, load_day_types, public_holidays_between
 from pipeline.query.pooled_conn import PooledConnection
 from pipeline.reports.filters import _agg_filter, _dist_filter
 from pipeline.reports.weather import _daily_filter
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import filed_date_ch
 from tests.fixtures.service_dates import selecting
 
 WEEKDAYS = (True, True, True, True, True, False, False)
@@ -327,7 +327,7 @@ def test_selected_dates_keep_only_the_ctx_window():
 def test_clickhouse_filter_selects_the_service_dates():
     frag, params = build_updates_filter_ch(replace(_resolved(), routes=("R1",)))
     assert "service_type" not in frag
-    assert f"{service_date_ch()} IN {{ch_service_dates:Array(Date)}}" in frag
+    assert f"{filed_date_ch()} IN {{ch_service_dates:Array(Date)}}" in frag
     assert params["ch_service_dates"] == [date(2025, 4, 28), date(2025, 4, 30)]
     # The date range stays beside it, for the sort key and partition pruning.
     assert "{ch_from_date:Date}" in frag and "{ch_to_date:Date}" in frag

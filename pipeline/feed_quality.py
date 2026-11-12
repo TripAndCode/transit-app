@@ -103,7 +103,13 @@ from pipeline.reports import comparability
 from pipeline.reports.comparability import clamp_pct, coverage_pct, matched_trips, trips_matchable
 from pipeline.reports.network import coverage_through
 from pipeline.reports.service_delivered import coverage_of, planned_days_ctes, service_sql
-from pipeline.service_day import service_date_ch, service_date_of, service_day_start_utc
+from pipeline.service_day import (
+    filed_between_ch,
+    filed_date_ch,
+    service_date_ch,
+    service_date_of,
+    service_day_start_utc,
+)
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, RT_INGEST_STRATEGIES
 
 logger = logging.getLogger(__name__)
@@ -170,18 +176,30 @@ COLUMNS: tuple[str, ...] = (
 # captured_at) sort key prunes the scan to the window.
 _WINDOW = "u.captured_at >= {window_start:DateTime64} AND u.captured_at < {window_end:DateTime64}"
 
-# Per service date: the stop_time_updates stored, how many carry each RT
-# coverage field, and the stop events reported. A cancellation listing no stop
-# leaves a trip-level row or a row per stop written from the timetable, and
-# neither is a stop_time_update; a row per stop still reports its stop event.
+# Per service date of capture: the stop_time_updates stored and how many
+# carry each RT coverage field. A cancellation listing no stop leaves a
+# trip-level row or a row per stop written from the timetable, and neither is a
+# stop_time_update.
 _SENT = f"NOT {timetable_cancellation_ch()}"
 _FIELD_COUNTS = ", ".join(f"countIf(u.{field} IS NOT NULL AND {_SENT}) AS {field}_rows" for field in RT_COVERAGE_FIELDS)
-_REPORTED = f"{plausible_delay_ch('u.dep_delay')} OR {plausible_delay_ch('u.arr_delay')} OR {withdrawn_ch()}"
 ROWS_CH_SQL = f"""
-    SELECT {service_date_ch("u.captured_at")} AS date, countIf({_SENT}) AS stop_time_updates, {_FIELD_COUNTS},
-           uniqExactIf((u.trip_id, u.stop_sequence), {_REPORTED}) AS stop_events
+    SELECT {service_date_ch("u.captured_at")} AS date, countIf({_SENT}) AS stop_time_updates, {_FIELD_COUNTS}
     FROM updates AS u
     WHERE u.agency_id = {{agency_id:UInt16}} AND {_WINDOW} AND u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}
+    GROUP BY date
+"""
+
+# Per service date a stop event is filed under (pipeline.service_day.
+# filed_date_ch), the stop events reported; a row per stop a cancellation writes
+# from the timetable still reports its stop event. Selected by the filed date
+# over the window's span, so a stop event whose polls straddle the cutover
+# counts once, under its trip's day, in the month that day falls in.
+_REPORTED = f"{plausible_delay_ch('u.dep_delay')} OR {plausible_delay_ch('u.arr_delay')} OR {withdrawn_ch()}"
+STOP_EVENTS_CH_SQL = f"""
+    SELECT {filed_date_ch("u.")} AS date, uniqExactIf((u.trip_id, u.stop_sequence), {_REPORTED}) AS stop_events
+    FROM updates AS u
+    WHERE u.agency_id = {{agency_id:UInt16}} AND {filed_between_ch("{first:Date}", "{last:Date}")}
+      AND u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}
     GROUP BY date
 """
 
@@ -550,7 +568,11 @@ def build_month(
         cur.execute(FEED_HEALTH_SQL, params)
         raw_samples, clamp_count, total_rows = (int(v) for v in cur.fetchone())
     rows = ch_client.query(ROWS_CH_SQL, parameters=params)
-    day_rows = {row[0]: dict(zip(rows.column_names[1:], row[1:], strict=True)) for row in rows.result_rows}
+    day_rows = with_stop_events(
+        {row[0]: dict(zip(rows.column_names[1:], row[1:], strict=True)) for row in rows.result_rows},
+        dict(ch_client.query(STOP_EVENTS_CH_SQL, parameters=params).result_rows),
+        rows.column_names[1:],
+    )
     dated_polls, undated_polls, polls, stale_polls, ages = ch_client.query(
         MESSAGE_AGE_CH_SQL, parameters=params
     ).result_rows[0]
@@ -573,6 +595,19 @@ def build_month(
         clamp_count=clamp_count,
         total_rows=total_rows,
     )
+
+
+def with_stop_events(
+    day_rows: Mapping[date, Mapping[str, int]], stop_events: Mapping[date, int], columns: Iterable[str]
+) -> dict[date, dict[str, int]]:
+    """*day_rows*, each service date's stop_time_update counts by its
+    capture, with each date's ``stop_events``, the stop events filed under it.
+    A date only stop events are filed under holds no stop_time_update."""
+    out = {day: {**row, "stop_events": 0} for day, row in day_rows.items()}
+    empty = dict.fromkeys(columns, 0)
+    for day, n in stop_events.items():
+        out.setdefault(day, {**empty, "stop_events": 0})["stop_events"] = int(n)
+    return out
 
 
 def rebuild(
@@ -619,8 +654,10 @@ def render() -> list[str]:
         STOP_PLAN_SQL,
         FEED_HEALTH_SQL,
         ROWS_CH_SQL,
+        STOP_EVENTS_CH_SQL,
         MESSAGE_AGE_CH_SQL,
         inspect.getsource(build_month),
+        inspect.getsource(with_stop_events),
         inspect.getsource(_window_params),
         inspect.getsource(shape),
         inspect.getsource(_share_pct),

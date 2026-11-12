@@ -41,7 +41,7 @@ import logging
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
-from api.clickhouse import max_captured_at_before_by_agency
+from api.clickhouse import newest_filed_date_before_by_agency
 from api.range import RangeCtx, updates_filter_ch
 from api.scope_applied import ALL_SIX
 from pipeline.db import stop_event_filter_ch
@@ -72,7 +72,6 @@ from pipeline.reports.rankings import (
     tolerance_aggregates_serve,
 )
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency, unreadable_service_delivered
-from pipeline.service_day import service_date_of
 from pipeline.static_archive import Stamp, observation_rows
 
 _log = logging.getLogger(__name__)
@@ -225,13 +224,14 @@ async def _freshness_and_quality(agency_id: int, ctx: RangeCtx, conn, ch) -> tup
         datetime.now(_JST).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
     )
     # This probe backs ONLY is_stale -- clamp_pct comes from Postgres.
-    # `max_captured_at_before_by_agency` already degrades a failing probe to
+    # `newest_filed_date_before_by_agency` already degrades a failing probe to
     # None rather than raising (is_stale(agg_day, None) is "not stale": no
     # completed day / can't determine -> nothing owed), the same shared
     # degrade shape pipeline.reports.network.compute_network_summary relies
     # on for its own per-agency probes.
-    live_max_ts = (await max_captured_at_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(agency_id)
-    live_max_day = None if live_max_ts is None else service_date_of(live_max_ts)
+    live_max_day = (await newest_filed_date_before_by_agency(ch, [agency_id], today_jst_midnight_utc, _log)).get(
+        agency_id
+    )
 
     feed_row = await conn.fetchrow(
         "SELECT COALESCE(SUM(raw_samples), 0) AS raw, COALESCE(SUM(clamp_count), 0) AS clamp "

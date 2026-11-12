@@ -286,3 +286,44 @@ def test_whole_history_tables_clickhouse_lost_are_finalized_again_without_recoun
     for table in lost:
         assert served[table]
         assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table) == served[table], table
+
+
+def _route_daily(pg_conn, agency_id: int) -> list[tuple]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, samples, sum_delay_sec FROM agg_route_daily WHERE agency_id = %s ORDER BY date", (agency_id,)
+        )
+        return cur.fetchall()
+
+
+def test_a_departure_predicted_before_the_cutover_is_rebuilt_on_its_own_day_when_only_the_day_before_changes(
+    pg_conn, agency_id, ch_client
+):
+    """A stop scheduled at 04:05 on 1 October is filed under that day, in
+    October, however much of it was predicted from 30 September's service
+    day, in September. A run whose only changed date is 30 September, by the
+    readings its rows count under, still rebuilds 1 October, the day those
+    readings are filed under, and leaves September without a row."""
+    first = update_row(datetime(2026, 10, 1, 4, 6), "a", 60, scheduled_time="04:05:00", scheduled_sec=4 * 3600 + 5 * 60)
+    insert_updates(ch_client, agency_id, [first])
+    analyze(agency_id, pg_conn, ch_client)
+    october = date(2026, 10, 1)
+    assert _route_daily(pg_conn, agency_id) == [(october, 1, 60)]
+
+    predicted = [
+        update_row(datetime(2026, 10, 1, 3, 58), "a", 0, scheduled_time="04:05:00", scheduled_sec=4 * 3600 + 5 * 60),
+        update_row(
+            datetime(2026, 10, 1, 3, 58),
+            "a",
+            30,
+            scheduled_time="04:07:00",
+            scheduled_sec=4 * 3600 + 7 * 60,
+            stop_sequence=2,
+        ),
+    ]
+    insert_updates(ch_client, agency_id, predicted)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _route_daily(pg_conn, agency_id) == [(october, 2, 90)]
+    for table in ch_aggregates.TABLES:
+        assert date(2026, 9, 30) not in _dates(ch_client, pg_conn, agency_id, table)[1], table
+        assert ch_rows(ch_client, agency_id, table) == pg_rows(pg_conn, agency_id, table), table

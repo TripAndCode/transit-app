@@ -6,12 +6,13 @@ departure the feed withdrew (a CANCELED trip or SKIPPED stop) left out."""
 from __future__ import annotations
 
 from pipeline.db import build_dedup_ch_sql
-from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS, service_date_ch, service_day_offset_ch
+from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS, filed_between_ch, service_day_offset_ch
 
-# Every stop event's rows share one service date (the dedup groups by it), so a
-# date range splits the work with no group cut in two. `u.` because the dedup
-# query's own SELECT aliases would otherwise capture a bare column name.
-_DATE_RANGE = f"{service_date_ch('u.captured_at')} BETWEEN {{start:Date}} AND {{end:Date}}"
+# Every stop event's rows share the service date it is filed under (the dedup
+# groups by it), so a range of those dates splits the work with no group cut in
+# two. `u.` because the dedup query's own SELECT aliases would otherwise
+# capture a bare column name.
+_DATE_RANGE = filed_between_ch("{start:Date}", "{end:Date}")
 
 
 # The hour of the schedule string of a run's first stop, for feeds that store no

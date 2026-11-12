@@ -9,7 +9,7 @@ excluded so the continuously-lagging current day never trips the check.
 
 The newest-completed-day cutoff (JST midnight, converted to UTC) is computed
 in Python, then passed as a `WHERE captured_at < {before}` bound into the
-ClickHouse query itself (`pipeline.clickhouse.max_captured_at_before`) —
+ClickHouse query itself (`pipeline.clickhouse.newest_filed_date_before`) —
 filtering BEFORE taking the max, not calling the unconditional
 `max_captured_at` and rejecting the result in Python afterwards. The latter
 would return "no completed day" whenever a later (e.g. today's,
@@ -20,9 +20,10 @@ has to be computed in Python since the live `updates` table lives in
 ClickHouse (`DateTime64(0, 'UTC')`) while `agg_route_daily` stays in
 Postgres, filed by service date by analyze() — comparing a
 Python-computed cutoff against ClickHouse's stored UTC instants keeps this
-correct regardless of the caller's session timezone. The live side is
-reduced to a service date (`pipeline.service_day.service_date_of`), the same
-day analyze files each row under, so the two sides compare like with like.
+correct regardless of the caller's session timezone. The live side is the
+service date the newest readings file a stop event under
+(`pipeline.service_day.filed_date_ch`), the same day analyze files each stop
+event under, so the two sides compare like with like.
 
 Only the newest completed day is compared, which catches the realistic failure
 modes (cron crashed mid-loop, forgot to re-analyze). It does NOT detect an
@@ -37,8 +38,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from pipeline.clickhouse import max_captured_at_before as ch_max_captured_at_before
-from pipeline.service_day import service_date_of
+from pipeline.clickhouse import newest_filed_date_before
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -78,8 +78,7 @@ def check_agg_freshness(conn, ch_client, agency_ids: Iterable[int]) -> list[Stal
     )
     with conn.cursor() as cur:
         for aid in agency_ids:
-            latest = ch_max_captured_at_before(ch_client, aid, today_jst_midnight_utc)
-            live_max = service_date_of(latest) if latest is not None else None
+            live_max = newest_filed_date_before(ch_client, aid, today_jst_midnight_utc)
             cur.execute(_AGG_MAX_SQL, (aid,))
             agg_max = cur.fetchone()[0]
             if is_stale(agg_max, live_max):
