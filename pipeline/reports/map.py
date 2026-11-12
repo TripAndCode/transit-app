@@ -22,8 +22,7 @@ from pipeline.live_filing import band_candidates, filing
 from pipeline.query.tools import unnamed_stop_name
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from pipeline.route_catalog import route_code_sql
-from pipeline.service_day import service_date_ch
-from pipeline.static_archive import Stamp, observation_rows
+from pipeline.static_archive import Stamp, filed_date_sql, observation_rows
 
 
 def _half_up(x: float, places: int) -> float:
@@ -78,7 +77,7 @@ def _route_rows(where: UpdatesFilter, stamp: Stamp, trip_filter_sql: str = "") -
 def _route_shape_vote_dedup_sql(where: UpdatesFilter, stamp: Stamp) -> str:
     """Per-(trip, day, stop) dedup used to weight `compute_route_shape`'s shape vote.
 
-    Keyed on the JST service day as well, like `pipeline.db.build_dedup_ch_sql`:
+    Keyed on the service day it is filed under as well, like `pipeline.db.build_dedup_ch_sql`:
     a GTFS trip_id recurs on every service day, so (trip, stop) alone would
     keep one day's observation out of a multi-day range.
 
@@ -94,7 +93,7 @@ def _route_shape_vote_dedup_sql(where: UpdatesFilter, stamp: Stamp) -> str:
         SELECT u.trip_id, u.stop_sequence,
             {latest_departure_ch()} AS dep_delay
         {_route_rows(where, stamp)}
-        GROUP BY u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence
+        GROUP BY u.trip_id, {filed_date_sql(stamp)}, u.stop_sequence
         HAVING dep_delay IS NOT NULL
     """
 
@@ -106,14 +105,15 @@ def _route_shape_stats_dedup_sql(where: UpdatesFilter, trip_filter_sql: str, sta
     Each row carries its service day, so one trip's readings on one day can be
     paired stop to stop.
     """
+    filed = filed_date_sql(stamp)
     return f"""
         SELECT u.trip_id, u.stop_sequence,
             {latest_departure_ch()} AS dep_delay,
-            {service_date_ch("u.captured_at")} AS service_date
+            {filed} AS service_date
         {_route_rows(where, stamp, trip_filter_sql)}
-        GROUP BY u.trip_id, {service_date_ch("u.captured_at")}, u.stop_sequence
+        GROUP BY u.trip_id, {filed}, u.stop_sequence
         HAVING dep_delay IS NOT NULL
-        ORDER BY u.trip_id, u.stop_sequence, {service_date_ch("u.captured_at")}
+        ORDER BY u.trip_id, u.stop_sequence, {filed}
     """
 
 

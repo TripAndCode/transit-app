@@ -46,7 +46,7 @@ async def reports_app(apply_schema):
     app.state.pool = pool
     # Every report type resolves get_report()'s ch=Depends(get_ch). None is safe:
     # every ClickHouse read these tests reach degrades a failed probe to None
-    # (api.clickhouse.max_captured_at_before_by_agency). No test here passes
+    # (api.clickhouse.newest_filed_date_before_by_agency). No test here passes
     # time_band, the one path that needs a real client.
     app.state.ch_client = None
     row = await pool.fetchrow(

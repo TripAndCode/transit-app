@@ -350,3 +350,14 @@ def test_a_poll_is_stale_only_when_its_message_is_older_than_65_s():
 def test_the_message_age_read_takes_an_archived_polls_instant_from_its_name():
     assert feed_quality.ARCHIVE_POLL_INSTANT_CH in feed_quality.MESSAGE_AGE_CH_SQL
     assert feed_quality.MESSAGE_AGE_CH_SQL in feed_quality.render()
+
+
+def test_each_day_takes_the_stop_events_filed_under_it_and_a_day_with_only_those_reads_no_update():
+    first, second = date(2026, 10, 1), date(2026, 10, 2)
+    rows = {first: {"stop_time_updates": 100, "stop_id_rows": 90}}
+    merged = feed_quality.with_stop_events(rows, {first: 40, second: 3}, ["stop_time_updates", "stop_id_rows"])
+    assert merged == {
+        first: {"stop_time_updates": 100, "stop_id_rows": 90, "stop_events": 40},
+        second: {"stop_time_updates": 0, "stop_id_rows": 0, "stop_events": 3},
+    }
+    assert feed_quality.with_stop_events(rows, {}, ["stop_time_updates"])[first]["stop_events"] == 0

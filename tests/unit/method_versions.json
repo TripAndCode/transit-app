@@ -38,6 +38,25 @@
   "2026.11.12": {
     "feed_quality_monthly": 5
   },
+  "2026.11.13": {
+    "agg_daily_trend": 4,
+    "agg_hour_daily": 5,
+    "agg_route_daily": 4,
+    "agg_route_daily_dist": 4,
+    "agg_route_daily_dwell_run": 4,
+    "agg_route_headway_daily": 5,
+    "agg_route_hour": 5,
+    "agg_route_hour_dow": 5,
+    "agg_route_stats": 4,
+    "agg_route_stop_daily": 5,
+    "agg_schedule_revision_daily": 3,
+    "agg_service_delivered_daily": 4,
+    "agg_stop_daily": 5,
+    "agg_stop_routes": 3,
+    "feed_quality_monthly": 6,
+    "route_delay_counts": 5,
+    "stop_route_days": 3
+  },
   "2026.11.2": {
     "agg_feed_health": 2
   },

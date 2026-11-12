@@ -2506,10 +2506,10 @@ def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_clie
     assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []
 
     # The ledger is the only thing consulted, so editing it is the same signal
-    # a newly ingested row would produce.
+    # a newly ingested row would produce: one fewer than ClickHouse holds.
     with pg_conn.cursor() as cur:
         cur.execute(
-            "UPDATE agg_feed_health SET raw_samples = raw_samples + 1 "
+            "UPDATE agg_feed_health SET raw_samples = raw_samples - 1 "
             "WHERE agency_id = %s AND date = (SELECT max(date) FROM agg_feed_health WHERE agency_id = %s) "
             "RETURNING date",
             (agency_id, agency_id),
@@ -2518,6 +2518,18 @@ def test_dates_needing_rebuild_names_only_what_moved(pg_conn, agency_id, ch_clie
     pg_conn.commit()
 
     assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [moved]
+
+    # One more than ClickHouse holds is a row lost, which may have been filed
+    # under either neighbouring day, so both are rebuilt with it.
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_feed_health SET raw_samples = raw_samples + 2 WHERE agency_id = %s AND date = %s",
+            (agency_id, moved),
+        )
+    pg_conn.commit()
+
+    day = timedelta(days=1)
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == [moved - day, moved, moved + day]
 
 
 class _RecordingCH:

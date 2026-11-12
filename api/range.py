@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException, Query
 
 from pipeline.day_types import TWO_WAY, DayType, DayTypes, load_day_types
-from pipeline.service_day import service_date_ch, service_date_of
+from pipeline.service_day import filed_between_ch, filed_date_ch, scheduled_seconds_ch, service_date_of
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -347,15 +347,16 @@ def service_date_clause(column: str, ctx: RangeCtx, next_param: int) -> tuple[st
 def service_date_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     """ClickHouse counterpart of :func:`service_date_clause` for ``updates``.
 
-    Keyed on the service date (:mod:`pipeline.service_day`), the day every
-    aggregate files an observation under.
+    Keyed on the service date a reading is filed under
+    (`pipeline.service_day.filed_date_ch`), the day every aggregate files a
+    stop event under.
     """
     dates = selected_service_dates(ctx)
     if dates is None:
         return "1", {}
     if not dates:
         return "0", {}
-    return f"{service_date_ch()} IN {{ch_service_dates:Array(Date)}}", {"ch_service_dates": dates}
+    return f"{filed_date_ch()} IN {{ch_service_dates:Array(Date)}}", {"ch_service_dates": dates}
 
 
 def _coerce_enum(value: str, allowed: tuple[str, ...], field: str) -> str:
@@ -642,18 +643,18 @@ def dow_clause(
 
 def date_range_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     """ClickHouse-dialect counterpart of :func:`date_range_clause` for the
-    live `updates` table (ClickHouse's own ``captured_at`` column).
+    `updates` rows of the window's stop events, named as `u.` columns.
 
-    Buckets by the service date (:mod:`pipeline.service_day`), not the UTC day:
-    analyze dates every agg_* row on that same day, so the same window must
-    select the same days whether it is served from an aggregate
-    (`date_range_clause`) or from `updates`. It is the expression
-    ``pipeline/db.py::build_dedup_ch_sql`` groups by, so the filter and the
-    dedup cannot disagree about which day an observation belongs to.
+    Selects by the service date a reading is filed under
+    (`pipeline.service_day.filed_date_ch`), not the UTC day: analyze dates
+    every agg_* row on that same day, so the same window must select the same
+    days whether it is served from an aggregate (`date_range_clause`) or from
+    `updates`. It is the day ``pipeline/db.py::build_dedup_ch_sql`` groups by,
+    so the filter and the dedup cannot disagree about which day a stop event
+    belongs to. The capture range around it lets the sort key prune the scan.
     """
-    service_date = service_date_ch()
     return (
-        f"{service_date} >= {{ch_from_date:Date}} AND {service_date} <= {{ch_to_date:Date}}",
+        filed_between_ch("{ch_from_date:Date}", "{ch_to_date:Date}"),
         {"ch_from_date": ctx.from_date, "ch_to_date": ctx.to_date},
     )
 
@@ -665,11 +666,12 @@ def dow_clause_ch(ctx: RangeCtx) -> tuple[str, dict]:
     1=Monday..7=Sunday — the same ISODOW numbering Postgres's
     ``EXTRACT(ISODOW FROM ...)`` uses, so the weekday/weekend split matches.
     A 00:15 Friday-night departure is Friday's service, so it counts as Friday.
+    The day is the one a reading is filed under (:func:`date_range_clause_ch`).
     """
     days = dow_isodays(ctx.dow)
     if days is None:
         return "1", {}
-    day_expr = f"toDayOfWeek({service_date_ch()})"
+    day_expr = f"toDayOfWeek({filed_date_ch()})"
     if ctx.dow == "weekday":
         return f"{day_expr} BETWEEN 1 AND 5", {}
     listed = ", ".join(str(day) for day in sorted(days))
@@ -683,21 +685,8 @@ def _clock_sec(hhmm: str) -> int:
 
 def scheduled_sec_ch(prefix: str = "") -> str:
     """ClickHouse seconds from the service day's 00:00 to a departure's
-    scheduled time, over the `updates` or dedup columns named with *prefix*
-    (``"u."``, ``"d."`` or ``""``).
-
-    `scheduled_sec` where ingest stored one: only it holds a GTFS extended
-    hour (``"24:10:00"`` is 87000), for which `scheduled_time` is NULL.
-    Otherwise the `scheduled_time` string's hours, minutes and optional
-    seconds, which is all the aomori_regex strategy's ``"HH:MM"`` rows and
-    the rows ingested before `scheduled_sec` existed carry. NULL when neither
-    holds a time; a malformed string degrades to NULL rather than failing the
-    query. `if`, not `ifNull`: `if` evaluates only the branch a row takes, so
-    a row carrying `scheduled_sec` never pays for the string parse.
-    """
-    parts = f"splitByChar(':', ifNull({prefix}scheduled_time, ''))"
-    from_text = f"toInt32OrNull({parts}[1]) * 3600 + toInt32OrNull({parts}[2]) * 60 + toInt32OrZero({parts}[3])"
-    return f"if({prefix}scheduled_sec IS NOT NULL, {prefix}scheduled_sec, {from_text})"
+    scheduled time (`pipeline.service_day.scheduled_seconds_ch`)."""
+    return scheduled_seconds_ch(prefix)
 
 
 def scheduled_hour_ch(prefix: str = "") -> str:

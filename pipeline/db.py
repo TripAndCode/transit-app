@@ -14,7 +14,7 @@ import psycopg2
 
 from pipeline import static_archive
 from pipeline.clickhouse import STOP_SKIPPED, TRIP_CANCELED, UPDATES_TABLE
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import filed_date_ch
 
 # The database the API and the pipeline CLI connect to when DATABASE_URL is
 # unset or empty. The test session vets this same value against the dev ports, so a
@@ -162,17 +162,21 @@ def build_dedup_ch_sql(
     combine the two safely, as `pipeline.reports.delay_record` does with
     `api.range.updates_filter_ch`'s date clause.
 
-    The `date` column is the *service date* (`pipeline.service_day`): the
-    Asia/Tokyo day shifted back by the service-day cutover, so a stop polled
-    before and after midnight is one event of one day. It is never a bare
-    `toDate(captured_at)`: the ClickHouse column is UTC
+    The `date` column is the service date the stop event is filed under, its
+    trip's (`pipeline.service_day.filed_date_ch`, as
+    `static_archive.filed_date_sql` reads it for *stamp*): the Asia/Tokyo day
+    shifted back by the service-day cutover, so a stop polled before and after
+    midnight is one event of one day, and a stop predicted before the cutover
+    for a departure after it is one event of the departure's day. It is never
+    a bare `toDate(captured_at)`: the ClickHouse column is UTC
     (`DateTime64(0, 'UTC')`), so a UTC day would misbucket every row whose
-    captured_at falls in UTC 15:00-23:59 (JST 00:00-08:59 the next day).
-    `toDate(value, timezone)` converts to a calendar date in the given
-    timezone regardless of the column's stored timezone. The `GROUP BY`
-    repeats the full expression rather than the `date` alias, to sidestep any
-    ambiguity in how ClickHouse resolves a GROUP BY key that shares a name
-    with a SELECT-list alias.
+    captured_at falls in UTC 15:00-23:59 (JST 00:00-08:59 the next day). The
+    `GROUP BY` repeats the full expression rather than the `date` alias, to
+    sidestep any ambiguity in how ClickHouse resolves a GROUP BY key that
+    shares a name with a SELECT-list alias. A caller selecting the events of
+    some dates tests the filed date on the raw rows (`api.range.
+    date_range_clause_ch`, `ch_aggregates.days_where`), so each event it
+    keeps has every reading it is filed with.
 
     Takes `agency_id` as a named parameter (`{agency_id:UInt16}`) rather
     than a Python-formatted literal, for clickhouse-connect's server-side
@@ -253,16 +257,17 @@ def build_dedup_ch_sql(
         if include_static_version
         else ""
     )
+    filed = static_archive.filed_date_sql(stamp)
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
+        f"{filed} AS date, u.stop_sequence, "
         f"{latest_departure_ch()} AS dep_delay{captured}{scheduled_sec}{static_version} "
         + static_archive.observation_rows(
             stop_event_filter_ch(extra_where), stamp, table, filed_where, live_form=live_form, by_stop_event=live_form
         )
         + " "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        f"{service_date_ch('u.captured_at')}, u.stop_sequence "
+        f"{filed}, u.stop_sequence "
         "HAVING dep_delay IS NOT NULL"
     )
 
@@ -315,7 +320,8 @@ def build_stop_visits_ch_sql(
       so only an observed one measures the time spent at the stop. NULL when
       the visit lacks either side, which leaves nothing to judge.
 
-    The visit is keyed on `(trip_id, service date, stop_sequence)` alone.
+    The visit is keyed on `(trip_id, service date, stop_sequence)` alone, the
+    service date the dedup files its departure under.
     `route_code`, `service_type` and `scheduled_time` come from the latest
     departure poll, or the latest arrival poll for an arrival-only visit.
     Ingest looks all three up by trip and stop, so they agree across a
@@ -389,7 +395,7 @@ def build_stop_visits_ch_sql(
         "if(tupleElement(visit_dep, 1) IS NOT NULL AND tupleElement(visit_arr, 1) IS NOT NULL, "
         "toBool(visit_dep_key >= visit_first_arr_key), NULL) AS dep_observed "
         "FROM ("
-        f"SELECT u.trip_id AS visit_trip_id, {service_date_ch('u.captured_at')} AS visit_date, "
+        f"SELECT u.trip_id AS visit_trip_id, {static_archive.filed_date_sql(stamp)} AS visit_date, "
         "u.stop_sequence AS visit_stop_sequence, "
         f"argMaxIf(tuple({departure_ch()}, {schedule}{sched_sec}), {latest}, {dep_ok} OR {withdrawn}) AS visit_dep, "
         f"argMaxIf(tuple(if({withdrawn}, NULL, u.arr_delay), {schedule}), {latest}, {arr_ok} OR {withdrawn}) "
@@ -403,7 +409,7 @@ def build_stop_visits_ch_sql(
             filed_where,
             live_form=live_form,
         )
-        + f" GROUP BY u.trip_id, {service_date_ch('u.captured_at')}, u.stop_sequence"
+        + f" GROUP BY u.trip_id, {static_archive.filed_date_sql(stamp)}, u.stop_sequence"
         ") WHERE tupleElement(visit_dep, 1) IS NOT NULL OR tupleElement(visit_arr, 1) IS NOT NULL"
     )
     if not join_schedule:
@@ -490,7 +496,7 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     rows_to_lead_bucket_stats` consumes the result by tuple position.
 
     See `build_dedup_ch_sql`'s own docstring for the rationale behind the
-    JST `toDate()` bucketing, the `{agency_id:UInt16}` parameter binding,
+    service date a stop event is filed under, the `{agency_id:UInt16}` parameter binding,
     and qualifying every base-table column reference with the `u.` alias
     (all identical here, not repeated).
     """
@@ -498,12 +504,12 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     where = f"u.scheduled_time IS NOT NULL AND {stop_event_filter_ch(extra_where)}"
     return (
         "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        f"{service_date_ch('u.captured_at')} AS date, u.stop_sequence, "
+        f"{filed_date_ch('u.')} AS date, u.stop_sequence, "
         f"{latest_departure_ch()} AS final_dep_delay, "
         f"groupArrayIf(tuple(u.captured_at, u.dep_delay), {departure}) AS observations "
         f"FROM updates AS u WHERE {where} "
         "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        f"{service_date_ch('u.captured_at')}, u.stop_sequence "
+        f"{filed_date_ch('u.')}, u.stop_sequence "
         f"HAVING final_dep_delay IS NOT NULL AND countIf({departure}) > 1"
     )
 

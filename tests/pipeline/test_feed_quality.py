@@ -18,6 +18,7 @@ from pipeline.reports.comparability import assess, clamp_pct
 from pipeline.reports.network import compute_agency_feed_quality, compute_network_summary, coverage_through
 from pipeline.reports.service_delivered import compute_service_delivered_by_agency
 from tests.fixtures.clock import freeze_now, jst_midday
+from tests.fixtures.scenario import JST
 
 _APRIL = date(2026, 4, 1)
 _MAY = date(2026, 5, 1)
@@ -449,6 +450,33 @@ def test_a_stop_event_counts_as_reported_on_a_plausible_delay_or_a_withdrawal(
     analyze(agency, pg_conn, ch_client)
 
     assert _stored(pg_conn, agency)[_APRIL]["observed_stop_events"] == reported
+
+
+def _predicted_across_the_cutover(day: date) -> list[tuple]:
+    """Trip ALL-1's first stop, scheduled at 04:05 on *day*, predicted at
+    03:58 and reported at 04:06 JST: one stop event, of *day*'s service, whose
+    readings fall on either side of the 04:00 cutover."""
+    rows = []
+    for hour, minute in ((3, 58), (4, 6)):
+        captured = datetime.combine(day, datetime.min.time().replace(hour=hour, minute=minute), tzinfo=JST)
+        captured = captured.astimezone(timezone.utc)
+        name = f"oracle/{captured:%Y%m%d}/TripUpdate_{captured:%H%M%S}.pb"
+        header = int(captured.timestamp()) - 10
+        rows.append((name, captured, "ALL-1", "平日", "04:05:00", "R1", 1, 30, "S1", 30, 0, 0, header, 14700))
+    return rows
+
+
+def test_a_stop_event_predicted_before_the_cutover_counts_once_on_its_trips_day(
+    pg_conn, ch_client, closed_on_may_first
+):
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    every_stop = _one_poll(("none", 0, None, None, 0))
+    insert_updates(ch_client, agency, every_stop + _predicted_across_the_cutover(date(2026, 4, 3)))
+    analyze(agency, pg_conn, ch_client)
+
+    assert _stored(pg_conn, agency)[_APRIL]["observed_stop_events"] == len(every_stop) + 1
 
 
 def test_a_trip_cancelled_without_listing_a_stop_reports_its_stops_but_sends_no_stop_update(

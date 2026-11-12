@@ -62,6 +62,7 @@ from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from tests.fixtures import scenario_oracle as oracle
 from tests.fixtures.scenario import (
     JST,
+    SCHEDULED,
     Cancellation,
     Delivery,
     FeedModel,
@@ -777,6 +778,68 @@ def imperfect_feed(day: date) -> Scenario:
             poll_interval_sec=60,
             lead_sec=300,
             freshness_lag_sec=_FRESHNESS_LAG_SEC,
+        ),
+    )
+
+
+# The cutover line: six stops two minutes apart. The night's last trip
+# leaves its first stop at 27:46 and is late enough from its fourth stop on
+# to leave after the 04:00 cutover; the next morning's first trip leaves at
+# 04:05. Each first departure, then each stop's true delay in seconds.
+_CUTOVER_NIGHT = ("27:46:00", (300, 420, 540, 600, 660, 720))
+_CUTOVER_MORNING = ("04:05:00", (30, 60, 61, 120, 180, 240))
+# A trip of each day well clear of the cutover, so each day's timetable has
+# a scheduled headway, far from high-frequency.
+_CUTOVER_EVENING = ("22:00:00", (0, 30, 60, 90, 120, 150))
+_CUTOVER_FORENOON = ("10:00:00", (-30, 0, 30, 60, 90, 120))
+# Both trips enter the feed ten minutes before they leave, so each is
+# predicted on both sides of the cutover, and until 04:00 the feed predicts
+# the stops still to leave after it at this stale delay.
+_CUTOVER_LEAD_SEC = 600
+_CUTOVER_STALE_DELAY_SEC = 0
+_CUTOVER_SEC = 4 * 3600
+
+
+def cutover(day: date) -> Scenario:
+    """A night's last trip that leaves its last three stops after the 04:00
+    cutover, and the next service day's first trip, which the feed starts
+    predicting before it. Every stop either trip leaves after the cutover is
+    predicted before it, at a stale delay, and reported after it at its
+    true one: each is one departure, of its own trip's service day. Each day
+    runs one more trip, hours from the cutover."""
+    route = _route("C1", "Cutover line", 6, 34.69)
+    morning_day = day + timedelta(days=1)
+    night = _trip(route, "平日", _CUTOVER_NIGHT[0], 120, "C1_wd2746")
+    morning = _trip(route, "土曜", _CUTOVER_MORNING[0], 120, "C1_sa0405")
+    evening = _trip(route, "平日", _CUTOVER_EVENING[0], 120, "C1_wd2200")
+    forenoon = _trip(route, "土曜", _CUTOVER_FORENOON[0], 120, "C1_sa1000")
+    night_enters = gtfs_seconds(_CUTOVER_NIGHT[0]) - _CUTOVER_LEAD_SEC
+    morning_enters = gtfs_seconds(_CUTOVER_MORNING[0]) - _CUTOVER_LEAD_SEC
+    return Scenario(
+        name="cutover",
+        routes=(route,),
+        timetable=(evening, night, morning, forenoon),
+        days=(ServiceDay(day, "平日"), ServiceDay(morning_day, "土曜")),
+        runs=(
+            TripRun.from_delays(evening, day, _CUTOVER_EVENING[1]),
+            TripRun.from_delays(night, day, _CUTOVER_NIGHT[1]),
+            TripRun.from_delays(morning, morning_day, _CUTOVER_MORNING[1]),
+            TripRun.from_delays(forenoon, morning_day, _CUTOVER_FORENOON[1]),
+        ),
+        feed=FeedModel(
+            poll_interval_sec=60,
+            lead_sec=_CUTOVER_LEAD_SEC,
+            misreports=(
+                Misreport(
+                    night.trip_id,
+                    day,
+                    _CUTOVER_STALE_DELAY_SEC,
+                    night_enters,
+                    _CUTOVER_SEC + 24 * 3600,
+                    (4, 5, 6),
+                ),
+                Misreport(morning.trip_id, morning_day, _CUTOVER_STALE_DELAY_SEC, morning_enters, _CUTOVER_SEC),
+            ),
         ),
     )
 
@@ -1617,8 +1680,35 @@ def _the_loaded_timetable_stands_for_every_day(observed: Observed, found: oracle
     return replace(found, wait_plans=wait_plans)
 
 
-# The two below are met by no scenario (_KNOWN): each one's test holds every
-# cell its rule would move to the truth, so the rule cannot come back unnoticed.
+def _each_capture_day_files_its_own_departure(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """Each departure once for every service day its plausible readings were
+    captured on, at the last of them captured that day, under its trip's day
+    type: what filing a reading under its capture's service day, rather than
+    its trip's, gives. Every other part of the outcome stays the truth's."""
+    captured = [poll for _version, batch in observed.batches for poll in batch]
+    sent = sorted(
+        (r.poll for r in oracle.received(observed.scenario, captured)), key=lambda p: (p.captured_at, p.source_file)
+    )
+    last: dict[tuple[str, date, int, date], int] = {}
+    for poll in sent:
+        day = oracle.service_day_of(poll.captured_at)
+        for entry in poll.trips:
+            for stop in entry.stops:
+                delay = stop.departure_delay
+                if stop.status == SCHEDULED and delay is not None and oracle.plausible(delay):
+                    last[(entry.trip_id, entry.service_date, stop.stop_sequence, day)] = delay
+    departed = {(d.trip_id, d.service_date, d.stop_sequence): d for d in found.departures}
+    refiled = [
+        replace(departed[key[:3]], service_date=key[3], delay_sec=delay)
+        for key, delay in last.items()
+        if key[:3] in departed
+    ]
+    return replace(found, departures=tuple(refiled))
+
+
+# The divergences below are met by no scenario (_KNOWN): each one's test holds
+# every cell its rule would move to the truth, so the rule cannot come back
+# unnoticed.
 _LOWER_MIDDLE_DIVERGENCE = Divergence(
     name="scheduled headway is the lower middle gap",
     reason=(
@@ -1636,6 +1726,15 @@ _LOADED_TIMETABLE_DIVERGENCE = Divergence(
         "timetable by today's"
     ),
     view=_the_loaded_timetable_stands_for_every_day,
+)
+_CAPTURE_DAY_DIVERGENCE = Divergence(
+    name="a reading is filed under its capture's service day",
+    reason=(
+        "Filing each reading under the service day it was captured on, rather than its trip's, counts a "
+        "departure whose readings straddle the 04:00 cutover once on each day, the earlier at the last "
+        "prediction before the cutover"
+    ),
+    view=_each_capture_day_files_its_own_departure,
 )
 # The divergences each scenario is known to meet, by scenario name.
 _KNOWN: dict[str, tuple[Divergence, ...]] = {}
@@ -2057,6 +2156,7 @@ _ALL = [
     pytest.param(dwell, id="dwell"),
     pytest.param(source_mix, id="source_mix"),
     _IMPERFECT := pytest.param(imperfect_feed, id="imperfect_feed"),
+    _CUTOVER := pytest.param(cutover, id="cutover"),
 ]
 
 
@@ -2138,6 +2238,11 @@ def test_headway_quality_judges_each_day_by_the_timetable_in_force_that_day(obse
 @pytest.mark.parametrize("observed", [_PUBLISHED_EARLY], indirect=True)
 def test_the_scheduled_headway_of_an_even_count_of_gaps_is_the_mean_of_the_middle_two(observed):
     _assert_clean(_divergence_mismatches(observed, _LOWER_MIDDLE_DIVERGENCE))
+
+
+@pytest.mark.parametrize("observed", [_CUTOVER], indirect=True)
+def test_each_departure_is_filed_under_its_trips_service_day(observed):
+    _assert_clean(_divergence_mismatches(observed, _CAPTURE_DAY_DIVERGENCE))
 
 
 def _at_true_delays(found: oracle.Outcome) -> oracle.Outcome:

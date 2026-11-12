@@ -40,8 +40,7 @@ from pipeline.reports.filters import (
     _service_label,
     ctx_filing,
 )
-from pipeline.service_day import service_date_ch
-from pipeline.static_archive import Stamp, observation_rows
+from pipeline.static_archive import Stamp, filed_date_sql, observation_rows
 
 
 def aggregates_serve(ctx: RangeCtx) -> bool:
@@ -934,7 +933,7 @@ async def _route_wd_we_avg_ch(
         live_form=True,
         by_stop_event=True,
     )
-    service_date = service_date_ch("u.captured_at")
+    service_date = filed_date_sql(filed.stamp)
     result = await ch.query(
         f"""
         SELECT route_code,

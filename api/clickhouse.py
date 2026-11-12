@@ -12,7 +12,15 @@ from datetime import date, datetime, timedelta, timezone
 import clickhouse_connect
 
 from pipeline.cache import cache_briefly
-from pipeline.clickhouse import LIVE_SOURCED, LIVE_TABLE, UPDATES_TABLE, ch_conn_kwargs, checked_table, live_table_for
+from pipeline.clickhouse import (
+    LIVE_SOURCED,
+    LIVE_TABLE,
+    NEWEST_FILED_DATE_BEFORE_SQL,
+    UPDATES_TABLE,
+    ch_conn_kwargs,
+    checked_table,
+    live_table_for,
+)
 from pipeline.service_day import service_date_ch
 
 
@@ -39,8 +47,8 @@ async def get_ch_client():
     kept small by aggregating in ClickHouse rather than shipping raw rows, so
     a query that can exceed the cap (a wide window over a busy route)
     should aggregate server-side instead of raising the limit — see
-    max_captured_at_before's docstring for how these queries are shaped to
-    stay index-served. clickhouse-connect converts these to strings itself
+    max_captured_at's docstring for how these queries are shaped to stay
+    index-served. clickhouse-connect converts these to strings itself
     when posting settings over HTTP, so plain Python int/str values here are
     fine as written.
     """
@@ -105,33 +113,16 @@ async def max_captured_at(ch, agency_id: int, *, table: str = UPDATES_TABLE) -> 
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-async def max_captured_at_before(ch, agency_id: int, before: datetime) -> datetime | None:
-    """Async counterpart of `pipeline.clickhouse.max_captured_at_before`.
-
-    Same index-served ``ORDER BY captured_at DESC LIMIT 1`` form (see that
-    function's docstring for why this beats `maxOrNull`/an unfiltered
-    `GROUP BY`): `captured_at` is the second column in `updates`' sort key
-    `(agency_id, captured_at, route_code, trip_id, stop_sequence)`, so a
-    single-agency, filtered-then-limited read is served off the sort index
-    (reads ~thousands of rows) instead of scanning every row for the agency
-    (or, worse, the whole table). Called per-agency by
-    `max_captured_at_before_by_agency` below (used by
-    `pipeline.health.aggregate_freshness` and
-    `pipeline.reports.network.compute_network_summary`) rather than a
-    cross-agency `GROUP BY` (ClickHouse has no LATERAL join, and an
+async def newest_filed_date_before(ch, agency_id: int, before: datetime) -> date | None:
+    """Async counterpart of `pipeline.clickhouse.newest_filed_date_before`:
+    the newest service date the agency's rows captured before *before* file a
+    stop event under, off the sort index (its SQL's own comment says how).
+    Called per agency by `newest_filed_date_before_by_agency` below rather
+    than as a cross-agency `GROUP BY` (ClickHouse has no LATERAL join, and an
     unfiltered `GROUP BY agency_id` over `updates` reads the `captured_at`
-    column for the entire table).
-    """
-    result = await ch.query(
-        "SELECT captured_at FROM updates "
-        "WHERE agency_id = {agency_id:UInt16} AND captured_at < {before:DateTime64} "
-        "ORDER BY captured_at DESC LIMIT 1",
-        parameters={"agency_id": agency_id, "before": before},
-    )
-    if not result.result_rows:
-        return None
-    value = result.result_rows[0][0]
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+    column for the entire table)."""
+    result = await ch.query(NEWEST_FILED_DATE_BEFORE_SQL, parameters={"agency_id": agency_id, "before": before})
+    return result.result_rows[0][0] if result.result_rows else None
 
 
 async def min_captured_at(ch, agency_id: int) -> datetime | None:
@@ -160,7 +151,7 @@ async def min_captured_at(ch, agency_id: int) -> datetime | None:
 async def min_captured_at_by_agency(ch, agency_ids: list[int], log: logging.Logger) -> dict[int, datetime | None]:
     """Per-agency `min_captured_at`, run concurrently.
 
-    Same degrade-on-failure shape as `max_captured_at_before_by_agency`: a
+    Same degrade-on-failure shape as `newest_filed_date_before_by_agency`: a
     failing probe degrades that one agency to `None` rather than failing the
     whole batch. Callers pass only the (normally small) subset of agencies
     with no `agg_route_daily` rows at all, since that's the only case this
@@ -177,10 +168,10 @@ async def min_captured_at_by_agency(ch, agency_ids: list[int], log: logging.Logg
     return dict(await asyncio.gather(*(_probe(aid) for aid in agency_ids)))
 
 
-async def max_captured_at_before_by_agency(
+async def newest_filed_date_before_by_agency(
     ch, agency_ids: list[int], before: datetime, log: logging.Logger
-) -> dict[int, datetime | None]:
-    """Per-agency `max_captured_at_before`, run concurrently.
+) -> dict[int, date | None]:
+    """Per-agency `newest_filed_date_before`, run concurrently.
 
     Shared by `pipeline.health.aggregate_freshness` and
     `pipeline.reports.network.compute_network_summary`, which both need this
@@ -195,9 +186,9 @@ async def max_captured_at_before_by_agency(
     internally.
     """
 
-    async def _probe(aid: int) -> tuple[int, datetime | None]:
+    async def _probe(aid: int) -> tuple[int, date | None]:
         try:
-            return aid, await max_captured_at_before(ch, aid, before)
+            return aid, await newest_filed_date_before(ch, aid, before)
         except Exception:
             log.warning("ClickHouse freshness probe failed for agency %s — degrading", aid, exc_info=True)
             cache_briefly()

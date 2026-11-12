@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from pipeline import ch_aggregates
+from pipeline import ch_aggregates, static_archive
 
 
 def test_months_of_names_each_month_once_in_order():
@@ -24,15 +24,36 @@ def test_month_bounds_run_from_the_first_to_the_next_months_first(month, bounds)
     assert ch_aggregates.month_bounds(month) == bounds
 
 
-def test_month_where_bounds_the_month_at_the_service_day_cutover():
-    """Service day 2026-09-01 starts at 04:00 JST, which is 19:00 UTC the day before."""
+def test_month_where_selects_the_rows_filed_under_the_month():
+    """Service day 2026-09-01 starts at 04:00 JST, which is 19:00 UTC the day
+    before; a reading filed under it can be captured up to the filing reach
+    either side of its span, from 00:00 JST that day to 08:00 JST on 1 October."""
     sql, params = ch_aggregates.month_where(202609)
     assert "u.captured_at >= {month_start:DateTime64}" in sql
     assert "u.captured_at < {month_end:DateTime64}" in sql
+    assert f"{static_archive.FILED_DATE_SQL} BETWEEN {{month_first:Date}} AND {{month_last:Date}}" in sql
     assert params == {
-        "month_start": datetime(2026, 8, 31, 19, 0, tzinfo=timezone.utc),
-        "month_end": datetime(2026, 9, 30, 19, 0, tzinfo=timezone.utc),
+        "month_start": datetime(2026, 8, 31, 15, 0, tzinfo=timezone.utc),
+        "month_end": datetime(2026, 9, 30, 23, 0, tzinfo=timezone.utc),
+        "month_first": date(2026, 9, 1),
+        "month_last": date(2026, 9, 30),
     }
+
+
+def test_days_where_ranges_once_per_run_of_consecutive_days():
+    days = [date(2026, 9, 3), date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 7)]
+    sql, params = ch_aggregates.days_where(days)
+    assert params["filed_days"] == [date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 7)]
+    assert (params["day_start_0"], params["day_end_0"]) == (
+        datetime(2026, 8, 31, 15, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 3, 23, 0, tzinfo=timezone.utc),
+    )
+    assert (params["day_start_1"], params["day_end_1"]) == (
+        datetime(2026, 9, 6, 15, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 7, 23, 0, tzinfo=timezone.utc),
+    )
+    assert "day_start_2" not in params
+    assert f"has({{filed_days:Array(Date)}}, {static_archive.FILED_DATE_SQL})" in sql
 
 
 def test_work_tables_are_named_per_agency_and_only_for_registered_tables():

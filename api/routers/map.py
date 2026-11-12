@@ -73,10 +73,9 @@ from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 from pipeline.service_day import (
     clock_to_sec,
-    service_date_ch,
+    filed_between_ch,
     service_date_of,
     service_day_offset,
-    service_day_start_utc,
 )
 from pipeline.service_hours import load_service_hours
 from pipeline.static_archive import Stamp, observation_rows
@@ -325,8 +324,12 @@ async def _live_filing(
     *,
     table: str = LIVE_TABLE,
 ) -> Filing:
-    """How a read of *table*'s rows captured from *since* to *latest* files them."""
-    return await filing(conn, ch, agency_id, service_date_of(since), service_date_of(latest), table=table, since=since)
+    """How a read of *table*'s rows captured from *since* to *latest* files
+    them. A row is filed under its capture's service date or the day either
+    side (`pipeline.service_day.filed_date_ch`), so the read reaches those."""
+    day = timedelta(days=1)
+    first, last = service_date_of(since) - day, service_date_of(latest) + day
+    return await filing(conn, ch, agency_id, first, last, table=table, since=since)
 
 
 @router.get("/delays/live", response_model=None)
@@ -638,7 +641,7 @@ def today_routes_sql(stamp: Stamp) -> str:
         + build_dedup_ch_sql(
             table=LIVE_TABLE,
             include_captured_at=True,
-            extra_where="u.captured_at >= {day_start:DateTime64} AND u.captured_at < {day_end:DateTime64}",
+            extra_where=filed_between_ch("{day:Date}", "{day:Date}"),
             stamp=stamp,
             live_form=True,
         )
@@ -827,8 +830,7 @@ async def today_route_summary(
         today_routes_sql(filed.stamp),
         parameters={
             "agency_id": agency_id,
-            "day_start": service_day_start_utc(today),
-            "day_end": service_day_start_utc(today + timedelta(days=1)),
+            "day": today,
             **filed.params,
         },
     )
@@ -1231,13 +1233,13 @@ def _cohort_fields(stop_id: str | None, route_avg_sec: int | None, cohort: dict[
 
 def _route_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = "") -> str:
     """The FROM clause of one route's plausible departures, and the polls
-    withdrawing one (`pipeline.db.stop_event_filter_ch`), on the service day
-    bound as *day_param*, read from *table*, each poll filed under *stamp*
+    withdrawing one (`pipeline.db.stop_event_filter_ch`), filed under the
+    service day bound as *day_param*, read from *table*, each poll filed under *stamp*
     (`pipeline.static_archive.observation_rows`), and tested by *filed_where*.
     Refitting can give a poll with no route this one, so a REFIT read also
     reads those and tests the route, and *filed_where*, on the filed poll;
     any other tests them on the poll as stored."""
-    on_day = f"{service_date_ch('u.captured_at')} = {{{day_param}:Date}}"
+    on_day = filed_between_ch(f"{{{day_param}:Date}}", f"{{{day_param}:Date}}")
     if stamp is not Stamp.REFIT:
         raw = " AND ".join(part for part in ("u.route_code = {route:String}", on_day, filed_where) if part)
         return observation_rows(stop_event_filter_ch(raw), stamp, table, live_form=True)

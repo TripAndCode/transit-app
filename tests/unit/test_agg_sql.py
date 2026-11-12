@@ -14,6 +14,7 @@ from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, 
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
 from pipeline.service_day import service_date_ch, service_day_offset_ch, service_day_seconds_sql
+from pipeline.static_archive import FILED_DATE_SQL
 
 DATES = " AND <DATE-FILTER>"
 
@@ -45,10 +46,16 @@ def test_the_date_filter_is_the_only_part_that_varies_by_run(name):
     assert build(DATES).replace(DATES, "") == build("")
 
 
-@pytest.mark.parametrize("name", CH_BUILDERS)
-def test_service_date_is_the_shared_service_day_expression(name):
+def test_feed_health_counts_each_reading_on_its_captures_service_day():
+    assert service_date_ch() in agg_sql.feed_health_ch_sql("")
+
+
+@pytest.mark.parametrize("name", ["service_delivered", "schedule_revision", "route_headway_daily"])
+def test_a_stop_event_builder_files_each_row_under_its_trips_service_day(name):
     build, _ = CH_BUILDERS[name]
-    assert service_date_ch() in build("")
+    sql = build("")
+    assert FILED_DATE_SQL in sql
+    assert service_date_ch("u.captured_at") not in sql.replace(FILED_DATE_SQL, "")
 
 
 def test_headway_daily_places_the_schedule_on_the_service_day_before_the_delay():

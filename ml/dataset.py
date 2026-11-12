@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 from clickhouse_connect.driver.client import Client
 
-from ml.data import date_span
+from ml.data import filed_span
 from ml.sql import runs_sql
 
 RUN_COLUMNS = [
@@ -28,7 +28,7 @@ RUN_COLUMNS = [
 
 def fetch_runs(client: Client, agency_id: int, *, chunk_days: int = 7) -> pd.DataFrame:
     """An agency's runs a week at a time, the same way fetch_cells reads its cells."""
-    span = date_span(client, agency_id)
+    span = filed_span(client, agency_id)
     chunks: list[pd.DataFrame] = []
     if span is not None:
         start, last = span

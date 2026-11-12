@@ -759,7 +759,7 @@ async def test_a_route_seen_as_stored_finds_its_latest_day_without_deciding_how_
     from the rows as stored; only the day then read is filed."""
     from api.main import app
     from pipeline.live_filing import invalidate_schedule_joins
-    from pipeline.service_day import service_day_start_utc
+    from pipeline.service_day import filed_capture_span
 
     spy = _Spy(ch_async_client)
     app.state.ch_client = spy
@@ -771,4 +771,4 @@ async def test_a_route_seen_as_stored_finds_its_latest_day_without_deciding_how_
         assert response.json()["date"] == refiled.day.isoformat(), path
         probed_from = [params["stamped_from"] for sql, params in spy.queries if "GROUP BY stem" in sql]
         assert probed_from, path
-        assert min(probed_from) >= service_day_start_utc(refiled.day), path
+        assert min(probed_from) >= filed_capture_span(refiled.day, refiled.day)[0], path

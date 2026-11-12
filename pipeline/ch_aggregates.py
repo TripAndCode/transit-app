@@ -50,7 +50,7 @@ from pipeline.histogram import (
     N_BUCKETS,
     WIDTH,
 )
-from pipeline.service_day import service_date_ch, service_day_start_utc
+from pipeline.service_day import filed_capture_span, service_date_ch
 from pipeline.static_archive import ScheduleJoin, Stamp, observation_rows
 
 logger = logging.getLogger(__name__)
@@ -125,17 +125,22 @@ def month_bounds(month: int) -> tuple[date, date]:
 
 
 def month_where(month: int) -> tuple[str, dict]:
-    """A predicate selecting the `updates` rows whose service date falls in *month*.
+    """A predicate selecting the `updates` rows filed under a service date of
+    *month* (`static_archive.FILED_DATE_SQL`).
 
-    A range on the stored instant rather than a test of the service date, so the
-    (agency_id, captured_at) sort key prunes the scan to the month. The bounds
-    bind as untyped DateTime64: clickhouse-connect renders an aware datetime in
-    the server's timezone, which is the zone an untyped value is read in.
+    With a range on the stored instant, the span those rows are captured in
+    (`filed_capture_span`), so the (agency_id, captured_at) sort key prunes the
+    scan to the month. The bounds bind as untyped DateTime64: clickhouse-connect
+    renders an aware datetime in the server's timezone, which is the zone an
+    untyped value is read in.
     """
     first, following = month_bounds(month)
+    last = following - timedelta(days=1)
+    start, end = filed_capture_span(first, last)
     return (
-        "u.captured_at >= {month_start:DateTime64} AND u.captured_at < {month_end:DateTime64}",
-        {"month_start": service_day_start_utc(first), "month_end": service_day_start_utc(following)},
+        "u.captured_at >= {month_start:DateTime64} AND u.captured_at < {month_end:DateTime64} "
+        f"AND {static_archive.FILED_DATE_SQL} BETWEEN {{month_first:Date}} AND {{month_last:Date}}",
+        {"month_start": start, "month_end": end, "month_first": first, "month_last": last},
     )
 
 
@@ -148,18 +153,32 @@ def _scope_where(month: int, scopes: Iterable[list[date] | None]) -> tuple[str, 
 
 
 def days_where(days: list[date]) -> tuple[str, dict]:
-    """A predicate selecting the `updates` rows whose service date is one of *days*.
+    """A predicate selecting the `updates` rows filed under one of *days*.
 
-    Ranges on the stored instant, for the reason `month_where` gives.
+    With ranges on the stored instant, one per run of consecutive days, for
+    the reason `month_where` gives.
     """
-    clauses, params = [], {}
-    for i, day in enumerate(days):
+    clauses: list[str] = []
+    params: dict = {"filed_days": sorted(set(days))}
+    for i, (first, last) in enumerate(_runs(days)):
         clauses.append(
             f"(u.captured_at >= {{day_start_{i}:DateTime64}} AND u.captured_at < {{day_end_{i}:DateTime64}})"
         )
-        params[f"day_start_{i}"] = service_day_start_utc(day)
-        params[f"day_end_{i}"] = service_day_start_utc(day + timedelta(days=1))
-    return " OR ".join(clauses), params
+        params[f"day_start_{i}"], params[f"day_end_{i}"] = filed_capture_span(first, last)
+    if not clauses:
+        return "0", {}
+    return f"({' OR '.join(clauses)}) AND has({{filed_days:Array(Date)}}, {static_archive.FILED_DATE_SQL})", params
+
+
+def _runs(days: Iterable[date]) -> list[tuple[date, date]]:
+    """*days* as runs of consecutive dates, each its first and last."""
+    runs: list[tuple[date, date]] = []
+    for day in sorted(set(days)):
+        if runs and runs[-1][1] + timedelta(days=1) == day:
+            runs[-1] = (runs[-1][0], day)
+        else:
+            runs.append((day, day))
+    return runs
 
 
 def _round_half_away(numerator: str, denominator: str, scale: int) -> str:
@@ -649,7 +668,7 @@ def _dedup_select(where: str, *, scheduled_sec: bool = True, stamp: Stamp = Stam
 def _raw_select(where: str, stamp: Stamp = Stamp.INGESTED) -> str:
     """The agency's `updates` rows matching *where*, with no dedup: every poll, delay or not."""
     return (
-        f"SELECT {service_date_ch('u.captured_at')} AS date, u.route_code AS route_code, u.trip_id AS trip_id, "
+        f"SELECT {static_archive.filed_date_sql(stamp)} AS date, u.route_code AS route_code, u.trip_id AS trip_id, "
         f"u.stop_sequence AS stop_sequence, ifNull(u.static_version_id, '') AS static_version_id "
         f"{observation_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', stamp)}"
     )
@@ -953,13 +972,15 @@ def source_months(ch, agency_id: int) -> list[int]:
     """Every month of service date from the agency's first `updates` row to its last.
 
     Two probes that the (agency_id, captured_at) sort key serves from either end
-    of the agency's rows, rather than a read of its whole history. A month in the
-    range that holds no row builds nothing, and `swap` then drops it.
+    of the agency's rows, rather than a read of its whole history. Each end is
+    taken a day further out, the furthest a row is filed from its capture's
+    service date (`static_archive.FILED_DATE_SQL`). A month in the range that
+    holds no row builds nothing, and `swap` then drops it.
     """
     ends = []
-    for direction in ("ASC", "DESC"):
+    for direction, step in (("ASC", -1), ("DESC", 1)):
         rows = ch.query(
-            f"SELECT toYYYYMM({service_date_ch()}) FROM {UPDATES_TABLE} "
+            f"SELECT toYYYYMM(addDays({service_date_ch()}, {step})) FROM {UPDATES_TABLE} "
             f"WHERE agency_id = {{agency_id:UInt16}} ORDER BY captured_at {direction} LIMIT 1",
             parameters={"agency_id": agency_id},
         ).result_rows

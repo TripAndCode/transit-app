@@ -10,7 +10,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pipeline.service_day import service_date_ch, service_date_of, service_day_offset, service_day_offset_ch
+from pipeline.service_day import (
+    filed_date_ch,
+    filed_date_of,
+    service_date_ch,
+    service_date_of,
+    service_day_offset,
+    service_day_offset_ch,
+)
 
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 
@@ -49,3 +56,28 @@ def test_the_sql_service_day_offset_matches_the_python_one_for_every_minute_arou
 def test_the_sql_service_day_offset_keeps_a_missing_value_missing(ch_client):
     rows = ch_client.query(f"SELECT {service_day_offset_ch('CAST(NULL AS Nullable(Int32))')}").result_rows
     assert rows == [(None,)]
+
+
+def test_the_sql_filed_date_matches_the_python_one_around_the_clock(ch_client):
+    """Every 7th minute of two days against stored schedules on and off the
+    hour, past 24:00, with none, and as an aomori_regex ``HH:MM`` string."""
+    seconds = [0, 600, 14340, 14400, 14700, 21600, 43200, 85800, 86400, 99960, 100800, 108000]
+    rows = ch_client.query(
+        f"SELECT captured_at, scheduled_sec, scheduled_time, {filed_date_ch('')} FROM ("
+        "SELECT toDateTime64('2026-03-05 15:00:00', 0, 'UTC') + INTERVAL number * 7 MINUTE AS captured_at, "
+        f"arrayJoin(CAST(arrayConcat([NULL], {seconds}) AS Array(Nullable(Int32)))) AS scheduled_sec, "
+        "CAST(NULL AS Nullable(String)) AS scheduled_time FROM numbers(412) "
+        "UNION ALL SELECT toDateTime64('2026-03-05 15:00:00', 0, 'UTC') + INTERVAL number * 7 MINUTE, "
+        "CAST(NULL AS Nullable(Int32)), arrayJoin(['04:05', '23:59', '00:40']) FROM numbers(412))"
+    ).result_rows
+    assert len(rows) == 412 * (len(seconds) + 4)
+    mismatches = []
+    for captured, sec, text, filed in rows:
+        captured = captured.replace(tzinfo=timezone.utc)
+        if sec is None and text is not None:
+            hours, minutes = text.split(":")
+            sec = int(hours) * 3600 + int(minutes) * 60
+        if filed != filed_date_of(captured, sec):
+            mismatches.append((captured, sec, filed))
+    assert mismatches == []
+    assert any(filed != service_date_of(c.replace(tzinfo=timezone.utc)) for c, _s, _t, filed in rows)

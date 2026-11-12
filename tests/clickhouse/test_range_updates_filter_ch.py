@@ -28,7 +28,7 @@ from api.range import (
     time_band_ch,
     time_band_clause_ch,
 )
-from pipeline.service_day import service_date_ch
+from pipeline.service_day import filed_between_ch, filed_date_ch
 from tests.fixtures.service_dates import selecting
 
 
@@ -45,12 +45,12 @@ def _ctx(**over: Any) -> RangeCtx:
     return RangeCtx(**base)
 
 
-def test_date_range_clause_ch_uses_the_service_date_not_bare_todate():
+def test_date_range_clause_ch_selects_the_filed_service_date_not_bare_todate():
     frag, params = date_range_clause_ch(_ctx())
-    assert service_date_ch() in frag
-    assert "toDate(captured_at)" not in frag.replace(service_date_ch(), "")
-    assert params["ch_from_date"] == date(2026, 5, 13)
-    assert params["ch_to_date"] == date(2026, 6, 11)
+    assert frag == filed_between_ch("{ch_from_date:Date}", "{ch_to_date:Date}")
+    assert filed_date_ch() in frag
+    assert "toDate(u.captured_at)" not in frag
+    assert params == {"ch_from_date": date(2026, 5, 13), "ch_to_date": date(2026, 6, 11)}
 
 
 def test_dow_clause_ch_all_is_noop():
@@ -112,9 +112,9 @@ def test_time_band_clause_ch_unknown_band_is_noop_not_keyerror():
 
 def test_build_updates_filter_ch_default_date_only():
     frag, params = build_updates_filter_ch(_ctx())
-    assert "toDate(captured_at" in frag
+    assert filed_date_ch() in frag
     assert "toDayOfWeek" not in frag
-    assert "scheduled_time" not in frag
+    assert "ch_tb_start" not in frag
     assert "service_type" not in frag
     assert "route_code" not in frag
     assert set(params) == {"ch_from_date", "ch_to_date"}
@@ -127,7 +127,7 @@ def _resolved(service, *dates: date):
 def test_build_updates_filter_ch_adds_service_dates_and_routes():
     resolved = _resolved("平日", date(2026, 5, 13), date(2026, 5, 14))
     frag, params = build_updates_filter_ch(_ctx(service="平日", service_dates=resolved, routes=("R1", "R2")))
-    assert f"{service_date_ch()} IN {{ch_service_dates:Array(Date)}}" in frag
+    assert f"{filed_date_ch()} IN {{ch_service_dates:Array(Date)}}" in frag
     assert "service_type" not in frag
     assert "route_code IN {ch_routes:Array(String)}" in frag
     assert params["ch_service_dates"] == [date(2026, 5, 13), date(2026, 5, 14)]
@@ -187,7 +187,7 @@ def test_build_updates_filter_ch_buckets_date_range_by_jst_day_not_utc_day():
     ctx = _ctx(from_date=date(2026, 1, 2), to_date=date(2026, 1, 2))
     frag, params = build_updates_filter_ch(ctx)
     result = client.query(
-        f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
+        f"SELECT count() FROM updates AS u WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
         parameters={"agency_id": 1, **params},
     )
     assert result.result_rows[0][0] == 1
@@ -196,7 +196,7 @@ def test_build_updates_filter_ch_buckets_date_range_by_jst_day_not_utc_day():
     ctx_utc_day = _ctx(from_date=date(2026, 1, 1), to_date=date(2026, 1, 1))
     frag2, params2 = build_updates_filter_ch(ctx_utc_day)
     result2 = client.query(
-        f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag2}",
+        f"SELECT count() FROM updates AS u WHERE agency_id = {{agency_id:UInt16}} AND {frag2}",
         parameters={"agency_id": 1, **params2},
     )
     assert result2.result_rows[0][0] == 0
@@ -227,7 +227,7 @@ def test_dow_clause_ch_matches_python_isoweekday():
     ctx = _ctx(dow="weekday", from_date=date(2026, 8, 3), to_date=date(2026, 8, 3))
     frag, params = build_updates_filter_ch(ctx)
     result = client.query(
-        f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
+        f"SELECT count() FROM updates AS u WHERE agency_id = {{agency_id:UInt16}} AND {frag}",
         parameters={"agency_id": 1, **params},
     )
     assert result.result_rows[0][0] == 1
@@ -235,7 +235,7 @@ def test_dow_clause_ch_matches_python_isoweekday():
     ctx_weekend = _ctx(dow="weekend", from_date=date(2026, 8, 3), to_date=date(2026, 8, 3))
     frag_we, params_we = build_updates_filter_ch(ctx_weekend)
     result_we = client.query(
-        f"SELECT count() FROM updates WHERE agency_id = {{agency_id:UInt16}} AND {frag_we}",
+        f"SELECT count() FROM updates AS u WHERE agency_id = {{agency_id:UInt16}} AND {frag_we}",
         parameters={"agency_id": 1, **params_we},
     )
     assert result_we.result_rows[0][0] == 0

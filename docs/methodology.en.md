@@ -54,7 +54,7 @@ An operator's result will be referenced from this document once its validation i
 A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) and shown in each operator's entry on the admin pages. Each month gives:
 
 - **Trips reported**: the share of the trips the timetable planned that the feed reported a plausible departure for, by the same rule as the coverage in the [Comparability conditions](#comparability-conditions);
-- **Stop events reported**: the share of the stops the planned trips call at that the feed reported;
+- **Stop events reported**: the share of the stops the planned trips call at that the feed reported, each counted on the day its departure counts on (see [Service day and time](#service-day-and-time), from method `2026.11.13`);
 - **Message age**: per poll, the time it was captured minus the feed header's timestamp (the median and the 95th percentile). A poll from the collector's archive is timed by its file name, which records when the poll began; a poll whose name records no time is left out and counted (from method `2026.11.8`);
 - **Polls over 65 s**: of the polls message age measures, the share whose message was more than 65 seconds old when captured. This is the freshness threshold used by Cal-ITP and by the MobilityData GTFS-RT validator (warning W008). It shows a feed header that stayed frozen for too short a time to move the 95th percentile (from method `2026.11.12`);
 - **Implausible readings**: the share of reports dropped as in [Excluding implausible values](#excluding-implausible-values);
@@ -111,9 +111,10 @@ A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped 
 
 ### Service day and time
 
-(`2026.11.0`; after-midnight times `2026.11.1`)
+(`2026.11.0`; after-midnight times `2026.11.1`; the stop event's day `2026.11.13`)
 
 - **Service day**: turns over at 04:00 JST, so a trip running from 23:40 to 00:30 falls in one service day.
+- **The day a departure counts on**: its trip's service day, the day of its scheduled departure, not the day each report was received on. A feed predicts a stop from before 04:00 for a departure after it, and reports a late night departure after 04:00; either departure counts once, on its own day. A report counts toward the service day before or after the one it was received on when the stop's scheduled departure that day is within four hours of it, which only a report received between 00:00 and 08:00 can be. A report with no scheduled time stays on the day it was received. The share of implausible reports counts each report on the day it was received.
 - **Hours**: a departure scheduled at 24:00 or later counts under its service day's hour 24, 25, and so on. A time band such as morning or evening is taken from the clock time (24:30 is late night).
 
 ### Matching the timetable
@@ -366,10 +367,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.12`. Newest first, each version with the inputs it set.
+The current method is `2026.11.13`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.13` | `agg_daily_trend` 3 → 4, `agg_hour_daily` 4 → 5, `agg_route_daily` 3 → 4, `agg_route_daily_dist` 3 → 4, `agg_route_daily_dwell_run` 3 → 4, `agg_route_headway_daily` 4 → 5, `agg_route_hour` 4 → 5, `agg_route_hour_dow` 4 → 5, `agg_route_stats` 3 → 4, `agg_route_stop_daily` 4 → 5, `agg_schedule_revision_daily` 2 → 3, `agg_service_delivered_daily` 3 → 4, `agg_stop_daily` 4 → 5, `agg_stop_routes` 2 → 3, `feed_quality_monthly` 5 → 6, `route_delay_counts` 4 → 5, `stop_route_days` 2 → 3 |
 | `2026.11.12` | `feed_quality_monthly` 4 → 5 |
 | `2026.11.11` | `feed_quality_monthly` 3 → 4 |
 | `2026.11.10` | `agg_route_headway` 2 → 3, `agg_route_headway_daily` 3 → 4 |
