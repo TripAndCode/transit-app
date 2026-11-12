@@ -10,7 +10,9 @@ Semantics assumed:
 
 - A departure is one trip run leaving one stop: a (trip, service date, stop)
   triple. Every stop a run served is a departure, its last included, unless
-  the feed never reported it plausibly (below).
+  the feed never reported it plausibly (below), or the feed reports
+  arrivals: such a feed reports a run's last stop only as an arrival, so the
+  last stop is no departure.
 - A stop a run skipped is no departure, and a trip that did not run, whether
   cancelled or never reported, has none: none of them has a delay, so none
   counts in any delay figure. A prediction the feed later withdraws, for a
@@ -137,10 +139,44 @@ the stamp's clamp share under "Method versions") and the methodology's
   polls: their count, and the ``MESSAGE_AGE_QUANTILES`` of their ages, each
   interpolated linearly between the two closest ranks.
 
+Dwell and running time, per the pairing ``docs/features/analysis-tab.md``
+describes for the ``dwell_run`` report and the user manual's glossary
+(``frontend/public/user-manual/en.md``, "Dwell" and "Running"):
+
+- A stop visit is one trip run at one stop on its service date. The feed
+  reports a visit's arrival and its departure in separate stop updates. Its
+  arrival is that of its last plausible arrival reading by capture time, and
+  its departure is the departure above: each side is the latest plausible
+  reading of its own kind, under the same clamp. A visit with neither has no
+  figure at all. No scenario withdraws an arrival, since a feed that reports
+  arrivals neither skips a stop nor cancels a run after predicting it.
+- The actual arrival is the scheduled arrival plus the arrival delay, and
+  the actual departure the scheduled departure plus the departure delay,
+  each scheduled time from the timetable in force on the service date.
+- A dwell sample is a visit's actual departure less its actual arrival,
+  counted only when the feed reported that departure after it reported the
+  arrival: the departure's last plausible reading came at or after the
+  visit's first plausible arrival reading, polls ordered by capture time and
+  then file name. A departure reported only before the arrival is a
+  prediction, and gives no dwell. A run's last stop, reported only as an
+  arrival, gives none either.
+- A running sample is a visit's actual arrival less the actual departure of
+  the run's visit before it, the nearest earlier stop with a visit, however
+  that departure was reported. A run's first visit has none, nor does a
+  visit after one with no departure, nor a visit with no arrival.
+- No bound applies to a dwell or a running time itself; only each reading's
+  clamp does. The methodology's summary ("Dwell and running time" in
+  ``docs/methodology.en.md``) calls dwell the difference between the arrival
+  and departure delays, which is this only where the timetable plans no
+  dwell; the glossary's definition is the one held here.
+- Per (route, service date, day type) with a visit, the samples, none when
+  no visit pairs. Over a period, a route with a visit pools its days'
+  samples; one with neither a dwell nor a running sample is not listed.
+
 Every figure is computed from an ``Outcome``: the departures, each day's
 service, each day's timetable version, each route's scheduled headways
-on each day, each day's readings, and each poll's age. ``outcome`` derives
-the one the truth implies. A test may
+on each day, each day's readings, each poll's age, and each stop visit.
+``outcome`` derives the one the truth implies. A test may
 derive another, such as the outcome a known pipeline divergence produces,
 and hand it to the same figure functions. Such an outcome may hold a
 departure no timetable could place, with no scheduled time, no stop and the
@@ -309,8 +345,9 @@ class Outcome:
     version's trip count, per (route, service date) the plan its long
     gaps are judged by (``plans``) and the plan its high-frequency test and
     scheduled mean wait read (``wait_plans``), each service day's readings,
-    and each poll's message age under the service day it was captured in.
-    The truth's two plans are one: the timetable in force that day."""
+    each poll's message age under the service day it was captured in, and
+    each stop visit. The truth's two plans are one: the timetable in force
+    that day."""
 
     departures: tuple[Departure, ...]
     service: dict[date, Service]
@@ -320,6 +357,7 @@ class Outcome:
     wait_plans: dict[tuple[str, date], Plan]
     readings: dict[date, Readings]
     ages: tuple[tuple[date, int], ...]
+    visits: tuple[Visit, ...]
 
 
 def plausible(delay_sec: int) -> bool:
@@ -349,7 +387,8 @@ def _last_plausible(sent: Sequence[Poll]) -> dict[tuple[str, date, int], int]:
 
 def departures(scenario: Scenario, sent: Sequence[Poll]) -> list[Departure]:
     """Every served stop of every run with a plausible reading in *sent*,
-    at that last reading's delay.
+    at that last reading's delay, but a run's last stop under a feed that
+    reports arrivals.
 
     Raises when a run no misreport names was reported at a delay other than
     its true one, or a true delay inside the clamp went without a plausible
@@ -363,7 +402,7 @@ def departures(scenario: Scenario, sent: Sequence[Poll]) -> list[Departure]:
         for seq, (stop, scheduled, actual) in enumerate(
             zip(stops, trip.scheduled_sec, run.actual_sec, strict=True), start=1
         ):
-            if actual is None:
+            if actual is None or (scenario.feed.arrivals and seq == len(run.actual_sec)):
                 continue
             reported = last.get((run.trip_id, run.service_date, seq))
             truthful = reported == actual - scheduled if plausible(actual - scheduled) else reported is None
@@ -381,6 +420,82 @@ def departures(scenario: Scenario, sent: Sequence[Poll]) -> list[Departure]:
                     stop.stop_id,
                     scheduled,
                     reported,
+                )
+            )
+    return out
+
+
+@dataclass(frozen=True)
+class Visit:
+    """One trip run at one stop on its service date: its actual arrival and
+    departure in seconds on the service date's clock, None for a side the
+    feed left without a plausible reading, and whether the departure was
+    reported at or after the arrival was first reported."""
+
+    route_id: str
+    trip_id: str
+    service_date: date
+    day_type: str
+    stop_sequence: int
+    arrival_sec: int | None
+    departure_sec: int | None
+    departure_observed: bool
+
+
+def _order(poll: Poll) -> tuple[datetime, str]:
+    """Where *poll* stands among the polls: by capture time, then file name."""
+    return (poll.captured_at, poll.source_file)
+
+
+def visits(scenario: Scenario, sent: Sequence[Poll], found: Iterable[Departure]) -> list[Visit]:
+    """Every stop of every run with a departure among *found* or a plausible
+    arrival reading in *sent*.
+
+    Raises when an arrival was last reported plausibly at a delay other than
+    its true one, or reported for a run that declares none: the feed model
+    would then be at fault, not the pipeline."""
+    first_arrival: dict[tuple[str, date, int], tuple[datetime, str]] = {}
+    last_arrival: dict[tuple[str, date, int], tuple[tuple[datetime, str], int]] = {}
+    last_departure: dict[tuple[str, date, int], tuple[datetime, str]] = {}
+    for poll in sent:
+        at = _order(poll)
+        for entry in poll.trips:
+            for stop in entry.stops:
+                key = (entry.trip_id, entry.service_date, stop.stop_sequence)
+                if stop.status != SCHEDULED:
+                    continue
+                if stop.departure_delay is not None and plausible(stop.departure_delay):
+                    last_departure[key] = max(last_departure.get(key, at), at)
+                if stop.arrival_delay is not None and plausible(stop.arrival_delay):
+                    first_arrival[key] = min(first_arrival.get(key, at), at)
+                    if key not in last_arrival or last_arrival[key][0] <= at:
+                        last_arrival[key] = (at, stop.arrival_delay)
+    departed = {(d.trip_id, d.service_date, d.stop_sequence): d.delay_sec for d in found}
+    out = []
+    for run in scenario.runs:
+        trip = scenario.trip(run.trip_id, run.service_date)
+        for i, (scheduled_arrival, scheduled) in enumerate(
+            zip(trip.scheduled_arrival_sec, trip.scheduled_sec, strict=True)
+        ):
+            key = (run.trip_id, run.service_date, i + 1)
+            departure_delay = departed.get(key)
+            arrival = last_arrival.get(key)
+            if arrival is not None and (
+                run.arrival_sec is None or arrival[1] != run.arrival_sec[i] - scheduled_arrival
+            ):
+                raise ValueError(f"{run.trip_id} {run.service_date} stop {i + 1}: arrival reported {arrival[1]}")
+            if departure_delay is None and arrival is None:
+                continue
+            out.append(
+                Visit(
+                    trip.route_id,
+                    trip.trip_id,
+                    run.service_date,
+                    trip.day_type,
+                    i + 1,
+                    None if arrival is None else scheduled_arrival + arrival[1],
+                    None if departure_delay is None else scheduled + departure_delay,
+                    departure_delay is not None and arrival is not None and last_departure[key] >= first_arrival[key],
                 )
             )
     return out
@@ -472,6 +587,7 @@ def outcome(scenario: Scenario) -> Outcome:
         wait_plans=day_plans,
         readings=readings(sent),
         ages=poll_ages(sent),
+        visits=tuple(visits(scenario, sent, found)),
     )
 
 
@@ -747,3 +863,75 @@ def scorecard(found: Outcome) -> dict[date, Scorecard]:
         )
         month = _month_end(month) + timedelta(days=1)
     return out
+
+
+@dataclass(frozen=True)
+class Timing:
+    """A visit's dwell and running time in seconds, None for one it has not."""
+
+    visit: Visit
+    dwell_sec: int | None
+    running_sec: int | None
+
+
+def timings(found: Outcome) -> list[Timing]:
+    """Each visit's dwell and running time, the visit before it being the
+    nearest earlier stop of its run with a visit."""
+    by_run: dict[tuple[str, date], list[Visit]] = defaultdict(list)
+    for v in found.visits:
+        by_run[(v.trip_id, v.service_date)].append(v)
+    out = []
+    for run_visits in by_run.values():
+        before: Visit | None = None
+        for v in sorted(run_visits, key=lambda v: v.stop_sequence):
+            dwell = None
+            if v.departure_observed and v.arrival_sec is not None and v.departure_sec is not None:
+                dwell = v.departure_sec - v.arrival_sec
+            running = None
+            if v.arrival_sec is not None and before is not None and before.departure_sec is not None:
+                running = v.arrival_sec - before.departure_sec
+            out.append(Timing(v, dwell, running))
+            before = v
+    return out
+
+
+@dataclass(frozen=True)
+class DwellRun:
+    """The dwell and running samples of a set of visits, in seconds."""
+
+    dwell: tuple[int, ...]
+    running: tuple[int, ...]
+
+    @property
+    def dwell_mean_sec(self) -> Fraction | None:
+        return Fraction(sum(self.dwell), len(self.dwell)) if self.dwell else None
+
+    @property
+    def running_mean_sec(self) -> Fraction | None:
+        return Fraction(sum(self.running), len(self.running)) if self.running else None
+
+
+def _dwell_run(group: Iterable[Timing]) -> DwellRun:
+    group = list(group)
+    return DwellRun(
+        dwell=tuple(t.dwell_sec for t in group if t.dwell_sec is not None),
+        running=tuple(t.running_sec for t in group if t.running_sec is not None),
+    )
+
+
+def dwell_run_by_route_day(found: Outcome) -> dict[tuple[str, date, str], DwellRun]:
+    """Per (route, service date, day type) with a visit, its samples."""
+    groups: dict[tuple[str, date, str], list[Timing]] = defaultdict(list)
+    for t in timings(found):
+        groups[(t.visit.route_id, t.visit.service_date, t.visit.day_type)].append(t)
+    return {key: _dwell_run(group) for key, group in groups.items()}
+
+
+def dwell_run_by_route(found: Outcome, first: date, last: date) -> dict[str, DwellRun]:
+    """Per route with a visit on the service days *first* to *last*, its
+    samples pooled over them, none when no visit pairs."""
+    groups: dict[str, list[Timing]] = defaultdict(list)
+    for t in timings(found):
+        if first <= t.visit.service_date <= last:
+            groups[t.visit.route_id].append(t)
+    return {route: _dwell_run(group) for route, group in groups.items()}

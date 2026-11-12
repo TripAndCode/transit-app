@@ -25,9 +25,11 @@ date.
 
 Each scenario runs through the pipeline once per module (the ``observed``
 fixture), and every test compares that one snapshot with the oracle. Every
-scenario's feed stands for one whose status fields a probe has confirmed:
-the runner records that verdict by hand, since the scenario feed carries no
-arrival times and a live probe would refute the arrival field.
+scenario's feed stands for one whose status and arrival fields a probe has
+confirmed: the runner records that verdict by hand, since most scenario
+feeds carry no arrival times and a live probe of them would refute the
+arrival field. Their dwell and running times are compared all the same, as
+the samples none of their visits pair.
 """
 
 from __future__ import annotations
@@ -557,6 +559,126 @@ def frozen_feed(day: date) -> Scenario:
     )
 
 
+# The dwell scenario's trips: each stop's (arrival, departure), scheduled,
+# then as each run reached and left it. The feed is polled on the minute, so
+# a run standing at a stop through two polls or more has its departure
+# reported after its arrival; through one, its arrival only, the departure
+# standing from the predictions before; through none, its departure only.
+# A prediction made before the run reaches a stop assumes the planned dwell,
+# so every stop whose departure is not reported after its arrival keeps its
+# planned dwell, and its prediction is its departure's true delay.
+_DWELL_LINE_A = (
+    ("06:55:00", "07:00:00"),
+    ("07:03:00", "07:03:30"),
+    ("07:07:00", "07:07:40"),
+    ("07:11:00", "07:11:30"),
+    ("07:15:00", "07:17:00"),
+    ("07:21:00", "07:21:00"),
+)
+_DWELL_RUN_A = (
+    ("06:57:30", "07:00:20"),  # back from a layover in time: a dwell of 170 s, the first stop's
+    ("07:03:40", "07:05:10"),  # 90 s
+    ("07:07:30", "07:08:10"),  # standing through 07:08 only: no dwell
+    ("07:11:10", "07:11:40"),  # standing through no poll: no arrival
+    ("07:14:30", "07:17:05"),  # early into a timed hold: 155 s
+    ("07:21:30", "07:21:30"),
+)
+_DWELL_LINE_B = (
+    ("07:30:00", "07:30:00"),
+    ("07:33:00", "07:33:30"),
+    ("07:37:00", "07:37:40"),
+    ("07:41:00", "07:41:30"),
+    ("07:45:00", "07:47:00"),
+    ("07:51:00", "07:51:00"),
+)
+_DWELL_RUN_B = (
+    ("07:30:10", "07:30:10"),  # leaving the first stop as it reaches it: no arrival
+    ("07:33:50", "07:35:30"),  # 100 s
+    ("07:37:05", "07:39:55"),  # 170 s
+    ("07:41:40", "07:42:10"),  # standing through 07:42 only: no dwell
+    ("07:45:20", "07:47:20"),  # the planned 120 s
+    ("07:50:40", "07:50:40"),
+)
+# Two hours late, with timed holds of 20 and 10 minutes.
+_LATE_LINE = (
+    ("07:30:00", "07:30:00"),
+    ("07:33:50", "07:53:50"),
+    ("07:58:00", "08:08:00"),
+    ("08:12:00", "08:12:00"),
+)
+_LATE_RUN = (
+    ("09:30:00", "09:30:00"),
+    ("09:33:50", "09:48:50"),  # reached 7,200 s late, the clamp's edge: a dwell of 900 s
+    ("09:58:01", "10:07:30"),  # reached 7,201 s late, past it: no arrival
+    ("10:11:30", "10:11:30"),
+)
+# Every stop before the last left without a dwell sample.
+_UNPAIRED_LINE = (
+    ("08:00:00", "08:00:00"),
+    ("08:03:00", "08:03:30"),
+    ("08:06:00", "08:06:20"),
+    ("08:10:00", "08:10:00"),
+)
+_UNPAIRED_RUN = (
+    ("08:00:20", "08:00:20"),
+    ("08:03:40", "08:04:10"),  # standing through 08:04 only: no dwell
+    ("08:06:30", "08:06:50"),  # standing through no poll: no arrival
+    ("08:09:45", "08:09:45"),
+)
+
+
+def _timed(route: Route, trip_id: str, stops: tuple[tuple[str, str], ...]) -> ScheduledTrip:
+    """A weekday trip of *route* planned to reach and leave each stop at *stops*' clocks."""
+    return ScheduledTrip(trip_id, route.route_id, "平日", tuple(d for _a, d in stops), tuple(a for a, _d in stops))
+
+
+def _timed_run(trip: ScheduledTrip, day: date, stops: tuple[tuple[str, str], ...]) -> TripRun:
+    """A run of *trip* on *day* that reached and left each stop at *stops*' clocks."""
+    return TripRun(
+        trip.trip_id,
+        day,
+        tuple(gtfs_seconds(d) for _a, d in stops),
+        arrival_sec=tuple(gtfs_seconds(a) for a, _d in stops),
+    )
+
+
+def dwell(day: date) -> Scenario:
+    """Three lines on one weekday whose feed reports arrivals as well as
+    departures, each in its own stop update, and each run's last stop only
+    as its arrival, which gives a running time and no dwell.
+
+    The dwell line's two runs between them stand at a stop through two polls
+    or more, through one, and through none, the first stop through three on
+    one run and through none on the other, and plan dwells of 30 s to a
+    five-minute layover, so an arrival taken at the planned departure, or a
+    dwell taken as the difference of the two delays, would move their
+    figures. A prediction before each run
+    reaches a stop assumes the planned dwell, so where the dwell differs the
+    departure reported after the arrival is a later reading than the
+    prediction, and not its equal. The late line's one run, two hours late,
+    reaches one stop at the clamp's edge and keeps its arrival, and stands
+    there 15 minutes; it reaches the next a second past the edge, whose
+    arrival is dropped. The unpaired line's one run gives running times and
+    not one dwell sample."""
+    line = _route("D1", "Dwell line", 6, 34.57)
+    late = _route("D2", "Late line", 4, 34.59)
+    unpaired = _route("D3", "Unpaired line", 4, 34.61)
+    trips_and_runs = (
+        (_timed(line, "D1_a", _DWELL_LINE_A), _DWELL_RUN_A),
+        (_timed(line, "D1_b", _DWELL_LINE_B), _DWELL_RUN_B),
+        (_timed(late, "D2_a", _LATE_LINE), _LATE_RUN),
+        (_timed(unpaired, "D3_a", _UNPAIRED_LINE), _UNPAIRED_RUN),
+    )
+    return Scenario(
+        name="dwell",
+        routes=(line, late, unpaired),
+        timetable=tuple(trip for trip, _run in trips_and_runs),
+        days=(ServiceDay(day, "平日"),),
+        runs=tuple(_timed_run(trip, day, run) for trip, run in trips_and_runs),
+        feed=FeedModel(poll_interval_sec=60, lead_sec=300, arrivals=True),
+    )
+
+
 @dataclass(frozen=True, repr=False)
 class Rounded:
     """An exact figure a column or report holds rounded to *places* decimals.
@@ -634,6 +756,11 @@ _TABLE_COLUMNS = {
         "month, raw_samples, clamp_count, clamp_pct, clamp_missing, message_age_polls, "
         "message_age_undated_polls, message_age_p50_sec, message_age_p95_sec, message_age_missing"
     ),
+    "agg_route_daily_dwell_run": (
+        "route_code, date, service_type, dwell_samples, dwell_sum_sec, run_samples, run_sum_sec, "
+        "(SELECT SUM(h) FROM unnest(hist_dwell) h) AS dwell_hist_total, "
+        "(SELECT SUM(h) FROM unnest(hist_run) h) AS run_hist_total"
+    ),
 }
 # Each read's report and query. The default, the industry window, puts
 # readings exactly a minute early and exactly five minutes late on its edges;
@@ -653,9 +780,10 @@ class Observed:
     report's first row; the council summary of every window ``_windows``
     names; the route table's response for each time band the truth departs
     in; the headway quality response for every window ``_windows`` names;
-    the agency's row of the agencies board over the whole period; and the
-    feed quality the route table's definition stamp states over it. ``truth``
-    is the oracle's outcome of the scenario, derived once, since deriving it
+    the agency's row of the agencies board over the whole period; the feed
+    quality the route table's definition stamp states over it; and the dwell
+    report's payload for every window ``_windows`` names. ``truth`` is the
+    oracle's outcome of the scenario, derived once, since deriving it
     simulates every poll."""
 
     scenario: Scenario
@@ -669,6 +797,7 @@ class Observed:
     headways: dict[tuple[date, date], dict[str, Any]]
     board: dict[str, Any]
     stamp: dict[str, Any]
+    dwell: dict[tuple[date, date], dict[str, Any]]
 
     @cached_property
     def choice(self) -> Choice:
@@ -779,8 +908,10 @@ def _daily_actual(observed: Observed) -> Cells:
 
 
 def _reports_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """The route reports over the whole period. Each lists a route only once
+    it departs MIN_GROUP_SAMPLES times, include_sparse or not."""
     window = _window(observed.scenario)
-    routes = oracle.by_route(found)
+    routes = {route: f for route, f in oracle.by_route(found).items() if f.departures >= MIN_GROUP_SAMPLES}
     return (
         _cells(
             f"GET reports/on_time {window}",
@@ -1186,6 +1317,89 @@ def _message_age_actual(observed: Observed) -> Cells:
     return _keyed(_month_label("message age"), observed.tables["feed_quality_monthly"], ("month",))
 
 
+def _dwell_daily_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """Each route's dwell and running samples on each service day it has a
+    visit on, none when no visit pairs, and the total of each histogram,
+    which holds every sample once."""
+    return _cells(
+        "agg_route_daily_dwell_run",
+        {
+            key: {
+                "dwell_samples": len(f.dwell),
+                "dwell_sum_sec": sum(f.dwell),
+                "dwell_hist_total": len(f.dwell),
+                "run_samples": len(f.running),
+                "run_sum_sec": sum(f.running),
+                "run_hist_total": len(f.running),
+            }
+            for key, f in oracle.dwell_run_by_route_day(found).items()
+        },
+    )
+
+
+def _dwell_daily_actual(observed: Observed) -> Cells:
+    return _keyed(
+        "agg_route_daily_dwell_run",
+        observed.tables["agg_route_daily_dwell_run"],
+        ("route_code", "date", "service_type"),
+    )
+
+
+def _dwell_label(window: tuple[date, date]) -> str:
+    return f"GET reports/dwell_run from={window[0]}&to={window[1]}"
+
+
+# The dwell report's columns compared, and the reason it gives when the
+# routes it was asked about hold no sample. Its percentiles read histogram
+# buckets no document sets out, so they are not compared.
+_DWELL_COLUMNS = ("dwell_samples", "dwell_avg_sec", "run_samples", "run_avg_sec")
+_NO_PAIRED_SAMPLES = "no_paired_samples"
+
+
+def _mean_sec(mean: Fraction | None) -> Rounded | None:
+    """A mean the dwell report states unrounded, held to a ten-thousandth of a second."""
+    return None if mean is None else Rounded(mean, 4)
+
+
+def _dwell_report_expected(observed: Observed, found: oracle.Outcome) -> Cells:
+    """Over every window ``_windows`` names, each route with a dwell or a
+    running sample, its sample counts and means, and the report's state:
+    available, since the runner confirms the arrival field, and saying when
+    the window's routes hold no sample at all."""
+    cells: Cells = {}
+    for window in _windows(observed.scenario):
+        label = _dwell_label(window)
+        routes = oracle.dwell_run_by_route(found, *window)
+        listed = {route: f for route, f in routes.items() if f.dwell or f.running}
+        cells |= _cells(
+            label,
+            {
+                route: {
+                    "dwell_samples": len(f.dwell),
+                    "dwell_avg_sec": _mean_sec(f.dwell_mean_sec),
+                    "run_samples": len(f.running),
+                    "run_avg_sec": _mean_sec(f.running_mean_sec),
+                }
+                for route, f in listed.items()
+            },
+        )
+        reason = _NO_PAIRED_SAMPLES if routes and not listed else None
+        cells |= _cells(label, {"report": {"available": True, "unavailable_reason": reason}})
+    return cells
+
+
+def _dwell_report_actual(observed: Observed) -> Cells:
+    cells: Cells = {}
+    for window, payload in observed.dwell.items():
+        label = _dwell_label(window)
+        cells |= _cells(label, {r["route_code"]: {c: r[c] for c in _DWELL_COLUMNS} for r in payload["routes"]})
+        cells |= _cells(
+            label,
+            {"report": {"available": payload["available"], "unavailable_reason": payload["unavailable_reason"]}},
+        )
+    return cells
+
+
 Expect = Callable[[Observed, oracle.Outcome], Cells]
 # Each test's comparison: the cells the oracle expects of an outcome, and the
 # cells the run produced.
@@ -1200,6 +1414,8 @@ _HEADWAY_DAILY = (_headway_daily_expected, _headway_daily_actual)
 _HEADWAY_QUALITY = (_headway_quality_expected, _headway_quality_actual)
 _CLAMP_SHARE = (_clamp_expected, _clamp_actual)
 _MESSAGE_AGE = (_message_age_expected, _message_age_actual)
+_DWELL_DAILY = (_dwell_daily_expected, _dwell_daily_actual)
+_DWELL_REPORT = (_dwell_report_expected, _dwell_report_actual)
 _COMPARISONS = (
     _DAILY,
     _REPORTS_COMPARED,
@@ -1212,6 +1428,8 @@ _COMPARISONS = (
     _HEADWAY_QUALITY,
     _CLAMP_SHARE,
     _MESSAGE_AGE,
+    _DWELL_DAILY,
+    _DWELL_REPORT,
 )
 
 
@@ -1501,6 +1719,7 @@ class _Reads:
     headways: dict[tuple[date, date], dict[str, Any]]
     board: dict[str, Any]
     stamp: dict[str, Any]
+    dwell: dict[tuple[date, date], dict[str, Any]]
 
 
 async def _read_reports(scenario: Scenario, truth: oracle.Outcome, agency_id: int) -> _Reads:
@@ -1535,7 +1754,11 @@ async def _read_reports(scenario: Scenario, truth: oracle.Outcome, agency_id: in
             window: await get(client, "headway_quality", f"from={window[0]}&to={window[1]}")
             for window in _windows(scenario)
         }
-    return _Reads(reports, trend, council, banded, headways, board, stamp)
+        dwell = {
+            window: (await get(client, "reports/dwell_run", f"from={window[0]}&to={window[1]}"))["rows"][0]
+            for window in _windows(scenario)
+        }
+    return _Reads(reports, trend, council, banded, headways, board, stamp, dwell)
 
 
 def _empty_stores(pg_conn, ch_client, reset_sql: str) -> None:
@@ -1637,6 +1860,7 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
         headways=reads.headways,
         board=reads.board,
         stamp=reads.stamp,
+        dwell=reads.dwell,
     )
 
 
@@ -1664,6 +1888,7 @@ _ALL = [
     pytest.param(bunching, id="bunching"),
     pytest.param(clamp, id="clamp"),
     pytest.param(frozen_feed, id="frozen_feed"),
+    pytest.param(dwell, id="dwell"),
 ]
 
 
@@ -1720,6 +1945,16 @@ def test_the_clamp_share_counts_every_implausible_reading_each_poll_sent(observe
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_message_age_reads_each_polls_capture_less_its_header(observed):
     _assert_clean(_hard_mismatches(observed, _MESSAGE_AGE))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_daily_dwell_and_running_times_pair_each_arrival_with_its_departure(observed):
+    _assert_clean(_hard_mismatches(observed, _DWELL_DAILY))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_dwell_report_matches_the_truth(observed):
+    _assert_clean(_hard_mismatches(observed, _DWELL_REPORT))
 
 
 @pytest.mark.parametrize("observed", [_TIMETABLE_CHANGE], indirect=True)

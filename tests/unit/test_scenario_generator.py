@@ -781,3 +781,175 @@ def test_the_scorecard_keeps_a_month_per_service_month_and_files_an_after_midnig
         date(2026, 5, 1): oracle.Scorecard(last=may, readings=oracle.Readings(78, 0, 78), polls=42, ages=(0, 117)),
         date(2026, 6, 1): oracle.Scorecard(last=DAY, readings=oracle.Readings(39, 0, 39), polls=21, ages=(0, 0)),
     }
+
+
+def test_a_feed_that_reports_no_arrival_sends_none_and_pairs_no_visit():
+    """Every scenario feed before arrivals keeps its wire bytes: no update
+    carries an arrival, and the timetable plans no dwell. Its visits have
+    departures only, so a route-day holds no dwell or running sample."""
+    scenario = _scenario()
+    for poll in polls(scenario):
+        assert all(e.arrival_delay is None for t in poll.trips for e in t.stops)
+        assert all(row[5] is None for row in _decode_rows(poll.payload))
+    stop_times = _zip_rows(static_gtfs_zip(scenario), "stop_times.txt")
+    assert all(r["arrival_time"] == r["departure_time"] for r in stop_times)
+    found = oracle.outcome(scenario)
+    assert len(found.visits) == 6
+    assert all(v.arrival_sec is None and not v.departure_observed for v in found.visits)
+    assert oracle.dwell_run_by_route_day(found) == {("R", DAY, "平日"): oracle.DwellRun(dwell=(), running=())}
+
+
+_QUAYS = tuple(Stop(f"Q{i}", f"Quay {i}", 34.1 + i / 1000, 132.0) for i in range(1, 5))
+_QUAY_ROUTE = Route("Q", "Quay line", _QUAYS)
+# Each stop's (arrival, departure), planned and then as the run went. The
+# feed is polled on the minute.
+_QUAY_PLAN = (("06:58:00", "07:00:00"), ("07:04:00", "07:04:30"), ("07:08:00", "07:08:20"), ("07:12:00", "07:12:00"))
+_QUAY_RUN = (("06:57:30", "07:00:40"), ("07:04:10", "07:04:40"), ("07:08:50", "07:09:10"), ("07:12:20", "07:12:20"))
+
+
+def _quay(
+    run: tuple[tuple[str, str], ...] = _QUAY_RUN,
+    plan: tuple[tuple[str, str], ...] = _QUAY_PLAN,
+    feed: FeedModel | None = None,
+) -> Scenario:
+    trip = ScheduledTrip("Q_0700", "Q", "平日", tuple(d for _a, d in plan), tuple(a for a, _d in plan))
+    return Scenario(
+        name="quay",
+        routes=(_QUAY_ROUTE,),
+        timetable=(trip,),
+        days=(ServiceDay(DAY, "平日"),),
+        runs=(
+            TripRun(
+                "Q_0700",
+                DAY,
+                tuple(gtfs_seconds(d) for _a, d in run),
+                arrival_sec=tuple(gtfs_seconds(a) for a, _d in run),
+            ),
+        ),
+        feed=feed or FeedModel(arrivals=True),
+    )
+
+
+def test_a_planned_dwell_ships_as_its_stops_arrival_time():
+    rows = _zip_rows(static_gtfs_zip(_quay()), "stop_times.txt")
+    assert [(r["arrival_time"], r["departure_time"]) for r in rows] == list(_QUAY_PLAN)
+
+
+def test_a_feed_that_reports_arrivals_lists_each_stop_with_one_of_them_at_a_time():
+    """The run enters the feed at 06:55. Stop 1, reached at 06:57:30, is
+    predicted to leave at its arrival's delay, -30, until the 06:58 poll
+    reports that arrival; the 06:59 and 07:00 polls report its true
+    departure, +40. Stop 2 is reached and left between polls, so only its
+    departure is ever reported, at +10. Stop 3 is reached at 07:08:50 and
+    left at 07:09:10, so the 07:09 poll reports its arrival and no poll its
+    departure after it. The last stop is only ever an arrival, +20."""
+    listed = {
+        f"{p.captured_at.astimezone(JST):%H:%M}": [
+            (e.stop_sequence, e.arrival_delay, e.departure_delay) for t in p.trips for e in t.stops
+        ]
+        for p in polls(_quay())
+    }
+    ahead = [(2, None, 10), (3, None, 50), (4, 20, None)]
+    assert listed == {
+        **{m: [(1, None, -30), *ahead] for m in ("06:55", "06:56", "06:57")},
+        "06:58": [(1, -30, None), *ahead],
+        **{m: [(1, None, 40), *ahead] for m in ("06:59", "07:00")},
+        **{f"07:0{m}": ahead for m in range(1, 5)},
+        **{f"07:0{m}": ahead[1:] for m in range(5, 9)},
+        "07:09": [(3, 50, None), (4, 20, None)],
+        **{f"07:1{m}": [(4, 20, None)] for m in range(3)},
+    }
+    for poll in polls(_quay()):
+        rows = [(seq, arr, dep) for _trip, _route, seq, dep, _stop, arr, *_ in _decode_rows(poll.payload)]
+        assert rows == [(e.stop_sequence, e.arrival_delay, e.departure_delay) for t in poll.trips for e in t.stops]
+
+
+def test_the_oracle_pairs_each_arrival_with_the_departure_reported_after_it():
+    """Stop 1 dwells 07:00:40 - 06:57:30 = 190 s against a planned 120, so
+    the difference of its delays, 70, is not its dwell. Stop 2 has no
+    arrival, so neither figure, but its departure starts stop 3's running
+    time, 07:08:50 - 07:04:40 = 250 s. Stop 3's departure was reported only
+    before its arrival, so it gives no dwell. The last stop runs 07:12:20 -
+    07:09:10 = 190 s, gives no dwell and is no departure."""
+    found = oracle.outcome(_quay())
+    assert [(d.stop_sequence, d.delay_sec) for d in found.departures] == [(1, 40), (2, 10), (3, 50)]
+    assert [(t.visit.stop_sequence, t.dwell_sec, t.running_sec) for t in oracle.timings(found)] == [
+        (1, 190, None),
+        (2, None, None),
+        (3, None, 250),
+        (4, None, 190),
+    ]
+    assert oracle.dwell_run_by_route_day(found) == {
+        ("Q", DAY, "平日"): oracle.DwellRun(dwell=(190,), running=(250, 190))
+    }
+    assert oracle.dwell_run_by_route(found, DAY, DAY)["Q"].running_mean_sec == 220
+
+
+def test_a_departure_reported_only_before_its_arrival_must_have_been_predicted_truly():
+    """Stop 3 stands through the 07:09 poll only, so its departure's last
+    reading is the prediction made at its arrival's delay, +50. Leaving at
+    07:09:30, 20 s later than planned, it truly left +70, so the oracle
+    refuses the scenario rather than count a departure the feed misstated."""
+    run = (*_QUAY_RUN[:2], ("07:08:50", "07:09:30"), _QUAY_RUN[3])
+    with pytest.raises(ValueError, match="not its truth"):
+        oracle.outcome(_quay(run=run))
+
+
+def _late(arrival: str) -> Scenario:
+    """A run two hours late into a timed hold of 20 minutes at stop 2,
+    reaching that stop at *arrival* and leaving at 09:20, 6,960 s late."""
+    trip = ScheduledTrip(
+        "R_late", "R", "平日", ("07:00:00", "07:24:00", "07:30:00"), ("07:00:00", "07:04:00", "07:30:00")
+    )
+    run = TripRun(
+        "R_late",
+        DAY,
+        tuple(gtfs_seconds(c) for c in ("09:00:00", "09:20:00", "09:26:00")),
+        arrival_sec=tuple(gtfs_seconds(c) for c in ("09:00:00", arrival, "09:26:00")),
+    )
+    return Scenario(
+        name="late",
+        routes=(_ROUTE,),
+        timetable=(trip,),
+        days=(ServiceDay(DAY, "平日"),),
+        runs=(run,),
+        feed=FeedModel(arrivals=True),
+    )
+
+
+def test_an_arrival_past_the_clamp_is_dropped_so_its_stop_has_neither_dwell_nor_running_time():
+    """Reached 7,200 s late, stop 2 keeps its arrival: a dwell of 960 s and a
+    run of 240 s from stop 1. Reached 7,201 s late it keeps neither, though
+    its departure still starts the last stop's 360 s run. Its departure,
+    predicted at the arrival's delay until the run reaches it, is an
+    implausible reading in each of the 130 polls from 06:55 to 09:04; the
+    arrival reading itself is no departure reading and counts in no total."""
+    kept = oracle.outcome(_late("09:04:00"))
+    assert [(t.dwell_sec, t.running_sec) for t in oracle.timings(kept)] == [(None, None), (960, 240), (None, 360)]
+    dropped = oracle.outcome(_late("09:04:01"))
+    assert [(t.dwell_sec, t.running_sec) for t in oracle.timings(dropped)] == [(None, None), (None, None), (None, 360)]
+    assert (kept.readings[DAY].implausible, dropped.readings[DAY].implausible) == (0, 130)
+
+
+def test_arrivals_the_feed_model_cannot_follow_are_refused():
+    with pytest.raises(ValueError, match="out of order"):
+        _quay(plan=(("07:01:00", "07:00:00"), *_QUAY_PLAN[1:]))
+    with pytest.raises(ValueError, match="out of order"):
+        _quay(run=(_QUAY_RUN[0], ("07:00:30", "07:04:40"), *_QUAY_RUN[2:]))
+    with pytest.raises(ValueError, match="ends on reaching its last stop"):
+        _quay(run=(*_QUAY_RUN[:3], ("07:12:20", "07:13:00")))
+    with pytest.raises(ValueError, match="exactly when the feed reports them"):
+        _quay(feed=FeedModel())
+    with pytest.raises(ValueError, match="exactly when the feed reports them"):
+        _scenario(FeedModel(arrivals=True))
+    freeze = Freeze(DAY, gtfs_seconds("07:00:00"), gtfs_seconds("07:05:00"))
+    with pytest.raises(ValueError, match="neither misreports nor freezes"):
+        _quay(feed=FeedModel(arrivals=True, freezes=(freeze,)))
+    skipping = TripRun(
+        "Q_0700",
+        DAY,
+        (gtfs_seconds("07:00:40"), None, gtfs_seconds("07:09:10"), gtfs_seconds("07:12:20")),
+        arrival_sec=tuple(gtfs_seconds(a) for a, _d in _QUAY_RUN),
+    )
+    with pytest.raises(ValueError, match="skips no stop"):
+        Scenario(**{**_quay().__dict__, "runs": (skipping,)})

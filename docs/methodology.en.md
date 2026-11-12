@@ -168,7 +168,7 @@ A headway median is taken the same way for scheduled and actual gaps: for an eve
 
 Each day is judged by the timetable in force that day, not by the one loaded now (from method `2026.11.10`). A day whose timetable's scheduled headways were not kept is not judged by another timetable instead: it is left out, and the panel says how many days were. For a timetable kept before `2026.11.10`, only its median was kept, so its days are still classified and their gaps count, but EWT is not shown for a route whose period includes them, and the panel says how many such days there are.
 
-**Dwell and running time**: dwell time is the difference between arrival and departure delay at the same stop, and running time the difference from the previous stop's departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
+**Dwell and running time**: each stop's actual arrival and departure are its scheduled times plus the reported delays. Dwell time is the actual departure minus the actual arrival at the same stop, counted only for a departure reported after the arrival, and running time is the actual arrival minus the previous stop's actual departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
 
 ### What is not observed
 

@@ -23,6 +23,10 @@ of them is refused, so a forgotten run cannot pass for a cancellation.
 The feed model may also misreport: a ``Misreport`` replaces a run's
 predicted delays for a stretch, and a ``Freeze`` makes the feed repeat one
 poll's content, its header too or not, for a stretch.
+
+A timetable may plan a dwell, an arrival before the departure at a stop, and
+a feed model may report arrivals beside departures, as the feeds confirmed to
+send them do: each run then declares when it reached every stop as well.
 """
 
 from __future__ import annotations
@@ -94,16 +98,22 @@ class Route:
 class ScheduledTrip:
     """A timetable trip. It runs on every service day of its day type, the
     GTFS ``service_id``, and leaves each stop of its route in order at
-    ``departures`` (GTFS clock strings)."""
+    ``departures`` (GTFS clock strings). It reaches each stop at
+    ``arrivals``, or at its departure when None: no dwell is planned."""
 
     trip_id: str
     route_id: str
     day_type: str
     departures: tuple[str, ...]
+    arrivals: tuple[str, ...] | None = None
 
     @property
     def scheduled_sec(self) -> tuple[int, ...]:
         return tuple(gtfs_seconds(clock) for clock in self.departures)
+
+    @property
+    def scheduled_arrival_sec(self) -> tuple[int, ...]:
+        return self.scheduled_sec if self.arrivals is None else tuple(gtfs_seconds(c) for c in self.arrivals)
 
 
 @dataclass(frozen=True)
@@ -140,12 +150,18 @@ class TripRun:
     The feed reports a skipped stop SKIPPED from ``skips_announced_sec`` on
     the service date's clock, or from the run's first poll when None. Until
     then it predicts the stop like any other, at the delay of the nearest
-    stop before it that the run serves (after it, when none is before)."""
+    stop before it that the run serves (after it, when none is before).
+
+    Under a feed model that reports arrivals, ``arrival_sec`` holds when the
+    run reached each stop, on the same clock: after it left the stop before,
+    and no later than it left this one. The run ends on reaching its last
+    stop, so its departure there is its arrival."""
 
     trip_id: str
     service_date: date
     actual_sec: tuple[int | None, ...]
     skips_announced_sec: int | None = None
+    arrival_sec: tuple[int, ...] | None = None
 
     @classmethod
     def from_delays(
@@ -289,6 +305,20 @@ class FeedModel:
     ``misreports`` stretch replaces it. ``freezes`` repeat a poll's content
     over a stretch, so a stop it lists stays listed, at the delay it had,
     after the run has left it.
+
+    ``arrivals``: the feed reports arrivals too, as the feeds confirmed to
+    send them do, each stop update carrying an arrival or a departure, never
+    both, and a run's last stop only as an arrival. The feed knows when the
+    run will reach each stop but not how long it will stand there. A stop
+    the run has not reached yet is listed with its departure predicted at
+    the delay of its arrival, as if the run kept the planned dwell, and the
+    last stop with its true arrival delay. Of the polls captured while the
+    run stands at a stop, the first lists the stop with its arrival and each
+    later one with its true departure delay, so a dwell no poll falls in
+    leaves the arrival unreported, and a dwell only one poll falls in leaves
+    the departure reported only before the arrival. The run leaves the feed
+    on reaching its last stop. Such a feed neither misreports nor freezes,
+    and no run of it skips a stop.
     """
 
     prediction: Literal["perfect"] = "perfect"
@@ -296,6 +326,7 @@ class FeedModel:
     lead_sec: int = 300
     misreports: tuple[Misreport, ...] = ()
     freezes: tuple[Freeze, ...] = ()
+    arrivals: bool = False
 
 
 @dataclass(frozen=True)
@@ -334,6 +365,9 @@ class Scenario:
                 if len(trip.departures) != len(route.stops):
                     raise ValueError(f"{trip.trip_id}: {len(trip.departures)} departures for {len(route.stops)} stops")
                 _increasing(f"{trip.trip_id} schedule", trip.scheduled_sec)
+                if len(trip.scheduled_arrival_sec) != len(trip.departures):
+                    raise ValueError(f"{trip.trip_id}: one scheduled arrival per stop is required")
+                _visits_in_order(f"{trip.trip_id} schedule", trip.scheduled_arrival_sec, trip.scheduled_sec)
         for event in events:
             trip = self.trip(event.trip_id, event.service_date)
             if self.day_type(event.service_date) != trip.day_type:
@@ -347,6 +381,20 @@ class Scenario:
             if run.skips_announced_sec is not None and len(run.served) == len(run.actual_sec):
                 raise ValueError(f"{run.trip_id} {run.service_date} announces skips but skips no stop")
             _increasing(f"{run.trip_id} {run.service_date} actual departures", run.served)
+            if (run.arrival_sec is not None) != self.feed.arrivals:
+                raise ValueError(
+                    f"{run.trip_id} {run.service_date}: a run declares its arrivals exactly when the feed reports them"
+                )
+            if run.arrival_sec is not None:
+                if len(run.served) != len(run.actual_sec):
+                    raise ValueError(f"{run.trip_id} {run.service_date}: a feed that reports arrivals skips no stop")
+                if len(run.arrival_sec) != len(run.actual_sec):
+                    raise ValueError(f"{run.trip_id} {run.service_date}: one actual arrival per stop is required")
+                _visits_in_order(f"{run.trip_id} {run.service_date}", run.arrival_sec, run.served)
+                if run.arrival_sec[-1] != run.served[-1]:
+                    raise ValueError(f"{run.trip_id} {run.service_date}: a run ends on reaching its last stop")
+        if self.feed.arrivals and (self.feed.misreports or self.feed.freezes):
+            raise ValueError("a feed that reports arrivals neither misreports nor freezes")
         for cancellation in self.cancellations:
             trip = self.trip(cancellation.trip_id, cancellation.service_date)
             first_predicted = trip.scheduled_sec[0] + cancellation.predicted_delay_sec
@@ -425,6 +473,14 @@ def _increasing(label: str, seconds: tuple[int, ...]) -> None:
         raise ValueError(f"{label} must strictly increase: {[gtfs_clock(s) for s in seconds]}")
 
 
+def _visits_in_order(label: str, arrivals: tuple[int, ...], departures: tuple[int, ...]) -> None:
+    """Refuse an arrival at a stop after its departure, or not after the
+    departure from the stop before."""
+    for i, (arrival, departure) in enumerate(zip(arrivals, departures, strict=True)):
+        if arrival > departure or (i and arrival <= departures[i - 1]):
+            raise ValueError(f"{label}: stop {i + 1} is reached at {gtfs_clock(arrival)}, out of order")
+
+
 def _csv(header: tuple[str, ...], rows: list[tuple]) -> str:
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
@@ -459,10 +515,11 @@ def static_gtfs_zip(scenario: Scenario, version: TimetableVersion | None = None)
         "stop_times.txt": _csv(
             ("trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"),
             [
-                (t.trip_id, clock, clock, stop.stop_id, seq)
+                (t.trip_id, arrival, departure, stop.stop_id, seq)
                 for t in version.trips
-                for seq, (stop, clock) in enumerate(
-                    zip(scenario.route(t.route_id).stops, t.departures, strict=True), start=1
+                for seq, (stop, arrival, departure) in enumerate(
+                    zip(scenario.route(t.route_id).stops, t.arrivals or t.departures, t.departures, strict=True),
+                    start=1,
                 )
             ],
         ),
@@ -485,12 +542,14 @@ def static_gtfs_zip(scenario: Scenario, version: TimetableVersion | None = None)
 @dataclass(frozen=True)
 class StopEntry:
     """One StopTimeUpdate of a poll: its stop, the departure delay it
-    predicts (None for none) and its schedule relationship."""
+    predicts (None for none), its schedule relationship, and the arrival
+    delay it reports (None for none)."""
 
     stop_sequence: int
     stop_id: str
     departure_delay: int | None
     status: int
+    arrival_delay: int | None = None
 
 
 @dataclass(frozen=True)
@@ -546,6 +605,7 @@ class Poll:
                         stop_time_update(
                             s.stop_sequence,
                             departure_delay=s.departure_delay,
+                            arrival_delay=s.arrival_delay,
                             stop_id=s.stop_id,
                             schedule_relationship=s.status,
                         )
@@ -605,7 +665,13 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
         nearest = [j for j in served if j < i][-1:] or [j for j in served if j > i][:1]
         return _predicted_delay(feed, trip.scheduled_sec[nearest[0]], served[nearest[0]])
 
+    first = min(trip.scheduled_sec[0], run.served[0])
+    enters = service_day_instant(run.service_date, first) - timedelta(seconds=feed.lead_sec)
+    leaves = service_day_instant(run.service_date, run.served[-1])
+
     def listing(at: datetime) -> tuple[int, tuple[StopEntry, ...]]:
+        if feed.arrivals:
+            return SCHEDULED, _with_arrivals(scenario, run, trip, enters, at)
         entries = []
         for i, (stop, scheduled, actual) in enumerate(zip(stops, trip.scheduled_sec, run.actual_sec, strict=True)):
             if actual is not None:
@@ -619,10 +685,33 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
                     entries.append(StopEntry(i + 1, stop.stop_id, stand_in_delay(i), SCHEDULED))
         return SCHEDULED, tuple(entries)
 
-    first = min(trip.scheduled_sec[0], run.served[0])
-    enters = service_day_instant(run.service_date, first) - timedelta(seconds=feed.lead_sec)
-    leaves = service_day_instant(run.service_date, run.served[-1])
     return _InFeed(trip, run.service_date, enters, leaves, listing)
+
+
+def _with_arrivals(
+    scenario: Scenario, run: TripRun, trip: ScheduledTrip, enters: datetime, at: datetime
+) -> tuple[StopEntry, ...]:
+    """The stops a poll captured *at* lists for *run*, which entered the feed
+    at *enters*, under a feed that reports arrivals (``FeedModel``)."""
+    if run.arrival_sec is None:
+        raise ValueError(f"{run.trip_id} {run.service_date} declares no arrivals")
+    step = timedelta(seconds=scenario.feed.poll_interval_sec)
+    stops = scenario.route(trip.route_id).stops
+    entries = []
+    for i, (stop, departed) in enumerate(zip(stops, run.served, strict=True)):
+        reached = service_day_instant(run.service_date, run.arrival_sec[i])
+        arrival_delay = run.arrival_sec[i] - trip.scheduled_arrival_sec[i]
+        if i == len(stops) - 1:
+            if at < reached:
+                entries.append(StopEntry(i + 1, stop.stop_id, None, SCHEDULED, arrival_delay))
+        elif at < reached:
+            entries.append(StopEntry(i + 1, stop.stop_id, arrival_delay, SCHEDULED))
+        elif at < service_day_instant(run.service_date, departed):
+            if at - step < max(reached, enters):
+                entries.append(StopEntry(i + 1, stop.stop_id, None, SCHEDULED, arrival_delay))
+            else:
+                entries.append(StopEntry(i + 1, stop.stop_id, departed - trip.scheduled_sec[i], SCHEDULED))
+    return tuple(entries)
 
 
 def _cancellation_listing(scenario: Scenario, cancellation: Cancellation, trip: ScheduledTrip) -> _InFeed:
@@ -661,15 +750,17 @@ def _cancellation_listing(scenario: Scenario, cancellation: Cancellation, trip: 
 
 
 def _reports(entry: TripEntry) -> set[tuple[str, str, date, int]]:
-    """What *entry* tells the collector: each departure it predicts, each stop
-    it reports SKIPPED, and a trip reported not running, CANCELED or with
-    every stop it lists SKIPPED."""
+    """What *entry* tells the collector: each departure and arrival it
+    reports, each stop it reports SKIPPED, and a trip reported not running,
+    CANCELED or with every stop it lists SKIPPED."""
     out = set()
     for stop in entry.stops:
         if stop.status == SKIPPED:
             out.add(("skip", entry.trip_id, entry.service_date, stop.stop_sequence))
         elif stop.departure_delay is not None:
             out.add(("departure", entry.trip_id, entry.service_date, stop.stop_sequence))
+        elif stop.arrival_delay is not None:
+            out.add(("arrival", entry.trip_id, entry.service_date, stop.stop_sequence))
     if entry.status == CANCELED or (entry.stops and all(s.status == SKIPPED for s in entry.stops)):
         out.add(("not run", entry.trip_id, entry.service_date, 0))
     return out
@@ -717,15 +808,23 @@ def _misreported(scenario: Scenario, runs: dict[tuple[str, date], TripRun], poll
     return out
 
 
+def _expected_report(scenario: Scenario, run: TripRun, i: int) -> str:
+    """What the feed must report of stop *i* (from 0) of *run* before the run gets there."""
+    if run.actual_sec[i] is None:
+        return "skip"
+    return "arrival" if scenario.feed.arrivals and i == len(run.actual_sec) - 1 else "departure"
+
+
 def polls(scenario: Scenario) -> list[Poll]:
     """The polls a collector captures under the scenario's feed model: one at
     every multiple of the poll interval while some trip is in the feed. A poll
     inside a freeze after its first repeats that first poll's TripUpdates,
     and its header too when the freeze holds it.
 
-    Raises when a departure gets no poll before it, a skipped stop is never
-    reported SKIPPED, or a trip that did not run is never reported so: the
-    oracle would count something the pipeline never saw, so the scenario
+    Raises when a departure, or the arrival at a run's last stop under a
+    feed that reports arrivals, gets no poll before it, a skipped stop is
+    never reported SKIPPED, or a trip that did not run is never reported so:
+    the oracle would count something the pipeline never saw, so the scenario
     would be at fault, not the pipeline. Raises too when no poll carries a
     misreport, which would then test nothing.
     """
@@ -760,9 +859,9 @@ def polls(scenario: Scenario) -> list[Poll]:
             out.append(poll)
         at += timedelta(seconds=step)
     expected = {
-        ("departure" if sec is not None else "skip", run.trip_id, run.service_date, i + 1)
+        (_expected_report(scenario, run, i), run.trip_id, run.service_date, i + 1)
         for run in scenario.runs
-        for i, sec in enumerate(run.actual_sec)
+        for i in range(len(run.actual_sec))
     }
     expected |= {("not run", c.trip_id, c.service_date, 0) for c in scenario.cancellations}
     missed = sorted(expected - reported, key=str)
