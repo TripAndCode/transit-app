@@ -158,12 +158,13 @@ async def aggregate_freshness(conn: asyncpg.Connection, ch) -> list[AgencyFreshn
             earliest_day = earliest_live.get(aid)
             # Inclusive day count from the earliest unaggregated day through
             # the newest completed one — e.g. a single day of unaggregated
-            # data (earliest_day == live_day) is 1 day behind, not 0. Falls
-            # back to a flat 1-day placeholder only if the earliest-day probe
-            # itself degraded to None (e.g. a ClickHouse hiccup for this one
-            # agency), matching this function's usual "degrade, don't fail
-            # the whole call" shape.
-            behind = (live_day - earliest_day).days + 1 if earliest_day is not None else 1
+            # data (earliest_day == live_day) is 1 day behind, not 0. At
+            # least 1: the newest day is a filed date, which can lie a day
+            # before the earliest capture's own. Falls back to a flat 1-day
+            # placeholder only if the earliest-day probe itself degraded to
+            # None (e.g. a ClickHouse hiccup for this one agency), matching
+            # this function's usual "degrade, don't fail the whole call" shape.
+            behind = max(1, (live_day - earliest_day).days + 1) if earliest_day is not None else 1
         else:
             behind = max(0, (live_day - agg_day).days)
 

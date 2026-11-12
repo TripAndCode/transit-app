@@ -62,7 +62,7 @@ become Nullable.
 - Prefer `ORDER BY captured_at DESC LIMIT 1` over `maxOrNull(captured_at)` for a
   single-agency max: `captured_at` is the 2nd sort-key column, so the `LIMIT 1`
   form is index-served while the aggregate form is a full per-agency scan.
-  See `api/clickhouse.py::max_captured_at_before`.
+  See `api/clickhouse.py::max_captured_at`.
 
 ## Known traps
 - `GROUP BY` binds the input column, not the output alias. A COALESCE-sentinel

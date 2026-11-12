@@ -184,6 +184,34 @@ async def test_aggregate_freshness_reads_the_day_the_newest_reading_is_filed_und
 
 
 @pytest.mark.asyncio
+async def test_a_never_analyzed_agency_whose_only_reading_files_back_a_day_is_one_day_behind(
+    health_pool, ch_client, ch_async_client
+):
+    """The reading is captured on service day 04-02 but filed under 04-01, so
+    the data runs to a day before the first capture's own; it is still one
+    day owed."""
+    from pipeline.clickhouse import insert_updates
+
+    async with health_pool.acquire() as conn:
+        a = await conn.fetchrow(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES ('B', 'http://b') RETURNING agency_id"
+        )
+        aid = a["agency_id"]
+        captured = datetime(2026, 4, 2, 4, 3, tzinfo=JST).astimezone(timezone.utc)
+        late = 27 * 3600 + 56 * 60
+        insert_updates(
+            ch_client, aid, [("late.pb", captured, "T1", "平日", None, "R1", 1, 60, None, None, None, None, None, late)]
+        )
+
+        result = await aggregate_freshness(conn, ch_async_client)
+
+    row = next(r for r in result if r.agency_id == aid)
+    assert row.data_to == "2026-04-01"
+    assert row.is_stale is True
+    assert row.agg_behind_days == 1
+
+
+@pytest.mark.asyncio
 async def test_aggregate_freshness_degrades_only_failing_agency_on_ch_error(health_pool, ch_async_client, monkeypatch):
     """A ClickHouse probe failure for ONE agency must not blank the whole
     result or crash the whole call — same "degrade the one CH-derived
