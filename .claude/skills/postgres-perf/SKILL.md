@@ -95,11 +95,11 @@ become Nullable.
 
 ## DB safety
 - Dev Postgres (the instance `DATABASE_URL` names — not necessarily `compose.yml`'s
-  `:5433`; see `AGENTS.md`) is read-only: EXPLAIN/SELECT only.
-- Dev ClickHouse (`docker compose exec clickhouse`, hundreds of millions of real
-  rows) is also read-only for agents. `make ch-bootstrap`
-  writes schema changes and must not be run against the dev instance by an
-  agent. `db/clickhouse/bootstrap.py` describes operator maintenance.
+  `:5433`; see `AGENTS.md`) and dev ClickHouse (`docker compose exec clickhouse`,
+  hundreds of millions of real rows) are EXPLAIN/SELECT only for agents, except
+  through the two sanctioned paths of the dev-database rule in `AGENTS.md`
+  (`scripts/dev_upgrade.py` runs `make migrate` and `make ch-bootstrap` there).
+  `db/clickhouse/bootstrap.py` describes operator maintenance.
 - Tests run against throwaway Postgres `:5544` (built from `db/`, needs
   PostGIS+pgvector+pg_trgm) and throwaway ClickHouse `:8124` (`make ch-test`).
   `RUN_CH_INTEGRATION=1` + the `CLICKHOUSE_*` env vars gate the ClickHouse-touching

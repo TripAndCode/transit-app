@@ -23,9 +23,19 @@ tier routing, the high-risk overlay and the fix cap.
 
 ## Hard rules
 
-- **Dev databases are read-only.** Dev Postgres and dev ClickHouse (`docker compose
-  exec clickhouse`) hold real data. SELECT/EXPLAIN is allowed; never run writes, DDL,
-  resets, down migrations, or destructive Make targets against them.
+- **Dev databases are read-only but for two sanctioned paths.** Dev Postgres and dev
+  ClickHouse (`docker compose exec clickhouse`) hold real data. SELECT/EXPLAIN is
+  allowed. The only writes an agent makes there:
+  - `scripts/dev_upgrade.py`, after a merge: migrations up, the ClickHouse schema,
+    analyze-all, then check-aggs. Its `--check` comes first; its docstring lists the
+    preconditions it enforces.
+  - A one-time operator script that a merged PR's body names for dev. Run it from the
+    primary checkout at `origin/main`, so it runs merged code, and read its dry run
+    before `--apply`.
+
+  A pending up migration that loses data waits for the owner to name it with
+  `--allow-destructive-up`. Nothing else is allowed: other writes, DDL, resets, down
+  migrations, prunes, ingests, or a destructive Make target.
   - Dev Postgres is whichever port the live container publishes. `compose.yml`
     declares `:5433`, but the instance holding the data can be published elsewhere,
     so read `DATABASE_URL` rather than assuming.
@@ -130,8 +140,9 @@ tier routing, the high-risk overlay and the fix cap.
   (`make analyze-all DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test
   CLICKHOUSE_PORT=8124 CLICKHOUSE_DATABASE=transit_test`). The variables go after
   the target: the Makefile's `-include .env` outranks the environment, so an env
-  prefix before `make` is replaced by whatever `.env` names. Rebuilding the dev
-  aggregates is the operator's step, which the PR body flags.
+  prefix before `make` is replaced by whatever `.env` names. The dev aggregates
+  are rebuilt once the change is merged, through `scripts/dev_upgrade.py` (the
+  dev-database rule above).
   `make check-aggs` only reads, and detects stale aggregates. It only compares each
   agency's newest day, so a date whose row count didn't change but whose rows did
   (replaced one-for-one) needs `FULL=1` to actually rebuild.
