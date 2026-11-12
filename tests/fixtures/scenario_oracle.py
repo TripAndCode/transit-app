@@ -208,10 +208,41 @@ observations came from" and the definition stamp's ``source_mix``
 - Over a period, its days by source, archive, live and none, which add up
   to the period's days.
 
+The feed's predictions against the truth. Every figure is "computed from
+the delay the operator's feed last predicted for each stop. It is not an
+observation of the bus passing the stop" (the methodology's "Value basis
+and validation status"), and of a stop's reports the one that counts is
+"the last report received" (its "Deduplication and withdrawal"; "keep only
+the latest reading per trip-stop-day", ``DELAY_ANALYSIS.md``'s dedup). So:
+
+- Under a feed that predicts imperfectly (``FeedModel``), a departure's
+  delay is the prediction of the last poll that read it plausibly, not its
+  true delay. A poll captured at t lists a stop of a run while t less the
+  feed's freshness lag is before the stop's departure. Under
+  ``propagate_current_delay`` it predicts each stop it lists at the run's
+  delay as it stood at t less the lag: that of the last stop it had left
+  by then, a stop being left from the instant of its departure, or 0
+  before it left its first. Under the perfect model it predicts each
+  stop's true delay, lag or not. So the last poll to list a stop is the
+  last on the poll interval's grid before its departure plus the lag, and
+  under a lag it may be captured after the run left.
+- A departure's prediction error is its delay less its true delay, late
+  positive: a feed that reports a run later than it left overstates its
+  delay. Its lead time is its true departure instant less the capture
+  instant of the poll whose reading it took, negative for a reading
+  captured after the run left. The lead runs to the true departure, not,
+  as in ``pipeline.prediction_accuracy``, to the reading's own predicted
+  one, since the truth is what a passage observed from vehicle positions
+  stands for.
+- Over a set of departures, the mean absolute error and the bias, the
+  mean error. By lead time, each group holds the leads from a multiple of
+  a width to the next multiple, that one excluded, so a negative lead
+  falls in a group of its own.
+
 Every figure is computed from an ``Outcome``: the departures, each day's
 service, each day's timetable version, each route's scheduled headways
-on each day, each day's readings and rows by path, each poll's age, and
-each stop visit.
+on each day, each day's readings and rows by path, each poll's age, each
+stop visit, and each departure's prediction beside its truth.
 ``outcome`` derives the one the truth implies. A test may
 derive another, such as the outcome a known pipeline divergence produces,
 and hand it to the same figure functions. Such an outcome may hold a
@@ -228,12 +259,24 @@ import math
 from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
 from itertools import pairwise
 from typing import Literal
 
-from tests.fixtures.scenario import JST, SCHEDULED, Poll, Scenario, capture_day, handoff, polls
+from tests.fixtures.scenario import (
+    JST,
+    SCHEDULED,
+    FeedModel,
+    Poll,
+    Scenario,
+    ScheduledTrip,
+    TripRun,
+    capture_day,
+    handoff,
+    polls,
+    service_day_instant,
+)
 
 # "A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped."
 MAX_PLAUSIBLE_DELAY_SEC = 120 * 60
@@ -401,8 +444,9 @@ class Outcome:
     gaps are judged by (``plans``) and the plan its high-frequency test and
     scheduled mean wait read (``wait_plans``), each service day's readings,
     each poll's message age under the service day it was captured in, each
-    stop visit, and each service day's rows by the path they came by. The
-    truth's two plans are one: the timetable in force that day."""
+    stop visit, each service day's rows by the path they came by, and each
+    departure's prediction beside its truth. The truth's two plans are one:
+    the timetable in force that day."""
 
     departures: tuple[Departure, ...]
     service: dict[date, Service]
@@ -414,6 +458,7 @@ class Outcome:
     ages: tuple[tuple[date, int], ...]
     visits: tuple[Visit, ...]
     sources: dict[date, Sources]
+    predictions: tuple[Prediction, ...]
 
 
 def plausible(delay_sec: int) -> bool:
@@ -486,6 +531,59 @@ def _last_plausible(sent: Sequence[Poll]) -> dict[tuple[str, date, int], int]:
     return {key: readings[-1][1] for key, readings in _plausible_readings(sent, "departure").items()}
 
 
+def _model_delay(feed: FeedModel, run: TripRun, trip: ScheduledTrip, seq: int, captured_at: datetime) -> int:
+    """The delay a poll captured at *captured_at* predicts stop *seq* of
+    *run* at, under *feed*'s prediction model and freshness lag."""
+    if feed.prediction == "perfect":
+        actual = run.actual_sec[seq - 1]
+        if actual is None:
+            raise ValueError(f"{run.trip_id} {run.service_date} stop {seq} is not served")
+        return actual - trip.scheduled_sec[seq - 1]
+    known = captured_at - feed.lag
+    left = [
+        actual - scheduled
+        for scheduled, actual in zip(trip.scheduled_sec, run.actual_sec, strict=True)
+        if actual is not None and service_day_instant(run.service_date, actual) <= known
+    ]
+    return left[-1] if left else 0
+
+
+def _last_listing(feed: FeedModel, departs: datetime) -> datetime:
+    """The capture instant of the last poll to list a stop its run leaves at
+    *departs*: the last multiple of the poll interval before the departure
+    plus the freshness lag."""
+    step = feed.poll_interval_sec
+    edge = math.ceil((departs + feed.lag).timestamp() / step)
+    return datetime.fromtimestamp((edge - 1) * step, timezone.utc)
+
+
+def _check_model(scenario: Scenario, captured: Sequence[Poll]) -> None:
+    """Raise unless every departure reading in *captured* carries the delay
+    the scenario's feed model predicts at its poll's capture, and each
+    served stop is last read in the last poll that lists it
+    (``_last_listing``)."""
+    runs = {(r.trip_id, r.service_date): r for r in scenario.runs}
+    last_read: dict[tuple[str, date, int], datetime] = {}
+    for poll in captured:
+        for entry in poll.trips:
+            run = runs[(entry.trip_id, entry.service_date)]
+            trip = scenario.trip(run.trip_id, run.service_date)
+            for stop in entry.stops:
+                key = (entry.trip_id, entry.service_date, stop.stop_sequence)
+                want = _model_delay(scenario.feed, run, trip, stop.stop_sequence, poll.captured_at)
+                if stop.departure_delay != want:
+                    raise ValueError(
+                        f"{key} read at {poll.captured_at}: {stop.departure_delay}, not the model's {want}"
+                    )
+                last_read[key] = max(last_read.get(key, poll.captured_at), poll.captured_at)
+    for run in scenario.runs:
+        for seq, actual in enumerate(run.served, start=1):
+            key = (run.trip_id, run.service_date, seq)
+            want_at = _last_listing(scenario.feed, service_day_instant(run.service_date, actual))
+            if last_read.get(key) != want_at:
+                raise ValueError(f"{key} last read at {last_read.get(key)}, not at {want_at}")
+
+
 def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll]) -> list[Departure]:
     """Every served stop of every run with a plausible reading in *sent*,
     at that last reading's delay, but a run's last stop under a feed that
@@ -494,12 +592,17 @@ def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll
 
     Raises when a run no misreport names was last reported in *captured* at
     a delay other than its true one, or a true delay inside the clamp went
-    without a plausible reading in *captured*: the feed model would then be
-    at fault, not the pipeline. A departure *sent* lacks a reading of is
-    one the path that brought its day never received."""
+    without a plausible reading in *captured*, and under a feed that
+    predicts imperfectly, when a reading in *captured* is not its model's
+    prediction or a stop is last read in another poll than the last to list
+    it (``_check_model``): the feed model would then be at fault, not the
+    pipeline. A departure *sent* lacks a reading of is one the path that
+    brought its day never received."""
     last = _last_plausible(sent)
     feed_last = _last_plausible(captured)
     misreported = {(m.trip_id, m.service_date) for m in scenario.feed.misreports}
+    if scenario.feed.imperfect:
+        _check_model(scenario, captured)
     out = []
     for run in scenario.runs:
         trip = scenario.trip(run.trip_id, run.service_date)
@@ -512,7 +615,7 @@ def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll
             key = (run.trip_id, run.service_date, seq)
             by_feed = feed_last.get(key)
             truthful = by_feed == actual - scheduled if plausible(actual - scheduled) else by_feed is None
-            if not truthful and (run.trip_id, run.service_date) not in misreported:
+            if not (truthful or scenario.feed.imperfect or (run.trip_id, run.service_date) in misreported):
                 raise ValueError(f"{run.trip_id} {run.service_date} stop {seq}: reported {by_feed}, not its truth")
             reported = last.get(key)
             if reported is None:
@@ -591,6 +694,37 @@ def visits(scenario: Scenario, sent: Sequence[Poll], found: Iterable[Departure])
                     observed,
                 )
             )
+    return out
+
+
+@dataclass(frozen=True)
+class Prediction:
+    """A departure beside its truth: the delay the run truly left the stop
+    at, and the lead time of the reading the departure's delay is that of,
+    in seconds."""
+
+    departure: Departure
+    true_delay_sec: int
+    lead_sec: int
+
+    @property
+    def error_sec(self) -> int:
+        return self.departure.delay_sec - self.true_delay_sec
+
+
+def predictions(scenario: Scenario, sent: Sequence[Poll], found: Iterable[Departure]) -> list[Prediction]:
+    """Each departure of *found* beside its truth, its lead time that of its
+    last plausible reading in *sent*."""
+    read = _plausible_readings(sent, "departure")
+    runs = {(r.trip_id, r.service_date): r for r in scenario.runs}
+    out = []
+    for d in found:
+        actual = runs[(d.trip_id, d.service_date)].actual_sec[d.stop_sequence - 1]
+        if actual is None or d.scheduled_sec is None:
+            raise ValueError(f"{d.trip_id} {d.service_date} stop {d.stop_sequence} has no true departure")
+        (read_at, _file), _delay = read[(d.trip_id, d.service_date, d.stop_sequence)][-1]
+        lead = service_day_instant(d.service_date, actual) - read_at
+        out.append(Prediction(d, actual - d.scheduled_sec, lead // timedelta(seconds=1)))
     return out
 
 
@@ -685,6 +819,7 @@ def outcome(scenario: Scenario) -> Outcome:
         ages=poll_ages(sent),
         visits=tuple(visits(scenario, sent, found)),
         sources=sources(arrived),
+        predictions=tuple(predictions(scenario, sent, found)),
     )
 
 
@@ -1052,3 +1187,42 @@ def dwell_run_by_route(found: Outcome, first: date, last: date) -> dict[str, Dwe
         if first <= t.visit.service_date <= last:
             groups[t.visit.route_id].append(t)
     return {route: _dwell_run(group) for route, group in groups.items()}
+
+
+@dataclass(frozen=True)
+class PredictionError:
+    """How far a set of departures' delays are from their truth: how many
+    departures, and the sums of their errors and of their absolute errors,
+    in seconds."""
+
+    departures: int
+    error_sum_sec: int
+    abs_error_sum_sec: int
+
+    @property
+    def bias_sec(self) -> Fraction:
+        return Fraction(self.error_sum_sec, self.departures)
+
+    @property
+    def mae_sec(self) -> Fraction:
+        return Fraction(self.abs_error_sum_sec, self.departures)
+
+
+def prediction_error(group: Iterable[Prediction]) -> PredictionError:
+    """The error over *group*."""
+    errors = [p.error_sec for p in group]
+    if not errors:
+        raise ValueError("no departures to measure")
+    return PredictionError(len(errors), sum(errors), sum(abs(e) for e in errors))
+
+
+def prediction_error_by_lead_time(found: Outcome, width_sec: int) -> dict[int, PredictionError]:
+    """The error per lead-time group *width_sec* wide, keyed by its first
+    second: a lead of l seconds falls in the group from the largest
+    multiple of the width not above l."""
+    if width_sec <= 0:
+        raise ValueError("a lead-time group must be wider than nothing")
+    groups: dict[int, list[Prediction]] = defaultdict(list)
+    for p in found.predictions:
+        groups[p.lead_sec // width_sec * width_sec].append(p)
+    return {start: prediction_error(group) for start, group in sorted(groups.items())}

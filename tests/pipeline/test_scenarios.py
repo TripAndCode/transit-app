@@ -10,6 +10,8 @@ by archive ingest, before or after promotion as the scenario says.
 report endpoints, the agencies board and the feed-quality scorecard are
 compared with ``tests.fixtures.scenario_oracle``, which computes the same
 figures from the truth and the polls of its feed that reach ``updates``.
+A feed that predicts imperfectly is held to the delays it last predicted,
+which the oracle derives from its feed model, not to the true ones.
 
 A scenario whose timetable is revised loads each version at the instant it
 declares, as an operator loads a newly published zip, and ingests each poll
@@ -731,6 +733,50 @@ def source_mix(day: date) -> Scenario:
             Delivery(before, live=False, archive=True),
             Delivery(day, archive=True, archive_first=True),
             Delivery(after, archive=True),
+        ),
+    )
+
+
+# The imperfect feed's line: eight stops two minutes apart, a trip every ten
+# minutes from 07:00, each run's true delays in seconds per stop. The feed
+# predicts each stop at the delay of the last stop the run has left, half a
+# minute late, so a poll captured on the minute lists what was so at the
+# half minute before it.
+_PROPAGATED_TRUTH = {
+    "07:00:00": (0, 40, 80, 120, 180, 240, 301, 361),
+    "07:10:00": (300, 250, 200, 150, 100, 61, 30, -30),
+    "07:20:00": (-90, -60, -30, 0, 0, 0, 0, 0),
+    "07:30:00": (0, 0, 0, 0, 0, 0, 0, 0),
+    "07:40:00": (100, 30, 30, 30, 30, 30, 30, 30),
+}
+_FRESHNESS_LAG_SEC = 30
+
+
+def imperfect_feed(day: date) -> Scenario:
+    """A ten-minute line on one weekday whose feed propagates each run's
+    current delay to every stop still to come, half a minute behind the run,
+    under a header that does not show the lag.
+
+    The runs lose time, recover it, leave early, keep time, and leave two
+    stops 50 s apart, so the kept predictions fall on the other side of the
+    on-time and five-minute edges from the truth at some stops and equal it
+    at others, a stop is still listed after the run left it, and the lag
+    changes which stop a prediction comes from.
+    ``tests/unit/test_scenario_generator.py`` pins each stop's kept delay,
+    true delay and lead."""
+    route = _route("P1", "Propagated line", 8, 34.67)
+    trips, runs = _runs(route, "平日", day, 120, _PROPAGATED_TRUTH)
+    return Scenario(
+        name="imperfect_feed",
+        routes=(route,),
+        timetable=tuple(trips),
+        days=(ServiceDay(day, "平日"),),
+        runs=tuple(runs),
+        feed=FeedModel(
+            prediction="propagate_current_delay",
+            poll_interval_sec=60,
+            lead_sec=300,
+            freshness_lag_sec=_FRESHNESS_LAG_SEC,
         ),
     )
 
@@ -1622,13 +1668,20 @@ def _shown(cell: dict | None, columns) -> str:
     return "{" + ", ".join(f"{c}: {cell.get(c)!r}" for c in columns) + "}"
 
 
+def _unfit(actual: Cells, expected: Cells) -> list[tuple[str, Hashable]]:
+    """The cells where *actual* does not fit *expected*, in order. A cell
+    *expected* lacks expects no row."""
+    return [
+        cell for cell in sorted(set(actual) | set(expected), key=str) if not _fits(expected.get(cell), actual.get(cell))
+    ]
+
+
 def _compare(actual: Cells, expected: Cells, keep: Callable[[tuple[str, Hashable]], bool]) -> list[str]:
-    """Each kept cell where *actual* does not fit *expected*, as one line. A
-    cell *expected* lacks expects no row."""
+    """Each kept cell where *actual* does not fit *expected*, as one line."""
     lines = []
-    for cell in sorted(set(actual) | set(expected), key=str):
-        want, got = expected.get(cell), actual.get(cell)
-        if keep(cell) and not _fits(want, got):
+    for cell in _unfit(actual, expected):
+        if keep(cell):
+            want, got = expected.get(cell), actual.get(cell)
             columns = want or got or {}
             lines.append(f"{cell[0]} {cell[1]}: expected {_shown(want, columns)}, actual {_shown(got, columns)}")
     return lines
@@ -2003,6 +2056,7 @@ _ALL = [
     pytest.param(frozen_feed, id="frozen_feed"),
     pytest.param(dwell, id="dwell"),
     pytest.param(source_mix, id="source_mix"),
+    _IMPERFECT := pytest.param(imperfect_feed, id="imperfect_feed"),
 ]
 
 
@@ -2084,3 +2138,28 @@ def test_headway_quality_judges_each_day_by_the_timetable_in_force_that_day(obse
 @pytest.mark.parametrize("observed", [_PUBLISHED_EARLY], indirect=True)
 def test_the_scheduled_headway_of_an_even_count_of_gaps_is_the_mean_of_the_middle_two(observed):
     _assert_clean(_divergence_mismatches(observed, _LOWER_MIDDLE_DIVERGENCE))
+
+
+def _at_true_delays(found: oracle.Outcome) -> oracle.Outcome:
+    """*found* as an oracle that took the feed's predictions for the truth
+    would expect it: every departure at its true delay."""
+    return replace(found, departures=tuple(replace(p.departure, delay_sec=p.true_delay_sec) for p in found.predictions))
+
+
+@pytest.mark.parametrize("observed", [_IMPERFECT], indirect=True)
+def test_an_expectation_planted_at_the_true_delays_fails_on_every_cell_the_predictions_move(observed):
+    """The run is held to the feed's kept predictions. Held to the true
+    delays instead, it fails on exactly the cells the predictions move from
+    the truth, the day's on-time and late counts among them, so the
+    comparisons see the model's error rather than pass whatever the feed
+    predicts."""
+    truth = observed.truth
+    planted = _at_true_delays(truth)
+    moved: set[tuple[str, Hashable]] = set()
+    caught: set[tuple[str, Hashable]] = set()
+    for expect, read in _COMPARISONS:
+        moved |= _moved(expect(observed, truth), expect(observed, planted))
+        caught |= set(_unfit(read(observed), expect(observed, planted)))
+    day = observed.scenario.days[0].date
+    assert ("agg_route_daily_dist", ("P1", day, "平日")) in moved
+    assert caught == moved
