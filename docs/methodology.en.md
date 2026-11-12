@@ -66,7 +66,7 @@ A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) 
 
 A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. Trips reported and the implausible share are also stated in every figure's [definition stamp](#definition-stamp), over that figure's own period. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
 
-Each month is graded A to F from these figures by four criteria, each passing or failing on its own. Each threshold is inclusive and is judged on the figure as it is shown:
+Each month is graded A to F from these figures by four criteria, each passing or failing on its own. Each threshold is inclusive, except the arrival-delay band in field coverage, which excludes both its ends: 0% and 50% fail. The implausible share is judged as printed to a tenth, as in the comparability conditions, and every other figure as it is shown:
 
 | Criterion | Passes when | Basis |
 |---|---|---|

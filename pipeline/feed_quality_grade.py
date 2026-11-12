@@ -6,8 +6,9 @@ whenever it is read, and only the admin API reads it: it is shown to admins
 only until operators have had the methodology's advance notice and right of
 reply (docs/methodology.md, "Publication process").
 
-Each criterion passes or fails on its own figure as the scorecard states it,
-each threshold inclusive:
+Each criterion passes or fails on its own figure as the scorecard states it.
+Each threshold is inclusive, but for field coverage's arr_delay band, which
+excludes both its ends:
 
 - ``rt_completeness``: trips reported are at least
   :data:`MIN_RT_COMPLETENESS_PCT` of those planned, Cal-ITP's realtime

@@ -1,17 +1,16 @@
 """The agency drawer's feed-quality months: newest first, as JSON-ready values,
 each with its grade, which no endpoint outside the admin API carries."""
 
-from collections.abc import Iterator, Sequence
 from datetime import date
 from decimal import Decimal
 from typing import Any
 
 from fastapi.routing import APIRoute
 from pydantic import TypeAdapter
-from starlette.routing import BaseRoute
 
 from api import agency_diagnostics as ad
 from api.security import require_admin
+from tests.fixtures.routes import api_routes
 
 
 def _month(month: date, **over):
@@ -103,16 +102,6 @@ def _has_grade(schema: Any) -> bool:
     return False
 
 
-def _routes(routes: Sequence[BaseRoute]) -> Iterator[APIRoute]:
-    """Every endpoint, through the wrapper newer FastAPI puts around each
-    included router."""
-    for route in routes:
-        if isinstance(route, APIRoute):
-            yield route
-        elif hasattr(route, "original_router"):
-            yield from _routes(route.original_router.routes)
-
-
 def _requires_admin(route: APIRoute) -> bool:
     pending = list(route.dependant.dependencies)
     while pending:
@@ -130,7 +119,7 @@ def test_only_the_admin_api_returns_a_grade():
 
     graded = [
         route
-        for route in _routes(app.routes)
+        for route in api_routes(app.routes)
         if route.response_model is not None and _has_grade(TypeAdapter(route.response_model).json_schema())
     ]
     assert [route.path for route in graded] == ["/api/admin/agencies/{agency_id}/diagnostics"]

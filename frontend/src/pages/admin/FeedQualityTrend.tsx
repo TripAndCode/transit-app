@@ -187,7 +187,9 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
         <Row label={t("admin.agency_diag.quality_stale")}>
           <Figure
             value={latest.message_age_stale_pct == null ? null : clampText(latest.message_age_stale_pct)}
-            missing={latest.message_age_missing}
+            // A month built before the share was stored has neither the share
+            // nor a reason, which the grade reads as not recorded too.
+            missing={latest.message_age_missing ?? "not_recorded"}
           >
             {t("admin.agency_diag.quality_stale_detail", {
               stale: latest.message_age_stale_polls ?? 0,

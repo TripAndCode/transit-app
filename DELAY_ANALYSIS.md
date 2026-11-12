@@ -237,7 +237,8 @@ above).
 
 **Grade.** The admin drawer grades each month A to F from its stored figures alone
 (`pipeline/feed_quality_grade.py`). Four criteria each pass or fail on the figure as
-stored, every threshold inclusive:
+stored. Every threshold is inclusive except field coverage's `arr_delay` band, which
+excludes both its ends: 0% and 50% fail.
 
 | Criterion | Passes when | Why this threshold |
 |---|---|---|

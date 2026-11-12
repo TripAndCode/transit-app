@@ -139,6 +139,21 @@ describe("FeedQualityTrend", () => {
     );
   });
 
+  it("says a month built before the share of polls over 65 s was stored has it not recorded", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([
+      month("2026-10", {
+        message_age_stale_polls: null,
+        message_age_stale_pct: null,
+        grade: null,
+        grade_failing: ["rt_completeness"],
+        grade_missing: [{ criterion: "stale_polls", reason: "not_recorded" }],
+      }),
+    ]);
+    const label = screen.getByText("Polls over 65 s");
+    expect(label.nextElementSibling?.textContent).toBe("— not recorded");
+  });
+
   it("speaks Japanese", async () => {
     await i18n.changeLanguage("ja");
     renderTrend([month("2026-10", { through_date: "2026-10-20" })]);

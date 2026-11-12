@@ -144,8 +144,9 @@ criteria it misses, and, for a month without a grade, each criterion whose
 figure is missing and why. The diagnostics endpoint computes the grade
 from the stored figures as it reads them (`pipeline/feed_quality_grade.py`);
 the thresholds and bands are in `docs/methodology.md` and `DELAY_ANALYSIS.md`.
-No other endpoint or screen carries the grade, and
-`tests/unit/test_agency_feed_quality.py` fails if one does. It stays admin-only
+No other endpoint carries the grade: `tests/unit/test_agency_feed_quality.py`
+fails if any other route's declared `response_model` schema has a grade, or if
+that route stops requiring an admin. It stays admin-only
 until operators have had the methodology's advance notice and right of reply.
 
 ### RT field-coverage verdicts
