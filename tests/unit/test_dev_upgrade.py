@@ -3,6 +3,7 @@ stores refuses everything that could carry unmerged code or schema there."""
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import pathlib
 import subprocess
@@ -196,7 +197,7 @@ def test_the_owner_naming_the_version_lets_it_run(monkeypatch, tmp_path):
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
     monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: ["0099"])
     monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending: {"0099_drop": ["users"]})
-    monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: _no_lock())
+    monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: contextlib.nullcontext())
     monkeypatch.setattr(dev_upgrade, "LOG_DIR", tmp_path)
     ran = []
     monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
@@ -219,7 +220,7 @@ def test_a_resumed_run_starts_at_its_step(monkeypatch, tmp_path):
     monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
     monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: [])
-    monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: _no_lock())
+    monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: contextlib.nullcontext())
     monkeypatch.setattr(dev_upgrade, "LOG_DIR", tmp_path)
     ran = []
     monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
@@ -264,9 +265,35 @@ def test_a_refused_checkout_writes_nothing(monkeypatch, capsys):
     assert "linked worktree" in capsys.readouterr().err
 
 
-class _no_lock:
-    def __enter__(self):
-        return None
+def test_a_step_takes_its_stores_from_the_checkouts_env_alone():
+    # A shell left pointed at the throwaway pair must not steer a step: .env
+    # names every store the Makefile exports, and a key it leaves unset falls
+    # back to the code's default rather than the caller's value.
+    env = dev_upgrade.step_env(
+        {"PATH": "/bin", "HOME": "/h", "DATABASE_URL": "postgresql://x@localhost:5544/t", "CLICKHOUSE_PORT": "8124"}
+    )
+    assert env == {"PATH": "/bin", "HOME": "/h"}
 
-    def __exit__(self, *exc):
-        return False
+
+def test_a_step_runs_in_the_stripped_environment(monkeypatch, tmp_path):
+    seen = {}
+
+    class _Proc:
+        returncode = 0
+        stdout: list[str] = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def popen(command, **kwargs):
+        seen.update(kwargs)
+        return _Proc()
+
+    monkeypatch.setenv("CLICKHOUSE_PORT", "8124")
+    monkeypatch.setattr(dev_upgrade.subprocess, "Popen", popen)
+    with (tmp_path / "log").open("w") as log:
+        dev_upgrade._run("check-aggs", log)
+    assert "CLICKHOUSE_PORT" not in seen["env"]

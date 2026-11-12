@@ -20,8 +20,8 @@ catching those is the migration's review.
 
 --check prints the preconditions, the pending migrations and the plan, and
 writes nothing. --start N resumes at step N once the earlier steps succeeded.
-The guard hook still blocks each of these make targets on a command line; this
-script is how they reach dev.
+The guard hook still blocks the writing steps' make targets on a command line;
+this script is how they reach dev.
 
 Run from the primary checkout with the poetry environment:
 `poetry run python scripts/dev_upgrade.py [--check]`. Each step's output goes to
@@ -33,12 +33,13 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
+import os
 import pathlib
 import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
@@ -155,13 +156,24 @@ def _stop_reason(
     return None
 
 
+def step_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """The environment a step runs in: the caller's, less anything that points
+    a store. The Makefile exports the stores the checkout's .env names, but a
+    key .env leaves unset (CLICKHOUSE_PORT, for one) would pass through from
+    the caller, so a shell left pointed at the throwaway pair would send the
+    ClickHouse steps there while migrate wrote dev Postgres."""
+    return {k: v for k, v in environ.items() if k != "DATABASE_URL" and not k.startswith("CLICKHOUSE_")}
+
+
 def _run(step: str, log) -> None:
     command = ["make", "-s", step]
     if shutil.which("caffeinate"):
         command = ["caffeinate", "-s", "-i", *command]
     print(f"== {dt.datetime.now():%F %T} {step}", flush=True)
     log.write(f"== {dt.datetime.now():%F %T} {step}\n")
-    with subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as proc:
+    with subprocess.Popen(
+        command, cwd=REPO, env=step_env(os.environ), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    ) as proc:
         assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
