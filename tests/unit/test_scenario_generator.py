@@ -1,7 +1,9 @@
 """The scenario generator and its oracle, checked by hand without a database."""
 
 import csv
+import hashlib
 import io
+import struct
 import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
@@ -40,6 +42,9 @@ from tests.fixtures.scenario import (
     polls,
     service_day_instant,
     static_gtfs_zip,
+    vehicle_id,
+    vehicle_positions,
+    write_vehicle_positions,
 )
 
 DAY = date(2026, 6, 1)
@@ -1112,3 +1117,271 @@ def test_deliveries_the_oracle_cannot_follow_are_refused():
     with pytest.raises(ValueError, match="neither cancels a trip nor skips a stop"):
         Scenario(**{**_cancelling(Cancellation("R_0700", DAY)).__dict__, "feed": sparse})
     Scenario(**{**_skipping(None).__dict__, "feed": replace(sparse, push_interval_sec=60)})
+
+
+# Each scenario's polls hashed, file name and wire bytes in capture order, so
+# that a feed model added beside the perfect one cannot change a byte the
+# perfect model sends.
+_PERFECT_WIRE = {
+    "both trips": "f027d01fb8b113a5f5ffa671eea3c55bc3105c6b7601c85a7d5b266cfc86c75a",
+    "skip announced": "6a9fa97b9f3c6b8f2c975322ee798e3bfbb75050ac061b0ca616cdfdef69b870",
+    "cancellation announced": "a3b2aa750bd899b088afa9ed3e0b165447bcebade78cd365aed68ffca82db7f7",
+    "frozen header": "fcd945eb1de30b6e0e640a56c710f53320e9ababa64418b01b7e9fd2c04494cf",
+    "advancing header": "aeee991f190a562451c327f3d3889c3fbde8bf54031425319e5cd05a8fb9e939",
+    "arrivals": "3d5a96d6a6718e25628236e947572960200c7b1682004eec65720ecd70463022",
+    "sparse pushes": "be8f51dcc7f5a8e75da4b8d7d676be50c4d93c96dc1b436e8620214965ad4702",
+    "bunched": "aa267eeac2d980d7252e79832bb48aed437b72ffca46edf879dfffacf5bbbe33",
+}
+
+
+def _wire_digest(scenario: Scenario) -> str:
+    digest = hashlib.sha256()
+    for poll in polls(scenario):
+        digest.update(poll.source_file.encode())
+        digest.update(poll.payload)
+    return digest.hexdigest()
+
+
+def test_the_perfect_models_wire_bytes_are_pinned():
+    announced = Cancellation("R_0700", DAY, announced_sec=gtfs_seconds("06:57:00"), predicted_delay_sec=30)
+    scenarios = {
+        "both trips": _scenario(),
+        "skip announced": _skipping(gtfs_seconds("06:58:00")),
+        "cancellation announced": _cancelling(announced),
+        "frozen header": _frozen("frozen"),
+        "advancing header": _frozen("advancing"),
+        "arrivals": _quay(),
+        "sparse pushes": _sparse_and_dense(),
+        "bunched": _bunched(),
+    }
+    assert {name: _wire_digest(scenario) for name, scenario in scenarios.items()} == _PERFECT_WIRE
+
+
+_PROPAGATING = FeedModel(prediction="propagate_current_delay", poll_interval_sec=60, lead_sec=300)
+
+
+def _listings(scenario_polls) -> list[tuple[str, int, tuple[tuple[int, int | None], ...]]]:
+    """The polls as runs of identical listings: each run's first capture on
+    the JST clock, how many polls it lasts, and the (stop, delay) it lists."""
+    out: list[tuple[str, int, tuple[tuple[int, int | None], ...]]] = []
+    for poll in scenario_polls:
+        listing = tuple((s.stop_sequence, s.departure_delay) for t in poll.trips for s in t.stops)
+        if out and out[-1][2] == listing:
+            out[-1] = (out[-1][0], out[-1][1] + 1, listing)
+        else:
+            out.append((f"{poll.captured_at.astimezone(JST):%H:%M:%S}", 1, listing))
+    return out
+
+
+def test_a_propagating_feed_predicts_every_stop_at_the_delay_of_the_last_stop_left():
+    """The run leaves at 06:59, 07:08 and 07:17, each on a poll, which knows
+    the stop as left: the 06:59 poll lists stop 1 no longer and predicts the
+    others 60 s early. So each stop is last predicted at the delay of the
+    stop before it, and the first on time."""
+    scenario = _one_run((-60, 0, 60), _PROPAGATING)
+    assert _listings(polls(scenario)) == [
+        ("06:54:00", 5, ((1, 0), (2, 0), (3, 0))),
+        ("06:59:00", 9, ((2, -60), (3, -60))),
+        ("07:08:00", 9, ((3, 0),)),
+    ]
+    found = oracle.outcome(scenario)
+    assert [(d.stop_sequence, d.delay_sec) for d in found.departures] == [(1, 0), (2, -60), (3, 0)]
+    assert [(p.true_delay_sec, p.error_sec, p.lead_sec) for p in found.predictions] == [
+        (-60, 60, 60),
+        (0, -60, 60),
+        (60, -60, 60),
+    ]
+    assert found.readings == {DAY: oracle.Readings(readings=42, implausible=0, rows=42)}
+
+
+def _quick(feed: FeedModel) -> Scenario:
+    """A trip of stops two minutes apart that leaves them at 07:01:40,
+    07:02:30 and 07:04:30, the first two 50 s apart."""
+    return Scenario(
+        name="quick",
+        routes=(_ROUTE,),
+        timetable=(_QUICK,),
+        days=(ServiceDay(DAY, "平日"),),
+        runs=(TripRun.from_delays(_QUICK, DAY, (100, 30, 30)),),
+        feed=feed,
+    )
+
+
+def test_a_lag_decides_which_stop_a_propagated_prediction_comes_from_and_may_be_read_after_the_run_left():
+    """Without a lag the 07:02 poll, the last to list stop 2, knows the run
+    has left stop 1 100 s late. Half a minute behind, it knows the run as it
+    stood at 07:01:30, still at stop 1, and predicts stop 2 on time; it also
+    still lists stop 1, 20 s after the run left it. The next poll knows the
+    run as it stood at 07:02:30, the instant it left stop 2, so no poll
+    predicts 100 s, and stop 3 is predicted at stop 2's 30 s either way. The
+    header shows no lag."""
+    fresh = oracle.outcome(_quick(_PROPAGATING))
+    lagging = _quick(replace(_PROPAGATING, freshness_lag_sec=30))
+    stale = oracle.outcome(lagging)
+    assert [d.delay_sec for d in fresh.departures] == [0, 100, 30]
+    assert [d.delay_sec for d in stale.departures] == [0, 0, 30]
+    assert [(p.error_sec, p.lead_sec) for p in fresh.predictions] == [(-100, 40), (70, 30), (0, 30)]
+    assert [(p.error_sec, p.lead_sec) for p in stale.predictions] == [(-100, -20), (-30, 30), (0, 30)]
+    assert _listings(polls(lagging)) == [
+        ("06:56:00", 7, ((1, 0), (2, 0), (3, 0))),
+        ("07:03:00", 2, ((3, 30),)),
+    ]
+    assert {age for _day, age in stale.ages} == {0}
+
+
+def test_a_lagging_perfect_feed_keeps_every_true_delay_and_reads_some_after_the_run_left():
+    """Each stop is read last in the poll before its departure plus the lag:
+    06:59:00 for a departure at 06:58:59, a second after the run left."""
+    fresh = oracle.outcome(_scenario())
+    stale = oracle.outcome(_scenario(FeedModel(poll_interval_sec=60, lead_sec=300, freshness_lag_sec=30)))
+    assert stale.departures == fresh.departures
+    assert {p.error_sec for p in fresh.predictions} == {p.error_sec for p in stale.predictions} == {0}
+    assert [p.lead_sec for p in fresh.predictions] == [59, 60, 1, 60, 1, 60]
+    assert [p.lead_sec for p in stale.predictions] == [-1, 0, 1, 0, 1, 0]
+    assert {age for _day, age in stale.ages} == {0}
+
+
+def test_the_error_figure_takes_mae_and_bias_by_lead_time():
+    """The lagging quick trip is reported 100 s early at stop 1, read 20 s
+    after it left, 30 s early at stop 2 and truly at stop 3, both read 30 s
+    ahead. A perfect feed errs only where a misreport stands."""
+    found = oracle.outcome(_quick(replace(_PROPAGATING, freshness_lag_sec=30)))
+    overall = oracle.prediction_error(found.predictions)
+    assert overall == oracle.PredictionError(departures=3, error_sum_sec=-130, abs_error_sum_sec=130)
+    assert (overall.mae_sec, overall.bias_sec) == (Fraction(130, 3), Fraction(-130, 3))
+    assert oracle.prediction_error_by_lead_time(found, 30) == {
+        -30: oracle.PredictionError(1, -100, 100),
+        30: oracle.PredictionError(2, -30, 30),
+    }
+    assert oracle.prediction_error_by_lead_time(found, 60) == {
+        -60: oracle.PredictionError(1, -100, 100),
+        0: oracle.PredictionError(2, -30, 30),
+    }
+    late = Misreport("R_0700", DAY, 7200, gtfs_seconds("07:10:00"), gtfs_seconds("30:00:00"), (3,))
+    misreported = oracle.outcome(_one_run((0, 0, 0), FeedModel(poll_interval_sec=60, lead_sec=300, misreports=(late,))))
+    assert [(p.error_sec, p.lead_sec) for p in misreported.predictions] == [(0, 60), (0, 60), (7200, 60)]
+    with pytest.raises(ValueError, match="no departures"):
+        oracle.prediction_error(())
+    with pytest.raises(ValueError, match="wider than nothing"):
+        oracle.prediction_error_by_lead_time(found, 0)
+
+
+def test_the_oracle_refuses_polls_its_feed_model_would_not_send():
+    """A planted expectation of the wrong model is caught: polls a
+    propagating feed sent half a minute behind, judged as a feed without the
+    lag or as a perfect one, and a lagging perfect feed's polls judged under
+    a longer lag, whose stops would be listed a poll longer."""
+    lagging = _quick(replace(_PROPAGATING, freshness_lag_sec=30))
+    captured = polls(lagging)
+    for told in (replace(lagging.feed, freshness_lag_sec=0), replace(lagging.feed, prediction="perfect")):
+        with pytest.raises(ValueError, match="not the model's"):
+            oracle.departures(replace(lagging, feed=told), captured, captured)
+    perfect = _quick(FeedModel(poll_interval_sec=60, lead_sec=300, freshness_lag_sec=30))
+    captured = polls(perfect)
+    with pytest.raises(ValueError, match="last read at"):
+        oracle.departures(replace(perfect, feed=replace(perfect.feed, freshness_lag_sec=60)), captured, captured)
+
+
+def test_imperfect_feeds_the_oracle_cannot_follow_are_refused():
+    stretch = (gtfs_seconds("06:57:00"), gtfs_seconds("07:03:00"))
+    for feed in (_PROPAGATING, FeedModel(freshness_lag_sec=30)):
+        with pytest.raises(ValueError, match="neither reports arrivals"):
+            _quay(feed=replace(feed, arrivals=True))
+        with pytest.raises(ValueError, match="neither reports arrivals"):
+            _one_run((0, 0, 0), replace(feed, misreports=(Misreport("R_0700", DAY, 600, *stretch),)))
+        with pytest.raises(ValueError, match="neither reports arrivals"):
+            _one_run((0, 0, 0), replace(feed, freezes=(Freeze(DAY, *stretch),)))
+        with pytest.raises(ValueError, match="neither cancels a trip nor skips a stop"):
+            Scenario(**{**_skipping(None).__dict__, "feed": feed})
+        with pytest.raises(ValueError, match="neither cancels a trip nor skips a stop"):
+            Scenario(**{**_cancelling(Cancellation("R_0700", DAY)).__dict__, "feed": feed})
+    with pytest.raises(ValueError, match="cannot be negative"):
+        _one_run((0, 0, 0), FeedModel(freshness_lag_sec=-30))
+
+
+def _float32(value: float) -> float:
+    return struct.unpack("<f", struct.pack("<f", value))[0]
+
+
+def _positions_on_the_wire(payload: bytes):
+    """A VehiclePositions feed as decoded from its bytes: its header's
+    timestamp, and per entity its id, the fields its VehiclePosition
+    carries, and their values: (trip_id, start_date, latitude, longitude,
+    timestamp, vehicle id)."""
+    message = _fields(payload)
+    (header,) = message[1]
+    entities = []
+    for raw in message.get(2, []):
+        entity = _fields(raw)
+        (position,) = entity[4]
+        vp = _fields(position)
+        trip, where, vehicle = _fields(vp[1][0]), _fields(vp[2][0]), _fields(vp[8][0])
+        latitude, longitude = (struct.unpack("<f", struct.pack("<I", where[k][0]))[0] for k in (1, 2))
+        entities.append(
+            (
+                entity[1][0].decode(),
+                sorted(vp),
+                (trip[1][0].decode(), trip[3][0].decode(), latitude, longitude, vp[5][0], vehicle[1][0].decode()),
+            )
+        )
+    return _fields(header)[3][0], entities
+
+
+def test_vehicle_positions_round_trip_and_pass_each_stop_at_the_truths_times(tmp_path):
+    """The run is sampled every 20 s from 06:54, when it enters the feed, to
+    07:18:00, when it reaches its last stop, and leaves its stops at 06:59:00,
+    07:08:40 and 07:18:00, each on a sample. The collector names each file
+    by its UTC day and time, the previous day's for a JST morning. Each
+    position names its trip, service date, vehicle and measuring instant,
+    and no stop or status."""
+    scenario = _one_run((-60, 40, 120))
+    (run,) = scenario.runs
+    written = write_vehicle_positions(scenario, tmp_path, 8, 20)
+    assert len(written) == 73
+    assert written[0] == tmp_path / "vp" / "8" / "20260531" / "VehiclePosition_215400.pb"
+    assert written[-1] == tmp_path / "vp" / "8" / "20260531" / "VehiclePosition_221800.pb"
+    seen = {}
+    for path, poll in zip(written, vehicle_positions(scenario, 20), strict=True):
+        stamped, entities = _positions_on_the_wire(path.read_bytes())
+        assert stamped == int(poll.captured_at.timestamp())
+        ((entity_id, fields, (trip_id, start_date, lat, lon, measured, vehicle)),) = entities
+        assert (entity_id, vehicle, trip_id, start_date) == (vehicle_id(run), vehicle_id(run), "R_0700", "20260601")
+        assert fields == [1, 2, 5, 8]
+        assert measured == stamped
+        seen[poll.captured_at.astimezone(JST).strftime("%H:%M:%S")] = (lat, lon)
+    s1, s2, s3 = ((_float32(s.lat), _float32(s.lon)) for s in _STOPS)
+    assert {seen["06:54:00"], seen["06:59:00"]} == {s1}
+    assert seen["07:08:40"] == s2
+    assert seen["07:18:00"] == s3
+    # 240 s into the 580 s from stop 1 to stop 2.
+    share = Fraction(240, 580)
+    expected = (_STOPS[0].lat + (_STOPS[1].lat - _STOPS[0].lat) * share, _STOPS[0].lon)
+    assert seen["07:03:00"] == pytest.approx(expected, abs=2e-5)
+    assert seen["07:03:00"] != s1
+
+
+def test_a_vehicle_stands_at_a_stop_through_its_dwell_and_passes_a_skipped_stop_without_stopping():
+    """The quay run stands at stop 2 from 07:04:10 to 07:04:40. The skipping
+    run leaves stop 1 at 07:00:30 and stop 3 at 07:17:30, passing stop 2,
+    halfway along, at 07:09:00. A trip that did not run, cancelled or never
+    reported, has no vehicle."""
+    quay = {
+        p.captured_at.astimezone(JST).strftime("%H:%M:%S"): (s.lat, s.lon)
+        for p in vehicle_positions(_quay(), 10)
+        for s in p.sightings
+    }
+    q2 = (_QUAYS[1].lat, _QUAYS[1].lon)
+    assert [quay[f"07:04:{sec}"] for sec in ("10", "20", "30", "40")] == [q2] * 4
+    assert quay["07:04:00"] != q2 != quay["07:04:50"]
+    assert quay["06:55:00"] == quay["07:00:40"] == (_QUAYS[0].lat, _QUAYS[0].lon)
+    skipping = {
+        p.captured_at.astimezone(JST).strftime("%H:%M:%S"): (s.lat, s.lon)
+        for p in vehicle_positions(_skipping(None), 30)
+        for s in p.sightings
+    }
+    assert skipping["07:09:00"] == pytest.approx((_STOPS[1].lat, _STOPS[1].lon), abs=1e-9)
+    assert skipping["07:17:30"] == (_STOPS[2].lat, _STOPS[2].lon)
+    cancelled = vehicle_positions(_cancelling(Cancellation("R_0700", DAY)), 60)
+    assert {s.trip_id for p in cancelled for s in p.sightings} == {"R_2350"}
+    unreported = vehicle_positions(_bunched(), 60)
+    assert {s.trip_id for p in unreported for s in p.sightings} == {"R_0", "R_1", "R_3"}

@@ -1,5 +1,7 @@
 """Hand-encoded GTFS-RT messages for tests that need a feed's exact wire bytes."""
 
+import struct
+
 
 def _varint(n: int) -> bytes:
     out = bytearray()
@@ -18,6 +20,11 @@ def _int32(field: int, n: int) -> bytes:
 
 def _uint(field: int, n: int) -> bytes:
     return _varint(field << 3) + _varint(n)
+
+
+def _float(field: int, value: float) -> bytes:
+    """A single-precision float field, fixed 32 bits on the wire, rounded to the nearest float32."""
+    return _varint((field << 3) | 5) + struct.pack("<f", value)
 
 
 def _len_delimited(field: int, body: bytes) -> bytes:
@@ -95,11 +102,38 @@ def vehicle_descriptor(vehicle_id: str, *, label: str | None = None, license_pla
     return body
 
 
-def vehicle_position_entity(trip_id: str, vehicle: bytes) -> bytes:
-    """A FeedEntity (FeedMessage field 2) holding a VehiclePosition (entity
-    field 4) of *trip_id*, with its `vehicle` (VehiclePosition field 8)."""
-    position = _len_delimited(1, _string(1, trip_id)) + _len_delimited(8, vehicle)
-    return _len_delimited(2, _len_delimited(4, position))
+def vehicle_position_entity(
+    trip_id: str,
+    vehicle: bytes,
+    *,
+    entity_id: str | None = None,
+    start_date: str | None = None,
+    position: tuple[float, float] | None = None,
+    timestamp: int | None = None,
+) -> bytes:
+    """A FeedEntity (FeedMessage field 2), with its `id` (field 1) when
+    given, holding a VehiclePosition (entity field 4). The VehiclePosition
+    carries its trip, *trip_id* with start_date ("YYYYMMDD") when given, its
+    `position` (field 2: latitude, longitude) and `timestamp` (field 5, POSIX
+    seconds) when given, and its `vehicle` (field 8)."""
+    trip = _string(1, trip_id)
+    if start_date is not None:
+        trip += _string(3, start_date)
+    body = _len_delimited(1, trip)
+    if position is not None:
+        latitude, longitude = position
+        body += _len_delimited(2, _float(1, latitude) + _float(2, longitude))
+    if timestamp is not None:
+        body += _uint(5, timestamp)
+    body += _len_delimited(8, vehicle)
+    entity = b"" if entity_id is None else _string(1, entity_id)
+    return _len_delimited(2, entity + _len_delimited(4, body))
+
+
+def vehicle_position_feed(*entities: bytes, timestamp: int) -> bytes:
+    """A FeedMessage of :func:`vehicle_position_entity` entities under a
+    FeedHeader stamped *timestamp* (POSIX seconds)."""
+    return header_only_feed(timestamp) + b"".join(entities)
 
 
 def trip_update_feed(*trip_updates: bytes, timestamp: int | None = None) -> bytes:

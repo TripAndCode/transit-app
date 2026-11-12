@@ -32,6 +32,15 @@ The collector archives every poll it captures and may push the app only some
 of them. Each JST calendar day of capture reaches the app by the live path,
 the polls pushed, by the collector's archive, every poll, or by both in an
 order the scenario states (``Delivery``).
+
+A feed model may predict imperfectly, as bus-location systems do: it may
+propagate each run's current delay to every stop still to come, and its
+content may lag the run by some seconds (``FeedModel``).
+
+The truth can also be emitted as the VehiclePositions feed a collector
+captures beside the TripUpdates: where each run's vehicle was at each
+sampling instant, interpolated between the stops' positions
+(``vehicle_positions``).
 """
 
 from __future__ import annotations
@@ -44,10 +53,18 @@ import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from tests.fixtures.gtfs_rt import stop_time_update, trip_update, trip_update_feed
+from tests.fixtures.gtfs_rt import (
+    stop_time_update,
+    trip_update,
+    trip_update_feed,
+    vehicle_descriptor,
+    vehicle_position_entity,
+    vehicle_position_feed,
+)
 
 JST = ZoneInfo("Asia/Tokyo")
 
@@ -356,20 +373,50 @@ class FeedModel:
     tell which polls are pushed. A feed pushed more sparsely than it is
     polled neither cancels a trip nor skips a stop, since the polls it
     pushes might not carry the report.
+
+    ``propagate_current_delay``: every poll predicts each stop it lists at
+    the run's current delay, as a bus-location system that knows only where
+    the bus has been does: the delay at which the run left the last stop it
+    has left, or 0, on time, before it leaves its first. A run has left
+    a stop from the instant of its departure on. So the last poll before a
+    departure carries the delay of the last stop the run left before that
+    poll, not the stop's own.
+
+    ``freshness_lag_sec``: each poll carries what the feed knew that many
+    seconds before it was captured. A poll captured at t lists the runs and
+    stops, at the delays, that a poll without the lag captured at t minus
+    the lag would have listed, under a FeedHeader stamped t, so its message
+    age does not show the lag. A run stays in the feed, and a stop stays
+    listed, until the lag after the run has left it.
+
+    A feed that predicts imperfectly, by propagating or with a lag, neither
+    misreports, freezes nor reports arrivals, cancels no trip and has no run
+    skip a stop: each of those states its own predictions, which these
+    models do not say how to combine with.
     """
 
-    prediction: Literal["perfect"] = "perfect"
+    prediction: Literal["perfect", "propagate_current_delay"] = "perfect"
     poll_interval_sec: int = 60
     lead_sec: int = 300
     misreports: tuple[Misreport, ...] = ()
     freezes: tuple[Freeze, ...] = ()
     arrivals: bool = False
     push_interval_sec: int | None = None
+    freshness_lag_sec: int = 0
 
     @property
     def sparse(self) -> bool:
         """Whether the collector pushes fewer polls than it captures."""
         return self.push_interval_sec is not None and self.push_interval_sec != self.poll_interval_sec
+
+    @property
+    def imperfect(self) -> bool:
+        """Whether the feed propagates the current delay or lags the run."""
+        return self.prediction != "perfect" or self.freshness_lag_sec != 0
+
+    @property
+    def lag(self) -> timedelta:
+        return timedelta(seconds=self.freshness_lag_sec)
 
     def pushes(self, poll: Poll) -> bool:
         """Whether the collector pushes *poll* to the app."""
@@ -418,6 +465,7 @@ class Scenario:
 
     def __post_init__(self) -> None:
         self._check_deliveries()
+        self._check_imperfect()
         events: list[TripRun | Cancellation | Unreported] = [*self.runs, *self.cancellations, *self.unreported]
         _unique("route", [r.route_id for r in self.routes])
         _unique("service day", [d.date for d in self.days])
@@ -522,6 +570,17 @@ class Scenario:
             raise ValueError("a scenario that declares a delivery runs one timetable")
         if any(d.archive for d in self.deliveries) and feed.freezes:
             raise ValueError("a scenario whose archive is ingested freezes no feed")
+
+    def _check_imperfect(self) -> None:
+        feed = self.feed
+        if feed.freshness_lag_sec < 0:
+            raise ValueError("a freshness lag cannot be negative")
+        if not feed.imperfect:
+            return
+        if feed.arrivals or feed.misreports or feed.freezes:
+            raise ValueError("a feed that predicts imperfectly neither reports arrivals, misreports nor freezes")
+        if self.cancellations or any(None in r.actual_sec for r in self.runs):
+            raise ValueError("a feed that predicts imperfectly neither cancels a trip nor skips a stop")
 
     def delivery(self, day: date) -> Delivery:
         """How the polls captured on JST calendar *day* reach the app."""
@@ -771,6 +830,13 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
         nearest = [j for j in served if j < i][-1:] or [j for j in served if j > i][:1]
         return _predicted_delay(feed, trip.scheduled_sec[nearest[0]], served[nearest[0]])
 
+    def predicted(i: int, at: datetime) -> int:
+        """The delay the feed model predicts served stop *i* (from 0) at, as the run stands at *at*."""
+        if feed.prediction == "propagate_current_delay":
+            left = [j for j, sec in served.items() if service_day_instant(run.service_date, sec) <= at]
+            return served[left[-1]] - trip.scheduled_sec[left[-1]] if left else 0
+        return _predicted_delay(feed, trip.scheduled_sec[i], served[i])
+
     first = min(trip.scheduled_sec[0], run.served[0])
     enters = service_day_instant(run.service_date, first) - timedelta(seconds=feed.lead_sec)
     leaves = service_day_instant(run.service_date, run.served[-1])
@@ -779,10 +845,10 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
         if feed.arrivals:
             return SCHEDULED, _with_arrivals(scenario, run, trip, enters, at)
         entries = []
-        for i, (stop, scheduled, actual) in enumerate(zip(stops, trip.scheduled_sec, run.actual_sec, strict=True)):
+        for i, (stop, actual) in enumerate(zip(stops, run.actual_sec, strict=True)):
             if actual is not None:
                 if service_day_instant(run.service_date, actual) > at:
-                    delay = reported_delay(i + 1, _predicted_delay(feed, scheduled, actual), at)
+                    delay = reported_delay(i + 1, predicted(i, at), at)
                     entries.append(StopEntry(i + 1, stop.stop_id, delay, SCHEDULED))
             elif passes(i) > at:
                 if announced is None or at >= announced:
@@ -872,11 +938,14 @@ def _reports(entry: TripEntry) -> set[tuple[str, str, date, int]]:
     return out
 
 
-def _fresh_poll(in_feed: list[_InFeed], at: datetime) -> Poll:
+def _fresh_poll(in_feed: list[_InFeed], at: datetime, lag: timedelta) -> Poll:
+    """The poll captured *at*, listing what the feed knew *lag* before it.
+    Its stops not due yet are counted at its capture, as ingest counts them."""
     trips = []
+    known = at - lag
     for item in in_feed:
-        if item.enters <= at < item.leaves:
-            status, stops = item.listing(at)
+        if item.enters <= known < item.leaves:
+            status, stops = item.listing(known)
             trips.append(
                 TripEntry(
                     item.trip.trip_id,
@@ -923,7 +992,8 @@ def _expected_report(scenario: Scenario, run: TripRun, i: int) -> str:
 
 def polls(scenario: Scenario) -> list[Poll]:
     """The polls a collector captures under the scenario's feed model: one at
-    every multiple of the poll interval while some trip is in the feed. A poll
+    every multiple of the poll interval while some trip is in the feed, as
+    the feed knows it after its freshness lag. A poll
     inside a freeze after its first repeats that first poll's TripUpdates,
     and its header too when the freeze holds it.
 
@@ -941,8 +1011,9 @@ def polls(scenario: Scenario) -> list[Poll]:
     if not in_feed:
         return []
     step = scenario.feed.poll_interval_sec
-    start = math.ceil(min(w.enters for w in in_feed).timestamp() / step) * step
-    end = max(w.leaves for w in in_feed)
+    lag = scenario.feed.lag
+    start = math.ceil((min(w.enters for w in in_feed) + lag).timestamp() / step) * step
+    end = max(w.leaves for w in in_feed) + lag
     out: list[Poll] = []
     reported: set[tuple[str, str, date, int]] = set()
     carried: set[Misreport] = set()
@@ -953,7 +1024,7 @@ def polls(scenario: Scenario) -> list[Poll]:
         freeze = next((f for f in scenario.feed.freezes if f.covers(at)), None)
         first = None if freeze is None else held.get(freeze)
         if freeze is None or first is None:
-            poll = _fresh_poll(in_feed, at)
+            poll = _fresh_poll(in_feed, at, lag)
             if freeze is not None:
                 held[freeze] = poll
         else:
@@ -1035,3 +1106,156 @@ def handoff(scenario: Scenario, captured: Sequence[Poll]) -> Handoff:
         if delivery.archive:
             (first if delivery.archive_first else after).append(poll)
     return Handoff(tuple(first), tuple(pushed), tuple(after))
+
+
+@dataclass(frozen=True)
+class Sighting:
+    """Where the vehicle running a trip on a service day was at one instant:
+    one VehiclePosition."""
+
+    trip_id: str
+    service_date: date
+    vehicle_id: str
+    lat: float
+    lon: float
+    at: datetime
+
+
+@dataclass(frozen=True)
+class PositionPoll:
+    """One captured VehiclePositions feed: every vehicle on a run when it was
+    captured, each measured at that instant, under a FeedHeader stamped with
+    it. As in the feeds the collector polls, each position names its trip
+    and service date, its vehicle and when it was measured, and neither the
+    stop it is at or near nor its status there."""
+
+    captured_at: datetime
+    sightings: tuple[Sighting, ...]
+
+    @property
+    def payload(self) -> bytes:
+        return vehicle_position_feed(
+            *(
+                vehicle_position_entity(
+                    s.trip_id,
+                    vehicle_descriptor(s.vehicle_id),
+                    entity_id=s.vehicle_id,
+                    start_date=s.service_date.strftime("%Y%m%d"),
+                    position=(s.lat, s.lon),
+                    timestamp=int(s.at.timestamp()),
+                )
+                for s in self.sightings
+            ),
+            timestamp=int(self.captured_at.timestamp()),
+        )
+
+    @property
+    def source_file(self) -> str:
+        """The collector's name for the capture: its UTC day and UTC time."""
+        utc = self.captured_at.astimezone(timezone.utc)
+        return f"{utc:%Y%m%d}/VehiclePosition_{utc:%H%M%S}.pb"
+
+
+def vehicle_id(run: TripRun) -> str:
+    """The vehicle driving *run*. A scenario declares no blocks, so each run
+    is a vehicle of its own."""
+    return f"{run.trip_id}@{run.service_date:%Y%m%d}"
+
+
+def _apart(a: Stop, b: Stop) -> float:
+    """How far apart two stops are, in degrees of latitude: the longitude is
+    scaled to the latitude between them, as on a local flat map."""
+    return math.hypot(b.lat - a.lat, (b.lon - a.lon) * math.cos(math.radians((a.lat + b.lat) / 2)))
+
+
+def _along(path: Sequence[Stop], share: float) -> tuple[float, float]:
+    """The point *share* of the way along *path*, by distance, straight from
+    each stop to the next."""
+    legs = [_apart(a, b) for a, b in itertools.pairwise(path)]
+    remaining = share * sum(legs)
+    for (a, b), leg in zip(itertools.pairwise(path), legs, strict=True):
+        if leg and remaining < leg:
+            part = remaining / leg
+            return a.lat + (b.lat - a.lat) * part, a.lon + (b.lon - a.lon) * part
+        remaining -= leg
+    return path[-1].lat, path[-1].lon
+
+
+def _position(scenario: Scenario, run: TripRun, at: datetime) -> tuple[float, float]:
+    """Where *run*'s vehicle is at *at*. It stands at its first stop until it
+    leaves it, and at each later stop it serves from reaching it until
+    leaving it. Between two stops it serves it moves at a steady speed along
+    the straight lines through the stops between them, a skipped stop
+    included."""
+    trip = scenario.trip(run.trip_id, run.service_date)
+    stops = scenario.route(trip.route_id).stops
+    sec = (at - service_day_instant(run.service_date, 0)) // timedelta(seconds=1)
+    visits = [
+        (i, left if run.arrival_sec is None else run.arrival_sec[i], left)
+        for i, left in enumerate(run.actual_sec)
+        if left is not None
+    ]
+    first, _reached, left = visits[0]
+    if sec <= left:
+        return stops[first].lat, stops[first].lon
+    for (a, _reached_a, left_a), (b, reached_b, left_b) in itertools.pairwise(visits):
+        if sec < reached_b:
+            return _along(stops[a : b + 1], (sec - left_a) / (reached_b - left_a))
+        if sec <= left_b:
+            return stops[b].lat, stops[b].lon
+    last = visits[-1][0]
+    return stops[last].lat, stops[last].lon
+
+
+def vehicle_positions(scenario: Scenario, interval_sec: int) -> list[PositionPoll]:
+    """The VehiclePositions polls a collector captures every *interval_sec*,
+    on the POSIX clock's multiples of it, while some run's vehicle is on its
+    trip: from when the run enters the TripUpdate feed (``FeedModel``'s
+    lead) until it reaches its last stop, that instant included. Each poll
+    measures every such vehicle where the truth puts it; a trip that did not
+    run has no vehicle. The positions are the truth's, so the TripUpdate
+    feed's prediction model and freshness lag do not touch them."""
+    if interval_sec <= 0:
+        raise ValueError("a sampling interval must be positive")
+    lead = timedelta(seconds=scenario.feed.lead_sec)
+    windows = []
+    for run in scenario.runs:
+        trip = scenario.trip(run.trip_id, run.service_date)
+        first = min(trip.scheduled_sec[0], run.served[0])
+        windows.append(
+            (
+                run,
+                service_day_instant(run.service_date, first) - lead,
+                service_day_instant(run.service_date, run.served[-1]),
+            )
+        )
+    if not windows:
+        return []
+    start = math.ceil(min(enters for _run, enters, _ends in windows).timestamp() / interval_sec) * interval_sec
+    end = max(ends for _run, _enters, ends in windows)
+    out = []
+    at = datetime.fromtimestamp(start, timezone.utc)
+    while at <= end:
+        sightings = tuple(
+            Sighting(run.trip_id, run.service_date, vehicle_id(run), *_position(scenario, run, at), at)
+            for run, enters, ends in windows
+            if enters <= at <= ends
+        )
+        if sightings:
+            out.append(PositionPoll(at, sightings))
+        at += timedelta(seconds=interval_sec)
+    return out
+
+
+def write_vehicle_positions(scenario: Scenario, folder: Path, agency_id: int, interval_sec: int) -> list[Path]:
+    """Write the scenario's VehiclePositions polls (``vehicle_positions``)
+    under *folder* as the collector archives them for *agency_id*,
+    ``vp/<agency_id>/<UTC day>/VehiclePosition_<UTC time>.pb``, and return
+    the files written, in capture order."""
+    written = []
+    for poll in vehicle_positions(scenario, interval_sec):
+        path = folder / "vp" / str(agency_id) / poll.source_file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(poll.payload)
+        written.append(path)
+    return written
