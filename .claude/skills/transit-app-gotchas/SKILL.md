@@ -20,8 +20,9 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   analyze there.
 - The same read-only rule applies to dev ClickHouse (`docker compose exec
   clickhouse`, hundreds of millions of real rows). `make
-  ch-bootstrap` writes schema changes; agents must not run it against the dev
-  instance. `db/clickhouse/bootstrap.py` describes operator maintenance, not an
+  ch-bootstrap` writes schema changes, so an agent reaches the dev instance with
+  it only through `scripts/dev_upgrade.py` (the dev-database rule in `AGENTS.md`).
+  `db/clickhouse/bootstrap.py` describes operator maintenance, not a further
   exception to the agent rule.
 - Tests use throwaway Postgres on :5544 and throwaway ClickHouse on :8124;
   both are required for any test touching `updates` (which is most of
