@@ -256,3 +256,42 @@ def test_the_live_score_runs_after_the_weekly_job_whether_it_succeeds_or_fails()
     assert not (VPS / "systemd" / "transit-ml-live-score.timer").exists()
     lines = [line for line in (VPS / "env.example").read_text().splitlines() if line and not line.startswith("#")]
     assert "HC_PING_URL_LIVE_SCORE" in dict(line.split("=", 1) for line in lines)
+
+
+def _calendar_time(timer: str) -> tuple[int, int]:
+    calendar = re.search(r"^OnCalendar=(.+)$", _unit(timer), re.MULTILINE)[1]
+    assert calendar.endswith("Asia/Tokyo"), timer
+    hour, minute = map(int, re.search(r"(\d{2}):(\d{2})", calendar).groups())
+    return hour, minute
+
+
+def test_the_validator_runs_daily_after_the_collector_has_verified_r2_and_before_the_sync():
+    calendar = re.search(r"^OnCalendar=(.+)$", _unit("transit-ml-validate.timer"), re.MULTILINE)[1]
+    assert calendar.startswith("*-*-* ")
+    assert (9, 15) < _calendar_time("transit-ml-validate.timer") < _calendar_time("transit-ml-sync.timer")
+
+
+def test_the_validator_unit_runs_the_sample_script_through_the_ping_wrapper():
+    exec_start = re.search(r"^ExecStart=(.+)$", _unit("transit-ml-validate.service"), re.MULTILINE)[1]
+    assert "deploy/vps/run-with-ping.sh VALIDATE" in exec_start
+    assert exec_start.endswith(
+        "scripts/rt_validate_sample.py --out /var/lib/transit-ml/validation --work /var/lib/transit-ml/work/validation"
+    )
+    assert "EnvironmentFile=/etc/transit-ml/env" in _unit("transit-ml-validate.service").splitlines()
+    lines = [line for line in (VPS / "env.example").read_text().splitlines() if line and not line.startswith("#")]
+    assert "HC_PING_URL_VALIDATE" in dict(line.split("=", 1) for line in lines)
+
+
+def test_the_bootstrap_pulls_the_validator_image_the_script_pins():
+    from scripts import rt_validate_sample
+
+    pulls = [line for line in (VPS / "bootstrap.sh").read_text().splitlines() if line.startswith("docker pull")]
+    assert pulls == [f"docker pull --quiet {rt_validate_sample.IMAGE}"]
+
+
+def test_the_validator_run_budget_ends_before_the_sync_starts():
+    from scripts import rt_validate_sample
+
+    hour, minute = _calendar_time("transit-ml-validate.timer")
+    sync_hour, sync_minute = _calendar_time("transit-ml-sync.timer")
+    assert (hour * 60 + minute) * 60 + rt_validate_sample.RUN_BUDGET_SEC < (sync_hour * 60 + sync_minute) * 60

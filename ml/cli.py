@@ -7,7 +7,6 @@ import asyncio
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable, Sequence
@@ -26,7 +25,9 @@ from ml.cells import Cell
 from ml.compare import DEFAULT_BASELINE, FITS, compare, render_markdown, variant_name
 from ml.data import agencies_with_data, count_days, date_span, fetch_cells
 from ml.model_result import DEFAULT_POINT, POINTS, result_from_json, result_to_json
-from ml.r2 import download_dir, download_file, list_keys, upload_dir, upload_file
+from ml.r2 import default_capture as _capture
+from ml.r2 import default_run as _run
+from ml.r2 import download_dir, download_file, list_keys, upload_dir, upload_file, use_store_credentials
 from ml.report import render
 from pipeline.clickhouse import get_client
 
@@ -36,30 +37,6 @@ if TYPE_CHECKING:
 
 def _today_jst() -> date:
     return datetime.now(ZoneInfo("Asia/Tokyo")).date()
-
-
-def _run(cmd: Sequence[str]) -> None:
-    subprocess.run(list(cmd), check=True)
-
-
-def _capture(cmd: Sequence[str]) -> str:
-    return subprocess.run(list(cmd), check=True, capture_output=True, text=True).stdout
-
-
-def _use_store_credentials() -> None:
-    # `sync` reads this same EnvironmentFile and must keep using the read-only
-    # transit-archives pair in AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- so
-    # each job that reads or writes the transit-ml bucket swaps in its
-    # read-write pair only for its own (separate, short-lived) process, from
-    # distinctly named variables.
-    access_key, secret_key = os.environ["ML_STORE_ACCESS_KEY_ID"], os.environ["ML_STORE_SECRET_ACCESS_KEY"]
-    # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=` --
-    # env.example ships exactly that, so a `KeyError` alone would not catch
-    # an operator who never filled it in.
-    if not access_key or not secret_key:
-        raise SystemExit("ML_STORE_ACCESS_KEY_ID/ML_STORE_SECRET_ACCESS_KEY must be set, not empty")
-    os.environ["AWS_ACCESS_KEY_ID"] = access_key
-    os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
 
 
 def _sync(args: argparse.Namespace) -> int:
@@ -194,7 +171,7 @@ def _train(args: argparse.Namespace) -> int:
     # Read and swap credentials before the fit, so a misconfigured env fails
     # fast instead of after a full fit.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
-    _use_store_credentials()
+    use_store_credentials()
 
     # Imported here: they need the optional `ml` group, which sync, report,
     # and the adoption gate above do not.
@@ -327,7 +304,7 @@ def _predict(args: argparse.Namespace) -> int:
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise SystemExit("DATABASE_URL must be set, not empty: predict reads the feed calendars from the replica")
-    _use_store_credentials()
+    use_store_credentials()
 
     # Imported here: they need the optional `ml` group, which sync and
     # report do not.
@@ -428,7 +405,7 @@ def _publish_eval(args: argparse.Namespace) -> int:
     # Read and swap credentials first, so a misconfigured env fails before
     # anything is written.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
-    _use_store_credentials()
+    use_store_credentials()
 
     result = result_from_json(args.models.read_text())
     meta = json.loads(args.model_meta.read_text()) if args.model_meta and args.model_meta.exists() else None
@@ -456,7 +433,7 @@ def _live_score(args: argparse.Namespace) -> int:
     # The default AWS pair reads transit-archives only; the store's pair reads transit-ml and, with
     # --publish, writes live.json to it.
     bucket, endpoint = os.environ["ML_STORE_BUCKET"], os.environ["ML_STORE_ENDPOINT"]
-    _use_store_credentials()
+    use_store_credentials()
 
     run_date = args.run_date or _today_jst()
     final_through = run_date - timedelta(days=2)

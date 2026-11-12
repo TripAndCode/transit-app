@@ -81,6 +81,11 @@ Each month is graded A to F from these figures by four criteria, each passing or
 - The thresholds start from those of Cal-ITP, the California programme that publishes a monthly GTFS quality report per operator. The grade is recomputed from the stored figures, under the current thresholds, each time it is shown. Changing a threshold changes no aggregate, so it is not a new method version. A change is announced by amending this section.
 - **Shown to admins only.** The grade is not published. Publishing it to operators waits on the [advance notice](#advance-notice) to each operator and the operator's right to reply.
 
+Each day, MobilityData's GTFS Realtime validator also checks one hour of each operator's archived trip updates: the polls from 09:00 to 10:00 JST, against the newest timetable the collector had stored by that day. For each operator and day, it records how many times each of the validator's rules fired and in how many polls. The validator publishes no numbered release, so each record names the image that ran by its digest, its source revision and the checksum of its jar. The validator's counts do not affect the grade:
+
+- The validator skips a poll identical to the one before it. A feed that stops changing is therefore validated only on the first poll of the run, when its header is usually still fresh, so W008 (header older than 65 seconds) undercounts frozen feeds. Freshness is judged by the share of polls over 65 s above, not by W008.
+- E022 (stop times not increasing from one stop to the next, which also fires on two stops given the same time), E039 (`is_deleted` in a full dataset), W001 (no timestamp on a trip update) and W002 (no vehicle ID) follow from how a feed's vendor platform writes it rather than from the service an operator runs. W007 (header timestamps more than 35 seconds apart from one poll to the next) fires whenever the collector polls less often than every 35 seconds, whatever the feed does. These are recorded but not graded.
+
 ## Processing
 
 Under each rule's heading is the method version that introduced it.

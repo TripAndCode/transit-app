@@ -1,0 +1,147 @@
+[
+  {
+    "errorMessage": {
+      "messageId": 0,
+      "gtfsRtFeedIterationModel": null,
+      "validationRule": {
+        "errorId": "W002",
+        "severity": "WARNING",
+        "title": "vehicle_id not populated",
+        "errorDescription": "vehicle_id should be populated for TripUpdates and VehiclePositions",
+        "occurrenceSuffix": "does not have a vehicle_id"
+      },
+      "errorDetails": null
+    },
+    "occurrenceList": [
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id d5555c6e-139b-47fd-90d4-86257d6dbc12"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id 7d3f7178-7fed-4c8c-955e-1d7265f69beb"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id c99d904f-70e7-4bdd-8255-f0b4832af688"
+      }
+    ]
+  },
+  {
+    "errorMessage": {
+      "messageId": 0,
+      "gtfsRtFeedIterationModel": null,
+      "validationRule": {
+        "errorId": "W001",
+        "severity": "WARNING",
+        "title": "timestamp not populated",
+        "errorDescription": "Timestamps should be populated for all elements",
+        "occurrenceSuffix": "does not have a timestamp"
+      },
+      "errorDetails": null
+    },
+    "occurrenceList": [
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id d5555c6e-139b-47fd-90d4-86257d6dbc12"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id 7d3f7178-7fed-4c8c-955e-1d7265f69beb"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id c99d904f-70e7-4bdd-8255-f0b4832af688"
+      }
+    ]
+  },
+  {
+    "errorMessage": {
+      "messageId": 0,
+      "gtfsRtFeedIterationModel": null,
+      "validationRule": {
+        "errorId": "W007",
+        "severity": "WARNING",
+        "title": "Refresh interval is more than 35 seconds",
+        "errorDescription": "GTFS-realtime feeds should be refreshed at least every 30 seconds",
+        "occurrenceSuffix": "which is less than the recommended interval of 35 seconds"
+      },
+      "errorDetails": null
+    },
+    "occurrenceList": [
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "63 second interval between consecutive header.timestamps"
+      }
+    ]
+  },
+  {
+    "errorMessage": {
+      "messageId": 0,
+      "gtfsRtFeedIterationModel": null,
+      "validationRule": {
+        "errorId": "E022",
+        "severity": "ERROR",
+        "title": "Sequential stop_time_update times are not increasing",
+        "errorDescription": "stop_time_update arrival/departure times between sequential stops should always increase - they should never be the same or decrease.",
+        "occurrenceSuffix": "- times must increase between two sequential stops"
+      },
+      "errorDetails": null
+    },
+    "occurrenceList": [
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id 7b4dab2f-8cb5-4544-b2ab-25e445e1d067 stop_sequence 41 departure_time 09:05:00 (1794269100) is equal to previous stop departure_time 09:05:00 (1794269100)"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id bd5fe131-578a-495b-8d52-0adc39310111 stop_sequence 49 departure_time 09:22:00 (1794270120) is equal to previous stop departure_time 09:22:00 (1794270120)"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "trip_id ab374e6c-50bf-413e-9e7b-821369419e4f stop_sequence 33 departure_time 09:05:00 (1794269100) is equal to previous stop departure_time 09:05:00 (1794269100)"
+      }
+    ]
+  },
+  {
+    "errorMessage": {
+      "messageId": 0,
+      "gtfsRtFeedIterationModel": null,
+      "validationRule": {
+        "errorId": "E039",
+        "severity": "ERROR",
+        "title": "FULL_DATASET feeds should not include entity.is_deleted",
+        "errorDescription": "The entity.is_deleted field should only be included in GTFS-rt feeds with header.incrementality of DIFFERENTIAL",
+        "occurrenceSuffix": "- FULL_DATASET feeds should not include is_deleted field"
+      },
+      "errorDetails": null
+    },
+    "occurrenceList": [
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "entity ID 0d950a68-1b56-4aef-8a16-3e843f17a9cf has is_deleted=false"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "entity ID 71fec0f9-4d2d-47c1-aeff-11df50946fec has is_deleted=false"
+      },
+      {
+        "occurrenceId": 0,
+        "messageLogModel": null,
+        "prefix": "entity ID aeb037f9-33a2-4f29-a505-bacd9f851468 has is_deleted=false"
+      }
+    ]
+  }
+]

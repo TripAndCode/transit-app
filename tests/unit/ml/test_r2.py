@@ -1,4 +1,18 @@
-from ml.r2 import download_dir, download_file, list_keys, upload_dir, upload_file
+import os
+import subprocess
+
+import pytest
+
+from ml.r2 import (
+    default_capture,
+    default_run,
+    download_dir,
+    download_file,
+    list_keys,
+    upload_dir,
+    upload_file,
+    use_store_credentials,
+)
 
 
 def test_upload_file_runs_the_expected_aws_cp_command(tmp_path):
@@ -92,3 +106,40 @@ def test_download_dir_copies_the_prefix_recursively(tmp_path):
             "--only-show-errors",
         ]
     ]
+
+
+def test_use_store_credentials_swaps_in_the_write_capable_pair(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "archive-readonly-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "archive-readonly-secret")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "store-write-key")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-write-secret")
+
+    use_store_credentials()
+
+    assert os.environ["AWS_ACCESS_KEY_ID"] == "store-write-key"
+    assert os.environ["AWS_SECRET_ACCESS_KEY"] == "store-write-secret"
+
+
+def test_use_store_credentials_rejects_an_unset_but_present_variable(monkeypatch):
+    # systemd's EnvironmentFile= sets an empty-but-present var for `VAR=`,
+    # exactly what env.example ships as a template -- os.environ[...] would
+    # return "" rather than raise, silently swapping in an empty credential.
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "archive-readonly-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "archive-readonly-secret")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "store-write-secret")
+
+    with pytest.raises(SystemExit):
+        use_store_credentials()
+
+    assert os.environ["AWS_ACCESS_KEY_ID"] == "archive-readonly-key"
+
+
+def test_the_default_runner_raises_on_a_nonzero_exit():
+    default_run(["true"])
+    with pytest.raises(subprocess.CalledProcessError):
+        default_run(["false"])
+
+
+def test_the_default_capture_returns_stdout():
+    assert default_capture(["printf", "listing"]) == "listing"
