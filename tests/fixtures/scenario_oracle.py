@@ -171,9 +171,46 @@ methodology's "Dwell and running time" (``docs/methodology.en.md``):
   no visit pairs. Over a period, a route with a visit pools its days'
   samples; one with neither a dwell nor a running sample is not listed.
 
+The paths a poll reaches history (``updates``) by, per the data path
+``docs/deploy-railway.md`` sets out (section 4: "Production data path", and
+the archive job's "This job writes closed JST days only, and never a day the
+live path already promoted"), ``README.md``'s architecture notes and the
+methodology's "How the data is collected" (``docs/methodology.en.md``):
+
+- The collector keeps every poll it captures in its archive and pushes the
+  app only some of them (``FeedModel``). Live, a day reaches history as the
+  polls pushed, once promotion copies the closed day; by the archive, as
+  every poll it captured.
+- A day here is a JST calendar day of capture: promotion copies closed JST
+  days, and archive ingest writes closed JST days only.
+- "A day in ``updates`` has one source": whichever path stores a row of the
+  day there first holds the day, and no poll of it the other path offers
+  reaches history. The paths store in the order the operator takes them
+  (``Handoff``): the archive ingested before promotion, promotion, then the
+  archive ingested after it. So, as the guide warns, "promotion claims each
+  day before its archive could be ingested" unless the archive comes first.
+- Every figure above is computed from the polls that reach history. On a
+  day the live path holds, a departure no pushed poll reported is no
+  departure, and a departure's delay is that of the last pushed reading of
+  it, whatever the archive read later.
+
+The source of a day's observations, per the methodology's "Where the
+observations came from" and the definition stamp's ``source_mix``
+(``docs/features/analysis-tab.md``):
+
+- Each row a poll stores came by the path its poll reached history by,
+  and belongs to the service day the poll was captured in, so a service
+  day that runs past midnight can hold rows of both paths.
+- A service day's source is the path holding most of its rows: the archive
+  only when its rows outnumber the live ones, since "a tie reads live". A
+  day with no row has none.
+- Over a period, its days by source, archive, live and none, which add up
+  to the period's days.
+
 Every figure is computed from an ``Outcome``: the departures, each day's
 service, each day's timetable version, each route's scheduled headways
-on each day, each day's readings, each poll's age, and each stop visit.
+on each day, each day's readings and rows by path, each poll's age, and
+each stop visit.
 ``outcome`` derives the one the truth implies. A test may
 derive another, such as the outcome a known pipeline divergence produces,
 and hand it to the same figure functions. Such an outcome may hold a
@@ -195,7 +232,7 @@ from fractions import Fraction
 from itertools import pairwise
 from typing import Literal
 
-from tests.fixtures.scenario import JST, SCHEDULED, Poll, Scenario, polls
+from tests.fixtures.scenario import JST, SCHEDULED, Poll, Scenario, capture_day, handoff, polls
 
 # "A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped."
 MAX_PLAUSIBLE_DELAY_SEC = 120 * 60
@@ -337,6 +374,24 @@ class Readings:
         return Fraction(100 * self.implausible, self.readings) if self.readings else None
 
 
+IngestPath = Literal["archive", "live"]
+
+
+@dataclass(frozen=True)
+class Sources:
+    """A service day's rows by the path they reached history by."""
+
+    archive_rows: int
+    live_rows: int
+
+    @property
+    def source(self) -> IngestPath | None:
+        """The path holding most of the rows, live on a tie; None without a row."""
+        if not self.archive_rows + self.live_rows:
+            return None
+        return "archive" if self.archive_rows > self.live_rows else "live"
+
+
 @dataclass(frozen=True)
 class Outcome:
     """What every figure is computed from: each departure, each service
@@ -344,9 +399,9 @@ class Outcome:
     version's trip count, per (route, service date) the plan its long
     gaps are judged by (``plans``) and the plan its high-frequency test and
     scheduled mean wait read (``wait_plans``), each service day's readings,
-    each poll's message age under the service day it was captured in, and
-    each stop visit. The truth's two plans are one: the timetable in force
-    that day."""
+    each poll's message age under the service day it was captured in, each
+    stop visit, and each service day's rows by the path they came by. The
+    truth's two plans are one: the timetable in force that day."""
 
     departures: tuple[Departure, ...]
     service: dict[date, Service]
@@ -357,6 +412,7 @@ class Outcome:
     readings: dict[date, Readings]
     ages: tuple[tuple[date, int], ...]
     visits: tuple[Visit, ...]
+    sources: dict[date, Sources]
 
 
 def plausible(delay_sec: int) -> bool:
@@ -366,6 +422,40 @@ def plausible(delay_sec: int) -> bool:
 def service_day_of(instant: datetime) -> date:
     """The service day *instant* falls in."""
     return (instant.astimezone(JST) - timedelta(hours=SERVICE_DAY_CUTOVER_HOUR)).date()
+
+
+@dataclass(frozen=True)
+class Received:
+    """A poll that reached history, and the path it came by."""
+
+    poll: Poll
+    path: IngestPath
+
+
+def received(scenario: Scenario, captured: Sequence[Poll]) -> list[Received]:
+    """The polls of *captured* that reach history, each with its path: each
+    step of the scenario's ``Handoff`` in turn stores its polls of every day
+    no other path holds yet, and holds each day it stores a row of."""
+    steps = handoff(scenario, captured)
+    held: dict[date, IngestPath] = {}
+    out = []
+    step: tuple[Poll, ...]
+    path: IngestPath
+    for path, step in (("archive", steps.archived_first), ("live", steps.pushed), ("archive", steps.archived_after)):
+        stored = [p for p in step if held.get(capture_day(p), path) == path]
+        for poll in stored:
+            if poll.stored_rows:
+                held.setdefault(capture_day(poll), path)
+        out += [Received(poll, path) for poll in stored]
+    return out
+
+
+def sources(arrived: Iterable[Received]) -> dict[date, Sources]:
+    """Per service day of capture, the rows *arrived* stored by each path."""
+    rows: dict[date, dict[IngestPath, int]] = defaultdict(lambda: {"archive": 0, "live": 0})
+    for r in arrived:
+        rows[service_day_of(r.poll.captured_at)][r.path] += r.poll.stored_rows
+    return {day: Sources(archive_rows=n["archive"], live_rows=n["live"]) for day, n in rows.items()}
 
 
 def _order(poll: Poll) -> tuple[datetime, str]:
@@ -395,15 +485,19 @@ def _last_plausible(sent: Sequence[Poll]) -> dict[tuple[str, date, int], int]:
     return {key: readings[-1][1] for key, readings in _plausible_readings(sent, "departure").items()}
 
 
-def departures(scenario: Scenario, sent: Sequence[Poll]) -> list[Departure]:
+def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll] | None = None) -> list[Departure]:
     """Every served stop of every run with a plausible reading in *sent*,
     at that last reading's delay, but a run's last stop under a feed that
-    reports arrivals.
+    reports arrivals. *sent* is the polls that reached history, of the
+    *captured* polls, the same when None.
 
-    Raises when a run no misreport names was reported at a delay other than
-    its true one, or a true delay inside the clamp went without a plausible
-    reading: the feed model would then be at fault, not the pipeline."""
+    Raises when a run no misreport names was last reported in *captured* at
+    a delay other than its true one, or a true delay inside the clamp went
+    without a plausible reading in *captured*: the feed model would then be
+    at fault, not the pipeline. A departure *sent* lacks a reading of is
+    one the path that brought its day never received."""
     last = _last_plausible(sent)
+    feed_last = last if captured is None else _last_plausible(captured)
     misreported = {(m.trip_id, m.service_date) for m in scenario.feed.misreports}
     out = []
     for run in scenario.runs:
@@ -414,10 +508,12 @@ def departures(scenario: Scenario, sent: Sequence[Poll]) -> list[Departure]:
         ):
             if actual is None or (scenario.feed.arrivals and seq == len(run.actual_sec)):
                 continue
-            reported = last.get((run.trip_id, run.service_date, seq))
-            truthful = reported == actual - scheduled if plausible(actual - scheduled) else reported is None
+            key = (run.trip_id, run.service_date, seq)
+            by_feed = feed_last.get(key)
+            truthful = by_feed == actual - scheduled if plausible(actual - scheduled) else by_feed is None
             if not truthful and (run.trip_id, run.service_date) not in misreported:
-                raise ValueError(f"{run.trip_id} {run.service_date} stop {seq}: reported {reported}, not its truth")
+                raise ValueError(f"{run.trip_id} {run.service_date} stop {seq}: reported {by_feed}, not its truth")
+            reported = last.get(key)
             if reported is None:
                 continue
             out.append(
@@ -568,11 +664,14 @@ def plans(scenario: Scenario) -> dict[tuple[str, date], Plan]:
 
 
 def outcome(scenario: Scenario) -> Outcome:
-    """The outcome the scenario's truth and its feed's polls imply. Each
-    service date runs the timetable version in force that day, and each
-    version counts one trip per trip it defines, whatever days it runs."""
-    sent = polls(scenario)
-    found = tuple(departures(scenario, sent))
+    """The outcome the scenario's truth and the polls of its feed that reach
+    history imply. Each service date runs the timetable version in force
+    that day, and each version counts one trip per trip it defines, whatever
+    days it runs."""
+    captured = polls(scenario)
+    arrived = received(scenario, captured)
+    sent = [r.poll for r in arrived]
+    found = tuple(departures(scenario, sent, captured))
     day_plans = plans(scenario)
     return Outcome(
         departures=found,
@@ -584,6 +683,7 @@ def outcome(scenario: Scenario) -> Outcome:
         readings=readings(sent),
         ages=poll_ages(sent),
         visits=tuple(visits(scenario, sent, found)),
+        sources=sources(arrived),
     )
 
 
@@ -791,6 +891,22 @@ def readings_over(found: Outcome, first: date, last: date) -> Readings:
         implausible=sum(r.implausible for r in days),
         rows=sum(r.rows for r in days),
     )
+
+
+@dataclass(frozen=True)
+class SourceMix:
+    """A period's service days by the source of their observations."""
+
+    archive_days: int
+    live_days: int
+    none_days: int
+
+
+def source_mix(found: Outcome, first: date, last: date) -> SourceMix:
+    """The service days *first* to *last* by their source."""
+    days = [first + timedelta(days=n) for n in range((last - first).days + 1)]
+    named = [found.sources[day].source if day in found.sources else None for day in days]
+    return SourceMix(archive_days=named.count("archive"), live_days=named.count("live"), none_days=named.count(None))
 
 
 def _printed(value: Fraction, places: int) -> Fraction:

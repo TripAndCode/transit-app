@@ -20,6 +20,7 @@ from tests.fixtures.scenario import (
     SCHEDULED,
     SKIPPED,
     Cancellation,
+    Delivery,
     FeedModel,
     Freeze,
     Misreport,
@@ -31,8 +32,10 @@ from tests.fixtures.scenario import (
     TimetableVersion,
     TripRun,
     Unreported,
+    capture_day,
     gtfs_clock,
     gtfs_seconds,
+    handoff,
     poll_batches,
     polls,
     service_day_instant,
@@ -952,3 +955,157 @@ def test_a_feed_that_reports_arrivals_runs_every_trip_it_schedules():
         Scenario(**{**scenario, "cancellations": (Cancellation("Q_0800", DAY),)})
     with pytest.raises(ValueError, match="runs every trip it schedules"):
         Scenario(**{**scenario, "unreported": (Unreported("Q_0800", DAY),)})
+
+
+_QUICK = ScheduledTrip("R_q", "R", "平日", ("07:00:00", "07:02:00", "07:04:00"))
+
+
+def _sparse_and_dense(*deliveries: Delivery) -> Scenario:
+    """One trip run to the same truth on DAY and NEXT, polled each minute and
+    pushed every fifth. It enters the feed at 06:58 and leaves its stops at
+    07:00:00, 07:02:30 and 07:05:00, so the 07:00 push is the only one it is
+    in, and lists stops 2 and 3. Stop 3 is predicted 400 s late until 07:01."""
+    return Scenario(
+        name="paths",
+        routes=(_ROUTE,),
+        timetable=(_QUICK,),
+        days=(ServiceDay(DAY, "平日"), ServiceDay(NEXT, "平日")),
+        runs=tuple(TripRun.from_delays(_QUICK, day, (0, 30, 60)) for day in (DAY, NEXT)),
+        feed=FeedModel(
+            poll_interval_sec=60,
+            lead_sec=120,
+            push_interval_sec=300,
+            misreports=tuple(
+                Misreport("R_q", day, 400, gtfs_seconds("06:55:00"), gtfs_seconds("07:01:00"), (3,))
+                for day in (DAY, NEXT)
+            ),
+        ),
+        deliveries=deliveries,
+    )
+
+
+def test_the_collector_archives_every_poll_and_pushes_one_per_push_interval():
+    scenario = _sparse_and_dense(Delivery(DAY, archive=True, archive_first=True), Delivery(NEXT, archive=True))
+    captured = polls(scenario)
+    steps = handoff(scenario, captured)
+    assert [p.captured_at for p in steps.pushed] == [
+        service_day_instant(day, gtfs_seconds("07:00:00")) for day in (DAY, NEXT)
+    ]
+    assert steps.archived_first == tuple(p for p in captured if capture_day(p) == DAY)
+    assert steps.archived_after == tuple(p for p in captured if capture_day(p) == NEXT)
+    assert len(steps.archived_first) == len(steps.archived_after) == 7
+
+
+@pytest.mark.parametrize(
+    ("archive_first", "held"), [(True, oracle.Sources(archive_rows=14, live_rows=0)), (False, oracle.Sources(0, 2))]
+)
+def test_a_day_offered_both_ways_is_held_by_the_path_that_stores_a_row_of_it_first(archive_first, held):
+    """Archived first, DAY keeps its seven polls' 14 rows and promotion is
+    left nothing; promoted first, it keeps the 07:00 push's 2 rows and its
+    archive is left out. NEXT, archived alone, keeps every row."""
+    scenario = _sparse_and_dense(
+        Delivery(DAY, archive=True, archive_first=archive_first), Delivery(NEXT, live=False, archive=True)
+    )
+    found = oracle.outcome(scenario)
+    assert found.sources == {DAY: held, NEXT: oracle.Sources(archive_rows=14, live_rows=0)}
+    assert {(capture_day(r.poll), r.path) for r in oracle.received(scenario, polls(scenario))} == {
+        (DAY, "archive" if archive_first else "live"),
+        (NEXT, "archive"),
+    }
+
+
+def test_on_a_day_the_live_path_holds_a_departure_no_push_caught_is_missing_and_a_stale_prediction_stands():
+    """DAY comes live: no push lists stop 1, and the 07:00 push, the last to
+    list stop 3, predicts it 400 s late. NEXT comes from the archive, whose
+    07:04 poll reads stop 3 at its true 60 s."""
+    found = oracle.outcome(_sparse_and_dense(Delivery(NEXT, live=False, archive=True)))
+    assert [(d.service_date, d.stop_sequence, d.delay_sec) for d in found.departures] == [
+        (DAY, 2, 30),
+        (DAY, 3, 400),
+        (NEXT, 1, 0),
+        (NEXT, 2, 30),
+        (NEXT, 3, 60),
+    ]
+    assert oracle.by_day(found) == {
+        DAY: oracle.Figures(
+            departures=2,
+            delay_sum_sec=430,
+            on_time=1,
+            over_five_min=1,
+            worst_delay_sec=400,
+            trip_runs=1,
+            early=0,
+            on_time_industry=1,
+        ),
+        NEXT: oracle.Figures(
+            departures=3,
+            delay_sum_sec=90,
+            on_time=3,
+            over_five_min=0,
+            worst_delay_sec=60,
+            trip_runs=1,
+            early=0,
+            on_time_industry=3,
+        ),
+    }
+    assert found.readings == {DAY: oracle.Readings(2, 0, 2), NEXT: oracle.Readings(14, 0, 14)}
+    assert found.sources == {DAY: oracle.Sources(0, 2), NEXT: oracle.Sources(14, 0)}
+    assert len(found.ages) == 1 + 7
+
+
+def test_a_service_day_past_midnight_holds_rows_of_both_paths_and_takes_the_source_of_most():
+    """The run leaves at 23:58, 24:01 and 24:04. DAY, archived alone, keeps
+    the four polls from 23:56 to 23:59, 10 rows; NEXT comes live, so the
+    00:00 push brings 2 rows of DAY's service and its other polls none."""
+    night = ScheduledTrip("R_2358", "R", "平日", ("23:58:00", "24:01:00", "24:04:00"))
+    scenario = Scenario(
+        name="midnight",
+        routes=(_ROUTE,),
+        timetable=(night,),
+        days=(ServiceDay(DAY, "平日"),),
+        runs=(TripRun.from_delays(night, DAY, (0, 0, 0)),),
+        feed=FeedModel(poll_interval_sec=60, lead_sec=120, push_interval_sec=300),
+        deliveries=(Delivery(DAY, live=False, archive=True),),
+    )
+    found = oracle.outcome(scenario)
+    assert found.sources == {DAY: oracle.Sources(archive_rows=10, live_rows=2)}
+    assert found.sources[DAY].source == "archive"
+    assert [d.delay_sec for d in found.departures] == [0, 0, 0]
+
+
+def test_a_tie_reads_live_and_a_day_without_rows_has_no_source():
+    assert oracle.Sources(archive_rows=2, live_rows=2).source == "live"
+    assert oracle.Sources(archive_rows=3, live_rows=2).source == "archive"
+    assert oracle.Sources(archive_rows=0, live_rows=0).source is None
+    found = replace(
+        oracle.outcome(_sparse_and_dense()), sources={DAY: oracle.Sources(2, 2), NEXT: oracle.Sources(3, 2)}
+    )
+    before, after = DAY - timedelta(days=1), NEXT + timedelta(days=1)
+    assert oracle.source_mix(found, before, after) == oracle.SourceMix(archive_days=1, live_days=1, none_days=2)
+
+
+def test_deliveries_the_oracle_cannot_follow_are_refused():
+    scenario = _sparse_and_dense()
+    fields = scenario.__dict__
+    with pytest.raises(ValueError, match="not a multiple"):
+        Scenario(**{**fields, "feed": replace(scenario.feed, push_interval_sec=90)})
+    with pytest.raises(ValueError, match="by no path"):
+        _sparse_and_dense(Delivery(DAY, live=False))
+    with pytest.raises(ValueError, match="offered both ways"):
+        _sparse_and_dense(Delivery(DAY, live=False, archive=True, archive_first=True))
+    with pytest.raises(ValueError, match="declared twice"):
+        _sparse_and_dense(Delivery(DAY), Delivery(DAY, archive=True))
+    later = _sparse_and_dense(Delivery(NEXT + timedelta(days=1), archive=True))
+    with pytest.raises(ValueError, match="no poll is captured"):
+        handoff(later, polls(later))
+    freeze = Freeze(DAY, gtfs_seconds("06:58:00"), gtfs_seconds("07:01:00"))
+    with pytest.raises(ValueError, match="freezes no feed"):
+        Scenario(**{**fields, "feed": FeedModel(freezes=(freeze,)), "deliveries": (Delivery(DAY, archive=True),)})
+    with pytest.raises(ValueError, match="runs one timetable"):
+        Scenario(**{**_revised().__dict__, "deliveries": (Delivery(DAY),)})
+    sparse = FeedModel(poll_interval_sec=60, lead_sec=300, push_interval_sec=300)
+    with pytest.raises(ValueError, match="neither cancels a trip nor skips a stop"):
+        Scenario(**{**_skipping(None).__dict__, "feed": sparse})
+    with pytest.raises(ValueError, match="neither cancels a trip nor skips a stop"):
+        Scenario(**{**_cancelling(Cancellation("R_0700", DAY)).__dict__, "feed": sparse})
+    Scenario(**{**_skipping(None).__dict__, "feed": replace(sparse, push_interval_sec=60)})

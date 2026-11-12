@@ -6,9 +6,11 @@ day's planned trips only once its service day is over, four hours after the
 JST calendar day ends, so a second scenario day anchored on the calendar would
 still be in progress during a run between midnight and 04:00 JST.
 
-Promotion moves only closed JST days, so every poll must land on one. Every
-poll must also outlast the run in ``updates_live``, whose TTL drops a row
-``LIVE_TTL`` after its capture.
+Promotion moves only closed JST days, and archive ingest writes only those,
+so every poll must land on one. Every poll the collector pushes must also
+outlast the run in ``updates_live``, whose TTL drops a row ``LIVE_TTL`` after
+its capture. A day only the archive delivers never enters that table, so it
+may sit further back.
 """
 
 from __future__ import annotations
@@ -28,8 +30,17 @@ RUN_BOUND = timedelta(minutes=15)
 
 
 def anchor_day(now: datetime) -> date:
-    """The first service day of a scenario run at *now*."""
+    """The service day a scenario run at *now* anchors on: its first, or,
+    for a scenario whose earlier days only the archive delivers, the first
+    a pushed poll may fall on."""
     return service_date_of(now) - timedelta(days=2)
+
+
+def check_closed(captured: list[datetime], now: datetime) -> None:
+    """Raise unless every capture instant falls on a JST day closed at *now*."""
+    today_start = datetime.combine(now.astimezone(JST).date(), time(0), tzinfo=JST)
+    if captured and max(captured) >= today_start:
+        raise RuntimeError("a poll falls on today, which is not closed")
 
 
 def check_closed_and_live(captured: list[datetime], now: datetime) -> None:
@@ -37,8 +48,6 @@ def check_closed_and_live(captured: list[datetime], now: datetime) -> None:
     and stays in updates_live for a run that starts at *now*."""
     if not captured:
         return
-    today_start = datetime.combine(now.astimezone(JST).date(), time(0), tzinfo=JST)
-    if max(captured) >= today_start:
-        raise RuntimeError("a poll falls on today, which is not closed")
+    check_closed(captured, now)
     if min(captured) <= now - LIVE_TTL + RUN_BOUND:
         raise RuntimeError("a poll would leave updates_live before the run promotes it")

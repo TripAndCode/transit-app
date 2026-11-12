@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from tests.fixtures import scenario_oracle as oracle
-from tests.fixtures.scenario import poll_batches
-from tests.fixtures.scenario_clock import JST, LIVE_TTL, RUN_BOUND, anchor_day, check_closed_and_live
+from tests.fixtures.scenario import handoff, polls
+from tests.fixtures.scenario_clock import JST, LIVE_TTL, RUN_BOUND, anchor_day, check_closed, check_closed_and_live
 from tests.pipeline.test_scenarios import _ALL
 
 _SCENARIOS = tuple(param.values[0] for param in _ALL)
@@ -27,14 +27,21 @@ def _at(clock: str) -> datetime:
 
 
 def _captures(build, now: datetime) -> list[datetime]:
-    return [poll.captured_at for _version, batch in poll_batches(build(anchor_day(now))) for poll in batch]
+    return [poll.captured_at for poll in polls(build(anchor_day(now)))]
+
+
+def _pushes(build, now: datetime) -> list[datetime]:
+    """The capture instants of the polls the collector pushes, which pass through updates_live."""
+    scenario = build(anchor_day(now))
+    return [poll.captured_at for poll in handoff(scenario, polls(scenario)).pushed]
 
 
 @pytest.mark.parametrize("clock", ["00:00", "03:59", "04:00", "12:00", "23:59"])
 @pytest.mark.parametrize("build", _SCENARIOS, ids=lambda build: build.__name__)
 def test_every_scenario_fits_the_live_window_whenever_it_runs(build, clock):
     now = _at(clock)
-    check_closed_and_live(_captures(build, now), now)
+    check_closed(_captures(build, now), now)
+    check_closed_and_live(_pushes(build, now), now)
 
 
 @pytest.mark.parametrize("build", _SCENARIOS, ids=lambda build: build.__name__)
@@ -51,7 +58,7 @@ def test_a_run_just_before_the_service_day_turns_anchors_three_calendar_days_bac
 
 def test_the_oldest_poll_of_the_worst_minute_leaves_hours_before_updates_live_drops_it():
     now = _at("03:59")
-    oldest = min(min(_captures(build, now)) for build in _SCENARIOS)
+    oldest = min(min(_pushes(build, now)) for build in _SCENARIOS)
     assert oldest - (now - LIVE_TTL + RUN_BOUND) > timedelta(hours=2)
 
 
@@ -66,6 +73,13 @@ def test_a_poll_on_today_is_refused():
     now = _at("12:00")
     with pytest.raises(RuntimeError, match="not closed"):
         check_closed_and_live([_at("00:00")], now)
+    with pytest.raises(RuntimeError, match="not closed"):
+        check_closed([_at("00:00")], now)
+
+
+def test_a_poll_older_than_the_live_window_may_reach_the_app_by_the_archive():
+    now = _at("12:00")
+    check_closed([now - 2 * LIVE_TTL], now)
 
 
 def test_the_live_ttl_is_the_one_the_schema_declares():
