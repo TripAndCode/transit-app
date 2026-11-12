@@ -1942,6 +1942,22 @@
       "quality_col_stops": "停留所",
       "quality_col_age": "経過（中央値）",
       "quality_col_clamp": "異常値",
+      "quality_grade": "評価",
+      "quality_grade_note": "管理者にだけ表示します。四つの基準をすべて満たす月が A で、満たさない基準が一つあるごとに一段下がり、F までです。基準に要る値が欠けた月は評価しません。基準の値は算出方法の文書にあります。",
+      "quality_grade_pass": "四つの基準をすべて満たす",
+      "quality_grade_failing": "基準に届かない項目：{{criteria}}",
+      "quality_grade_ungraded": "評価なし：{{items}}",
+      "quality_grade_missing_item": "{{criterion}}（{{reason}}）",
+      "quality_list_separator": "、",
+      "quality_stale": "65秒を超えた取得",
+      "quality_stale_detail": "計測した取得 {{polls, number}} 回のうち {{stale, number}} 回",
+      "quality_col_grade": "評価",
+      "quality_criterion": {
+        "rt_completeness": "便の充足率",
+        "stale_polls": "65秒を超えた取得",
+        "clamp": "異常値の割合",
+        "field_coverage": "項目の充足"
+      },
       "quality_missing": {
         "coverage_unknown": "便IDが時刻表と対応しない",
         "no_plan_observed": "観測した日に時刻表の計画なし",

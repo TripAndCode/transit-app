@@ -22,6 +22,8 @@ function month(m: string, over: Partial<AgencyFeedQualityMonth> = {}): AgencyFee
     stop_completeness_missing: null,
     message_age_polls: 16,
     message_age_undated_polls: 0,
+    message_age_stale_polls: 2,
+    message_age_stale_pct: 12.5,
     message_age_p50_sec: 22,
     message_age_p95_sec: 38.3,
     message_age_missing: null,
@@ -37,6 +39,9 @@ function month(m: string, over: Partial<AgencyFeedQualityMonth> = {}): AgencyFee
     field_coverage_missing: null,
     vehicle_positions_available: null,
     vehicle_positions_missing: "not_recorded",
+    grade: "C",
+    grade_failing: ["rt_completeness", "stale_polls"],
+    grade_missing: [],
     ...over,
   };
 }
@@ -99,6 +104,56 @@ describe("FeedQualityTrend", () => {
     expect(row.cells[3].getAttribute("title")).toBe("archived polls' file names give no capture time");
   });
 
+  it("shows the newest month's grade and the criteria it misses, in the trend too", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([month("2026-10"), month("2026-09", { grade: "A", grade_failing: [] })]);
+    expect(screen.getByText("below threshold: trips reported, polls over 65 s")).toBeInTheDocument();
+    expect(screen.getByText(/Shown to admins only/)).toBeInTheDocument();
+    expect(screen.getByText("12.50%")).toBeInTheDocument();
+    expect(screen.getByText("2 of 16 polls measured")).toBeInTheDocument();
+    const rows = within(screen.getByRole("table")).getAllByRole("row") as HTMLTableRowElement[];
+    const last = rows[0].cells.length - 1;
+    expect(rows[0].cells[last].textContent).toBe("Grade");
+    expect(rows.slice(1).map((r) => r.cells[last].textContent)).toEqual(["C", "A"]);
+    expect(rows[2].cells[last].getAttribute("title")).toBe("all four criteria met");
+  });
+
+  it("gives a month missing a needed figure no grade, and says which and why", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([
+      month("2026-10", {
+        rt_completeness_pct: null,
+        rt_completeness_missing: "coverage_unknown",
+        grade: null,
+        grade_failing: ["stale_polls"],
+        grade_missing: [{ criterion: "rt_completeness", reason: "coverage_unknown" }],
+      }),
+    ]);
+    expect(screen.getByText("not graded: trips reported (trip IDs are not the timetable's)")).toBeInTheDocument();
+    expect(screen.getByText("below threshold: polls over 65 s")).toBeInTheDocument();
+    const row = within(screen.getByRole("table")).getAllByRole("row")[1] as HTMLTableRowElement;
+    const cell = row.cells[row.cells.length - 1];
+    expect(cell.textContent).toBe("—");
+    expect(cell.getAttribute("title")).toBe(
+      "not graded: trips reported (trip IDs are not the timetable's) · below threshold: polls over 65 s",
+    );
+  });
+
+  it("says a month built before the share of polls over 65 s was stored has it not recorded", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([
+      month("2026-10", {
+        message_age_stale_polls: null,
+        message_age_stale_pct: null,
+        grade: null,
+        grade_failing: ["rt_completeness"],
+        grade_missing: [{ criterion: "stale_polls", reason: "not_recorded" }],
+      }),
+    ]);
+    const label = screen.getByText("Polls over 65 s");
+    expect(label.nextElementSibling?.textContent).toBe("— not recorded");
+  });
+
   it("speaks Japanese", async () => {
     await i18n.changeLanguage("ja");
     renderTrend([month("2026-10", { through_date: "2026-10-20" })]);
@@ -106,6 +161,7 @@ describe("FeedQualityTrend", () => {
     expect(screen.getByText("計画 1,000 便のうち 693 便")).toBeInTheDocument();
     expect(screen.getByText("計測した取得 16 回")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "直近6か月" })).toBeInTheDocument();
+    expect(screen.getByText("基準に届かない項目：便の充足率、65秒を超えた取得")).toBeInTheDocument();
     await i18n.changeLanguage("en");
   });
 });

@@ -56,6 +56,7 @@ A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) 
 - **Trips reported**: the share of the trips the timetable planned that the feed reported a plausible departure for, by the same rule as the coverage in the [Comparability conditions](#comparability-conditions);
 - **Stop events reported**: the share of the stops the planned trips call at that the feed reported;
 - **Message age**: per poll, the time it was captured minus the feed header's timestamp (the median and the 95th percentile). A poll from the collector's archive is timed by its file name, which records when the poll began; a poll whose name records no time is left out and counted (from method `2026.11.8`);
+- **Polls over 65 s**: of the polls message age measures, the share whose message was more than 65 seconds old when captured. This is the freshness threshold used by Cal-ITP and by the MobilityData GTFS-RT validator (warning W008). It shows a feed header that stayed frozen for too short a time to move the 95th percentile (from method `2026.11.12`);
 - **Implausible readings**: the share of reports dropped as in [Excluding implausible values](#excluding-implausible-values);
 - **Field coverage**: for each of four fields separately, the share of reports carrying that field; the four are never combined into one figure:
   - the stop ID (`stop_id`);
@@ -63,7 +64,22 @@ A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) 
   - the trip's status (the trip's `schedule_relationship`);
   - the stop's status (the stop's `schedule_relationship`).
 
-A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. No pass or fail threshold is set for any of them yet. Trips reported and the implausible share are also stated in every figure's [definition stamp](#definition-stamp), over that figure's own period. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
+A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. Trips reported and the implausible share are also stated in every figure's [definition stamp](#definition-stamp), over that figure's own period. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
+
+Each month is graded A to F from these figures by four criteria, each passing or failing on its own. Each threshold is inclusive, except the arrival-delay band in field coverage, which excludes both its ends: 0% and 50% fail. The implausible share is judged as printed to a tenth, as in the comparability conditions, and every other figure as it is shown:
+
+| Criterion | Passes when | Basis |
+|---|---|---|
+| Trips reported | at least 95% | Cal-ITP's realtime completeness bar: no more than 5% of planned trips missing. Over 100% passes. The 70% in the [Comparability conditions](#comparability-conditions) answers a different question: whether delays can be ranked |
+| Polls over 65 s | at most 5% | Cal-ITP's freshness threshold and the validator's W008, with Cal-ITP's 5% as the tolerance |
+| Implausible readings | at most 5% | The same condition as in the [Comparability conditions](#comparability-conditions) |
+| Field coverage | the stop ID and both statuses on at least 99% of reports, and the arrival delay on some but fewer than half of them | The rule the Service uses to confirm that a feed carries the fields its figures need. A feed sending the arrival delay on every report is not sending the sparse arrival estimate the Service reads it as, so it does not pass |
+
+- A month meeting all four criteria is an A. Each criterion missed costs one letter: B, C, D, and F for all four.
+- A month missing a figure that a criterion needs is not graded rather than given a guessed grade, and the reason is shown.
+- Stop events reported and the message-age median and percentile are shown beside the grade, but do not affect it.
+- The thresholds start from those of Cal-ITP, the California programme that publishes a monthly GTFS quality report per operator. The grade is recomputed from the stored figures, under the current thresholds, each time it is shown. Changing a threshold changes no aggregate, so it is not a new method version. A change is announced by amending this section.
+- **Shown to admins only.** The grade is not published. Publishing it to operators waits on the [advance notice](#advance-notice) to each operator and the operator's right to reply.
 
 ## Processing
 
@@ -207,7 +223,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | Passenger weighting | Partial | Only hand-entered relative weights per route, used only by the weighted on-time rate on the agency comparison screen. No ridership import |
 | Splitting running time from dwell time | Partial | The split exists. Whether a feed's arrival and departure delays are independent has not been checked feed by feed |
 | External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
-| Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The monthly feed-quality scorecard is on the admin pages, with no pass or fail thresholds yet |
+| Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The monthly feed-quality scorecard and its A–F grade are on the admin pages and are not published |
 | Stating the measurement point and definitions | Partial | "Download CSV" files, the council report, the delay record and the screens' "How this is calculated" block carry the definition stamp. CSVs a screen builds on the spot and chart images do not |
 | Transfers and total travel time | Out of scope | Passengers are not the Service's primary users. Connection reliability at feeder hubs is considered separately |
 | Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
@@ -350,10 +366,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.11`. Newest first, each version with the inputs it set.
+The current method is `2026.11.12`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.12` | `feed_quality_monthly` 4 → 5 |
 | `2026.11.11` | `feed_quality_monthly` 3 → 4 |
 | `2026.11.10` | `agg_route_headway` 2 → 3, `agg_route_headway_daily` 3 → 4 |
 | `2026.11.9` | `agg_route_headway` 1 → 2 |

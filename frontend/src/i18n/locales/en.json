@@ -1942,6 +1942,22 @@
       "quality_col_stops": "Stop events",
       "quality_col_age": "Age (median)",
       "quality_col_clamp": "Implausible",
+      "quality_grade": "Grade",
+      "quality_grade_note": "Shown to admins only. A month meeting all four criteria is an A, and each criterion it misses costs one letter, down to F. A month missing a figure a criterion needs has no grade. The thresholds are in the methodology.",
+      "quality_grade_pass": "all four criteria met",
+      "quality_grade_failing": "below threshold: {{criteria}}",
+      "quality_grade_ungraded": "not graded: {{items}}",
+      "quality_grade_missing_item": "{{criterion}} ({{reason}})",
+      "quality_list_separator": ", ",
+      "quality_stale": "Polls over 65 s",
+      "quality_stale_detail": "{{stale, number}} of {{polls, number}} polls measured",
+      "quality_col_grade": "Grade",
+      "quality_criterion": {
+        "rt_completeness": "trips reported",
+        "stale_polls": "polls over 65 s",
+        "clamp": "implausible readings",
+        "field_coverage": "field coverage"
+      },
       "quality_missing": {
         "coverage_unknown": "trip IDs are not the timetable's",
         "no_plan_observed": "no timetable plans the days observed",

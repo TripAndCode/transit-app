@@ -6,12 +6,10 @@ schema, so the only description of its shape is the hand-written mirror in
 test pins the set of endpoints still in that state so it can only shrink.
 """
 
-from collections.abc import Sequence
-
 from fastapi.routing import APIRoute
-from starlette.routing import BaseRoute
 
 from api.main import app
+from tests.fixtures.routes import api_routes
 
 # A 204 has no body by definition, so there is nothing to describe. Structural,
 # not a backlog entry: these never acquire a response model.
@@ -78,25 +76,12 @@ TYPED = {
 
 
 def _schema_routes() -> list[tuple[str, APIRoute]]:
-    out = []
-
-    def _collect(routes: Sequence[BaseRoute]) -> None:
-        for route in routes:
-            if isinstance(route, APIRoute):
-                if not route.include_in_schema or route.methods is None:
-                    continue
-                for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
-                    out.append((f"{method} {route.path}", route))
-            elif hasattr(route, "original_router"):
-                # Newer FastAPI wraps each include_router() call in a private
-                # lazy-matching wrapper instead of flattening its routes
-                # directly into app.routes; recurse into the underlying
-                # router (whose routes already carry its own prefix) so this
-                # still sees the real endpoint set on either FastAPI version.
-                _collect(route.original_router.routes)
-
-    _collect(app.routes)
-    return out
+    return [
+        (f"{method} {route.path}", route)
+        for route in api_routes(app.routes)
+        if route.include_in_schema and route.methods is not None
+        for method in sorted(route.methods - {"HEAD", "OPTIONS"})
+    ]
 
 
 def _undescribed() -> set[str]:

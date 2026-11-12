@@ -581,6 +581,28 @@ def test_an_archived_polls_age_is_its_named_instant_less_its_header(pg_conn, ch_
     april = _stored(pg_conn, agency)[_APRIL]
     assert (april["message_age_polls"], april["message_age_p50_sec"], april["message_age_p95_sec"]) == (4, 10.0, 35.5)
     assert (april["message_age_missing"], april["message_age_undated_polls"]) == (None, 1)
+    # The undated poll's header is 500 s older than its name, but no instant
+    # is known for it, so it is not counted stale either.
+    assert (april["message_age_stale_polls"], april["message_age_stale_pct"]) == (0, 0)
+
+
+def test_a_poll_is_stale_when_its_message_is_older_than_65_s(pg_conn, ch_client, closed_on_may_first):
+    """Cal-ITP's freshness threshold, the GTFS-RT validator's W008: a message
+    older than 65 s at capture. One exactly 65 s old is not, nor is one newer
+    than its archive name."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    rows = []
+    for i, age in enumerate((-5, 64, 65, 66, 3600)):
+        named = _POLL + timedelta(minutes=i)
+        rows += _archive_poll(named, int(named.timestamp()) - age)
+    insert_updates(ch_client, agency, rows)
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["message_age_polls"], april["message_age_stale_polls"]) == (5, 2)
+    assert float(april["message_age_stale_pct"]) == 40.0
 
 
 def test_a_frozen_header_reads_as_the_hours_its_polls_went_on_receiving_it(pg_conn, ch_client, closed_on_may_first):
@@ -609,6 +631,9 @@ def test_a_frozen_header_reads_as_the_hours_its_polls_went_on_receiving_it(pg_co
         3600.0,
         52200.0,
     )
+    # A run too short to reach the 95th percentile still shows in the share
+    # of polls older than 65 s.
+    assert (april["message_age_stale_polls"], float(april["message_age_stale_pct"])) == (2, 66.67)
 
 
 def test_a_header_newer_than_its_archive_name_reads_a_negative_age(pg_conn, ch_client, closed_on_may_first):
@@ -639,3 +664,4 @@ def test_a_month_whose_every_archived_poll_is_undated_has_no_message_age(pg_conn
     april = _stored(pg_conn, agency)[_APRIL]
     assert (april["message_age_polls"], april["message_age_undated_polls"]) == (0, 1)
     assert (april["message_age_p50_sec"], april["message_age_missing"]) == (None, "archive_stamped")
+    assert (april["message_age_stale_polls"], april["message_age_stale_pct"]) == (None, None)
