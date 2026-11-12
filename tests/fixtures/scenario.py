@@ -512,9 +512,9 @@ class Scenario:
                 raise ValueError(f"{delivery.day} reaches the app by no path")
             if delivery.archive_first and not (delivery.live and delivery.archive):
                 raise ValueError(f"{delivery.day}: only a day offered both ways is archived first")
-        if feed.push_interval_sec is not None and (
-            feed.push_interval_sec <= 0 or feed.push_interval_sec % feed.poll_interval_sec
-        ):
+        if feed.push_interval_sec is not None and feed.push_interval_sec <= 0:
+            raise ValueError("a push interval must be positive")
+        if feed.push_interval_sec is not None and feed.push_interval_sec % feed.poll_interval_sec:
             raise ValueError(f"a push every {feed.push_interval_sec} s is not a multiple of the poll interval")
         if feed.sparse and (self.cancellations or any(None in r.actual_sec for r in self.runs)):
             raise ValueError("a feed pushed more sparsely than it is polled neither cancels a trip nor skips a stop")

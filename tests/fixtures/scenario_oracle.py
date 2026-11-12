@@ -172,10 +172,11 @@ methodology's "Dwell and running time" (``docs/methodology.en.md``):
   samples; one with neither a dwell nor a running sample is not listed.
 
 The paths a poll reaches history (``updates``) by, per the data path
-``docs/deploy-railway.md`` sets out (section 4: "Production data path", and
-the archive job's "This job writes closed JST days only, and never a day the
-live path already promoted"), ``README.md``'s architecture notes and the
-methodology's "How the data is collected" (``docs/methodology.en.md``):
+``docs/deploy-railway.md`` sets out ("Production data path — the live path,
+promoted daily" under "Load data", and the daily ingest job's "This job
+writes closed JST days only, and never a day the live path already
+promoted"), ``README.md``'s architecture notes and the methodology's "How
+the data is collected" (``docs/methodology.en.md``):
 
 - The collector keeps every poll it captures in its archive and pushes the
   app only some of them (``FeedModel``). Live, a day reaches history as the
@@ -485,11 +486,11 @@ def _last_plausible(sent: Sequence[Poll]) -> dict[tuple[str, date, int], int]:
     return {key: readings[-1][1] for key, readings in _plausible_readings(sent, "departure").items()}
 
 
-def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll] | None = None) -> list[Departure]:
+def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll]) -> list[Departure]:
     """Every served stop of every run with a plausible reading in *sent*,
     at that last reading's delay, but a run's last stop under a feed that
     reports arrivals. *sent* is the polls that reached history, of the
-    *captured* polls, the same when None.
+    *captured* polls.
 
     Raises when a run no misreport names was last reported in *captured* at
     a delay other than its true one, or a true delay inside the clamp went
@@ -497,7 +498,7 @@ def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll
     at fault, not the pipeline. A departure *sent* lacks a reading of is
     one the path that brought its day never received."""
     last = _last_plausible(sent)
-    feed_last = last if captured is None else _last_plausible(captured)
+    feed_last = _last_plausible(captured)
     misreported = {(m.trip_id, m.service_date) for m in scenario.feed.misreports}
     out = []
     for run in scenario.runs:
@@ -883,9 +884,14 @@ def no_high_frequency_route(found: Outcome, first: date, last: date) -> bool:
     return not any(plan.high_frequency for (_route, day), plan in found.wait_plans.items() if first <= day <= last)
 
 
+def _days_between(first: date, last: date) -> list[date]:
+    """Each day from *first* to *last*, both included."""
+    return [first + timedelta(days=n) for n in range((last - first).days + 1)]
+
+
 def readings_over(found: Outcome, first: date, last: date) -> Readings:
     """The readings of the service days *first* to *last*, summed."""
-    days = [r for day, r in found.readings.items() if first <= day <= last]
+    days = [found.readings[day] for day in _days_between(first, last) if day in found.readings]
     return Readings(
         readings=sum(r.readings for r in days),
         implausible=sum(r.implausible for r in days),
@@ -904,8 +910,7 @@ class SourceMix:
 
 def source_mix(found: Outcome, first: date, last: date) -> SourceMix:
     """The service days *first* to *last* by their source."""
-    days = [first + timedelta(days=n) for n in range((last - first).days + 1)]
-    named = [found.sources[day].source if day in found.sources else None for day in days]
+    named = [found.sources[day].source if day in found.sources else None for day in _days_between(first, last)]
     return SourceMix(archive_days=named.count("archive"), live_days=named.count("live"), none_days=named.count(None))
 
 

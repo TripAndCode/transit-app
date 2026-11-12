@@ -1383,9 +1383,10 @@ def _sources_actual(observed: Observed) -> Cells:
 
 
 def _message_age_expected(observed: Observed, found: oracle.Outcome) -> Cells:
-    """Each month's polls and the quantiles of their message ages, every poll
-    a live one whose capture instant is known, each quantile to a tenth of a
-    second."""
+    """Each month's polls and the quantiles of their message ages, each
+    quantile to a tenth of a second. Every poll's capture instant is known,
+    whichever path delivered it: live by its capture time, archived by its
+    collector's file name."""
     months = {}
     for month, card in oracle.scorecard(found).items():
         # No scenario leaves a month without a poll between two with one; such a month has no ages.

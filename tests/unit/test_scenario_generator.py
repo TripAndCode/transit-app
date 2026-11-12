@@ -1089,6 +1089,9 @@ def test_deliveries_the_oracle_cannot_follow_are_refused():
     fields = scenario.__dict__
     with pytest.raises(ValueError, match="not a multiple"):
         Scenario(**{**fields, "feed": replace(scenario.feed, push_interval_sec=90)})
+    for interval in (0, -300):
+        with pytest.raises(ValueError, match="must be positive"):
+            Scenario(**{**fields, "feed": replace(scenario.feed, push_interval_sec=interval)})
     with pytest.raises(ValueError, match="by no path"):
         _sparse_and_dense(Delivery(DAY, live=False))
     with pytest.raises(ValueError, match="offered both ways"):
