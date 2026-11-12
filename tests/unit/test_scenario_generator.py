@@ -3,11 +3,13 @@
 import csv
 import hashlib
 import io
+import json
 import struct
 import zipfile
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
+from pathlib import Path
 from typing import Literal
 
 import pytest
@@ -46,6 +48,7 @@ from tests.fixtures.scenario import (
     vehicle_positions,
     write_vehicle_positions,
 )
+from tests.pipeline.test_scenarios import imperfect_feed
 
 DAY = date(2026, 6, 1)
 _STOPS = tuple(Stop(f"S{i}", f"Stop {i}", 34.0 + i / 1000, 132.0) for i in range(1, 4))
@@ -613,12 +616,10 @@ def test_a_true_delay_beyond_the_clamp_either_way_is_no_departure_and_each_of_it
     }
 
 
-def test_a_misreport_beyond_the_clamp_leaves_the_last_plausible_reading_standing():
-    """From 07:05 the 07:00 run's stop 2 is read at 7201 s, 3 times before it
-    leaves at 07:08, so its reading of 07:04 stands. From 07:10 its stop 3 is
-    read at 7200 s, which is plausible and so its last reading. The evening
-    run is read a day early in each of its 39 readings, so it has no
-    departure and is not observed."""
+def _misreporting() -> Scenario:
+    """Both trips run on time. From 07:05 the 07:00 run's stop 2 is reported
+    7201 s late and from 07:10 its stop 3 7200 s late; the evening run is
+    reported a day early throughout."""
     feed = FeedModel(
         poll_interval_sec=60,
         lead_sec=300,
@@ -628,7 +629,15 @@ def test_a_misreport_beyond_the_clamp_leaves_the_last_plausible_reading_standing
             Misreport("R_2350", DAY, -86400, 0, gtfs_seconds("30:00:00")),
         ),
     )
-    scenario = _one_run((0, 0, 0), feed, evening=(0, 0, 0))
+    return _one_run((0, 0, 0), feed, evening=(0, 0, 0))
+
+
+def test_a_misreport_beyond_the_clamp_leaves_the_last_plausible_reading_standing():
+    """The 07:00 run's stop 2 is read at 7201 s 3 times before it leaves at
+    07:08, so its reading of 07:04 stands. Its stop 3's 7200 s is plausible
+    and so its last reading. The evening run is read a day early in each of
+    its 39 readings, so it has no departure and is not observed."""
+    scenario = _misreporting()
     stop_2 = {
         p.captured_at: s.departure_delay
         for p in polls(scenario)
@@ -1119,30 +1128,18 @@ def test_deliveries_the_oracle_cannot_follow_are_refused():
     Scenario(**{**_skipping(None).__dict__, "feed": replace(sparse, push_interval_sec=60)})
 
 
-# Each scenario's polls hashed, file name and wire bytes in capture order, so
-# that a feed model added beside the perfect one cannot change a byte the
-# perfect model sends.
-_PERFECT_WIRE = {
-    "both trips": "f027d01fb8b113a5f5ffa671eea3c55bc3105c6b7601c85a7d5b266cfc86c75a",
-    "skip announced": "6a9fa97b9f3c6b8f2c975322ee798e3bfbb75050ac061b0ca616cdfdef69b870",
-    "cancellation announced": "a3b2aa750bd899b088afa9ed3e0b165447bcebade78cd365aed68ffca82db7f7",
-    "frozen header": "fcd945eb1de30b6e0e640a56c710f53320e9ababa64418b01b7e9fd2c04494cf",
-    "advancing header": "aeee991f190a562451c327f3d3889c3fbde8bf54031425319e5cd05a8fb9e939",
-    "arrivals": "3d5a96d6a6718e25628236e947572960200c7b1682004eec65720ecd70463022",
-    "sparse pushes": "be8f51dcc7f5a8e75da4b8d7d676be50c4d93c96dc1b436e8620214965ad4702",
-    "bunched": "aa267eeac2d980d7252e79832bb48aed437b72ffca46edf879dfffacf5bbbe33",
-}
+# Each poll's SHA-256 by its file name, per scenario of the perfect model,
+# as the generator made them at commit 84a616cf, which the file records: a
+# feed model added beside the perfect one must not change a byte it sends.
+_PERFECT_WIRE = Path(__file__).parents[1] / "fixtures" / "perfect_wire_digests.json"
 
 
-def _wire_digest(scenario: Scenario) -> str:
-    digest = hashlib.sha256()
-    for poll in polls(scenario):
-        digest.update(poll.source_file.encode())
-        digest.update(poll.payload)
-    return digest.hexdigest()
-
-
-def test_the_perfect_models_wire_bytes_are_pinned():
+def test_the_perfect_models_wire_bytes_are_pinned_poll_by_poll():
+    """Every kind of entry the perfect model sends: runs either side of
+    midnight, a skip and a cancellation each predicted then announced,
+    frozen and advancing headers, arrivals, sparse pushes over a misreport
+    that ends, unreported trips, and misreports beyond the clamp, a stop's
+    and a whole run's. A changed, added or missing poll is named by file."""
     announced = Cancellation("R_0700", DAY, announced_sec=gtfs_seconds("06:57:00"), predicted_delay_sec=30)
     scenarios = {
         "both trips": _scenario(),
@@ -1153,8 +1150,14 @@ def test_the_perfect_models_wire_bytes_are_pinned():
         "arrivals": _quay(),
         "sparse pushes": _sparse_and_dense(),
         "bunched": _bunched(),
+        "misreported": _misreporting(),
     }
-    assert {name: _wire_digest(scenario) for name, scenario in scenarios.items()} == _PERFECT_WIRE
+    pinned = json.loads(_PERFECT_WIRE.read_text())["scenarios"]
+    assert set(pinned) == set(scenarios)
+    for name, scenario in scenarios.items():
+        made = {poll.source_file: hashlib.sha256(poll.payload).hexdigest() for poll in polls(scenario)}
+        changed = sorted(f for f in made.keys() | pinned[name].keys() if made.get(f) != pinned[name].get(f))
+        assert not changed, f"{name}: these polls differ from the pinned bytes: {changed}"
 
 
 _PROPAGATING = FeedModel(prediction="propagate_current_delay", poll_interval_sec=60, lead_sec=300)
@@ -1297,6 +1300,43 @@ def test_imperfect_feeds_the_oracle_cannot_follow_are_refused():
             Scenario(**{**_cancelling(Cancellation("R_0700", DAY)).__dict__, "feed": feed})
     with pytest.raises(ValueError, match="cannot be negative"):
         _one_run((0, 0, 0), FeedModel(freshness_lag_sec=-30))
+
+
+def test_the_imperfect_feed_scenario_keeps_each_stop_at_the_delay_the_run_had_half_a_minute_before_its_last_poll():
+    """The runner's imperfect_feed scenario, stop by stop: the delays the
+    feed last predicted, the true ones, and each kept reading's lead. Its
+    07:40 run's second stop is kept on time, where without the lag it would
+    be kept 100 s late."""
+    scenario = imperfect_feed(DAY)
+    found = oracle.outcome(scenario)
+    by_run: dict[str, list[tuple[int, int, int]]] = {}
+    for p in found.predictions:
+        by_run.setdefault(p.departure.trip_id, []).append((p.departure.delay_sec, p.true_delay_sec, p.lead_sec))
+    kept, truth, leads = ({trip: [r[k] for r in rows] for trip, rows in by_run.items()} for k in range(3))
+    assert kept == {
+        "P1_0700": [0, 0, 40, 80, 120, 180, 240, 301],
+        "P1_0710": [0, 300, 250, 200, 150, 100, 61, 30],
+        "P1_0720": [0, -90, -60, -30, 0, 0, 0, 0],
+        "P1_0730": [0, 0, 0, 0, 0, 0, 0, 0],
+        "P1_0740": [0, 0, 30, 30, 30, 30, 30, 30],
+    }
+    assert truth == {
+        "P1_0700": [0, 40, 80, 120, 180, 240, 301, 361],
+        "P1_0710": [300, 250, 200, 150, 100, 61, 30, -30],
+        "P1_0720": [-90, -60, -30, 0, 0, 0, 0, 0],
+        "P1_0730": [0, 0, 0, 0, 0, 0, 0, 0],
+        "P1_0740": [100, 30, 30, 30, 30, 30, 30, 30],
+    }
+    assert leads == {
+        "P1_0700": [0, -20, 20, 0, 0, 0, 1, 1],
+        "P1_0710": [0, 10, 20, 30, -20, 1, 30, 30],
+        "P1_0720": [30, 0, 30, 0, 0, 0, 0, 0],
+        "P1_0730": [0, 0, 0, 0, 0, 0, 0, 0],
+        "P1_0740": [-20, 30, 30, 30, 30, 30, 30, 30],
+    }
+    fresh = oracle.outcome(replace(scenario, feed=replace(scenario.feed, freshness_lag_sec=0)))
+    assert [d.delay_sec for d in fresh.departures if d.trip_id == "P1_0740"][:2] == [0, 100]
+    assert {age for _day, age in found.ages} == {0}
 
 
 def _float32(value: float) -> float:

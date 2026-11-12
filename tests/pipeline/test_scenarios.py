@@ -754,25 +754,16 @@ _FRESHNESS_LAG_SEC = 30
 
 def imperfect_feed(day: date) -> Scenario:
     """A ten-minute line on one weekday whose feed propagates each run's
-    current delay to every stop still to come, half a minute behind the run.
+    current delay to every stop still to come, half a minute behind the run,
+    under a header that does not show the lag.
 
-    Each stop's departure is therefore the delay of the last stop the run
-    left by the half minute before the last poll that lists it, and every
-    first stop is predicted on time. The 07:00 run, losing time, is reported
-    one stop behind: 40 s at its third stop, which truly left 80 s late, and
-    240 s at its seventh, which truly left 301 s late. The 07:10 run,
-    recovering, is reported 300 s late at its second stop and 61 s at its
-    seventh, which truly left 250 s and 30 s late. The 07:20 run leaves its
-    first stop 90 s early and is reported on time there, and 90 s early at
-    its second, which it truly left 60 s early. The 07:30 run keeps time
-    and is reported truly. The 07:40 run leaves its first two stops 50 s
-    apart, at 07:41:40 and 07:42:30: the last poll to list the second, at
-    07:42, knows the run as it stood at 07:41:30, still at the first stop,
-    and so reports it on time where a feed without the lag would report it
-    100 s late. The same poll still lists the first stop, 20 s after the run
-    left it. The 07:10 run's fourth stop, left at 07:18:30, is last listed
-    by the poll at 07:18, since the one at 07:19 knows the run as it stood
-    at that very instant. No poll's header shows the lag."""
+    The runs lose time, recover it, leave early, keep time, and leave two
+    stops 50 s apart, so the kept predictions fall on the other side of the
+    on-time and five-minute edges from the truth at some stops and equal it
+    at others, a stop is still listed after the run left it, and the lag
+    changes which stop a prediction comes from.
+    ``tests/unit/test_scenario_generator.py`` pins each stop's kept delay,
+    true delay and lead."""
     route = _route("P1", "Propagated line", 8, 34.67)
     trips, runs = _runs(route, "平日", day, 120, _PROPAGATED_TRUTH)
     return Scenario(
@@ -1677,13 +1668,20 @@ def _shown(cell: dict | None, columns) -> str:
     return "{" + ", ".join(f"{c}: {cell.get(c)!r}" for c in columns) + "}"
 
 
+def _unfit(actual: Cells, expected: Cells) -> list[tuple[str, Hashable]]:
+    """The cells where *actual* does not fit *expected*, in order. A cell
+    *expected* lacks expects no row."""
+    return [
+        cell for cell in sorted(set(actual) | set(expected), key=str) if not _fits(expected.get(cell), actual.get(cell))
+    ]
+
+
 def _compare(actual: Cells, expected: Cells, keep: Callable[[tuple[str, Hashable]], bool]) -> list[str]:
-    """Each kept cell where *actual* does not fit *expected*, as one line. A
-    cell *expected* lacks expects no row."""
+    """Each kept cell where *actual* does not fit *expected*, as one line."""
     lines = []
-    for cell in sorted(set(actual) | set(expected), key=str):
-        want, got = expected.get(cell), actual.get(cell)
-        if keep(cell) and not _fits(want, got):
+    for cell in _unfit(actual, expected):
+        if keep(cell):
+            want, got = expected.get(cell), actual.get(cell)
             columns = want or got or {}
             lines.append(f"{cell[0]} {cell[1]}: expected {_shown(want, columns)}, actual {_shown(got, columns)}")
     return lines
@@ -2148,11 +2146,6 @@ def _at_true_delays(found: oracle.Outcome) -> oracle.Outcome:
     return replace(found, departures=tuple(replace(p.departure, delay_sec=p.true_delay_sec) for p in found.predictions))
 
 
-def _unfit(actual: Cells, expected: Cells) -> set[tuple[str, Hashable]]:
-    """The cells where *actual* does not fit *expected*."""
-    return {cell for cell in set(actual) | set(expected) if not _fits(expected.get(cell), actual.get(cell))}
-
-
 @pytest.mark.parametrize("observed", [_IMPERFECT], indirect=True)
 def test_an_expectation_planted_at_the_true_delays_fails_on_every_cell_the_predictions_move(observed):
     """The run is held to the feed's kept predictions. Held to the true
@@ -2166,7 +2159,7 @@ def test_an_expectation_planted_at_the_true_delays_fails_on_every_cell_the_predi
     caught: set[tuple[str, Hashable]] = set()
     for expect, read in _COMPARISONS:
         moved |= _moved(expect(observed, truth), expect(observed, planted))
-        caught |= _unfit(read(observed), expect(observed, planted))
+        caught |= set(_unfit(read(observed), expect(observed, planted)))
     day = observed.scenario.days[0].date
     assert ("agg_route_daily_dist", ("P1", day, "平日")) in moved
     assert caught == moved

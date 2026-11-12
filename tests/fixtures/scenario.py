@@ -792,10 +792,35 @@ class Poll:
         return f"{utc:%Y%m%d}/TripUpdate_{utc:%H%M%S}.pb"
 
 
-def _predicted_delay(feed: FeedModel, scheduled_sec: int, actual_sec: int) -> int:
-    if feed.prediction == "perfect":
-        return actual_sec - scheduled_sec
-    raise ValueError(f"unknown prediction model {feed.prediction!r}")
+def _predicted_delay(feed: FeedModel, run: TripRun, trip: ScheduledTrip, i: int, at: datetime) -> int:
+    """The delay *feed*'s model predicts stop *i* (from 0) of *run* at, as the
+    run stands at *at* (``FeedModel``). The perfect model predicts a stop the
+    run serves at its true delay, and a stop it skips at the true delay of
+    the nearest stop before it that it serves, after it when none is before.
+    Propagation predicts every stop at the delay of the last stop the run
+    has left by *at*, and on time before it leaves its first."""
+    served = [(j, sec) for j, sec in enumerate(run.actual_sec) if sec is not None]
+    if feed.prediction == "propagate_current_delay":
+        basis = [(j, sec) for j, sec in served if service_day_instant(run.service_date, sec) <= at][-1:]
+        if not basis:
+            return 0
+    elif feed.prediction == "perfect":
+        basis = [(j, sec) for j, sec in served if j <= i][-1:] or [(j, sec) for j, sec in served if j > i][:1]
+    else:
+        raise ValueError(f"unknown prediction model {feed.prediction!r}")
+    ((j, sec),) = basis
+    return sec - trip.scheduled_sec[j]
+
+
+def _run_window(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> tuple[datetime, datetime]:
+    """When *run* enters the feed, the feed model's lead before its first
+    departure, scheduled or actual, whichever is earlier, and when it leaves
+    the feed, on leaving the last stop it serves."""
+    first = min(trip.scheduled_sec[0], run.served[0])
+    return (
+        service_day_instant(run.service_date, first) - timedelta(seconds=scenario.feed.lead_sec),
+        service_day_instant(run.service_date, run.served[-1]),
+    )
 
 
 @dataclass(frozen=True)
@@ -826,20 +851,7 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
         later = [j for j in served if j > i]
         return service_day_instant(run.service_date, served[later[0] if later else max(served)])
 
-    def stand_in_delay(i: int) -> int:
-        nearest = [j for j in served if j < i][-1:] or [j for j in served if j > i][:1]
-        return _predicted_delay(feed, trip.scheduled_sec[nearest[0]], served[nearest[0]])
-
-    def predicted(i: int, at: datetime) -> int:
-        """The delay the feed model predicts served stop *i* (from 0) at, as the run stands at *at*."""
-        if feed.prediction == "propagate_current_delay":
-            left = [j for j, sec in served.items() if service_day_instant(run.service_date, sec) <= at]
-            return served[left[-1]] - trip.scheduled_sec[left[-1]] if left else 0
-        return _predicted_delay(feed, trip.scheduled_sec[i], served[i])
-
-    first = min(trip.scheduled_sec[0], run.served[0])
-    enters = service_day_instant(run.service_date, first) - timedelta(seconds=feed.lead_sec)
-    leaves = service_day_instant(run.service_date, run.served[-1])
+    enters, leaves = _run_window(scenario, run, trip)
 
     def listing(at: datetime) -> tuple[int, tuple[StopEntry, ...]]:
         if feed.arrivals:
@@ -848,13 +860,13 @@ def _run_listing(scenario: Scenario, run: TripRun, trip: ScheduledTrip) -> _InFe
         for i, (stop, actual) in enumerate(zip(stops, run.actual_sec, strict=True)):
             if actual is not None:
                 if service_day_instant(run.service_date, actual) > at:
-                    delay = reported_delay(i + 1, predicted(i, at), at)
+                    delay = reported_delay(i + 1, _predicted_delay(feed, run, trip, i, at), at)
                     entries.append(StopEntry(i + 1, stop.stop_id, delay, SCHEDULED))
             elif passes(i) > at:
                 if announced is None or at >= announced:
                     entries.append(StopEntry(i + 1, stop.stop_id, None, SKIPPED))
                 else:
-                    entries.append(StopEntry(i + 1, stop.stop_id, stand_in_delay(i), SCHEDULED))
+                    entries.append(StopEntry(i + 1, stop.stop_id, _predicted_delay(feed, run, trip, i, at), SCHEDULED))
         return SCHEDULED, tuple(entries)
 
     return _InFeed(trip, run.service_date, enters, leaves, listing)
@@ -964,19 +976,20 @@ def _misreported(scenario: Scenario, runs: dict[tuple[str, date], TripRun], poll
     the misreported delay while the stretch is on, where the feed would
     otherwise have sent another."""
     out = set()
-    for m in scenario.feed.misreports:
+    feed = scenario.feed
+    for m in feed.misreports:
         run = runs[(m.trip_id, m.service_date)]
-        scheduled = scenario.trip(run.trip_id, run.service_date).scheduled_sec
+        trip = scenario.trip(run.trip_id, run.service_date)
         for entry in poll.trips:
             if (entry.trip_id, entry.service_date) != (m.trip_id, m.service_date):
                 continue
             for s in entry.stops:
-                actual = run.actual_sec[s.stop_sequence - 1]
                 carried = (
-                    actual is not None
+                    run.actual_sec[s.stop_sequence - 1] is not None
                     and s.departure_delay == m.delay_sec
                     and m.replaces(s.stop_sequence, poll.captured_at)
-                    and m.delay_sec != _predicted_delay(scenario.feed, scheduled[s.stop_sequence - 1], actual)
+                    and m.delay_sec
+                    != _predicted_delay(feed, run, trip, s.stop_sequence - 1, poll.captured_at - feed.lag)
                 )
                 if carried:
                     out.add(m)
@@ -1217,18 +1230,9 @@ def vehicle_positions(scenario: Scenario, interval_sec: int) -> list[PositionPol
     feed's prediction model and freshness lag do not touch them."""
     if interval_sec <= 0:
         raise ValueError("a sampling interval must be positive")
-    lead = timedelta(seconds=scenario.feed.lead_sec)
-    windows = []
-    for run in scenario.runs:
-        trip = scenario.trip(run.trip_id, run.service_date)
-        first = min(trip.scheduled_sec[0], run.served[0])
-        windows.append(
-            (
-                run,
-                service_day_instant(run.service_date, first) - lead,
-                service_day_instant(run.service_date, run.served[-1]),
-            )
-        )
+    windows = [
+        (run, *_run_window(scenario, run, scenario.trip(run.trip_id, run.service_date))) for run in scenario.runs
+    ]
     if not windows:
         return []
     start = math.ceil(min(enters for _run, enters, _ends in windows).timestamp() / interval_sec) * interval_sec
