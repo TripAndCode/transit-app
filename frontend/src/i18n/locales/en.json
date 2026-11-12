@@ -382,6 +382,13 @@
     "observations_unrecorded_other": "none recorded {{count}} days",
     "observations_separator": ", ",
     "observations_explained": "Archive days hold every poll the collector made that day; live days hold only the part the app received in real time.",
+    "feed_quality": "Feed quality for the whole agency: {{coverage}}. {{clamp}}.",
+    "feed_quality_heading": "Feed quality for the whole agency",
+    "feed_quality_agency": "{{agency}} — {{coverage}}. {{clamp}}",
+    "feed_quality_coverage_missing": "Observation coverage — ({{reason}})",
+    "feed_quality_no_data": "no analyzed observations in the period",
+    "feed_quality_clamp": "Implausible readings {{pct}}%",
+    "feed_quality_clamp_missing": "Implausible readings — (no analyzed observations in the period)",
     "sentence_separator": " "
   },
   "app": {
@@ -1914,7 +1921,7 @@
       "quality_section": "Feed quality by month",
       "quality_scope_note": "Trips reported and implausible readings use the agencies board's definitions.",
       "quality_empty": "No monthly feed-quality figures yet. The next aggregation run builds them.",
-      "quality_through": "{{month}} · counted through {{date}} ({{days}} days)",
+      "quality_through": "{{month}} · {{days}} days · trips and stop events counted through {{date}}",
       "quality_rt": "Trips reported",
       "quality_rt_detail": "{{observed, number}} of {{planned, number}} planned trips",
       "quality_stops": "Stop events",
@@ -1937,6 +1944,7 @@
       "quality_col_clamp": "Implausible",
       "quality_missing": {
         "coverage_unknown": "trip IDs are not the timetable's",
+        "no_plan_observed": "no timetable plans the days observed",
         "no_plan": "no trips planned",
         "no_stop_plan": "stop plan not saved for these days",
         "no_data": "nothing observed",

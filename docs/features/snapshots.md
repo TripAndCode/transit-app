@@ -39,7 +39,7 @@ One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
   - `report`: the response the screen's endpoint
     (`GET /api/{agency_id}/reports/{council_summary|route_table}`) serves,
     once per language, each with its `definition` (`DefinitionMeta`: method
-    version, build time, timetables, ingest sources). Both languages are
+    version, build time, timetables, ingest sources, feed quality). Both languages are
     stored because the server writes the council report's prose. Everything
     but that prose (`text`) and the serving time (`rendered_at`) must match
     between them, or the create answers 409 and stores nothing.

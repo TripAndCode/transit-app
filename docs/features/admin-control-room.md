@@ -131,7 +131,8 @@ and `ridership_weights`; every write additionally records an
 The drawer's 月次フィード品質 section reads `feed_quality_monthly`, which
 analyze keeps per agency and month (`pipeline/feed_quality.py`;
 `DELAY_ANALYSIS.md` defines each figure). It shows the newest month in full,
-with the day it counts through, then the last six months' trips reported,
+with its days and the day its trips and stop events are counted through, then
+the last six months' trips reported,
 stop events, median message age and implausible share, newest first. A
 missing figure prints as a dash with its reason, never as 0. Trips reported
 and the implausible share are the agencies board's own figures over the same

@@ -382,6 +382,13 @@
     "observations_unrecorded_other": "記録なし {{count}}日間",
     "observations_separator": "、",
     "observations_explained": "アーカイブの日は収集サーバーがその日に取得した全データ、ライブの日はアプリがリアルタイムで受け取った一部のデータのみです。",
+    "feed_quality": "フィード品質（事業者全体）：{{coverage}}、{{clamp}}。",
+    "feed_quality_heading": "フィード品質（事業者全体）",
+    "feed_quality_agency": "{{agency}}：{{coverage}}、{{clamp}}",
+    "feed_quality_coverage_missing": "観測カバー率 —（{{reason}}）",
+    "feed_quality_no_data": "期間内の集計済みの観測なし",
+    "feed_quality_clamp": "異常値 {{pct}}%",
+    "feed_quality_clamp_missing": "異常値 —（期間内の集計済みの観測なし）",
     "sentence_separator": ""
   },
   "app": {
@@ -1914,7 +1921,7 @@
       "quality_section": "月次フィード品質",
       "quality_scope_note": "便の充足率と異常値の割合は、事業者ボードと同じ定義です。",
       "quality_empty": "月次のフィード品質はまだありません。次回の集計で作成されます。",
-      "quality_through": "{{month}} · {{date}}まで（{{days}}日分）",
+      "quality_through": "{{month}} · {{days}}日分 · 便と停留所の報告率は{{date}}まで",
       "quality_rt": "便の充足率",
       "quality_rt_detail": "計画 {{planned, number}} 便のうち {{observed, number}} 便",
       "quality_stops": "停留所イベント",
@@ -1937,6 +1944,7 @@
       "quality_col_clamp": "異常値",
       "quality_missing": {
         "coverage_unknown": "便IDが時刻表と対応しない",
+        "no_plan_observed": "観測した日に時刻表の計画なし",
         "no_plan": "計画便なし",
         "no_stop_plan": "この期間の停留所計画が未保存",
         "no_data": "観測なし",

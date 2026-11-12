@@ -649,6 +649,37 @@ the scope as one sentence above their content
   two sources are. On a database not yet migrated to those columns,
   `source_mix` is null and the line is left out rather than failing the
   report.
+- The stamp ends with the period's feed quality for the whole agency
+  (フィード品質), whatever filter narrows the figures beside it. `feed_quality`
+  holds, per agency, the agencies board's observation coverage
+  (`coverage_pct`, `observed_trips` of `coverage_planned_trips`) and clamp share
+  (`clamp_pct`), by the comparability gate's own rules, so a report, the
+  board and the feed-quality scorecard's month agree over the same days: all
+  three end coverage at the newest day any listed agency observed and count
+  the clamp share over the whole period. Beside each are the gate's flags
+  (`coverage_low`, `clamp_high`) and the thresholds they were judged against.
+  - **Missing figures.** A figure that cannot be computed is null beside its
+    reason (`coverage_missing`: `no_data`, `unmatched`, `no_plan`,
+    `no_plan_observed`, `unreadable`; `clamp_missing`: `no_data`), never 0.
+    `no_data` means the aggregates hold no observation in the period, which a
+    live scan beside them can still list before analyze reaches its days.
+  - **Wording.** A flagged figure is worded as the board words its unranked
+    reason.
+  - **Reads.** `stamp_build` reads one agency's figures through
+    `pipeline/reports/network.py: compute_agency_feed_quality`: a probe per
+    listed agency for its newest observed day, the board's service-delivered
+    read for the plan, and `agg_feed_health`. The result is cached as the
+    compute functions are. Beside aggregates it is read after the build check,
+    so a rebuild clears it first; a live scan states the figures too, from that
+    cache, which can trail a rebuild by up to its TTL.
+  - **The council report** states the figures its verdict judges, from the
+    board's cached row, without reading its own (`stamp_build`'s
+    `read_feed_quality=False`), and then leaves out its own quality note. Only
+    without a verdict does it read them the board's way itself.
+  - **Old definitions.** One saved before the stamp carried the figures has no
+    `feed_quality`, and renders without the line. If the read fails, the
+    figures are left out; if only the plan read fails, coverage reads
+    `unreadable`.
 - Every CSV export's preamble ends, right before the column header, with a
   one-cell credit for the open data behind the figures:
   `pipeline/data_sources.py`'s `credit_line` for the agency's `feed_url`, so

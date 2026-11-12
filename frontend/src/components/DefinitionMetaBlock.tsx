@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import type { DefinitionMeta, SourceMix, TimetableVersion } from "../api/types";
+import type { DefinitionMeta, FeedQuality, SourceMix, TimetableVersion } from "../api/types";
 import { PRESET_NAMES } from "../api/onTimeDefault";
 import { toJstISO } from "../api/scope";
-import { formatDate, formatDuration } from "../utils/format";
+import { fixedTenth, formatDate, formatDuration, formatNumber } from "../utils/format";
 
 type Props = {
   definition: DefinitionMeta;
@@ -11,7 +11,8 @@ type Props = {
 
 type BlockProps = Props & {
   /** Each agency's name, for figures that span several agencies, whose
-   *  timetables and sources are then listed under their agency's name. */
+   *  timetables, sources and feed quality are then listed under their
+   *  agency's name. */
   agencyNames?: ReadonlyMap<number, string>;
 };
 
@@ -20,7 +21,8 @@ type BlockProps = Props & {
  *  repeated report is treated, which readings are dropped, what on time means
  *  and, where the figures carry an early-departure rate, what it counts, then
  *  the method version, the day the aggregates were built, the timetables
- *  in force and where each day's observations came from. A reader comparing two agencies or two exports can open it to see
+ *  in force, where each day's observations came from and the period's
+ *  completeness and clamp share. A reader comparing two agencies or two exports can open it to see
  *  they share a definition. Every value comes from the API response's
  *  `definition` field (pipeline/reports/definition.py is the source of
  *  truth); an identifier this build has no words for is shown as the API
@@ -53,8 +55,76 @@ export function DefinitionMetaBlock({ definition, agencyNames }: BlockProps) {
       {definition.source_mix != null && definition.source_mix.length > 0 && (
         <Sources mix={definition.source_mix} agencyNames={agencyNames} />
       )}
+      {definition.feed_quality != null && definition.feed_quality.length > 0 && (
+        <FeedQualityLines quality={definition.feed_quality} agencyNames={agencyNames} />
+      )}
     </details>
   );
+}
+
+/** Each agency's realtime completeness and clamp share over the period, for
+ *  the whole agency, in the agencies board's words: a figure the gate flags
+ *  reads as the board's unranked reason does, plainly, and one it cannot
+ *  compute says why, never 0. One sentence for one agency, and a list under
+ *  each agency's name for several. */
+function FeedQualityLines({ quality, agencyNames }: { quality: FeedQuality[]; agencyNames?: ReadonlyMap<number, string> }) {
+  const { t } = useTranslation();
+  if (quality.length === 1) return <p>{t("definitionMeta.feed_quality", qualityParts(quality[0], t))}</p>;
+  return (
+    <>
+      <p>{t("definitionMeta.feed_quality_heading")}</p>
+      <ul>
+        {quality.map((own) => (
+          <li key={own.agency_id}>
+            {t("definitionMeta.feed_quality_agency", {
+              agency: agencyNames?.get(own.agency_id) ?? String(own.agency_id),
+              ...qualityParts(own, t),
+            })}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** One agency's coverage and clamp share as the feed-quality sentences
+ *  interpolate them. */
+function qualityParts(own: FeedQuality, t: TFunction): { coverage: string; clamp: string } {
+  return { coverage: coverageWords(own, t), clamp: clampWords(own, t) };
+}
+
+function coverageWords(own: FeedQuality, t: TFunction): string {
+  if (own.coverage_pct == null) {
+    const missing = own.coverage_missing ?? "no_data";
+    const reason =
+      missing === "no_data"
+        ? t("definitionMeta.feed_quality_no_data")
+        : t(`network.coverage_unknown_why.${missing}`, { defaultValue: missing });
+    return t("definitionMeta.feed_quality_coverage_missing", { reason });
+  }
+  if (own.coverage_low) {
+    return t("network.unranked_reason.coverage_low", {
+      pct: fixedTenth(own.coverage_pct),
+      min: formatNumber(own.min_coverage_pct),
+    });
+  }
+  if (own.observed_trips == null || own.coverage_planned_trips == null) return t("network.observed_coverage_missing");
+  return t("network.observed_coverage", {
+    pct: fixedTenth(own.coverage_pct),
+    observed: formatNumber(own.observed_trips),
+    planned: formatNumber(own.coverage_planned_trips),
+  });
+}
+
+function clampWords(own: FeedQuality, t: TFunction): string {
+  if (own.clamp_pct == null) return t("definitionMeta.feed_quality_clamp_missing");
+  if (own.clamp_high) {
+    return t("network.unranked_reason.clamp_high", {
+      pct: fixedTenth(own.clamp_pct),
+      max: formatNumber(own.max_clamp_pct),
+    });
+  }
+  return t("definitionMeta.feed_quality_clamp", { pct: fixedTenth(own.clamp_pct) });
 }
 
 /** The days each ingest source supplied the observations on: one sentence for

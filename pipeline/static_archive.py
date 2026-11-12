@@ -323,9 +323,13 @@ def archive_joined_tables() -> list[str]:
 
 def clear_archive_joined_states(conn, agency_id: int) -> None:
     """Clear the states of the agency's tables that read the archive, so its next analyze rebuilds them in full."""
+    clear_states(conn, agency_id, archive_joined_tables())
+
+
+def clear_states(conn, agency_id: int, names: list[str]) -> None:
+    """Clear the states of the agency's tables *names*, so its next analyze rebuilds them in full."""
     from pipeline.locks import agency_ingest_lock
 
-    names = archive_joined_tables()
     # Under the agency lock: an analyze in flight would otherwise record these
     # states again at its end, as built, and the rebuild would be lost. Within
     # analyze itself the lock is the session's own, taken again.

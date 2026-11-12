@@ -449,6 +449,7 @@ export type AgencyWeight = { route_code: string | null; weight: number };
 /** Why a scorecard figure is null (pipeline/feed_quality.py's `Missing`). */
 export type FeedQualityMissing =
   | "coverage_unknown"
+  | "no_plan_observed"
   | "no_plan"
   | "no_stop_plan"
   | "no_data"

@@ -26,6 +26,7 @@ from pipeline.reports.definition import (
     METHODOLOGY_URLS,
     VALUE_BASIS,
     DefinitionMeta,
+    FeedQuality,
     SourceMix,
     TimetableVersion,
     format_definition_csv_line,
@@ -669,6 +670,132 @@ def test_a_scope_with_no_agency_names_no_source(locale, line):
 def test_a_definition_no_router_stamped_names_no_source():
     assert "観測データ" not in format_definition_csv_line(_DATED)
     assert not any(line.startswith("Observations") for line in format_stamp_lines(_DATED, "en"))
+
+
+# The period's realtime completeness and clamp share, as the agencies board reads them.
+
+
+def _quality(**over) -> FeedQuality:
+    figures = {
+        "agency_id": 1,
+        "coverage_pct": 93.2,
+        "observed_trips": 11500,
+        "coverage_planned_trips": 12345,
+        "coverage_missing": None,
+        "coverage_low": False,
+        "clamp_pct": 0.42,
+        "clamp_missing": None,
+        "clamp_high": False,
+        "min_coverage_pct": 70.0,
+        "max_clamp_pct": 5.0,
+    }
+    return FeedQuality(**{**figures, **over})
+
+
+_STAMPED = _DATED.model_copy(update={"timetable_versions": _TIMETABLES, "source_mix": _SOURCE_MIX})
+
+
+@pytest.mark.parametrize(
+    ("locale", "line"),
+    [
+        ("ja", "フィード品質（事業者全体）: 観測カバー率 93.2%（計画12,345便中11,500便）、異常値 0.4%"),
+        (
+            "en",
+            "Feed quality (whole agency): observation coverage 93.2% (11,500 of 12,345 planned trips), "
+            "implausible readings 0.4%",
+        ),
+    ],
+)
+def test_the_stamp_ends_with_the_periods_completeness_and_clamp_share(locale, line):
+    """Every document the stamp footnotes, the council report and the delay
+    record among them, states both figures, after where the observations
+    came from."""
+    lines = format_stamp_lines(_STAMPED.model_copy(update={"feed_quality": [_quality()]}), locale)
+    assert lines[:-1] == format_stamp_lines(_STAMPED, locale)
+    assert lines[-1] == line
+    footnotes = format_definition_footnotes(_STAMPED.model_copy(update={"feed_quality": [_quality()]}), locale)
+    assert footnotes[-1] == line
+
+
+def test_csv_line_ends_with_the_periods_completeness_and_clamp_share_in_one_cell():
+    line = format_definition_csv_line(_STAMPED.model_copy(update={"feed_quality": [_quality()]}))
+    assert line == format_definition_csv_line(_STAMPED) + (
+        "; フィード品質（事業者全体）=観測カバー率 93.2%（計画12345便中11500便）、異常値 0.4%"
+    )
+    assert "," not in line
+
+
+@pytest.mark.parametrize(
+    ("locale", "line"),
+    [
+        ("ja", "フィード品質（事業者全体）: 観測カバー率 65.0%（70%未満）、異常値 6.3%（5%超）"),
+        (
+            "en",
+            "Feed quality (whole agency): observation coverage 65.0% (below 70%), implausible readings 6.3% (above 5%)",
+        ),
+    ],
+)
+def test_a_figure_the_gate_flags_is_stated_in_the_gates_own_words(locale, line):
+    """The clamp share prints to a tenth with ties away from zero, as the
+    board prints it, so 6.25 reads 6.3."""
+    flagged = _quality(coverage_pct=65.0, coverage_low=True, clamp_pct=6.25, clamp_high=True)
+    assert format_stamp_lines(_DATED.model_copy(update={"feed_quality": [flagged]}), locale)[-1] == line
+
+
+@pytest.mark.parametrize(
+    ("reason", "ja", "en"),
+    [
+        ("no_data", "期間内の集計済みの観測なし", "no analyzed observations in the period"),
+        ("unreadable", "計画を読み込めませんでした", "the plan could not be read"),
+        (
+            "unmatched",
+            "この配信の便は時刻表の便と照合できません",
+            "this feed's trips can't be matched to the timetable",
+        ),
+        ("no_plan", "期間に時刻表の計画なし", "no timetable plans this period"),
+        ("no_plan_observed", "観測した日に時刻表の計画なし", "no timetable plans the days observed"),
+    ],
+)
+def test_a_figure_that_cannot_be_computed_says_why_and_never_reads_0(reason, ja, en):
+    missing = _quality(coverage_pct=None, observed_trips=None, coverage_planned_trips=None, coverage_missing=reason)
+    meta = _DATED.model_copy(update={"feed_quality": [missing]})
+    assert format_stamp_lines(meta, "ja")[-1] == f"フィード品質（事業者全体）: 観測カバー率 —（{ja}）、異常値 0.4%"
+    assert format_stamp_lines(meta, "en")[-1] == (
+        f"Feed quality (whole agency): observation coverage — ({en}), implausible readings 0.4%"
+    )
+    assert format_definition_csv_line(meta).endswith(
+        f"; フィード品質（事業者全体）=観測カバー率 —（{ja}）、異常値 0.4%"
+    )
+
+
+def test_a_clamp_share_with_no_reading_says_so():
+    meta = _DATED.model_copy(update={"feed_quality": [_quality(clamp_pct=None, clamp_missing="no_data")]})
+    assert format_stamp_lines(meta, "ja")[-1].endswith("、異常値 —（期間内の集計済みの観測なし）")
+    assert format_stamp_lines(meta, "en")[-1].endswith(
+        ", implausible readings — (no analyzed observations in the period)"
+    )
+
+
+def test_several_agencies_figures_are_each_named_by_their_agency():
+    meta = _DATED.model_copy(update={"feed_quality": [_quality(), _quality(agency_id=2, clamp_pct=0.0)]})
+    assert format_stamp_lines(meta, "ja")[-1] == (
+        "フィード品質（事業者全体）: 事業者1：観測カバー率 93.2%（計画12,345便中11,500便）、異常値 0.4%"
+        "／事業者2：観測カバー率 93.2%（計画12,345便中11,500便）、異常値 0.0%"
+    )
+    assert format_stamp_lines(meta, "en")[-1] == (
+        "Feed quality (whole agency): agency 1: observation coverage 93.2% (11,500 of 12,345 planned trips), "
+        "implausible readings 0.4%; agency 2: observation coverage 93.2% (11,500 of 12,345 planned trips), "
+        "implausible readings 0.0%"
+    )
+    assert "," not in format_definition_csv_line(meta)
+
+
+def test_a_definition_without_the_figures_states_none():
+    """A stamp saved before the figures were stamped, or made with no router,
+    reads as it always did."""
+    assert "フィード品質" not in format_definition_csv_line(_STAMPED)
+    assert not any(line.startswith("Feed quality") for line in format_stamp_lines(_STAMPED, "en"))
+    assert DefinitionMeta.model_validate(_STAMPED.model_dump(exclude={"feed_quality"})).feed_quality is None
 
 
 def test_cached_rows_are_forgotten_whenever_the_builds_move(monkeypatch):

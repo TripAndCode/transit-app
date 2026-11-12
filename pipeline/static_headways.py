@@ -33,6 +33,29 @@ def _version() -> int:
     return agg_registry.TABLES["agg_route_headway"].version
 
 
+def kept_headway_readers() -> list[str]:
+    """The tables built from the kept headways (agg_registry.ArchivedInput.MEDIANS): kept again, a
+    timetable's headways reach their built rows only once these rebuild."""
+    from pipeline import agg_registry
+
+    return [
+        name
+        for name, table in agg_registry.TABLES.items()
+        if table.archived_input is agg_registry.ArchivedInput.MEDIANS
+    ]
+
+
+def current_contents(conn, agency_id: int) -> set[str]:
+    """The agency's contents whose headways are kept at the current version, which record_route_headways
+    records no more."""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"SELECT DISTINCT content_hash FROM {TABLE} WHERE agency_id = %s AND logic_version = %s",
+            (agency_id, _version()),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
 def record_route_headways(conn, agency_id: int, key: str, parts: list[str]) -> int:
     """Record the loaded timetable's headways under *key* unless they are kept at
     the current version; the rows inserted. Nothing is recorded when the

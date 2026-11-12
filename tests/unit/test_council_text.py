@@ -9,7 +9,7 @@ import pytest
 
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.query.formatter import format_council_summary_footnotes, format_council_summary_text
-from pipeline.reports.definition import resolve_definition_meta
+from pipeline.reports.definition import FeedQuality, resolve_definition_meta
 from pipeline.reports.service_delivered import DeliveredMissing
 
 _DEFINITION = resolve_definition_meta("council_summary", None, None)
@@ -427,3 +427,53 @@ def test_the_report_is_footnoted_with_the_method_version_and_the_build_day(local
 
     assert dated in lines(built)
     assert live in lines(scanned)
+
+
+_STAMPED_QUALITY = FeedQuality(
+    agency_id=1,
+    coverage_pct=90.0,
+    observed_trips=900,
+    coverage_planned_trips=1000,
+    coverage_missing=None,
+    coverage_low=False,
+    clamp_pct=1.5,
+    clamp_missing=None,
+    clamp_high=False,
+    min_coverage_pct=70.0,
+    max_clamp_pct=5.0,
+)
+
+
+@pytest.mark.parametrize(
+    ("locale", "stamped", "caveat"),
+    [
+        (
+            "ja",
+            "※フィード品質（事業者全体）: 観測カバー率 90.0%（計画1,000便中900便）、異常値 1.5%",
+            "※データ品質: 観測値の1.5%が異常値として除外されています。",
+        ),
+        (
+            "en",
+            "* Feed quality (whole agency): observation coverage 90.0% (900 of 1,000 planned trips), "
+            "implausible readings 1.5%",
+            "* Data quality: 1.5% of observations were excluded as implausible.",
+        ),
+    ],
+)
+def test_a_stamped_report_states_its_clamp_share_once(locale, stamped, caveat):
+    """The stamp's line states the period's clamp share beside its coverage, so
+    the report's own quality note would print the same share a second time; a
+    definition stamped without the figures keeps the note."""
+    definition = _DEFINITION.model_copy(update={"feed_quality": [_STAMPED_QUALITY]})
+
+    def lines(definition):
+        payload = _payload(clamp_pct=1.5)
+        return format_council_summary_text(payload, definition, "青森市バス", "2026-08-12", "2026-09-10", locale).split(
+            "\n"
+        )
+
+    assert stamped in lines(definition)
+    assert caveat not in lines(definition)
+    assert caveat in lines(_DEFINITION)
+    unavailable = format_council_summary_footnotes(definition, _payload(clamp_pct=None), locale)
+    assert not any(line.startswith(("データ品質", "Data quality")) for line in unavailable)

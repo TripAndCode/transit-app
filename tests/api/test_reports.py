@@ -12,8 +12,11 @@ from pipeline.reports.definition import METHODOLOGY_URLS
 from pipeline.reports.network import invalidate_network_summary
 from pipeline.reports.rankings import on_time_window
 from tests.api.test_network import (
+    _seed,
     _seed_gated_agency,
+    _seed_observed_trips,
     _seed_route_dist,
+    _seed_saved_plan,
     _seed_service_delivered_daily,
     _seed_static_schedule,
     _seed_two_day_agency,
@@ -449,7 +452,11 @@ _SOURCE_NOTE = (
 _BASIS_NOTE = "※値の根拠: 事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）"
 _METHODOLOGY_NOTE = f"※算出方法の説明: {METHODOLOGY_URLS['ja']}"
 _LIVE_STAMP = f"※算出方法: {METHOD_VERSION}、集計日: 対象外（ライブ集計）"
-# The stamp of a one-day delay record with no timetable or source recorded for its day.
+# The feed quality of a day analyze has not reached: the figures read the
+# aggregates, which hold no observation of it yet.
+_UNANALYZED_QUALITY = "観測カバー率 —（期間内の集計済みの観測なし）、異常値 —（期間内の集計済みの観測なし）"
+# The stamp of a one-day delay record with no timetable, source or analyzed
+# observation recorded for its day.
 _CERT_STAMP = "\n".join(
     [
         _BASIS_NOTE,
@@ -457,6 +464,7 @@ _CERT_STAMP = "\n".join(
         _LIVE_STAMP,
         "※時刻表: 記録なし 1日間（全1日間）",
         "※観測データ: 記録なし 1日間（全1日間）",
+        f"※フィード品質（事業者全体）: {_UNANALYZED_QUALITY}",
     ]
 )
 
@@ -608,6 +616,7 @@ async def test_a_report_names_where_each_of_its_days_observations_came_from(repo
     assert definition["source_mix"] == [{"agency_id": agency_id, "archive_days": 2, "live_days": 1, "none_days": 4}]
     assert _preamble(await client.get(f"{url}&format=csv")).endswith(
         f"; 観測データ=アーカイブ 2日間、ライブ 1日間、記録なし 4日間（全7日間）。{_SOURCE_NOTE}"
+        f"; フィード品質（事業者全体）={_UNANALYZED_QUALITY}"
     )
 
 
@@ -646,6 +655,8 @@ async def test_a_database_without_the_source_counts_still_serves_the_report(repo
         ]
         assert _preamble(await client.get(f"{url}&format=csv")).endswith(
             "; 時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）"
+            "; フィード品質（事業者全体）=観測カバー率 —（この配信の便は時刻表の便と照合できません）"
+            "、異常値 —（期間内の集計済みの観測なし）"
         )
     finally:
         await pool.execute(_ADD_SOURCE_COLUMNS)
@@ -846,6 +857,7 @@ async def test_a_time_band_scans_live_and_names_no_build_day(reports_client, ch_
     assert _preamble(await client.get(f"{url}&format=csv")).endswith(
         f"; 算出方法={METHOD_VERSION}; 集計日=対象外（ライブ集計）; "
         "時刻表=gtfs_static_20260401（2026-04-01取得）1日間（全1日間）; 観測データ=記録なし 1日間（全1日間）"
+        f"; フィード品質（事業者全体）={_UNANALYZED_QUALITY}"
     )
     if report_type == "council_summary":
         assert _LIVE_STAMP in body["text"].split("\n")
@@ -3116,7 +3128,8 @@ async def test_council_summary_says_delivered_figures_stay_agency_wide_under_a_r
     assert "事業者全体の値です" in body["text"]
 
     unfiltered = (await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}")).json()
-    assert "事業者全体" not in unfiltered["text"]
+    assert "運行率 75.0%（事業者全体）" not in unfiltered["text"]
+    assert "事業者全体の値です" not in unfiltered["text"]
     assert unfiltered["delivered_scope_applied"] == delivered_scope
 
     csv_resp = await client.get(f"/api/{agency_id}/reports/council_summary?from={day}&to={day}&routes=R1&format=csv")
@@ -3378,7 +3391,7 @@ async def test_council_summary_stands_without_a_verdict_when_the_board_cannot_be
     assert body["rows"][0][2] == _DENSE["samples"]
     lines = body["text"].split("\n")
     assert not any(line.startswith("※他事業者との比較") for line in lines)
-    assert "※データ品質: 観測値の1.5%が異常値として除外されています。" in lines
+    assert "※フィード品質（事業者全体）: 観測カバー率 90.0%（計画1,000便中900便）、異常値 1.5%" in lines
 
     csv_resp = await client.get(_council_url(agency_id, extra="&format=csv"))
     assert csv_resp.status_code == 200
@@ -3462,6 +3475,216 @@ async def test_council_summary_judges_the_whole_agency_whatever_narrows_its_on_t
     same_definition = "他事業者との比較は、ここで指定した定時の幅ではなく、どの事業者にも共通の定時の定義で判定"
     assert same_definition in tolerance["text"]
     assert same_definition not in unfiltered["text"]
+
+
+# The definition stamp's feed-quality figures: the period's completeness and
+# clamp share, as the agencies board reads them.
+
+_QUALITY_PASS = {
+    "coverage_missing": None,
+    "coverage_low": False,
+    "clamp_missing": None,
+    "clamp_high": False,
+    "min_coverage_pct": 70.0,
+    "max_clamp_pct": 5.0,
+}
+
+
+def _board_quality(row):
+    """The stamp's figures for an agency, as its board row prints them."""
+    return {
+        "agency_id": row["agency_id"],
+        "coverage_pct": row["coverage_pct"],
+        "observed_trips": row["observed_trips"],
+        "coverage_planned_trips": row["coverage_planned_trips"],
+        "clamp_pct": row["clamp_pct"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_reports_stamp_states_the_coverage_and_clamp_share_the_board_reads(reports_client):
+    """Coverage stops where the board stops it, at the newest day any agency
+    has observations for, so another agency's later day counts this agency's
+    missing one against it in the stamp as on the board. The board's own stamp
+    states every agency's figures from its rows."""
+    client, agency_id, pool = reports_client
+    await _seed_two_day_agency(pool, agency_id, name="Behind", observed_days=["2026-04-01"])
+    other = await _add_agency(pool, "Current")
+    await _seed_two_day_agency(pool, other, name="Current", observed_days=["2026-04-01", "2026-04-02"])
+    params = {"from": "2026-04-01", "to": "2026-04-02"}
+    board = (await client.get("/api/network/summary", params=params)).json()
+    rows = {r["agency_id"]: r for r in board["agencies"]}
+    assert (rows[agency_id]["coverage_pct"], rows[agency_id]["comparable_reason"]) == (45.0, "coverage_low")
+
+    url = f"/api/{agency_id}/reports/ranking?from=2026-04-01&to=2026-04-02"
+    quality = (await client.get(url)).json()["definition"]["feed_quality"]
+    assert quality == [{**_board_quality(rows[agency_id]), **_QUALITY_PASS, "coverage_low": True}]
+    assert [q for q in board["definition"]["feed_quality"] if q["agency_id"] == agency_id] == quality
+    assert [q["agency_id"] for q in board["definition"]["feed_quality"]] == sorted(rows)
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        "; フィード品質（事業者全体）=観測カバー率 45.0%（70%未満）、異常値 0.0%"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reports_stamp_flags_a_high_clamp_share_in_the_gates_words(reports_client):
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Noisy", strategy="static_join", delay_min=1, clamp=2000, **_DENSE)
+    url = f"/api/{agency_id}/reports/on_time?from={_GATE_DAY}&to={_GATE_DAY}"
+
+    quality = (await client.get(url)).json()["definition"]["feed_quality"]
+    assert quality == [
+        {
+            "agency_id": agency_id,
+            "coverage_pct": 90.0,
+            "observed_trips": 900,
+            "coverage_planned_trips": 1000,
+            "clamp_pct": 10.0,
+            **_QUALITY_PASS,
+            "clamp_high": True,
+        }
+    ]
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(
+        "; フィード品質（事業者全体）=観測カバー率 90.0%（計画1000便中900便）、異常値 10.0%（5%超）"
+    )
+
+
+async def _seed_unplanned(pool, aid):
+    """Dense observations on the gate's day, which no timetable plans."""
+    await _set_ingest_strategy(pool, aid, "static_join")
+    await _seed_observed_trips(pool, aid, [(_GATE_DAY, 900)])
+    await _seed(pool, aid, dist=[(_GATE_DAY, 20000, 20000 * 60, 18000)], feed=(_GATE_DAY, 20000, 0))
+
+
+async def _seed_unmatched(pool, aid):
+    await _seed_gated_agency(pool, aid, name="Regex", strategy="aomori_regex", delay_min=1, **_DENSE)
+
+
+async def _seed_unobserved(pool, aid):
+    """A plan for the gate's day, and nothing the feed reported."""
+    await _set_ingest_strategy(pool, aid, "static_join")
+    await _seed_saved_plan(pool, aid, [(_GATE_DAY, 1000)])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("seed", "coverage_missing", "clamp_pct", "words"),
+    [
+        (_seed_unplanned, "no_plan", 0.0, "観測カバー率 —（期間に時刻表の計画なし）、異常値 0.0%"),
+        (_seed_unmatched, "unmatched", 0.0, "観測カバー率 —（この配信の便は時刻表の便と照合できません）、異常値 0.0%"),
+        (
+            _seed_unobserved,
+            "no_data",
+            None,
+            "観測カバー率 —（期間内の集計済みの観測なし）、異常値 —（期間内の集計済みの観測なし）",
+        ),
+    ],
+    ids=["no-plan", "unmatched", "unobserved"],
+)
+async def test_a_reports_stamp_gives_the_reason_a_figure_cannot_be_computed(
+    reports_client, seed, coverage_missing, clamp_pct, words
+):
+    """Never 0 or a guess: a figure that cannot be computed is empty beside
+    the board's reason, and an agency with a plan but no observation reads no
+    data, as the gate's first check does, not 0%."""
+    client, agency_id, pool = reports_client
+    await seed(pool, agency_id)
+    url = f"/api/{agency_id}/reports/ranking?from={_GATE_DAY}&to={_GATE_DAY}"
+
+    [quality] = (await client.get(url)).json()["definition"]["feed_quality"]
+    assert (quality["coverage_pct"], quality["coverage_missing"], quality["coverage_low"]) == (
+        None,
+        coverage_missing,
+        False,
+    )
+    assert (quality["observed_trips"], quality["coverage_planned_trips"]) == (None, None)
+    assert (quality["clamp_pct"], quality["clamp_missing"]) == (clamp_pct, None if clamp_pct is not None else "no_data")
+    assert _preamble(await client.get(f"{url}&format=csv")).endswith(f"; フィード品質（事業者全体）={words}")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_plan_read_says_the_plan_could_not_be_read(reports_client, monkeypatch):
+    """As on the board, a failure reading the plan leaves the stamp's coverage
+    unreadable and the rest of the report standing."""
+    from pipeline.reports import network
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("simulated failure reading the plan")
+
+    monkeypatch.setattr(network, "compute_service_delivered_by_agency", broken)
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={_GATE_DAY}&to={_GATE_DAY}")
+    assert resp.status_code == 200
+    [quality] = resp.json()["definition"]["feed_quality"]
+    assert (quality["coverage_pct"], quality["coverage_missing"], quality["clamp_pct"]) == (None, "unreadable", 0.0)
+
+
+@pytest.mark.asyncio
+async def test_a_council_report_states_the_figures_its_verdict_reads_once(reports_client):
+    """The council's stamp states the board's cached figures, the ones its
+    verdict judges, so a change the cached board has not picked up yet never
+    leaves the document with two coverages, and its own quality note gives
+    way to the stamp's line."""
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, clamp=300, **_DENSE)
+    await client.get("/api/network/summary", params={"from": _GATE_DAY, "to": _GATE_DAY})
+    await pool.execute("UPDATE agg_route_daily SET trips_observed = 400 WHERE agency_id = $1", agency_id)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"]["coverage_pct"] == 90.0
+    assert body["definition"]["feed_quality"] == [
+        {
+            "agency_id": agency_id,
+            "coverage_pct": 90.0,
+            "observed_trips": 900,
+            "coverage_planned_trips": 1000,
+            "clamp_pct": 1.5,
+            **_QUALITY_PASS,
+        }
+    ]
+    lines = body["text"].split("\n")
+    assert "※フィード品質（事業者全体）: 観測カバー率 90.0%（計画1,000便中900便）、異常値 1.5%" in lines
+    assert not any(line.startswith("※データ品質") for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_a_council_report_with_a_verdict_reads_no_figures_of_its_own(reports_client, monkeypatch):
+    """The verdict's board row already holds the figures, so the council
+    report never pays for a read it would discard; another report reads them,
+    and a council report without a verdict reads its own."""
+    from api.routers import reports as reports_router
+    from pipeline.reports import council, network
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+    reads = []
+    read = network.compute_agency_feed_quality
+
+    async def recorded(conn, aid, from_date, to_date):
+        reads.append(aid)
+        return await read(conn, aid, from_date, to_date)
+
+    monkeypatch.setattr(network, "compute_agency_feed_quality", recorded)
+    monkeypatch.setattr(reports_router, "compute_agency_feed_quality", recorded)
+
+    body = (await client.get(_council_url(agency_id))).json()
+    assert body["comparability"] is not None
+    assert body["definition"]["feed_quality"][0]["coverage_pct"] == 90.0
+    assert reads == []
+
+    await client.get(f"/api/{agency_id}/reports/on_time?from={_GATE_DAY}&to={_GATE_DAY}")
+    assert reads == [agency_id]
+
+    async def broken_board(*args, **kwargs):
+        raise RuntimeError("simulated failure building the board")
+
+    monkeypatch.setattr(council, "compute_network_summary", broken_board)
+    body = (await client.get(_council_url(agency_id, extra="&routes=R1"))).json()
+    assert body["comparability"] is None
+    assert body["definition"]["feed_quality"][0]["coverage_pct"] == 90.0
+    assert reads == [agency_id, agency_id]
 
 
 @pytest.mark.asyncio

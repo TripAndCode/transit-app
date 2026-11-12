@@ -22,8 +22,9 @@ judges the figures, so no caller can judge a figure the gate would not print.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from pipeline.reports.definition import resolve_definition_meta
 from pipeline.reports.rankings import DEFAULT_PRESET, ON_TIME_PRESETS
@@ -93,9 +94,7 @@ def assess(
     (:func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`);
     ``on_time_count`` of ``samples`` the stop events on time and observed.
     """
-    matchable = trips_matchable(ingest_strategy)
-    observed = observed_trips if matchable else None
-    planned = coverage_planned_trips if matchable else None
+    observed, planned = matched_trips(ingest_strategy, observed_trips, coverage_planned_trips)
     coverage = coverage_pct(observed, planned)
     ci_low, ci_high = _on_time_interval(on_time_count, samples, observed)
     reason = _first_failure(coverage_pct=coverage, ci_low=ci_low, ci_high=ci_high, clamp_pct=clamp_pct, samples=samples)
@@ -114,6 +113,34 @@ def trips_matchable(ingest_strategy: str | None) -> bool:
     """Whether the strategy's trip_ids are the timetable's, so what its feed
     reported can be counted against what the timetable planned."""
     return ingest_strategy in COMPARABLE_INGEST_STRATEGIES
+
+
+def matched_trips(
+    ingest_strategy: str | None, observed_trips: int | None, planned_trips: int | None
+) -> tuple[int | None, int | None]:
+    """*observed_trips* of *planned_trips*, or neither for a strategy whose
+    trips cannot be matched to the timetable (:func:`trips_matchable`), so
+    nothing downstream can count them."""
+    if trips_matchable(ingest_strategy):
+        return observed_trips, planned_trips
+    return None, None
+
+
+def coverage_unknown_why(
+    figures: Mapping[str, Any],
+) -> Literal["unreadable", "unmatched", "no_plan", "no_plan_observed"]:
+    """Why an agency's observation coverage cannot be measured, read as the
+    board reads it, from a row's own plan figures only, so one reason comes
+    from one read. A failed read nulls the planned count too, so it is told
+    apart first. Otherwise a null coverage plan (the plan through the coverage
+    bound) is ``unmatched``, a feed whose trip_ids aren't the timetable's; a
+    zero coverage plan beside a nonzero whole-period plan is
+    ``no_plan_observed``; and zero for both is ``no_plan``."""
+    if figures.get("delivered_missing") == "unreadable":
+        return "unreadable"
+    if figures.get("coverage_planned_trips") is None:
+        return "unmatched"
+    return "no_plan_observed" if figures.get("planned_trips") else "no_plan"
 
 
 def coverage_pct(observed: int | None, planned: int | None) -> float | None:
@@ -182,6 +209,20 @@ def ci_half_width_as_printed(ci_low: float, ci_high: float) -> float:
     return math.ceil(round((ci_high - ci_low) / 2 * 1000) / 100) / 10
 
 
+def coverage_is_low(coverage_pct: float) -> bool:
+    """Whether observation coverage, a one-decimal figure as printed, falls
+    short of :data:`MIN_COVERAGE_PCT`: the gate's ``coverage_low`` check, and
+    the flag the definition stamp states beside the figure."""
+    return coverage_pct < MIN_COVERAGE_PCT
+
+
+def clamp_is_high(clamp_pct: float) -> bool:
+    """Whether the clamp share, as printed to a tenth, exceeds
+    :data:`MAX_CLAMP_PCT`: the gate's ``clamp_high`` check, and the flag the
+    definition stamp states beside the figure."""
+    return tenth_as_printed(clamp_pct) > MAX_CLAMP_PCT
+
+
 def _first_failure(
     *,
     coverage_pct: float | None,
@@ -202,12 +243,12 @@ def _first_failure(
         return "no_data"
     if coverage_pct is None:
         return "coverage_unknown"
-    if coverage_pct < MIN_COVERAGE_PCT:
+    if coverage_is_low(coverage_pct):
         return "coverage_low"
     # Rounded as a reader would round the two printed bounds' difference, so
     # binary noise in the subtraction never flips a boundary case.
     if ci_low is None or ci_high is None or round((ci_high - ci_low) / 2, 2) > MAX_CI_HALF_WIDTH_PP:
         return "ci_wide"
-    if clamp_pct is not None and tenth_as_printed(clamp_pct) > MAX_CLAMP_PCT:
+    if clamp_pct is not None and clamp_is_high(clamp_pct):
         return "clamp_high"
     return None

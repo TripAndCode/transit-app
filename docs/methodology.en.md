@@ -63,7 +63,7 @@ A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) 
   - the trip's status (the trip's `schedule_relationship`);
   - the stop's status (the stop's `schedule_relationship`).
 
-A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. No pass or fail threshold is set for any of them yet. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
+A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. No pass or fail threshold is set for any of them yet. Trips reported and the implausible share are also stated in every figure's [definition stamp](#definition-stamp), over that figure's own period. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
 
 ## Processing
 
@@ -245,7 +245,8 @@ Figures shown or exported in the places listed below carry:
 - the value basis: feed prediction;
 - the method version, and the day the aggregates were built, or "live scan" for figures scanned directly from the observations;
 - the timetable versions in force over the period, with their days and content hashes;
-- where the observations came from: days from the archive and days from the live path.
+- where the observations came from: days from the archive and days from the live path;
+- the feed's quality: the whole agency's observation coverage over the period (the coverage in the [Comparability conditions](#comparability-conditions)) and the share of implausible values dropped. A figure short of a comparability threshold says so in the words the agencies board uses; a figure that cannot be computed is never shown as 0 and gives its reason (no analyzed observations, trips that cannot be matched, no plan, or a plan that could not be read).
 
 The stamp appears in the places below. The CSV preambles and the footnotes also give this document's URL.
 
@@ -349,10 +350,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.10`. Newest first, each version with the inputs it set.
+The current method is `2026.11.11`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.11` | `feed_quality_monthly` 3 → 4 |
 | `2026.11.10` | `agg_route_headway` 2 → 3, `agg_route_headway_daily` 3 → 4 |
 | `2026.11.9` | `agg_route_headway` 1 → 2 |
 | `2026.11.8` | `feed_quality_monthly` 2 → 3 |
