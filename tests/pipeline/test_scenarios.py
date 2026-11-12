@@ -559,14 +559,8 @@ def frozen_feed(day: date) -> Scenario:
     )
 
 
-# The dwell scenario's trips: each stop's (arrival, departure), scheduled,
-# then as each run reached and left it. The feed is polled on the minute, so
-# a run standing at a stop through two polls or more has its departure
-# reported after its arrival; through one, its arrival only, the departure
-# standing from the predictions before; through none, its departure only.
-# A prediction made before the run reaches a stop assumes the planned dwell,
-# so every stop whose departure is not reported after its arrival keeps its
-# planned dwell, and its prediction is its departure's true delay.
+# The dwell scenario's trips: each stop's (arrival, departure), planned, then
+# as each run reached and left it. The feed is polled on the minute.
 _DWELL_LINE_A = (
     ("06:55:00", "07:00:00"),
     ("07:03:00", "07:03:30"),
@@ -627,21 +621,6 @@ _UNPAIRED_RUN = (
 )
 
 
-def _timed(route: Route, trip_id: str, stops: tuple[tuple[str, str], ...]) -> ScheduledTrip:
-    """A weekday trip of *route* planned to reach and leave each stop at *stops*' clocks."""
-    return ScheduledTrip(trip_id, route.route_id, "平日", tuple(d for _a, d in stops), tuple(a for a, _d in stops))
-
-
-def _timed_run(trip: ScheduledTrip, day: date, stops: tuple[tuple[str, str], ...]) -> TripRun:
-    """A run of *trip* on *day* that reached and left each stop at *stops*' clocks."""
-    return TripRun(
-        trip.trip_id,
-        day,
-        tuple(gtfs_seconds(d) for _a, d in stops),
-        arrival_sec=tuple(gtfs_seconds(a) for a, _d in stops),
-    )
-
-
 def dwell(day: date) -> Scenario:
     """Three lines on one weekday whose feed reports arrivals as well as
     departures, each in its own stop update, and each run's last stop only
@@ -664,17 +643,17 @@ def dwell(day: date) -> Scenario:
     late = _route("D2", "Late line", 4, 34.59)
     unpaired = _route("D3", "Unpaired line", 4, 34.61)
     trips_and_runs = (
-        (_timed(line, "D1_a", _DWELL_LINE_A), _DWELL_RUN_A),
-        (_timed(line, "D1_b", _DWELL_LINE_B), _DWELL_RUN_B),
-        (_timed(late, "D2_a", _LATE_LINE), _LATE_RUN),
-        (_timed(unpaired, "D3_a", _UNPAIRED_LINE), _UNPAIRED_RUN),
+        (ScheduledTrip.from_clocks("D1_a", line.route_id, "平日", _DWELL_LINE_A), _DWELL_RUN_A),
+        (ScheduledTrip.from_clocks("D1_b", line.route_id, "平日", _DWELL_LINE_B), _DWELL_RUN_B),
+        (ScheduledTrip.from_clocks("D2_a", late.route_id, "平日", _LATE_LINE), _LATE_RUN),
+        (ScheduledTrip.from_clocks("D3_a", unpaired.route_id, "平日", _UNPAIRED_LINE), _UNPAIRED_RUN),
     )
     return Scenario(
         name="dwell",
         routes=(line, late, unpaired),
         timetable=tuple(trip for trip, _run in trips_and_runs),
         days=(ServiceDay(day, "平日"),),
-        runs=tuple(_timed_run(trip, day, run) for trip, run in trips_and_runs),
+        runs=tuple(TripRun.from_clocks(trip, day, run) for trip, run in trips_and_runs),
         feed=FeedModel(poll_interval_sec=60, lead_sec=300, arrivals=True),
     )
 

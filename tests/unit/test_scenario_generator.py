@@ -784,9 +784,9 @@ def test_the_scorecard_keeps_a_month_per_service_month_and_files_an_after_midnig
 
 
 def test_a_feed_that_reports_no_arrival_sends_none_and_pairs_no_visit():
-    """Every scenario feed before arrivals keeps its wire bytes: no update
-    carries an arrival, and the timetable plans no dwell. Its visits have
-    departures only, so a route-day holds no dwell or running sample."""
+    """A feed that does not report arrivals sends none, and its timetable
+    plans no dwell. Its visits have departures only, so a route-day holds no
+    dwell or running sample."""
     scenario = _scenario()
     for poll in polls(scenario):
         assert all(e.arrival_delay is None for t in poll.trips for e in t.stops)
@@ -812,20 +812,13 @@ def _quay(
     plan: tuple[tuple[str, str], ...] = _QUAY_PLAN,
     feed: FeedModel | None = None,
 ) -> Scenario:
-    trip = ScheduledTrip("Q_0700", "Q", "平日", tuple(d for _a, d in plan), tuple(a for a, _d in plan))
+    trip = ScheduledTrip.from_clocks("Q_0700", "Q", "平日", plan)
     return Scenario(
         name="quay",
         routes=(_QUAY_ROUTE,),
         timetable=(trip,),
         days=(ServiceDay(DAY, "平日"),),
-        runs=(
-            TripRun(
-                "Q_0700",
-                DAY,
-                tuple(gtfs_seconds(d) for _a, d in run),
-                arrival_sec=tuple(gtfs_seconds(a) for a, _d in run),
-            ),
-        ),
+        runs=(TripRun.from_clocks(trip, DAY, run),),
         feed=feed or FeedModel(arrivals=True),
     )
 
@@ -898,15 +891,10 @@ def test_a_departure_reported_only_before_its_arrival_must_have_been_predicted_t
 def _late(arrival: str) -> Scenario:
     """A run two hours late into a timed hold of 20 minutes at stop 2,
     reaching that stop at *arrival* and leaving at 09:20, 6,960 s late."""
-    trip = ScheduledTrip(
-        "R_late", "R", "平日", ("07:00:00", "07:24:00", "07:30:00"), ("07:00:00", "07:04:00", "07:30:00")
+    trip = ScheduledTrip.from_clocks(
+        "R_late", "R", "平日", (("07:00:00", "07:00:00"), ("07:04:00", "07:24:00"), ("07:30:00", "07:30:00"))
     )
-    run = TripRun(
-        "R_late",
-        DAY,
-        tuple(gtfs_seconds(c) for c in ("09:00:00", "09:20:00", "09:26:00")),
-        arrival_sec=tuple(gtfs_seconds(c) for c in ("09:00:00", arrival, "09:26:00")),
-    )
+    run = TripRun.from_clocks(trip, DAY, (("09:00:00", "09:00:00"), (arrival, "09:20:00"), ("09:26:00", "09:26:00")))
     return Scenario(
         name="late",
         routes=(_ROUTE,),
@@ -932,9 +920,9 @@ def test_an_arrival_past_the_clamp_is_dropped_so_its_stop_has_neither_dwell_nor_
 
 
 def test_arrivals_the_feed_model_cannot_follow_are_refused():
-    with pytest.raises(ValueError, match="out of order"):
+    with pytest.raises(ValueError, match="stop 1 is reached at 07:01:00, after it is left at 07:00:00"):
         _quay(plan=(("07:01:00", "07:00:00"), *_QUAY_PLAN[1:]))
-    with pytest.raises(ValueError, match="out of order"):
+    with pytest.raises(ValueError, match="stop 2 is reached at 07:00:30, not after stop 1 is left at 07:00:40"):
         _quay(run=(_QUAY_RUN[0], ("07:00:30", "07:04:40"), *_QUAY_RUN[2:]))
     with pytest.raises(ValueError, match="ends on reaching its last stop"):
         _quay(run=(*_QUAY_RUN[:3], ("07:12:20", "07:13:00")))
@@ -953,3 +941,14 @@ def test_arrivals_the_feed_model_cannot_follow_are_refused():
     )
     with pytest.raises(ValueError, match="skips no stop"):
         Scenario(**{**_quay().__dict__, "runs": (skipping,)})
+
+
+def test_a_feed_that_reports_arrivals_runs_every_trip_it_schedules():
+    """Its arrivals come from runs alone, so a trip it cancels or never
+    reports is refused, and no arrival it sends is ever withdrawn."""
+    later = ScheduledTrip("Q_0800", "Q", "平日", ("08:00:00", "08:04:30", "08:08:20", "08:12:00"))
+    scenario = {**_quay().__dict__, "timetable": (*_quay().timetable, later)}
+    with pytest.raises(ValueError, match="runs every trip it schedules"):
+        Scenario(**{**scenario, "cancellations": (Cancellation("Q_0800", DAY),)})
+    with pytest.raises(ValueError, match="runs every trip it schedules"):
+        Scenario(**{**scenario, "unreported": (Unreported("Q_0800", DAY),)})

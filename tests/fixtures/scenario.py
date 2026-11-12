@@ -115,6 +115,14 @@ class ScheduledTrip:
     def scheduled_arrival_sec(self) -> tuple[int, ...]:
         return self.scheduled_sec if self.arrivals is None else tuple(gtfs_seconds(c) for c in self.arrivals)
 
+    @classmethod
+    def from_clocks(
+        cls, trip_id: str, route_id: str, day_type: str, stops: tuple[tuple[str, str], ...]
+    ) -> ScheduledTrip:
+        """A trip planned to reach and leave each stop at the (arrival,
+        departure) GTFS clocks of *stops*."""
+        return cls(trip_id, route_id, day_type, tuple(d for _a, d in stops), tuple(a for a, _d in stops))
+
 
 @dataclass(frozen=True)
 class TimetableVersion:
@@ -182,6 +190,19 @@ class TripRun:
             service_date,
             tuple(None if d is None else s + d for s, d in zip(trip.scheduled_sec, delays_sec, strict=True)),
             skips_announced_sec,
+        )
+
+    @classmethod
+    def from_clocks(cls, trip: ScheduledTrip, service_date: date, stops: tuple[tuple[str, str], ...]) -> TripRun:
+        """A run, for a feed that reports arrivals, that reached and left each
+        stop at the (arrival, departure) clocks of *stops*."""
+        if len(stops) != len(trip.departures):
+            raise ValueError(f"{trip.trip_id}: {len(stops)} stops' clocks for {len(trip.departures)} stops")
+        return cls(
+            trip.trip_id,
+            service_date,
+            tuple(gtfs_seconds(d) for _a, d in stops),
+            arrival_sec=tuple(gtfs_seconds(a) for a, _d in stops),
         )
 
     @property
@@ -318,7 +339,8 @@ class FeedModel:
     leaves the arrival unreported, and a dwell only one poll falls in leaves
     the departure reported only before the arrival. The run leaves the feed
     on reaching its last stop. Such a feed neither misreports nor freezes,
-    and no run of it skips a stop.
+    and runs every trip it schedules: none is cancelled or goes unreported,
+    and no run skips a stop.
     """
 
     prediction: Literal["perfect"] = "perfect"
@@ -395,6 +417,8 @@ class Scenario:
                     raise ValueError(f"{run.trip_id} {run.service_date}: a run ends on reaching its last stop")
         if self.feed.arrivals and (self.feed.misreports or self.feed.freezes):
             raise ValueError("a feed that reports arrivals neither misreports nor freezes")
+        if self.feed.arrivals and (self.cancellations or self.unreported):
+            raise ValueError("a feed that reports arrivals runs every trip it schedules")
         for cancellation in self.cancellations:
             trip = self.trip(cancellation.trip_id, cancellation.service_date)
             first_predicted = trip.scheduled_sec[0] + cancellation.predicted_delay_sec
@@ -477,8 +501,16 @@ def _visits_in_order(label: str, arrivals: tuple[int, ...], departures: tuple[in
     """Refuse an arrival at a stop after its departure, or not after the
     departure from the stop before."""
     for i, (arrival, departure) in enumerate(zip(arrivals, departures, strict=True)):
-        if arrival > departure or (i and arrival <= departures[i - 1]):
-            raise ValueError(f"{label}: stop {i + 1} is reached at {gtfs_clock(arrival)}, out of order")
+        if arrival > departure:
+            raise ValueError(
+                f"{label}: stop {i + 1} is reached at {gtfs_clock(arrival)}, "
+                f"after it is left at {gtfs_clock(departure)}"
+            )
+        if i and arrival <= departures[i - 1]:
+            raise ValueError(
+                f"{label}: stop {i + 1} is reached at {gtfs_clock(arrival)}, "
+                f"not after stop {i} is left at {gtfs_clock(departures[i - 1])}"
+            )
 
 
 def _csv(header: tuple[str, ...], rows: list[tuple]) -> str:
