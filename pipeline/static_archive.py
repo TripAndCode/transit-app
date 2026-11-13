@@ -705,15 +705,24 @@ def observation_rows(
     `u`, with `updates`' columns, each row filed under *stamp*'s timetable.
 
     *where* names columns as `u.` columns and is tested on each row as ingest
-    stored it, so it must not test a column filing rewrites (static_version_id,
-    and under REFIT service_type, scheduled_time, scheduled_sec and
-    route_code): a row ingest left without a schedule would be dropped before
-    REFIT gives it one. A test of those goes in *filed_where*, on the filed
-    row. Under INGESTED the clause is the table itself; otherwise a subquery
-    that binds ScheduleJoin.params, which files a row only by the segments in
-    force, and carries `filed_date`, the service date FILED_DATE_SQL files the
-    row as stored under (filed_date_sql). REFIT also joins the schedule archive, so a read whose rows need
-    none of it (refit_dates) is cheaper under IN_FORCE, with the same result.
+    stored it. A column filing rewrites (static_version_id, and under REFIT
+    service_type, scheduled_time, scheduled_sec and route_code) may be tested
+    there only by a test that keeps a row lacking it: REFIT gives a schedule to
+    a row ingest left without one, which a test needing it would drop first.
+    A test of the filed value goes in *filed_where*, on the filed row. The
+    timeliness cutoff (pipeline.db.timely_reading_ch) reads the stored
+    scheduled_sec on purpose, as FILED_DATE_SQL does: a reading is timely or
+    not, like its filed day, whichever stamp reads it, and it is tested before
+    REFIT's per-event pick (_stop_events), so a stop event falls back to its
+    last timely reading instead of losing a late one picked as its latest. A
+    revision that moves a stop's time moves its bound by as much.
+
+    Under INGESTED the clause is the table itself; otherwise a subquery that
+    binds ScheduleJoin.params, which files a row only by the segments in force,
+    and carries `filed_date`, the service date FILED_DATE_SQL files the row as
+    stored under (filed_date_sql). REFIT also joins the schedule archive, so a
+    read whose rows need none of it (refit_dates) is cheaper under IN_FORCE,
+    with the same result.
 
     *live_form*, for a read inside the API's time budget
     (pipeline.live_filing), joins the archive on one 64-bit hash of its three

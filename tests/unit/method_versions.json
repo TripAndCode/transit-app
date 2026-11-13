@@ -57,6 +57,22 @@
     "route_delay_counts": 5,
     "stop_route_days": 3
   },
+  "2026.11.14": {
+    "agg_daily_trend": 5,
+    "agg_hour_daily": 6,
+    "agg_route_daily": 5,
+    "agg_route_daily_dist": 5,
+    "agg_route_daily_dwell_run": 5,
+    "agg_route_headway_daily": 6,
+    "agg_route_hour": 6,
+    "agg_route_hour_dow": 6,
+    "agg_route_stats": 5,
+    "agg_route_stop_daily": 6,
+    "agg_service_delivered_daily": 5,
+    "agg_stop_daily": 6,
+    "feed_quality_monthly": 7,
+    "route_delay_counts": 6
+  },
   "2026.11.2": {
     "agg_feed_health": 2
   },

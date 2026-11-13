@@ -45,7 +45,10 @@ describe("DefinitionMetaBlock", () => {
     renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
     const block = screen.getByTestId("definition-meta");
     expect(block).toHaveTextContent("Average of every recorded departure at every stop.");
-    expect(block).toHaveTextContent("When a departure is reported more than once, the latest report counts.");
+    expect(block).toHaveTextContent(
+      "When a departure is reported more than once, the latest report counts, unless it arrives more than 130 " +
+        "minutes after the scheduled departure; then the last report before that counts.",
+    );
     expect(block).toHaveTextContent("Readings more than 2 hours off are ignored as errors.");
     expect(block).toHaveTextContent("On time (legacy) = no more than 1 min late (early departures count as on time).");
     expect(block).not.toHaveTextContent("legacy_60s");

@@ -150,6 +150,30 @@ def filed_date_of(captured_at: datetime, scheduled_seconds: int | None) -> date:
     return own
 
 
+def departure_lag_ch(prefix: str = "u.") -> str:
+    """ClickHouse seconds from a stop's scheduled departure to a reading's
+    capture, negative before it, over the `updates` columns named with
+    *prefix*: the departure is `scheduled_sec` placed on the service-day clock
+    of the day the reading is filed under (:func:`filed_date_ch`).
+
+    NULL where ingest stored no `scheduled_sec`. That is a trip the timetable
+    did not match, and every aomori_regex row, whose `scheduled_time` is its
+    trip's first departure rather than the stop's own. Reads only stored
+    columns, as the filing does."""
+    midnight = f"toDateTime({filed_date_ch(prefix)}, 'Asia/Tokyo')"
+    return f"dateDiff('second', {midnight}, {prefix}captured_at) - ({service_day_offset_ch(f'{prefix}scheduled_sec')})"
+
+
+def departure_lag(captured_at: datetime, scheduled_sec: int | None) -> int | None:
+    """:func:`departure_lag_ch` for a reading's capture instant and the
+    `scheduled_sec` ingest stored with it: the rule stated in Python, which
+    the ClickHouse tests hold the SQL to."""
+    if scheduled_sec is None:
+        return None
+    day = filed_date_of(captured_at, scheduled_sec)
+    return int((captured_at - service_day_moment_utc(day, service_day_offset(scheduled_sec))).total_seconds())
+
+
 def filed_capture_span(first: date, last: date) -> tuple[datetime, datetime]:
     """The UTC capture instants, from the first up to the second, that hold
     every reading :func:`filed_date_ch` files under the service dates *first*

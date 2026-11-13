@@ -9,7 +9,7 @@ import pytest
 
 from pipeline import agg_sql
 from pipeline.clickhouse import LIVE_SOURCED
-from pipeline.db import hms_to_sec_sql
+from pipeline.db import hms_to_sec_sql, stop_event_filter_ch
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
@@ -76,9 +76,9 @@ def test_feed_health_splits_every_row_by_the_one_live_source_rule():
     assert f"countIf({LIVE_SOURCED}) AS live_rows" in sql
 
 
-def test_headway_daily_bounds_the_delay_with_server_side_parameters():
+def test_headway_daily_reads_the_rows_every_stop_event_dedup_reads():
     sql = agg_sql.route_headway_daily_ch_sql("")
-    assert "BETWEEN {min_delay:Int32} AND {max_delay:Int32}" in sql
+    assert stop_event_filter_ch("u.stop_id IS NOT NULL") in sql
 
 
 PG_BUILDERS = {

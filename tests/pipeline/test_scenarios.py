@@ -69,6 +69,7 @@ from tests.fixtures.scenario import (
     Freeze,
     Misreport,
     Poll,
+    Relisting,
     Route,
     Scenario,
     ScheduledTrip,
@@ -839,6 +840,53 @@ def cutover(day: date) -> Scenario:
                     (4, 5, 6),
                 ),
                 Misreport(morning.trip_id, morning_day, _CUTOVER_STALE_DELAY_SEC, morning_enters, _CUTOVER_SEC),
+            ),
+        ),
+    )
+
+
+# The relisted line: six stops two minutes apart, three trips ten minutes
+# apart from 09:00, run on two weekdays. Each first departure, then each
+# stop's true delay in seconds on each day.
+_RELISTED_TRUTH = {
+    "09:00:00": ((60, 90, 120, 120, 150, 180), (0, 30, 30, 60, 60, 90)),
+    "09:10:00": ((240, 270, 300, 330, 360, 420), (-30, 0, 0, 30, 30, 60)),
+    "09:20:00": ((0, 0, 30, 30, 60, 60), (120, 150, 180, 180, 210, 240)),
+}
+
+
+def relisted(day: date) -> Scenario:
+    """A line on two weekdays whose feed lists two trips while their runs are
+    out of it, at 0 s, which neither trip's first-day run ever is. The first
+    day's 09:00 run is listed again from a minute after its last stop's
+    latest reading (``oracle.LATEST_READING_SEC``), as a feed listing a trip
+    again after it ran does, and the 09:10 trip's second-day run from 21:30
+    to 22:00 the evening before, as a feed listing a trip's next run early
+    does. Both are captured on the first day, hours after that day's runs of
+    the trip. Every departure keeps its own run's last reading."""
+    route = _route("L1", "Relisted line", 6, 34.71)
+    after = day + timedelta(days=1)
+    trips = [_trip(route, "平日", first, 120) for first in _RELISTED_TRUTH]
+    runs = [
+        TripRun.from_delays(trip, service_date, delays[i])
+        for trip, delays in zip(trips, _RELISTED_TRUTH.values(), strict=True)
+        for i, service_date in enumerate((day, after))
+    ]
+    first, second = trips[0], trips[1]
+    first_listed_again = first.scheduled_sec[-1] + oracle.LATEST_READING_SEC + 60
+    evening = gtfs_seconds("21:30:00") - _DAY_SEC
+    return Scenario(
+        name="relisted",
+        routes=(route,),
+        timetable=tuple(trips),
+        days=(ServiceDay(day, "平日"), ServiceDay(after, "平日")),
+        runs=tuple(runs),
+        feed=FeedModel(
+            poll_interval_sec=60,
+            lead_sec=300,
+            relistings=(
+                Relisting(first.trip_id, day, 0, first_listed_again, first_listed_again + 20 * 60),
+                Relisting(second.trip_id, after, 0, evening, evening + 30 * 60),
             ),
         ),
     )
@@ -1706,6 +1754,35 @@ def _each_capture_day_files_its_own_departure(observed: Observed, found: oracle.
     return replace(found, departures=tuple(refiled))
 
 
+def _each_departure_keeps_its_days_last_reading(observed: Observed, found: oracle.Outcome) -> oracle.Outcome:
+    """Each departure at the last plausible reading of its trip and stop
+    captured on its service day, however long after the departure: what
+    keeping a stop event's last reading by its capture alone gives. Every
+    other part of the outcome stays the truth's. A reading captured from
+    00:00 to 08:00 may be filed under the day before or after its capture's,
+    so the view refuses a scenario with one."""
+    captured = [poll for _version, batch in observed.batches for poll in batch]
+    sent = sorted(
+        (r.poll for r in oracle.received(observed.scenario, captured)), key=lambda p: (p.captured_at, p.source_file)
+    )
+    last: dict[tuple[str, date, int], int] = {}
+    for poll in sent:
+        if poll.captured_at.astimezone(JST).hour < 2 * oracle.SERVICE_DAY_CUTOVER_HOUR:
+            raise ValueError(f"{observed.scenario.name}: the view files no reading captured from 00:00 to 08:00")
+        day = oracle.service_day_of(poll.captured_at)
+        for entry in poll.trips:
+            for stop in entry.stops:
+                delay = stop.departure_delay
+                if stop.status == SCHEDULED and delay is not None and oracle.plausible(delay):
+                    last[(entry.trip_id, day, stop.stop_sequence)] = delay
+    return replace(
+        found,
+        departures=tuple(
+            replace(d, delay_sec=last[(d.trip_id, d.service_date, d.stop_sequence)]) for d in found.departures
+        ),
+    )
+
+
 # The divergences below are met by no scenario (_KNOWN): each one's test holds
 # every cell its rule would move to the truth, so the rule cannot come back
 # unnoticed.
@@ -1735,6 +1812,15 @@ _CAPTURE_DAY_DIVERGENCE = Divergence(
         "prediction before the cutover"
     ),
     view=_each_capture_day_files_its_own_departure,
+)
+_LATE_READING_DIVERGENCE = Divergence(
+    name="a reading counts however late it is captured",
+    reason=(
+        "Keeping each stop event's last reading by its capture alone lets a trip the feed lists again hours "
+        "after it ran, or the evening before its next run, replace the departure's last real reading with "
+        "that listing's delay"
+    ),
+    view=_each_departure_keeps_its_days_last_reading,
 )
 # The divergences each scenario is known to meet, by scenario name.
 _KNOWN: dict[str, tuple[Divergence, ...]] = {}
@@ -2157,6 +2243,7 @@ _ALL = [
     pytest.param(source_mix, id="source_mix"),
     _IMPERFECT := pytest.param(imperfect_feed, id="imperfect_feed"),
     _CUTOVER := pytest.param(cutover, id="cutover"),
+    _RELISTED := pytest.param(relisted, id="relisted"),
 ]
 
 
@@ -2243,6 +2330,11 @@ def test_the_scheduled_headway_of_an_even_count_of_gaps_is_the_mean_of_the_middl
 @pytest.mark.parametrize("observed", [_CUTOVER], indirect=True)
 def test_each_departure_is_filed_under_its_trips_service_day(observed):
     _assert_clean(_divergence_mismatches(observed, _CAPTURE_DAY_DIVERGENCE))
+
+
+@pytest.mark.parametrize("observed", [_RELISTED], indirect=True)
+def test_a_trip_listed_again_while_out_of_the_feed_leaves_each_departure_its_last_timely_reading(observed):
+    _assert_clean(_divergence_mismatches(observed, _LATE_READING_DIVERGENCE))
 
 
 def _at_true_delays(found: oracle.Outcome) -> oracle.Outcome:

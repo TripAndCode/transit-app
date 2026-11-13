@@ -333,7 +333,7 @@
       "all_stops_all_observations": "Average of every recorded departure at every stop."
     },
     "dedupRule": {
-      "latest_observation_per_stop_event": "When a departure is reported more than once, the latest report counts."
+      "latest_observation_per_stop_event": "When a departure is reported more than once, the latest report counts, unless it arrives more than 130 minutes after the scheduled departure; then the last report before that counts."
     },
     "valueBasis": {
       "feed_prediction": "Figures are computed from the delays the operator's feed last predicted for each stop, not from observed passing times."

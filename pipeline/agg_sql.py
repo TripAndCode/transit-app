@@ -12,7 +12,13 @@ the table's version in `pipeline/agg_registry.py` in the same commit.
 """
 
 from pipeline.clickhouse import LIVE_SOURCED, STOP_SKIPPED, TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
-from pipeline.db import departure_ch, hms_to_sec_sql, stop_event_filter_ch, withdrawn_ch
+from pipeline.db import (
+    departure_ch,
+    hms_to_sec_sql,
+    latest_trip_report_ch,
+    stop_event_filter_ch,
+    trip_report_filter_ch,
+)
 from pipeline.dwell_run import DWELL_HI, DWELL_LO, DWELL_WIDTH, RUN_HI, RUN_LO, RUN_WIDTH
 from pipeline.headways import HIGH_FREQUENCY_HEADWAY_SEC, dominant_service_ctes
 from pipeline.histogram import bucket_case_sql, hist_array_sql
@@ -84,8 +90,8 @@ def feed_health_ch_sql(date_where: str) -> str:
 # none is or the timetable lacks the trip, one trip-level row, which counts
 # in the trip's status and is no stop.
 #
-# Both subqueries read the rows the departure dedup reads
-# (pipeline.db.stop_event_filter_ch): a plausible departure, or a row
+# Both subqueries pick from the rows the departure dedup reads
+# (pipeline.db.stop_event_report_ch): a plausible departure, or a row
 # withdrawing one. A report carrying neither a delay nor a CANCELED or
 # SKIPPED status says nothing about whether the trip ran: a later one
 # leaves the withdrawal before it standing here exactly as it leaves that
@@ -93,28 +99,34 @@ def feed_health_ch_sql(date_where: str) -> str:
 # counts neither way, so the trip's other stops decide.
 #
 # The route is picked once per trip-day, from the outer subquery's group:
-# the route its latest report naming one names (argMax skips a NULL
-# route_code), '' where none does. That subquery groups every row the
-# stop-level one reads, so every trip not run is one of its trip-days and
-# lands under exactly one route, and an agency's day is the sum of its
-# routes. The pick is aliased `route`, not `route_code`, because ClickHouse
-# substitutes a SELECT alias for a same-named column elsewhere in the query.
+# the route its latest report naming one names, '' where none does. That
+# subquery groups every row the stop-level one reads, so every trip not run
+# is one of its trip-days and lands under exactly one route, and an agency's
+# day is the sum of its routes. The pick is aliased `route`, not
+# `route_code`, because ClickHouse substitutes a SELECT alias for a
+# same-named column elsewhere in the query.
 def service_delivered_ch_sql(date_where: str) -> str:
     """Per service date and route, the trips the feed reported as not run: a
     trip whose latest status is CANCELED, or every stop of which it reports
     with a plausible delay or a CANCELED or SKIPPED status has SKIPPED as its
     latest such status. A stop reported only without either counts neither
-    way."""
+    way. A cancellation listing no stop that arrives after the trip has run,
+    past its last scheduled departure plus the clamp and listing margin, is
+    passed over (`pipeline.db.latest_trip_report_ch`)."""
     return (
         """
                 SELECT svc_date, route, count() FROM (
                     SELECT """
         + FILED_DATE_SQL
         + """ AS svc_date, trip_id,
-                           argMax(coalesce(schedule_relationship_trip, -1), (captured_at, file_name)) AS trip_rel,
-                           ifNull(argMax(u.route_code, (captured_at, file_name)), '') AS route
+                           """
+        + latest_trip_report_ch("coalesce(u.schedule_relationship_trip, -1)", "svc_date")
+        + """ AS trip_rel,
+                           ifNull("""
+        + latest_trip_report_ch("u.route_code", "svc_date", "u.route_code IS NOT NULL")
+        + """, '') AS route
                     FROM updates AS u WHERE """
-        + stop_event_filter_ch()
+        + trip_report_filter_ch()
         + date_where
         + """
                     GROUP BY svc_date, trip_id
@@ -174,8 +186,9 @@ def schedule_revision_ch_sql(date_where: str, stamp: Stamp = Stamp.IN_FORCE) -> 
 # underneath it scans every `updates` row of the dates being rebuilt
 # (the agency's whole history on a full rebuild).
 #
-# The per-event dedup is build_dedup_ch_sql's: implausible and NULL
-# delays are dropped BEFORE the latest-observation-wins argMax, so a
+# The per-event dedup is build_dedup_ch_sql's, over the rows
+# pipeline.db.stop_event_filter_ch admits: implausible and NULL delays, and
+# untimely readings, are dropped BEFORE the latest-observation-wins argMax, so a
 # frozen-feed spike in an event's latest poll leaves its last
 # plausible estimate rather than removing the event and merging its
 # two neighbouring gaps, while an event whose latest poll reports its
@@ -220,8 +233,7 @@ def route_headway_daily_ch_sql(date_where: str, stamp: Stamp = Stamp.REFIT) -> s
                            ) AS latest
                     """
         + observation_rows(
-            "u.agency_id = {agency_id:UInt16} AND u.stop_id IS NOT NULL AND ((u.dep_delay IS NOT NULL "
-            "AND u.dep_delay BETWEEN {min_delay:Int32} AND {max_delay:Int32}) OR " + withdrawn_ch() + ")" + date_where,
+            stop_event_filter_ch("u.stop_id IS NOT NULL" + date_where),
             stamp,
             filed_where="u.route_code IS NOT NULL AND u.scheduled_sec IS NOT NULL",
         )

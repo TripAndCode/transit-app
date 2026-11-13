@@ -42,7 +42,8 @@ from pipeline.timetable_in_force import fetch_day
 # Stable identifiers (not resolved per request, unlike the tolerance fields
 # below) so a caller can render/translate them instead of a fixed string
 # baked into this module. ``pipeline.db.build_dedup_ch_sql`` implements the
-# dedup rule itself (latest observation per stop event wins); no separate
+# dedup rule itself (the latest timely observation per stop event wins, one
+# received long after the departure being ignored); no separate
 # "measurement point" knob exists elsewhere in the pipeline today.
 DEDUP_RULE = "latest_observation_per_stop_event"
 MEASUREMENT_POINT = "all_stops_all_observations"
@@ -64,8 +65,11 @@ _MEASUREMENT_POINT_TEXT: dict[tuple[str, str], str] = {
     (MEASUREMENT_POINT, "en"): "all stops, all observations",
 }
 _DEDUP_RULE_TEXT: dict[tuple[str, str], str] = {
-    (DEDUP_RULE, "ja"): "停留所イベントごとに最新観測を採用",
-    (DEDUP_RULE, "en"): "latest observation per stop event",
+    (DEDUP_RULE, "ja"): "停留所イベントごとに最新観測を採用（予定発車から130分を過ぎて届いた観測は除く）",
+    (DEDUP_RULE, "en"): (
+        "latest observation per stop event, leaving out observations received more than 130 minutes after "
+        "the scheduled departure"
+    ),
 }
 _VALUE_BASIS_TEXT: dict[tuple[str, str], str] = {
     (VALUE_BASIS, "ja"): "事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出（通過の観測値ではない）",

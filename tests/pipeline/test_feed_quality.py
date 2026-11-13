@@ -452,6 +452,29 @@ def test_a_stop_event_counts_as_reported_on_a_plausible_delay_or_a_withdrawal(
     assert _stored(pg_conn, agency)[_APRIL]["observed_stop_events"] == reported
 
 
+@pytest.mark.parametrize(("scheduled", "reported"), [("07:50:00", 8), ("07:49:59", 7)], ids=["on_the_bound", "past_it"])
+def test_a_stop_read_only_more_than_130_minutes_after_its_departure_is_neither_a_departure_nor_reported(
+    pg_conn, ch_client, closed_on_may_first, scheduled, reported
+):
+    """Trip ALL-3's second stop is read once, in the 10:00 poll, and is
+    scheduled at *scheduled*. On the 130-minute bound its reading counts; a
+    second earlier it is no reading of the departure, so the stop has no
+    departure in the dedup and is no stop event reported."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    others = [row for row in _one_poll(("none", 0, None, None, 0)) if (row[2], row[6]) != ("ALL-3", 2)]
+    hours, minutes, seconds = (int(part) for part in scheduled.split(":"))
+    late = (*others[0][:2], "ALL-3", "平日", scheduled, "R1", 2, 30, "S2", 30, 0, 0, others[0][12])
+    insert_updates(ch_client, agency, [*others, (*late, hours * 3600 + minutes * 60 + seconds)])
+    analyze(agency, pg_conn, ch_client)
+
+    assert _stored(pg_conn, agency)[_APRIL]["observed_stop_events"] == reported
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT sum(samples) FROM agg_route_daily WHERE agency_id = %s", (agency,))
+        assert cur.fetchone()[0] == reported
+
+
 def _predicted_across_the_cutover(day: date) -> list[tuple]:
     """Trip ALL-1's first stop, scheduled at 04:05 on *day*, predicted at
     03:58 and reported at 04:06 JST: one stop event, of *day*'s service, whose

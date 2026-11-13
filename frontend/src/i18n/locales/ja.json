@@ -333,7 +333,7 @@
       "all_stops_all_observations": "全停留所で記録されたすべての発車の平均です。"
     },
     "dedupRule": {
-      "latest_observation_per_stop_event": "同じ発車が複数回報告された場合は、最新の報告を使います。"
+      "latest_observation_per_stop_event": "同じ発車が複数回報告された場合は、最新の報告を使います。ただし、予定発車から130分を過ぎて届いた報告は使わず、それより前の最後の報告を使います。"
     },
     "valueBasis": {
       "feed_prediction": "数値は、事業者のフィードが停留所ごとに最後に配信した遅延の予測値から算出したもので、通過の観測値ではありません。"

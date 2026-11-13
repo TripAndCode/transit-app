@@ -54,7 +54,7 @@ An operator's result will be referenced from this document once its validation i
 A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) and shown in each operator's entry on the admin pages. Each month gives:
 
 - **Trips reported**: the share of the trips the timetable planned that the feed reported a plausible departure for, by the same rule as the coverage in the [Comparability conditions](#comparability-conditions);
-- **Stop events reported**: the share of the stops the planned trips call at that the feed reported, each counted on the day its departure counts on (see [Service day and time](#service-day-and-time), from method `2026.11.13`);
+- **Stop events reported**: the share of the stops the planned trips call at that the feed reported, each counted on the day its departure counts on (see [Service day and time](#service-day-and-time), from method `2026.11.13`), and not from a report received long after the departure (see [Reports received after the departure](#reports-received-after-the-departure), from method `2026.11.14`);
 - **Message age**: per poll, the time it was captured minus the feed header's timestamp (the median and the 95th percentile). A poll from the collector's archive is timed by its file name, which records when the poll began; a poll whose name records no time is left out and counted (from method `2026.11.8`);
 - **Polls over 65 s**: of the polls message age measures, the share whose message was more than 65 seconds old when captured. This is the freshness threshold used by Cal-ITP and by the MobilityData GTFS-RT validator (warning W008). It shows a feed header that stayed frozen for too short a time to move the 95th percentile (from method `2026.11.12`);
 - **Implausible readings**: the share of reports dropped as in [Excluding implausible values](#excluding-implausible-values);
@@ -106,13 +106,19 @@ A report carrying neither a delay nor a cancelled or skipped status counts neith
 - a trip whose last status is `CANCELED`;
 - a trip whose every stop reported with a delay or a status was last reported `SKIPPED`.
 
-A trip that skipped only some stops ran. A trip reported cancelled without listing any stop also counts as not run. Its cancellation withdraws the predictions received before it at each stop the timetable schedules the trip at whose scheduled departure was still to come when the cancellation arrived; a stop whose scheduled departure had passed keeps its departure (`2026.11.6`). The scheduled time decides, because the cancellation carries no delay: a trip running late and cancelled between a stop's scheduled and its delayed departure keeps that stop's last prediction. A trip whose last status is `CANCELED` counts as not run even when it was cancelled partway through, or after its last stop.
+A trip that skipped only some stops ran. A trip reported cancelled without listing any stop also counts as not run. Its cancellation withdraws the predictions received before it at each stop the timetable schedules the trip at whose scheduled departure was still to come when the cancellation arrived; a stop whose scheduled departure had passed keeps its departure (`2026.11.6`). The scheduled time decides, because the cancellation carries no delay: a trip running late and cancelled between a stop's scheduled and its delayed departure keeps that stop's last prediction. A trip whose last status is `CANCELED` counts as not run even when it was cancelled partway through, or after its last stop, as long as the cancellation is received within 130 minutes of its last scheduled departure (see [Reports received after the departure](#reports-received-after-the-departure), from method `2026.11.14`).
 
 ### Excluding implausible values
 
 (`2026.11.0`)
 
 A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped before deduplication. Such values come from a feed that has stopped updating and keeps resending the same prediction, not from real delays. A dropped report counts in no delay or on-time figure, so the stop's departure is decided by the reports before it. The share of dropped reports is one of the comparability conditions.
+
+### Reports received after the departure
+
+(`2026.11.14`)
+
+A report received more than 130 minutes after the stop's scheduled departure is ignored. A departure within the 120-minute range is last reported by its scheduled time plus 120 minutes, and a feed drops a stop within minutes of its departure, so ten more minutes cover that. Some feeds list a trip again hours after it ran, at a delay of their own, which would otherwise replace the stop's last real report. The stop's departure is decided by the reports received before then, and a stop reported only that late has no departure and is not a stop event reported. A trip reported cancelled without listing any stop is held to its last scheduled departure that day by the same 130 minutes: a cancellation received after the trip ran does not count it as not run, while a trip none of whose stops was reported keeps its cancellation. A report of a stop whose scheduled departure is not known keeps counting: a trip not matched to the timetable, and a feed whose scheduled time is the trip's first departure rather than the stop's. The share of implausible reports and the message age still count every report.
 
 ### Service day and time
 
@@ -372,10 +378,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.13`. Newest first, each version with the inputs it set.
+The current method is `2026.11.14`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.14` | `agg_daily_trend` 4 → 5, `agg_hour_daily` 5 → 6, `agg_route_daily` 4 → 5, `agg_route_daily_dist` 4 → 5, `agg_route_daily_dwell_run` 4 → 5, `agg_route_headway_daily` 5 → 6, `agg_route_hour` 5 → 6, `agg_route_hour_dow` 5 → 6, `agg_route_stats` 4 → 5, `agg_route_stop_daily` 5 → 6, `agg_service_delivered_daily` 4 → 5, `agg_stop_daily` 5 → 6, `feed_quality_monthly` 6 → 7, `route_delay_counts` 5 → 6 |
 | `2026.11.13` | `agg_daily_trend` 3 → 4, `agg_hour_daily` 4 → 5, `agg_route_daily` 3 → 4, `agg_route_daily_dist` 3 → 4, `agg_route_daily_dwell_run` 3 → 4, `agg_route_headway_daily` 4 → 5, `agg_route_hour` 4 → 5, `agg_route_hour_dow` 4 → 5, `agg_route_stats` 3 → 4, `agg_route_stop_daily` 4 → 5, `agg_schedule_revision_daily` 2 → 3, `agg_service_delivered_daily` 3 → 4, `agg_stop_daily` 4 → 5, `agg_stop_routes` 2 → 3, `feed_quality_monthly` 5 → 6, `route_delay_counts` 4 → 5, `stop_route_days` 2 → 3 |
 | `2026.11.12` | `feed_quality_monthly` 4 → 5 |
 | `2026.11.11` | `feed_quality_monthly` 3 → 4 |

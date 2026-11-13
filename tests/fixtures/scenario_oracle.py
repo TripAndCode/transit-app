@@ -25,7 +25,15 @@ Semantics assumed:
   before deduplication, so a departure's delay is that of the last plausible
   reading of it, by capture time, and a served stop with no plausible
   reading is no departure (``docs/methodology.en.md``, "Excluding
-  implausible values" and "Deduplication and withdrawal"). Under the
+  implausible values" and "Deduplication and withdrawal"). A reading is
+  of the departure of its trip and stop on the service day it is filed
+  under, which its capture decides, not the run its poll names: the
+  service day its capture falls in, or the day either side of it when the
+  stop's scheduled departure that day is within ``FILING_REACH_SEC`` of the
+  capture ("Service day and time"). One captured more than
+  ``LATEST_READING_SEC`` after that departure is no reading of it: a feed
+  lists a trip again long after it ran ("Reports received after the
+  departure"). It still counts as a reading the feed sent. Under the
   ``perfect`` feed model each reading a misreport does not replace carries
   the true delay, the actual departure minus the scheduled departure in
   whole seconds, early negative; a frozen feed repeats such readings. Its
@@ -280,6 +288,11 @@ from tests.fixtures.scenario import (
 
 # "A report of a delay over 120 minutes (7,200 seconds), early or late, is dropped."
 MAX_PLAUSIBLE_DELAY_SEC = 120 * 60
+# "A report received more than 130 minutes after the stop's scheduled departure is ignored."
+LATEST_READING_SEC = 130 * 60
+# "A report counts toward the service day before or after the one it was received on when the
+# stop's scheduled departure that day is within four hours of it."
+FILING_REACH_SEC = 4 * 3600
 # "Implausible readings over 5% as printed to a tenth" are flagged.
 MAX_CLAMP_PCT = 5
 # "Service day: turns over at 04:00 JST."
@@ -509,26 +522,48 @@ def _order(poll: Poll) -> tuple[datetime, str]:
     return (poll.captured_at, poll.source_file)
 
 
+def filed_day(captured_at: datetime, scheduled_sec: int) -> date:
+    """The service day a reading captured at *captured_at* of a stop the
+    timetable schedules at *scheduled_sec* is filed under: the day either
+    side of its capture's whose departure of the stop is within
+    ``FILING_REACH_SEC`` of the capture, else its capture's own."""
+    own = service_day_of(captured_at)
+    reach = timedelta(seconds=FILING_REACH_SEC)
+    for day in (own + timedelta(days=1), own - timedelta(days=1)):
+        if abs(service_day_instant(day, scheduled_sec) - captured_at) <= reach:
+            return day
+    return own
+
+
 def _plausible_readings(
-    sent: Sequence[Poll], kind: Literal["arrival", "departure"]
+    scenario: Scenario, sent: Sequence[Poll], kind: Literal["arrival", "departure"]
 ) -> dict[tuple[str, date, int], list[tuple[tuple[datetime, str], int]]]:
     """Per (trip, service date, stop sequence), each plausible reading of
-    *kind* in *sent*, earliest first: where its poll stands (``_order``) and
-    its delay."""
+    *kind* in *sent* filed under that date (``filed_day``) and captured by
+    ``LATEST_READING_SEC`` after the stop's scheduled departure on it,
+    earliest first: where its poll stands (``_order``) and its delay. The
+    schedule is the one of the run the poll names, as ingest joins it."""
     out: dict[tuple[str, date, int], list[tuple[tuple[datetime, str], int]]] = defaultdict(list)
+    latest = timedelta(seconds=LATEST_READING_SEC)
     for poll in sorted(sent, key=_order):
         for entry in poll.trips:
+            scheduled = scenario.trip(entry.trip_id, entry.service_date).scheduled_sec
             for stop in entry.stops:
                 delay = stop.arrival_delay if kind == "arrival" else stop.departure_delay
-                if stop.status == SCHEDULED and delay is not None and plausible(delay):
-                    out[(entry.trip_id, entry.service_date, stop.stop_sequence)].append((_order(poll), delay))
+                if stop.status != SCHEDULED or delay is None or not plausible(delay):
+                    continue
+                sec = scheduled[stop.stop_sequence - 1]
+                day = filed_day(poll.captured_at, sec)
+                if poll.captured_at > service_day_instant(day, sec) + latest:
+                    continue
+                out[(entry.trip_id, day, stop.stop_sequence)].append((_order(poll), delay))
     return out
 
 
-def _last_plausible(sent: Sequence[Poll]) -> dict[tuple[str, date, int], int]:
+def _last_plausible(scenario: Scenario, sent: Sequence[Poll]) -> dict[tuple[str, date, int], int]:
     """Per (trip, service date, stop sequence), the delay of its last
     plausible departure reading."""
-    return {key: readings[-1][1] for key, readings in _plausible_readings(sent, "departure").items()}
+    return {key: readings[-1][1] for key, readings in _plausible_readings(scenario, sent, "departure").items()}
 
 
 def _model_delay(feed: FeedModel, run: TripRun, trip: ScheduledTrip, seq: int, captured_at: datetime) -> int:
@@ -590,17 +625,17 @@ def departures(scenario: Scenario, sent: Sequence[Poll], captured: Sequence[Poll
     reports arrivals. *sent* is the polls that reached history, of the
     *captured* polls.
 
-    Raises when a run no misreport names was last reported in *captured* at
-    a delay other than its true one, or a true delay inside the clamp went
-    without a plausible reading in *captured*, and under a feed that
+    Raises when a run no misreport or relisting names was last reported in
+    *captured* at a delay other than its true one, or a true delay inside the
+    clamp went without a plausible reading in *captured*, and under a feed that
     predicts imperfectly, when a reading in *captured* is not its model's
     prediction or a stop is last read in another poll than the last to list
     it (``_check_model``): the feed model would then be at fault, not the
     pipeline. A departure *sent* lacks a reading of is one the path that
     brought its day never received."""
-    last = _last_plausible(sent)
-    feed_last = _last_plausible(captured)
-    misreported = {(m.trip_id, m.service_date) for m in scenario.feed.misreports}
+    last = _last_plausible(scenario, sent)
+    feed_last = _last_plausible(scenario, captured)
+    misreported = {(m.trip_id, m.service_date) for m in (*scenario.feed.misreports, *scenario.feed.relistings)}
     if scenario.feed.imperfect:
         _check_model(scenario, captured)
     out = []
@@ -659,8 +694,8 @@ def visits(scenario: Scenario, sent: Sequence[Poll], found: Iterable[Departure])
     Raises when an arrival was last reported plausibly at a delay other than
     its true one, or reported for a run that declares none: the feed model
     would then be at fault, not the pipeline."""
-    arrivals = _plausible_readings(sent, "arrival")
-    departure_readings = _plausible_readings(sent, "departure")
+    arrivals = _plausible_readings(scenario, sent, "arrival")
+    departure_readings = _plausible_readings(scenario, sent, "departure")
     departed = {(d.trip_id, d.service_date, d.stop_sequence): d.delay_sec for d in found}
     out = []
     for run in scenario.runs:
@@ -715,7 +750,7 @@ class Prediction:
 def predictions(scenario: Scenario, sent: Sequence[Poll], found: Iterable[Departure]) -> list[Prediction]:
     """Each departure of *found* beside its truth, its lead time that of its
     last plausible reading in *sent*."""
-    read = _plausible_readings(sent, "departure")
+    read = _plausible_readings(scenario, sent, "departure")
     runs = {(r.trip_id, r.service_date): r for r in scenario.runs}
     out = []
     for d in found:

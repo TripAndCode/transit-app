@@ -329,6 +329,24 @@ class Freeze(_Stretch):
 
 
 @dataclass(frozen=True)
+class Relisting(_Stretch):
+    """A stretch in which the feed lists one run while the run is not in the
+    feed: after it has left, as a feed listing a trip again hours after it
+    ran does, or before it enters, as a feed listing a trip's next run hours
+    ahead does. Every poll captured from ``from_sec`` until ``until_sec`` on
+    the run's service-date clock, negative before that date's midnight, lists
+    each stop of the run from ``first_stop`` on at ``delay_sec``, under the
+    run's own trip and service date."""
+
+    trip_id: str
+    service_date: date
+    delay_sec: int
+    from_sec: int
+    until_sec: int
+    first_stop: int = 1
+
+
+@dataclass(frozen=True)
 class FeedModel:
     """How the feed reports the truth.
 
@@ -347,7 +365,8 @@ class FeedModel:
     poll before a departure carries the true delay too, except where a
     ``misreports`` stretch replaces it. ``freezes`` repeat a poll's content
     over a stretch, so a stop it lists stays listed, at the delay it had,
-    after the run has left it.
+    after the run has left it. ``relistings`` list a run again while it is
+    out of the feed, at a delay of their own.
 
     ``arrivals``: the feed reports arrivals too, as the feeds confirmed to
     send them do, each stop update carrying an arrival or a departure, never
@@ -390,8 +409,8 @@ class FeedModel:
     listed, until the lag after the run has left it.
 
     A feed that predicts imperfectly, by propagating or with a lag, neither
-    misreports, freezes nor reports arrivals, cancels no trip and has no run
-    skip a stop: each of those states its own predictions, which these
+    misreports, freezes, relists nor reports arrivals, cancels no trip and has
+    no run skip a stop: each of those states its own predictions, which these
     models do not say how to combine with.
     """
 
@@ -400,6 +419,7 @@ class FeedModel:
     lead_sec: int = 300
     misreports: tuple[Misreport, ...] = ()
     freezes: tuple[Freeze, ...] = ()
+    relistings: tuple[Relisting, ...] = ()
     arrivals: bool = False
     push_interval_sec: int | None = None
     freshness_lag_sec: int = 0
@@ -516,6 +536,8 @@ class Scenario:
                     raise ValueError(f"{run.trip_id} {run.service_date}: a run ends on reaching its last stop")
         if self.feed.arrivals and (self.feed.misreports or self.feed.freezes):
             raise ValueError("a feed that reports arrivals neither misreports nor freezes")
+        if self.feed.relistings and (self.feed.arrivals or self.feed.imperfect):
+            raise ValueError("a feed that lists a run again predicts perfectly and reports no arrivals")
         if self.feed.arrivals and (self.cancellations or self.unreported):
             raise ValueError("a feed that reports arrivals runs every trip it schedules")
         for cancellation in self.cancellations:
@@ -536,6 +558,22 @@ class Scenario:
                 raise ValueError(f"{misreport.trip_id}: a misreport must end after it starts")
             if any(not 1 <= seq <= len(run.actual_sec) for seq in misreport.stops):
                 raise ValueError(f"{misreport.trip_id}: a misreport names a stop the trip does not have")
+        listed: dict[tuple[str, date], list[tuple[datetime, datetime]]] = {}
+        for relisting in self.feed.relistings:
+            key = (relisting.trip_id, relisting.service_date)
+            run = runs.get(key)
+            if run is None:
+                raise ValueError(f"{key}: only a run can be listed again")
+            if len(run.served) != len(run.actual_sec):
+                raise ValueError(f"{key} skips a stop and cannot be listed again")
+            if relisting.ends <= relisting.starts:
+                raise ValueError(f"{key}: a relisting must end after it starts")
+            if not 1 <= relisting.first_stop <= len(run.actual_sec):
+                raise ValueError(f"{key}: a relisting starts at a stop the trip does not have")
+            windows = listed.setdefault(key, [_run_window(self, run, self.trip(*key))])
+            if any(relisting.starts < leaves and enters < relisting.ends for enters, leaves in windows):
+                raise ValueError(f"{key}: a relisting overlaps the run in the feed or another relisting")
+            windows.append((relisting.starts, relisting.ends))
         freezes = sorted(self.feed.freezes, key=lambda f: f.starts)
         for freeze in freezes:
             if freeze.ends <= freeze.starts:
@@ -933,6 +971,16 @@ def _cancellation_listing(scenario: Scenario, cancellation: Cancellation, trip: 
     return _InFeed(trip, day, enters, leaves, listing)
 
 
+def _relisting(scenario: Scenario, relisting: Relisting) -> _InFeed:
+    trip = scenario.trip(relisting.trip_id, relisting.service_date)
+    stops = tuple(
+        StopEntry(seq, stop.stop_id, relisting.delay_sec, SCHEDULED)
+        for seq, stop in enumerate(scenario.route(trip.route_id).stops, start=1)
+        if seq >= relisting.first_stop
+    )
+    return _InFeed(trip, relisting.service_date, relisting.starts, relisting.ends, lambda _at: (SCHEDULED, stops))
+
+
 def _reports(entry: TripEntry) -> set[tuple[str, str, date, int]]:
     """What *entry* tells the collector: each departure and arrival it
     reports, each stop it reports SKIPPED, and a trip reported not running,
@@ -1015,12 +1063,14 @@ def polls(scenario: Scenario) -> list[Poll]:
     never reported SKIPPED, or a trip that did not run is never reported so:
     the oracle would count something the pipeline never saw, so the scenario
     would be at fault, not the pipeline. Raises too when no poll carries a
-    misreport, which would then test nothing.
+    misreport or a relisting, which would then test nothing.
     """
     in_feed = [_run_listing(scenario, r, scenario.trip(r.trip_id, r.service_date)) for r in scenario.runs]
     in_feed += [
         _cancellation_listing(scenario, c, scenario.trip(c.trip_id, c.service_date)) for c in scenario.cancellations
     ]
+    relisted = [_relisting(scenario, r) for r in scenario.feed.relistings]
+    in_feed += relisted
     if not in_feed:
         return []
     step = scenario.feed.poll_interval_sec
@@ -1060,6 +1110,13 @@ def polls(scenario: Scenario) -> list[Poll]:
     idle = [m for m in scenario.feed.misreports if m not in carried]
     if idle:
         raise ValueError(f"no poll carries these misreports: {idle}")
+    unlisted = [
+        r
+        for r, item in zip(scenario.feed.relistings, relisted, strict=True)
+        if not any(item.enters <= poll.captured_at < item.leaves for poll in out)
+    ]
+    if unlisted:
+        raise ValueError(f"no poll carries these relistings: {unlisted}")
     return out
 
 
