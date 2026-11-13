@@ -353,9 +353,9 @@ describe("type scale tokens", () => {
 
 describe("radius tokens", () => {
   it.each([
-    ["--radius", "6px"],
-    ["--radius-lg", "10px"],
-    ["--radius-xl", "14px"],
+    ["--radius", "8px"],
+    ["--radius-lg", "12px"],
+    ["--radius-xl", "16px"],
   ])("%s is %s", (prop, value) => {
     expect(decl(rootBlock, prop)).toBe(value);
   });
@@ -385,7 +385,7 @@ describe("the type families", () => {
   it.each([
     ["--font-body", '"BIZ UDPGothic"'],
     ["--font-display", '"BIZ UDPGothic"'],
-    ["--font-num", '"Barlow Semi Condensed"'],
+    ["--font-num", '"Inter Tight"'],
     ["--font-mono", '"IBM Plex Mono"'],
   ])("%s leads with %s", (prop, face) => {
     expect(decl(rootBlock, prop)?.startsWith(face)).toBe(true);
@@ -469,7 +469,7 @@ describe("index.html font loading", () => {
 
   it("requests only the font weights the type scale uses", () => {
     expect(indexHtml).toMatch(/BIZ\+UDPGothic:wght@400;700/);
-    expect(indexHtml).toMatch(/Barlow\+Semi\+Condensed:wght@500;600;700/);
+    expect(indexHtml).toMatch(/Inter\+Tight:wght@500;600;700/);
     expect(indexHtml).toMatch(/IBM\+Plex\+Mono:wght@400;500/);
     expect(indexHtml).not.toMatch(/Noto\+S(ans|erif)\+JP/);
   });

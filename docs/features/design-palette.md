@@ -8,8 +8,8 @@ copy to keep in sync by hand.
 ## One accent
 
 The whole product — pre-auth and signed-in — uses a single accent,
-signage blue: `--accent` (#2750C2, dark #86A2FF), with `--accent-soft`
-(#E2E9FA, dark #1C2847) as its tint and `--accent-strong` (#1A378C, dark
+signage blue: `--accent` (#3355E0, dark #86A2FF), with `--accent-soft`
+(#E6EBFF, dark #1C2847) as its tint and `--accent-strong` (#2238A8, dark
 #BCCBFF) as its deepened variant for button/active weight. It is for
 interaction and selection only, never for delay magnitude, which has its
 own ramp. `tokens.test.ts` asserts that `--accent` is declared only on the
@@ -20,9 +20,9 @@ route badge and the pre-auth wordmark) — not a second accent.
 
 ## Ground and text
 
-The ground is cool paper: `--bg-page` #F1F4F7, `--bg-surface` #FFFFFF and
-`--bg-soft` #E8ECF1. Text is ink in three levels: `--text-primary`
-#0F1A2A, `--text-secondary` #435166 and `--text-tertiary` #5B687D. The
+The ground is cool paper: `--bg-page` #F6F7FB, `--bg-surface` #FFFFFF and
+`--bg-soft` #EDF0F7. Text is ink in three levels: `--text-primary`
+#14213D, `--text-secondary` #5E6982 and `--text-tertiary` #5B687D. The
 dark theme redefines each. Every text level clears WCAG AA (4.5:1) on
 surface, soft, page and the selected state (`--accent-soft`) in both themes,
 and `tokens.test.ts` asserts every
@@ -84,14 +84,14 @@ and MapLibre style-expression consumers resolve the same source of truth.
 - `--font-body` and `--font-display` are both BIZ UDPGothic; display is the
   same family set at 700, so identity comes from weight and size rather
   than a second face.
-- `--font-num` is Barlow Semi Condensed, which `.num` applies (with tabular
+- `--font-num` is Inter Tight, which `.num` applies (with tabular
   figures) to every HTML figure printed outside a table: hero values, stat
   tiles, HTML chart labels and counters. Table cells get tabular figures
   from `td({ align: "right" })`; ReportTable's bar cells also carry `.num`,
   like the card headline they mirror.
 - `--font-mono` is IBM Plex Mono, for identifiers read character by
   character.
-- `frontend/index.html` loads BIZ UDPGothic 400/700, Barlow Semi Condensed
+- `frontend/index.html` loads BIZ UDPGothic 400/700, Inter Tight
   500/600/700 and IBM Plex Mono 400/500. `tokens.test.ts` asserts those
   weights and that `--font-display` is only set at a weight index.html
   loads.

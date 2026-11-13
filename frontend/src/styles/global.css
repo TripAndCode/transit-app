@@ -13,31 +13,31 @@
      deliberately not derived from the solid tone they share an RGB base
      with: a color-mix() computation would change how getComputedStyle
      serialises the value. */
-  --p-slate-50: #F1F4F7;
+  --p-slate-25: #F6F7FB;
+  --p-slate-75: #EDF0F7;
   --p-slate-100: #EEF1F5;
   --p-slate-150: #E6ECF4;
-  --p-slate-200: #E8ECF1;
   --p-slate-250: #E5E9EF;
   --p-slate-275: #E4E7EC;
   --p-slate-325: #D6DDE6;
   --p-slate-375: #AAB6C7;
   --p-slate-425: #94A3B8;
   --p-slate-475: #95A1B3;
+  --p-slate-500: #5E6982;
   --p-slate-525: #5B687D;
   --p-slate-575: #475569;
-  --p-slate-625: #435166;
   --p-slate-650: #283444;
   --p-slate-700: #1F2A37;
+  --p-slate-725: #14213D;
   --p-slate-750: #1A2431;
   --p-slate-800: #18212D;
-  --p-slate-850: #0F1A2A;
   --p-slate-900: #131B26;
   --p-slate-950: #0C1219;
-  --p-blue-50: #E2E9FA;
+  --p-blue-25: #E6EBFF;
   --p-blue-200: #BCCBFF;
   --p-blue-375: #86A2FF;
-  --p-blue-525: #2750C2;
-  --p-blue-675: #1A378C;
+  --p-blue-450: #3355E0;
+  --p-blue-600: #2238A8;
   --p-blue-850: #1C2847;
   --p-indigo-50: #7E8CD0;
   --p-indigo-250: #5B6CAD;
@@ -97,20 +97,20 @@
   /* Cool paper and ink, like transport signage: the ground is a pale blue-grey
      rather than a warm cream, and every text level clears WCAG AA (4.5:1) on
      --bg-surface, --bg-soft and --bg-page (asserted in tokens.test.ts). */
-  --bg-page: var(--p-slate-50);
+  --bg-page: var(--p-slate-25);
   --bg-surface: var(--p-graphite-50);
-  --bg-soft: var(--p-slate-200);
+  --bg-soft: var(--p-slate-75);
   --border-soft: var(--p-slate-250);
   --border-subtle: var(--p-slate-325);
-  --text-primary: var(--p-slate-850);
-  --text-secondary: var(--p-slate-625);
+  --text-primary: var(--p-slate-725);
+  --text-secondary: var(--p-slate-500);
   --text-tertiary: var(--p-slate-525);
   /* One accent for the whole product, light and dark: signage blue, for
      interaction and selection only -- never for delay magnitude, which has
      its own ramp (--d0..--d4). Any scoped redefinition of --accent would
      fork the identity and is asserted against in tokens.test.ts. */
-  --accent: var(--p-blue-525);
-  --accent-soft: var(--p-blue-50);
+  --accent: var(--p-blue-450);
+  --accent-soft: var(--p-blue-25);
   --on-accent: var(--p-graphite-50);
   /* Delay magnitude, calm to heavy: < 1.5, < 2.5, < 3.5, < 5 and >= 5
      minutes. Magnitude, never alarm: rust is reserved for this ramp's last
@@ -176,7 +176,7 @@
      family as --accent by contract (tokens.test.ts): a different family here
      would give the app two accents again, one per weight. Clears 4.5:1 as
      text on both --bg-surface and --bg-soft. */
-  --accent-strong: var(--p-blue-675);
+  --accent-strong: var(--p-blue-600);
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
      distinct from --delay-severe, which stays the map's own per-point
      severity ramp; this is specifically for aggregate counts. */
@@ -253,9 +253,9 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --radius: 6px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   /* Motion scale. --dur-1 is UI feedback (hover, focus, colour), --dur-2 a
      panel or menu opening, --dur-3 a chart or bar drawing itself in, --dur-4
      an ambient loop (skeleton pulse). --ease-out decelerates hard for things
@@ -331,9 +331,9 @@
   --font-display: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
   --font-body: "BIZ UDPGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
                system-ui, sans-serif;
-  /* The numeral face (see .num). Condensed so a column of minutes stays
-     narrow; Japanese in the same run falls back to the body face. */
-  --font-num: "Barlow Semi Condensed", "BIZ UDPGothic", system-ui, sans-serif;
+  /* The numeral face (see .num). Tight letter-spacing keeps a column of
+     minutes narrow; Japanese in the same run falls back to the body face. */
+  --font-num: "Inter Tight", "BIZ UDPGothic", system-ui, sans-serif;
   /* Identifiers that are read character by character — a user id, a route
      code, a hash, a clock time — where proportional digits and an ambiguous
      1/l/I cost the reader a second look. Not for anything with prose in it. */
