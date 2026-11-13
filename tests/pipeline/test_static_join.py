@@ -444,7 +444,7 @@ def test_static_join_stores_a_cancelled_trip_listing_no_stop_as_a_withdrawal_per
     has not left yet: the stop's sequence, stop and schedule, the trip's
     route, service and version, the CANCELED status and no delay. A stop_sequence no stop row can hold is
     left out. A trip the timetable lists no stop for keeps one trip-level row,
-    with no stop, delay or schedule. A cancellation that stores a stop row
+    with no stop, delay or schedule: it has no departure to carry. A cancellation that stores a stop row
     needs neither, a SCHEDULED trip listing no stop says nothing, and the
     probe still counts StopTimeUpdates alone. A poll holding nothing else
     stores the rows too."""
@@ -514,14 +514,20 @@ def test_static_join_stores_a_cancelled_trip_listing_no_stop_as_a_withdrawal_per
         ("2026-05-09T07:05:00+09:00", [2, 3, 4, 5, 6]),
         ("2026-05-09T07:12:00+09:00", [4, 5, 6]),
         ("2026-05-10T00:05:00+09:00", [6]),
+        ("2026-05-10T03:50:00+09:00", [1, 3]),
     ],
-    ids=["before_departure", "at_departure", "mid_run", "past_a_stop_with_no_time", "after_midnight"],
+    ids=["before_departure", "at_departure", "mid_run", "past_a_stop_with_no_time", "after_midnight", "next_days_run"],
 )
 def test_a_stop_less_cancellation_withdraws_only_the_stops_still_to_come(pg_conn, captured_at, withdrawn):
     """A CANCELED trip will not run the rest of its trip; a stop it already
     left keeps its reports. A stop is left once its scheduled departure on the
-    service day the poll is captured in is earlier than the capture, and a
-    stop with no time once a stop after it is."""
+    trip's service day is earlier than the capture, and a stop with no time
+    once a stop after it is. The trip's service day is the one its first
+    departure is filed under (pipeline.service_day.filed_date_of): at 03:50,
+    the 07:00 trip about to run is the next service day's, so none of its
+    stops is left. Only the stops whose own reading files under that day are
+    withdrawn by this poll: the later ones, and those with no time, file under
+    the day before, and a poll after the cutover withdraws them."""
     aid = _cancelled_trip_agency(
         pg_conn,
         "static_join_cancel_to_come",
@@ -542,9 +548,43 @@ def test_a_stop_less_cancellation_withdraws_only_the_stops_still_to_come(pg_conn
     assert [r[6] for r in rows] == withdrawn
 
 
+@pytest.mark.parametrize(
+    ("captured_at", "trips_day", "withdrawn"),
+    [
+        ("2026-05-10T03:50:00+09:00", "2026-05-10", [1]),
+        ("2026-05-09T05:00:00+09:00", "2026-05-09", [1]),
+    ],
+    ids=["next_days_run", "a_late_stop_a_reading_would_file_the_day_before"],
+)
+def test_every_withdrawal_of_a_stop_less_cancellation_files_under_its_trips_day(
+    pg_conn, captured_at, trips_day, withdrawn
+):
+    """A withdrawal stored under another service day would share that day's
+    stop event with a run of the same trip there and could replace its real
+    last reading, so a stop whose reading would file elsewhere is left to a
+    later poll. At 05:00 a 27:50 stop's reading files under the day before,
+    whose own 27:50 departure was an hour earlier."""
+    from datetime import date, datetime
+
+    from pipeline.service_day import filed_date_of
+
+    aid = _cancelled_trip_agency(
+        pg_conn,
+        "static_join_cancel_trips_day",
+        {"T1": [(1, "S1", "07:00:00"), (2, "S2", "27:50:00")]},
+        "gtfs_static_20260101",
+    )
+    cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295600)
+    rows = static_join.parse_feed(cancelled, captured_at, "f1.bin", aid, pg_conn)
+    assert [r[6] for r in rows] == withdrawn
+    captured = datetime.fromisoformat(captured_at)
+    assert {filed_date_of(captured, r[13]) for r in rows} == {date.fromisoformat(trips_day)}
+
+
 def test_a_stop_less_cancellation_after_the_last_stop_keeps_only_the_trip_level_row(pg_conn):
     """Every stop already left keeps its reports, so the cancellation is kept
-    as the trip-level row alone."""
+    as the trip-level row alone. It carries the trip's last scheduled
+    departure, so it is filed under, and held to, the trip's own day."""
     from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
 
     aid = _cancelled_trip_agency(
@@ -552,7 +592,29 @@ def test_a_stop_less_cancellation_after_the_last_stop_keeps_only_the_trip_level_
     )
     cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295600)
     rows = static_join.parse_feed(cancelled, "2026-05-09T07:11:00+09:00", "f1.bin", aid, pg_conn)
-    assert [(r[6], r[3], r[5], r[10], r[14]) for r in rows] == [(TRIP_LEVEL_STOP_SEQUENCE, "平日", "R1", 3, "v1")]
+    assert [(r[6], r[3], r[5], r[10], r[13], r[14]) for r in rows] == [
+        (TRIP_LEVEL_STOP_SEQUENCE, "平日", "R1", 3, 7 * 3600 + 10 * 60, "v1")
+    ]
+
+
+def test_the_trip_level_row_of_a_run_that_ran_before_the_cutover_files_under_its_own_day(pg_conn):
+    """At 04:30 a night trip whose stops were scheduled at 25:30 and 26:30 has
+    left them all on the day before, which is the trip's day; its trip-level
+    row must file there, not under the capture's own day, where another run
+    of the trip may be about to start."""
+    from datetime import date, datetime
+
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+    from pipeline.service_day import filed_date_of
+
+    aid = _cancelled_trip_agency(
+        pg_conn, "static_join_cancel_night_run", {"T1": [(1, "S1", "25:30:00"), (2, "S2", "26:30:00")]}, "v1"
+    )
+    cancelled = trip_update_feed(trip_update("T1", schedule_relationship=3), timestamp=1778295600)
+    captured_at = "2026-05-10T04:30:00+09:00"
+    rows = static_join.parse_feed(cancelled, captured_at, "f1.bin", aid, pg_conn)
+    assert [r[6] for r in rows] == [TRIP_LEVEL_STOP_SEQUENCE]
+    assert filed_date_of(datetime.fromisoformat(captured_at), rows[0][13]) == date(2026, 5, 9)
 
 
 def test_a_stop_less_cancellation_stores_each_stop_under_its_earlier_predictions_keys(pg_conn):
