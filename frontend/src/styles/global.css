@@ -14,8 +14,8 @@
      with: a color-mix() computation would change how getComputedStyle
      serialises the value. */
   --p-slate-25: #F6F7FB;
-  --p-slate-75: #EDF0F7;
   --p-slate-100: #EEF1F5;
+  --p-slate-125: #EDF0F7;
   --p-slate-150: #E6ECF4;
   --p-slate-250: #E5E9EF;
   --p-slate-275: #E4E7EC;
@@ -28,8 +28,8 @@
   --p-slate-575: #475569;
   --p-slate-650: #283444;
   --p-slate-700: #1F2A37;
-  --p-slate-725: #14213D;
   --p-slate-750: #1A2431;
+  --p-slate-775: #14213D;
   --p-slate-800: #18212D;
   --p-slate-900: #131B26;
   --p-slate-950: #0C1219;
@@ -99,10 +99,10 @@
      --bg-surface, --bg-soft and --bg-page (asserted in tokens.test.ts). */
   --bg-page: var(--p-slate-25);
   --bg-surface: var(--p-graphite-50);
-  --bg-soft: var(--p-slate-75);
+  --bg-soft: var(--p-slate-125);
   --border-soft: var(--p-slate-250);
   --border-subtle: var(--p-slate-325);
-  --text-primary: var(--p-slate-725);
+  --text-primary: var(--p-slate-775);
   --text-secondary: var(--p-slate-550);
   --text-tertiary: var(--p-slate-500);
   /* One accent for the whole product, light and dark: signage blue, for

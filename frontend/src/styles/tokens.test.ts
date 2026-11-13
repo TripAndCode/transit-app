@@ -957,6 +957,17 @@ describe("accentColorResolved()", () => {
   });
 });
 
+describe("the landing hero's palette fallbacks", () => {
+  it("each match the light theme's value of the token they stand in for", () => {
+    const src = readFileSync(resolve(process.cwd(), "src/pages/landing/useHeroMapAnimation.ts"), "utf8");
+    const pairs = [...src.matchAll(/color\("(--[\w-]+)", "(#[0-9A-Fa-f]{6})"\)/g)];
+    expect(pairs.length, "no color(token, fallback) calls found in useHeroMapAnimation.ts").toBeGreaterThan(0);
+    for (const [, prop, fallback] of pairs) {
+      expect(fallback.toLowerCase(), prop).toBe(resolveDecl(rootBlock, prop)!.toLowerCase());
+    }
+  });
+});
+
 describe("delayRampVar()", () => {
   it.each([
     [0, "var(--d0)"],

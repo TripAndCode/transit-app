@@ -339,7 +339,7 @@ describe("flowDashArrayAtPhase (pure builder)", () => {
 });
 
 describe("active route line: gradient, casing and the calm flow overlay", () => {
-  const LIGHT_ACCENT = "#2750C2";
+  const LIGHT_ACCENT = "#3355E0";
   const DARK_ACCENT = "#86A2FF";
 
   afterEach(() => {
@@ -502,7 +502,7 @@ describe("active route line: gradient, casing and the calm flow overlay", () => 
 });
 
 describe("a theme toggle repaints layers whose source already exists", () => {
-  const LIGHT = { "--accent": "#2750C2", "--bg-surface": "#ffffff", "--delay-severe": "#A8391F" };
+  const LIGHT = { "--accent": "#3355E0", "--bg-surface": "#ffffff", "--delay-severe": "#A8391F" };
   const DARK = { "--accent": "#86A2FF", "--bg-surface": "#131B26", "--delay-severe": "#F0837A" };
 
   function paintTokens(tokens: typeof LIGHT) {
