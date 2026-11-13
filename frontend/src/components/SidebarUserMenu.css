@@ -8,7 +8,8 @@
   background: transparent;
   transition: background var(--transition);
 }
-.sidebar-user-trigger:hover {
+.sidebar-user-trigger:hover,
+.sidebar-user-trigger:focus-visible {
   background: var(--hover-tint);
 }
 

@@ -11,8 +11,8 @@ describe("SidebarUserMenu.css", () => {
     expect(decl(base, "background")).toBe("transparent");
   });
 
-  it("gives the account trigger a calm hover fill", () => {
-    const hover = ruleBody(css, ".sidebar-user-trigger:hover {");
+  it("gives the account trigger the same calm fill on hover and keyboard focus", () => {
+    const hover = ruleBody(css, ".sidebar-user-trigger:hover,\n.sidebar-user-trigger:focus-visible {");
     expect(decl(hover, "background")).toBe("var(--hover-tint)");
   });
 
