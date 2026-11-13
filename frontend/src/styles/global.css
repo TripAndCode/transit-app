@@ -24,7 +24,7 @@
   --p-slate-425: #94A3B8;
   --p-slate-475: #95A1B3;
   --p-slate-500: #5E6982;
-  --p-slate-525: #5B687D;
+  --p-slate-550: #4A5670;
   --p-slate-575: #475569;
   --p-slate-650: #283444;
   --p-slate-700: #1F2A37;
@@ -103,8 +103,8 @@
   --border-soft: var(--p-slate-250);
   --border-subtle: var(--p-slate-325);
   --text-primary: var(--p-slate-725);
-  --text-secondary: var(--p-slate-500);
-  --text-tertiary: var(--p-slate-525);
+  --text-secondary: var(--p-slate-550);
+  --text-tertiary: var(--p-slate-500);
   /* One accent for the whole product, light and dark: signage blue, for
      interaction and selection only -- never for delay magnitude, which has
      its own ramp (--d0..--d4). Any scoped redefinition of --accent would

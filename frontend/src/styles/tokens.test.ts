@@ -605,6 +605,17 @@ describe("the text levels clear AA on every surface and the selected state, in b
     const block = theme === "light" ? rootBlock : darkBlock;
     expect(contrastRatio(resolveDecl(block, prop)!, resolveDecl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
   });
+
+  it("rank primary > secondary > tertiary by contrast on the surface, in both themes", () => {
+    for (const block of [rootBlock, darkBlock]) {
+      const surface = resolveDecl(block, "--bg-surface")!;
+      const [primary, secondary, tertiary] = ["--text-primary", "--text-secondary", "--text-tertiary"].map((prop) =>
+        contrastRatio(resolveDecl(block, prop)!, surface),
+      );
+      expect(primary).toBeGreaterThan(secondary);
+      expect(secondary).toBeGreaterThan(tertiary);
+    }
+  });
 });
 
 describe("the delay ramp", () => {
