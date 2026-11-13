@@ -2463,7 +2463,7 @@
     "pause": "Pause",
     "speed_group_aria": "Play speed",
     "speed_label": "{{minutesPerSecond}} min/s",
-    "speed_aria": "Change play speed, currently {{minutesPerSecond}} simulated minutes per second",
+    "speed_aria": "Play at {{minutesPerSecond}} simulated minutes per second",
     "scrubber_aria": "Scrub through the day",
     "canvas_aria": "Schematic map of buses replaying the day",
     "on_time_title": "On time right now",
@@ -2475,6 +2475,7 @@
     "how_it_works_title": "How we know",
     "how_it_works_body": "Each bus glides in a straight line between the stops it was actually seen at, coloured by how late it was there. The map is schematic, not to scale.",
     "empty_title": "No buses ran that we can replay",
-    "empty_hint": "Try a different day."
+    "empty_hint": "Try a different day.",
+    "estimate_note": "Positions between stops are estimated."
   }
 }

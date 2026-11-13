@@ -1,4 +1,4 @@
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, type UseQueryResult } from "@tanstack/react-query";
 import { replayWindowQueryOptions, useReplayWindow } from "../../api/hooks";
 import type { ReplayResponse } from "../../api/types";
 import {
@@ -17,9 +17,23 @@ import {
 
 const NO_WINDOWS: readonly ReplayResponse[] = [];
 
+/** `useQueries`' own result array is a fresh array every render; without a
+ *  stable `combine` the merge/build pipeline downstream (`mergeReplayWindows`,
+ *  `buildBusTownModel`, the stop point/pair lists) could never be skipped on
+ *  an unrelated re-render. Module-level so its identity never changes, which
+ *  is what lets `useQueries` itself reuse the previous return value whenever
+ *  every query result is unchanged. */
+function combineExtraWindows(results: readonly UseQueryResult<ReplayResponse>[]): ReplayResponse[] {
+  return results.map((r) => r.data).filter((d): d is ReplayResponse => d != null);
+}
+
 export type BusTownReplay = {
   loading: boolean;
   error: unknown;
+  /** True once the day query has a response to show — including a response
+   *  naming no day at all (an agency with no observations ever). Distinct
+   *  from `date != null`, which an agency like that never satisfies. */
+  loaded: boolean;
   date: string | null;
   availableDates: string[];
   originHour: number | null;
@@ -41,6 +55,13 @@ export type BusTownReplay = {
  * call that discovers the day, so it is never re-requested through
  * `useQueries` below — only the neighbouring windows the playhead approaches
  * are.
+ *
+ * Also keeps a standing query for the agency's own default day (selected or
+ * not), purely for its `available_dates` list: `dayQuery` alone drops that
+ * list on a picked day's error or still-loading response, which would make
+ * the day picker vanish exactly when a reader needs it to escape that day.
+ * Sharing `useReplayWindow`'s cache key means this costs no extra request
+ * once the default day has loaded once, which every mount does first.
  */
 export function useBusTownReplay(
   agencyId: number | null,
@@ -49,19 +70,19 @@ export function useBusTownReplay(
   speed: number,
 ): BusTownReplay {
   const dayQuery = useReplayWindow(agencyId, selectedDate, null, null);
+  const defaultDayQuery = useReplayWindow(agencyId, null, null, null);
   const date = dayQuery.data?.date ?? null;
   const originHour = dayQuery.data?.from_hour ?? null;
 
   const desired = date != null && originHour != null ? desiredWindowKeys(date, originHour, playheadSec, speed) : [];
   const extra = desired.filter((key) => key.fromHour !== originHour);
 
-  const extraResults = useQueries({
+  const extraData = useQueries({
     queries: extra.map((key) => replayWindowQueryOptions(agencyId, key.date, key.fromHour, key.toHour)),
+    combine: combineExtraWindows,
   });
 
-  const windows: readonly ReplayResponse[] = dayQuery.data
-    ? [dayQuery.data, ...extraResults.map((r) => r.data).filter((d): d is ReplayResponse => d != null)]
-    : NO_WINDOWS;
+  const windows: readonly ReplayResponse[] = dayQuery.data ? [dayQuery.data, ...extraData] : NO_WINDOWS;
 
   const trips = mergeReplayWindows(windows);
   const routeNames: Record<string, string> = {};
@@ -72,8 +93,9 @@ export function useBusTownReplay(
   return {
     loading: dayQuery.isLoading,
     error: dayQuery.data === undefined ? dayQuery.error : null,
+    loaded: dayQuery.data !== undefined,
     date,
-    availableDates: dayQuery.data?.available_dates ?? [],
+    availableDates: dayQuery.data?.available_dates ?? defaultDayQuery.data?.available_dates ?? [],
     originHour,
     minSec: scrubberStartHour(originHour) * 3600,
     maxSec: SCRUBBER_END_HOUR * 3600,

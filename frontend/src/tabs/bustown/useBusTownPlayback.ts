@@ -1,6 +1,7 @@
-import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { StopBounds } from "../../api/types";
-import { drawBusTownFrame, resolveBusTownPalette } from "./busTownDraw";
+import { useThemeSignal } from "../../styles/theme";
+import { drawBusTownFrame, resolveBusTownPalette, type BusTownPalette } from "./busTownDraw";
 import { fitProjection, positionsAt, type BusTownModel, type StopPair, type StopPoint } from "./busTownModel";
 
 /** High-DPI canvases cost fill-rate quadratically; past 2x the extra
@@ -11,73 +12,107 @@ const MAX_PIXEL_RATIO = 2;
 const MAX_STEP_MS = 100;
 
 export type BusTownPlayback = {
-  /** The playhead, throttled to once per simulated minute so the scrubber
-   *  and clock re-render far less often than the canvas redraws. */
-  sec: number;
   playing: boolean;
   play: () => void;
   pause: () => void;
   seek: (sec: number) => void;
+  /** Attach to the `<canvas>` as `ref`. A callback, not a `RefObject`, so the
+   *  setup effect below re-runs the moment the element actually mounts —
+   *  which on a first, uncached visit happens after this hook's caller has
+   *  already rendered once, behind `AsyncSection`'s loading skeleton. */
+  canvasRef: (el: HTMLCanvasElement | null) => void;
 };
 
-type LoopControls = { seek: (sec: number) => void; setPlaying: (playing: boolean) => void };
+export type BusTownPlaybackOptions = {
+  model: BusTownModel;
+  stopPoints: readonly StopPoint[];
+  stopPairs: readonly StopPair[];
+  bounds: StopBounds | null;
+  minSec: number;
+  maxSec: number;
+  speed: number;
+  autoplay: boolean;
+  /** The playhead, owned by the caller (throttled to once per simulated
+   *  minute by this hook's own calls to `setSec`) so it can feed both this
+   *  hook and whatever else needs to know where playback is without the two
+   *  racing to own it. */
+  sec: number;
+  setSec: (sec: number) => void;
+};
+
+type LoopControls = { seek: (sec: number) => void; setPlaying: (playing: boolean) => void; retheme: () => void };
 
 /**
- * Owns the schematic's rAF draw loop and the playhead clock it advances.
- * `model`/`stopPoints`/`stopPairs`/`bounds` are read fresh on every drawn
- * frame without restarting the loop, so a newly loaded window never resets
- * play position. The loop is only ever scheduled while playing (and the tab
- * is visible and the canvas on screen) — pausing cancels it outright rather
- * than idling, matching the stricter of the two product requirements this
- * mirrors `useHeroMapAnimation`'s structure to meet.
+ * Owns the schematic's rAF draw loop. `model`/`stopPoints`/`stopPairs`/
+ * `bounds` are read fresh on every drawn frame without restarting the loop,
+ * so a newly loaded window never resets play position. The loop is only
+ * ever scheduled while playing (and the tab is visible and the canvas on
+ * screen) — pausing cancels it outright rather than idling, matching the
+ * stricter of the two product requirements this mirrors
+ * `useHeroMapAnimation`'s structure to meet.
  */
-export function useBusTownPlayback(
-  canvasRef: RefObject<HTMLCanvasElement | null>,
-  model: BusTownModel,
-  stopPoints: readonly StopPoint[],
-  stopPairs: readonly StopPair[],
-  bounds: StopBounds | null,
-  minSec: number,
-  maxSec: number,
-  speed: number,
-  autoplay: boolean,
-): BusTownPlayback {
-  const [sec, setSec] = useState(minSec);
+export function useBusTownPlayback({
+  model,
+  stopPoints,
+  stopPairs,
+  bounds,
+  minSec,
+  maxSec,
+  speed,
+  autoplay,
+  sec,
+  setSec,
+}: BusTownPlaybackOptions): BusTownPlayback {
+  /** The canvas itself lives in a ref, not state: the setup effect below
+   *  resizes it directly (`el.width`/`el.height`), which the compiler only
+   *  allows on a ref's `current` — a value held in state is treated as
+   *  immutable. `canvasMounted` is the reactive signal that tells the effect
+   *  the ref now has something to attach to. */
+  const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+  const [canvasMounted, setCanvasMounted] = useState(false);
   const [playing, setPlaying] = useState(autoplay);
   const speedRef = useRef(speed);
   useEffect(() => {
     speedRef.current = speed;
   }, [speed]);
+  const themeSignal = useThemeSignal();
 
   const controls = useRef<LoopControls | null>(null);
 
   const draw = useEffectEvent(
-    (currentSec: number, ctx: CanvasRenderingContext2D, width: number, height: number, el: Element) => {
+    (currentSec: number, ctx: CanvasRenderingContext2D, width: number, height: number, palette: BusTownPalette) => {
       const projection = bounds ? fitProjection(bounds, width, height) : null;
-      drawBusTownFrame(ctx, width, height, projection, stopPoints, stopPairs, positionsAt(model, currentSec), resolveBusTownPalette(el));
+      drawBusTownFrame(ctx, width, height, projection, stopPoints, stopPairs, positionsAt(model, currentSec), palette);
     },
   );
 
+  /** The playhead/play state live at the instant the setup effect below
+   *  (re-)runs — read through `useEffectEvent` so referencing them doesn't
+   *  force the effect to restart on every tick, the way putting `sec`/
+   *  `playing` directly in its dependency array would. */
+  const live = useEffectEvent(() => ({ sec, playing }));
+
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const maybeCtx = canvas.getContext("2d");
+    if (!canvasElRef.current) return;
+    const maybeCtx = canvasElRef.current.getContext("2d");
     if (!maybeCtx) return;
     const ctx: CanvasRenderingContext2D = maybeCtx;
-    const el: HTMLCanvasElement = canvas;
+    const el: HTMLCanvasElement = canvasElRef.current;
 
+    let palette = resolveBusTownPalette(el);
     let width = 0;
     let height = 0;
-    let t = minSec;
+    const { sec: liveSec, playing: livePlaying } = live();
+    let t = Math.max(minSec, Math.min(maxSec, liveSec));
     let lastMinute = Math.floor(t / 60);
     let running = false;
-    let wantPlaying = false;
+    let wantPlaying = livePlaying;
     let onScreen = true;
     let rafId = 0;
     let last = 0;
 
     function paint() {
-      draw(t, ctx, width, height, el);
+      draw(t, ctx, width, height, palette);
     }
 
     function resize() {
@@ -103,8 +138,10 @@ export function useBusTownPlayback(
         setSec(t);
       }
       if (t >= maxSec) {
+        wantPlaying = false;
         stop();
         setSec(t);
+        setPlaying(false);
         return;
       }
       rafId = requestAnimationFrame(frame);
@@ -147,7 +184,12 @@ export function useBusTownPlayback(
         wantPlaying = next;
         sync();
       },
+      retheme: () => {
+        palette = resolveBusTownPalette(el);
+        paint();
+      },
     };
+    sync();
 
     return () => {
       stop();
@@ -156,21 +198,33 @@ export function useBusTownPlayback(
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("resize", resize);
     };
-  }, [canvasRef, minSec, maxSec]);
+  }, [canvasMounted, minSec, maxSec, setSec]);
 
   useEffect(() => {
     controls.current?.setPlaying(playing);
   }, [playing]);
 
+  useEffect(() => {
+    controls.current?.retheme();
+  }, [themeSignal]);
+
+  function seek(next: number) {
+    const clamped = Math.max(minSec, Math.min(maxSec, next));
+    controls.current?.seek(clamped);
+    setSec(clamped);
+  }
+
   return {
-    sec,
     playing,
-    play: () => setPlaying(true),
+    play: () => {
+      if (sec >= maxSec) seek(minSec);
+      setPlaying(true);
+    },
     pause: () => setPlaying(false),
-    seek: (next) => {
-      const clamped = Math.max(minSec, Math.min(maxSec, next));
-      controls.current?.seek(clamped);
-      setSec(clamped);
+    seek,
+    canvasRef: (el: HTMLCanvasElement | null) => {
+      canvasElRef.current = el;
+      setCanvasMounted(el != null);
     },
   };
 }

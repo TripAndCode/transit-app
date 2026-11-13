@@ -154,6 +154,18 @@ describe("positionsAt: interpolation", () => {
     expect(positionsAt(model, 99)).toEqual([]);
     expect(positionsAt(model, 201)).toEqual([]);
   });
+
+  it("skips a trip whose whole window misses sec, without affecting a trip that covers it", () => {
+    const w2 = replayWindow({
+      stops: { id: ["a", "b", "c", "d"], lat: [35.0, 35.1, 35.2, 35.3], lon: [139.0, 139.1, 139.2, 139.3] },
+      trips: [
+        { trip_id: "in", route_code: "R1", stop_idx: [0, 1], t: [100, 200], delay: [0, 0] },
+        { trip_id: "out", route_code: "R1", stop_idx: [2, 3], t: [1000, 1100], delay: [0, 0] },
+      ],
+    });
+    const m2 = buildBusTownModel(mergeReplayWindows([w2]));
+    expect(positionsAt(m2, 150).map((b) => b.tripId)).toEqual(["in"]);
+  });
 });
 
 describe("onTimeCount", () => {

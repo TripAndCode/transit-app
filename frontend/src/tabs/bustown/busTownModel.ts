@@ -3,8 +3,8 @@ import type { ReplayResponse, ReplayTrip, StopBounds } from "../../api/types";
 
 /** Mirrors `api.routers.replay.MAX_REPLAY_WINDOW_HOURS`: the width of one
  *  fetched window, and the step the window grid advances by. Not exported:
- *  every other module reaches it only through `SCRUBBER_END_HOUR`,
- *  `windowStartForHour` or `desiredWindowKeys`. */
+ *  every other module reaches it only through `windowStartForHour` or
+ *  `desiredWindowKeys`. */
 const WINDOW_WIDTH_HOURS = 3;
 
 /** Mirrors `pipeline.service_day.SERVICE_DAY_CUTOVER_HOURS`: the hour a new
@@ -165,6 +165,7 @@ export function buildBusTownModel(trips: ReadonlyMap<string, ResolvedTrip>): Bus
 export function positionsAt(model: BusTownModel, sec: number): BusTownBus[] {
   const buses: BusTownBus[] = [];
   for (const segments of model.values()) {
+    if (segments.length === 0 || sec < segments[0].t0 || sec > segments[segments.length - 1].t1) continue;
     const seg = segments.find((s) => sec >= s.t0 && sec <= s.t1);
     if (!seg) continue;
     const span = seg.t1 - seg.t0;

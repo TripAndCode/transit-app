@@ -27,6 +27,7 @@ function nonEmptyReplay(overrides: Partial<BusTownReplay> = {}): BusTownReplay {
   return {
     loading: false,
     error: null,
+    loaded: true,
     date: "2026-01-05",
     availableDates: ["2026-01-05", "2026-01-04"],
     originHour: 4,
@@ -45,6 +46,7 @@ function emptyReplay(overrides: Partial<BusTownReplay> = {}): BusTownReplay {
   return {
     loading: false,
     error: null,
+    loaded: true,
     date: "2026-01-05",
     availableDates: ["2026-01-05"],
     originHour: 4,
@@ -61,11 +63,11 @@ function emptyReplay(overrides: Partial<BusTownReplay> = {}): BusTownReplay {
 
 function mockPlayback(overrides: Partial<BusTownPlayback> = {}): BusTownPlayback {
   return {
-    sec: 4 * 3600 + 120,
     playing: false,
     play: vi.fn(),
     pause: vi.fn(),
     seek: vi.fn(),
+    canvasRef: vi.fn(),
     ...overrides,
   };
 }
@@ -120,7 +122,7 @@ describe("BusTownPage", () => {
     renderBusTown();
     fireEvent.click(screen.getByRole("button", { name: /6 simulated minutes per second/ }));
     const lastCall = playbackSpy.mock.calls.at(-1)!;
-    expect(lastCall[7]).toBe(360);
+    expect(lastCall[0].speed).toBe(360);
   });
 
   it("seeks when the scrubber moves", () => {
@@ -145,7 +147,7 @@ describe("BusTownPage", () => {
   });
 
   it("shows an error banner when the day fails to load", () => {
-    setup(emptyReplay({ date: null, error: new Error("boom") }));
+    setup(emptyReplay({ date: null, error: new Error("boom"), loaded: false }));
     renderBusTown();
     expect(screen.getByRole("alert")).toBeInTheDocument();
   });
@@ -154,9 +156,27 @@ describe("BusTownPage", () => {
     const { playbackSpy } = setup(nonEmptyReplay(), mockPlayback({ playing: false }), true);
     renderBusTown();
     const lastCall = playbackSpy.mock.calls.at(-1)!;
-    // autoplay is the 9th positional argument: false whenever reduced
-    // motion is the viewer's preference.
-    expect(lastCall[8]).toBe(false);
+    expect(lastCall[0].autoplay).toBe(false);
     expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+  });
+
+  it("shows a note that positions between stops are estimated", () => {
+    setup(nonEmptyReplay());
+    renderBusTown();
+    expect(screen.getByText("Positions between stops are estimated.")).toBeInTheDocument();
+  });
+
+  it("shows the day picker in the empty state so another day can still be chosen", () => {
+    setup(emptyReplay());
+    renderBusTown();
+    expect(screen.getByText("No buses ran that we can replay")).toBeInTheDocument();
+    expect(screen.getByLabelText("Day")).toBeInTheDocument();
+  });
+
+  it("shows the day picker in the error state so another day can still be chosen", () => {
+    setup(emptyReplay({ date: null, error: new Error("boom"), loaded: false }));
+    renderBusTown();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByLabelText("Day")).toBeInTheDocument();
   });
 });

@@ -49,24 +49,29 @@ export function drawBusTownFrame(
   ctx.fillRect(0, 0, width, height);
   if (!projection) return;
 
-  ctx.strokeStyle = palette.line;
-  ctx.lineWidth = 1;
-  ctx.globalAlpha = 0.5;
-  for (const pair of stopPairs) {
-    const a = projection(pair.lat0, pair.lon0);
-    const b = projection(pair.lat1, pair.lon1);
+  if (stopPairs.length > 0) {
+    ctx.strokeStyle = palette.line;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.5;
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    for (const pair of stopPairs) {
+      const a = projection(pair.lat0, pair.lon0);
+      const b = projection(pair.lat1, pair.lon1);
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+    }
     ctx.stroke();
+    ctx.globalAlpha = 1;
   }
-  ctx.globalAlpha = 1;
 
-  ctx.fillStyle = palette.stopDot;
-  for (const stop of stopPoints) {
-    const p = projection(stop.lat, stop.lon);
+  if (stopPoints.length > 0) {
+    ctx.fillStyle = palette.stopDot;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, STOP_RADIUS, 0, Math.PI * 2);
+    for (const stop of stopPoints) {
+      const p = projection(stop.lat, stop.lon);
+      ctx.moveTo(p.x + STOP_RADIUS, p.y);
+      ctx.arc(p.x, p.y, STOP_RADIUS, 0, Math.PI * 2);
+    }
     ctx.fill();
   }
 

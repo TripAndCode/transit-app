@@ -4,7 +4,7 @@
  * they were there. A schematic, not a map, reached from the command palette
  * and this page's own back-link rather than the sidebar rail.
  */
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Pause, Play } from "lucide-react";
@@ -21,7 +21,7 @@ import { DelayBandLegend } from "../../components/analysis/StopChart";
 import { formatDate, formatMinutes } from "../../utils/format";
 import { useBusTownReplay, type BusTownReplay } from "./useBusTownReplay";
 import { useBusTownPlayback } from "./useBusTownPlayback";
-import { boundsFromPoints, formatServiceClock, onTimeCount, positionsAt, slowestRoute } from "./busTownModel";
+import { boundsFromPoints, formatServiceClock, onTimeCount, positionsAt, scrubberStartHour, slowestRoute } from "./busTownModel";
 import "../../styles/scrubber.css";
 import "./busTown.css";
 
@@ -81,40 +81,30 @@ export function BusTownPage() {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [speed, setSpeed] = useState<number>(SPEEDS[DEFAULT_SPEED_INDEX]);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [sec, setSec] = useState(scrubberStartHour(null) * 3600);
 
-  // `useBusTownReplay` needs the playhead to know which window to prefetch
-  // next, but the playhead only exists once `useBusTownPlayback` has a model
-  // to animate, which comes from `useBusTownReplay` — so the two can't be
-  // called in a single data-flow direction. `playheadSec` breaks the cycle
-  // by trailing `playback.sec` one render behind, same idiom as React's
-  // "adjust state during render" pattern: a stale prefetch trigger by one
-  // render is harmless, since the window grid itself doesn't move that
-  // fast, while mirroring it through an effect would cost an extra commit
-  // every tick for no benefit.
-  const [playheadSec, setPlayheadSec] = useState(0);
-  const replay = useBusTownReplay(agencyId, selectedDate, playheadSec, speed);
+  const replay = useBusTownReplay(agencyId, selectedDate, sec, speed);
   const stopBoundsQuery = useStopBounds(agencyId);
   const bounds = stopBoundsQuery.data ?? boundsFromPoints(replay.stopPoints);
 
-  const playback = useBusTownPlayback(
-    canvasRef,
-    replay.model,
-    replay.stopPoints,
-    replay.stopPairs,
+  const playback = useBusTownPlayback({
+    model: replay.model,
+    stopPoints: replay.stopPoints,
+    stopPairs: replay.stopPairs,
     bounds,
-    replay.minSec,
-    replay.maxSec,
+    minSec: replay.minSec,
+    maxSec: replay.maxSec,
     speed,
-    !reducedMotion,
-  );
-  if (playback.sec !== playheadSec) setPlayheadSec(playback.sec);
+    autoplay: !reducedMotion,
+    sec,
+    setSec,
+  });
 
-  const buses = positionsAt(replay.model, playback.sec);
+  const buses = positionsAt(replay.model, sec);
   const onTime = onTimeCount(buses);
   const slowest = slowestRoute(replay.trips, replay.routeNames);
 
-  const data = replay.date != null ? replay : undefined;
+  const data = replay.loaded ? replay : undefined;
 
   return (
     <div className="bus-town-page">
@@ -124,6 +114,7 @@ export function BusTownPage() {
           <ArrowLeft size={14} aria-hidden="true" /> {t("busTown.back_to_pulse")}
         </Link>
       )}
+      <DayPicker replay={replay} selectedDate={selectedDate} onChange={setSelectedDate} t={t} />
 
       <AsyncSection
         loading={replay.loading}
@@ -135,7 +126,7 @@ export function BusTownPage() {
         {() => (
           <div className="bus-town-layout">
             <div className="bus-town-stage">
-              <canvas ref={canvasRef} className="bus-town-canvas" role="img" aria-label={t("busTown.canvas_aria")} />
+              <canvas ref={playback.canvasRef} className="bus-town-canvas" role="img" aria-label={t("busTown.canvas_aria")} />
               <div className="bus-town-controls">
                 <button
                   type="button"
@@ -152,19 +143,19 @@ export function BusTownPage() {
                   min={replay.minSec}
                   max={replay.maxSec}
                   step={60}
-                  value={playback.sec}
+                  value={sec}
                   aria-label={t("busTown.scrubber_aria")}
                   onChange={(event) => playback.seek(Number(event.target.value))}
                 />
                 <span className="bus-town-clock num" aria-hidden="true">
-                  {formatServiceClock(playback.sec)}
+                  {formatServiceClock(sec)}
                 </span>
                 <SpeedPills speed={speed} onChange={setSpeed} t={t} />
-                <DayPicker replay={replay} selectedDate={selectedDate} onChange={setSelectedDate} t={t} />
               </div>
               <div className="bus-town-legend">
                 <DelayBandLegend />
               </div>
+              <p className="bus-town-estimate-note">{t("busTown.estimate_note")}</p>
             </div>
 
             <div className="bus-town-cards">

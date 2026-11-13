@@ -115,7 +115,9 @@ export function useStopBounds(agencyId: number | null): UseQueryResult<StopBound
  *  the server to pick that day's own default window — the one call this
  *  doubles as both "find the day and its first window" and "load one more
  *  window of an already-known day". A past service day's observations never
- *  change, so the result is cached indefinitely once fetched. */
+ *  change, so it never goes stale for the session (`staleTime: Infinity`);
+ *  it's still evicted once unused for `gcTime` (10 minutes), the same as any
+ *  other query. */
 export function replayWindowQueryOptions(
   agencyId: number | null,
   date: string | null,

@@ -2463,7 +2463,7 @@
     "pause": "一時停止",
     "speed_group_aria": "再生速度",
     "speed_label": "{{minutesPerSecond}}分/秒",
-    "speed_aria": "再生速度を変更（現在1秒あたり{{minutesPerSecond}}分）",
+    "speed_aria": "1秒あたり{{minutesPerSecond}}分の速さで再生",
     "scrubber_aria": "再生位置を指定",
     "canvas_aria": "その日のバスを再現した模式図",
     "on_time_title": "現在の定時運行",
@@ -2475,6 +2475,7 @@
     "how_it_works_title": "どうやってわかるのか",
     "how_it_works_body": "バスは実際に観測された停留所の間を直線で結んで動かしており、その時点の遅れで色分けしています。地図は模式図で、実際の位置関係とは異なります。",
     "empty_title": "再現できるバスの記録がありません",
-    "empty_hint": "別の日を試してください。"
+    "empty_hint": "別の日を試してください。",
+    "estimate_note": "停留所と停留所のあいだの位置は推定です。"
   }
 }
