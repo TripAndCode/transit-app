@@ -1,0 +1,11 @@
+/* The hour x date grid's cells are SVG rects, which lift unreliably across
+   browsers, so hover and focus-visible get a stroke ring plus a brightness
+   lift instead, matching the outline the weekday x hour surface already
+   draws on its own cells. The delay fill colour (`delayRampVar`) is
+   untouched. */
+.heat-cell:hover,
+.heat-cell:focus-visible {
+  stroke: var(--accent);
+  stroke-width: 2;
+  filter: brightness(1.1);
+}
