@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LiveTrip, LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import { makeMockMap, type MockLayer, type MockMap } from "../../test/mockMap";
-import { delayColorResolved, readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { accentColorResolved, delayColorResolved, readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
 import { applyTheme } from "../../styles/theme";
 import {
   ACTIVE_ROUTE_FLOW_LAYER,
@@ -244,13 +244,40 @@ describe("operations-map mark paint (pure builders)", () => {
     ]);
   });
 
-  it("gives every vehicle mark a thin surface-derived ring instead of a heavy casing", () => {
+  it("gives an unselected vehicle mark a thin surface-derived ring instead of a heavy casing", () => {
     const paint = vehicleCirclePaint();
-    expect(paint["circle-stroke-width"]).toBe(1.5);
-    expect(paint["circle-stroke-color"]).toBe(surfaceColorResolved());
-    expect(paint["circle-stroke-color"]).not.toContain("var(");
+    expect(paint["circle-stroke-width"]).toEqual(["case", ["boolean", ["get", "selected"], false], 3, 1.5]);
+    expect(paint["circle-stroke-color"]).toEqual([
+      "case", ["boolean", ["get", "selected"], false], accentColorResolved(), surfaceColorResolved(),
+    ]);
+    expect(JSON.stringify(paint["circle-stroke-color"])).not.toContain("var(");
   });
 
+  it("gives the selected vehicle a gentle accent ring rather than a second shape", () => {
+    const [, , selectedWidth, unselectedWidth] = vehicleCirclePaint()["circle-stroke-width"] as [unknown, unknown, number, number];
+    expect(selectedWidth).toBeGreaterThan(unselectedWidth);
+    const [, , selectedColor, unselectedColor] = vehicleCirclePaint()["circle-stroke-color"] as [unknown, unknown, string, string];
+    expect(selectedColor).toBe(accentColorResolved());
+    expect(selectedColor).not.toBe(unselectedColor);
+  });
+
+  it("softens every mark's edge with a gentle blur, short of smearing it", () => {
+    const blur = vehicleCirclePaint()["circle-blur"] as number;
+    expect(blur).toBeGreaterThan(0);
+    expect(blur).toBeLessThan(0.5);
+  });
+
+  it("keeps every live and trip-trail label at or above the 12px legibility floor", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1", PROGRESS);
+    });
+    const liveSizes = (map.getLayer(LIVE_TRIPS_LABEL_LAYER) as MockLayer).layout?.["text-size"] as unknown[];
+    expect(liveSizes.slice(-2)).toEqual([13, 12]);
+    const progressSize = (map.getLayer("trip-progress-labels") as MockLayer).layout?.["text-size"];
+    expect(progressSize as number).toBeGreaterThanOrEqual(12);
+  });
 });
 
 describe("operations-map layers use resolved tokens, never literal hexes", () => {
@@ -569,7 +596,8 @@ describe("a theme toggle repaints layers whose source already exists", () => {
 
     expectRepainted(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
     expectRepainted(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
-    expect(map.getPaintProperty(LIVE_TRIPS_LAYER, "circle-stroke-color")).toBe(DARK["--bg-surface"]);
+    const strokeColor = map.getPaintProperty(LIVE_TRIPS_LAYER, "circle-stroke-color") as unknown[];
+    expect(strokeColor).toEqual(["case", ["boolean", ["get", "selected"], false], DARK["--accent"], DARK["--bg-surface"]]);
     expect(map.getPaintProperty(LIVE_TRIPS_LABEL_LAYER, "text-halo-color")).toBe(DARK["--bg-surface"]);
   });
 });
