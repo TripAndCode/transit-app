@@ -19,17 +19,17 @@ function resolvePalette(el: Element): HeroPalette {
     return isHexColor(value) ? value : fallback;
   };
   const font = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-  const page = color("--bg-page", "#fafaf8");
+  const page = color("--bg-page", "#F6F7FB");
   const dark = luminance(page) < 0.2;
   const map = dark ? DARK_MAP : LIGHT_MAP;
   return {
     land: dark ? mixHex(page, "#ffffff", 0.03) : mixHex(page, "#d8d4c8", 0.35),
     ...map,
     surface: color("--bg-surface", "#ffffff"),
-    text: color("--text-primary", "#2a2a2a"),
-    muted: color("--text-tertiary", "#6e6e6e"),
-    rule: color("--border-subtle", "#e2e2e0"),
-    accent: color("--accent", "#2750C2"),
+    text: color("--text-primary", "#14213D"),
+    muted: color("--text-tertiary", "#5E6982"),
+    rule: color("--border-subtle", "#D6DDE6"),
+    accent: color("--accent", "#3355E0"),
     delay: {
       ok: DELAY_RAMP.ok,
       mild: DELAY_RAMP.mild,
