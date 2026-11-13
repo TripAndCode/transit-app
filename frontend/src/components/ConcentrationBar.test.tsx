@@ -49,6 +49,13 @@ function mockRoutes() {
 describe("ConcentrationBar", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("renders the shared lift primitive on its clickable card", () => {
+    const { container } = renderBar(
+      <ConcentrationBar periodRange={PERIOD} concentration={concentration} onClick={() => {}} />,
+    );
+    expect(container.querySelector(".ov-card")).toHaveClass("ov-clickable", "lift");
+  });
+
   it("draws the largest share at full width and the rest in proportion to it", () => {
     const { container } = renderBar(
       <ConcentrationBar

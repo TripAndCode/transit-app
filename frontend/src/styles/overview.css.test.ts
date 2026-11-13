@@ -27,8 +27,10 @@ describe("overview.css hover affordances change colour or opacity only", () => {
     expect(decl(ruleBody(css, ".ov-pareto-row:hover {"), "background")).toBe("var(--hover-tint)");
   });
 
-  it("a clickable card neither lifts nor changes elevation on hover", () => {
-    const hover = css.match(/\.ov-card\.ov-clickable:hover\s*\{([^}]*)\}/)?.[1] ?? "";
+  it("a clickable card's own hover changes only colour; its lift is composed in from the shared .lift primitive", () => {
+    const base = ruleBody(css, ".ov-card.ov-clickable {");
+    expect(decl(base, "transition")).toContain("var(--lift-transition)");
+    const hover = ruleBody(css, ".ov-card.ov-clickable:hover {");
     expect(hover).not.toMatch(/transform|box-shadow/);
     expect(hover).toMatch(/background/);
     const uiHover = uiCss.match(/\.ui-card--clickable:hover\s*\{([^}]*)\}/)?.[1] ?? "";

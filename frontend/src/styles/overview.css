@@ -436,12 +436,7 @@
   color: var(--text-secondary);
 }
 
-/* Card hover affordance for the clickable summary cards. Composes the
-   .lift primitive's own transition token (--lift-transition, global.css)
-   alongside this rule's own background transition: this rule's own
-   transition property would otherwise win on specificity (two classes
-   beat .lift's one) and drop the lift's transform/box-shadow, leaving it
-   to snap instead of ease. */
+/* Why this composes --lift-transition: see .lift in global.css. */
 .ov-card.ov-clickable {
   cursor: pointer;
   transition: var(--lift-transition), background var(--dur-1) var(--ease-out);
@@ -836,11 +831,6 @@
 .ov-fresh-dot.live-dot {
   color: var(--delay-text-ok);
 }
-/* Full opacity (below, in the motion block) only under motion -- opacity
-   applies to the ring too (it's the same element's box-shadow), and at the
-   dot's resting 0.55 the ring fades to an alpha too faint to read. Under
-   reduced motion there is no ring (global.css turns .live-dot's animation
-   off), so brightening the dot here would have no cue to justify it. */
 
 /* BP.sm. Kept after the hero's base rules: an override of equal specificity
    placed earlier in the file loses to them at every width. */
@@ -858,10 +848,11 @@
    belongs), never for a reduced-motion viewer. Exclusive with the shared
    .live-dot ring (rule above, keyframes in global.css) -- both set
    `animation`, so React only ever puts one class on the dot at a time
-   (OverviewHeroRow.tsx). Also carries .ov-fresh-dot.live-dot's opacity
-   bump (see that rule above) under the same condition: with no ring to
-   read under reduced motion, there is nothing for the brighter dot to
-   announce. */
+   (OverviewHeroRow.tsx). Also brightens .ov-fresh-dot.live-dot to full
+   opacity under the same condition: opacity dims the ring too, as it is
+   the dot's own box-shadow, and at the dot's resting 0.55 the ring fades
+   to an alpha too faint to read, so the bump only matters where the ring
+   can actually run. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ov-breath {
     0%, 100% { opacity: 0.55; }

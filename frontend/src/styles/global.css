@@ -274,12 +274,7 @@
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-in-out: cubic-bezier(.65, 0, .35, 1);
   --transition: var(--dur-1) var(--ease-out);
-  /* The .lift primitive's own transition (transform + box-shadow), as one
-     token: a host that must declare its own `transition` (to animate
-     another property on the same hover) composes this alongside its own
-     instead of hand-copying .lift's timing, which would drift the moment
-     this token's duration or easing changes (see .ov-card.ov-clickable in
-     overview.css). */
+  /* Shared by .lift and any host that composes it; see .lift below. */
   --lift-transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
   /* Elevation scale: el-1 a resting card, el-2 something floating over the
      page (menu, popover, tooltip, hover lift), el-3 a modal or full overlay.
@@ -986,8 +981,9 @@ summary::-webkit-details-marker { display: none; }
    other property on the same hover) outranks this one-class rule on
    specificity and silently drops transform/box-shadow from the
    transitioned set, so the lift snaps instead of easing. That host must
-   include `var(--lift-transition)` alongside its own property (see
-   .ov-card.ov-clickable in overview.css). */
+   compose `var(--lift-transition)` alongside its own property rather than
+   hand-copying .lift's timing, which would drift the moment the token's
+   duration or easing changes (see .ov-card.ov-clickable in overview.css). */
 .lift {
   transition: var(--lift-transition);
 }
@@ -1004,10 +1000,8 @@ summary::-webkit-details-marker { display: none; }
    rather than an ambient distraction. The host SVG line sets
    pathLength="100" so the dash percentages below are independent of the
    chart's own width, and renders this as a second, wider stroke -- lighter
-   than the real line underneath it (mixed toward --glint-tint, the white
-   primitive, rather than --bg-surface: on a near-black dark surface mixing
-   toward the surface itself would darken a bright line instead of lightening
-   it), so it reads as a sheen passing over the line rather than the line
+   than the real line underneath it (mixed toward --glint-tint), so it
+   reads as a sheen passing over the line rather than the line
    thickening. Delayed a full --dur-4 -- the draw-on's own duration (see
    .chart-draw-on above) -- so it starts once the line itself has finished
    drawing in rather than racing ahead of ink that isn't there yet. Only a
