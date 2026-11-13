@@ -7,7 +7,6 @@ and how late" for a span no wider than
 multi-hour, multi-route reply stays a small payload.
 """
 
-from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from datetime import date as CalendarDate
 from datetime import datetime, timezone
@@ -22,6 +21,7 @@ from pydantic import BaseModel, Field
 from api.clickhouse import newest_filed_date_before, table_holding
 from api.deps import get_agency, get_ch, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
+from pipeline.clickhouse import TRIP_CANCELED
 from pipeline.db import departure_ch, stop_event_filter_ch
 from pipeline.live_filing import filing
 from pipeline.route_catalog import route_code_sql
@@ -72,18 +72,23 @@ class ReplayRoute(BaseModel):
 
 
 class ReplayTrip(BaseModel):
-    """One trip's observed stops over the window, in schedule order.
+    """One trip's stops over the window, in schedule order.
 
     ``stop_idx``, ``t`` and ``delay`` are parallel arrays, one entry per
-    stop the trip has an observation for within the window — a stop the
-    feed never reported for that trip, or whose scheduled time falls
-    outside the window, is simply absent rather than carrying a null entry.
+    stop the trip has a usable reading for within the window. A stop with
+    its own report has ``delay`` from that report; a stop the feed skipped
+    instead carries the trip's last reported delay forward, since the trip
+    keeps running past a skipped stop. A stop the feed never reported at
+    all, whose scheduled time falls outside the window, a skipped stop with
+    nothing earlier in the trip to carry forward, or a stop the feed
+    reported after canceling the trip, is simply absent rather than
+    carrying a null entry.
     """
 
     trip_id: str
     route_code: str | None = Field(description="Null when refitting leaves the stop event with no route.")
     stop_idx: list[int]
-    t: list[int] = Field(description="Seconds since the service day's 00:00: scheduled second plus observed delay.")
+    t: list[int] = Field(description="Seconds since the service day's 00:00: scheduled second plus delay.")
     delay: list[int]
 
 
@@ -204,19 +209,31 @@ def build_replay_sql(stamp: Stamp, table: str) -> str:
     tuple instead of being fixed by a WHERE. The window is tested on the
     filed schedule (`pipeline.static_archive.observation_rows`'s own
     docstring), since REFIT can rewrite ``scheduled_sec``.
+
+    Unlike every other reader of this dedup (`pipeline.db.latest_departure_ch`'s
+    docstring), a withdrawn stop event's winning row -- its last report
+    skipped the stop or canceled the trip, so `dep_delay` is NULL -- is kept
+    rather than dropped: a skipped stop still carries the trip's last
+    reported delay forward (`build_replay_trips`), so the replay shows where
+    the trip was heading. ``winner.6`` separates the two withdrawal kinds,
+    since a canceled trip does not run its remaining stops and must not
+    carry a delay onto them (`build_replay_trips` drops it instead).
+    `build_default_window_probe_sql` keeps the drop, since a window's start
+    must still be a stop with its own delay.
     """
     filed_where = f"{_service_sec_ch()} >= {{from_sec:UInt32}} AND {_service_sec_ch()} < {{to_sec:UInt32}}"
     return f"""
         WITH grouped AS (
             SELECT u.trip_id AS trip_id, u.stop_sequence AS stop_sequence,
-                argMax(tuple({departure_ch()}, u.stop_id, u.route_code, u.scheduled_sec, u.scheduled_time),
+                argMax(tuple({departure_ch()}, u.stop_id, u.route_code, u.scheduled_sec, u.scheduled_time,
+                    ifNull(u.schedule_relationship_trip, 0) = {TRIP_CANCELED}),
                     (u.captured_at, u.file_name)) AS winner
             {_replay_rows("target_date", stamp, table, filed_where)}
             GROUP BY u.trip_id, u.stop_sequence
-            HAVING tupleElement(winner, 1) IS NOT NULL
         )
         SELECT trip_id, stop_sequence, winner.1 AS dep_delay, winner.2 AS stop_id,
-            winner.3 AS route_code, winner.4 AS scheduled_sec, winner.5 AS scheduled_time
+            winner.3 AS route_code, winner.4 AS scheduled_sec, winner.5 AS scheduled_time,
+            winner.6 AS canceled
         FROM grouped
         ORDER BY trip_id, stop_sequence
     """
@@ -230,27 +247,38 @@ def build_replay_trips(
     for `stops.id`'s columnar index) and the distinct route_codes used.
 
     Each row is ``(trip_id, stop_sequence, dep_delay, stop_id, route_code,
-    scheduled_sec, scheduled_time)``, already in ``stop_sequence`` order
-    within a trip from the query's own ``ORDER BY``. ``t`` is
-    ``scheduled + delay`` exactly as `api.routers.map.build_route_trips`
-    computes ``observed_sec`` -- the one existing definition of "when a bus
-    was at a stop" this reuses rather than inventing a second one.
+    scheduled_sec, scheduled_time, canceled)``, already in ``stop_sequence``
+    order within a trip from the query's own ``ORDER BY``. An observed
+    stop's ``t`` is ``scheduled + delay`` exactly as
+    `api.routers.map.build_route_trips` computes ``observed_sec`` -- the one
+    existing definition of "when a bus was at a stop" this reuses rather
+    than inventing a second one. A stop `build_replay_sql` kept despite a
+    skipped-stop winning row has no delay of its own, so it carries the
+    trip's last known delay forward instead; a canceled-trip winning row
+    stops the trip from running, so it is dropped outright rather than
+    carrying anything onto it. Either way, a stop with nothing earlier in
+    the trip to carry forward is dropped, the same as a stop the feed never
+    reported at all -- which also keeps a trip canceled before its first
+    kept stop out of the response, rather than appearing with no stops.
     """
     stop_index: dict[str, int] = {}
-    per_trip: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"route_code": None, "stop_idx": [], "t": [], "delay": []}
-    )
+    per_trip: dict[str, dict[str, Any]] = {}
     route_codes: dict[str, None] = {}
-    for trip_id, _stop_sequence, dep_delay, stop_id, route_code, scheduled_sec, scheduled_time in rows:
+    for trip_id, _stop_sequence, dep_delay, stop_id, route_code, scheduled_sec, scheduled_time, canceled in rows:
         sched = service_day_offset(int(scheduled_sec)) if scheduled_sec is not None else clock_to_sec(scheduled_time)
-        if sched is None or stop_id is None:
+        if sched is None or stop_id is None or canceled:
             continue
+        last_delay = per_trip[trip_id]["last_delay"] if trip_id in per_trip else None
+        delay = int(dep_delay) if dep_delay is not None else last_delay
+        if delay is None:
+            continue
+        t = per_trip.setdefault(trip_id, {"route_code": None, "stop_idx": [], "t": [], "delay": [], "last_delay": None})
+        t["last_delay"] = delay
         idx = stop_index.setdefault(stop_id, len(stop_index))
-        t = per_trip[trip_id]
         t["route_code"] = route_code
         t["stop_idx"].append(idx)
-        t["t"].append(sched + int(dep_delay))
-        t["delay"].append(int(dep_delay))
+        t["t"].append(sched + delay)
+        t["delay"].append(delay)
         if route_code is not None:
             route_codes[route_code] = None
 
@@ -259,8 +287,8 @@ def build_replay_trips(
         for trip_id, t in per_trip.items()
     ]
     # "First t": the earliest second a trip is observed at, not the array's
-    # first entry -- a window clip can leave a trip's kept stops in an order
-    # whose first entry is not its earliest (e.g. a trip crossing midnight).
+    # first entry -- a reported delay can shrink from one stop to the next,
+    # which can leave an earlier stop_sequence with the later t.
     trips.sort(key=lambda trip: (min(trip.t) if trip.t else 0, trip.trip_id))
     ordered_stops = sorted(stop_index, key=lambda s: stop_index[s])
     return trips, ordered_stops, list(route_codes)

@@ -30,7 +30,11 @@ _UPDATE_COLUMNS = [
     "stop_sequence",
     "dep_delay",
     "scheduled_sec",
+    "schedule_relationship_trip",
+    "schedule_relationship_stop",
 ]
+_TRIP_CANCELED = 3
+_STOP_SKIPPED = 1
 
 
 @pytest.fixture(autouse=True)
@@ -82,7 +86,18 @@ async def replay_client(replay_app):
 
 
 def _row(
-    agency_id, trip_id, stop_sequence, scheduled_sec, delay, *, route_code="R1", stop_id=None, day=_DAY, file_suffix=0
+    agency_id,
+    trip_id,
+    stop_sequence,
+    scheduled_sec,
+    delay,
+    *,
+    route_code="R1",
+    stop_id=None,
+    day=_DAY,
+    file_suffix=0,
+    schedule_relationship_stop=None,
+    schedule_relationship_trip=None,
 ):
     clock = f"{scheduled_sec // 3600:02d}:{scheduled_sec % 3600 // 60:02d}:00"
     return (
@@ -97,6 +112,8 @@ def _row(
         stop_sequence,
         delay,
         scheduled_sec,
+        schedule_relationship_trip,
+        schedule_relationship_stop,
     )
 
 
@@ -193,6 +210,68 @@ async def test_replay_omits_a_stop_the_feed_never_reported(replay_app, replay_cl
     trip = resp.json()["trips"][0]
     assert len(trip["stop_idx"]) == 2
     assert trip["delay"] == [0, 15]
+
+
+@pytest.mark.asyncio
+async def test_replay_carries_a_skipped_stops_delay_forward(replay_app, replay_client):
+    app, agency_id, ch_client = replay_app
+    client, _, _ = replay_client
+    await _seed_agg_route_daily(app.state.pool, agency_id)
+    # stop_sequence 2's only report skips the stop, so it has no delay of
+    # its own -- the replay should carry stop 1's delay forward onto it.
+    ch_client.insert(
+        "updates",
+        [
+            _row(agency_id, "T1", 1, 8 * 3600, 30, file_suffix=0),
+            _row(
+                agency_id,
+                "T1",
+                2,
+                8 * 3600 + 600,
+                0,
+                file_suffix=1,
+                schedule_relationship_stop=_STOP_SKIPPED,
+            ),
+            _row(agency_id, "T1", 3, 8 * 3600 + 1200, 90, file_suffix=2),
+        ],
+        column_names=_UPDATE_COLUMNS,
+    )
+    resp = await client.get(f"/api/agencies/{agency_id}/replay?date={_DAY.isoformat()}&from_hour=8&to_hour=11")
+    assert resp.status_code == 200
+    trip = resp.json()["trips"][0]
+    assert trip["delay"] == [30, 30, 90]
+    assert trip["t"] == [8 * 3600 + 30, 8 * 3600 + 600 + 30, 8 * 3600 + 1200 + 90]
+
+
+@pytest.mark.asyncio
+async def test_replay_omits_a_canceled_trips_remaining_stop_rather_than_carrying_onto_it(replay_app, replay_client):
+    app, agency_id, ch_client = replay_app
+    client, _, _ = replay_client
+    await _seed_agg_route_daily(app.state.pool, agency_id)
+    # stop_sequence 2's only report cancels the trip -- unlike a skipped
+    # stop, a canceled trip does not keep running, so it must not appear
+    # with a delay carried forward from stop 1.
+    ch_client.insert(
+        "updates",
+        [
+            _row(agency_id, "T1", 1, 8 * 3600, 30, file_suffix=0),
+            _row(
+                agency_id,
+                "T1",
+                2,
+                8 * 3600 + 600,
+                None,
+                file_suffix=1,
+                schedule_relationship_trip=_TRIP_CANCELED,
+            ),
+        ],
+        column_names=_UPDATE_COLUMNS,
+    )
+    resp = await client.get(f"/api/agencies/{agency_id}/replay?date={_DAY.isoformat()}&from_hour=8&to_hour=11")
+    assert resp.status_code == 200
+    trip = resp.json()["trips"][0]
+    assert trip["delay"] == [30]
+    assert len(trip["stop_idx"]) == 1
 
 
 @pytest.mark.asyncio

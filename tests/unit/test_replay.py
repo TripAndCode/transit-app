@@ -75,9 +75,17 @@ def test_replay_sql_reads_every_column_off_one_winning_row():
     # column independently could mix a delay from one physical row with a
     # route_code from another.
     assert sql.count("argMax(") == 1
-    assert "HAVING tupleElement(winner, 1) IS NOT NULL" in sql
-    for i, name in enumerate(("dep_delay", "stop_id", "route_code", "scheduled_sec", "scheduled_time"), start=1):
+    columns = ("dep_delay", "stop_id", "route_code", "scheduled_sec", "scheduled_time", "canceled")
+    for i, name in enumerate(columns, start=1):
         assert f"winner.{i} AS {name}" in sql
+
+
+def test_replay_sql_keeps_a_withdrawn_stop_events_winning_row():
+    sql = build_replay_sql(Stamp.INGESTED, "updates")
+    # Unlike every other dedup reader, a withdrawn stop event's winning row
+    # (dep_delay NULL) must survive so the trip's last delay can carry
+    # forward -- so this query must not filter the winner on dep_delay.
+    assert "HAVING" not in sql
 
 
 def test_replay_sql_orders_by_trip_then_stop_sequence():
@@ -116,8 +124,8 @@ def test_default_window_probe_under_refit_joins_the_archive_and_keeps_its_placeh
 # --- row -> columnar transform -------------------------------------------
 
 
-def _row(trip_id, stop_sequence, dep_delay, stop_id, route_code, scheduled_sec, scheduled_time=None):
-    return (trip_id, stop_sequence, dep_delay, stop_id, route_code, scheduled_sec, scheduled_time)
+def _row(trip_id, stop_sequence, dep_delay, stop_id, route_code, scheduled_sec, scheduled_time=None, canceled=False):
+    return (trip_id, stop_sequence, dep_delay, stop_id, route_code, scheduled_sec, scheduled_time, canceled)
 
 
 def test_build_replay_trips_packs_columnar_fields():
@@ -167,3 +175,58 @@ def test_build_replay_trips_falls_back_to_the_clock_string_without_scheduled_sec
     rows = [_row("t1", 1, 0, "s1", "R1", None, "04:10:00")]
     trips, _stops, _routes = build_replay_trips(rows)
     assert trips[0].t == [4 * 3600 + 600]
+
+
+def test_build_replay_trips_carries_a_withdrawn_stops_delay_forward():
+    rows = [
+        _row("t1", 1, 30, "s1", "R1", 4 * 3600),
+        _row("t1", 2, None, "s2", "R1", 4 * 3600 + 600),
+        _row("t1", 3, 90, "s3", "R1", 4 * 3600 + 1200),
+    ]
+    trips, stops, _routes = build_replay_trips(rows)
+    assert stops == ["s1", "s2", "s3"]
+    trip = trips[0]
+    assert trip.stop_idx == [0, 1, 2]
+    assert trip.delay == [30, 30, 90]
+    assert trip.t == [4 * 3600 + 30, 4 * 3600 + 600 + 30, 4 * 3600 + 1200 + 90]
+
+
+def test_build_replay_trips_omits_a_withdrawn_stop_with_no_prior_delay():
+    rows = [
+        _row("t1", 1, None, "s1", "R1", 4 * 3600),
+        _row("t1", 2, 60, "s2", "R1", 4 * 3600 + 600),
+    ]
+    trips, stops, _routes = build_replay_trips(rows)
+    assert stops == ["s2"]
+    assert trips[0].stop_idx == [0]
+    assert trips[0].t == [4 * 3600 + 600 + 60]
+
+
+def test_build_replay_trips_omits_a_canceled_stop_rather_than_carrying_onto_it():
+    rows = [
+        _row("t1", 1, 30, "s1", "R1", 4 * 3600),
+        _row("t1", 2, None, "s2", "R1", 4 * 3600 + 600, canceled=True),
+    ]
+    trips, stops, _routes = build_replay_trips(rows)
+    assert stops == ["s1"]
+    assert trips[0].stop_idx == [0]
+    assert trips[0].delay == [30]
+
+
+def test_build_replay_trips_drops_a_trip_whose_every_row_is_withdrawn():
+    rows = [
+        _row("t1", 1, None, "s1", "R1", 4 * 3600),
+        _row("t1", 2, None, "s2", "R1", 4 * 3600 + 600),
+    ]
+    trips, stops, routes = build_replay_trips(rows)
+    assert trips == []
+    assert stops == []
+    assert routes == []
+
+
+def test_build_replay_trips_drops_a_trip_canceled_before_its_first_kept_stop():
+    rows = [_row("t1", 1, None, "s1", "R1", 4 * 3600, canceled=True)]
+    trips, stops, routes = build_replay_trips(rows)
+    assert trips == []
+    assert stops == []
+    assert routes == []
