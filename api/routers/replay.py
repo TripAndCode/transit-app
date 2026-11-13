@@ -81,7 +81,7 @@ class ReplayTrip(BaseModel):
     instead carries the trip's last reported delay forward, since the trip
     keeps running past a skipped stop. A stop the feed never reported at
     all, whose scheduled time falls outside the window, a skipped stop with
-    nothing earlier in the trip to carry forward, or a stop the feed
+    nothing earlier in the window to carry forward, or a stop the feed
     reported after canceling the trip, is simply absent rather than
     carrying a null entry.
     """
@@ -100,7 +100,8 @@ class ReplayResponse(BaseModel):
     from_hour: int | None = Field(
         description=(
             "The window replayed, [from_hour, to_hour) in service-day hours;"
-            " null only when no day has a stop event to replay."
+            " null when there is no day to replay, or when no hours were given and"
+            " the day has no stop event to start a default window from."
         )
     )
     to_hour: int | None
@@ -268,7 +269,7 @@ def build_replay_trips(
     trip's last known delay forward instead; a canceled-trip winning row
     stops the trip from running, so it is dropped outright rather than
     carrying anything onto it. Either way, a stop with nothing earlier in
-    the trip to carry forward is dropped, the same as a stop the feed never
+    the window to carry forward is dropped, the same as a stop the feed never
     reported at all -- which also keeps a trip canceled before its first
     kept stop out of the response, rather than appearing with no stops.
     """
