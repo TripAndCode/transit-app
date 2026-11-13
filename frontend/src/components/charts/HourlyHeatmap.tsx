@@ -10,6 +10,7 @@ import { DelayScaleLegend } from "./DelayScaleLegend";
 import { isoDow, useTrendFocus } from "./trendFocus";
 import { onActivateKey } from "../../utils/a11y";
 import { formatDate, formatMinutes, formatNumber, formatShortDate } from "../../utils/format";
+import "./HourlyHeatmap.css";
 
 export type HourlyCell = {
   date: string;
@@ -201,7 +202,7 @@ export function HourlyHeatmap({ cells, height = 280 }: Props) {
                     width={Math.max(1, cellW - 1)}
                     height={Math.max(1, cellH - 1)}
                     opacity={1}
-                    className={`chart-cell-enter${entered ? " chart-cell-enter--in" : ""} chart-focus-dimmable focus-dim-fill`}
+                    className={`heat-cell chart-cell-enter${entered ? " chart-cell-enter--in" : ""} chart-focus-dimmable focus-dim-fill`}
                     style={
                       {
                         fill,

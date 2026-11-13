@@ -1,0 +1,18 @@
+/* A one-time light sheen across the route page's header when it mounts.
+
+   Painted as the header's own background, not an overlay: a positioned
+   overlay would paint over the in-flow title and action buttons, briefly
+   hiding them under the sheen's band. */
+.route-header-sheen {
+  background: linear-gradient(100deg, transparent 30%, var(--accent-soft) 50%, transparent 70%);
+  background-size: 250% 100%;
+  background-position: 150% 0;
+  animation: route-header-sheen var(--dur-4) var(--ease-in-out) 1 forwards;
+}
+@keyframes route-header-sheen {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-header-sheen { animation: none; }
+}
