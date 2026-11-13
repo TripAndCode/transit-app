@@ -83,7 +83,7 @@ class ReplayTrip(BaseModel):
     trip_id: str
     route_code: str | None = Field(description="Null when refitting leaves the stop event with no route.")
     stop_idx: list[int]
-    t: list[int] = Field(description="Seconds since the service day's 00:00, observed or scheduled plus delay.")
+    t: list[int] = Field(description="Seconds since the service day's 00:00: scheduled second plus observed delay.")
     delay: list[int]
 
 

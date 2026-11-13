@@ -119,6 +119,15 @@ async def test_replay_unknown_agency_is_denied(replay_client):
 
 
 @pytest.mark.asyncio
+async def test_replay_soft_deleted_agency_is_denied(replay_app, replay_client):
+    app, agency_id, _ch = replay_app
+    client, _, _ = replay_client
+    await app.state.pool.execute("UPDATE agencies SET deleted_at = NOW() WHERE agency_id = $1", agency_id)
+    resp = await client.get(f"/api/agencies/{agency_id}/replay")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_replay_defaults_to_the_latest_date_with_observations(replay_app, replay_client):
     app, agency_id, ch_client = replay_app
     client, _, _ = replay_client
