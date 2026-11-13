@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, Link } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { BusTownPage } from "./BusTownPage";
 import * as hooks from "../../api/hooks";
@@ -178,5 +178,34 @@ describe("BusTownPage", () => {
     renderBusTown();
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.getByLabelText("Day")).toBeInTheDocument();
+  });
+
+  it("resets the picked date when the agency switches", () => {
+    setup(nonEmptyReplay());
+    const replaySpy = vi.mocked(replayModule.useBusTownReplay);
+
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/8/bus-town"]}>
+        <Routes>
+          <Route
+            path="/agencies/:agencyId/bus-town"
+            element={
+              <>
+                <Link to="/agencies/9/bus-town">switch agency</Link>
+                <BusTownPage />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText("Day"), { target: { value: "2026-01-04" } });
+    expect(replaySpy.mock.calls.at(-1)![0]).toBe(8);
+    expect(replaySpy.mock.calls.at(-1)![1]).toBe("2026-01-04");
+
+    fireEvent.click(screen.getByText("switch agency"));
+    expect(replaySpy.mock.calls.at(-1)![0]).toBe(9);
+    expect(replaySpy.mock.calls.at(-1)![1]).toBeNull();
   });
 });

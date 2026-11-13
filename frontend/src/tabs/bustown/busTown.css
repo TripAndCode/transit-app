@@ -69,7 +69,7 @@
 .bus-town-play-button:hover { background: var(--bg-soft); }
 .bus-town-play-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.scrub-input { flex: 1 1 160px; min-width: 120px; }
+.bus-town-controls .scrub-input { flex: 1 1 160px; min-width: 120px; }
 
 .bus-town-clock {
   color: var(--text-primary);

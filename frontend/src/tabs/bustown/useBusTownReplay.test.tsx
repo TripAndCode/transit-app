@@ -50,4 +50,24 @@ describe("useBusTownReplay", () => {
     expect(result.current.stopPoints).toBe(first.stopPoints);
     expect(result.current.stopPairs).toBe(first.stopPairs);
   });
+
+  it("keeps the built scene across a playhead advance that stays in the same window", () => {
+    const client = seededClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result, rerender } = renderHook(({ sec }: { sec: number }) => useBusTownReplay(AGENCY, null, sec, SPEED), {
+      wrapper,
+      initialProps: { sec: PLAYHEAD },
+    });
+    const first = result.current;
+    expect(first.model.size).toBeGreaterThan(0);
+
+    rerender({ sec: PLAYHEAD + 60 });
+
+    expect(result.current.model).toBe(first.model);
+    expect(result.current.trips).toBe(first.trips);
+    expect(result.current.stopPoints).toBe(first.stopPoints);
+    expect(result.current.stopPairs).toBe(first.stopPairs);
+  });
 });

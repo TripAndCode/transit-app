@@ -1,8 +1,9 @@
 /**
  * Bus Town — replays one past service day of one agency's buses, gliding
  * between the stops they were actually observed at, coloured by how late
- * they were there. A schematic, not a map, reached from the command palette
- * and this page's own back-link rather than the sidebar rail.
+ * they were there. A schematic, not a map, reached only from the command
+ * palette rather than the sidebar rail; its own back-link leads out to
+ * Pulse, not in.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -75,9 +76,19 @@ function DayPicker({ replay, selectedDate, onChange, t }: {
   );
 }
 
+/**
+ * A thin wrapper so `key={agencyId}` remounts the stateful inner page on an
+ * agency switch — `useAgencyId` is reactive but the same route element, so
+ * without a remount the previous agency's picked date, playhead and speed
+ * would otherwise survive into the new agency's replay request.
+ */
 export function BusTownPage() {
-  const { t } = useTranslation();
   const agencyId = useAgencyId();
+  return <BusTownPageForAgency key={agencyId ?? "none"} agencyId={agencyId} />;
+}
+
+function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
+  const { t } = useTranslation();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [speed, setSpeed] = useState<number>(SPEEDS[DEFAULT_SPEED_INDEX]);
@@ -86,6 +97,11 @@ export function BusTownPage() {
   const replay = useBusTownReplay(agencyId, selectedDate, sec, speed);
   const stopBoundsQuery = useStopBounds(agencyId);
   const bounds = stopBoundsQuery.data ?? boundsFromPoints(replay.stopPoints);
+  /** `sec` can sit outside `[minSec, maxSec]` right after a day switch (a
+   *  shorter day) or before the first load — clamp it for display and
+   *  playback without feeding the clamped value back into state, which
+   *  `useBusTownReplay` still needs the raw playhead for. */
+  const playhead = Math.min(replay.maxSec, Math.max(replay.minSec, sec));
 
   const playback = useBusTownPlayback({
     model: replay.model,
@@ -96,11 +112,11 @@ export function BusTownPage() {
     maxSec: replay.maxSec,
     speed,
     autoplay: !reducedMotion,
-    sec,
+    sec: playhead,
     setSec,
   });
 
-  const buses = positionsAt(replay.model, sec);
+  const buses = positionsAt(replay.model, playhead);
   const onTime = onTimeCount(buses);
   const slowest = slowestRoute(replay.trips, replay.routeNames);
 
@@ -143,12 +159,12 @@ export function BusTownPage() {
                   min={replay.minSec}
                   max={replay.maxSec}
                   step={60}
-                  value={sec}
+                  value={playhead}
                   aria-label={t("busTown.scrubber_aria")}
                   onChange={(event) => playback.seek(Number(event.target.value))}
                 />
                 <span className="bus-town-clock num" aria-hidden="true">
-                  {formatServiceClock(sec)}
+                  {formatServiceClock(playhead)}
                 </span>
                 <SpeedPills speed={speed} onChange={setSpeed} t={t} />
               </div>

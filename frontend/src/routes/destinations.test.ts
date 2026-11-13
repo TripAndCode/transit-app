@@ -22,7 +22,7 @@ import {
 } from "./destinations";
 
 describe("destinations", () => {
-  it("lists the seven destinations in rail order", () => {
+  it("lists the rail's seven destinations, then Bus Town", () => {
     expect(DESTINATIONS).toEqual(["pulse", "routes", "time", "why", "compare", "live", "reports", "bus-town"]);
   });
 

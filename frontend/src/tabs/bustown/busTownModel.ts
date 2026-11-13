@@ -182,8 +182,7 @@ export function positionsAt(model: BusTownModel, sec: number): BusTownBus[] {
 }
 
 /** "On time" is exactly `delayBand`'s "ok" tier (< 1.5 min = 90s) — the same
- *  classifier the colour ramp and its legend use, so the count on the card
- *  can never disagree with what the canvas is showing. */
+ *  classifier the colour ramp and its legend use. */
 export function onTimeCount(buses: readonly BusTownBus[]): { onTime: number; total: number } {
   return { onTime: buses.filter((b) => delayBand(b.delayMin) === "ok").length, total: buses.length };
 }

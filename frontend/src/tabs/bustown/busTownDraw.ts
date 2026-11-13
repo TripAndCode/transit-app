@@ -1,4 +1,5 @@
-import { delayColorResolved } from "../../styles/tokens";
+import { isHexColor } from "../../pages/landing/heroMapMath";
+import { delayColor, DELAY_THRESHOLDS } from "../../styles/tokens";
 import type { BusTownBus, Projection, StopPair, StopPoint } from "./busTownModel";
 
 export type BusTownPalette = {
@@ -6,9 +7,11 @@ export type BusTownPalette = {
   line: string;
   stopDot: string;
   stopRing: string;
+  /** The severe-delay band's resolved hex, read once per palette (mount and
+   *  theme toggle) rather than per bus per frame — `getComputedStyle` is a
+   *  layout-triggering call the draw loop can't afford on every bus. */
+  severe: string;
 };
-
-const isHexColor = (value: string): boolean => /^#[0-9a-f]{6}$/i.test(value);
 
 /** Canvas cannot read `var()`, so the schematic's own tokens are resolved
  *  once at mount and again whenever the theme changes. */
@@ -23,6 +26,7 @@ export function resolveBusTownPalette(el: Element): BusTownPalette {
     line: color("--border-subtle", "#D6DDE6"),
     stopDot: color("--text-tertiary", "#5E6982"),
     stopRing: color("--bg-page", "#F6F7FB"),
+    severe: color("--delay-severe", "#A8391F"),
   };
 }
 
@@ -77,7 +81,7 @@ export function drawBusTownFrame(
 
   for (const bus of buses) {
     const p = projection(bus.lat, bus.lon);
-    ctx.fillStyle = delayColorResolved(bus.delayMin);
+    ctx.fillStyle = bus.delayMin < DELAY_THRESHOLDS.severe ? delayColor(bus.delayMin) : palette.severe;
     ctx.strokeStyle = palette.stopRing;
     ctx.lineWidth = 1.5;
     ctx.beginPath();

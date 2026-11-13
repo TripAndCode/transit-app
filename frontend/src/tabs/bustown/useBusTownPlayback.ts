@@ -40,16 +40,23 @@ export type BusTownPlaybackOptions = {
   setSec: (sec: number) => void;
 };
 
-type LoopControls = { seek: (sec: number) => void; setPlaying: (playing: boolean) => void; retheme: () => void };
+type LoopControls = {
+  seek: (sec: number) => void;
+  setPlaying: (playing: boolean) => void;
+  retheme: () => void;
+  repaint: () => void;
+};
 
 /**
  * Owns the schematic's rAF draw loop. `model`/`stopPoints`/`stopPairs`/
  * `bounds` are read fresh on every drawn frame without restarting the loop,
- * so a newly loaded window never resets play position. The loop is only
- * ever scheduled while playing (and the tab is visible and the canvas on
- * screen) — pausing cancels it outright rather than idling, matching the
- * stricter of the two product requirements this mirrors
- * `useHeroMapAnimation`'s structure to meet.
+ * so a newly loaded window never resets play position while playing; while
+ * paused, a separate effect repaints the one still frame whenever any of
+ * them changes, so a day switch, a window arriving after a paused seek, or
+ * the stop bounds resolving are never left stale on screen. The loop itself
+ * is only ever scheduled while playing (and the tab is visible and the
+ * canvas on screen) — pausing cancels it outright rather than scheduling
+ * empty frames.
  */
 export function useBusTownPlayback({
   model,
@@ -71,10 +78,7 @@ export function useBusTownPlayback({
   const canvasElRef = useRef<HTMLCanvasElement | null>(null);
   const [canvasMounted, setCanvasMounted] = useState(false);
   const [playing, setPlaying] = useState(autoplay);
-  const speedRef = useRef(speed);
-  useEffect(() => {
-    speedRef.current = speed;
-  }, [speed]);
+  const currentSpeed = useEffectEvent(() => speed);
   const themeSignal = useThemeSignal();
 
   const controls = useRef<LoopControls | null>(null);
@@ -130,7 +134,7 @@ export function useBusTownPlayback({
     function frame(now: number) {
       const step = Math.min(now - last, MAX_STEP_MS);
       last = now;
-      t = Math.min(maxSec, t + (step / 1000) * speedRef.current);
+      t = Math.min(maxSec, t + (step / 1000) * currentSpeed());
       paint();
       const minute = Math.floor(t / 60);
       if (minute !== lastMinute) {
@@ -188,6 +192,9 @@ export function useBusTownPlayback({
         palette = resolveBusTownPalette(el);
         paint();
       },
+      repaint: () => {
+        paint();
+      },
     };
     sync();
 
@@ -207,6 +214,10 @@ export function useBusTownPlayback({
   useEffect(() => {
     controls.current?.retheme();
   }, [themeSignal]);
+
+  useEffect(() => {
+    controls.current?.repaint();
+  }, [model, stopPoints, stopPairs, bounds]);
 
   function seek(next: number) {
     const clamped = Math.max(minSec, Math.min(maxSec, next));
