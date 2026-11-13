@@ -1,8 +1,8 @@
 /* The desktop rail's "Other" footer links (Model/Help/Feedback/About/Admin):
    the same soft accent pill the destinations above give their current entry,
    so the active state isn't a colour change alone. Scoped to the desktop
-   rail -- the phone "more" sheet repeats this list unchanged, since the
-   narrow layout is a later PR. */
+   rail -- the phone "more" sheet keeps `railLinkStyle` for these links
+   instead. */
 .app-sidebar-desktop .other-nav-link {
   border-radius: var(--radius-lg);
   color: var(--text-primary);

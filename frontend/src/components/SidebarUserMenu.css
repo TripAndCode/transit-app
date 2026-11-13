@@ -1,12 +1,20 @@
 /* The account-menu trigger and its popover rows: a calm hover fill, which an
-   inline style can't express. */
+   inline style can't express. The transparent default has to live here too,
+   not as an inline style on the element: an inline `background` would beat
+   these `:hover`/`:focus-visible` rules and the fill would never paint. The
+   selected row is the one exception: its inline `--accent-soft` highlight is
+   deliberately meant to beat hover, so it keeps that background inline. */
 .sidebar-user-trigger {
+  background: transparent;
   transition: background var(--transition);
 }
 .sidebar-user-trigger:hover {
   background: var(--hover-tint);
 }
 
+.sidebar-user-menu-item {
+  background: transparent;
+}
 .sidebar-user-menu-item:hover,
 .sidebar-user-menu-item:focus-visible {
   background: var(--bg-soft);
