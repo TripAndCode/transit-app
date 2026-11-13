@@ -191,6 +191,20 @@ async def test_replay_window_clips_a_trip_to_the_requested_hours(replay_app, rep
 
 
 @pytest.mark.asyncio
+async def test_replay_empty_window_still_names_the_day_and_window(replay_app, replay_client):
+    app, agency_id, ch_client = replay_app
+    client, _, _ = replay_client
+    await _seed_agg_route_daily(app.state.pool, agency_id)
+    ch_client.insert("updates", [_row(agency_id, "T1", 1, 8 * 3600 + 300, 30)], column_names=_UPDATE_COLUMNS)
+    resp = await client.get(f"/api/agencies/{agency_id}/replay?date={_DAY.isoformat()}&from_hour=14&to_hour=17")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trips"] == []
+    assert body["date"] == _DAY.isoformat()
+    assert (body["from_hour"], body["to_hour"]) == (14, 17)
+
+
+@pytest.mark.asyncio
 async def test_replay_omits_a_stop_the_feed_never_reported(replay_app, replay_client):
     app, agency_id, ch_client = replay_app
     client, _, _ = replay_client

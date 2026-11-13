@@ -108,6 +108,8 @@ def test_default_window_probe_shares_the_survivor_definition():
 def test_replay_sql_under_refit_joins_the_archive_and_keeps_its_placeholders():
     sql = build_replay_sql(Stamp.REFIT, "updates")
     assert "ANY LEFT JOIN" in sql
+    # One row per stop event joins the archive, not every poll.
+    assert "argMax(tuple(u.dep_delay, u.schedule_relationship_trip" in sql
     assert "{target_date:Date}" in sql
     assert "{from_sec:UInt32}" in sql
     assert "{to_sec:UInt32}" in sql
@@ -162,6 +164,16 @@ def test_build_replay_trips_drops_a_stop_with_no_usable_scheduled_time():
     trips, stops, _routes = build_replay_trips(rows)
     assert stops == ["s1"]
     assert trips[0].stop_idx == [0]
+
+
+def test_build_replay_trips_keeps_a_trips_route_code_past_a_later_null_one():
+    rows = [
+        _row("t1", 1, 30, "s1", "R1", 4 * 3600),
+        _row("t1", 2, 60, "s2", None, 4 * 3600 + 600),
+    ]
+    trips, _stops, routes = build_replay_trips(rows)
+    assert routes == ["R1"]
+    assert trips[0].route_code == "R1"
 
 
 def test_build_replay_trips_omits_a_null_route_code_from_the_route_list():

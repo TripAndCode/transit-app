@@ -39,9 +39,10 @@ router = APIRouter(prefix="/api/agencies", tags=["replay"])
 _JST = ZoneInfo("Asia/Tokyo")
 
 #: The widest a requested window may be. The frontend replays at most a
-#: few hours at a time, and a wider window would ship proportionally more
-#: stop-event rows for an agency-wide, every-route read (unlike the
-#: route-scoped endpoints, which bound cost by picking one route).
+#: few hours at a time. The ClickHouse scan always covers the agency's whole
+#: service day; the window bounds the rows the dedup groups and the payload
+#: an agency-wide, every-route read ships (the route-scoped endpoints bound
+#: theirs by picking one route).
 MAX_REPLAY_WINDOW_HOURS = 3
 
 #: Sanity bound on from_hour/to_hour. A GTFS post-midnight continuation
@@ -96,7 +97,12 @@ class ReplayResponse(BaseModel):
     date: str | None = Field(
         description="The service day replayed, or null when the agency has no observations at all."
     )
-    from_hour: int | None
+    from_hour: int | None = Field(
+        description=(
+            "The window replayed, [from_hour, to_hour) in service-day hours;"
+            " null only when no day has a stop event to replay."
+        )
+    )
     to_hour: int | None
     available_dates: list[str] = Field(
         description=f"Up to the agency's last {MAX_AVAILABLE_DATES} service days with observations, newest first."
@@ -106,11 +112,16 @@ class ReplayResponse(BaseModel):
     trips: list[ReplayTrip]
 
 
-def _empty_response(date: CalendarDate | None, available_dates: list[CalendarDate]) -> ReplayResponse:
+def _empty_response(
+    date: CalendarDate | None,
+    available_dates: list[CalendarDate],
+    from_hour: int | None = None,
+    to_hour: int | None = None,
+) -> ReplayResponse:
     return ReplayResponse(
         date=None if date is None else date.isoformat(),
-        from_hour=None,
-        to_hour=None,
+        from_hour=from_hour,
+        to_hour=to_hour,
         available_dates=[d.isoformat() for d in available_dates],
         stops=ReplayStops(id=[], lat=[], lon=[]),
         routes=[],
@@ -121,8 +132,8 @@ def _empty_response(date: CalendarDate | None, available_dates: list[CalendarDat
 def validate_replay_window(from_hour: int | None, to_hour: int | None) -> None:
     """Raise a 422 for a malformed or over-wide window. Both bounds must be
     given together -- one alone has no stated meaning in the contract -- and
-    the width is capped at :data:`MAX_REPLAY_WINDOW_HOURS`, the one bound
-    this agency-wide, every-route read enforces on its own cost."""
+    the width is capped at :data:`MAX_REPLAY_WINDOW_HOURS`, which bounds the
+    rows this agency-wide, every-route read groups and ships."""
     if (from_hour is None) != (to_hour is None):
         raise HTTPException(status_code=422, detail="from_hour and to_hour must be given together")
     if from_hour is None or to_hour is None:
@@ -170,7 +181,7 @@ def _replay_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = ""
     is nothing a REFIT read would need an OR-NULL branch to keep.
     """
     on_day = filed_between_ch(f"{{{day_param}:Date}}", f"{{{day_param}:Date}}")
-    return observation_rows(stop_event_filter_ch(on_day), stamp, table, filed_where, live_form=True)
+    return observation_rows(stop_event_filter_ch(on_day), stamp, table, filed_where, live_form=True, by_stop_event=True)
 
 
 def _service_sec_ch() -> str:
@@ -275,7 +286,8 @@ def build_replay_trips(
         t = per_trip.setdefault(trip_id, {"route_code": None, "stop_idx": [], "t": [], "delay": [], "last_delay": None})
         t["last_delay"] = delay
         idx = stop_index.setdefault(stop_id, len(stop_index))
-        t["route_code"] = route_code
+        if route_code is not None:
+            t["route_code"] = route_code
         t["stop_idx"].append(idx)
         t["t"].append(sched + delay)
         t["delay"].append(delay)
@@ -308,16 +320,17 @@ async def _stop_coordinates(
 
 
 async def _route_labels(conn: asyncpg.Connection, agency_id: int, route_codes: list[str]) -> dict[str, str]:
-    """``route_code -> display name`` for exactly the codes used, the same
-    ``COALESCE(short_name, long_name, code)`` precedence
-    ``api.routers.reports.forecast_overview`` derives route names with."""
+    """``route_code -> display name`` for exactly the codes used, with the
+    same ``COALESCE(short_name, long_name, code)`` precedence, and the same
+    pick among route_ids that derive one code, as
+    ``api.routers.reports.forecast_overview``."""
     if not route_codes:
         return {}
     rows = await conn.fetch(
-        "SELECT route_code, route_short_name, route_long_name FROM ("
+        "SELECT DISTINCT ON (route_code) route_code, route_short_name, route_long_name FROM ("
         f"  SELECT {route_code_sql('route_id')} AS route_code, route_short_name, route_long_name "
         "  FROM static_routes WHERE agency_id = $1"
-        ") s WHERE route_code = ANY($2)",
+        ") s WHERE route_code = ANY($2) ORDER BY route_code, route_short_name",
         agency_id,
         route_codes,
     )
@@ -370,7 +383,7 @@ async def replay(
     )
     trips, stop_ids, route_codes = build_replay_trips(result.result_rows)
     if not trips:
-        return _empty_response(target_date, available)
+        return _empty_response(target_date, available, from_hour, to_hour)
 
     coords = await _stop_coordinates(conn, agency_id, stop_ids)
     labels = await _route_labels(conn, agency_id, route_codes)
