@@ -50,9 +50,9 @@ type LoopControls = {
 /**
  * Owns the schematic's rAF draw loop. `model`/`stopPoints`/`stopPairs`/
  * `bounds` are read fresh on every drawn frame without restarting the loop,
- * so a newly loaded window never resets play position while playing; while
- * paused, a separate effect repaints the one still frame whenever any of
- * them changes, so a day switch, a window arriving after a paused seek, or
+ * so a newly loaded window never resets play position. A separate effect
+ * also repaints the current frame whenever any of them changes, so while
+ * paused a day switch, a window arriving after a paused seek, or
  * the stop bounds resolving are never left stale on screen. The loop itself
  * is only ever scheduled while playing (and the tab is visible and the
  * canvas on screen) — pausing cancels it outright rather than scheduling

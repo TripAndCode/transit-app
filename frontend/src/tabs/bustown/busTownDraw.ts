@@ -7,9 +7,9 @@ export type BusTownPalette = {
   line: string;
   stopDot: string;
   stopRing: string;
-  /** The severe-delay band's resolved hex, read once per palette (mount and
-   *  theme toggle) rather than per bus per frame — `getComputedStyle` is a
-   *  layout-triggering call the draw loop can't afford on every bus. */
+  /** The severe-delay band's resolved hex, read with the rest of the palette
+   *  rather than per bus per frame: `getComputedStyle` forces a style
+   *  recalculation the draw loop can't afford on every bus. */
   severe: string;
 };
 
