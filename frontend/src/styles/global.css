@@ -971,19 +971,14 @@ summary::-webkit-details-marker { display: none; }
    Reused across tabs, so a page composes "lively but calm" from one
    definition rather than retuning distance/timing/shadow per screen. */
 
-/* An interactive card (one whose whole surface opens something) rises
-   slightly with its shadow stepping up to the floating tier (--el-2) --
-   the tier the elevation scale already names for a hover lift -- on hover
-   or keyboard focus. The lift itself is an explicit reduced-motion
-   casualty (not merely a faster one): a viewer who has asked for no motion
-   gets no transform, only the instant shadow cue.
-   A host selector that declares its own `transition` (to animate some
-   other property on the same hover) outranks this one-class rule on
-   specificity and silently drops transform/box-shadow from the
-   transitioned set, so the lift snaps instead of easing. That host must
-   compose `var(--lift-transition)` alongside its own property rather than
-   hand-copying .lift's timing, which would drift the moment the token's
-   duration or easing changes (see .ov-card.ov-clickable in overview.css). */
+/* An interactive card rises slightly with its shadow stepping up to the
+   floating tier (--el-2) on hover or keyboard focus; reduced motion
+   drops the transform, keeping only the instant shadow cue.
+   A host with its own `transition` outranks this rule on specificity and
+   drops transform/box-shadow from the transitioned set, so the lift
+   snaps instead of easing. Compose `var(--lift-transition)` there rather
+   than hand-copying .lift's timing, which would drift when the token
+   changes (see .ov-card.ov-clickable in overview.css). */
 .lift {
   transition: var(--lift-transition);
 }
@@ -995,22 +990,14 @@ summary::-webkit-details-marker { display: none; }
   .lift:hover, .lift:focus-visible { transform: none; }
 }
 
-/* A light sheen that sweeps once across a sparkline/mini-chart's line, on
-   mount -- never a loop, so it reads as a one-time "here's the trend" cue
-   rather than an ambient distraction. The host SVG line sets
-   pathLength="100" so the dash percentages below are independent of the
-   chart's own width, and renders this as a second, wider stroke -- lighter
-   than the real line underneath it (mixed toward --glint-tint), so it
-   reads as a sheen passing over the line rather than the line
-   thickening. Delayed a full --dur-4 -- the draw-on's own duration (see
-   .chart-draw-on above) -- so it starts once the line itself has finished
-   drawing in rather than racing ahead of ink that isn't there yet. Only a
-   caller whose line draws on (InlineSparkline's default `drawOn={true}`)
-   needs that wait; one whose line is already fully drawn on mount has no
-   current caller pairing it with `glint`, so there is no 0s override to
-   carry here. Invisible at rest in every motion mode; only the
-   no-preference block below ever reveals it, which is what keeps it fully
-   off (not merely instant) under reduced motion. */
+/* A light sheen that sweeps once across a sparkline/mini-chart's line on
+   mount -- never a loop, so it reads as a one-time "here's the trend" cue,
+   not an ambient distraction. Renders as a second, wider stroke mixed
+   toward --glint-tint, so it reads as a sheen passing over the line
+   rather than the line thickening. Delayed one --dur-4 -- the draw-on's
+   own duration (see .chart-draw-on above) -- so it starts once the line
+   has finished drawing in rather than racing ahead of ink that isn't
+   there yet. */
 .glint {
   opacity: 0;
   stroke-dashoffset: 14;

@@ -2,6 +2,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { ruleBody, decl, withoutBlocks } from "../test/cssRules";
 
 // Every duration goes through a --dur-* token (or --transition): the tokens
 // are the one motion scale, and the reduced-motion zeroing of them is the
@@ -70,118 +71,71 @@ describe("motion durations come from tokens", () => {
 // that breaks one of these invariants fails this test instead of silently
 // drifting from it.
 describe("shared motion primitives (.lift, .glint, .live-dot)", () => {
-  const globalCss = readFileSync(path.join(root, "styles", "global.css"), "utf8");
+  const globalCss = readFileSync(path.join(root, "styles", "global.css"), "utf8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const rootBlock = ruleBody(globalCss, ":root {");
 
-  /** The declaration body of the first `{ ... }` block in file order whose
-   *  selector list matches `selector` exactly, e.g. `.lift:hover,
-   *  .lift:focus-visible`. The scan is a flat regex over the whole file,
-   *  not aware of `@media` nesting, so a same-selector rule inside an
-   *  earlier `@media` block is returned ahead of one outside it -- callers
-   *  that need the unnested rule specifically pick a `selector` unique to
-   *  it. Block comments are stripped first so a comment mentioning the
-   *  selector can't be mistaken for one. */
-  function ruleBody(css: string, selector: string): string | null {
-    for (const [, sel, body] of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      if (sel.trim().split(/\s*,\s*/).join(", ") === selector) return body;
-    }
-    return null;
-  }
-
-  /** Every top-level `marker { ... }` block's span and body, matched by
-   *  brace depth rather than a regex that stops at the block's first `}` --
-   *  global.css holds several `@media (prefers-reduced-motion: ...)`
-   *  blocks, each with nested rules of its own. */
-  function blocksOf(css: string, marker: string): { start: number; end: number; body: string }[] {
-    const out: { start: number; end: number; body: string }[] = [];
-    let from = 0;
-    for (let start; (start = css.indexOf(marker, from)) !== -1; ) {
-      const openBrace = css.indexOf("{", start);
-      let depth = 1;
-      let i = openBrace + 1;
-      while (depth > 0 && i < css.length) {
-        if (css[i] === "{") depth++;
-        else if (css[i] === "}") depth--;
-        i++;
-      }
-      out.push({ start, end: i, body: css.slice(openBrace + 1, i - 1) });
-      from = i;
-    }
-    return out;
-  }
-
-  /** Every `@media (prefers-reduced-motion: <mode>)` block's bodies,
-   *  concatenated -- global.css declares more than one. */
-  function reducedMotionBodies(css: string, mode: "reduce" | "no-preference"): string {
-    return blocksOf(css, `@media (prefers-reduced-motion: ${mode})`)
-      .map((b) => b.body)
-      .join("\n");
-  }
-
-  /** `css` with every `@media (prefers-reduced-motion: <mode>)` block
-   *  removed entirely, so a rule that survives is one reduced motion can
-   *  still reach. */
-  function withoutReducedMotionBlocks(css: string, mode: "reduce" | "no-preference"): string {
-    const blocks = blocksOf(css, `@media (prefers-reduced-motion: ${mode})`);
-    let out = "";
-    let last = 0;
-    for (const b of blocks) {
-      out += css.slice(last, b.start);
-      last = b.end;
-    }
-    return out + css.slice(last);
+  /** Every `@media (prefers-reduced-motion: <mode>)` block whose body
+   *  contains `selector` -- global.css declares more than one block per
+   *  mode, each guarding a different rule. Mirrors the
+   *  matchAll()-then-ruleBody() idiom tokens.test.ts uses for the
+   *  no-preference case, parameterized over both modes. */
+  function reducedMotionBlocksContaining(mode: "reduce" | "no-preference", selector: string): string[] {
+    const marker = `@media (prefers-reduced-motion: ${mode})`;
+    const markerRe = new RegExp(`@media \\(prefers-reduced-motion: ${mode}\\)`, "g");
+    return [...globalCss.matchAll(markerRe)]
+      .map((m) => ruleBody(globalCss.slice(m.index), marker))
+      .filter((block) => block.includes(selector));
   }
 
   it("times .lift and .glint only through var(--dur-*)/var(--ease-*)", () => {
-    const lift = ruleBody(globalCss, ".lift");
-    expect(lift).toMatch(/transition:\s*var\(--lift-transition\)/);
+    const lift = ruleBody(globalCss, ".lift {");
+    expect(decl(lift, "transition")).toBe("var(--lift-transition)");
     // --lift-transition itself (the token .lift and every host composing
     // alongside it both resolve to) carries the real timing.
-    const liftTransition = globalCss.match(/--lift-transition:\s*([^;]+);/)?.[1] ?? "";
-    expect(liftTransition).toMatch(/var\(--dur-\d\)\s+var\(--ease-[a-z-]+\)/);
-    const noPref = reducedMotionBodies(globalCss, "no-preference");
-    expect(noPref).toMatch(/\.glint\s*\{\s*animation:\s*glint-sweep\s+var\(--dur-\d\)\s+var\(--ease-[a-z-]+\)/);
+    expect(decl(rootBlock, "--lift-transition")).toMatch(/var\(--dur-\d\)\s+var\(--ease-[a-z-]+\)/);
+    const [noPref] = reducedMotionBlocksContaining("no-preference", ".glint {");
+    expect(decl(ruleBody(noPref, ".glint {"), "animation")).toMatch(/glint-sweep\s+var\(--dur-\d\)\s+var\(--ease-[a-z-]+\)/);
   });
 
   // Shared by the real assertion and its negative-control self-test below,
   // so the two can never drift apart into checking different things.
-  const LIVE_RING_TIMING_RE =
-    /animation:\s*live-ring\s+calc\(var\(--dur-\d\)[^)]*\)\s+var\(--ease-[a-z-]+\)\s+infinite/;
+  const LIVE_RING_TIMING_RE = /^live-ring\s+calc\(var\(--dur-\d\)[^)]*\)\s+var\(--ease-[a-z-]+\)\s+infinite$/;
 
   it("times .live-dot's loop only through var(--dur-*)/var(--ease-*)", () => {
-    expect(globalCss).toMatch(new RegExp(`\\.live-dot\\s*\\{\\s*${LIVE_RING_TIMING_RE.source}`));
+    expect(decl(ruleBody(globalCss, ".live-dot {"), "animation")).toMatch(LIVE_RING_TIMING_RE);
   });
 
   it("fails this test's own matcher on a hard-coded duration, proving it would catch one", () => {
-    expect("animation: live-ring 2.4s ease-in-out infinite").not.toMatch(LIVE_RING_TIMING_RE);
+    expect("live-ring 2.4s ease-in-out infinite").not.toMatch(LIVE_RING_TIMING_RE);
   });
 
   it("gives .lift's hover/focus lift no transform under reduced motion", () => {
-    const reduced = reducedMotionBodies(globalCss, "reduce");
-    const lift = ruleBody(reduced, ".lift:hover, .lift:focus-visible");
-    expect(lift).not.toBeNull();
-    expect(lift).toMatch(/transform:\s*none/);
+    const [reduced] = reducedMotionBlocksContaining("reduce", ".lift:hover, .lift:focus-visible {");
+    expect(decl(ruleBody(reduced, ".lift:hover, .lift:focus-visible {"), "transform")).toBe("none");
   });
 
   it("turns .glint fully off (invisible, not just instant) under reduced motion", () => {
     // The base rule (outside every @media) is the reduced-motion resting
     // state: opacity 0, so there is nothing to see without the
     // no-preference block's animation ever running.
-    const base = ruleBody(globalCss, ".glint");
-    expect(base).toMatch(/opacity:\s*0\b/);
+    expect(decl(ruleBody(globalCss, ".glint {"), "opacity")).toBe("0");
     // And that animation lives only inside the no-preference block(s) --
     // not declared again anywhere reduced motion can still reach it.
-    const outsideNoPreference = withoutReducedMotionBlocks(globalCss, "no-preference");
+    const outsideNoPreference = withoutBlocks(globalCss, "@media (prefers-reduced-motion: no-preference)");
     expect(outsideNoPreference).not.toMatch(/\.glint\s*\{[^}]*animation:/);
   });
 
   it("explicitly turns .live-dot's loop off under reduced motion", () => {
-    const reduced = reducedMotionBodies(globalCss, "reduce");
-    expect(ruleBody(reduced, ".live-dot")).toMatch(/animation:\s*none/);
+    const [reduced] = reducedMotionBlocksContaining("reduce", ".live-dot {");
+    expect(decl(ruleBody(reduced, ".live-dot {"), "animation")).toBe("none");
   });
 
   it("limits .lift's hover transform to at most 4px", () => {
-    const lift = ruleBody(globalCss, ".lift:hover, .lift:focus-visible");
-    const translate = lift?.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+    const transform = decl(ruleBody(globalCss, ".lift:hover, .lift:focus-visible {"), "transform");
+    const translate = transform?.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
     expect(translate).not.toBeNull();
     expect(Math.abs(Number(translate![1]))).toBeLessThanOrEqual(4);
   });

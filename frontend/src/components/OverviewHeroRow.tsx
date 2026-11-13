@@ -217,11 +217,9 @@ export function OverviewHeroRow({
           )}
           <div className="ov-hero-feed">
             {/* Green only for a live feed; a quiet or never-reporting one
-                keeps a neutral dot, and an unread status shows none. The
-                breath and the ring never run together -- both set the
-                dot's `animation`, and only one wins -- so the ring (an
-                ongoing "still live" cue) starts once the breath (a "just
-                refreshed" cue) ends. */}
+                keeps a neutral dot, and an unread status shows none.
+                Exclusive with the breath: see .ov-fresh-dot.live-dot in
+                overview.css. */}
             {feed.kind !== "unknown" && (
               <i
                 className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${

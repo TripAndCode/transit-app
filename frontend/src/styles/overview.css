@@ -850,9 +850,9 @@
    `animation`, so React only ever puts one class on the dot at a time
    (OverviewHeroRow.tsx). Also brightens .ov-fresh-dot.live-dot to full
    opacity under the same condition: opacity dims the ring too, as it is
-   the dot's own box-shadow, and at the dot's resting 0.55 the ring fades
-   to an alpha too faint to read, so the bump only matters where the ring
-   can actually run. */
+   the dot's own box-shadow, and at the dot's resting opacity the ring
+   fades to an alpha too faint to read, so the bump only matters where
+   the ring can actually run. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ov-breath {
     0%, 100% { opacity: 0.55; }
