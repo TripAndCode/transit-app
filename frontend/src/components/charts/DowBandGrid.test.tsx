@@ -83,9 +83,14 @@ describe("BandGrid keyboard and screen-reader access", () => {
     const cell = screen.getByRole("gridcell", { name: /^Day1 Late morning 9–12h · 6\.8/ });
     expect(cell.style.outline).not.toContain("accent");
     fireEvent.mouseEnter(cell);
-    expect(cell.style.outline).toBe("2px solid var(--accent)");
+    const hovered = cell.style.outline;
+    expect(hovered).toBe("2px solid var(--accent)");
     const outlines = Array.from(cell.querySelectorAll("*")).filter((el) => (el as HTMLElement).style.outline);
     expect(outlines).toHaveLength(0);
+    fireEvent.mouseLeave(cell);
+    expect(cell.style.outline).not.toContain("accent");
+    act(() => cell.focus());
+    expect(cell.style.outline).toBe(hovered);
   });
 
   it("declares the same row and column counts as the rows and headers it renders", () => {
