@@ -117,6 +117,21 @@ describe("RouteAnalysisTab", () => {
     expect(screen.getByText("Delay by stop")).toBeInTheDocument();
   });
 
+  it("gives the page header its one-time mount sheen, not the stop-delay section header", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: shape([{ stop_sequence: 1, stop_name: "Stop A", lon: 140.7, lat: 40.8, avg_min: 2.4, samples: 10 }]),
+      isPending: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderTab("/agencies/1/route-analysis?routes=R1");
+    const headers = document.querySelectorAll(".focus-header");
+    expect(headers).toHaveLength(2);
+    expect(headers[0]).toHaveClass("route-header-sheen");
+    expect(headers[1]).not.toHaveClass("route-header-sheen");
+  });
+
   it("judges the route's own targets beside its figures, asking for that route alone", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
