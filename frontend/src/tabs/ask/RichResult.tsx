@@ -7,7 +7,7 @@ import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
 import { conditionsLabel, formatWindow, provenancePath, resultRowCount, toolLabel } from "./provenance";
-import { rankedBarColor, rankedBarColumn, rankedBarShares } from "./rankedBars";
+import { MAX_STAGGER, rankedBarColor, rankedBarColumn, rankedBarShares } from "./rankedBars";
 import { SHARED_TABLE } from "../../components/tableStyles";
 import "./rankedBars.css";
 
@@ -156,7 +156,7 @@ function ResultTable({
                             style={
                               {
                                 width: `${barShares[i] * 100}%`,
-                                "--stagger": Math.min(i, 8),
+                                "--stagger": Math.min(i, MAX_STAGGER),
                                 background: rankedBarColor(barColumn!.kind, cell),
                               } as CSSProperties
                             }

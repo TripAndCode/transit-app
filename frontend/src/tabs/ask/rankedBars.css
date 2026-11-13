@@ -12,10 +12,10 @@
 
 /* The bar's share sets its actual width, a real layout dimension set inline
    per row (e.g. width: 42%) -- never a resting scaleX, which would squash
-   the rounded right end down to the scaled-in size (see compareBars.css for
-   the same trap). The entrance animation below only scales the already
-   correctly-sized box from 0 for its own duration; disabling it (reduced
-   motion) leaves the box at its real width with no transform at all. */
+   the rounded right end down to the scaled-in size. The entrance animation
+   below only scales the already correctly-sized box from 0 for its own
+   duration; it exists only under no-preference, so reduced motion leaves the
+   box at its real width with no transform at all. */
 .ask-rank-bar-fill {
   display: block;
   height: 100%;
@@ -35,11 +35,5 @@
   .ask-rank-bar-fill {
     animation: ask-rank-bar-grow var(--dur-3) var(--ease-out) backwards;
     animation-delay: calc(var(--stagger, 0) * var(--dur-1) / 3);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ask-rank-bar-fill {
-    animation: none;
   }
 }

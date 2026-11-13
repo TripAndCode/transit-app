@@ -5,7 +5,6 @@ import { decl, ruleBody } from "../../test/cssRules";
 
 const css = readFileSync(resolve(__dirname, "./rankedBars.css"), "utf8");
 const MOTION_ALLOWED = "@media (prefers-reduced-motion: no-preference)";
-const MOTION_REDUCED = "@media (prefers-reduced-motion: reduce)";
 
 describe("rankedBars.css motion", () => {
   it("rests at no transform, so the bar's real width is never scaled down", () => {
@@ -25,10 +24,5 @@ describe("rankedBars.css motion", () => {
 
   it("declares no animation on .ask-rank-bar-fill outside the motion-allowed block", () => {
     expect(decl(ruleBody(css, ".ask-rank-bar-fill {"), "animation")).toBeNull();
-  });
-
-  it("explicitly turns the animation off under reduced motion, leaving the bar at its real (unscaled) width", () => {
-    const reduced = ruleBody(css.slice(css.indexOf(MOTION_REDUCED)), MOTION_REDUCED);
-    expect(decl(ruleBody(reduced, ".ask-rank-bar-fill {"), "animation")).toBe("none");
   });
 });

@@ -5,15 +5,18 @@ export type RankedBarKind = "delay" | "accent";
 // A table gets a ranked bar exactly when its columns start with `route_code`
 // followed by one of RANKED_METRIC_COLUMNS below -- that shape is how
 // pipeline/query/tools.py's _tool_top_n (all three metrics) and
-// _tool_on_time_rate mark a single-metric ranking of routes. A day/service
-// breakdown, a weekday-vs-weekend comparison and a stop profile ordered by
-// sequence share the same table renderer but don't match the shape, so they
-// get no bar.
+// _tool_on_time_rate mark a single-metric ranking of routes. Other tables the
+// same renderer draws (day/service breakdowns, weekday-vs-weekend, stop
+// profiles) don't match the shape, so they get no bar.
 const RANKED_METRIC_COLUMNS: Record<string, RankedBarKind> = {
   avg_min: "delay",
   on_time_pct: "accent",
   late5_count: "accent",
 };
+
+/** Rows past this index share its entrance delay, so even a long table's
+ *  last bar starts growing a few `--dur-1` steps in rather than seconds later. */
+export const MAX_STAGGER = 8;
 
 /** The column a ranked-routes table draws its bars against, if any: always
  *  index 1, right after `route_code`. */

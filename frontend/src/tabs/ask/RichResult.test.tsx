@@ -7,6 +7,7 @@ import type { TFunction } from "i18next";
 import i18n from "../../i18n";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { RichResult } from "./RichResult";
+import { MAX_STAGGER } from "./rankedBars";
 import type { NextStepAction } from "./nextStepChips";
 import type { ToolResult } from "../../api/types";
 
@@ -117,6 +118,25 @@ describe("RichResult ranked bars", () => {
     expect(fills).toHaveLength(2);
     expect(fills[0].style.width).toBe("100%");
     expect(fills[1].style.width).toBe(`${(4.7 / 9.4) * 100}%`);
+  });
+
+  it("staggers each bar's entrance by its row, capping long tables at MAX_STAGGER", () => {
+    const rows = Array.from({ length: MAX_STAGGER + 3 }, (_, i) => [`r${i}`, 10 - i * 0.5, 0, 0, 10]);
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows,
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const staggers = Array.from(container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill")).map((f) =>
+      f.style.getPropertyValue("--stagger"),
+    );
+    expect(staggers.slice(0, 3)).toEqual(["0", "1", "2"]);
+    expect(staggers.slice(MAX_STAGGER)).toEqual(Array(3).fill(String(MAX_STAGGER)));
   });
 
   it("gives every row a track, with an empty one for a zero, negative or missing value, and never a NaN width", () => {
