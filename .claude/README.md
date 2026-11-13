@@ -67,8 +67,8 @@ describes, never as the rule itself.
 
 | Agent | Role | Tools |
 |---|---|---|
-| `issue-worker` | Implements one assigned issue in an owned worktree and returns concise verification evidence for the coordinator's review. | Read, Grep, Glob, Bash, Edit, Write (model: opus) |
-| `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash (model: sonnet) |
+| `issue-worker` | Implements one assigned issue in an owned worktree and returns concise verification evidence for the coordinator's review. | Read, Grep, Glob, Bash, Edit, Write |
+| `branch-reviewer` | Focused reviewer for one merged group of dimensions. It reads the prepared diff once and uses targeted evidence gathering. `.claude/agents/branch-reviewer.md` is the dimension source of truth. | Read, Grep, Glob, Bash |
 
 `scripts/run_agent_check.py` is an opt-in command runner for native background
 execution. It captures both streams privately, writes a completion result, preserves
