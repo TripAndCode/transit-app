@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, type CSSProperties, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type { ToolResult, TrendDay } from "../../api/types";
 import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
@@ -7,7 +7,9 @@ import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
 import { conditionsLabel, formatWindow, provenancePath, resultRowCount, toolLabel } from "./provenance";
+import { rankedBarColor, rankedBarColumn, rankedBarShares } from "./rankedBars";
 import { SHARED_TABLE } from "../../components/tableStyles";
+import "./rankedBars.css";
 
 type Conditions = { dow?: string; time_band?: string; service?: string } | null;
 
@@ -97,6 +99,14 @@ function ResultTable({
   // pipeline/stats.py), not a plain value; render a short marker only
   // when true rather than the raw "true"/"false".
   const lowConfIdx = cols.findIndex((c) => c === "low_confidence");
+  const visibleRows = rows.slice(0, 50);
+  // A ranked-routes table (top_n's three shapes) draws a slim bar beside its
+  // one ranked metric, proportional to the largest value shown -- decoration
+  // next to the number, never replacing it. Other table shapes (a day/
+  // service breakdown, a weekday-vs-weekend comparison, a stop profile
+  // ordered by sequence) are not a single-metric ranking and get no bar.
+  const barColumn = rankedBarColumn(cols);
+  const barShares = barColumn ? rankedBarShares(visibleRows.map((row) => (row as unknown[])[barColumn.index])) : null;
   return (
     <div style={{ overflowX: "auto" }}>
       {/* The element style is the shared one. The cells are not: this table
@@ -122,11 +132,11 @@ function ResultTable({
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, 50).map((row, i) => (
+          {visibleRows.map((row, i) => (
             <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
-              {(row as unknown[]).map((cell, j) => (
-                <td key={j} style={{ padding: "6px 10px" }}>
-                  {j === routeIdx
+              {(row as unknown[]).map((cell, j) => {
+                const text =
+                  j === routeIdx
                     ? formatRoute(cell as string)
                     : j === serviceTypeIdx && cell != null
                       ? serviceValueLabel(String(cell), t)
@@ -138,9 +148,32 @@ function ResultTable({
                           ? "—"
                           : typeof cell === "number"
                             ? formatNumber(cell)
-                            : String(cell)}
-                </td>
-              ))}
+                            : String(cell);
+                const share = barColumn && j === barColumn.index ? (barShares![i] ?? null) : null;
+                return (
+                  <td key={j} style={{ padding: "6px 10px" }}>
+                    {share != null ? (
+                      <span className="ask-rank-bar-cell">
+                        <span className="ask-rank-bar-track" aria-hidden="true">
+                          <span
+                            className="ask-rank-bar-fill"
+                            style={
+                              {
+                                "--bar-share": share,
+                                "--stagger": Math.min(i, 8),
+                                background: rankedBarColor(barColumn!.kind, cell as number),
+                              } as CSSProperties
+                            }
+                          />
+                        </span>
+                        {text}
+                      </span>
+                    ) : (
+                      text
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

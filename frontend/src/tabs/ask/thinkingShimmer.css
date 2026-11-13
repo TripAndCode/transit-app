@@ -1,0 +1,46 @@
+.ask-thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 12px;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.ask-thinking-shimmer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.ask-thinking-shimmer-line {
+  width: 96px;
+  height: 8px;
+  border-radius: var(--radius);
+  background: linear-gradient(90deg, var(--skeleton-a) 25%, var(--skeleton-b) 50%, var(--skeleton-a) 75%);
+  background-size: 200% 100%;
+}
+
+.ask-thinking-shimmer-line:last-child {
+  width: 64px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ask-thinking-sweep {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  .ask-thinking-shimmer-line {
+    animation: ask-thinking-sweep var(--dur-4) linear infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-thinking-shimmer-line {
+    animation: none;
+  }
+}

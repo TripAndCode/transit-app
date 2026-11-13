@@ -34,7 +34,6 @@ import { FilterContextBar } from "../components/FilterContextBar";
 import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
 import { PageHeader } from "../components/ui/PageHeader";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
@@ -43,6 +42,7 @@ import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
 import type { NextStepAction } from "./ask/nextStepChips";
 import { useInvestigationLocation } from "./ask/useInvestigationLocation";
+import "./ask/thinkingShimmer.css";
 
 type Submission = { tool: string; args: Record<string, unknown>; user_summary: string };
 
@@ -439,20 +439,12 @@ export function AskTab() {
             >
               {({ messages: contextMessages, focus }) => <>
               {(appendMsg.isPending || followup.isPending) && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  style={{
-                    padding: 12,
-                    color: "var(--text-tertiary)",
-                    fontSize: 13,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <Spinner size={14} />
+                <div role="status" aria-live="polite" className="ask-thinking">
                   {t("ask.thinking")}
+                  <span className="ask-thinking-shimmer" aria-hidden="true">
+                    <span className="ask-thinking-shimmer-line" />
+                    <span className="ask-thinking-shimmer-line" />
+                  </span>
                 </div>
               )}
 

@@ -98,6 +98,96 @@ describe("RichResult on_time low_confidence column", () => {
   });
 });
 
+describe("RichResult ranked bars", () => {
+  it("renders one bar per row for a top_n ranking, the largest value at full share", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows: [
+            ["39061", 9.4, 7.0, 11.0, 120],
+            ["39062", 4.7, 3.0, 6.0, 90],
+          ],
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
+    expect(fills).toHaveLength(2);
+    expect(fills[0].style.getPropertyValue("--bar-share")).toBe("1");
+    expect(fills[1].style.getPropertyValue("--bar-share")).toBe(String(4.7 / 9.4));
+  });
+
+  it("draws no bar for a zero, negative or missing value, and never a NaN share", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows: [
+            ["39061", 8, 0, 0, 10],
+            ["39062", 0, 0, 0, 10],
+            ["39063", -3, 0, 0, 10],
+            ["39064", null, 0, 0, 10],
+          ],
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
+    expect(fills).toHaveLength(1);
+    expect(fills[0].style.getPropertyValue("--bar-share")).toBe("1");
+    for (const fill of fills) {
+      expect(Number.isNaN(Number(fill.style.getPropertyValue("--bar-share")))).toBe(false);
+    }
+  });
+
+  it("colours a delay-minutes bar from the delay ramp, never a fixed accent", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows: [["39061", 9.4, 7.0, 11.0, 120]],
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const fill = container.querySelector<HTMLElement>(".ask-rank-bar-fill")!;
+    expect(fill.style.background).toBe("var(--d4)");
+  });
+
+  it("colours an on-time-rate bar with the product accent, not the delay ramp", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "On-time rate",
+          rows: [["39061", 80.0, 0.5, 120, false]],
+          columns: ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
+        }}
+      />,
+    );
+    const fill = container.querySelector<HTMLElement>(".ask-rank-bar-fill")!;
+    expect(fill.style.background).toBe("var(--accent)");
+  });
+
+  it("draws no bar for a table that is not a single-metric route ranking", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Weekday vs weekend",
+          rows: [["39061", 5.2, 6.1, 0.9, 0.9]],
+          columns: ["route_code", "heijitsu_min", "kyujitsu_min", "abs_delta", "signed_delta"],
+        }}
+      />,
+    );
+    expect(container.querySelectorAll(".ask-rank-bar-fill")).toHaveLength(0);
+  });
+});
+
 describe("RichResult evidence card", () => {
   it("shows the SQL-only badge for a dispatched (tool-bearing) message", () => {
     renderWithProviders(<Wrapper result={tableResult} tool="top_n" />);
