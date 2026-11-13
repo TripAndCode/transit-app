@@ -608,7 +608,7 @@ describe("the text levels clear AA on every surface and the selected state, in b
 });
 
 describe("the delay ramp", () => {
-  it("runs warm from calm (teal) toward severe (rust) -- hue strictly decreases d0 to d4, in both themes", () => {
+  it("runs warm from calm (teal) toward severe (rust) -- hue never rises d0 to d4, and strictly falls from d1, in both themes", () => {
     // Magnitude, never alarm: the ramp has to read as one continuous warming
     // progression, not five unrelated colours a reskin could shuffle.
     for (const block of [rootBlock, darkBlock]) {
@@ -619,7 +619,9 @@ describe("the delay ramp", () => {
         for (const prop of steps) expect(decl(darkBlock, prop), `${prop} has no dark-theme declaration`).not.toBeNull();
       }
       const hues = steps.map((prop) => hueOf(rgb(resolveDecl(block, prop)!)));
-      for (let i = 1; i < hues.length; i++) {
+      // d0 and d1 are both calm teal and may differ by lightness alone.
+      expect(hues[1], `hue(${steps[1]})`).toBeLessThanOrEqual(hues[0]);
+      for (let i = 2; i < hues.length; i++) {
         expect(hues[i], `hue(${steps[i]})`).toBeLessThan(hues[i - 1]);
       }
     }
@@ -1032,6 +1034,15 @@ describe("the primitive palette lives only on the bare :root", () => {
     );
     const undeclared = [...referenced].filter((name) => !declaredPrimitives.has(name));
     expect(undeclared).toEqual([]);
+  });
+
+  it("every declared custom property resolves to a value in both themes (no dangling reference, no cycle)", () => {
+    const names = new Set([...rootBlock.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]));
+    for (const block of [rootBlock, darkBlock]) {
+      for (const name of names) {
+        expect(() => resolveDecl(block, name), name).not.toThrow();
+      }
+    }
   });
 });
 
