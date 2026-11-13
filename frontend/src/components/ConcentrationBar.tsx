@@ -55,7 +55,7 @@ export function ConcentrationBar({
   const wrapperClass =
     variant === "modal"
       ? "ov-conc-modal"
-      : `ov-card${clickable ? " ov-clickable" : ""}`;
+      : `ov-card${clickable ? " ov-clickable lift" : ""}`;
   const interactiveProps = clickable
     ? {
         tabIndex: 0,

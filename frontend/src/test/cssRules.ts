@@ -25,3 +25,27 @@ export function decl(body: string, prop: string): string | null {
   for (const m of body.matchAll(re)) last = m[1].replace(/\s+/g, " ").trim();
   return last;
 }
+
+/** `css` with every top-level block whose header starts with `marker`
+ *  (e.g. `@media (prefers-reduced-motion: reduce)`) removed entirely,
+ *  brace-balanced so a nested rule inside the block doesn't end the
+ *  removal early. For checking what a guarded rule set still leaves
+ *  reachable once every one of its guards is stripped out. */
+export function withoutBlocks(css: string, marker: string): string {
+  let out = "";
+  let from = 0;
+  for (let at; (at = css.indexOf(marker, from)) !== -1; ) {
+    out += css.slice(from, at);
+    let depth = 0;
+    let i = css.indexOf("{", at + marker.length - 1);
+    for (; i < css.length; i++) {
+      if (css[i] === "{") depth++;
+      else if (css[i] === "}" && --depth === 0) {
+        i++;
+        break;
+      }
+    }
+    from = i;
+  }
+  return out + css.slice(from);
+}

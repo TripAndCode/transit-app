@@ -85,7 +85,7 @@ export function ServiceSplit({
   const wrapperClass =
     variant === "modal"
       ? "ov-svc-modal"
-      : `ov-card${clickable ? " ov-clickable" : ""}`;
+      : `ov-card${clickable ? " ov-clickable lift" : ""}`;
   const interactiveProps = clickable
     ? {
         tabIndex: 0,

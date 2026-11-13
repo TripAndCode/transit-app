@@ -49,6 +49,13 @@ function mockRoutes() {
 describe("ConcentrationBar", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("renders the shared lift primitive on its clickable card", () => {
+    const { container } = renderBar(
+      <ConcentrationBar periodRange={PERIOD} concentration={concentration} onClick={() => {}} />,
+    );
+    expect(container.querySelector(".ov-card")).toHaveClass("ov-clickable", "lift");
+  });
+
   it("draws the largest share at full width and the rest in proportion to it", () => {
     const { container } = renderBar(
       <ConcentrationBar
@@ -148,6 +155,33 @@ describe("ConcentrationBar", () => {
     );
     expect(container.querySelector(".ov-conc-spotlight")).toHaveTextContent("70-3 あさひが丘線 accounts for 100%");
     expect(container.querySelector(".ov-conc-spotlight-spark")).toBeNull();
+  });
+
+  it("draws the spotlight sparkline without the glint sheen -- this card sits inside a RevealSection, which is its own entrance", () => {
+    mockRoutes();
+    const { container } = renderBar(
+      <ConcentrationBar
+        periodRange={PERIOD}
+        movers={{
+          worse: [
+            {
+              route_code: "1471981638",
+              route_short_name: "70-3",
+              delta_min: 1.2,
+              delta_pct: 10,
+              current_avg_min: 5,
+              previous_avg_min: 4,
+              streak_weeks: 1,
+              sparkline_points: [3, 4, 5, 4],
+            },
+          ],
+          better: [],
+        }}
+        concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 100 }], rest_share_pct: 0 }}
+      />,
+    );
+    expect(container.querySelector(".ov-conc-spotlight-spark")).not.toBeNull();
+    expect(container.querySelector(".glint")).toBeNull();
   });
 
   it("states every share as one of the delay of the routes it counts, and says how many and when", () => {
