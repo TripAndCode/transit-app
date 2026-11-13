@@ -70,4 +70,22 @@ describe("useBusTownReplay", () => {
     expect(result.current.stopPoints).toBe(first.stopPoints);
     expect(result.current.stopPairs).toBe(first.stopPairs);
   });
+
+  it("fetches the window that covers the clamped playhead after a switch to a later-starting day", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const day = replayWindow(7);
+    client.setQueryData(["bus-town-replay", AGENCY, null, null, null], day);
+    for (const fromHour of [1, 4, 7]) {
+      client.setQueryData(["bus-town-replay", AGENCY, day.date, fromHour, fromHour + 3], replayWindow(fromHour));
+    }
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useBusTownReplay(AGENCY, null, 2 * 3600, SPEED), { wrapper });
+
+    expect(result.current.playhead).toBe(4 * 3600);
+    const covering = client.getQueryCache().find({ queryKey: ["bus-town-replay", AGENCY, day.date, 4, 7], exact: true });
+    expect(covering?.getObserversCount()).toBeGreaterThan(0);
+  });
 });

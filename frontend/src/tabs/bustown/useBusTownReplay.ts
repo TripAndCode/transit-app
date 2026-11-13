@@ -37,6 +37,11 @@ export type BusTownReplay = {
   originHour: number | null;
   minSec: number;
   maxSec: number;
+  /** The caller's playhead clamped to `[minSec, maxSec]`. The raw value can
+   *  sit below `minSec` right after a switch to a day whose service starts
+   *  later; the windows fetched and everything the page shows follow this
+   *  one, so the raw state never needs correcting from an effect. */
+  playhead: number;
   model: BusTownModel;
   trips: ReadonlyMap<string, ResolvedTrip>;
   stopPoints: StopPoint[];
@@ -72,7 +77,10 @@ export function useBusTownReplay(
   const date = dayQuery.data?.date ?? null;
   const originHour = dayQuery.data?.from_hour ?? null;
 
-  const desired = date != null && originHour != null ? desiredWindowKeys(date, originHour, playheadSec, speed) : [];
+  const minSec = scrubberStartHour(originHour) * 3600;
+  const maxSec = SCRUBBER_END_HOUR * 3600;
+  const playhead = Math.min(maxSec, Math.max(minSec, playheadSec));
+  const desired = date != null && originHour != null ? desiredWindowKeys(date, originHour, playhead, speed) : [];
   const extra = desired.filter((key) => key.fromHour !== originHour);
 
   const extraData = useQueries({
@@ -90,8 +98,9 @@ export function useBusTownReplay(
     date,
     availableDates: dayQuery.data?.available_dates ?? defaultDayQuery.data?.available_dates ?? NO_DATES,
     originHour,
-    minSec: scrubberStartHour(originHour) * 3600,
-    maxSec: SCRUBBER_END_HOUR * 3600,
+    minSec,
+    maxSec,
+    playhead,
     ...scene,
   };
 }

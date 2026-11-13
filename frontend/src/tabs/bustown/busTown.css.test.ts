@@ -24,7 +24,10 @@ function topLevelSelectors(stylesheet: string): string[] {
 
 describe("busTown.css scrubber scope", () => {
   it("never styles a bare .scrub-input, which the Map tab's PlaybackRail and MareyDiagram also use", () => {
-    expect(topLevelSelectors(css)).not.toContain(".scrub-input");
+    const unscoped = topLevelSelectors(css).filter(
+      (selector) => /\.scrub-input\b/.test(selector) && !selector.startsWith(".bus-town-controls "),
+    );
+    expect(unscoped).toEqual([]);
   });
 
   it("scopes the scrubber rule to Bus Town's own controls", () => {

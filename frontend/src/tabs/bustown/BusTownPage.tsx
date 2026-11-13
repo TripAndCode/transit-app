@@ -97,11 +97,7 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
   const replay = useBusTownReplay(agencyId, selectedDate, sec, speed);
   const stopBoundsQuery = useStopBounds(agencyId);
   const bounds = stopBoundsQuery.data ?? boundsFromPoints(replay.stopPoints);
-  /** `sec` can sit outside `[minSec, maxSec]` right after a switch to a day
-   *  whose service starts later — clamp it for display and
-   *  playback without feeding the clamped value back into state, which
-   *  `useBusTownReplay` still needs the raw playhead for. */
-  const playhead = Math.min(replay.maxSec, Math.max(replay.minSec, sec));
+  const playhead = replay.playhead;
 
   const playback = useBusTownPlayback({
     model: replay.model,
