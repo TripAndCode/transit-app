@@ -14,7 +14,7 @@
 // Both locale files are written, or neither: every requested change is
 // applied to in-memory copies of both locale objects first, and only
 // written to disk once the whole batch succeeds. A refusal (see
-// I18nSetError below) aborts before anything is read from disk.
+// I18nSetError below) aborts before either locale file is written.
 //
 // FORMATTING: the locale files are hand-maintained with 2-space indents and
 // insertion-order keys (not sorted), which `JSON.parse` and `JSON.stringify`
@@ -49,6 +49,8 @@ export function serialize(data) {
   return `${JSON.stringify(data, null, 2).replace(/\u00a0/g, "\\u00a0")}\n`;
 }
 
+const RESERVED_SEGMENTS = new Set(["__proto__", "constructor", "prototype"]);
+
 function splitPath(dottedKey) {
   if (typeof dottedKey !== "string" || dottedKey.length === 0) {
     throw new I18nSetError(`invalid key: ${JSON.stringify(dottedKey)}`);
@@ -56,6 +58,11 @@ function splitPath(dottedKey) {
   const parts = dottedKey.split(".");
   if (parts.some((part) => part.length === 0)) {
     throw new I18nSetError(`invalid key (empty segment): "${dottedKey}"`);
+  }
+  // Assigning these on a plain object reaches Object.prototype's accessors
+  // instead of creating an own key, so the value would never be serialized.
+  if (parts.some((part) => RESERVED_SEGMENTS.has(part))) {
+    throw new I18nSetError(`invalid key (reserved segment): "${dottedKey}"`);
   }
   return parts;
 }
@@ -151,7 +158,12 @@ export function parseArgv(argv) {
 }
 
 function readBatchFile(filePath) {
-  const raw = readFileSync(path.resolve(filePath), "utf8");
+  let raw;
+  try {
+    raw = readFileSync(path.resolve(filePath), "utf8");
+  } catch (err) {
+    throw new I18nSetError(`--file cannot be read: ${err.message}`);
+  }
   let batch;
   try {
     batch = JSON.parse(raw);

@@ -101,6 +101,21 @@ describe("run (CLI) against a locales dir", () => {
     expect(readFileSync(join(dir, "ja.json"), "utf8")).toBe(FIXTURE_JA);
   });
 
+  test.each(["__proto__.polluted", "newsec.__proto__", "common.constructor", "prototype"])(
+    "refuses the reserved segment in %s and writes nothing",
+    (key) => {
+      const dir = makeLocaleDir();
+      expect(() => run(["--locales-dir", dir, key, "x", "y"])).toThrow(/reserved segment/);
+      expect(readFileSync(join(dir, "en.json"), "utf8")).toBe(FIXTURE_EN);
+      expect(readFileSync(join(dir, "ja.json"), "utf8")).toBe(FIXTURE_JA);
+    },
+  );
+
+  test("a missing --file is an I18nSetError, not a raw ENOENT", () => {
+    const dir = makeLocaleDir();
+    expect(() => run(["--locales-dir", dir, "--file", join(dir, "nope.json")])).toThrow(I18nSetError);
+  });
+
   test("refuses to overwrite an object key with a string", () => {
     const dir = makeLocaleDir();
     expect(() => run(["--locales-dir", dir, "common", "oops", "oops"])).toThrow(I18nSetError);
