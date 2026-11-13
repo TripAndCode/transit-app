@@ -1,13 +1,18 @@
 :root {
   /* Primitive palette: raw colour values named by hue family and lightness
-     step, never by where they are used. A future reskin edits this block
-     only; every semantic token below -- on this bare :root and on each
-     scoped theme block -- names a primitive through var(--p-...) instead of
-     carrying its own literal. Primitives are declared once, here: a theme
-     block only ever points an existing semantic name at a different
-     primitive, it never declares a --p-* of its own. Alpha tones (scrims,
-     shadows, glass) are primitives too, suffixed with their alpha as hundredths
-     (-a04 is 4%). */
+     step, never by where they are used. Within this stylesheet, a future
+     reskin edits this block only; every semantic token below -- on this
+     bare :root and on each scoped theme block -- names a primitive through
+     var(--p-...) instead of carrying its own literal. tokens.ts's
+     hand-mirrored fallbacks (see its NOTE) need a matching edit too, since
+     there's no build-time link between the two. Primitives are declared
+     once, here: a theme block only ever points an existing semantic name at
+     a different primitive, it never declares a --p-* of its own. Alpha
+     tones (scrims, shadows, glass) are primitives too, suffixed with their
+     alpha as hundredths (-a04 is 4%). They are their own primitives,
+     deliberately not derived from the solid tone they share an RGB base
+     with: a color-mix() computation would change how getComputedStyle
+     serialises the value. */
   --p-slate-50: #F1F4F7;
   --p-slate-100: #EEF1F5;
   --p-slate-150: #E6ECF4;
@@ -108,8 +113,8 @@
   --accent-soft: var(--p-blue-50);
   --on-accent: var(--p-graphite-50);
   /* Delay magnitude, calm to heavy: < 1.5, < 2.5, < 3.5, < 5 and >= 5
-     minutes. Magnitude, never alarm: rust is reserved for the last step.
-     --none fills a cell with no observations. */
+     minutes. Magnitude, never alarm: rust is reserved for this ramp's last
+     step. --none fills a cell with no observations. */
   --d0: var(--p-teal-50);
   --d1: var(--p-teal-275);
   --d2: var(--p-amber-150);
@@ -377,7 +382,7 @@
   --delay-text-moderate: var(--p-clay-50);
   /* --color-warning itself already clears 4.5:1 on this theme's surfaces —
      see the light declaration for why light needs a separate darkened value. */
-  --color-warning-text: var(--p-amber-475);
+  --color-warning-text: var(--color-warning);
   --trend-good: var(--p-green-50);
   --trend-bad: var(--p-amber-375);
   --trend-neutral: var(--p-slate-425);

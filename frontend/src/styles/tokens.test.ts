@@ -156,41 +156,83 @@ function cascadedDecl(block: string, prop: string): string | null {
   return decl(block, prop) ?? (block === darkBlock ? decl(rootBlock, prop) : null);
 }
 
-/** Resolve `prop` in `block` down to a literal CSS value, following every
- *  `var(--x)` (or `var(--x, <fallback>)`) link in the chain through the same
- *  cascade `cascadedDecl` uses. Throws on a cyclic reference rather than
- *  looping forever. */
-function resolveDecl(block: string, prop: string, seen = new Set<string>()): string | null {
-  if (seen.has(prop)) throw new Error(`cyclic var() reference starting at ${prop}`);
-  seen.add(prop);
+/** Resolve every `var(--x)` (or `var(--x, <fallback>)`) reference inside
+ *  `raw` down to literal text, via `lookup`. The same recursive replace
+ *  serves a whole-declaration value (e.g. `"var(--accent)"`) and a composite
+ *  one with several references inside it (e.g. `--el-3`'s comma-separated
+ *  shadow layers, each carrying its own colour) -- both are just strings
+ *  with zero or more `var()` references. Throws on a cyclic reference, and
+ *  on a reference with neither a declaration nor a fallback, rather than
+ *  passing the literal `"var(...)"` text through: a caller that parses the
+ *  result as a colour (`rgb()`, a hex regex) would otherwise mis-parse that
+ *  text as if it were a real value. */
+function resolveValue(raw: string, lookup: (name: string) => string | null, seen: Set<string>): string {
+  const resolved = raw.replace(
+    /var\((--[a-zA-Z0-9-]+)(?:\s*,\s*((?:[^()]|\([^()]*\))*))?\)/g,
+    (_match, name: string, fallback?: string) => {
+      if (seen.has(name)) throw new Error(`cyclic var() reference starting at ${name}`);
+      const nextSeen = new Set(seen).add(name);
+      const declared = lookup(name);
+      if (declared !== null) return resolveValue(declared, lookup, nextSeen);
+      if (fallback !== undefined) return resolveValue(fallback.trim(), lookup, nextSeen);
+      throw new Error(`var(${name}) has no declaration and no fallback`);
+    },
+  );
+  if (resolved.includes("var(")) throw new Error(`unresolved var() left in: ${resolved}`);
+  return resolved;
+}
+
+/** `resolveValue()` over `prop`'s own declaration in `block`, through the
+ *  same cascade `cascadedDecl` uses. Returns null when `prop` itself has no
+ *  declaration at all -- distinct from a declared value whose reference
+ *  chain is broken, which throws -- so callers can tell "not declared" from
+ *  "declared but dangling". */
+function resolveDecl(block: string, prop: string): string | null {
   const raw = cascadedDecl(block, prop);
   if (raw === null) return null;
-  return resolveValue(block, raw, seen);
+  return resolveValue(raw, (name) => cascadedDecl(block, name), new Set([prop]));
 }
 
-function resolveValue(block: string, raw: string, seen: Set<string>): string {
-  const m = /^var\((--[a-zA-Z0-9-]+)(?:\s*,\s*([\s\S]+))?\)$/.exec(raw);
-  if (!m) return raw;
-  const [, name, fallback] = m;
-  const resolved = resolveDecl(block, name, seen);
-  if (resolved !== null) return resolved;
-  return fallback !== undefined ? resolveValue(block, fallback.trim(), seen) : raw;
+
+/** Builds a synthetic `var(--x)` / `var(--x, <fallback>)` string for the
+ *  resolveValue() tests below, from parts rather than one literal. Built up
+ *  this way, this fixture text never contains the literal substring
+ *  "var(--" that scripts/check-css-tokens.mjs scans this file's own source
+ *  for, so these made-up, undefined property names don't get flagged as a
+ *  real, unresolved design-token reference. */
+function cssVar(name: string, fallback?: string): string {
+  return ["var(", name, fallback !== undefined ? `, ${fallback}` : "", ")"].join("");
 }
 
-/** Expand every `var(--x)` reference inside a composite value (a box-shadow
- *  list, for instance) in place, rather than requiring the whole declaration
- *  to be a single `var()` the way `resolveDecl` does. Needed for a token like
- *  `--el-3` whose declared value is several comma-separated shadow layers,
- *  each carrying its own colour reference. */
-function expandVars(block: string, raw: string, seen = new Set<string>()): string {
-  return raw.replace(/var\((--[a-zA-Z0-9-]+)(?:\s*,\s*((?:[^()]|\([^()]*\))*))?\)/g, (match, name: string, fallback?: string) => {
-    if (seen.has(name)) throw new Error(`cyclic var() reference starting at ${name}`);
-    const nextSeen = new Set(seen).add(name);
-    const resolved = cascadedDecl(block, name);
-    if (resolved !== null) return expandVars(block, resolved, nextSeen);
-    return fallback !== undefined ? expandVars(block, fallback.trim(), nextSeen) : match;
+// resolveValue()'s own correctness, over hand-written lookups rather than
+// the real stylesheet: this is the guard every test below leans on to turn a
+// dangling var() into a thrown error instead of a silently mis-parsed value.
+describe("resolveValue()", () => {
+  it("resolves a direct reference through a lookup", () => {
+    expect(resolveValue(cssVar("--a"), (n) => (n === "--a" ? "#fff" : null), new Set())).toBe("#fff");
   });
-}
+
+  it("falls back when the lookup has no declaration for the name", () => {
+    expect(resolveValue(cssVar("--missing", "#000"), () => null, new Set())).toBe("#000");
+  });
+
+  it("throws on a var() with neither a declaration nor a fallback", () => {
+    expect(() => resolveValue(cssVar("--missing"), () => null, new Set())).toThrow(/--missing/);
+  });
+
+  it("throws on a cyclic reference instead of looping forever", () => {
+    const lookup = (n: string): string | null => (n === "--a" ? cssVar("--b") : n === "--b" ? cssVar("--a") : null);
+    expect(() => resolveValue(cssVar("--a"), lookup, new Set())).toThrow(/cyclic/);
+  });
+
+  it("does not treat two sibling references to the same name as a cycle", () => {
+    // A value like --el-3's can reference the same primitive twice as
+    // independent siblings (e.g. two shadow layers sharing a colour); only a
+    // reference nested inside its own expansion is a real cycle.
+    const lookup = (n: string): string | null => (n === "--a" ? "#111" : null);
+    expect(resolveValue(`${cssVar("--a")} ${cssVar("--a")}`, lookup, new Set())).toBe("#111 #111");
+  });
+});
 
 const overviewCss = readFileSync(resolve(process.cwd(), "src/styles/overview.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
@@ -241,7 +283,7 @@ describe("elevation tokens", () => {
       expect(dark).toContain("inset");
       expect(dark).not.toBe(decl(rootBlock, prop));
     }
-    expect(expandVars(darkBlock, decl(darkBlock, "--el-3")!)).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
+    expect(resolveDecl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
   });
 
   it("--el-left casts to the left (negative x-offset), not downward like --el-2/--el-3", () => {
@@ -253,10 +295,6 @@ describe("elevation tokens", () => {
   });
 });
 
-// One wash behind every overlay. A scrim is a theme decision, not a
-// per-overlay one: two overlays that pick their own literal drift apart the
-// moment either theme is retuned, and the dark theme needs a deeper wash
-// than the light one to separate the panel from the page at all.
 /** Alpha channel of an `rgba(r, g, b, a)` string, as a number. */
 function rgbaAlpha(value: string): number {
   const m = /rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\s*\)/.exec(value);
@@ -264,6 +302,10 @@ function rgbaAlpha(value: string): number {
   return Number(m[1]);
 }
 
+// One wash behind every overlay. A scrim is a theme decision, not a
+// per-overlay one: two overlays that pick their own literal drift apart the
+// moment either theme is retuned, and the dark theme needs a deeper wash
+// than the light one to separate the panel from the page at all.
 describe("scrim token", () => {
   it("is defined on the bare :root as a translucent wash", () => {
     const alpha = rgbaAlpha(resolveDecl(rootBlock, "--scrim")!);
@@ -538,10 +580,11 @@ describe("one accent identity", () => {
   });
 
   it("keeps --accent-strong readable as text directly on --accent-soft", () => {
-    // Plain --accent on --accent-soft is only 4.32:1 in light mode -- under
-    // AA -- which is why every "selected"/"active" state that tints its
-    // background with --accent-soft colors its own text --accent-strong
-    // instead (never --accent).
+    // Several "selected"/"active" controls that tint their background with
+    // --accent-soft set their own text to --accent-strong -- the "readable
+    // at text weight" test above only checks --accent-strong against
+    // --bg-surface and --bg-soft, so this is the one place that pairing's
+    // contrast against --accent-soft itself is checked.
     for (const block of [rootBlock, darkBlock]) {
       expect(
         contrastRatio(resolveDecl(block, "--accent-strong")!, resolveDecl(block, "--accent-soft")!),
@@ -585,9 +628,12 @@ describe("the delay ramp", () => {
   it("has a dark counterpart for every step, and a no-data fill in both themes", () => {
     for (const prop of ["--d0", "--d1", "--d2", "--d3", "--d4", "--none"]) {
       expect(resolveDecl(rootBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
-      // decl(), not resolveDecl(): this test's whole point is that the dark
-      // theme declares its OWN value for each step, not that one resolves.
-      expect(decl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$|^var\(--p-/);
+      // decl() first: this test's whole point is that the dark theme
+      // declares its OWN value for each step, not that one resolves through
+      // the cascade fallback to root's. resolveDecl() on that own
+      // declaration then proves it isn't a dangling reference.
+      expect(decl(darkBlock, prop), prop).not.toBeNull();
+      expect(resolveDecl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }
   });
 });
@@ -975,6 +1021,17 @@ describe("the primitive palette lives only on the bare :root", () => {
     const rootPrimitiveNames = [...rootBlock.matchAll(/(--p-[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]);
     expect(new Set(rootPrimitiveNames).size).toBe(rootPrimitiveNames.length);
     expect(rootPrimitiveNames.length).toBeGreaterThan(0);
+  });
+
+  it("every var(--p-*) a semantic token references names a primitive declared on :root", () => {
+    const declaredPrimitives = new Set([...rootBlock.matchAll(/(--p-[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]));
+    const referenced = new Set(
+      [...rootBlock.matchAll(/var\((--p-[a-zA-Z0-9-]+)/g), ...darkBlock.matchAll(/var\((--p-[a-zA-Z0-9-]+)/g)].map(
+        (m) => m[1],
+      ),
+    );
+    const undeclared = [...referenced].filter((name) => !declaredPrimitives.has(name));
+    expect(undeclared).toEqual([]);
   });
 });
 
