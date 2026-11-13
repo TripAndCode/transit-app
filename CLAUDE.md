@@ -17,6 +17,11 @@ same source. This section only maps them onto Claude Code tooling.
 - `/cleanup-merged` is the post-merge cleanup.
 - For authorized multi-issue work, use `/work-issues`. It owns task routing,
   completion notifications, and private handoffs; `issue-worker` owns implementation.
+- Subagent models follow the work, not the session. Mechanical edits and code
+  location go to Sonnet or Haiku (`model` on the Agent call); an agent's default is
+  its frontmatter `model:`. Opus is for design, high-risk paths, and debugging that
+  cheaper models have already failed. `/work-issues` owns when `issue-worker`
+  escalates.
 - `.claude/settings.json` wires two hooks that enforce rules for Claude Code
   sessions:
   - `.claude/hooks/guard-dev-db.sh`, a wrapper around `guard_dev_db.py`, enforces
