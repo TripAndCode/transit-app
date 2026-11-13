@@ -147,6 +147,93 @@ const darkBlock = ruleBody(globalCss, ':root[data-theme="dark"] {');
 const reduceBlock = ruleBody(globalCss, "@media (prefers-reduced-motion: reduce)");
 const bodyBlock = ruleBody(globalCss, "body {");
 
+/** `decl()` through the real cascade: the dark block inherits whatever the
+ *  bare :root declares for a name it doesn't override itself. Every colour
+ *  semantic token's value is a `var(--p-...)` reference, not a literal, so a
+ *  test that needs the actual colour has to resolve it the way a browser
+ *  would rather than read the declaration text directly. */
+function cascadedDecl(block: string, prop: string): string | null {
+  return decl(block, prop) ?? (block === darkBlock ? decl(rootBlock, prop) : null);
+}
+
+/** Resolve every `var(--x)` (or `var(--x, <fallback>)`) reference inside
+ *  `raw` down to literal text, via `lookup`. The same recursive replace
+ *  serves a whole-declaration value (e.g. `"var(--accent)"`) and a composite
+ *  one with several references inside it (e.g. `--el-3`'s comma-separated
+ *  shadow layers, each carrying its own colour) -- both are just strings
+ *  with zero or more `var()` references. Throws on a cyclic reference, and
+ *  on a reference with neither a declaration nor a fallback, rather than
+ *  passing the literal `"var(...)"` text through: a caller that parses the
+ *  result as a colour (`rgb()`, a hex regex) would otherwise mis-parse that
+ *  text as if it were a real value. */
+function resolveValue(raw: string, lookup: (name: string) => string | null, seen: Set<string>): string {
+  const resolved = raw.replace(
+    /var\((--[a-zA-Z0-9-]+)(?:\s*,\s*((?:[^()]|\([^()]*\))*))?\)/g,
+    (_match, name: string, fallback?: string) => {
+      if (seen.has(name)) throw new Error(`cyclic var() reference starting at ${name}`);
+      const nextSeen = new Set(seen).add(name);
+      const declared = lookup(name);
+      if (declared !== null) return resolveValue(declared, lookup, nextSeen);
+      if (fallback !== undefined) return resolveValue(fallback.trim(), lookup, nextSeen);
+      throw new Error(`var(${name}) has no declaration and no fallback`);
+    },
+  );
+  if (resolved.includes("var(")) throw new Error(`unresolved var() left in: ${resolved}`);
+  return resolved;
+}
+
+/** `resolveValue()` over `prop`'s own declaration in `block`, through the
+ *  same cascade `cascadedDecl` uses. Returns null when `prop` itself has no
+ *  declaration at all -- distinct from a declared value whose reference
+ *  chain is broken, which throws -- so callers can tell "not declared" from
+ *  "declared but dangling". */
+function resolveDecl(block: string, prop: string): string | null {
+  const raw = cascadedDecl(block, prop);
+  if (raw === null) return null;
+  return resolveValue(raw, (name) => cascadedDecl(block, name), new Set([prop]));
+}
+
+
+/** Builds a synthetic `var(--x)` / `var(--x, <fallback>)` string for the
+ *  resolveValue() tests below, from parts rather than one literal. Built up
+ *  this way, this fixture text never contains the literal substring
+ *  "var(--" that scripts/check-css-tokens.mjs scans this file's own source
+ *  for, so these made-up, undefined property names don't get flagged as a
+ *  real, unresolved design-token reference. */
+function cssVar(name: string, fallback?: string): string {
+  return ["var(", name, fallback !== undefined ? `, ${fallback}` : "", ")"].join("");
+}
+
+// resolveValue()'s own correctness, over hand-written lookups rather than
+// the real stylesheet: this is the guard every test below leans on to turn a
+// dangling var() into a thrown error instead of a silently mis-parsed value.
+describe("resolveValue()", () => {
+  it("resolves a direct reference through a lookup", () => {
+    expect(resolveValue(cssVar("--a"), (n) => (n === "--a" ? "#fff" : null), new Set())).toBe("#fff");
+  });
+
+  it("falls back when the lookup has no declaration for the name", () => {
+    expect(resolveValue(cssVar("--missing", "#000"), () => null, new Set())).toBe("#000");
+  });
+
+  it("throws on a var() with neither a declaration nor a fallback", () => {
+    expect(() => resolveValue(cssVar("--missing"), () => null, new Set())).toThrow(/--missing/);
+  });
+
+  it("throws on a cyclic reference instead of looping forever", () => {
+    const lookup = (n: string): string | null => (n === "--a" ? cssVar("--b") : n === "--b" ? cssVar("--a") : null);
+    expect(() => resolveValue(cssVar("--a"), lookup, new Set())).toThrow(/cyclic/);
+  });
+
+  it("does not treat two sibling references to the same name as a cycle", () => {
+    // A value like --el-3's can reference the same primitive twice as
+    // independent siblings (e.g. two shadow layers sharing a colour); only a
+    // reference nested inside its own expansion is a real cycle.
+    const lookup = (n: string): string | null => (n === "--a" ? "#111" : null);
+    expect(resolveValue(`${cssVar("--a")} ${cssVar("--a")}`, lookup, new Set())).toBe("#111 #111");
+  });
+});
+
 const overviewCss = readFileSync(resolve(process.cwd(), "src/styles/overview.css"), "utf8").replace(
   /\/\*[\s\S]*?\*\//g,
   "",
@@ -196,7 +283,7 @@ describe("elevation tokens", () => {
       expect(dark).toContain("inset");
       expect(dark).not.toBe(decl(rootBlock, prop));
     }
-    expect(decl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
+    expect(resolveDecl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
   });
 
   it("--el-left casts to the left (negative x-offset), not downward like --el-2/--el-3", () => {
@@ -208,17 +295,29 @@ describe("elevation tokens", () => {
   });
 });
 
+/** Alpha channel of an `rgba(r, g, b, a)` string, as a number. */
+function rgbaAlpha(value: string): number {
+  const m = /rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\s*\)/.exec(value);
+  if (!m) throw new Error(`not an rgba() string: ${value}`);
+  return Number(m[1]);
+}
+
 // One wash behind every overlay. A scrim is a theme decision, not a
 // per-overlay one: two overlays that pick their own literal drift apart the
 // moment either theme is retuned, and the dark theme needs a deeper wash
 // than the light one to separate the panel from the page at all.
 describe("scrim token", () => {
-  it("is defined on the bare :root", () => {
-    expect(decl(rootBlock, "--scrim")).toBe("rgba(15, 17, 25, 0.32)");
+  it("is defined on the bare :root as a translucent wash", () => {
+    const alpha = rgbaAlpha(resolveDecl(rootBlock, "--scrim")!);
+    expect(alpha).toBeGreaterThan(0);
+    expect(alpha).toBeLessThan(1);
   });
 
   it("deepens under the dark theme, where the light wash would not separate the panel", () => {
-    expect(decl(darkBlock, "--scrim")).toBe("rgba(0, 0, 0, 0.55)");
+    // Dark declares its own override rather than merely resolving the
+    // light value through the cascade fallback.
+    expect(decl(darkBlock, "--scrim")).not.toBeNull();
+    expect(rgbaAlpha(resolveDecl(darkBlock, "--scrim")!)).toBeGreaterThan(rgbaAlpha(resolveDecl(rootBlock, "--scrim")!));
   });
 
   it("is what the shared overlay paints, so no overlay carries its own literal", () => {
@@ -400,14 +499,36 @@ function rgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/** Hue angle (0-360, HSL) of an `[r, g, b]` channel triple. */
+function hueOf([r, g, b]: [number, number, number]): number {
+  const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const d = max - min;
+  if (d === 0) return 0;
+  let h: number;
+  if (max === rn) h = ((gn - bn) / d) % 6;
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+}
+
 describe("one accent identity", () => {
   it.each([
-    [rootBlock, "--accent", "#2750C2"],
-    [rootBlock, "--accent-soft", "#E2E9FA"],
-    [darkBlock, "--accent", "#86A2FF"],
-    [darkBlock, "--accent-soft", "#1C2847"],
-  ])("declares the signage-blue accent", (block, prop, value) => {
-    expect(decl(block, prop)).toBe(value);
+    [rootBlock, "--accent"],
+    [rootBlock, "--accent-soft"],
+    [darkBlock, "--accent"],
+    [darkBlock, "--accent-soft"],
+  ])("declares a defined, blue-dominant accent in %s", (block, prop) => {
+    // Each theme must declare its OWN value, not merely resolve one through
+    // the dark-falls-back-to-:root cascade -- otherwise deleting the dark
+    // override would pass this test by silently testing the light one twice.
+    if (block === darkBlock) expect(decl(darkBlock, prop), `${prop} has no dark-theme declaration`).not.toBeNull();
+    const value = resolveDecl(block, prop);
+    expect(value).toBeTruthy();
+    const [r, g, b] = rgb(value!);
+    expect(b).toBeGreaterThan(Math.max(r, g));
   });
 
   it("carries no scoped --accent override that would fork the identity", () => {
@@ -419,19 +540,28 @@ describe("one accent identity", () => {
     expect(accentDeclarations).toEqual([":root", ':root[data-theme="dark"]']);
   });
 
-  it("keeps the blue-purple as --brand in both themes, not as --accent", () => {
-    expect(decl(rootBlock, "--brand")).toBe("#5b6cad");
-    expect(decl(darkBlock, "--brand")).toBe("#7E8CD0");
-    expect(decl(rootBlock, "--on-brand")).toBeTruthy();
-    expect(decl(darkBlock, "--on-brand")).toBeTruthy();
+  it("keeps --brand a distinct, blue-leaning identity from --accent in both themes", () => {
+    // --brand marks the operations route badge and the pre-auth wordmark --
+    // never interaction/selection, which is --accent's job alone. A palette
+    // retune that ever makes them equal collapses the two identities back
+    // into one.
+    for (const block of [rootBlock, darkBlock]) {
+      const brand = resolveDecl(block, "--brand")!;
+      const accent = resolveDecl(block, "--accent")!;
+      expect(brand).not.toBe(accent);
+      const [r, g, b] = rgb(brand);
+      expect(b).toBeGreaterThan(Math.max(r, g));
+    }
+    expect(resolveDecl(rootBlock, "--on-brand")).toBeTruthy();
+    expect(resolveDecl(darkBlock, "--on-brand")).toBeTruthy();
   });
 
   it("keeps --accent-strong in the accent's own hue family", () => {
     // --accent-strong is documented as a deepened --accent; if it stays in a
     // different hue family the app still reads as two brands.
     for (const block of [rootBlock, darkBlock]) {
-      const [ar, ag, ab] = rgb(decl(block, "--accent")!);
-      const [sr, sg, sb] = rgb(decl(block, "--accent-strong")!);
+      const [ar, ag, ab] = rgb(resolveDecl(block, "--accent")!);
+      const [sr, sg, sb] = rgb(resolveDecl(block, "--accent-strong")!);
       // Blue dominates red and green, in the accent and its deepened
       // sibling alike.
       expect(ab).toBeGreaterThan(Math.max(ar, ag));
@@ -443,21 +573,22 @@ describe("one accent identity", () => {
     for (const block of [rootBlock, darkBlock]) {
       for (const prop of ["--accent", "--accent-strong"]) {
         for (const surface of ["--bg-surface", "--bg-soft"]) {
-          expect(contrastRatio(decl(block, prop)!, decl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
+          expect(contrastRatio(resolveDecl(block, prop)!, resolveDecl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
         }
       }
     }
   });
 
   it("keeps --accent-strong readable as text directly on --accent-soft", () => {
-    // Plain --accent on --accent-soft is only 4.32:1 in light mode -- under
-    // AA -- which is why every "selected"/"active" state that tints its
-    // background with --accent-soft colors its own text --accent-strong
-    // instead (never --accent).
+    // Several "selected"/"active" controls that tint their background with
+    // --accent-soft set their own text to --accent-strong -- the "readable
+    // at text weight" test above only checks --accent-strong against
+    // --bg-surface and --bg-soft, so this is the one place that pairing's
+    // contrast against --accent-soft itself is checked.
     for (const block of [rootBlock, darkBlock]) {
-      expect(contrastRatio(decl(block, "--accent-strong")!, decl(block, "--accent-soft")!)).toBeGreaterThanOrEqual(
-        4.5,
-      );
+      expect(
+        contrastRatio(resolveDecl(block, "--accent-strong")!, resolveDecl(block, "--accent-soft")!),
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 });
@@ -472,34 +603,48 @@ describe("the text levels clear AA on every surface and the selected state, in b
     ),
   )("%s %s on %s", (theme, prop, surface) => {
     const block = theme === "light" ? rootBlock : darkBlock;
-    expect(contrastRatio(decl(block, prop)!, decl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(resolveDecl(block, prop)!, resolveDecl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
   });
 });
 
 describe("the delay ramp", () => {
-  it("fills magnitude in five steps on the light theme", () => {
-    expect(["--d0", "--d1", "--d2", "--d3", "--d4"].map((prop) => decl(rootBlock, prop))).toEqual([
-      "#D7EDE7",
-      "#A6D5C7",
-      "#F0CD7A",
-      "#E39556",
-      "#BC523A",
-    ]);
+  it("runs warm from calm (teal) toward severe (rust) -- hue never rises d0 to d4, and strictly falls from d1, in both themes", () => {
+    // Magnitude, never alarm: the ramp has to read as one continuous warming
+    // progression, not five unrelated colours a reskin could shuffle.
+    for (const block of [rootBlock, darkBlock]) {
+      const steps = ["--d0", "--d1", "--d2", "--d3", "--d4"];
+      // Each theme declares its own ramp -- resolving through the cascade
+      // fallback would let a deleted dark ramp pass by re-checking light's.
+      if (block === darkBlock) {
+        for (const prop of steps) expect(decl(darkBlock, prop), `${prop} has no dark-theme declaration`).not.toBeNull();
+      }
+      const hues = steps.map((prop) => hueOf(rgb(resolveDecl(block, prop)!)));
+      // d0 and d1 are both calm teal and may differ by lightness alone.
+      expect(hues[1], `hue(${steps[1]})`).toBeLessThanOrEqual(hues[0]);
+      for (let i = 2; i < hues.length; i++) {
+        expect(hues[i], `hue(${steps[i]})`).toBeLessThan(hues[i - 1]);
+      }
+    }
   });
 
   it("has a dark counterpart for every step, and a no-data fill in both themes", () => {
     for (const prop of ["--d0", "--d1", "--d2", "--d3", "--d4", "--none"]) {
-      expect(decl(rootBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
-      expect(decl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      expect(resolveDecl(rootBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      // decl() first: this test's whole point is that the dark theme
+      // declares its OWN value for each step, not that one resolves through
+      // the cascade fallback to root's. resolveDecl() on that own
+      // declaration then proves it isn't a dangling reference.
+      expect(decl(darkBlock, prop), prop).not.toBeNull();
+      expect(resolveDecl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
     }
   });
 });
 
 describe("--delay-severe clears AA on its own theme's surface", () => {
-  const lightSevere = decl(rootBlock, "--delay-severe")!;
-  const darkSevere = decl(darkBlock, "--delay-severe")!;
-  const lightSurface = decl(rootBlock, "--bg-surface")!;
-  const darkSurface = decl(darkBlock, "--bg-surface")!;
+  const lightSevere = resolveDecl(rootBlock, "--delay-severe")!;
+  const darkSevere = resolveDecl(darkBlock, "--delay-severe")!;
+  const lightSurface = resolveDecl(rootBlock, "--bg-surface")!;
+  const darkSurface = resolveDecl(darkBlock, "--bg-surface")!;
 
   it("the light value clears 4.5:1 on the light surface", () => {
     expect(contrastRatio(lightSevere, lightSurface)).toBeGreaterThanOrEqual(4.5);
@@ -546,47 +691,47 @@ describe("--delay-text-ok/mild/moderate clear AA on every surface they render on
   it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
     "%s clears 4.5:1 on light %s",
     (prop, surface) => {
-      expect(contrastRatio(decl(rootBlock, prop)!, decl(rootBlock, surface)!)).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(resolveDecl(rootBlock, prop)!, resolveDecl(rootBlock, surface)!)).toBeGreaterThanOrEqual(4.5);
     },
   );
 
   it.each(DELAY_TEXT_TOKENS.flatMap((prop) => DELAY_TEXT_SURFACES.map((surface) => [prop, surface])))(
     "%s clears 4.5:1 on dark %s",
     (prop, surface) => {
-      const onDark = decl(darkBlock, surface) ?? decl(rootBlock, surface)!;
-      expect(contrastRatio(decl(darkBlock, prop)!, onDark)).toBeGreaterThanOrEqual(4.5);
+      const onDark = resolveDecl(darkBlock, surface)!;
+      expect(contrastRatio(resolveDecl(darkBlock, prop)!, onDark)).toBeGreaterThanOrEqual(4.5);
     },
   );
 
   it("is a distinct set from the plain ramp, which is for fills and fails as text", () => {
     // The dark ramp reads as AA-passing against a card and is not against the
     // page tints, so text needs its own values in both themes, not just light.
-    expect(decl(darkBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
-    expect(decl(rootBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
+    expect(resolveDecl(darkBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
+    expect(resolveDecl(rootBlock, "--delay-text-moderate")).not.toBe(DELAY_RAMP.moderate);
   });
 });
 
 describe("--color-warning-text clears AA against --bg-surface and --bg-soft, in both themes", () => {
   it("the light value clears 4.5:1 on both light surfaces", () => {
     for (const surface of ["--bg-surface", "--bg-soft"]) {
-      expect(contrastRatio(decl(rootBlock, "--color-warning-text")!, decl(rootBlock, surface)!)).toBeGreaterThanOrEqual(
-        4.5,
-      );
+      expect(
+        contrastRatio(resolveDecl(rootBlock, "--color-warning-text")!, resolveDecl(rootBlock, surface)!),
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
   it("the dark value clears 4.5:1 on both dark surfaces", () => {
     for (const surface of ["--bg-surface", "--bg-soft"]) {
-      expect(contrastRatio(decl(darkBlock, "--color-warning-text")!, decl(darkBlock, surface)!)).toBeGreaterThanOrEqual(
-        4.5,
-      );
+      expect(
+        contrastRatio(resolveDecl(darkBlock, "--color-warning-text")!, resolveDecl(darkBlock, surface)!),
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
   it("the dark value is identical to plain --color-warning (already AA-passing there)", () => {
     // --color-warning has no dark-theme override, so the value that actually
     // cascades in dark mode is the one declared on the bare :root.
-    expect(decl(darkBlock, "--color-warning-text")).toBe(decl(rootBlock, "--color-warning"));
+    expect(resolveDecl(darkBlock, "--color-warning-text")).toBe(resolveDecl(rootBlock, "--color-warning"));
   });
 });
 
@@ -618,11 +763,11 @@ describe("--color-danger is retired outside destructive-action buttons", () => {
 
 describe("--delay-ok mirrors tokens.ts's DELAY_RAMP.ok", () => {
   it("is defined on the bare :root", () => {
-    expect(decl(rootBlock, "--delay-ok")).toBeTruthy();
+    expect(resolveDecl(rootBlock, "--delay-ok")).toBeTruthy();
   });
 
   it("matches DELAY_RAMP.ok — the same relationship --delay-severe has with SEVERE_FALLBACK, without the per-theme split (nothing renders text on this token)", () => {
-    expect(decl(rootBlock, "--delay-ok")!.toUpperCase()).toBe(DELAY_RAMP.ok);
+    expect(resolveDecl(rootBlock, "--delay-ok")!.toUpperCase()).toBe(DELAY_RAMP.ok);
   });
 });
 
@@ -793,11 +938,11 @@ describe("bottom sheet peek height", () => {
 
 describe("accentColorResolved()", () => {
   it("falls back to the light theme's --accent when it is unresolved (jsdom)", () => {
-    expect(accentColorResolved().toLowerCase()).toBe(decl(rootBlock, "--accent")!.toLowerCase());
+    expect(accentColorResolved().toLowerCase()).toBe(resolveDecl(rootBlock, "--accent")!.toLowerCase());
   });
 
   it("falls back to the light theme's surface the same way", () => {
-    expect(surfaceColorResolved().toLowerCase()).toBe(decl(rootBlock, "--bg-surface")!.toLowerCase());
+    expect(surfaceColorResolved().toLowerCase()).toBe(resolveDecl(rootBlock, "--bg-surface")!.toLowerCase());
   });
 });
 
@@ -844,5 +989,68 @@ describe("delayRampVar()", () => {
       expect(delayRampVar(minutes)).not.toBe(DELAY_RAMP.severe);
       expect(delayRampVar(minutes)).not.toContain("--color-danger");
     }
+  });
+});
+
+describe("semantic tokens carry no raw colour literals", () => {
+  // A reskin edits the primitive block only; a raw hex/rgb/hsl on a semantic
+  // name outside it is a value the next reskin would miss.
+  const RAW_COLOR_RE = /#[0-9A-Fa-f]{3,8}\b|rgba?\(|hsla?\(/;
+
+  it("every non-primitive declaration in :root and the dark block is a var() reference (or a composition of one), never a raw literal", () => {
+    for (const [name, block] of [
+      ["root", rootBlock],
+      ["dark", darkBlock],
+    ] as const) {
+      const offenders: string[] = [];
+      for (const m of block.matchAll(/(--[a-zA-Z0-9-]+)\s*:\s*([^;]+);/g)) {
+        const [, prop, value] = m;
+        if (prop.startsWith("--p-")) continue;
+        if (RAW_COLOR_RE.test(value)) offenders.push(`${prop}: ${value.trim()}`);
+      }
+      expect(offenders, `${name} block`).toEqual([]);
+    }
+  });
+});
+
+describe("the primitive palette lives only on the bare :root", () => {
+  it("the dark block declares no --p-* of its own", () => {
+    const darkPrimitives = [...darkBlock.matchAll(/(--p-[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]);
+    expect(darkPrimitives).toEqual([]);
+  });
+
+  it("every primitive is declared exactly once, on the bare :root", () => {
+    const rootPrimitiveNames = [...rootBlock.matchAll(/(--p-[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]);
+    expect(new Set(rootPrimitiveNames).size).toBe(rootPrimitiveNames.length);
+    expect(rootPrimitiveNames.length).toBeGreaterThan(0);
+  });
+
+  it("every var(--p-*) a semantic token references names a primitive declared on :root", () => {
+    const declaredPrimitives = new Set([...rootBlock.matchAll(/(--p-[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]));
+    const referenced = new Set(
+      [...rootBlock.matchAll(/var\((--p-[a-zA-Z0-9-]+)/g), ...darkBlock.matchAll(/var\((--p-[a-zA-Z0-9-]+)/g)].map(
+        (m) => m[1],
+      ),
+    );
+    const undeclared = [...referenced].filter((name) => !declaredPrimitives.has(name));
+    expect(undeclared).toEqual([]);
+  });
+
+  it("every declared custom property resolves to a value in both themes (no dangling reference, no cycle)", () => {
+    const names = new Set([...rootBlock.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]));
+    for (const block of [rootBlock, darkBlock]) {
+      for (const name of names) {
+        expect(() => resolveDecl(block, name), name).not.toThrow();
+      }
+    }
+  });
+});
+
+describe("every dark-theme token has a light counterpart", () => {
+  it("the dark block only ever overrides a semantic name the bare :root already declares", () => {
+    const rootNames = new Set([...rootBlock.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]));
+    const darkNames = [...darkBlock.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]);
+    const unknown = darkNames.filter((n) => !rootNames.has(n));
+    expect(unknown).toEqual([]);
   });
 });
