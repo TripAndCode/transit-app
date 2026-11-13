@@ -412,8 +412,8 @@
   /* More translucent than the light value: a near-black --bg-surface mixed
      at the same 82% reads as a near-opaque card rather than glass, which
      defeats the point over a bright basemap (aerial photo, GSI std). The
-     hairline needs its own lighter line for the same reason --card-border
-     (a light-grey literal) does not read on a dark surface. */
+     hairline needs its own lighter line for the same reason --card-border's
+     light-grey value does not read on a dark surface. */
   --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
   --glass-line: var(--p-white-a16);
   /* Deeper than the light wash: on a near-black page a 32% ink wash barely

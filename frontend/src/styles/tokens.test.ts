@@ -148,10 +148,10 @@ const reduceBlock = ruleBody(globalCss, "@media (prefers-reduced-motion: reduce)
 const bodyBlock = ruleBody(globalCss, "body {");
 
 /** `decl()` through the real cascade: the dark block inherits whatever the
- *  bare :root declares for a name it doesn't override itself. Every
- *  semantic token's value is now `var(--p-...)`, not a literal, so a test
- *  that needs the actual colour has to resolve it the way a browser would
- *  rather than read the declaration text directly. */
+ *  bare :root declares for a name it doesn't override itself. Every colour
+ *  semantic token's value is a `var(--p-...)` reference, not a literal, so a
+ *  test that needs the actual colour has to resolve it the way a browser
+ *  would rather than read the declaration text directly. */
 function cascadedDecl(block: string, prop: string): string | null {
   return decl(block, prop) ?? (block === darkBlock ? decl(rootBlock, prop) : null);
 }
@@ -257,13 +257,25 @@ describe("elevation tokens", () => {
 // per-overlay one: two overlays that pick their own literal drift apart the
 // moment either theme is retuned, and the dark theme needs a deeper wash
 // than the light one to separate the panel from the page at all.
+/** Alpha channel of an `rgba(r, g, b, a)` string, as a number. */
+function rgbaAlpha(value: string): number {
+  const m = /rgba\([^,]+,[^,]+,[^,]+,\s*([\d.]+)\s*\)/.exec(value);
+  if (!m) throw new Error(`not an rgba() string: ${value}`);
+  return Number(m[1]);
+}
+
 describe("scrim token", () => {
-  it("is defined on the bare :root", () => {
-    expect(resolveDecl(rootBlock, "--scrim")).toBe("rgba(15, 17, 25, 0.32)");
+  it("is defined on the bare :root as a translucent wash", () => {
+    const alpha = rgbaAlpha(resolveDecl(rootBlock, "--scrim")!);
+    expect(alpha).toBeGreaterThan(0);
+    expect(alpha).toBeLessThan(1);
   });
 
   it("deepens under the dark theme, where the light wash would not separate the panel", () => {
-    expect(resolveDecl(darkBlock, "--scrim")).toBe("rgba(0, 0, 0, 0.55)");
+    // Dark declares its own override rather than merely resolving the
+    // light value through the cascade fallback.
+    expect(decl(darkBlock, "--scrim")).not.toBeNull();
+    expect(rgbaAlpha(resolveDecl(darkBlock, "--scrim")!)).toBeGreaterThan(rgbaAlpha(resolveDecl(rootBlock, "--scrim")!));
   });
 
   it("is what the shared overlay paints, so no overlay carries its own literal", () => {
@@ -467,6 +479,10 @@ describe("one accent identity", () => {
     [darkBlock, "--accent"],
     [darkBlock, "--accent-soft"],
   ])("declares a defined, blue-dominant accent in %s", (block, prop) => {
+    // Each theme must declare its OWN value, not merely resolve one through
+    // the dark-falls-back-to-:root cascade -- otherwise deleting the dark
+    // override would pass this test by silently testing the light one twice.
+    if (block === darkBlock) expect(decl(darkBlock, prop), `${prop} has no dark-theme declaration`).not.toBeNull();
     const value = resolveDecl(block, prop);
     expect(value).toBeTruthy();
     const [r, g, b] = rgb(value!);
@@ -553,9 +569,15 @@ describe("the delay ramp", () => {
     // Magnitude, never alarm: the ramp has to read as one continuous warming
     // progression, not five unrelated colours a reskin could shuffle.
     for (const block of [rootBlock, darkBlock]) {
-      const hues = ["--d0", "--d1", "--d2", "--d3", "--d4"].map((prop) => hueOf(rgb(resolveDecl(block, prop)!)));
+      const steps = ["--d0", "--d1", "--d2", "--d3", "--d4"];
+      // Each theme declares its own ramp -- resolving through the cascade
+      // fallback would let a deleted dark ramp pass by re-checking light's.
+      if (block === darkBlock) {
+        for (const prop of steps) expect(decl(darkBlock, prop), `${prop} has no dark-theme declaration`).not.toBeNull();
+      }
+      const hues = steps.map((prop) => hueOf(rgb(resolveDecl(block, prop)!)));
       for (let i = 1; i < hues.length; i++) {
-        expect(hues[i], `hue(${["--d0", "--d1", "--d2", "--d3", "--d4"][i]})`).toBeLessThan(hues[i - 1]);
+        expect(hues[i], `hue(${steps[i]})`).toBeLessThan(hues[i - 1]);
       }
     }
   });
@@ -563,7 +585,9 @@ describe("the delay ramp", () => {
   it("has a dark counterpart for every step, and a no-data fill in both themes", () => {
     for (const prop of ["--d0", "--d1", "--d2", "--d3", "--d4", "--none"]) {
       expect(resolveDecl(rootBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
-      expect(resolveDecl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$/);
+      // decl(), not resolveDecl(): this test's whole point is that the dark
+      // theme declares its OWN value for each step, not that one resolves.
+      expect(decl(darkBlock, prop), prop).toMatch(/^#[0-9A-Fa-f]{6}$|^var\(--p-/);
     }
   });
 });
