@@ -436,10 +436,10 @@
   color: var(--text-secondary);
 }
 
-/* Card hover affordance for the clickable summary cards. */
+/* Why this composes --lift-transition: see .lift in global.css. */
 .ov-card.ov-clickable {
   cursor: pointer;
-  transition: background var(--dur-1) var(--ease-out);
+  transition: var(--lift-transition), background var(--dur-1) var(--ease-out);
 }
 .ov-card.ov-clickable:hover {
   background: var(--bg-soft);
@@ -804,8 +804,11 @@
 .ov-routes-anchor {
   scroll-margin-top: 16px;
 }
-/* Feed-status dot: still by default; it breathes (motion block at the end
-   of this file) only inside BREATH_WINDOW_MS (overview/freshness.ts). */
+/* Feed-status dot: still at rest. It breathes (motion block at the end of
+   this file) only inside BREATH_WINDOW_MS (overview/freshness.ts), right
+   after a report lands; once that window closes, a still-live feed keeps
+   the shared .live-dot ring (global.css) running for the rest of the live
+   window instead. */
 .ov-fresh-dot {
   display: inline-block;
   width: 8px;
@@ -821,6 +824,13 @@
 .ov-fresh-dot--stale {
   background: var(--text-tertiary);
 }
+/* The feed's ongoing "live" state (not only the moment a fresh report
+   lands, which .ov-fresh-dot--live's breath covers): the shared .live-dot
+   primitive's ring reads currentColor, so it's told the same green the dot
+   itself is already filled with. */
+.ov-fresh-dot.live-dot {
+  color: var(--delay-text-ok);
+}
 
 /* BP.sm. Kept after the hero's base rules: an override of equal specificity
    placed earlier in the file loses to them at every width. */
@@ -835,13 +845,21 @@
 }
 
 /* The freshness dot's breath: a symmetric loop (the place --ease-in-out
-   belongs), never for a reduced-motion viewer. */
+   belongs), never for a reduced-motion viewer. Exclusive with the shared
+   .live-dot ring (rule above, keyframes in global.css) -- both set
+   `animation`, so React only ever puts one class on the dot at a time
+   (OverviewHeroRow.tsx). Also brightens .ov-fresh-dot.live-dot to full
+   opacity under the same condition: opacity dims the ring too, as it is
+   the dot's own box-shadow, and at the dot's resting opacity the ring
+   fades to an alpha too faint to read, so the bump only matters where
+   the ring can actually run. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ov-breath {
     0%, 100% { opacity: 0.55; }
     50%      { opacity: 1; }
   }
   .ov-fresh-dot--live { animation: ov-breath calc(var(--dur-4) * 3) var(--ease-in-out) infinite; }
+  .ov-fresh-dot.live-dot { opacity: 1; }
 }
 
 /* Without subgrid, inside the build's browser floor, each route row keeps

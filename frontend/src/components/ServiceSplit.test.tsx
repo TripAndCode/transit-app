@@ -154,6 +154,11 @@ describe("ServiceSplit card", () => {
     fireEvent.keyDown(screen.getByRole("button"), { key: "Enter" });
     expect(opened).toBe(1);
   });
+
+  it("renders the shared lift primitive on its clickable card", () => {
+    renderWithProviders(<ServiceSplit service_split={TYPICAL} onClick={() => {}} />);
+    expect(screen.getByRole("button")).toHaveClass("ov-card", "ov-clickable", "lift");
+  });
 });
 
 function daily(n: number, start = 1): OverviewServiceSplitDay[] {

@@ -199,6 +199,11 @@
      which flips light-to-dark and would otherwise break tooltip contrast. */
   --tooltip-bg: var(--p-graphite-750);
   --tooltip-fg: var(--p-graphite-50);
+  /* .glint's sheen mixes toward this, always the white primitive and never
+     --bg-surface: the dark theme's surface is near-black, and mixing a
+     bright line toward it would darken the sheen instead of lightening it.
+     Theme-invariant by design, so no dark-block entry. */
+  --glint-tint: var(--p-graphite-50);
   /* Floating map chrome (filter dock, legend, basemap switcher, fit-all
      button): a translucent, blurred fill so the control reads as sitting on
      the map rather than punched through it, on any basemap including dark
@@ -269,6 +274,8 @@
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-in-out: cubic-bezier(.65, 0, .35, 1);
   --transition: var(--dur-1) var(--ease-out);
+  /* Shared by .lift and any host that composes it; see .lift below. */
+  --lift-transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
   /* Elevation scale: el-1 a resting card, el-2 something floating over the
      page (menu, popover, tooltip, hover lift), el-3 a modal or full overlay.
      On light surfaces depth reads as a soft drop shadow; the dark theme
@@ -404,7 +411,12 @@
      tier carries a hairline ring and a top inset highlight to draw its own
      edge; only the floating tiers add a drop, and el-3 makes it deep enough
      to darken the page visibly behind a modal. */
-  --el-1: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06);
+  /* The invisible third layer (zero offset/blur/spread, hidden behind the
+     box) gives --el-1 the same layer count and inset-ness per position as
+     --el-2/--el-3 below: a box-shadow transition (.lift) can't interpolate
+     between lists of different shape, so a card resting at --el-1 and
+     rising to --el-2 on hover would otherwise snap instead of ease. */
+  --el-1: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06), 0 0 0 var(--p-black-a40);
   --el-2: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
           0 8px 24px var(--p-black-a40);
   --el-3: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
@@ -953,6 +965,71 @@ summary::-webkit-details-marker { display: none; }
   .reveal.reveal--in {
     transform: translateY(0);
   }
+}
+
+/* ---------- Shared interactive motion primitives ----------
+   Reused across tabs, so a page composes "lively but calm" from one
+   definition rather than retuning distance/timing/shadow per screen. */
+
+/* An interactive card rises slightly with its shadow stepping up to the
+   floating tier (--el-2) on hover or keyboard focus; reduced motion
+   drops the transform, keeping only the instant shadow cue.
+   A host with its own `transition` outranks this rule on specificity and
+   drops transform/box-shadow from the transitioned set, so the lift
+   snaps instead of easing. Compose `var(--lift-transition)` there rather
+   than hand-copying .lift's timing, which would drift when the token
+   changes (see .ov-card.ov-clickable in overview.css). */
+.lift {
+  transition: var(--lift-transition);
+}
+.lift:hover, .lift:focus-visible {
+  transform: translateY(-4px);
+  box-shadow: var(--el-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lift:hover, .lift:focus-visible { transform: none; }
+}
+
+/* A light sheen that sweeps once across a sparkline/mini-chart's line on
+   mount -- never a loop, so it reads as a one-time "here's the trend" cue,
+   not an ambient distraction. Renders as a second, wider stroke mixed
+   toward --glint-tint, so it reads as a sheen passing over the line
+   rather than the line thickening. Delayed one --dur-4 -- the draw-on's
+   own duration (see .chart-draw-on above) -- so it starts once the line
+   has finished drawing in rather than racing ahead of ink that isn't
+   there yet. */
+.glint {
+  opacity: 0;
+  stroke-dashoffset: 14;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes glint-sweep {
+    from { stroke-dashoffset: 14; opacity: 0.45; }
+    60%  { opacity: 0.45; }
+    to   { stroke-dashoffset: -100; opacity: 0; }
+  }
+  .glint {
+    animation: glint-sweep var(--dur-4) var(--ease-out) var(--dur-4) 1 forwards;
+  }
+}
+
+/* A "live" indicator dot's calm, slow expanding ring -- the one primitive
+   here allowed to loop, since it marks an ongoing state rather than a
+   one-time event. Reads currentColor, so the host sets `color` to whatever
+   tone its own dot already uses for "live" rather than this primitive
+   picking one. Explicit `animation: none` under reduced motion rather than
+   relying on the page-wide blanket rule: a shared primitive gets copied
+   into contexts this file's author won't see, so the loop's exemption from
+   motion has to travel with the rule that creates it. */
+.live-dot {
+  animation: live-ring calc(var(--dur-4) * 2) var(--ease-in-out) infinite;
+}
+@keyframes live-ring {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 35%, transparent); }
+  50%      { box-shadow: 0 0 0 8px color-mix(in srgb, currentColor 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
 }
 
 /* The daily chart's plot is a keyboard-operable range control: arrows move

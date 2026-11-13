@@ -124,6 +124,11 @@ describe("PeakHourRibbon", () => {
     }
     const xOfHour = (h: number) => h * CELL_W + CELL_W / 2;
 
+    it("renders the shared lift primitive on its clickable card", () => {
+      const { container } = setup();
+      expect(container.querySelector(".ov-card")).toHaveClass("ov-clickable", "lift");
+    });
+
     it("opens the hour breakdown only, not the card's own detail as well", () => {
       const { svg, onClick, onHourClick } = setup();
       fireEvent.click(svg, { clientX: xOfHour(8), clientY: 60 });

@@ -27,8 +27,10 @@ describe("overview.css hover affordances change colour or opacity only", () => {
     expect(decl(ruleBody(css, ".ov-pareto-row:hover {"), "background")).toBe("var(--hover-tint)");
   });
 
-  it("a clickable card neither lifts nor changes elevation on hover", () => {
-    const hover = css.match(/\.ov-card\.ov-clickable:hover\s*\{([^}]*)\}/)?.[1] ?? "";
+  it("a clickable card's own hover changes only colour; its lift is composed in from the shared .lift primitive", () => {
+    const base = ruleBody(css, ".ov-card.ov-clickable {");
+    expect(decl(base, "transition")).toContain("var(--lift-transition)");
+    const hover = ruleBody(css, ".ov-card.ov-clickable:hover {");
     expect(hover).not.toMatch(/transform|box-shadow/);
     expect(hover).toMatch(/background/);
     const uiHover = uiCss.match(/\.ui-card--clickable:hover\s*\{([^}]*)\}/)?.[1] ?? "";
@@ -60,6 +62,11 @@ describe("overview.css living hero", () => {
   it("a stale feed's dot drops the ok green for a neutral tone", () => {
     expect(decl(ruleBody(css, ".ov-fresh-dot {"), "background")).toBe("var(--delay-text-ok)");
     expect(decl(ruleBody(css, ".ov-fresh-dot--stale {"), "background")).toBe("var(--text-tertiary)");
+  });
+  it("only brightens the live dot to full opacity where the ring can actually run", () => {
+    expect(decl(ruleBody(css, ".ov-fresh-dot.live-dot {"), "opacity")).toBeNull();
+    const motion = ruleBody(css, "@media (prefers-reduced-motion: no-preference) {");
+    expect(decl(ruleBody(motion, ".ov-fresh-dot.live-dot {"), "opacity")).toBe("1");
   });
   it("the ribbon's path transitions its geometry on --dur-3 only", () => {
     expect(decl(ruleBody(css, ".ov-pulse-ribbon path {"), "transition")).toBe("d var(--dur-3) var(--ease-out)");

@@ -31,6 +31,7 @@ import { SidebarLineMap } from "./SidebarLineMap";
 import { SidebarPinnedRoutes } from "./SidebarPinnedRoutes";
 import { SidebarTicket } from "./SidebarTicket";
 import { readStorage, writeStorage } from "../utils/safeStorage";
+import "./sidebarOtherNav.css";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
@@ -129,6 +130,33 @@ function railLinkStyle(collapsedFlag: boolean) {
   });
 }
 
+/** Layout only, for the desktop rail's "Other" footer links -- their own
+ *  soft accent pill and hover come from sidebarOtherNav.css's `.other-nav-link`,
+ *  since what can't go inline is the `:hover` rule and the `.active` class
+ *  NavLink merges in automatically. */
+function otherLinkStyle(collapsedFlag: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: collapsedFlag ? "center" : "flex-start",
+    justifyContent: collapsedFlag ? "center" : "flex-start",
+    gap: 12,
+    margin: "0 8px",
+    padding: collapsedFlag ? "10px 0" : "10px 14px",
+    textDecoration: "none",
+  };
+}
+
+/** `className`/`style` for one of the "Other" footer links, shared by the
+ *  desktop rail's `.other-nav-link` pill and the phone sheet's plain
+ *  `railLinkStyle` row. In the sheet, `style` is `railLinkStyle`'s function,
+ *  for a `NavLink`/`PendingNavLink` to call with its own `isActive`. */
+function otherNavProps(collapsedFlag: boolean, inSheet: boolean): { className?: string; style: CSSProperties | ReturnType<typeof railLinkStyle> } {
+  return {
+    className: inSheet ? undefined : "other-nav-link",
+    style: inSheet ? railLinkStyle(collapsedFlag) : otherLinkStyle(collapsedFlag),
+  };
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const agencyId = useRailAgencyId();
@@ -179,6 +207,10 @@ export function Sidebar() {
   // out, and no Ask, which has a tab of its own there: repeating the bar's
   // links here would put the same links twice on screen at once.
   function renderNavAndFooter(collapsedFlag: boolean, onNavigate?: () => void, inSheet = false) {
+    const otherNav = otherNavProps(collapsedFlag, inSheet);
+    // Not a NavLink, so there is no router callback to supply isActive: an
+    // external link is never the current route.
+    const feedbackStyle = typeof otherNav.style === "function" ? otherNav.style({ isActive: false }) : otherNav.style;
     return (
       <>
         {/* On the phone sheet the account row leads: at the end it sat below
@@ -220,6 +252,7 @@ export function Sidebar() {
                 padding: "0 22px",
                 marginBottom: 4,
                 fontSize: "var(--text-xs)",
+                fontWeight: 700,
                 color: "var(--text-tertiary)",
                 letterSpacing: "0.04em",
               }}
@@ -233,7 +266,7 @@ export function Sidebar() {
                 to={agencyId ? `/model?from=${agencyId}` : "/model"}
                 aria-label={collapsedFlag ? t("nav.model") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)}
+                {...otherNav}
               >
                 <Gauge size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("nav.model")}</span>}
@@ -245,7 +278,7 @@ export function Sidebar() {
               to="/help"
               aria-label={collapsedFlag ? t("nav.help") : undefined}
               onClick={() => onNavigate?.()}
-              style={railLinkStyle(collapsedFlag)}
+              {...otherNav}
             >
               <HelpCircle size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.help")}</span>}
@@ -259,7 +292,8 @@ export function Sidebar() {
                 rel="noopener noreferrer"
                 aria-label={collapsedFlag ? t("nav.feedback") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)({ isActive: false })}
+                className={otherNav.className}
+                style={feedbackStyle}
               >
                 <MessageSquare
                   size={18}
@@ -276,7 +310,7 @@ export function Sidebar() {
               to="/welcome"
               aria-label={collapsedFlag ? t("nav.about") : undefined}
               onClick={() => onNavigate?.()}
-              style={railLinkStyle(collapsedFlag)}
+              {...otherNav}
             >
               <Info size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.about")}</span>}
@@ -288,7 +322,7 @@ export function Sidebar() {
                 to="/admin"
                 aria-label={collapsedFlag ? t("account.admin_link") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)}
+                {...otherNav}
               >
                 <Shield size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("account.admin_link")}</span>}
@@ -317,10 +351,10 @@ export function Sidebar() {
       <span
         aria-hidden="true"
         style={{
-          width: 32,
-          height: 32,
+          width: 40,
+          height: 40,
           flexShrink: 0,
-          borderRadius: 8,
+          borderRadius: "var(--radius-lg)",
           background: "var(--accent)",
           color: "var(--on-accent)",
           display: "flex",

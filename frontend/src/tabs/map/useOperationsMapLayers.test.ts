@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import type { LiveTrip, LiveTripProgressResponse, LiveTripsResponse, RouteShapeResponse, RouteStopProfileRow } from "../../api/types";
 import { makeMockMap, type MockLayer, type MockMap } from "../../test/mockMap";
-import { delayColorResolved, readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
+import { accentColorResolved, delayColorResolved, readableInkOn, severityStepColors, surfaceColorResolved } from "../../styles/tokens";
 import { applyTheme } from "../../styles/theme";
 import {
   ACTIVE_ROUTE_FLOW_LAYER,
@@ -13,6 +13,10 @@ import {
   LIVE_TRIPS_LABEL_LAYER,
   LIVE_TRIPS_LAYER,
   LIVE_TRIPS_SOURCE,
+  MARK_STROKE_WIDTH,
+  SELECTED_RING_WIDTH,
+  TRIP_LABEL_OFFSET_EM,
+  TRIP_LABEL_SIZE,
   VEHICLE_RADIUS,
   activeRouteLinePaint,
   buildRouteLineGradient,
@@ -173,6 +177,29 @@ describe("useOperationsMapLayers", () => {
     expect(source.data.features[0].properties!.trip_label).not.toContain("×");
   });
 
+  it("marks every vehicle on a picked route as selected when no trip is picked, and none off it", () => {
+    const map = makeMockMap();
+    const mixedRoutes: LiveTripsResponse = {
+      latest_captured_at: "2026-09-11T01:00:00Z",
+      rows: [
+        liveTrip({ trip_id: "trip-1", route_code: "12", stop_lon: 140.71, stop_lat: 40.81 }),
+        liveTrip({ trip_id: "trip-2", route_code: "12", stop_lon: 140.72, stop_lat: 40.82 }),
+        liveTrip({ trip_id: "trip-3", route_code: "8", stop_lon: 140.73, stop_lat: 40.83 }),
+      ],
+      truncated: false,
+    };
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, mixedRoutes, SHAPE, "12", 420, 1, 0);
+    });
+
+    const source = map.getSource(LIVE_TRIPS_SOURCE) as { data: GeoJSON.FeatureCollection<GeoJSON.Point> };
+    const byTrip = new Map(source.data.features.map((feature) => [feature.properties!.trip_id as string, feature.properties!.selected]));
+    expect(byTrip.get("trip-1")).toBe(true);
+    expect(byTrip.get("trip-2")).toBe(true);
+    expect(byTrip.get("trip-3")).toBe(false);
+  });
+
   it("draws the selected trip on top of any other trip sharing its reported stop", () => {
     const map = makeMockMap();
     renderHook(() => {
@@ -244,13 +271,57 @@ describe("operations-map mark paint (pure builders)", () => {
     ]);
   });
 
-  it("gives every vehicle mark a thin surface-derived ring instead of a heavy casing", () => {
+  it("gives an unselected vehicle mark a thin surface-derived ring instead of a heavy casing", () => {
     const paint = vehicleCirclePaint();
-    expect(paint["circle-stroke-width"]).toBe(1.5);
-    expect(paint["circle-stroke-color"]).toBe(surfaceColorResolved());
-    expect(paint["circle-stroke-color"]).not.toContain("var(");
+    expect(paint["circle-stroke-width"]).toEqual(["case", ["boolean", ["get", "selected"], false], 3, 1.5]);
+    expect(paint["circle-stroke-color"]).toEqual([
+      "case", ["boolean", ["get", "selected"], false], accentColorResolved(), surfaceColorResolved(),
+    ]);
+    expect(JSON.stringify(paint["circle-stroke-color"])).not.toContain("var(");
   });
 
+  it("gives the selected vehicle a gentle accent ring rather than a second shape", () => {
+    const [, , selectedWidth, unselectedWidth] = vehicleCirclePaint()["circle-stroke-width"] as [unknown, unknown, number, number];
+    expect(selectedWidth).toBeGreaterThan(unselectedWidth);
+    const [, , selectedColor, unselectedColor] = vehicleCirclePaint()["circle-stroke-color"] as [unknown, unknown, string, string];
+    expect(selectedColor).toBe(accentColorResolved());
+    expect(selectedColor).not.toBe(unselectedColor);
+  });
+
+  it("keeps circle-blur's own contribution to the fade band within half of every tier's stroke width", () => {
+    const blur = vehicleCirclePaint()["circle-blur"] as number;
+    const tiers = [
+      { radius: VEHICLE_RADIUS.base, strokeWidth: MARK_STROKE_WIDTH },
+      { radius: VEHICLE_RADIUS.severe, strokeWidth: MARK_STROKE_WIDTH },
+      { radius: VEHICLE_RADIUS.selected, strokeWidth: SELECTED_RING_WIDTH },
+    ];
+    for (const { radius, strokeWidth } of tiers) {
+      expect(blur * (radius + strokeWidth)).toBeLessThanOrEqual(strokeWidth / 2);
+    }
+  });
+
+  it("keeps every live and trip-trail label at or above the 12px legibility floor", () => {
+    const map = makeMockMap();
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1", PROGRESS);
+    });
+    const liveSizes = (map.getLayer(LIVE_TRIPS_LABEL_LAYER) as MockLayer).layout?.["text-size"] as unknown[];
+    expect(liveSizes.slice(-2)).toEqual([TRIP_LABEL_SIZE.selected, TRIP_LABEL_SIZE.base]);
+    const progressSize = (map.getLayer("trip-progress-labels") as MockLayer).layout?.["text-size"];
+    expect(progressSize as number).toBeGreaterThanOrEqual(12);
+  });
+
+  it("keeps the trip label's offset clear of the mark it names, in every tier", () => {
+    const tiers = [
+      { name: "base", labelSize: TRIP_LABEL_SIZE.base, radius: VEHICLE_RADIUS.base, strokeWidth: MARK_STROKE_WIDTH },
+      { name: "severe", labelSize: TRIP_LABEL_SIZE.base, radius: VEHICLE_RADIUS.severe, strokeWidth: MARK_STROKE_WIDTH },
+      { name: "selected", labelSize: TRIP_LABEL_SIZE.selected, radius: VEHICLE_RADIUS.selected, strokeWidth: SELECTED_RING_WIDTH },
+    ];
+    for (const { name, labelSize, radius, strokeWidth } of tiers) {
+      expect(TRIP_LABEL_OFFSET_EM * labelSize, name).toBeGreaterThanOrEqual(radius + strokeWidth);
+    }
+  });
 });
 
 describe("operations-map layers use resolved tokens, never literal hexes", () => {
@@ -569,7 +640,8 @@ describe("a theme toggle repaints layers whose source already exists", () => {
 
     expectRepainted(map, LIVE_TRIPS_LAYER, vehicleCirclePaint());
     expectRepainted(map, LIVE_TRIPS_LABEL_LAYER, labelPaint());
-    expect(map.getPaintProperty(LIVE_TRIPS_LAYER, "circle-stroke-color")).toBe(DARK["--bg-surface"]);
+    const strokeColor = map.getPaintProperty(LIVE_TRIPS_LAYER, "circle-stroke-color") as unknown[];
+    expect(strokeColor).toEqual(["case", ["boolean", ["get", "selected"], false], DARK["--accent"], DARK["--bg-surface"]]);
     expect(map.getPaintProperty(LIVE_TRIPS_LABEL_LAYER, "text-halo-color")).toBe(DARK["--bg-surface"]);
   });
 });

@@ -26,6 +26,11 @@ type Props = {
   /** Draw the line on when its data first arrives. Pass false inside a
    *  RevealSection, whose own transform is the entrance. */
   drawOn?: boolean;
+  /** Sweep the `.glint` motion primitive (global.css) once across the line
+   *  on mount: a light sheen that draws the eye to a chart that otherwise
+   *  sits still once drawn in. Off by default -- a sparkline shown inside a
+   *  list or a frequently-remounted card would replay it on every row. */
+  glint?: boolean;
 };
 
 /** A trend line too small for an axis. It draws no SVG text: callers stretch
@@ -43,6 +48,7 @@ export function InlineSparkline({
   baseline,
   preserveAspectRatio,
   drawOn = true,
+  glint = false,
 }: Props) {
   // Called unconditionally, ahead of the early return below -- hooks can't
   // themselves be conditional on `points.length`.
@@ -126,6 +132,23 @@ export function InlineSparkline({
         points={coords.join(" ")}
       />
       {showEndDot && <circle cx={lastX} cy={lastY} r="2.5" style={{ fill: stroke }} />}
+      {glint && (
+        <polyline
+          className="glint"
+          pathLength={100}
+          fill="none"
+          // Lighter than the line itself (see global.css's .glint for why
+          // it mixes toward --glint-tint rather than the line's own stroke).
+          style={{
+            stroke: `color-mix(in srgb, ${stroke} 45%, var(--glint-tint))`,
+          }}
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeDasharray="14 100"
+          points={coords.join(" ")}
+          aria-hidden="true"
+        />
+      )}
     </svg>
   );
 }
