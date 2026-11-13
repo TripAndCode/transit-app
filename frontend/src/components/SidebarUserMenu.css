@@ -1,0 +1,13 @@
+/* The account-menu trigger and its popover rows: a calm hover fill, which an
+   inline style can't express. */
+.sidebar-user-trigger {
+  transition: background var(--transition);
+}
+.sidebar-user-trigger:hover {
+  background: var(--hover-tint);
+}
+
+.sidebar-user-menu-item:hover,
+.sidebar-user-menu-item:focus-visible {
+  background: var(--bg-soft);
+}

@@ -31,6 +31,7 @@ import { SidebarLineMap } from "./SidebarLineMap";
 import { SidebarPinnedRoutes } from "./SidebarPinnedRoutes";
 import { SidebarTicket } from "./SidebarTicket";
 import { readStorage, writeStorage } from "../utils/safeStorage";
+import "./sidebarOtherNav.css";
 
 type SidebarNavItem = (typeof SIDEBAR_NAV_ITEMS)[number];
 
@@ -129,6 +130,22 @@ function railLinkStyle(collapsedFlag: boolean) {
   });
 }
 
+/** Layout only, for the desktop rail's "Other" footer links -- their own
+ *  soft accent pill and hover come from sidebarOtherNav.css's `.other-nav-link`
+ *  (react-router merges its "active" class in automatically), since a pill's
+ *  background and hover state can't be expressed as an inline style. */
+function otherLinkStyle(collapsedFlag: boolean): CSSProperties {
+  return {
+    display: "flex",
+    alignItems: collapsedFlag ? "center" : "flex-start",
+    justifyContent: collapsedFlag ? "center" : "flex-start",
+    gap: 12,
+    margin: "0 8px",
+    padding: collapsedFlag ? "10px 0" : "10px 14px",
+    textDecoration: "none",
+  };
+}
+
 export function Sidebar() {
   const { t } = useTranslation();
   const agencyId = useRailAgencyId();
@@ -220,6 +237,7 @@ export function Sidebar() {
                 padding: "0 22px",
                 marginBottom: 4,
                 fontSize: "var(--text-xs)",
+                fontWeight: 700,
                 color: "var(--text-tertiary)",
                 letterSpacing: "0.04em",
               }}
@@ -233,7 +251,8 @@ export function Sidebar() {
                 to={agencyId ? `/model?from=${agencyId}` : "/model"}
                 aria-label={collapsedFlag ? t("nav.model") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)}
+                className={inSheet ? undefined : "other-nav-link"}
+                style={inSheet ? railLinkStyle(collapsedFlag) : otherLinkStyle(collapsedFlag)}
               >
                 <Gauge size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("nav.model")}</span>}
@@ -245,7 +264,8 @@ export function Sidebar() {
               to="/help"
               aria-label={collapsedFlag ? t("nav.help") : undefined}
               onClick={() => onNavigate?.()}
-              style={railLinkStyle(collapsedFlag)}
+              className={inSheet ? undefined : "other-nav-link"}
+              style={inSheet ? railLinkStyle(collapsedFlag) : otherLinkStyle(collapsedFlag)}
             >
               <HelpCircle size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.help")}</span>}
@@ -259,7 +279,8 @@ export function Sidebar() {
                 rel="noopener noreferrer"
                 aria-label={collapsedFlag ? t("nav.feedback") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)({ isActive: false })}
+                className={inSheet ? undefined : "other-nav-link"}
+                style={inSheet ? railLinkStyle(collapsedFlag)({ isActive: false }) : otherLinkStyle(collapsedFlag)}
               >
                 <MessageSquare
                   size={18}
@@ -276,7 +297,8 @@ export function Sidebar() {
               to="/welcome"
               aria-label={collapsedFlag ? t("nav.about") : undefined}
               onClick={() => onNavigate?.()}
-              style={railLinkStyle(collapsedFlag)}
+              className={inSheet ? undefined : "other-nav-link"}
+              style={inSheet ? railLinkStyle(collapsedFlag) : otherLinkStyle(collapsedFlag)}
             >
               <Info size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
               {!collapsedFlag && <span>{t("nav.about")}</span>}
@@ -288,7 +310,8 @@ export function Sidebar() {
                 to="/admin"
                 aria-label={collapsedFlag ? t("account.admin_link") : undefined}
                 onClick={() => onNavigate?.()}
-                style={railLinkStyle(collapsedFlag)}
+                className={inSheet ? undefined : "other-nav-link"}
+                style={inSheet ? railLinkStyle(collapsedFlag) : otherLinkStyle(collapsedFlag)}
               >
                 <Shield size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: collapsedFlag ? 0 : 2, flexShrink: 0 }} />
                 {!collapsedFlag && <span>{t("account.admin_link")}</span>}
@@ -317,10 +340,10 @@ export function Sidebar() {
       <span
         aria-hidden="true"
         style={{
-          width: 32,
-          height: 32,
+          width: 40,
+          height: 40,
           flexShrink: 0,
-          borderRadius: 8,
+          borderRadius: "var(--radius-lg)",
           background: "var(--accent)",
           color: "var(--on-accent)",
           display: "flex",

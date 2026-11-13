@@ -11,6 +11,7 @@ import { Z_INDEX } from "../styles/zIndex";
 import { Spinner } from "./Spinner";
 import { useToast } from "./ui/toastContext";
 import { usePopoverDismiss } from "../hooks/usePopoverDismiss";
+import "./SidebarUserMenu.css";
 
 const THEME_OPTIONS = ["system", "light", "dark"] as const satisfies readonly Theme[];
 const THEME_OPTION_LABEL_KEYS: Record<(typeof THEME_OPTIONS)[number], string> = {
@@ -25,7 +26,7 @@ const popItemStyle: CSSProperties = {
   justifyContent: "space-between",
   width: "100%",
   padding: "7px 9px",
-  borderRadius: 5,
+  borderRadius: "var(--radius)",
   fontSize: 12,
   color: "var(--text-secondary)",
   textDecoration: "none",
@@ -95,7 +96,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
             bottom: "calc(100% + 6px)",
             background: "var(--bg-surface)",
             border: "1px solid var(--border-subtle)",
-            borderRadius: 8,
+            borderRadius: "var(--radius-lg)",
             boxShadow: "var(--el-2)",
             padding: 6,
             zIndex: Z_INDEX.dropdown,
@@ -103,11 +104,11 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
         >
           {config?.auth_enabled &&
             (session ? (
-              <Link role="menuitem" to="/me" onClick={() => setOpen(false)} style={popItemStyle}>
+              <Link role="menuitem" to="/me" onClick={() => setOpen(false)} className="sidebar-user-menu-item" style={popItemStyle}>
                 <span>{displayName}</span>
               </Link>
             ) : (
-              <Link role="menuitem" to="/login" onClick={() => setOpen(false)} style={popItemStyle}>
+              <Link role="menuitem" to="/login" onClick={() => setOpen(false)} className="sidebar-user-menu-item" style={popItemStyle}>
                 <span>{t("common.login")}</span>
               </Link>
             ))}
@@ -133,6 +134,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                     setSwitchTarget(lng);
                     void switchTo(lng);
                   }}
+                  className="sidebar-user-menu-item"
                   style={lng === current ? selectedItemStyle : loading ? { ...popItemStyle, cursor: "default" } : popItemStyle}
                 >
                   <span>{LOCALE_NAMES[lng]}</span>
@@ -156,6 +158,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                 role="menuitemradio"
                 aria-checked={theme === option}
                 onClick={() => setTheme(option)}
+                className="sidebar-user-menu-item"
                 style={theme === option ? selectedItemStyle : popItemStyle}
               >
                 <span>{t(THEME_OPTION_LABEL_KEYS[option])}</span>
@@ -169,6 +172,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
               setOpen(false);
               onOpenSettings();
             }}
+            className="sidebar-user-menu-item"
             style={popItemStyle}
           >
             <span>{t("header.settings_aria")}</span>
@@ -185,6 +189,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
                   if (logout.isPending) return;
                   logout.mutate(undefined, { onSuccess: () => window.location.assign("/welcome") });
                 }}
+                className="sidebar-user-menu-item"
                 style={logout.isPending ? { ...popItemStyle, cursor: "default" } : popItemStyle}
               >
                 <span>{t("account.logout")}</span>
@@ -206,13 +211,14 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
         aria-expanded={open}
         aria-label={t("nav.account_menu")}
         onClick={() => setOpen((v) => !v)}
+        className="sidebar-user-trigger"
         style={{
           width: "100%",
           display: "flex",
           alignItems: "center",
           gap: 9,
           padding: 8,
-          borderRadius: 8,
+          borderRadius: "var(--radius-lg)",
           border: "1px solid transparent",
           background: "transparent",
           cursor: "pointer",
