@@ -22,9 +22,10 @@ the repository's review, verification, and publication requirements.
   with only the issue reference, objective/acceptance criteria, relevant user
   decisions, owned worktree/branch, and required evidence or special constraints.
   Use a fresh non-fork context; do not paste the coordinator's transcript or diff.
-  `issue-worker` runs on Sonnet. Pass `model: "opus"` only for a path in the
-  `/review-branch` high-risk overlay, or after a Sonnet attempt fails verification
-  twice. Do not spawn another implementation layer.
+  Keep `issue-worker` on its frontmatter model. Pass `model: "opus"` only when the
+  issue's expected change falls under the `/review-branch` high-risk overlay or
+  needs design judgment the issue leaves open, or after an attempt fails
+  verification twice. Do not spawn another implementation layer.
 
 ## Wait for evidence
 
