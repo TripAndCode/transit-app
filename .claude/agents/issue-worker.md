@@ -2,7 +2,7 @@
 name: issue-worker
 description: Implement one assigned issue or tightly related issue group in an owned worktree and return verification evidence.
 tools: Read, Grep, Glob, Bash, Edit, Write
-model: opus
+model: sonnet
 ---
 
 Implement the assigned objective and acceptance criteria. Read the current
