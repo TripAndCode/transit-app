@@ -57,6 +57,7 @@ from api.routers.me import router as me_router
 from api.routers.ml import router as ml_router
 from api.routers.network import router as network_router
 from api.routers.overview import router as overview_router
+from api.routers.replay import router as replay_router
 from api.routers.reports import router as reports_router
 from api.routers.scope_summary import router as scope_summary_router
 from api.routers.snapshots import admin_router as admin_snapshots_router
@@ -395,6 +396,7 @@ app.include_router(ml_router)
 app.include_router(me_router)
 app.include_router(network_router)
 app.include_router(overview_router)
+app.include_router(replay_router)
 app.include_router(reports_router)
 app.include_router(scope_summary_router)
 app.include_router(snapshots_router)
