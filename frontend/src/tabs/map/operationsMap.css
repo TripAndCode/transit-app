@@ -98,7 +98,7 @@
    every control docked on the map (filter dock, legend, basemap switcher,
    fit-all button, day-playback rail) so they read as one system regardless
    of which component defines them, plus an exported `.map-chrome` class
-   other map controls (e.g. a route-inspect card) can adopt directly. Glass
+   other map controls can adopt directly. Glass
    rather than an opaque card: a solid panel wide enough to hold real text
    would occlude the basemap underneath it, and this screen is watched for
    long stretches, not scanned once. */

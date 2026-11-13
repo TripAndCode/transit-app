@@ -51,16 +51,29 @@ export const MARK_STROKE_WIDTH = 1.5;
  *  and in the app's accent, so the highlight reads as deliberate rather than
  *  a second, differently coloured dot next to the one that encodes delay. */
 export const SELECTED_RING_WIDTH = 3;
-/** A gentle feather on every mark's edge -- the mockup's soft circular halo,
- *  without a second, larger circle underneath it. MapLibre's circle shader
- *  fades the mark's outer edge to transparent over a band `blur * (radius +
- *  strokeWidth)` px wide, eating into the stroke from the outside in, so it
- *  has to stay small enough that at least half of every tier's stroke (the
- *  selected ring included) survives that fade at full opacity:
- *  `MARK_BLUR * (radius + strokeWidth) <= strokeWidth / 2` for every tier.
- *  A heavier blur also starts smearing adjacent marks together at a busy
- *  stop. */
+/** A gentle feather on every mark's edge, so it reads as a soft dot rather
+ *  than a hard-cut disc, without a second, larger circle underneath it.
+ *  MapLibre's circle shader fades the mark's outer edge to transparent over
+ *  a band `max(1 / devicePixelRatio, MARK_BLUR * (radius + strokeWidth))` px
+ *  wide, eating into the stroke from the outside in: its own one-device-
+ *  pixel antialias, or this blur, whichever is wider. This constant bounds
+ *  only its own term, never past half of any tier's stroke (the selected
+ *  ring included): `MARK_BLUR * (radius + strokeWidth) <= strokeWidth / 2`
+ *  for every tier. At a low device pixel ratio that one-pixel floor is the
+ *  wider of the two, and MARK_BLUR has no visible effect there. A heavier
+ *  blur also starts smearing adjacent marks together at a busy stop. */
 const MARK_BLUR = 0.07;
+
+/** Never below the 12px floor a watched label needs to stay legible. */
+export const TRIP_LABEL_SIZE = { base: 12, selected: 13 } as const;
+
+/** The live-trip label's vertical offset from its mark, in ems of the
+ *  label's own font size so the clearance scales with text-size rather than
+ *  needing a separate constant per tier. Chosen so `TRIP_LABEL_OFFSET_EM *
+ *  labelSize` clears `radius + strokeWidth` for every tier: the base and
+ *  severe tiers at `TRIP_LABEL_SIZE.base` with `MARK_STROKE_WIDTH`, the
+ *  selected tier at `TRIP_LABEL_SIZE.selected` with `SELECTED_RING_WIDTH`. */
+export const TRIP_LABEL_OFFSET_EM = 1.1;
 
 export function vehicleCirclePaint(): CirclePaint {
   return {
@@ -72,9 +85,11 @@ export function vehicleCirclePaint(): CirclePaint {
     ],
     "circle-color": ["step", ["/", ["get", "delay_sec"], 60], ...severityStepColors()],
     "circle-blur": MARK_BLUR,
-    // A hairline in the page's own surface colour, rather than a heavy dark
-    // casing ring: enough to separate a mark from the basemap in either theme
-    // without giving every reading the weight of an incident.
+    // The unselected stroke is a hairline in the page's own surface colour,
+    // rather than a heavy dark casing ring: enough to separate a mark from
+    // the basemap in either theme without giving every reading the weight of
+    // an incident. A selected mark takes SELECTED_RING_WIDTH in the accent
+    // colour instead.
     "circle-stroke-color": ["case", ["boolean", ["get", "selected"], false], accentColorResolved(), surfaceColorResolved()],
     "circle-stroke-width": ["case", ["boolean", ["get", "selected"], false], SELECTED_RING_WIDTH, MARK_STROKE_WIDTH],
   };
@@ -298,11 +313,8 @@ export function useOperationsMapLayers(
           layout: {
             "text-field": ["get", "trip_label"],
             "text-font": ["Noto Sans Regular"],
-            // Never below the 12px floor a watched label needs to stay legible.
-            "text-size": ["case", ["boolean", ["get", "selected"], false], 13, 12],
-            // In ems, so the offset scales with the label's own font size
-            // and clears the mark it names.
-            "text-offset": [0, 1.1],
+            "text-size": ["case", ["boolean", ["get", "selected"], false], TRIP_LABEL_SIZE.selected, TRIP_LABEL_SIZE.base],
+            "text-offset": [0, TRIP_LABEL_OFFSET_EM],
             "text-anchor": "top",
             "text-allow-overlap": false,
             "text-optional": true,

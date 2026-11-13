@@ -15,6 +15,8 @@ import {
   LIVE_TRIPS_SOURCE,
   MARK_STROKE_WIDTH,
   SELECTED_RING_WIDTH,
+  TRIP_LABEL_OFFSET_EM,
+  TRIP_LABEL_SIZE,
   VEHICLE_RADIUS,
   activeRouteLinePaint,
   buildRouteLineGradient,
@@ -286,8 +288,7 @@ describe("operations-map mark paint (pure builders)", () => {
     expect(selectedColor).not.toBe(unselectedColor);
   });
 
-  it("keeps the blur band inside half the stroke width for every tier, so the hairline and selected ring both render solid", () => {
-    // See MARK_BLUR's own doc for why this inequality holds.
+  it("keeps circle-blur's own contribution to the fade band within half of every tier's stroke width", () => {
     const blur = vehicleCirclePaint()["circle-blur"] as number;
     const tiers = [
       { radius: VEHICLE_RADIUS.base, strokeWidth: MARK_STROKE_WIDTH },
@@ -306,9 +307,20 @@ describe("operations-map mark paint (pure builders)", () => {
       useOperationsMapLayers(mapRef, LIVE, SHAPE, "12", 420, 1, 0, "trip-1", PROGRESS);
     });
     const liveSizes = (map.getLayer(LIVE_TRIPS_LABEL_LAYER) as MockLayer).layout?.["text-size"] as unknown[];
-    expect(liveSizes.slice(-2)).toEqual([13, 12]);
+    expect(liveSizes.slice(-2)).toEqual([TRIP_LABEL_SIZE.selected, TRIP_LABEL_SIZE.base]);
     const progressSize = (map.getLayer("trip-progress-labels") as MockLayer).layout?.["text-size"];
     expect(progressSize as number).toBeGreaterThanOrEqual(12);
+  });
+
+  it("keeps the trip label's offset clear of the mark it names, in every tier", () => {
+    const tiers = [
+      { name: "base", labelSize: TRIP_LABEL_SIZE.base, radius: VEHICLE_RADIUS.base, strokeWidth: MARK_STROKE_WIDTH },
+      { name: "severe", labelSize: TRIP_LABEL_SIZE.base, radius: VEHICLE_RADIUS.severe, strokeWidth: MARK_STROKE_WIDTH },
+      { name: "selected", labelSize: TRIP_LABEL_SIZE.selected, radius: VEHICLE_RADIUS.selected, strokeWidth: SELECTED_RING_WIDTH },
+    ];
+    for (const { name, labelSize, radius, strokeWidth } of tiers) {
+      expect(TRIP_LABEL_OFFSET_EM * labelSize, name).toBeGreaterThanOrEqual(radius + strokeWidth);
+    }
   });
 });
 
