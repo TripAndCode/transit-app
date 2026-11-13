@@ -39,20 +39,28 @@ type LinePaint = NonNullable<Extract<LayerSpecification, { type: "line" }>["pain
 
 /** One vehicle is one reading, not a headline: the mark is small enough that a
  *  screenful of them reads as a field rather than a wall of alarms, and only
- *  the severe tier and the selected trip earn extra area. Size therefore
+ *  the severe tier and a selected mark (the picked trip, or every vehicle on
+ *  a picked route when no trip is chosen) earn extra area. Size therefore
  *  encodes severity, never volume. */
 export const VEHICLE_RADIUS = { base: 6, severe: 9, selected: 11 } as const;
 
-const MARK_STROKE_WIDTH = 1.5;
-/** The selected trip's ring: thicker and in the app's accent, so picking a
- *  trip reads as a deliberate highlight rather than a second, differently
- *  coloured dot next to the one that encodes its delay. */
-const SELECTED_RING_WIDTH = 3;
+export const MARK_STROKE_WIDTH = 1.5;
+/** The ring for a selected mark -- the picked trip, or every vehicle on a
+ *  picked route when no trip is chosen, since picking a route is meant to
+ *  highlight its buses the same way picking a trip highlights it -- thicker
+ *  and in the app's accent, so the highlight reads as deliberate rather than
+ *  a second, differently coloured dot next to the one that encodes delay. */
+export const SELECTED_RING_WIDTH = 3;
 /** A gentle feather on every mark's edge -- the mockup's soft circular halo,
- *  without a second, larger circle underneath it. Low enough that the
- *  severity colour still reads cleanly at this radius; a heavier blur starts
- *  smearing adjacent marks together at a busy stop. */
-const MARK_BLUR = 0.2;
+ *  without a second, larger circle underneath it. MapLibre's circle shader
+ *  fades the mark's outer edge to transparent over a band `blur * (radius +
+ *  strokeWidth)` px wide, eating into the stroke from the outside in, so it
+ *  has to stay small enough that at least half of every tier's stroke (the
+ *  selected ring included) survives that fade at full opacity:
+ *  `MARK_BLUR * (radius + strokeWidth) <= strokeWidth / 2` for every tier.
+ *  A heavier blur also starts smearing adjacent marks together at a busy
+ *  stop. */
+const MARK_BLUR = 0.07;
 
 export function vehicleCirclePaint(): CirclePaint {
   return {
@@ -66,9 +74,7 @@ export function vehicleCirclePaint(): CirclePaint {
     "circle-blur": MARK_BLUR,
     // A hairline in the page's own surface colour, rather than a heavy dark
     // casing ring: enough to separate a mark from the basemap in either theme
-    // without giving every reading the weight of an incident. The selected
-    // trip trades that hairline for a thicker accent ring instead of a
-    // second shape, so the highlight stays the same gentle circle.
+    // without giving every reading the weight of an incident.
     "circle-stroke-color": ["case", ["boolean", ["get", "selected"], false], accentColorResolved(), surfaceColorResolved()],
     "circle-stroke-width": ["case", ["boolean", ["get", "selected"], false], SELECTED_RING_WIDTH, MARK_STROKE_WIDTH],
   };
@@ -294,9 +300,8 @@ export function useOperationsMapLayers(
             "text-font": ["Noto Sans Regular"],
             // Never below the 12px floor a watched label needs to stay legible.
             "text-size": ["case", ["boolean", ["get", "selected"], false], 13, 12],
-            // Ems, against a mark that is now a third of its old radius: a
-            // larger offset leaves the label floating free of the dot it
-            // names.
+            // In ems, so the offset scales with the label's own font size
+            // and clears the mark it names.
             "text-offset": [0, 1.1],
             "text-anchor": "top",
             "text-allow-overlap": false,

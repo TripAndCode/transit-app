@@ -7,10 +7,10 @@ import { decl, ruleBody } from "../../test/cssRules";
 const css = readFileSync(resolve(__dirname, "./operationsMap.css"), "utf-8");
 
 describe("operationsMap.css floating chrome", () => {
-  it("the playback rail's glass tracks the theme's own --glass/--glass-line, not a fixed light-mode mix", () => {
-    const playback = ruleBody(css, ".ops-playback {");
-    expect(decl(playback, "background")).toBe("var(--glass)");
-    expect(decl(playback, "border")).toContain("var(--glass-line)");
+  it("the playback rail joins the shared floating-chrome glass instead of carrying its own drifted copy", () => {
+    const shared = ruleBody(css, ".map-chrome,\n.ops-dock,\n.ops-map-ref,\n.ops-map-fit,\n.ops-playback {");
+    expect(decl(shared, "background")).toBe("var(--glass)");
+    expect(decl(shared, "border")).toContain("var(--glass-line)");
   });
 
   it("the live breath lives only inside the no-preference motion block, on the token scale", () => {

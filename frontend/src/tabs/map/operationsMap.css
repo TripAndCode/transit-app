@@ -96,16 +96,17 @@
 
 /* Shared floating-control chrome: one glass fill/blur/border/elevation for
    every control docked on the map (filter dock, legend, basemap switcher,
-   fit-all button) so they read as one system regardless of which component
-   defines them, plus an exported `.map-chrome` class other map controls
-   (e.g. a route-inspect card) can adopt directly. Glass rather than an
-   opaque card: a solid panel wide enough to hold real text would occlude
-   the basemap underneath it, and this screen is watched for long stretches,
-   not scanned once. */
+   fit-all button, day-playback rail) so they read as one system regardless
+   of which component defines them, plus an exported `.map-chrome` class
+   other map controls (e.g. a route-inspect card) can adopt directly. Glass
+   rather than an opaque card: a solid panel wide enough to hold real text
+   would occlude the basemap underneath it, and this screen is watched for
+   long stretches, not scanned once. */
 .map-chrome,
 .ops-dock,
 .ops-map-ref,
-.ops-map-fit {
+.ops-map-fit,
+.ops-playback {
   background: var(--glass);
   backdrop-filter: blur(14px) saturate(1.2);
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
@@ -119,7 +120,8 @@
   .map-chrome,
   .ops-dock,
   .ops-map-ref,
-  .ops-map-fit {
+  .ops-map-fit,
+  .ops-playback {
     background: var(--bg-surface);
   }
 }
@@ -340,14 +342,9 @@
    is a transport for the whole map, and its scrubber has to be long enough
    that one hour of a nineteen-hour day is a comfortable target.
 
-   Glass chrome matching .ops-dock above (same --glass/--glass-line tokens,
-   blur, border and elevation), so the map's controls read as one family and
-   the mix tracks dark mode's own --glass instead of a fixed light-theme
-   ratio. */
-.ops-playback { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: var(--z-map-overlay); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--glass-line); border-radius: var(--radius-xl); background: var(--glass); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); box-shadow: var(--el-2); }
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .ops-playback { background: var(--bg-surface); }
-}
+   Glass chrome comes from the shared `.map-chrome` group above, which
+   `.ops-playback` joins, so the map's controls read as one family. */
+.ops-playback { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: var(--z-map-overlay); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-xl); }
 
 .ops-playback__transport { display: flex; gap: 4px; }
 .ops-playback__button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-width: 32px; height: 32px; padding: 0 8px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-secondary); cursor: pointer; transition: background var(--transition), color var(--transition); }

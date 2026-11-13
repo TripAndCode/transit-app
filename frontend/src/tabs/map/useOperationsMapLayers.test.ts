@@ -13,6 +13,8 @@ import {
   LIVE_TRIPS_LABEL_LAYER,
   LIVE_TRIPS_LAYER,
   LIVE_TRIPS_SOURCE,
+  MARK_STROKE_WIDTH,
+  SELECTED_RING_WIDTH,
   VEHICLE_RADIUS,
   activeRouteLinePaint,
   buildRouteLineGradient,
@@ -173,6 +175,29 @@ describe("useOperationsMapLayers", () => {
     expect(source.data.features[0].properties!.trip_label).not.toContain("×");
   });
 
+  it("marks every vehicle on a picked route as selected when no trip is picked, and none off it", () => {
+    const map = makeMockMap();
+    const mixedRoutes: LiveTripsResponse = {
+      latest_captured_at: "2026-09-11T01:00:00Z",
+      rows: [
+        liveTrip({ trip_id: "trip-1", route_code: "12", stop_lon: 140.71, stop_lat: 40.81 }),
+        liveTrip({ trip_id: "trip-2", route_code: "12", stop_lon: 140.72, stop_lat: 40.82 }),
+        liveTrip({ trip_id: "trip-3", route_code: "8", stop_lon: 140.73, stop_lat: 40.83 }),
+      ],
+      truncated: false,
+    };
+    renderHook(() => {
+      const mapRef = useRef(map as never);
+      useOperationsMapLayers(mapRef, mixedRoutes, SHAPE, "12", 420, 1, 0);
+    });
+
+    const source = map.getSource(LIVE_TRIPS_SOURCE) as { data: GeoJSON.FeatureCollection<GeoJSON.Point> };
+    const byTrip = new Map(source.data.features.map((feature) => [feature.properties!.trip_id as string, feature.properties!.selected]));
+    expect(byTrip.get("trip-1")).toBe(true);
+    expect(byTrip.get("trip-2")).toBe(true);
+    expect(byTrip.get("trip-3")).toBe(false);
+  });
+
   it("draws the selected trip on top of any other trip sharing its reported stop", () => {
     const map = makeMockMap();
     renderHook(() => {
@@ -261,10 +286,17 @@ describe("operations-map mark paint (pure builders)", () => {
     expect(selectedColor).not.toBe(unselectedColor);
   });
 
-  it("softens every mark's edge with a gentle blur, short of smearing it", () => {
+  it("keeps the blur band inside half the stroke width for every tier, so the hairline and selected ring both render solid", () => {
+    // See MARK_BLUR's own doc for why this inequality holds.
     const blur = vehicleCirclePaint()["circle-blur"] as number;
-    expect(blur).toBeGreaterThan(0);
-    expect(blur).toBeLessThan(0.5);
+    const tiers = [
+      { radius: VEHICLE_RADIUS.base, strokeWidth: MARK_STROKE_WIDTH },
+      { radius: VEHICLE_RADIUS.severe, strokeWidth: MARK_STROKE_WIDTH },
+      { radius: VEHICLE_RADIUS.selected, strokeWidth: SELECTED_RING_WIDTH },
+    ];
+    for (const { radius, strokeWidth } of tiers) {
+      expect(blur * (radius + strokeWidth)).toBeLessThanOrEqual(strokeWidth / 2);
+    }
   });
 
   it("keeps every live and trip-trail label at or above the 12px legibility floor", () => {
