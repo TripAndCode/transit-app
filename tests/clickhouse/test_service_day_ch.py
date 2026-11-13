@@ -7,10 +7,14 @@ days across the cutover and the UTC/JST boundaries.
 
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
+from pipeline.db import timely_reading, timely_reading_ch
 from pipeline.service_day import (
+    departure_lag,
+    departure_lag_ch,
     filed_date_ch,
     filed_date_of,
     service_date_ch,
@@ -21,6 +25,7 @@ from pipeline.service_day import (
 
 pytestmark = pytest.mark.skipif(os.environ.get("RUN_CH_INTEGRATION") != "1", reason="requires `make ch-test`")
 
+JST = ZoneInfo("Asia/Tokyo")
 _START = datetime(2026, 3, 6, 0, 0, tzinfo=timezone.utc)
 _MINUTES = 48 * 60
 
@@ -81,3 +86,54 @@ def test_the_sql_filed_date_matches_the_python_one_around_the_clock(ch_client):
             mismatches.append((captured, sec, filed))
     assert mismatches == []
     assert any(filed != service_date_of(c.replace(tzinfo=timezone.utc)) for c, _s, _t, filed in rows)
+
+
+def test_the_sql_departure_lag_and_timeliness_match_the_python_ones_around_the_clock(ch_client):
+    """Every 7th minute of two days against stored departures on and off the
+    hour, past 24:00, un-extended after midnight, and with none beside an
+    aomori_regex ``HH:MM`` string, which no lag is read from."""
+    seconds = [600, 14340, 14400, 21600, 33000, 43200, 85800, 91800, 97200, 108000]
+    rows = ch_client.query(
+        f"SELECT u.captured_at, u.scheduled_sec, {departure_lag_ch('u.')}, {timely_reading_ch()} FROM ("
+        "SELECT toDateTime64('2026-03-05 15:00:00', 0, 'UTC') + INTERVAL number * 7 MINUTE AS captured_at, "
+        f"arrayJoin(CAST(arrayConcat([NULL], {seconds}) AS Array(Nullable(Int32)))) AS scheduled_sec, "
+        "if(scheduled_sec IS NULL, '09:10', CAST(NULL AS Nullable(String))) AS scheduled_time FROM numbers(412)) AS u"
+    ).result_rows
+    assert len(rows) == 412 * (len(seconds) + 1)
+    mismatches = []
+    for captured, sec, lag, timely in rows:
+        captured = captured.replace(tzinfo=timezone.utc)
+        if (lag, bool(timely)) != (departure_lag(captured, sec), timely_reading(captured, sec)):
+            mismatches.append((captured, sec, lag, timely))
+    assert mismatches == []
+    assert {bool(timely) for *_rest, timely in rows} == {True, False}
+
+
+@pytest.mark.parametrize(
+    ("jst", "scheduled_sec", "timely"),
+    [
+        # 09:10, read up to 130 minutes after it.
+        ("2026-03-06 11:20:00", 33000, True),
+        ("2026-03-06 11:20:01", 33000, False),
+        # 25:30, the next calendar day's 01:30, on its trip's service day.
+        ("2026-03-07 03:40:00", 91800, True),
+        ("2026-03-07 03:40:01", 91800, False),
+        # 27:00, read after the cutover and filed back under its trip's day.
+        ("2026-03-07 05:10:00", 97200, True),
+        ("2026-03-07 05:10:01", 97200, False),
+        # An un-extended 00:30 is the service day's 24:30.
+        ("2026-03-07 02:40:00", 1800, True),
+        ("2026-03-07 02:40:01", 1800, False),
+        # No stored departure of the stop: kept whenever captured.
+        ("2026-03-06 23:59:00", None, True),
+    ],
+)
+def test_a_reading_is_timely_until_130_minutes_after_its_stops_departure(ch_client, jst, scheduled_sec, timely):
+    captured = datetime.fromisoformat(jst).replace(tzinfo=JST).astimezone(timezone.utc)
+    rows = ch_client.query(
+        f"SELECT {timely_reading_ch()} FROM (SELECT toDateTime64({{at:String}}, 0, 'UTC') AS captured_at, "
+        "CAST({sec:Nullable(Int32)} AS Nullable(Int32)) AS scheduled_sec, "
+        "CAST(NULL AS Nullable(String)) AS scheduled_time) AS u",
+        parameters={"at": captured.strftime("%Y-%m-%d %H:%M:%S"), "sec": scheduled_sec},
+    ).result_rows
+    assert (bool(rows[0][0]), timely_reading(captured, scheduled_sec)) == (timely, timely)

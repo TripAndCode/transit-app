@@ -1111,6 +1111,92 @@ def test_analyze_counts_a_stop_reported_with_neither_a_delay_nor_a_status_neithe
         assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
 
 
+def test_analyze_ignores_a_cancellation_listing_no_stop_that_arrives_long_after_the_trip_ran(
+    pg_conn, agency_id, ch_client
+):
+    """A cancellation listing no stop, the trip-level row ingest stores for it,
+    counts only when captured by the trip's last scheduled departure that day
+    plus 130 minutes, the bound every reading of its stops has. Four trips
+    leave stops scheduled at 08:00 and 08:10 JST, each predicted at 07:55:
+    one cancelled at 10:20:00, on the bound, is not run, and those cancelled
+    at 10:20:01 and at 11:20, after it, ran. A trip no stop of which is
+    reported, cancelled at 11:20, is not run however late that is."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    jst = timezone(timedelta(hours=9))
+    predicted = datetime(2026, 4, 1, 7, 55, tzinfo=jst)
+
+    def stop(trip_id, seq, scheduled):
+        clock = time.fromisoformat(scheduled)
+        sec = clock.hour * 3600 + clock.minute * 60
+        return ("p.pb", predicted, trip_id, "平日", scheduled, "R1", seq, 0, None, None, 0, 0, None, sec)
+
+    def cancelled(trip_id, at):
+        at = datetime.fromisoformat(f"2026-04-01T{at}+09:00")
+        file_name = f"c{at:%H%M%S}.pb"
+        return (file_name, at, trip_id, "平日", None, "R1", TRIP_LEVEL_STOP_SEQUENCE, None, None, None, 3, None, None)
+
+    rows = []
+    for trip_id, at in (("on_bound", "10:20:00"), ("past_bound", "10:20:01"), ("hours_later", "11:20:00")):
+        rows += [stop(trip_id, 1, "08:00:00"), stop(trip_id, 2, "08:10:00"), cancelled(trip_id, at)]
+    rows.append(cancelled("never_ran", "11:20:00"))
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 2}
+        cur.execute("SELECT trips_observed, samples FROM agg_route_daily WHERE agency_id = %s", (agency_id,))
+        assert cur.fetchall() == [(3, 6)]
+
+
+def test_analyze_bounds_a_cancellation_listing_no_stop_by_a_last_stop_reported_only_as_its_arrival(
+    pg_conn, agency_id, ch_client
+):
+    """A feed that reports arrivals reports a trip's last stop as its arrival
+    alone. The trip's last scheduled departure is still that stop's, 08:40
+    JST here after departures at 08:00 and 08:10, so a cancellation listing no
+    stop counts until 10:50:00: one at 10:40, past 08:10's bound, is not run,
+    and one at 10:50:01 ran."""
+    from pipeline.clickhouse import TRIP_LEVEL_STOP_SEQUENCE
+
+    _set_ingest_strategy(pg_conn, agency_id, "static_join")
+    jst = timezone(timedelta(hours=9))
+    predicted = datetime(2026, 4, 1, 7, 55, tzinfo=jst)
+
+    def stop(trip_id, seq, scheduled, *, dep_delay=0, arr_delay=None):
+        clock = time.fromisoformat(scheduled)
+        sec = clock.hour * 3600 + clock.minute * 60
+        return ("p.pb", predicted, trip_id, "平日", scheduled, "R1", seq, dep_delay, None, arr_delay, 0, 0, None, sec)
+
+    def cancelled(trip_id, at):
+        at = datetime.fromisoformat(f"2026-04-01T{at}+09:00")
+        file_name = f"c{at:%H%M%S}.pb"
+        return (file_name, at, trip_id, "平日", None, "R1", TRIP_LEVEL_STOP_SEQUENCE, None, None, None, 3, None, None)
+
+    rows = []
+    for trip_id, at in (("inside_last_stop", "10:40:00"), ("past_last_stop", "10:50:01")):
+        rows += [
+            stop(trip_id, 1, "08:00:00"),
+            stop(trip_id, 2, "08:10:00"),
+            stop(trip_id, 3, "08:40:00", dep_delay=None, arr_delay=30),
+            cancelled(trip_id, at),
+        ]
+    insert_updates(ch_client, agency_id, rows)
+    analyze(agency_id, pg_conn, ch_client)
+
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, non_executed_trips FROM agg_service_delivered_daily WHERE agency_id = %s",
+            (agency_id,),
+        )
+        assert {str(d): n for d, n in cur.fetchall()} == {"2026-04-01": 1}
+
+
 def test_analyze_counts_each_trip_not_run_under_the_one_route_its_latest_report_names(pg_conn, agency_id, ch_client):
     """Each trip-day not run lands under one route, so an agency's day is the
     sum of its routes: the route its latest report naming one names, and ''
@@ -1602,7 +1688,7 @@ def test_analyze_reconstructs_actual_headway_for_static_join_agency(pg_conn, age
     reconstructed median headway must land within a few seconds of the
     hand-computed 480s value."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # a single JST service day
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", dep_delay=0, file_name="b.pb"),
@@ -1638,7 +1724,7 @@ def test_analyze_leaves_a_cancelled_departure_out_of_the_actual_headway(pg_conn,
     cancelling its trip, so the stop saw T1 and T3 alone: one 960 s gap, not
     two of 480 s."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", dep_delay=0, file_name="b.pb"),
@@ -1736,7 +1822,7 @@ def test_analyze_reconstructs_actual_headway_keeps_an_event_whose_latest_poll_is
     keeps its last plausible estimate instead of vanishing and merging its two
     neighbouring gaps into one."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
@@ -1760,7 +1846,7 @@ def test_analyze_reconstructs_actual_headway_takes_the_schedule_from_the_latest_
     its polls. The event's time pairs the latest poll's delay with that same
     poll's schedule, never an older one."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:08:00", file_name="b.pb"),
@@ -1787,7 +1873,7 @@ def test_analyze_reconstructs_actual_headway_keeps_both_visits_of_a_looping_rout
     visits survive as distinct events -- collapsing them via argMax on
     trip_id alone would silently discard one real departure."""
     _set_ingest_strategy(pg_conn, agency_id, "static_join")
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)  # a single JST service day
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         # T1 revisits stop s1 twice within its own trip (stop_sequence 1 and 5),
         # ten minutes apart -- two distinct real events sharing the same trip_id.
@@ -1849,7 +1935,7 @@ def test_analyze_reconstructs_actual_headway_long_gap_count_against_scheduled_me
         "s1",
         ["08:00:00", "08:08:00", "08:16:00", "08:24:00", "08:32:00"],
     )
-    day = datetime(2026, 4, 1, 2, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 31, 23, 0, tzinfo=timezone.utc)  # 2026-04-01 08:00 JST, before its departures
     rows = [
         _ch_headway_row("T1", day, stop_id="s1", scheduled_time="08:00:00", dep_delay=0, file_name="a.pb"),
         _ch_headway_row("T2", day, stop_id="s1", scheduled_time="08:00:30", dep_delay=0, file_name="b.pb"),

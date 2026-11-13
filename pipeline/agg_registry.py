@@ -28,17 +28,17 @@ from pipeline.static_archive import Stamp
 # Versions of the tables built in the loops below, which default to 1. A bump
 # goes here rather than into a second entry, which _index would reject.
 _VERSIONS: dict[str, int] = {
-    "agg_daily_trend": 4,
-    "agg_hour_daily": 5,
-    "agg_route_daily": 4,
-    "agg_route_daily_dist": 4,
-    "agg_route_hour": 5,
-    "agg_route_hour_dow": 5,
-    "agg_route_stats": 4,
-    "agg_route_stop_daily": 5,
-    "agg_stop_daily": 5,
+    "agg_daily_trend": 5,
+    "agg_hour_daily": 6,
+    "agg_route_daily": 5,
+    "agg_route_daily_dist": 5,
+    "agg_route_hour": 6,
+    "agg_route_hour_dow": 6,
+    "agg_route_stats": 5,
+    "agg_route_stop_daily": 6,
+    "agg_stop_daily": 6,
     "agg_stop_routes": 3,
-    "route_delay_counts": 5,
+    "route_delay_counts": 6,
     "stop_route_days": 3,
 }
 
@@ -127,7 +127,6 @@ def _clamp() -> str:
 def _headway_daily() -> list[str]:
     return [
         *(agg_sql.route_headway_daily_ch_sql("", stamp) for stamp in Stamp),
-        _clamp(),
         inspect.getsource(headways.reconstruct_headways),
         inspect.getsource(headways.pool_daily_gaps),
         inspect.getsource(headways.dominant_contents),
@@ -166,7 +165,7 @@ def _entries() -> list[AggTable]:
     entries = [
         AggTable("agg_feed_health", 2, Kind.DATED, Timetable.NONE, lambda: [agg_sql.feed_health_ch_sql(""), _clamp()]),
         AggTable(
-            "agg_service_delivered_daily", 4, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
+            "agg_service_delivered_daily", 5, Kind.DATED, Timetable.NONE, lambda: [agg_sql.service_delivered_ch_sql("")]
         ),
         AggTable(
             "agg_schedule_revision_daily",
@@ -188,7 +187,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_headway_daily",
-            5,
+            6,
             Kind.DATED,
             Timetable.ARCHIVED,
             _headway_daily,
@@ -201,7 +200,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_daily_dwell_run",
-            4,
+            5,
             Kind.DATED,
             Timetable.ARCHIVED,
             lambda: [
@@ -213,7 +212,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "feed_quality_monthly",
-            6,
+            7,
             Kind.DATED,
             # A planned day no capture saved reads the loaded timetable's plan.
             Timetable.LOADED,
@@ -388,6 +387,25 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
             "feed_quality_monthly": 6,
             "route_delay_counts": 5,
             "stop_route_days": 3,
+        },
+    ),
+    MethodVersion(
+        "2026.11.14",
+        {
+            "agg_daily_trend": 5,
+            "agg_hour_daily": 6,
+            "agg_route_daily": 5,
+            "agg_route_daily_dist": 5,
+            "agg_route_daily_dwell_run": 5,
+            "agg_route_headway_daily": 6,
+            "agg_route_hour": 6,
+            "agg_route_hour_dow": 6,
+            "agg_route_stats": 5,
+            "agg_route_stop_daily": 6,
+            "agg_service_delivered_daily": 5,
+            "agg_stop_daily": 6,
+            "feed_quality_monthly": 7,
+            "route_delay_counts": 6,
         },
     ),
 )

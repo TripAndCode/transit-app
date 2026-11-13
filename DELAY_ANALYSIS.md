@@ -45,6 +45,22 @@ After ingest, `analyze` turns the raw readings into summary tables:
    A reading with no scheduled time, a trip the timetable did not match, stays on its
    capture's service day. A count of readings as such, the feed-health rows and the
    implausible share, keeps each reading on its capture's service day.
+
+   A reading captured more than 130 minutes after its stop's scheduled departure, on the
+   day it is filed under, is no reading of that departure, and the stop keeps its last
+   reading captured before then. A departure within the 120-minute clamp is last read
+   by its scheduled time plus the clamp, and the feeds drop a departed stop within
+   minutes, so ten minutes cover that. Some feeds list a trip again hours after it ran,
+   at a delay of its own, which would otherwise replace the stop's last real reading. A
+   stop read only that late has no departure, and is no stop event reported on the
+   feed-quality scorecard. A cancellation listing no stop is held to the trip's last
+   scheduled departure that day, the latest its stops carry, by the same 130 minutes, so
+   one received after a trip ran does not count it as not run; a trip none of whose stops
+   was reported keeps its cancellation. A reading of a stop with no stored scheduled departure is
+   never ignored for its lateness: a trip the timetable did not match, and the
+   `aomori_regex` feed, whose scheduled time is the trip's first departure rather than
+   the stop's. A count of readings as such, the feed-health rows, the implausible share
+   and message age, still counts every reading.
 2. **clamp** — drop impossible values (more than 120 minutes late), which come from
    frozen/stale feeds re-sending the same stuck estimate, not from real delays.
 3. **aggregate** — precompute averages and p90 sliced different ways into `agg_*` tables:
@@ -155,6 +171,7 @@ Stating them changes no aggregate, so it is not a method version.
 | `2026.11.11` | The feed-quality scorecard counts a month the way the agencies board counts a range, under the comparability gate's rules. A month in which the agency has no analyzed observation reads no data for its trips and stop events reported, the gate's first check, where it had read 0%. Trips and stop events reported are measured against the plan only through the newest day of the month that any listed agency has observations for, where the board's coverage stops, so days at the end of a closed month that no agency observed, such as an outage of the shared collector, no longer count against every feed. A month whose plan starts only after that day reads that no timetable plans the days observed, as the board does, where it had read that no trips were planned. Trips or stop events reported that cannot be stated leave both their counts empty, as the stamp does, where a month without a plan had kept its 0 planned. The other figures, the implausible share among them, count the whole month. Its trips reported and implausible share are now what the board and every report's stamp state over the same month. No delay or on-time figure changes. | `feed_quality_monthly` |
 | `2026.11.12` | The feed-quality scorecard counts each month's polls whose message was more than 65 s old when captured, Cal-ITP's freshness threshold and the GTFS-RT validator's W008, and their share of the polls measured. A header frozen for a run too short to move the 95th percentile shows there. A month built before the share existed states none until analyze rebuilds it. The admin drawer grades each month from its stored figures (see "Feed-quality scorecard" below). No delay or on-time figure changes. | `feed_quality_monthly` |
 | `2026.11.13` | A stop event is filed under its trip's service day. A departure scheduled just after 04:00 that the feed predicted before it, and a late night departure reported after it, each count once, on the day of the departure, where each had counted on both days: on the earlier day at the last prediction before 04:00, or on the later one at the reports after it. A reading moves to the service day on either side of its capture's only when the stop's scheduled departure that day is within four hours of the capture. Each day's headways, stop visits, trips not run and timetable, and the feed-quality scorecard's stop events reported, are filed the same way. A count of readings as such stays on the capture's day. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_stop_routes`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_schedule_revision_daily`, `agg_service_delivered_daily`, `feed_quality_monthly`, `route_delay_counts`, `stop_route_days` |
+| `2026.11.14` | A reading captured more than 130 minutes after its stop's scheduled departure is ignored: the stop keeps its last reading from before then, where a trip the feed listed again hours after it ran had replaced that reading with the later listing's delay, and a stop read only that late no longer counts as a departure or as a stop event reported. A cancellation listing no stop received more than 130 minutes after the trip's last scheduled departure no longer counts a trip that ran as not run. A stop with no stored scheduled departure keeps every reading. Counts of readings as such do not change. | `agg_daily_trend`, `agg_route_daily`, `agg_route_daily_dist`, `agg_hour_daily`, `agg_stop_daily`, `agg_route_stop_daily`, `agg_route_stats`, `agg_route_hour`, `agg_route_hour_dow`, `agg_route_daily_dwell_run`, `agg_route_headway_daily`, `agg_service_delivered_daily`, `feed_quality_monthly`, `route_delay_counts` |
 
 ## What counts as on time
 

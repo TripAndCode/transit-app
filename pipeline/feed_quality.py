@@ -29,9 +29,10 @@ The figures:
   trip, stop and service date, however often reported) of those the planned
   trips' stop times plan, over the planned days whose stop events are known.
   A day saved before the capture kept them is left out (``stop_plan_days``
-  counts the rest). A stop event is reported when any poll of it carries a
-  plausible departure or arrival delay or withdraws it (its trip CANCELED or
-  its stop SKIPPED, :func:`pipeline.db.withdrawn_ch`). This is reporting
+  counts the rest). A stop event is reported when any timely poll of it
+  (:func:`pipeline.db.timely_reading_ch`) carries a plausible departure or
+  arrival delay or withdraws it (its trip CANCELED or its stop SKIPPED,
+  :func:`pipeline.db.withdrawn_ch`). This is reporting
   coverage, not the service-delivered rate: a withdrawal is something the feed
   said about the stop, so it counts here, where the departure figures let the
   feed's last report decide whether the stop departed.
@@ -98,7 +99,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from pipeline.clickhouse import LIVE_SOURCED, TRIP_LEVEL_STOP_SEQUENCE
-from pipeline.db import plausible_delay_ch, timetable_cancellation_ch, withdrawn_ch
+from pipeline.db import plausible_delay_ch, timely_reading_ch, timetable_cancellation_ch, withdrawn_ch
 from pipeline.reports import comparability
 from pipeline.reports.comparability import clamp_pct, coverage_pct, matched_trips, trips_matchable
 from pipeline.reports.network import coverage_through
@@ -190,11 +191,15 @@ ROWS_CH_SQL = f"""
 """
 
 # Per service date a stop event is filed under (pipeline.service_day.
-# filed_date_ch), the stop events reported; a row per stop a cancellation writes
-# from the timetable still reports its stop event. Selected by the filed date
-# over the window's span, so a stop event whose polls straddle the cutover
-# counts once, under its trip's day, in the month that day falls in.
-_REPORTED = f"{plausible_delay_ch('u.dep_delay')} OR {plausible_delay_ch('u.arr_delay')} OR {withdrawn_ch()}"
+# filed_date_ch), the stop events a timely reading reported
+# (pipeline.db.timely_reading_ch); a row per stop a cancellation writes from
+# the timetable still reports its stop event. Selected by the filed date over
+# the window's span, so a stop event whose polls straddle the cutover counts
+# once, under its trip's day, in the month that day falls in.
+_REPORTED = (
+    f"({plausible_delay_ch('u.dep_delay')} OR {plausible_delay_ch('u.arr_delay')} OR {withdrawn_ch()}) "
+    f"AND {timely_reading_ch()}"
+)
 STOP_EVENTS_CH_SQL = f"""
     SELECT {filed_date_ch("u.")} AS date, uniqExactIf((u.trip_id, u.stop_sequence), {_REPORTED}) AS stop_events
     FROM updates AS u

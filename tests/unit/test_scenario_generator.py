@@ -28,6 +28,7 @@ from tests.fixtures.scenario import (
     FeedModel,
     Freeze,
     Misreport,
+    Relisting,
     Route,
     Scenario,
     ScheduledTrip,
@@ -48,7 +49,7 @@ from tests.fixtures.scenario import (
     vehicle_positions,
     write_vehicle_positions,
 )
-from tests.pipeline.test_scenarios import imperfect_feed
+from tests.pipeline.test_scenarios import imperfect_feed, relisted
 
 DAY = date(2026, 6, 1)
 _STOPS = tuple(Stop(f"S{i}", f"Stop {i}", 34.0 + i / 1000, 132.0) for i in range(1, 4))
@@ -656,6 +657,78 @@ def test_a_misreport_beyond_the_clamp_leaves_the_last_plausible_reading_standing
     assert found.readings == {DAY: oracle.Readings(readings=78, implausible=42, rows=78)}
     assert found.service == {DAY: oracle.Service(planned=2, reported_not_run=0, observed=1)}
     assert oracle.clamp_high(oracle.readings_over(found, DAY, DAY).clamp_share)
+
+
+def _relisted(from_clock: str, until_clock: str) -> Scenario:
+    """The 07:00 run, a minute late at each stop, listed again at 0 s from
+    *from_clock* until *until_clock*."""
+    relisting = Relisting("R_0700", DAY, 0, gtfs_seconds(from_clock), gtfs_seconds(until_clock))
+    return _one_run((60, 60, 60), FeedModel(poll_interval_sec=60, lead_sec=300, relistings=(relisting,)))
+
+
+def test_a_reading_captured_more_than_130_minutes_after_its_stops_departure_is_no_reading_of_it():
+    """Listed again from 09:11 to 09:30, each poll lists all three stops at
+    0 s: 60 readings beside the run's own 42, every one still a reading the
+    feed sent. Stop 1, scheduled at 07:00, takes none of them, as 09:11 is
+    past 09:10. Stops 2 and 3, scheduled at 07:08 and 07:16, take those of
+    09:18 and 09:26 at the latest, so each is read last at 0 s, 7,740 s after
+    the run left it."""
+    scenario = _relisted("09:11:00", "09:31:00")
+    relisted = [p for p in polls(scenario) if p.captured_at >= service_day_instant(DAY, gtfs_seconds("09:11:00"))]
+    assert len(relisted) == 20
+    assert {(s.stop_sequence, s.departure_delay) for p in relisted for t in p.trips for s in t.stops} == {
+        (1, 0),
+        (2, 0),
+        (3, 0),
+    }
+    found = oracle.outcome(scenario)
+    assert [(d.stop_sequence, d.delay_sec) for d in found.departures] == [(1, 60), (2, 0), (3, 0)]
+    assert [(p.departure.stop_sequence, p.lead_sec) for p in found.predictions] == [(1, 60), (2, -7740), (3, -7740)]
+    assert found.readings == {DAY: oracle.Readings(readings=102, implausible=0, rows=102)}
+    later = oracle.outcome(_relisted("09:27:00", "09:47:00"))
+    assert [(d.stop_sequence, d.delay_sec) for d in later.departures] == [(1, 60), (2, 60), (3, 60)]
+
+
+def test_a_reading_is_filed_by_its_capture_not_by_the_run_its_poll_names():
+    """A reading is filed under its capture's service day, or the day either
+    side whose departure of its stop is within four hours of it. The relisted
+    scenario's evening listing of the second day's 09:10 run, captured at
+    21:30 on the first, is filed under the first day, past that day's 09:10
+    departure by more than 130 minutes, so it is no reading of either day's
+    departure, and each day's 09:10 run keeps its own last reading."""
+    clock = gtfs_seconds
+    assert oracle.filed_day(service_day_instant(DAY, clock("21:30:00")), clock("09:10:00")) == DAY
+    assert oracle.filed_day(service_day_instant(DAY, clock("27:58:00")), clock("04:05:00")) == DAY + timedelta(days=1)
+    assert oracle.filed_day(service_day_instant(DAY, clock("28:03:00")), clock("27:56:00")) == DAY
+    scenario = relisted(DAY)
+    found = oracle.outcome(scenario)
+    first_stops = {
+        (d.service_date, d.delay_sec) for d in found.departures if (d.trip_id, d.stop_sequence) == ("L1_0910", 1)
+    }
+    assert first_stops == {(DAY, 240), (DAY + timedelta(days=1), -30)}
+
+
+def test_relistings_the_feed_model_cannot_follow_are_refused():
+    relisting = Relisting("R_0700", DAY, 0, gtfs_seconds("09:00:00"), gtfs_seconds("09:20:00"))
+    with pytest.raises(ValueError, match="only a run can be listed again"):
+        _one_run((0, 0, 0), FeedModel(relistings=(replace(relisting, trip_id="R_2350"),)))
+    with pytest.raises(ValueError, match="overlaps the run in the feed"):
+        _one_run((0, 0, 0), FeedModel(relistings=(replace(relisting, from_sec=gtfs_seconds("07:10:00")),)))
+    with pytest.raises(ValueError, match="overlaps the run in the feed or another relisting"):
+        _one_run((0, 0, 0), FeedModel(relistings=(relisting, replace(relisting, until_sec=gtfs_seconds("09:10:00")))))
+    with pytest.raises(ValueError, match="must end after it starts"):
+        _one_run((0, 0, 0), FeedModel(relistings=(replace(relisting, until_sec=relisting.from_sec),)))
+    with pytest.raises(ValueError, match="starts at a stop the trip does not have"):
+        _one_run((0, 0, 0), FeedModel(relistings=(replace(relisting, first_stop=4),)))
+    with pytest.raises(ValueError, match="predicts perfectly and reports no arrivals"):
+        _one_run((0, 0, 0), FeedModel(freshness_lag_sec=30, relistings=(relisting,)))
+    skipping = TripRun.from_delays(_MORNING, DAY, (0, None, 0))
+    with pytest.raises(ValueError, match="skips a stop and cannot be listed again"):
+        replace(_one_run((0, 0, 0), FeedModel(relistings=(relisting,))), runs=(skipping,))
+    # Between two polls a minute apart.
+    between = replace(relisting, from_sec=gtfs_seconds("09:00:10"), until_sec=gtfs_seconds("09:00:50"))
+    with pytest.raises(ValueError, match="no poll carries these relistings"):
+        polls(_one_run((0, 0, 0), FeedModel(poll_interval_sec=60, relistings=(between,))))
 
 
 def _frozen(header: Literal["frozen", "advancing"]) -> Scenario:

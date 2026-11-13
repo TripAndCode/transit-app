@@ -10,11 +10,13 @@ observation" means: they read the ClickHouse `updates` table through these
 two builders.
 """
 
+from datetime import datetime
+
 import psycopg2
 
 from pipeline import static_archive
-from pipeline.clickhouse import STOP_SKIPPED, TRIP_CANCELED, UPDATES_TABLE
-from pipeline.service_day import filed_date_ch
+from pipeline.clickhouse import STOP_SKIPPED, TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE, UPDATES_TABLE
+from pipeline.service_day import departure_lag, departure_lag_ch, filed_date_ch, service_day_offset_ch
 
 # The database the API and the pipeline CLI connect to when DATABASE_URL is
 # unset or empty. The test session vets this same value against the dev ports, so a
@@ -46,6 +48,82 @@ _DOW_ISO_TO_JP = {v: k for k, v in _DOW_JP_TO_ISO.items()}
 # ceiling sits well above any plausible real delay, so a genuinely very-late
 # bus still counts everywhere.
 MAX_PLAUSIBLE_DELAY_SEC = 7200
+
+# How long a feed can still list a stop after it departs. A departure inside
+# the clamp is last read by its scheduled time plus MAX_PLAUSIBLE_DELAY_SEC
+# plus this, so a later reading lists a run that has left, such as a trip
+# listed again hours after it ran (timely_reading_ch). Feeds drop a departed
+# stop within minutes, and such a listing comes back hours later.
+LISTED_AFTER_DEPARTURE_SEC = 600
+
+
+def timely_reading_ch() -> str:
+    """Whether a row can be a reading of its stop event: captured no later
+    than the stop's scheduled departure, on the day the row is filed under,
+    plus MAX_PLAUSIBLE_DELAY_SEC and LISTED_AFTER_DEPARTURE_SEC
+    (`pipeline.service_day.departure_lag_ch`). A row with no stored departure
+    of its own stop keeps every capture.
+
+    Every read that keeps a stop event's latest reading, or counts the stop
+    events reported, admits only these rows, tested as ingest stored them, so
+    the event falls back to its last timely reading. A count of the readings
+    the feed sent reads every row."""
+    return (
+        f"(u.scheduled_sec IS NULL OR "
+        f"{departure_lag_ch('u.')} <= {MAX_PLAUSIBLE_DELAY_SEC + LISTED_AFTER_DEPARTURE_SEC})"
+    )
+
+
+def trip_report_filter_ch() -> str:
+    """The row-level WHERE of a read through :func:`latest_trip_report_ch`:
+    the agency, the rows a stop event's latest report is picked from
+    (:func:`stop_event_report_ch`), and every other stop row that stores its
+    scheduled departure, whatever it reports. A trip's last stop is often
+    reported as its arrival alone, which is no report of a departure, yet its
+    scheduled departure is the trip's last."""
+    return (
+        f"u.agency_id = {{agency_id:UInt16}} AND ({stop_event_report_ch()} "
+        f"OR (u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE} AND u.scheduled_sec IS NOT NULL))"
+    )
+
+
+def latest_trip_report_ch(value: str, day: str, where: str = "1") -> str:
+    """Over one trip-day's rows that :func:`trip_report_filter_ch` admits,
+    grouped under the service date *day* they are filed under: *value* of the
+    latest by `(captured_at, file_name)` of its reports satisfying *where*, or
+    *value*'s default for none. Its reports are its stop rows that
+    :func:`stop_event_report_ch` admits and its timely trip-level rows.
+
+    A trip-level row (`pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE`), a
+    cancellation listing no stop, stores no departure of its own, so
+    :func:`timely_reading_ch` keeps every one. It is timely here when captured
+    no later than the trip's last scheduled departure that day, the latest any
+    of its stop rows stores, reported as a departure or not, plus the same
+    MAX_PLAUSIBLE_DELAY_SEC and LISTED_AFTER_DEPARTURE_SEC: one captured later
+    cancels a trip that has already run. A trip-day none of whose stop rows
+    stores a departure keeps every trip-level row, so a trip cancelled before
+    it ran is still not run.
+
+    The trip-level rows are collected in an array: a cancelled trip-day holds
+    few, and the bound comes from the same group's stop rows, so one pass over
+    the rows decides both."""
+    key = "(u.captured_at, u.file_name)"
+    stop = f"u.stop_sequence != {TRIP_LEVEL_STOP_SEQUENCE}"
+    reported = f"({stop_event_report_ch()}) AND ({where})"
+    last = f"maxIf({service_day_offset_ch('u.scheduled_sec')}, {stop})"
+    reach = MAX_PLAUSIBLE_DELAY_SEC + LISTED_AFTER_DEPARTURE_SEC
+    bound = f"toDateTime({day}, 'Asia/Tokyo') + toIntervalSecond({last} + {reach})"
+    trip_level = f"groupArrayIf(tuple({key}, {value}), NOT {stop} AND {reported})"
+    timely = f"arrayFilter(r -> {last} IS NULL OR r.1.1 <= {bound}, {trip_level})"
+    stops = f"argMaxIf(tuple({key}, {value}), {key}, {stop} AND {reported})"
+    return f"tupleElement(arrayReduce('max', arrayPushBack({timely}, {stops})), 2)"
+
+
+def timely_reading(captured_at: datetime, scheduled_sec: int | None) -> bool:
+    """:func:`timely_reading_ch` for a reading's capture instant and stored
+    `scheduled_sec`, which the ClickHouse tests hold the SQL to."""
+    lag = departure_lag(captured_at, scheduled_sec)
+    return lag is None or lag <= MAX_PLAUSIBLE_DELAY_SEC + LISTED_AFTER_DEPARTURE_SEC
 
 
 def observation_filter_ch(extra_where: str = "") -> str:
@@ -88,13 +166,20 @@ def timetable_cancellation_ch() -> str:
     )
 
 
+def stop_event_report_ch() -> str:
+    """Whether a row is one a stop event's latest report is picked from: a
+    measured `dep_delay` inside the plausibility clamp or a row withdrawing
+    the departure whatever delay it carries, and a timely reading
+    (:func:`timely_reading_ch`)."""
+    return f"({plausible_delay_ch('u.dep_delay')} OR {withdrawn_ch()}) AND {timely_reading_ch()}"
+
+
 def stop_event_filter_ch(extra_where: str = "") -> str:
     """The row-level WHERE of a read that picks each stop event's latest poll
-    (:func:`latest_departure_ch`): the agency, a measured `dep_delay` inside
-    the plausibility clamp or a row withdrawing the departure whatever delay
-    it carries, and the caller's own filter."""
+    (:func:`latest_departure_ch`): the agency, a report of a stop event
+    (:func:`stop_event_report_ch`), and the caller's own filter."""
     extra = f" AND ({extra_where})" if extra_where else ""
-    return f"u.agency_id = {{agency_id:UInt16}} AND ({plausible_delay_ch('u.dep_delay')} OR {withdrawn_ch()}){extra}"
+    return f"u.agency_id = {{agency_id:UInt16}} AND {stop_event_report_ch()}{extra}"
 
 
 def departure_ch() -> str:
@@ -189,10 +274,10 @@ def build_dedup_ch_sql(
     `pipeline.reports.filters._ch_rows`).
 
     The latest poll decides whether the stop departed at all. The rows that
-    reach the pick are those with a plausible departure and those withdrawing
-    one, a CANCELED trip or a SKIPPED stop (`stop_event_filter_ch`), and a
-    stop event whose latest such row withdraws its departure has no row here
-    (`latest_departure_ch`). A row with no delay that withdraws nothing never
+    reach the pick are the timely ones (`timely_reading_ch`) with a plausible
+    departure or withdrawing one, a CANCELED trip or a SKIPPED stop
+    (`stop_event_filter_ch`), and a stop event whose latest such row
+    withdraws its departure has no row here (`latest_departure_ch`). A row with no delay that withdraws nothing never
     reaches the pick, so the last prediction stands. The feeds report a
     stop's arrival in a poll of its own, so this query never sees an arrival.
     A reader pairing a stop's arrival with its departure uses
@@ -299,11 +384,11 @@ def build_stop_visits_ch_sql(
     row carrying either and resolves each kind on its own:
 
     - `dep_delay` is picked exactly as `build_dedup_ch_sql` picks it:
-      implausible readings are dropped, then the latest
+      implausible and untimely readings are dropped, then the latest
       `(captured_at, file_name)` among the departures and the rows
       withdrawing one (`withdrawn_ch`) wins, and a withdrawing winner leaves
       none. NULL for a visit reported only as an arrival.
-    - `arr_delay` goes through the same clamp and the same latest-wins pick
+    - `arr_delay` goes through the same clamp, timeliness and latest-wins pick
       over the arrival readings and the rows withdrawing them. A departure
       poll's empty arrival field is not a retraction, so it never hides an
       earlier arrival; a later CANCELED trip or SKIPPED stop is. NULL when the
@@ -403,7 +488,8 @@ def build_stop_visits_ch_sql(
         f"maxIf({latest}, {dep_ok} AND NOT {withdrawn}) AS visit_dep_key, "
         f"minIf({latest}, {arr_ok} AND NOT {withdrawn}) AS visit_first_arr_key "
         + static_archive.observation_rows(
-            f"u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok} OR {withdrawn}){extra}",
+            f"u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok} OR {withdrawn}) "
+            f"AND {timely_reading_ch()}{extra}",
             stamp,
             table,
             filed_where,
@@ -468,7 +554,7 @@ def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
     `pipeline.prediction_accuracy`'s early-vs-final delay-estimate error
     metric.
 
-    Same grouping key, same `agency_id`/plausibility-clamp/withdrawal `WHERE`
+    Same grouping key, same `agency_id`/plausibility-clamp/withdrawal/timeliness `WHERE`
     (`stop_event_filter_ch`), and the same final-value resolution
     (`latest_departure_ch`) as `build_dedup_ch_sql`, so the two queries can
     never silently disagree about which row is "the final observation" for a

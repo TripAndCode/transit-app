@@ -350,6 +350,10 @@ def _route_stop_daily(source: str) -> str:
 
 
 def _stop_route_days(source: str) -> str:
+    """Each (service date, stop, route) a poll reports, read from every row
+    (`_raw_select`), untimely ones too (`pipeline.db.timely_reading_ch`): it
+    records which routes serve a stop, not a figure of its stop events, so a
+    trip the feed lists long after it ran still names a route that serves it."""
     return f"""
         SELECT DISTINCT toInt32({{agency_id:UInt16}}) AS agency_id, d.date AS date, st.stop_id AS stop_id,
                assumeNotNull(d.route_code) AS route_code
@@ -439,6 +443,8 @@ def _route_hour(source: str) -> str:
 
 
 def _stop_routes(source: str) -> str:
+    """Each stop's routes over its whole history, from stop_route_days: which
+    routes serve it, untimely readings included, as that table records them."""
     return f"""
         SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id,
                arrayStringConcat(arraySort(groupUniqArray(route_code)), ',') AS route_codes

@@ -1646,8 +1646,6 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                         "agency_id": agency_id,
                         **read.params,
                         **join.params(between=read.between),
-                        "min_delay": -MAX_PLAUSIBLE_DELAY_SEC,
-                        "max_delay": MAX_PLAUSIBLE_DELAY_SEC,
                     },
                 )
                 # Each row is one (route, stop, service date), which no read splits.
