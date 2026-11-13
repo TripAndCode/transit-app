@@ -33,8 +33,9 @@ pair.
 `--d0`…`--d4` fill delay magnitude in five steps, calm to heavy — #D7EDE7,
 #A6D5C7, #F0CD7A, #E39556 and #BC523A in the light theme — for < 1.5,
 < 2.5, < 3.5, < 5 and ≥ 5 minutes. Each step has a dark counterpart, and
-`--none` fills a cell with no observations. `tokens.test.ts` asserts the
-five light values and that every step and `--none` exists in both themes.
+`--none` fills a cell with no observations. `tokens.test.ts` asserts that
+hue runs from teal toward rust in both themes, and that every step and
+`--none` exists in both themes.
 `DELAY_RAMP_STEPS` in `tokens.ts` holds the five cuts, `delayRampVar()` maps
 a delay onto them, and `delayScaleSteps()` (`delayScale.ts`, which
 `DelayScaleLegend` renders) labels them for every legend, so a label cannot
