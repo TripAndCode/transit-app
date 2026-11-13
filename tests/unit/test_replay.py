@@ -97,6 +97,22 @@ def test_default_window_probe_shares_the_survivor_definition():
     assert "min(tupleElement(winner, 2))" in sql
 
 
+def test_replay_sql_under_refit_joins_the_archive_and_keeps_its_placeholders():
+    sql = build_replay_sql(Stamp.REFIT, "updates")
+    assert "ANY LEFT JOIN" in sql
+    assert "{target_date:Date}" in sql
+    assert "{from_sec:UInt32}" in sql
+    assert "{to_sec:UInt32}" in sql
+    assert "ORDER BY trip_id, stop_sequence" in sql
+
+
+def test_default_window_probe_under_refit_joins_the_archive_and_keeps_its_placeholders():
+    sql = build_default_window_probe_sql(Stamp.REFIT, "updates")
+    assert "ANY LEFT JOIN" in sql
+    assert "{target_date:Date}" in sql
+    assert "HAVING tupleElement(winner, 1) IS NOT NULL" in sql
+
+
 # --- row -> columnar transform -------------------------------------------
 
 
