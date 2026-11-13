@@ -6,6 +6,7 @@ import { useMediaQuery, COARSE_POINTER_QUERY } from "../hooks/useMediaQuery";
 import { openCommandPalette } from "./commandPaletteEvents";
 import { DataFreshness } from "./DataFreshness";
 import { modifierKeyLabel } from "../utils/platform";
+import "./TopBar.css";
 
 /** The bar above every agency screen: one search-and-ask field that opens
  *  the command palette, and how recent the agency's data is. */
@@ -31,6 +32,7 @@ export function TopBar() {
       <button
         type="button"
         data-tour="ask-nav"
+        className="topbar-search"
         aria-keyshortcuts="Meta+K Control+K"
         onClick={() => openCommandPalette()}
         style={{
@@ -40,10 +42,9 @@ export function TopBar() {
           flex: "1 1 280px",
           maxWidth: 560,
           minWidth: 0,
-          height: 38,
-          padding: "0 10px 0 12px",
+          height: 44,
+          padding: "0 10px 0 16px",
           border: "1px solid var(--border-subtle)",
-          borderRadius: "var(--radius)",
           background: "var(--bg-page)",
           color: "var(--text-tertiary)",
           fontSize: "var(--text-sm)",
@@ -60,11 +61,11 @@ export function TopBar() {
           {[modifierKeyLabel(), "K"].map((k) => (
             <kbd
               key={k}
+              className="topbar-kbd"
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: "var(--text-xs)",
                 border: "1px solid var(--border-subtle)",
-                borderRadius: 4,
                 padding: "0 5px",
                 background: "var(--bg-surface)",
                 color: "var(--text-secondary)",
