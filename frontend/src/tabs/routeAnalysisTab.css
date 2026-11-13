@@ -1,9 +1,4 @@
-/* A one-time light sheen across the route page's own header on mount,
-   distinct from RouteTitleTransition's shared-element title animation (a
-   different element, the <h1> inside this header, and only active during a
-   route-to-route navigation). The header itself stays mounted while the
-   route param changes, so this plays once per page visit, not once per
-   route switched to.
+/* A one-time light sheen across the route page's header when it mounts.
 
    Painted as the header's own background, not an overlay: a positioned
    overlay would paint over the in-flow title and action buttons, briefly
