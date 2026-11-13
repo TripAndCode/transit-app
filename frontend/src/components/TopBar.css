@@ -1,0 +1,14 @@
+/* The command-palette trigger: a full pill, like the mockup's search field.
+   Its hover is a lift rather than a colour change, since it already carries
+   its own border and a recessed fill against the bar. */
+.topbar-search {
+  border-radius: 999px;
+  transition: box-shadow var(--transition);
+}
+.topbar-search:hover {
+  box-shadow: var(--el-1);
+}
+
+.topbar-kbd {
+  border-radius: 7px;
+}

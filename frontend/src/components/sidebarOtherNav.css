@@ -1,0 +1,21 @@
+/* The desktop rail's "Other" footer links (Model/Help/Feedback/About/Admin):
+   the same soft accent pill the destinations above give their current entry,
+   so the active state isn't a colour change alone. Scoped to the desktop
+   rail -- the phone "more" sheet keeps `railLinkStyle` for these links
+   instead. */
+.app-sidebar-desktop .other-nav-link {
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  transition: background var(--transition), color var(--transition);
+}
+.app-sidebar-desktop .other-nav-link:hover {
+  background: var(--hover-tint);
+  text-decoration: none;
+}
+.app-sidebar-desktop .other-nav-link.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+.app-sidebar-desktop .other-nav-link.active:hover {
+  background: var(--accent-soft);
+}

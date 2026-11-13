@@ -271,6 +271,16 @@ describe("SidebarUserMenu", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(i18n.t("account.logout_error"));
   });
 
+  it("leaves the trigger and an unselected row with no inline background, so the CSS hover fill can paint, while the selected row keeps its inline accent highlight", async () => {
+    const user = userEvent.setup();
+    renderMenu();
+    const trigger = await screen.findByRole("button", { name: "Account menu" });
+    expect(trigger.style.background).toBe("");
+    await user.click(trigger);
+    expect(screen.getByRole("menuitem", { name: "Settings" }).style.background).toBe("");
+    expect(screen.getByRole("menuitemradio", { name: "System" }).style.background).toBe("var(--accent-soft)");
+  });
+
   it("offers no sign-out to a guest", async () => {
     const user = userEvent.setup();
     renderMenu();
