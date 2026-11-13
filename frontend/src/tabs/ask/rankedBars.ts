@@ -2,11 +2,13 @@ import { delayRampVar } from "../../styles/tokens";
 
 export type RankedBarKind = "delay" | "accent";
 
-// top_n's three table shapes (pipeline/query/tools.py's _tool_top_n) are the
-// only `kind: "table"` answers that rank routes by one metric: a day/service
+// A table gets a ranked bar exactly when its columns start with `route_code`
+// followed by one of RANKED_METRIC_COLUMNS below -- that shape is how
+// pipeline/query/tools.py's _tool_top_n (all three metrics) and
+// _tool_on_time_rate mark a single-metric ranking of routes. A day/service
 // breakdown, a weekday-vs-weekend comparison and a stop profile ordered by
-// sequence all share the table renderer but are not a single-metric ranking,
-// so they get no bar.
+// sequence share the same table renderer but don't match the shape, so they
+// get no bar.
 const RANKED_METRIC_COLUMNS: Record<string, RankedBarKind> = {
   avg_min: "delay",
   on_time_pct: "accent",
@@ -35,10 +37,12 @@ export function rankedBarShares(values: readonly unknown[]): number[] {
 }
 
 /** The bar's fill colour: the delay ramp for a delay-minutes metric (never
- *  alarm red -- see styles/tokens.ts), the product accent for a metric where
- *  a bigger bar is not necessarily worse (an on-time rate, a late-trip
- *  count). `value` falls back to 0 for a non-finite or missing cell, which is
- *  always paired with a 0 share, so the colour never shows. */
+ *  alarm red -- see styles/tokens.ts), the product accent for everything
+ *  else. `delayRampVar` is keyed on minutes, so only `avg_min` belongs on it;
+ *  a percentage (on-time rate) or a count (late trips) has no minutes scale
+ *  to map onto that ramp and gets the flat accent instead. `value` falls back
+ *  to 0 for a non-finite or missing cell, which is always paired with a 0
+ *  share, so the colour never shows. */
 export function rankedBarColor(kind: RankedBarKind, value: unknown): string {
   const v = typeof value === "number" && Number.isFinite(value) ? value : 0;
   return kind === "delay" ? delayRampVar(v) : "var(--accent)";

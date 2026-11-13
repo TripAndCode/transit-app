@@ -100,13 +100,7 @@ function ResultTable({
   // when true rather than the raw "true"/"false".
   const lowConfIdx = cols.findIndex((c) => c === "low_confidence");
   const visibleRows = rows.slice(0, 50);
-  // A ranked-routes table (top_n's three shapes) draws a slim bar beside its
-  // one ranked metric in every row, proportional to the largest value shown
-  // -- decoration next to the number, never replacing it. A non-positive or
-  // missing value draws an empty track rather than skipping the bar, so the
-  // column stays aligned. Other table shapes (a day/service breakdown, a
-  // weekday-vs-weekend comparison, a stop profile ordered by sequence) are
-  // not a single-metric ranking and get no bar column at all.
+  // Which tables get a ranked bar, and why: see ./rankedBars.ts.
   const barColumn = rankedBarColumn(cols);
   const barShares = barColumn ? rankedBarShares(visibleRows.map((row) => (row as unknown[])[barColumn.index])) : [];
   return (

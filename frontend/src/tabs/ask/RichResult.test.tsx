@@ -173,6 +173,26 @@ describe("RichResult ranked bars", () => {
     expect(fill.style.background).toBe("var(--accent)");
   });
 
+  it("renders one bar per row for an on_time_rate ranking too -- same shape as top_n", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        tool="on_time_rate"
+        result={{
+          kind: "table",
+          summary: "On-time rate",
+          rows: [
+            ["39061", 92.0, 0.4, 120, false],
+            ["39062", 80.0, 0.9, 90, false],
+          ],
+          columns: ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
+        }}
+      />,
+    );
+    const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
+    expect(fills).toHaveLength(2);
+    expect(fills[0].style.background).toBe("var(--accent)");
+  });
+
   it("draws no bar for a table that is not a single-metric route ranking", () => {
     const { container } = renderWithProviders(
       <Wrapper

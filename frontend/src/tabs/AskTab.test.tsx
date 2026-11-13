@@ -223,13 +223,19 @@ describe("AskTab thinking state", () => {
     return renderAskTab("/agencies/5/ask?conversation=t1");
   }
 
-  it("shows the shimmer alongside the accessible status text while a question is pending", () => {
+  it("shows two hidden skeleton lines alongside the accessible status text while a question is pending", () => {
     vi.spyOn(hooks, "useAppendMessage").mockReturnValue(mutationStub({ isPending: true }));
     openInvestigation(oneMessage);
     const status = screen.getByRole("status");
     expect(status).toHaveTextContent("Thinking...");
-    expect(status.querySelector(".ask-thinking-shimmer")).toBeInTheDocument();
     expect(status).toHaveAttribute("aria-live", "polite");
+    const lines = status.querySelectorAll(".skeleton");
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line.closest('[aria-hidden="true"]')).not.toBeNull();
+    }
+    // No spinner: the pending state is a calm skeleton, not a rotating glyph.
+    expect(status.querySelector("svg")).not.toBeInTheDocument();
   });
 
   it("renders no thinking status when nothing is pending", () => {

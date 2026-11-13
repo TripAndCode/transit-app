@@ -42,7 +42,6 @@ import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
 import type { NextStepAction } from "./ask/nextStepChips";
 import { useInvestigationLocation } from "./ask/useInvestigationLocation";
-import "./ask/thinkingShimmer.css";
 
 type Submission = { tool: string; args: Record<string, unknown>; user_summary: string };
 
@@ -439,12 +438,23 @@ export function AskTab() {
             >
               {({ messages: contextMessages, focus }) => <>
               {(appendMsg.isPending || followup.isPending) && (
-                <div role="status" aria-live="polite" className="ask-thinking">
+                <div
+                  role="status"
+                  aria-live="polite"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--space-3)",
+                    padding: 12,
+                    color: "var(--text-tertiary)",
+                    fontSize: "var(--text-sm)",
+                  }}
+                >
                   {t("ask.thinking")}
-                  <span className="ask-thinking-shimmer" aria-hidden="true">
-                    <span className="ask-thinking-shimmer-line" />
-                    <span className="ask-thinking-shimmer-line" />
-                  </span>
+                  <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+                    <Skeleton width={96} height={8} />
+                    <Skeleton width={64} height={8} />
+                  </div>
                 </div>
               )}
 
