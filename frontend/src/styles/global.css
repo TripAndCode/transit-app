@@ -1,45 +1,135 @@
 :root {
+  /* Primitive palette: raw colour values named by hue family and lightness
+     step, never by where they are used. A future reskin edits this block
+     only; every semantic token below -- on this bare :root and on each
+     scoped theme block -- names a primitive through var(--p-...) instead of
+     carrying its own literal. Primitives are declared once, here: a theme
+     block only ever points an existing semantic name at a different
+     primitive, it never declares a --p-* of its own. Alpha tones (scrims,
+     shadows, glass) are primitives too, suffixed with their alpha as hundredths
+     (-a04 is 4%). */
+  --p-slate-50: #F1F4F7;
+  --p-slate-100: #EEF1F5;
+  --p-slate-150: #E6ECF4;
+  --p-slate-200: #E8ECF1;
+  --p-slate-250: #E5E9EF;
+  --p-slate-275: #E4E7EC;
+  --p-slate-325: #D6DDE6;
+  --p-slate-375: #AAB6C7;
+  --p-slate-425: #94A3B8;
+  --p-slate-475: #95A1B3;
+  --p-slate-525: #5B687D;
+  --p-slate-575: #475569;
+  --p-slate-625: #435166;
+  --p-slate-650: #283444;
+  --p-slate-700: #1F2A37;
+  --p-slate-750: #1A2431;
+  --p-slate-800: #18212D;
+  --p-slate-850: #0F1A2A;
+  --p-slate-900: #131B26;
+  --p-slate-950: #0C1219;
+  --p-blue-50: #E2E9FA;
+  --p-blue-200: #BCCBFF;
+  --p-blue-375: #86A2FF;
+  --p-blue-525: #2750C2;
+  --p-blue-675: #1A378C;
+  --p-blue-850: #1C2847;
+  --p-indigo-50: #7E8CD0;
+  --p-indigo-250: #5B6CAD;
+  --p-indigo-425: #30385A;
+  --p-indigo-625: #202642;
+  --p-indigo-800: #0F1119;
+  --p-teal-50: #D7EDE7;
+  --p-teal-275: #A6D5C7;
+  --p-teal-525: #2C6758;
+  --p-teal-750: #1E3934;
+  --p-green-50: #4ADE80;
+  --p-green-250: #31B483;
+  --p-green-425: #2EA87A;
+  --p-green-625: #207454;
+  --p-green-800: #166534;
+  --p-amber-50: #FDF6E3;
+  --p-amber-150: #F0CD7A;
+  --p-amber-250: #E0B45C;
+  --p-amber-375: #FBBF24;
+  --p-amber-475: #C99A2E;
+  --p-amber-575: #8C7331;
+  --p-amber-675: #8A6F1C;
+  --p-amber-775: #81631D;
+  --p-amber-900: #2A1F14;
+  --p-clay-50: #E08A61;
+  --p-clay-175: #E39556;
+  --p-clay-325: #E08A54;
+  --p-clay-450: #C4501F;
+  --p-clay-600: #A45E2E;
+  --p-clay-725: #A74D21;
+  --p-clay-850: #B45309;
+  --p-rust-50: #F0837A;
+  --p-rust-200: #E0685B;
+  --p-rust-375: #BC523A;
+  --p-rust-525: #B84F3A;
+  --p-rust-675: #C0392B;
+  --p-rust-850: #A8391F;
+  --p-graphite-50: #FFFFFF;
+  --p-graphite-275: #F5F5F5;
+  --p-graphite-525: #ECECEC;
+  --p-graphite-750: #2A2A2A;
+  --p-ink-900-a04: rgba(17, 24, 39, 0.04);
+  --p-ink-900-a05: rgba(17, 24, 39, 0.05);
+  --p-ink-900-a10: rgba(17, 24, 39, 0.10);
+  --p-ink-900-a18: rgba(17, 24, 39, 0.18);
+  --p-ink-950-a32: rgba(15, 17, 25, 0.32);
+  --p-white-a04: rgba(255, 255, 255, 0.04);
+  --p-white-a06: rgba(255, 255, 255, 0.06);
+  --p-white-a08: rgba(255, 255, 255, 0.08);
+  --p-white-a16: rgba(255, 255, 255, 0.16);
+  --p-black-a03: rgba(0, 0, 0, 0.03);
+  --p-black-a04: rgba(0, 0, 0, 0.04);
+  --p-black-a40: rgba(0, 0, 0, 0.40);
+  --p-black-a55: rgba(0, 0, 0, 0.55);
+  --p-black-a60: rgba(0, 0, 0, 0.60);
+
   /* Cool paper and ink, like transport signage: the ground is a pale blue-grey
      rather than a warm cream, and every text level clears WCAG AA (4.5:1) on
      --bg-surface, --bg-soft and --bg-page (asserted in tokens.test.ts). */
-  --bg-page: #F1F4F7;
-  --bg-surface: #FFFFFF;
-  --bg-soft: #E8ECF1;
-  --border-soft: #E5E9EF;
-  --border-subtle: #D6DDE6;
-  --text-primary: #0F1A2A;
-  --text-secondary: #435166;
-  --text-tertiary: #5B687D;
+  --bg-page: var(--p-slate-50);
+  --bg-surface: var(--p-graphite-50);
+  --bg-soft: var(--p-slate-200);
+  --border-soft: var(--p-slate-250);
+  --border-subtle: var(--p-slate-325);
+  --text-primary: var(--p-slate-850);
+  --text-secondary: var(--p-slate-625);
+  --text-tertiary: var(--p-slate-525);
   /* One accent for the whole product, light and dark: signage blue, for
      interaction and selection only -- never for delay magnitude, which has
      its own ramp (--d0..--d4). Any scoped redefinition of --accent would
      fork the identity and is asserted against in tokens.test.ts. */
-  --accent: #2750C2;
-  --accent-soft: #E2E9FA;
-  --on-accent: #FFFFFF;
+  --accent: var(--p-blue-525);
+  --accent-soft: var(--p-blue-50);
+  --on-accent: var(--p-graphite-50);
   /* Delay magnitude, calm to heavy: < 1.5, < 2.5, < 3.5, < 5 and >= 5
      minutes. Magnitude, never alarm: rust is reserved for the last step.
      --none fills a cell with no observations. */
-  --d0: #D7EDE7;
-  --d1: #A6D5C7;
-  --d2: #F0CD7A;
-  --d3: #E39556;
-  --d4: #BC523A;
-  --none: #EEF1F5;
+  --d0: var(--p-teal-50);
+  --d1: var(--p-teal-275);
+  --d2: var(--p-amber-150);
+  --d3: var(--p-clay-175);
+  --d4: var(--p-rust-375);
+  --none: var(--p-slate-100);
   /* A separate identity from the accent, not a second accent: it marks a
      route (the operations route badge) and the pre-auth wordmark, and nothing
      else. --on-brand is theme-split because the dark brand is
      light enough that white text on it falls below AA. */
-  --brand: #5b6cad;
-  --on-brand: #ffffff;
+  --brand: var(--p-indigo-250);
+  --on-brand: var(--p-graphite-50);
   /* Own token (aliasing --accent) rather than a hardcoded var(--accent)
      reference in every :focus-visible rule, so a future focus-ring color
      can diverge from the accent color in one place. Tracks --accent
      automatically in both themes, including the .app-shell/dark overrides
      below, with no separate dark-block entry needed. */
   --focus-ring: var(--accent);
-  --error-bg: #fdf6e3;
-  --error-fg: #8a6f1c;
+  --error-bg: var(--p-amber-50);
+  --error-fg: var(--p-amber-675);
   /* Derived from --bg-surface (not a hand-copied literal per theme) so it
      can't drift out of sync if --bg-surface is ever retuned — see the
      --surface-1/--surface-2 note below for the exact failure mode this
@@ -65,27 +155,27 @@
      gap as --surface-1/--surface-2 above. Same value in both themes; passes
      contrast comfortably on dark, matches the pre-existing (marginal) look
      on light — not changing the light-mode value here, out of scope. */
-  --color-warning: #C99A2E;
+  --color-warning: var(--p-amber-475);
   /* Text-safe counterpart to --color-warning: the plain value is 2.3-2.6:1 as
      text against --bg-surface/--bg-soft, well under WCAG AA. Darkened along
      the same amber hue rather than desaturating to grey. Dark theme reuses
      --color-warning itself -- see the dark declaration. */
-  --color-warning-text: #81631D;
+  --color-warning-text: var(--p-amber-775);
   /* Reserved for destructive-action buttons only (delete/remove controls) --
      an alarm red the calm-UI rule otherwise rules out. Any other severity
      signal (a stale feed, an error message, a danger-zone heading) uses
      --delay-severe instead, which is per-theme and AA-passing as text. */
-  --color-danger: #c0392b;
+  --color-danger: var(--p-rust-675);
   /* Deepened variant of --accent for primary buttons/active states -- more
      confident at button weight than --accent reads on its own. Same hue
      family as --accent by contract (tokens.test.ts): a different family here
      would give the app two accents again, one per weight. Clears 4.5:1 as
      text on both --bg-surface and --bg-soft. */
-  --accent-strong: #1A378C;
+  --accent-strong: var(--p-blue-675);
   /* "Needs attention" summary-callout color (e.g. "5分以上遅延: N件") --
      distinct from --delay-severe, which stays the map's own per-point
      severity ramp; this is specifically for aggregate counts. */
-  --delay-flag: #C4501F;
+  --delay-flag: var(--p-clay-450);
   /* Fallback first for engines without color-mix() support (same reasoning as
      --map-badge-bg above); the mix itself tracks --delay-flag automatically
      in both themes, so it needs no separate dark-block entry. */
@@ -96,14 +186,14 @@
      --delay-severe below has with SEVERE_FALLBACK. Unlike --delay-severe this
      tier never carries text on top of it, so it needs no per-theme AA split:
      same value in both themes. */
-  --delay-ok: #2EA87A;
-  --card-border: #E4E7EC;
+  --delay-ok: var(--p-green-425);
+  --card-border: var(--p-slate-275);
   --card-radius: var(--radius-lg);
   /* Tooltip is intentionally theme-invariant (always a dark chip with white
      text, in both light and dark mode) — NOT derived from --text-primary,
      which flips light-to-dark and would otherwise break tooltip contrast. */
-  --tooltip-bg: #2a2a2a;
-  --tooltip-fg: #ffffff;
+  --tooltip-bg: var(--p-graphite-750);
+  --tooltip-fg: var(--p-graphite-50);
   /* Floating map chrome (filter dock, legend, basemap switcher, fit-all
      button): a translucent, blurred fill so the control reads as sitting on
      the map rather than punched through it, on any basemap including dark
@@ -127,16 +217,16 @@
      and JS consumers (MapLibre style expressions) resolve the same source
      of truth; its SEVERE_FALLBACK mirrors this light value by hand and is
      held to it by the same test. */
-  --delay-severe: #A8391F;
+  --delay-severe: var(--p-rust-850);
   /* Text-safe counterpart to the ok/mild/moderate delay-ramp fills
      (tokens.ts's DELAY_RAMP), which are 2.6-3.8:1 as text against
      --bg-surface -- under WCAG AA. Darkened along each fill's own hue rather
      than desaturating to grey. The severe tier needs no text variant: it is
      already per-theme and AA-passing (--delay-severe above). Each theme's
      values are tuned per tier to clear AA on every surface they land on. */
-  --delay-text-ok: #207454;
-  --delay-text-mild: #81631D;
-  --delay-text-moderate: #A74D21;
+  --delay-text-ok: var(--p-green-625);
+  --delay-text-mild: var(--p-amber-775);
+  --delay-text-moderate: var(--p-clay-725);
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
      ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
@@ -147,13 +237,13 @@
      values below match the pre-existing hardcoded overview.css hex exactly;
      dark values are lifted to pass contrast / stay visible on the dark
      surfaces. */
-  --trend-good: #166534;
-  --trend-bad: #b45309;
-  --trend-neutral: #475569;
-  --track-bg: rgba(0, 0, 0, 0.03);
-  --hover-tint: rgba(0, 0, 0, 0.04);
-  --skeleton-a: #ececec;
-  --skeleton-b: #f5f5f5;
+  --trend-good: var(--p-green-800);
+  --trend-bad: var(--p-clay-850);
+  --trend-neutral: var(--p-slate-575);
+  --track-bg: var(--p-black-a03);
+  --hover-tint: var(--p-black-a04);
+  --skeleton-a: var(--p-graphite-525);
+  --skeleton-b: var(--p-graphite-275);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -182,16 +272,16 @@
      come from the edge instead. Every tier carries the hairline ring, in both
      themes: a surface that swaps tiers on hover would otherwise lose its own
      edge at the moment it gains depth. */
-  --el-1: 0 1px 3px rgba(17, 24, 39, 0.05), 0 0 0 1px rgba(17, 24, 39, 0.04);
-  --el-2: 0 4px 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
-  --el-3: 0 24px 60px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  --el-1: 0 1px 3px var(--p-ink-900-a05), 0 0 0 1px var(--p-ink-900-a04);
+  --el-2: 0 4px 16px var(--p-ink-900-a10), 0 0 0 1px var(--p-ink-900-a04);
+  --el-3: 0 24px 60px var(--p-ink-900-a18), 0 0 0 1px var(--p-ink-900-a04);
   /* Leftward counterpart of --el-2, for a panel anchored to the right edge
      (a drawer) whose shadow has to cast onto the page it covers rather than
      downward -- the scale above is downward-only, so an edge-anchored panel
      can't reuse it without losing the direction that separates it from the
      content it covers. Same weight and opacity as --el-2, offset to the left
      instead of down. */
-  --el-left: -4px 0 16px rgba(17, 24, 39, 0.10), 0 0 0 1px rgba(17, 24, 39, 0.04);
+  --el-left: -4px 0 16px var(--p-ink-900-a10), 0 0 0 1px var(--p-ink-900-a04);
   /* Type scale. --text-xs (12px) is the floor for any DOM text: below it CJK
      glyphs lose stroke separation and Japanese labels stop being readable.
      SVG chart tick labels are the one exception and set their size as an
@@ -208,7 +298,7 @@
      the theme, not of whichever overlay happens to be open: two overlays
      picking their own literal drift apart the moment either theme is
      retuned, and they are routinely seen one over the other. */
-  --scrim: rgba(15, 17, 25, 0.32);
+  --scrim: var(--p-ink-950-a32);
   /* Stacking-order ladder -- mirrors src/styles/zIndex.ts's Z_INDEX exactly
      (zIndex.test.ts enforces it) for CSS files that can't import the TS
      constant. Keep both in sync: add/change a rung in Z_INDEX first, then
@@ -251,57 +341,57 @@
 }
 
 :root[data-theme="dark"] {
-  --bg-page: #0C1219;
-  --bg-surface: #131B26;
-  --bg-soft: #1A2431;
-  --border-soft: #1F2A37;
-  --border-subtle: #283444;
-  --text-primary: #E6ECF4;
-  --text-secondary: #AAB6C7;
-  --text-tertiary: #95A1B3;
+  --bg-page: var(--p-slate-950);
+  --bg-surface: var(--p-slate-900);
+  --bg-soft: var(--p-slate-750);
+  --border-soft: var(--p-slate-700);
+  --border-subtle: var(--p-slate-650);
+  --text-primary: var(--p-slate-150);
+  --text-secondary: var(--p-slate-375);
+  --text-tertiary: var(--p-slate-475);
   /* Dark counterpart of the single signage-blue accent. */
-  --accent: #86A2FF;
-  --accent-soft: #1C2847;
-  --on-accent: #0C1219;
-  --d0: #1E3934;
-  --d1: #2C6758;
-  --d2: #8C7331;
-  --d3: #A45E2E;
-  --d4: #B84F3A;
-  --none: #18212D;
-  --brand: #7E8CD0;
+  --accent: var(--p-blue-375);
+  --accent-soft: var(--p-blue-850);
+  --on-accent: var(--p-slate-950);
+  --d0: var(--p-teal-750);
+  --d1: var(--p-teal-525);
+  --d2: var(--p-amber-575);
+  --d3: var(--p-clay-600);
+  --d4: var(--p-rust-525);
+  --none: var(--p-slate-800);
+  --brand: var(--p-indigo-50);
   /* Dark ink, not white: the dark brand is light enough that white on it
      lands around 3.2:1. */
-  --on-brand: #0F1119;
-  --error-bg: #2A1F14;
-  --error-fg: #E0B45C;
-  --color-danger: #E0685B;
+  --on-brand: var(--p-indigo-800);
+  --error-bg: var(--p-amber-900);
+  --error-fg: var(--p-amber-250);
+  --color-danger: var(--p-rust-200);
   /* Dark-theme severe tone. Same warm family as the light value, lifted until
      it clears 4.5:1 on this theme's --bg-surface — see the invariant on the
      light declaration. */
-  --delay-severe: #F0837A;
+  --delay-severe: var(--p-rust-50);
   /* Tuned per tier to clear 4.5:1 on this theme's page, --accent-soft and
      current-row surfaces; only mild coincides with its ramp fill. */
-  --delay-text-ok: #31B483;
-  --delay-text-mild: #C99A2E;
-  --delay-text-moderate: #E08A61;
+  --delay-text-ok: var(--p-green-250);
+  --delay-text-mild: var(--p-amber-475);
+  --delay-text-moderate: var(--p-clay-50);
   /* --color-warning itself already clears 4.5:1 on this theme's surfaces —
      see the light declaration for why light needs a separate darkened value. */
-  --color-warning-text: #C99A2E;
-  --trend-good: #4ade80;
-  --trend-bad: #fbbf24;
-  --trend-neutral: #94a3b8;
-  --track-bg: rgba(255, 255, 255, 0.08);
-  --hover-tint: rgba(255, 255, 255, 0.08);
-  --skeleton-a: #202642;
-  --skeleton-b: #30385A;
+  --color-warning-text: var(--p-amber-475);
+  --trend-good: var(--p-green-50);
+  --trend-bad: var(--p-amber-375);
+  --trend-neutral: var(--p-slate-425);
+  --track-bg: var(--p-white-a08);
+  --hover-tint: var(--p-white-a08);
+  --skeleton-a: var(--p-indigo-625);
+  --skeleton-b: var(--p-indigo-425);
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change.
      Stays in --accent's hue family; see the light declaration. */
-  --accent-strong: #BCCBFF;
+  --accent-strong: var(--p-blue-200);
   /* Chosen to clear WCAG AA (4.5:1) as text against both --bg-surface and
      --bg-soft -- re-check contrast if this color or those tokens change. */
-  --delay-flag: #E08A54;
+  --delay-flag: var(--p-clay-325);
   /* Border, not text -- reuses the existing dark --border-subtle value
      rather than introducing a third near-identical border hue. */
   --card-border: var(--border-subtle);
@@ -309,26 +399,26 @@
      tier carries a hairline ring and a top inset highlight to draw its own
      edge; only the floating tiers add a drop, and el-3 makes it deep enough
      to darken the page visibly behind a modal. */
-  --el-1: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --el-2: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
-          0 8px 24px rgba(0, 0, 0, 0.40);
-  --el-3: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
-          0 24px 60px rgba(0, 0, 0, 0.60);
+  --el-1: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06);
+  --el-2: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
+          0 8px 24px var(--p-black-a40);
+  --el-3: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
+          0 24px 60px var(--p-black-a60);
   /* Same hairline ring and top inset highlight as el-2 above -- depth on a
      near-black page still has to come from the edge, not the shadow -- with
      the drop cast to the left instead of down. */
-  --el-left: 0 0 0 1px rgba(255, 255, 255, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.06),
-             -8px 0 24px rgba(0, 0, 0, 0.40);
+  --el-left: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
+             -8px 0 24px var(--p-black-a40);
   /* More translucent than the light value: a near-black --bg-surface mixed
      at the same 82% reads as a near-opaque card rather than glass, which
      defeats the point over a bright basemap (aerial photo, GSI std). The
      hairline needs its own lighter line for the same reason --card-border
      (a light-grey literal) does not read on a dark surface. */
   --glass: color-mix(in srgb, var(--bg-surface) 62%, transparent);
-  --glass-line: rgba(255, 255, 255, 0.16);
+  --glass-line: var(--p-white-a16);
   /* Deeper than the light wash: on a near-black page a 32% ink wash barely
      separates the panel from what it covers. */
-  --scrim: rgba(0, 0, 0, 0.55);
+  --scrim: var(--p-black-a55);
 }
 
 /* One global reduced-motion regime, so a stylesheet does not have to remember
