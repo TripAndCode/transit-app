@@ -436,15 +436,15 @@
   color: var(--text-secondary);
 }
 
-/* Card hover affordance for the clickable summary cards. Also carries the
-   .lift primitive's own transform/box-shadow transition (global.css):
-   this rule's own transition property would otherwise win on specificity
-   (two classes beat .lift's one) and drop them, leaving the lift to snap
-   instead of ease. */
+/* Card hover affordance for the clickable summary cards. Composes the
+   .lift primitive's own transition token (--lift-transition, global.css)
+   alongside this rule's own background transition: this rule's own
+   transition property would otherwise win on specificity (two classes
+   beat .lift's one) and drop the lift's transform/box-shadow, leaving it
+   to snap instead of ease. */
 .ov-card.ov-clickable {
   cursor: pointer;
-  transition: background var(--dur-1) var(--ease-out), transform var(--dur-2) var(--ease-out),
-    box-shadow var(--dur-2) var(--ease-out);
+  transition: var(--lift-transition), background var(--dur-1) var(--ease-out);
 }
 .ov-card.ov-clickable:hover {
   background: var(--bg-soft);
@@ -809,8 +809,11 @@
 .ov-routes-anchor {
   scroll-margin-top: 16px;
 }
-/* Feed-status dot: still by default; it breathes (motion block at the end
-   of this file) only inside BREATH_WINDOW_MS (overview/freshness.ts). */
+/* Feed-status dot: still at rest. It breathes (motion block at the end of
+   this file) only inside BREATH_WINDOW_MS (overview/freshness.ts), right
+   after a report lands; once that window closes, a still-live feed keeps
+   the shared .live-dot ring (global.css) running for the rest of the live
+   window instead. */
 .ov-fresh-dot {
   display: inline-block;
   width: 8px;
@@ -829,13 +832,15 @@
 /* The feed's ongoing "live" state (not only the moment a fresh report
    lands, which .ov-fresh-dot--live's breath covers): the shared .live-dot
    primitive's ring reads currentColor, so it's told the same green the dot
-   itself is already filled with. Full opacity rather than the dot's
-   resting 0.55 -- opacity applies to the ring too (it's the same element's
-   box-shadow), and at 0.55 the ring fades to an alpha too faint to read. */
+   itself is already filled with. */
 .ov-fresh-dot.live-dot {
   color: var(--delay-text-ok);
-  opacity: 1;
 }
+/* Full opacity (below, in the motion block) only under motion -- opacity
+   applies to the ring too (it's the same element's box-shadow), and at the
+   dot's resting 0.55 the ring fades to an alpha too faint to read. Under
+   reduced motion there is no ring (global.css turns .live-dot's animation
+   off), so brightening the dot here would have no cue to justify it. */
 
 /* BP.sm. Kept after the hero's base rules: an override of equal specificity
    placed earlier in the file loses to them at every width. */
@@ -850,15 +855,20 @@
 }
 
 /* The freshness dot's breath: a symmetric loop (the place --ease-in-out
-   belongs), never for a reduced-motion viewer. Exclusive with the
-   .live-dot ring below -- both set `animation`, so React only ever puts
-   one class on the dot at a time (OverviewHeroRow.tsx). */
+   belongs), never for a reduced-motion viewer. Exclusive with the shared
+   .live-dot ring (rule above, keyframes in global.css) -- both set
+   `animation`, so React only ever puts one class on the dot at a time
+   (OverviewHeroRow.tsx). Also carries .ov-fresh-dot.live-dot's opacity
+   bump (see that rule above) under the same condition: with no ring to
+   read under reduced motion, there is nothing for the brighter dot to
+   announce. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ov-breath {
     0%, 100% { opacity: 0.55; }
     50%      { opacity: 1; }
   }
   .ov-fresh-dot--live { animation: ov-breath calc(var(--dur-4) * 3) var(--ease-in-out) infinite; }
+  .ov-fresh-dot.live-dot { opacity: 1; }
 }
 
 /* Without subgrid, inside the build's browser floor, each route row keeps

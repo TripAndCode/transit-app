@@ -150,6 +150,33 @@ describe("ConcentrationBar", () => {
     expect(container.querySelector(".ov-conc-spotlight-spark")).toBeNull();
   });
 
+  it("draws the spotlight sparkline without the glint sheen -- this card sits inside a RevealSection, which is its own entrance", () => {
+    mockRoutes();
+    const { container } = renderBar(
+      <ConcentrationBar
+        periodRange={PERIOD}
+        movers={{
+          worse: [
+            {
+              route_code: "1471981638",
+              route_short_name: "70-3",
+              delta_min: 1.2,
+              delta_pct: 10,
+              current_avg_min: 5,
+              previous_avg_min: 4,
+              streak_weeks: 1,
+              sparkline_points: [3, 4, 5, 4],
+            },
+          ],
+          better: [],
+        }}
+        concentration={{ top_routes: [{ route_code: "1471981638", route_short_name: "70-3", share_pct: 100 }], rest_share_pct: 0 }}
+      />,
+    );
+    expect(container.querySelector(".ov-conc-spotlight-spark")).not.toBeNull();
+    expect(container.querySelector(".glint")).toBeNull();
+  });
+
   it("states every share as one of the delay of the routes it counts, and says how many and when", () => {
     const { container } = renderBar(<ConcentrationBar periodRange={PERIOD} concentration={concentration} limit={20} variant="modal" />);
     // Two listed routes and four more the API only counts.

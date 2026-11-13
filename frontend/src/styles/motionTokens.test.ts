@@ -72,10 +72,14 @@ describe("motion durations come from tokens", () => {
 describe("shared motion primitives (.lift, .glint, .live-dot)", () => {
   const globalCss = readFileSync(path.join(root, "styles", "global.css"), "utf8");
 
-  /** The declaration body of the first top-level rule (not inside any
-   *  `@media`) whose selector list includes `selector` exactly, e.g.
-   *  `.lift:hover, .lift:focus-visible`. Block comments are stripped first
-   *  so a comment mentioning the selector can't be mistaken for one. */
+  /** The declaration body of the first `{ ... }` block in file order whose
+   *  selector list matches `selector` exactly, e.g. `.lift:hover,
+   *  .lift:focus-visible`. The scan is a flat regex over the whole file,
+   *  not aware of `@media` nesting, so a same-selector rule inside an
+   *  earlier `@media` block is returned ahead of one outside it -- callers
+   *  that need the unnested rule specifically pick a `selector` unique to
+   *  it. Block comments are stripped first so a comment mentioning the
+   *  selector can't be mistaken for one. */
   function ruleBody(css: string, selector: string): string | null {
     for (const [, sel, body] of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
       if (sel.trim().split(/\s*,\s*/).join(", ") === selector) return body;
@@ -129,21 +133,26 @@ describe("shared motion primitives (.lift, .glint, .live-dot)", () => {
 
   it("times .lift and .glint only through var(--dur-*)/var(--ease-*)", () => {
     const lift = ruleBody(globalCss, ".lift");
-    expect(lift).toMatch(/transition:.*var\(--dur-\d\).*var\(--ease-[a-z-]+\)/);
+    expect(lift).toMatch(/transition:\s*var\(--lift-transition\)/);
+    // --lift-transition itself (the token .lift and every host composing
+    // alongside it both resolve to) carries the real timing.
+    const liftTransition = globalCss.match(/--lift-transition:\s*([^;]+);/)?.[1] ?? "";
+    expect(liftTransition).toMatch(/var\(--dur-\d\)\s+var\(--ease-[a-z-]+\)/);
     const noPref = reducedMotionBodies(globalCss, "no-preference");
     expect(noPref).toMatch(/\.glint\s*\{\s*animation:\s*glint-sweep\s+var\(--dur-\d\)\s+var\(--ease-[a-z-]+\)/);
   });
 
+  // Shared by the real assertion and its negative-control self-test below,
+  // so the two can never drift apart into checking different things.
+  const LIVE_RING_TIMING_RE =
+    /animation:\s*live-ring\s+calc\(var\(--dur-\d\)[^)]*\)\s+var\(--ease-[a-z-]+\)\s+infinite/;
+
   it("times .live-dot's loop only through var(--dur-*)/var(--ease-*)", () => {
-    expect(globalCss).toMatch(
-      /\.live-dot\s*\{\s*animation:\s*live-ring\s+calc\(var\(--dur-\d\)[^)]*\)\s+var\(--ease-[a-z-]+\)\s+infinite/,
-    );
+    expect(globalCss).toMatch(new RegExp(`\\.live-dot\\s*\\{\\s*${LIVE_RING_TIMING_RE.source}`));
   });
 
   it("fails this test's own matcher on a hard-coded duration, proving it would catch one", () => {
-    expect("animation: live-ring 2.4s ease-in-out infinite").not.toMatch(
-      /animation:\s*live-ring\s+calc\(var\(--dur-\d\)[^)]*\)\s+var\(--ease-[a-z-]+\)\s+infinite/,
-    );
+    expect("animation: live-ring 2.4s ease-in-out infinite").not.toMatch(LIVE_RING_TIMING_RE);
   });
 
   it("gives .lift's hover/focus lift no transform under reduced motion", () => {

@@ -293,6 +293,40 @@ describe("elevation tokens", () => {
       expect(decl(block, "--el-left")).toMatch(/-\d+px 0/);
     }
   });
+
+  /** Top-level `,`-separated shadow layers of a box-shadow value, ignoring
+   *  commas nested inside a `var()`/`color-mix()` call. */
+  function shadowLayers(value: string): string[] {
+    const layers: string[] = [];
+    let depth = 0;
+    let current = "";
+    for (const ch of value) {
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      if (ch === "," && depth === 0) {
+        layers.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) layers.push(current.trim());
+    return layers;
+  }
+
+  /** Each layer's inset-ness, in position order -- the shape a box-shadow
+   *  transition has to share between its `from` and `to` values to
+   *  interpolate at all; a mismatched layer count or a layer that flips
+   *  from outer to inset (or back) makes the browser snap instead of ease. */
+  function shadowShape(value: string): boolean[] {
+    return shadowLayers(value).map((layer) => /^inset\b/.test(layer));
+  }
+
+  it("--el-1 and --el-2 share shadow-layer shape in both themes, so .lift's transition can interpolate", () => {
+    for (const block of [rootBlock, darkBlock]) {
+      expect(shadowShape(decl(block, "--el-1")!)).toEqual(shadowShape(decl(block, "--el-2")!));
+    }
+  });
 });
 
 /** Alpha channel of an `rgba(r, g, b, a)` string, as a number. */

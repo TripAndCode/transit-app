@@ -137,15 +137,10 @@ export function InlineSparkline({
           className="glint"
           pathLength={100}
           fill="none"
-          // Lighter than the line itself (mixed toward the card's own
-          // surface) so the sweep reads as a sheen, not a thicker line.
-          // --glint-delay overrides the primitive's default (a full
-          // --dur-4, timed to the draw-on above) to 0s when the line is
-          // already fully drawn on mount, so the sheen doesn't wait on ink
-          // that's already there.
+          // Lighter than the line itself (see global.css's .glint for why
+          // it mixes toward --glint-tint rather than the line's own stroke).
           style={{
-            stroke: `color-mix(in srgb, ${stroke} 45%, var(--bg-surface))`,
-            ...(drawOn ? {} : ({ "--glint-delay": "0s" } as CSSProperties)),
+            stroke: `color-mix(in srgb, ${stroke} 45%, var(--glint-tint))`,
           }}
           strokeWidth="3"
           strokeLinecap="round"

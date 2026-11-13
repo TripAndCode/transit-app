@@ -61,6 +61,11 @@ describe("overview.css living hero", () => {
     expect(decl(ruleBody(css, ".ov-fresh-dot {"), "background")).toBe("var(--delay-text-ok)");
     expect(decl(ruleBody(css, ".ov-fresh-dot--stale {"), "background")).toBe("var(--text-tertiary)");
   });
+  it("only brightens the live dot to full opacity where the ring can actually run", () => {
+    expect(decl(ruleBody(css, ".ov-fresh-dot.live-dot {"), "opacity")).toBeNull();
+    const motion = ruleBody(css, "@media (prefers-reduced-motion: no-preference) {");
+    expect(decl(ruleBody(motion, ".ov-fresh-dot.live-dot {"), "opacity")).toBe("1");
+  });
   it("the ribbon's path transitions its geometry on --dur-3 only", () => {
     expect(decl(ruleBody(css, ".ov-pulse-ribbon path {"), "transition")).toBe("d var(--dur-3) var(--ease-out)");
   });

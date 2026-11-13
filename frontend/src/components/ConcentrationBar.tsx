@@ -99,7 +99,6 @@ export function ConcentrationBar({
               width={320}
               height={48}
               accent="var(--trend-neutral)"
-              glint
               forceAccent
               showEndDot
               drawOn={false}
