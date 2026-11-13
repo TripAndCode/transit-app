@@ -353,9 +353,9 @@ describe("type scale tokens", () => {
 
 describe("radius tokens", () => {
   it.each([
-    ["--radius", "6px"],
-    ["--radius-lg", "10px"],
-    ["--radius-xl", "14px"],
+    ["--radius", "8px"],
+    ["--radius-lg", "12px"],
+    ["--radius-xl", "16px"],
   ])("%s is %s", (prop, value) => {
     expect(decl(rootBlock, prop)).toBe(value);
   });
@@ -385,7 +385,7 @@ describe("the type families", () => {
   it.each([
     ["--font-body", '"BIZ UDPGothic"'],
     ["--font-display", '"BIZ UDPGothic"'],
-    ["--font-num", '"Barlow Semi Condensed"'],
+    ["--font-num", '"Inter Tight"'],
     ["--font-mono", '"IBM Plex Mono"'],
   ])("%s leads with %s", (prop, face) => {
     expect(decl(rootBlock, prop)?.startsWith(face)).toBe(true);
@@ -469,7 +469,7 @@ describe("index.html font loading", () => {
 
   it("requests only the font weights the type scale uses", () => {
     expect(indexHtml).toMatch(/BIZ\+UDPGothic:wght@400;700/);
-    expect(indexHtml).toMatch(/Barlow\+Semi\+Condensed:wght@500;600;700/);
+    expect(indexHtml).toMatch(/Inter\+Tight:wght@500;600;700/);
     expect(indexHtml).toMatch(/IBM\+Plex\+Mono:wght@400;500/);
     expect(indexHtml).not.toMatch(/Noto\+S(ans|erif)\+JP/);
   });
@@ -604,6 +604,17 @@ describe("the text levels clear AA on every surface and the selected state, in b
   )("%s %s on %s", (theme, prop, surface) => {
     const block = theme === "light" ? rootBlock : darkBlock;
     expect(contrastRatio(resolveDecl(block, prop)!, resolveDecl(block, surface)!)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("rank primary > secondary > tertiary by contrast on the surface, in both themes", () => {
+    for (const block of [rootBlock, darkBlock]) {
+      const surface = resolveDecl(block, "--bg-surface")!;
+      const [primary, secondary, tertiary] = ["--text-primary", "--text-secondary", "--text-tertiary"].map((prop) =>
+        contrastRatio(resolveDecl(block, prop)!, surface),
+      );
+      expect(primary).toBeGreaterThan(secondary);
+      expect(secondary).toBeGreaterThan(tertiary);
+    }
   });
 });
 
@@ -943,6 +954,17 @@ describe("accentColorResolved()", () => {
 
   it("falls back to the light theme's surface the same way", () => {
     expect(surfaceColorResolved().toLowerCase()).toBe(resolveDecl(rootBlock, "--bg-surface")!.toLowerCase());
+  });
+});
+
+describe("the landing hero's palette fallbacks", () => {
+  it("each match the light theme's value of the token they stand in for", () => {
+    const src = readFileSync(resolve(process.cwd(), "src/pages/landing/useHeroMapAnimation.ts"), "utf8");
+    const pairs = [...src.matchAll(/color\("(--[\w-]+)", "(#[0-9A-Fa-f]{6})"\)/g)];
+    expect(pairs.length, "no color(token, fallback) calls found in useHeroMapAnimation.ts").toBeGreaterThan(0);
+    for (const [, prop, fallback] of pairs) {
+      expect(fallback.toLowerCase(), prop).toBe(resolveDecl(rootBlock, prop)!.toLowerCase());
+    }
   });
 });
 
