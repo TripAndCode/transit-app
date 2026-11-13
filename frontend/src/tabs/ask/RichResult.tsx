@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, type CSSProperties, type ReactNode } from "react";
 import type { TFunction } from "i18next";
 import type { ToolResult, TrendDay } from "../../api/types";
 import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
@@ -7,7 +7,9 @@ import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
 import { conditionsLabel, formatWindow, provenancePath, resultRowCount, toolLabel } from "./provenance";
+import { MAX_STAGGER, rankedBarColor, rankedBarColumn, rankedBarShares } from "./rankedBars";
 import { SHARED_TABLE } from "../../components/tableStyles";
+import "./rankedBars.css";
 
 type Conditions = { dow?: string; time_band?: string; service?: string } | null;
 
@@ -97,6 +99,10 @@ function ResultTable({
   // pipeline/stats.py), not a plain value; render a short marker only
   // when true rather than the raw "true"/"false".
   const lowConfIdx = cols.findIndex((c) => c === "low_confidence");
+  const visibleRows = rows.slice(0, 50);
+  // Which tables get a ranked bar, and why: see ./rankedBars.ts.
+  const barColumn = rankedBarColumn(cols);
+  const barShares = barColumn ? rankedBarShares(visibleRows.map((row) => (row as unknown[])[barColumn.index])) : [];
   return (
     <div style={{ overflowX: "auto" }}>
       {/* The element style is the shared one. The cells are not: this table
@@ -122,11 +128,11 @@ function ResultTable({
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, 50).map((row, i) => (
+          {visibleRows.map((row, i) => (
             <tr key={i} style={{ borderTop: "1px solid var(--border-soft)" }}>
-              {(row as unknown[]).map((cell, j) => (
-                <td key={j} style={{ padding: "6px 10px" }}>
-                  {j === routeIdx
+              {(row as unknown[]).map((cell, j) => {
+                const text =
+                  j === routeIdx
                     ? formatRoute(cell as string)
                     : j === serviceTypeIdx && cell != null
                       ? serviceValueLabel(String(cell), t)
@@ -138,9 +144,32 @@ function ResultTable({
                           ? "—"
                           : typeof cell === "number"
                             ? formatNumber(cell)
-                            : String(cell)}
-                </td>
-              ))}
+                            : String(cell);
+                const isBarColumn = barColumn != null && j === barColumn.index;
+                return (
+                  <td key={j} style={{ padding: "6px 10px" }}>
+                    {isBarColumn ? (
+                      <span className="ask-rank-bar-cell">
+                        <span className="ask-rank-bar-track" aria-hidden="true">
+                          <span
+                            className="ask-rank-bar-fill"
+                            style={
+                              {
+                                width: `${barShares[i] * 100}%`,
+                                "--stagger": Math.min(i, MAX_STAGGER),
+                                background: rankedBarColor(barColumn!.kind, cell),
+                              } as CSSProperties
+                            }
+                          />
+                        </span>
+                        {text}
+                      </span>
+                    ) : (
+                      text
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

@@ -1,0 +1,39 @@
+.ask-rank-bar-cell { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+.ask-rank-bar-track {
+  display: inline-block;
+  width: 48px;
+  height: 6px;
+  border-radius: var(--radius);
+  background: var(--track-bg);
+  overflow: hidden;
+  flex: none;
+}
+
+/* The bar's share sets its actual width, a real layout dimension set inline
+   per row (e.g. width: 42%) -- never a resting scaleX, which would squash
+   the rounded right end down to the scaled-in size. The entrance animation
+   below only scales the already correctly-sized box from 0 for its own
+   duration; it exists only under no-preference, so reduced motion leaves the
+   box at its real width with no transform at all. */
+.ask-rank-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transform-origin: left center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ask-rank-bar-grow {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+  .ask-rank-bar-fill {
+    animation: ask-rank-bar-grow var(--dur-3) var(--ease-out) backwards;
+    animation-delay: calc(var(--stagger, 0) * var(--dur-1) / 3);
+  }
+}
