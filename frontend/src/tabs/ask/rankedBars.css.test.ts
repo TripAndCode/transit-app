@@ -8,8 +8,8 @@ const MOTION_ALLOWED = "@media (prefers-reduced-motion: no-preference)";
 const MOTION_REDUCED = "@media (prefers-reduced-motion: reduce)";
 
 describe("rankedBars.css motion", () => {
-  it("rests at the bar's own finished share, not scaleX(0)", () => {
-    expect(decl(ruleBody(css, ".ask-rank-bar-fill {"), "transform")).toBe("scaleX(var(--bar-share, 0))");
+  it("rests at no transform, so the bar's real width is never scaled down", () => {
+    expect(decl(ruleBody(css, ".ask-rank-bar-fill {"), "transform")).toBeNull();
   });
 
   it("the grow-in animation lives only inside the motion-allowed block, on token timing", () => {
@@ -27,7 +27,7 @@ describe("rankedBars.css motion", () => {
     expect(decl(ruleBody(css, ".ask-rank-bar-fill {"), "animation")).toBeNull();
   });
 
-  it("explicitly turns the animation off under reduced motion, leaving the bar at its finished share", () => {
+  it("explicitly turns the animation off under reduced motion, leaving the bar at its real (unscaled) width", () => {
     const reduced = ruleBody(css.slice(css.indexOf(MOTION_REDUCED)), MOTION_REDUCED);
     expect(decl(ruleBody(reduced, ".ask-rank-bar-fill {"), "animation")).toBe("none");
   });

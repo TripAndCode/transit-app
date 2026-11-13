@@ -22,21 +22,24 @@ export function rankedBarColumn(columns: readonly string[]): { index: number; ki
 }
 
 /** Each row's bar share (0-1) of the largest value shown, for the column
- *  `rankedBarColumn` names. A non-finite, missing or non-positive value gets
- *  no bar (`null`) rather than a negative or `NaN` width; when every shown
- *  value is non-positive, every row gets no bar, since there is nothing to
- *  be the largest of. */
-export function rankedBarShares(values: readonly unknown[]): (number | null)[] {
+ *  `rankedBarColumn` names: one share per row, so every row keeps its track
+ *  and stays aligned. A non-finite, missing or non-positive value gets a
+ *  share of 0 (an empty track) rather than a negative or `NaN` width; when
+ *  every shown value is non-positive, every row's share is 0, since there is
+ *  nothing to be the largest of. */
+export function rankedBarShares(values: readonly unknown[]): number[] {
   const finite = values.filter((v): v is number => typeof v === "number" && Number.isFinite(v) && v > 0);
   const max = finite.length > 0 ? Math.max(...finite) : 0;
-  if (max <= 0) return values.map(() => null);
-  return values.map((v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v / max : null));
+  if (max <= 0) return values.map(() => 0);
+  return values.map((v) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v / max : 0));
 }
 
 /** The bar's fill colour: the delay ramp for a delay-minutes metric (never
  *  alarm red -- see styles/tokens.ts), the product accent for a metric where
  *  a bigger bar is not necessarily worse (an on-time rate, a late-trip
- *  count). */
-export function rankedBarColor(kind: RankedBarKind, value: number): string {
-  return kind === "delay" ? delayRampVar(value) : "var(--accent)";
+ *  count). `value` falls back to 0 for a non-finite or missing cell, which is
+ *  always paired with a 0 share, so the colour never shows. */
+export function rankedBarColor(kind: RankedBarKind, value: unknown): string {
+  const v = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return kind === "delay" ? delayRampVar(v) : "var(--accent)";
 }

@@ -10,7 +10,9 @@ const MOTION_REDUCED = "@media (prefers-reduced-motion: reduce)";
 describe("thinkingShimmer.css motion", () => {
   it("the sweep lives only inside the motion-allowed block, on token timing, looping", () => {
     const allowed = ruleBody(css.slice(css.indexOf(MOTION_ALLOWED)), MOTION_ALLOWED);
-    expect(allowed).toMatch(/\.ask-thinking-shimmer-line\s*\{[^}]*animation:\s*ask-thinking-sweep var\(--dur-4\) linear infinite/);
+    expect(allowed).toMatch(
+      /\.ask-thinking-shimmer-line\s*\{[^}]*animation:\s*ask-thinking-sweep calc\(var\(--dur-4\) \* 1\.5\) var\(--ease-in-out\) infinite/,
+    );
     const outside = css.replace(allowed, "");
     expect(outside).not.toMatch(/ask-thinking-sweep/);
   });

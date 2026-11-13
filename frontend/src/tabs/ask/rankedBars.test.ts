@@ -43,15 +43,15 @@ describe("rankedBarShares", () => {
     expect(rankedBarShares([5.2])).toEqual([1]);
   });
 
-  it("gives zero, negative, non-numeric and missing values no bar, without producing NaN", () => {
+  it("gives zero, negative, non-numeric and missing values a share of 0, without producing NaN", () => {
     const shares = rankedBarShares([8, 0, -3, null, undefined, "n/a"]);
     expect(shares[0]).toBe(1);
-    expect(shares.slice(1)).toEqual([null, null, null, null, null]);
-    expect(shares.some((s) => typeof s === "number" && Number.isNaN(s))).toBe(false);
+    expect(shares.slice(1)).toEqual([0, 0, 0, 0, 0]);
+    expect(shares.some((s) => Number.isNaN(s))).toBe(false);
   });
 
-  it("gives every row no bar when nothing shown is positive", () => {
-    expect(rankedBarShares([0, -1, -2])).toEqual([null, null, null]);
+  it("gives every row a share of 0 when nothing shown is positive", () => {
+    expect(rankedBarShares([0, -1, -2])).toEqual([0, 0, 0]);
   });
 });
 
@@ -64,5 +64,11 @@ describe("rankedBarColor", () => {
   it("colours a non-delay metric with the product accent regardless of value", () => {
     expect(rankedBarColor("accent", 95)).toBe("var(--accent)");
     expect(rankedBarColor("accent", 1)).toBe("var(--accent)");
+  });
+
+  it("falls back to 0 for a non-finite or missing value, rather than NaN", () => {
+    expect(rankedBarColor("delay", null)).toBe("var(--d0)");
+    expect(rankedBarColor("delay", undefined)).toBe("var(--d0)");
+    expect(rankedBarColor("delay", Number.NaN)).toBe("var(--d0)");
   });
 });

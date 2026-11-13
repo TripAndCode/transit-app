@@ -26,16 +26,20 @@
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  /* One tile period (200% tile, travelled 100%) per loop, so the sweep
+     repeats seamlessly instead of jumping; the duration matches the
+     skeleton pulse's calm pace (see .skeleton in global.css) rather than a
+     shorter, busier loop. */
   @keyframes ask-thinking-sweep {
     from {
-      background-position: 200% 0;
+      background-position: 100% 0;
     }
     to {
-      background-position: -200% 0;
+      background-position: -100% 0;
     }
   }
   .ask-thinking-shimmer-line {
-    animation: ask-thinking-sweep var(--dur-4) linear infinite;
+    animation: ask-thinking-sweep calc(var(--dur-4) * 1.5) var(--ease-in-out) infinite;
   }
 }
 

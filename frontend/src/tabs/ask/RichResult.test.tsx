@@ -115,11 +115,11 @@ describe("RichResult ranked bars", () => {
     );
     const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
     expect(fills).toHaveLength(2);
-    expect(fills[0].style.getPropertyValue("--bar-share")).toBe("1");
-    expect(fills[1].style.getPropertyValue("--bar-share")).toBe(String(4.7 / 9.4));
+    expect(fills[0].style.width).toBe("100%");
+    expect(fills[1].style.width).toBe(`${(4.7 / 9.4) * 100}%`);
   });
 
-  it("draws no bar for a zero, negative or missing value, and never a NaN share", () => {
+  it("gives every row a track, with an empty one for a zero, negative or missing value, and never a NaN width", () => {
     const { container } = renderWithProviders(
       <Wrapper
         result={{
@@ -136,10 +136,10 @@ describe("RichResult ranked bars", () => {
       />,
     );
     const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
-    expect(fills).toHaveLength(1);
-    expect(fills[0].style.getPropertyValue("--bar-share")).toBe("1");
+    expect(fills).toHaveLength(4);
+    expect([...fills].map((fill) => fill.style.width)).toEqual(["100%", "0%", "0%", "0%"]);
     for (const fill of fills) {
-      expect(Number.isNaN(Number(fill.style.getPropertyValue("--bar-share")))).toBe(false);
+      expect(Number.isNaN(Number.parseFloat(fill.style.width))).toBe(false);
     }
   });
 

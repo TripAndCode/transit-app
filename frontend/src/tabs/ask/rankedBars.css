@@ -10,16 +10,16 @@
   flex: none;
 }
 
-/* The resting/final state is the finished bar -- its share of the row's
-   axis, set per row via --bar-share (0-1; same per-instance convention as
-   ConcentrationBar/CompareBars). The entrance animation below only adds how
-   it got there; disabling it (reduced motion) must never leave the bar
-   short of its own value. */
+/* The bar's share sets its actual width, a real layout dimension set inline
+   per row (e.g. width: 42%) -- never a resting scaleX, which would squash
+   the rounded right end down to the scaled-in size (see compareBars.css for
+   the same trap). The entrance animation below only scales the already
+   correctly-sized box from 0 for its own duration; disabling it (reduced
+   motion) leaves the box at its real width with no transform at all. */
 .ask-rank-bar-fill {
   display: block;
   height: 100%;
   border-radius: inherit;
-  transform: scaleX(var(--bar-share, 0));
   transform-origin: left center;
 }
 
@@ -29,7 +29,7 @@
       transform: scaleX(0);
     }
     to {
-      transform: scaleX(var(--bar-share, 0));
+      transform: scaleX(1);
     }
   }
   .ask-rank-bar-fill {
