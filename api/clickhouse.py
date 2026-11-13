@@ -207,7 +207,11 @@ async def table_holding(ch, agency_id: int, day: date) -> str:
     archive rows in `updates` win over polls of it left in the live table.
     Each day is read from one table, so a service day split between them (an
     archived calendar day whose after-midnight tail is still only live) reads
-    `updates` without that tail until the next calendar day is promoted.
+    `updates` without that tail until the next calendar day is promoted. The
+    same holds for the readings captured after the next day's cutover that a
+    stop event files back under *day* (`pipeline.service_day.filed_date_ch`):
+    the table is probed by the capture's own service date, so those readings
+    are read only once the next day is promoted too.
     """
     if live_table_for(day) == UPDATES_TABLE:
         return UPDATES_TABLE

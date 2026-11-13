@@ -39,7 +39,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
-from pipeline.service_day import service_date_of, service_day_moment_utc, service_day_offset
+from pipeline.service_day import filed_date_of, service_day_moment_utc, service_day_offset
 from pipeline.strategies._pb import _dec, _fields, _int32, _uint16, decode_feed_timestamp
 from pipeline.strategies._time import Status, parse_departure_time
 
@@ -479,7 +479,9 @@ def parse_feed(
     trip with no stop still to come, or that the timetable lists no stop for,
     gets one trip-level row instead
     (pipeline.clickhouse.TRIP_LEVEL_STOP_SEQUENCE), which keeps the
-    cancellation with no stop, delay or schedule.
+    cancellation with no stop or delay. It stores its trip's last scheduled
+    departure as its own scheduled_sec (``_last_departure``), so it is filed
+    under its trip's day like the trip's stops.
     """
     trip_updates = list(_decode_trip_updates(pb_bytes))
     decoded = list(_stop_rows(trip_updates))
@@ -604,15 +606,17 @@ def parse_feed(
     for trip_id, rt_route_id in cancelled:
         route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
         route_code = rt_route_id or route
-        stops = _stops_to_come(cancelled_stops.get(trip_id, []), captured)
+        trip_stops = cancelled_stops.get(trip_id, [])
+        stops = _stops_to_come(trip_stops, captured)
         if not stops:
             rows.append(
                 (
                     *(file_name, captured_at, trip_id, svc, None, route_code, TRIP_LEVEL_STOP_SEQUENCE),
-                    *(None, None, None, TRIP_CANCELED, None, feed_timestamp, None, static_version_id),
+                    *(None, None, None, TRIP_CANCELED, None, feed_timestamp, _last_departure(trip_stops)),
+                    static_version_id,
                 )
             )
-        for stop_seq, stop_id, departure_time in stops:
+        for stop_seq, stop_id, departure_time in _filed_under_trips_day(stops, trip_stops, captured):
             row, status = _stored_row(
                 *(file_name, captured_at, trip_id, svc, departure_time, route_code, stop_seq, None, stop_id, None),
                 *(TRIP_CANCELED, None, feed_timestamp, static_version_id),
@@ -689,12 +693,51 @@ def _instant(captured_at: str) -> datetime:
     return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
 
 
+def _last_departure(stops: list[_StopTime]) -> int | None:
+    """The scheduled seconds of the last stop of *stops* that has a usable
+    departure time, which a trip-level row stores as its own: every stop
+    event is filed under, and held to, the service day its scheduled
+    departure gives (pipeline.service_day.filed_date_ch,
+    pipeline.db.timely_reading_ch), so the row lands on its trip's day.
+    None for a trip the timetable lists no timed stop for."""
+    seconds = [sec for _seq, _stop_id, departure in stops if (sec := parse_departure_time(departure)[2]) is not None]
+    return seconds[-1] if seconds else None
+
+
+def _trip_day(seconds: list[int | None], captured: datetime) -> date:
+    """The service day of a trip whose stops are scheduled at *seconds*, as a
+    poll captured at *captured* sees it: the one its first departure is filed
+    under (pipeline.service_day.filed_date_of)."""
+    return filed_date_of(captured, next((sec for sec in seconds if sec is not None), None))
+
+
+def _filed_under_trips_day(
+    stops: list[_StopTime], trip_stops: list[_StopTime], captured: datetime | None
+) -> list[_StopTime]:
+    """The stops of *stops* whose own reading at *captured* files under the
+    service day of the trip *trip_stops* schedules. Every stop event is filed
+    by its own scheduled departure, so a withdrawal of a stop that files
+    under another day would share that day's stop event with a run of the
+    same trip there and could replace its last reading; a later poll, nearer
+    the stop's departure, withdraws it under the trip's day instead."""
+    if captured is None:
+        return stops
+    day = _trip_day([parse_departure_time(departure)[2] for _seq, _stop_id, departure in trip_stops], captured)
+    return [stop for stop in stops if filed_date_of(captured, parse_departure_time(stop[2])[2]) == day]
+
+
 def _stops_to_come(stops: list[_StopTime], captured: datetime | None) -> list[_StopTime]:
     """The stops of *stops*, in stop_sequence order, after the last one the
     trip has left by *captured*: a stop whose scheduled departure, on the
-    service day *captured* falls in (pipeline.service_day), is earlier than
-    *captured*. A stop with no usable departure time is left once a stop
-    after it is.
+    trip's service day, is earlier than *captured*. A stop with no usable
+    departure time is left once a stop after it is.
+
+    The trip's service day is the one its first departure is filed under
+    (pipeline.service_day.filed_date_of): a poll just before the cutover
+    cancels the next service day's run about to start, not the run of the
+    day the capture falls in. Each stop's own reading is still filed by its
+    own departure, so only the withdrawals that land on this day are stored
+    (:func:`_filed_under_trips_day`).
 
     The schedule alone decides, not the trip's last predicted delay: a poll
     that cancels a trip listing no stop carries no delay, and the feed's
@@ -703,11 +746,11 @@ def _stops_to_come(stops: list[_StopTime], captured: datetime | None) -> list[_S
     counts as left, and its last prediction stands."""
     if captured is None:
         return stops
-    day = service_date_of(captured)
+    seconds = [parse_departure_time(departure)[2] for _seq, _stop_id, departure in stops]
+    day = _trip_day(seconds, captured)
     left = [
         i
-        for i, (_seq, _stop_id, departure) in enumerate(stops)
-        if (sec := parse_departure_time(departure)[2]) is not None
-        and service_day_moment_utc(day, service_day_offset(sec)) < captured
+        for i, sec in enumerate(seconds)
+        if sec is not None and service_day_moment_utc(day, service_day_offset(sec)) < captured
     ]
     return stops[left[-1] + 1 :] if left else stops

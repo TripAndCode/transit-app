@@ -26,8 +26,15 @@ After ingest, `analyze` turns the raw readings into summary tables:
    departure. A stop whose scheduled departure has passed keeps its departure, so a
    late-running trip cancelled between a stop's scheduled and its delayed departure keeps
    that stop's last prediction: the cancellation carries no delay, and ingest goes by the
-   timetable alone. A trip with no stop still to come, or with no stops in the timetable,
-   is stored as one trip-level row: it counts as not run, and is not a stop. Days ingested
+   timetable alone. The departures are those of the trip's own service day, the one its
+   first departure is filed under, so a cancellation received shortly before the 04:00
+   cutover for a trip starting soon after it withdraws that run's stops. Only the stops
+   whose own report files under that day are withdrawn by that poll; a later poll, nearer
+   their departure, withdraws the rest, except a stop with no scheduled time, whose report
+   always files under the day it is captured in. A trip with no
+   stop still to come, or with no stops in the timetable,
+   is stored as one trip-level row: it counts as not run, and is not a stop. It carries the
+   trip's last scheduled departure, so it is filed under the trip's own day. Days ingested
    before method `2026.11.6` keep the earlier shape, the one trip-level row, unless they
    are ingested again from the archive. Each stop's cancellation takes the route the
    feed's cancellation names, or the timetable's when it names none, so it replaces a
