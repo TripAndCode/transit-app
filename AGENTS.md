@@ -169,7 +169,8 @@ tier routing, the high-risk overlay and the fix cap.
   derived state over synchronization effects.
 - All visible strings use `t()` with matching keys in both
   `frontend/src/i18n/locales/{ja,en}.json`. Intentional source-language exceptions
-  require `i18n-ignore`.
+  require `i18n-ignore`. Add, change or remove a key with `npm run i18n:set` (from
+  `frontend/`) instead of reading or editing those two files by hand.
 - Keep UI calm: no alarm-red defaults, dense panels, or stressful motion.
 - New pages are lazy-loaded. Keep MapLibre out of the entry chunk.
 - Server-side strings live in `_LOCALES` in `pipeline/query/tools.py`; update both
