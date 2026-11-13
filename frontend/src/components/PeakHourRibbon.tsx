@@ -306,7 +306,7 @@ export function PeakHourRibbon({
   const wrapperClass =
     variant === "modal"
       ? "ov-peak-modal"
-      : `ov-card${clickable ? " ov-clickable" : ""}`;
+      : `ov-card${clickable ? " ov-clickable lift" : ""}`;
   const interactiveProps = clickable
     ? {
         tabIndex: 0,

@@ -64,3 +64,116 @@ describe("motion durations come from tokens", () => {
     expect(LITERAL.test("opacity 0s".replace(NOT_MOTION, "$1"))).toBe(false);
   });
 });
+
+// The shared .lift/.glint/.live-dot primitives (global.css): each is read
+// back out of the real file rather than re-declared here, so a future edit
+// that breaks one of these invariants fails this test instead of silently
+// drifting from it.
+describe("shared motion primitives (.lift, .glint, .live-dot)", () => {
+  const globalCss = readFileSync(path.join(root, "styles", "global.css"), "utf8");
+
+  /** The declaration body of the first top-level rule (not inside any
+   *  `@media`) whose selector list includes `selector` exactly, e.g.
+   *  `.lift:hover, .lift:focus-visible`. Block comments are stripped first
+   *  so a comment mentioning the selector can't be mistaken for one. */
+  function ruleBody(css: string, selector: string): string | null {
+    for (const [, sel, body] of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (sel.trim().split(/\s*,\s*/).join(", ") === selector) return body;
+    }
+    return null;
+  }
+
+  /** Every top-level `marker { ... }` block's span and body, matched by
+   *  brace depth rather than a regex that stops at the block's first `}` --
+   *  global.css holds several `@media (prefers-reduced-motion: ...)`
+   *  blocks, each with nested rules of its own. */
+  function blocksOf(css: string, marker: string): { start: number; end: number; body: string }[] {
+    const out: { start: number; end: number; body: string }[] = [];
+    let from = 0;
+    for (let start; (start = css.indexOf(marker, from)) !== -1; ) {
+      const openBrace = css.indexOf("{", start);
+      let depth = 1;
+      let i = openBrace + 1;
+      while (depth > 0 && i < css.length) {
+        if (css[i] === "{") depth++;
+        else if (css[i] === "}") depth--;
+        i++;
+      }
+      out.push({ start, end: i, body: css.slice(openBrace + 1, i - 1) });
+      from = i;
+    }
+    return out;
+  }
+
+  /** Every `@media (prefers-reduced-motion: <mode>)` block's bodies,
+   *  concatenated -- global.css declares more than one. */
+  function reducedMotionBodies(css: string, mode: "reduce" | "no-preference"): string {
+    return blocksOf(css, `@media (prefers-reduced-motion: ${mode})`)
+      .map((b) => b.body)
+      .join("\n");
+  }
+
+  /** `css` with every `@media (prefers-reduced-motion: <mode>)` block
+   *  removed entirely, so a rule that survives is one reduced motion can
+   *  still reach. */
+  function withoutReducedMotionBlocks(css: string, mode: "reduce" | "no-preference"): string {
+    const blocks = blocksOf(css, `@media (prefers-reduced-motion: ${mode})`);
+    let out = "";
+    let last = 0;
+    for (const b of blocks) {
+      out += css.slice(last, b.start);
+      last = b.end;
+    }
+    return out + css.slice(last);
+  }
+
+  it("times .lift and .glint only through var(--dur-*)/var(--ease-*)", () => {
+    const lift = ruleBody(globalCss, ".lift");
+    expect(lift).toMatch(/transition:.*var\(--dur-\d\).*var\(--ease-[a-z-]+\)/);
+    const noPref = reducedMotionBodies(globalCss, "no-preference");
+    expect(noPref).toMatch(/\.glint\s*\{\s*animation:\s*glint-sweep\s+var\(--dur-\d\)\s+var\(--ease-[a-z-]+\)/);
+  });
+
+  it("times .live-dot's loop only through var(--dur-*)/var(--ease-*)", () => {
+    expect(globalCss).toMatch(
+      /\.live-dot\s*\{\s*animation:\s*live-ring\s+calc\(var\(--dur-\d\)[^)]*\)\s+var\(--ease-[a-z-]+\)\s+infinite/,
+    );
+  });
+
+  it("fails this test's own matcher on a hard-coded duration, proving it would catch one", () => {
+    expect("animation: live-ring 2.4s ease-in-out infinite").not.toMatch(
+      /animation:\s*live-ring\s+calc\(var\(--dur-\d\)[^)]*\)\s+var\(--ease-[a-z-]+\)\s+infinite/,
+    );
+  });
+
+  it("gives .lift's hover/focus lift no transform under reduced motion", () => {
+    const reduced = reducedMotionBodies(globalCss, "reduce");
+    const lift = ruleBody(reduced, ".lift:hover, .lift:focus-visible");
+    expect(lift).not.toBeNull();
+    expect(lift).toMatch(/transform:\s*none/);
+  });
+
+  it("turns .glint fully off (invisible, not just instant) under reduced motion", () => {
+    // The base rule (outside every @media) is the reduced-motion resting
+    // state: opacity 0, so there is nothing to see without the
+    // no-preference block's animation ever running.
+    const base = ruleBody(globalCss, ".glint");
+    expect(base).toMatch(/opacity:\s*0\b/);
+    // And that animation lives only inside the no-preference block(s) --
+    // not declared again anywhere reduced motion can still reach it.
+    const outsideNoPreference = withoutReducedMotionBlocks(globalCss, "no-preference");
+    expect(outsideNoPreference).not.toMatch(/\.glint\s*\{[^}]*animation:/);
+  });
+
+  it("explicitly turns .live-dot's loop off under reduced motion", () => {
+    const reduced = reducedMotionBodies(globalCss, "reduce");
+    expect(ruleBody(reduced, ".live-dot")).toMatch(/animation:\s*none/);
+  });
+
+  it("limits .lift's hover transform to at most 4px", () => {
+    const lift = ruleBody(globalCss, ".lift:hover, .lift:focus-visible");
+    const translate = lift?.match(/translateY\((-?\d+(?:\.\d+)?)px\)/);
+    expect(translate).not.toBeNull();
+    expect(Math.abs(Number(translate![1]))).toBeLessThanOrEqual(4);
+  });
+});

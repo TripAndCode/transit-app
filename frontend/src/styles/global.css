@@ -955,6 +955,84 @@ summary::-webkit-details-marker { display: none; }
   }
 }
 
+/* ---------- Shared interactive motion primitives ----------
+   Reused across tabs, so a page composes "lively but calm" from one
+   definition rather than retuning distance/timing/shadow per screen. */
+
+/* An interactive card (one whose whole surface opens something) rises
+   slightly with its shadow stepping up to the floating tier (--el-2) --
+   the tier the elevation scale already names for a hover lift -- on hover
+   or keyboard focus. The lift itself is an explicit reduced-motion
+   casualty (not merely a faster one): a viewer who has asked for no motion
+   gets no transform, only the instant shadow cue.
+   A host selector that declares its own `transition` (to animate some
+   other property on the same hover) outranks this one-class rule on
+   specificity and silently drops transform/box-shadow from the
+   transitioned set, so the lift snaps instead of easing. That host must
+   list `transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2)
+   var(--ease-out)` alongside its own property (see .ov-card.ov-clickable
+   in overview.css). */
+.lift {
+  transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
+}
+.lift:hover, .lift:focus-visible {
+  transform: translateY(-4px);
+  box-shadow: var(--el-2);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lift:hover, .lift:focus-visible { transform: none; }
+}
+
+/* A light sheen that sweeps once across a sparkline/mini-chart's line, on
+   mount -- never a loop, so it reads as a one-time "here's the trend" cue
+   rather than an ambient distraction. The host SVG line sets
+   pathLength="100" so the dash percentages below are independent of the
+   chart's own width, and renders this as a second, wider stroke -- lighter
+   than the real line underneath it (mixed toward --bg-surface), so it
+   reads as a sheen passing over the line rather than the line thickening.
+   Delayed by a full --dur-4 by
+   default -- the draw-on's own duration (see .chart-draw-on above) -- so
+   it starts once the line itself has finished drawing in rather than
+   racing ahead of ink that isn't there yet; a caller whose line is already
+   fully drawn on mount (InlineSparkline's drawOn={false}) overrides
+   --glint-delay to 0s, since there's nothing to wait for. Invisible at
+   rest in every motion mode; only the no-preference block below ever
+   reveals it, which is what keeps it fully off (not merely instant) under
+   reduced motion. */
+.glint {
+  opacity: 0;
+  stroke-dashoffset: 14;
+}
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes glint-sweep {
+    from { stroke-dashoffset: 14; opacity: 0.45; }
+    60%  { opacity: 0.45; }
+    to   { stroke-dashoffset: -100; opacity: 0; }
+  }
+  .glint {
+    animation: glint-sweep var(--dur-4) var(--ease-out) var(--glint-delay, var(--dur-4)) 1 forwards;
+  }
+}
+
+/* A "live" indicator dot's calm, slow expanding ring -- the one primitive
+   here allowed to loop, since it marks an ongoing state rather than a
+   one-time event. Reads currentColor, so the host sets `color` to whatever
+   tone its own dot already uses for "live" rather than this primitive
+   picking one. Explicit `animation: none` under reduced motion rather than
+   relying on the page-wide blanket rule: a shared primitive gets copied
+   into contexts this file's author won't see, so the loop's exemption from
+   motion has to travel with the rule that creates it. */
+.live-dot {
+  animation: live-ring calc(var(--dur-4) * 2) var(--ease-in-out) infinite;
+}
+@keyframes live-ring {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 35%, transparent); }
+  50%      { box-shadow: 0 0 0 8px color-mix(in srgb, currentColor 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+}
+
 /* The daily chart's plot is a keyboard-operable range control: arrows move
    the read-out cursor, Shift+arrows extend the selection. */
 .chart-brush-surface:focus-visible {

@@ -198,6 +198,7 @@ export function OverviewHeroRow({
             preserveAspectRatio="none"
             showEndDot={false}
             baseline={sparklineMean ?? undefined}
+            glint
             style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
           />
           {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
@@ -216,10 +217,16 @@ export function OverviewHeroRow({
           )}
           <div className="ov-hero-feed">
             {/* Green only for a live feed; a quiet or never-reporting one
-                keeps a neutral dot, and an unread status shows none. */}
+                keeps a neutral dot, and an unread status shows none. The
+                breath and the ring never run together -- both set the
+                dot's `animation`, and only one wins -- so the ring (an
+                ongoing "still live" cue) starts once the breath (a "just
+                refreshed" cue) ends. */}
             {feed.kind !== "unknown" && (
               <i
-                className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${feed.kind === "live" ? "" : " ov-fresh-dot--stale"}`}
+                className={`ov-fresh-dot${breathing ? " ov-fresh-dot--live" : ""}${
+                  feed.kind === "live" ? (breathing ? "" : " live-dot") : " ov-fresh-dot--stale"
+                }`}
                 aria-hidden="true"
               />
             )}
