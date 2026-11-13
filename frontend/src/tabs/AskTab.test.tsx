@@ -180,6 +180,70 @@ describe("AskTab investigations", () => {
   });
 });
 
+describe("AskTab thinking state", () => {
+  beforeEach(() => {
+    mockAllHooks();
+    Element.prototype.scrollTo = vi.fn();
+  });
+
+  const oneMessage: ConvMessage[] = [
+    {
+      message_id: 1,
+      conversation_id: "t1",
+      role: "user",
+      chip_id: null,
+      tool: null,
+      args: null,
+      signature_hash: null,
+      result: null,
+      rendered_summary: "Hi",
+      created_at: "2026-09-01T00:00:00Z",
+    },
+  ];
+
+  function openInvestigation(messages: ConvMessage[]) {
+    vi.spyOn(hooks, "useConversation").mockReturnValue({
+      data: {
+        conversation: {
+          conversation_id: "t1",
+          user_id: null,
+          agency_id: 5,
+          title: "Morning delays",
+          filter_ctx: {},
+          pinned: false,
+          created_at: "",
+          updated_at: "",
+        },
+        messages,
+      },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as never);
+    return renderAskTab("/agencies/5/ask?conversation=t1");
+  }
+
+  it("shows two hidden skeleton lines alongside the accessible status text while a question is pending", () => {
+    vi.spyOn(hooks, "useAppendMessage").mockReturnValue(mutationStub({ isPending: true }));
+    openInvestigation(oneMessage);
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("Thinking...");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    const lines = status.querySelectorAll(".skeleton");
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line.closest('[aria-hidden="true"]')).not.toBeNull();
+    }
+    // No spinner: the pending state is a calm skeleton, not a rotating glyph.
+    expect(status.querySelector("svg")).not.toBeInTheDocument();
+  });
+
+  it("renders no thinking status when nothing is pending", () => {
+    openInvestigation(oneMessage);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
 describe("AskTab dispatch failures", () => {
   beforeEach(() => {
     mockAllHooks();

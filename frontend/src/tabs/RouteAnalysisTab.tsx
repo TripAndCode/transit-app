@@ -32,6 +32,7 @@ import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
+import "./routeAnalysisTab.css";
 import { fixedTenth, formatDateRange, formatNumber } from "../utils/format";
 
 // Dynamic, not a static import: MapLibre would otherwise ride into this tab's
@@ -166,7 +167,7 @@ export function RouteAnalysisTab() {
       <span aria-hidden="true"> / </span>
       <span aria-current="page">{names.format(route)}</span>
     </nav>}
-    <header className="focus-header"><div>
+    <header className="focus-header route-header-sheen"><div>
       {/* A route's page is named by its route; the question it answers sits
           beneath. Without a route the question is all there is to say. */}
       {route ? (

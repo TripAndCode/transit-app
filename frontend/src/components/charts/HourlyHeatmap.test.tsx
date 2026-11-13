@@ -47,6 +47,11 @@ describe("HourlyHeatmap tooltip", () => {
     expect(screen.getByText(/3\.3 min/)).toBeInTheDocument();
     expect(screen.getByText(/2,500/)).toBeInTheDocument();
   });
+
+  it("wires every cell to the shared hover/focus-visible ring class", () => {
+    const { container } = renderHeatmap(ONE_CELL);
+    expect(cellAt(container, "2026-06-01", 8)).toHaveClass("heat-cell");
+  });
 });
 
 describe("HourlyHeatmap legend", () => {

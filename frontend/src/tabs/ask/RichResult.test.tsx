@@ -7,6 +7,7 @@ import type { TFunction } from "i18next";
 import i18n from "../../i18n";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { RichResult } from "./RichResult";
+import { MAX_STAGGER } from "./rankedBars";
 import type { NextStepAction } from "./nextStepChips";
 import type { ToolResult } from "../../api/types";
 
@@ -95,6 +96,135 @@ describe("RichResult on_time low_confidence column", () => {
       />,
     );
     expect(screen.getByText("120")).toBeInTheDocument();
+  });
+});
+
+describe("RichResult ranked bars", () => {
+  it("renders one bar per row for a top_n ranking, the largest value at full share", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows: [
+            ["39061", 9.4, 7.0, 11.0, 120],
+            ["39062", 4.7, 3.0, 6.0, 90],
+          ],
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
+    expect(fills).toHaveLength(2);
+    expect(fills[0].style.width).toBe("100%");
+    expect(fills[1].style.width).toBe(`${(4.7 / 9.4) * 100}%`);
+  });
+
+  it("staggers each bar's entrance by its row, capping long tables at MAX_STAGGER", () => {
+    const rows = Array.from({ length: MAX_STAGGER + 3 }, (_, i) => [`r${i}`, 10 - i * 0.5, 0, 0, 10]);
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows,
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const staggers = Array.from(container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill")).map((f) =>
+      f.style.getPropertyValue("--stagger"),
+    );
+    expect(staggers.slice(0, 3)).toEqual(["0", "1", "2"]);
+    expect(staggers.slice(MAX_STAGGER)).toEqual(Array(3).fill(String(MAX_STAGGER)));
+  });
+
+  it("gives every row a track, with an empty one for a zero, negative or missing value, and never a NaN width", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows: [
+            ["39061", 8, 0, 0, 10],
+            ["39062", 0, 0, 0, 10],
+            ["39063", -3, 0, 0, 10],
+            ["39064", null, 0, 0, 10],
+          ],
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
+    expect(fills).toHaveLength(4);
+    expect([...fills].map((fill) => fill.style.width)).toEqual(["100%", "0%", "0%", "0%"]);
+    for (const fill of fills) {
+      expect(Number.isNaN(Number.parseFloat(fill.style.width))).toBe(false);
+    }
+  });
+
+  it("colours a delay-minutes bar from the delay ramp, never a fixed accent", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Delay ranking",
+          rows: [["39061", 9.4, 7.0, 11.0, 120]],
+          columns: ["route_code", "avg_min", "p50_min", "p90_min", "samples"],
+        }}
+      />,
+    );
+    const fill = container.querySelector<HTMLElement>(".ask-rank-bar-fill")!;
+    expect(fill.style.background).toBe("var(--d4)");
+  });
+
+  it("colours an on-time-rate bar with the product accent, not the delay ramp", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "On-time rate",
+          rows: [["39061", 80.0, 0.5, 120, false]],
+          columns: ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
+        }}
+      />,
+    );
+    const fill = container.querySelector<HTMLElement>(".ask-rank-bar-fill")!;
+    expect(fill.style.background).toBe("var(--accent)");
+  });
+
+  it("renders one bar per row for an on_time_rate ranking too -- same shape as top_n", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        tool="on_time_rate"
+        result={{
+          kind: "table",
+          summary: "On-time rate",
+          rows: [
+            ["39061", 92.0, 0.4, 120, false],
+            ["39062", 80.0, 0.9, 90, false],
+          ],
+          columns: ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
+        }}
+      />,
+    );
+    const fills = container.querySelectorAll<HTMLElement>(".ask-rank-bar-fill");
+    expect(fills).toHaveLength(2);
+    expect(fills[0].style.background).toBe("var(--accent)");
+  });
+
+  it("draws no bar for a table that is not a single-metric route ranking", () => {
+    const { container } = renderWithProviders(
+      <Wrapper
+        result={{
+          kind: "table",
+          summary: "Weekday vs weekend",
+          rows: [["39061", 5.2, 6.1, 0.9, 0.9]],
+          columns: ["route_code", "heijitsu_min", "kyujitsu_min", "abs_delta", "signed_delta"],
+        }}
+      />,
+    );
+    expect(container.querySelectorAll(".ask-rank-bar-fill")).toHaveLength(0);
   });
 });
 

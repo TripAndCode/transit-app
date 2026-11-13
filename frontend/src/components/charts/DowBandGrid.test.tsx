@@ -69,6 +69,30 @@ describe("BandGrid keyboard and screen-reader access", () => {
     expect(cell.style.outline).not.toContain("accent");
   });
 
+  it("gives a hovered cell the same highlight as a focused one, with no second ring", () => {
+    const onTip = vi.fn();
+    render(
+      <BandGrid
+        ariaLabel="Grid"
+        grid={fullGrid([{ dow: 1, band: "forenoon", v: 6.8 }])}
+        dayLabel={(d) => `Day${d}`}
+        onTip={onTip}
+        onLeave={vi.fn()}
+      />,
+    );
+    const cell = screen.getByRole("gridcell", { name: /^Day1 Late morning 9–12h · 6\.8/ });
+    expect(cell.style.outline).not.toContain("accent");
+    fireEvent.mouseEnter(cell);
+    const hovered = cell.style.outline;
+    expect(hovered).toBe("2px solid var(--accent)");
+    const outlines = Array.from(cell.querySelectorAll("*")).filter((el) => (el as HTMLElement).style.outline);
+    expect(outlines).toHaveLength(0);
+    fireEvent.mouseLeave(cell);
+    expect(cell.style.outline).not.toContain("accent");
+    act(() => cell.focus());
+    expect(cell.style.outline).toBe(hovered);
+  });
+
   it("declares the same row and column counts as the rows and headers it renders", () => {
     renderGrid();
     const grid = screen.getByRole("grid");
