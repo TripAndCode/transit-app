@@ -16,13 +16,11 @@ import {
 } from "./busTownModel";
 
 const NO_WINDOWS: readonly ReplayResponse[] = [];
+const NO_DATES: string[] = [];
 
-/** `useQueries`' own result array is a fresh array every render; without a
- *  stable `combine` the merge/build pipeline downstream (`mergeReplayWindows`,
- *  `buildBusTownModel`, the stop point/pair lists) could never be skipped on
- *  an unrelated re-render. Module-level so its identity never changes, which
- *  is what lets `useQueries` itself reuse the previous return value whenever
- *  every query result is unchanged. */
+/** `useQueries`' own result array is new every render. A module-level
+ *  `combine` lets it return the previous array while every query result is
+ *  unchanged, so `windows`, and the scene built from it, stay stable. */
 function combineExtraWindows(results: readonly UseQueryResult<ReplayResponse>[]): ReplayResponse[] {
   return results.map((r) => r.data).filter((d): d is ReplayResponse => d != null);
 }
@@ -83,22 +81,34 @@ export function useBusTownReplay(
   });
 
   const windows: readonly ReplayResponse[] = dayQuery.data ? [dayQuery.data, ...extraData] : NO_WINDOWS;
-
-  const trips = mergeReplayWindows(windows);
-  const routeNames: Record<string, string> = {};
-  for (const replayWindow of windows) {
-    for (const route of replayWindow.routes) routeNames[route.code] = route.name;
-  }
+  const scene = replayScene(windows);
 
   return {
     loading: dayQuery.isLoading,
     error: dayQuery.data === undefined ? dayQuery.error : null,
     loaded: dayQuery.data !== undefined,
     date,
-    availableDates: dayQuery.data?.available_dates ?? defaultDayQuery.data?.available_dates ?? [],
+    availableDates: dayQuery.data?.available_dates ?? defaultDayQuery.data?.available_dates ?? NO_DATES,
     originHour,
     minSec: scrubberStartHour(originHour) * 3600,
     maxSec: SCRUBBER_END_HOUR * 3600,
+    ...scene,
+  };
+}
+
+type ReplayScene = Pick<BusTownReplay, "model" | "trips" | "stopPoints" | "stopPairs" | "routeNames">;
+
+/** Kept out of the hook body on purpose: inlined there, the compiler puts the
+ *  merge/build work in one memo scope with the query result objects, which are
+ *  new every render, so the whole day's model would be rebuilt on every
+ *  playhead tick. As a call it is memoized on `windows` alone. */
+function replayScene(windows: readonly ReplayResponse[]): ReplayScene {
+  const trips = mergeReplayWindows(windows);
+  const routeNames: Record<string, string> = {};
+  for (const replayWindow of windows) {
+    for (const route of replayWindow.routes) routeNames[route.code] = route.name;
+  }
+  return {
     model: buildBusTownModel(trips),
     trips,
     stopPoints: stopPointsFromWindows(windows),
