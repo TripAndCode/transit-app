@@ -13,6 +13,7 @@ import {
 import { RedirectNetworkToAgencyNetwork } from "./routes/networkRedirect";
 import {
   loadAskTab,
+  loadBusTownTab,
   loadCompareTab,
   loadMapTab,
   loadOverviewTab,
@@ -54,6 +55,7 @@ const CompareTab = lazy(loadCompareTab);
 const MapTab = lazy(loadMapTab);
 const SavedExportTab = lazy(loadSavedExportTab);
 const AskTab = lazy(loadAskTab);
+const BusTownTab = lazy(loadBusTownTab);
 const LandingPage = lazy(() => import("./pages/LandingPage").then((m) => ({ default: m.LandingPage })));
 const LoginPage = lazy(() => import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })));
 const AccountPage = lazy(() => import("./pages/AccountPage").then((m) => ({ default: m.AccountPage })));
@@ -142,6 +144,7 @@ const router = createBrowserRouter([
       { path: "agencies/:agencyId/live", element: <MapTab /> },
       { path: "agencies/:agencyId/reports", element: <SavedExportTab /> },
       { path: "agencies/:agencyId/ask", element: <AskTab /> },
+      { path: "agencies/:agencyId/bus-town", element: <BusTownTab /> },
       // Legacy URLs, each replaced by the screen that serves it (routes/legacyRedirects).
       { path: "agencies/:agencyId/analysis", element: <RedirectTo dest="pulse" /> },
       { path: "agencies/:agencyId/analysis/:lens", element: <RedirectAnalysisLens /> },

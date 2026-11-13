@@ -1,0 +1,197 @@
+/**
+ * Bus Town — replays one past service day of one agency's buses, gliding
+ * between the stops they were actually observed at, coloured by how late
+ * they were there. A schematic, not a map, reached from the command palette
+ * and this page's own back-link rather than the sidebar rail.
+ */
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { Link } from "react-router-dom";
+import { ArrowLeft, Pause, Play } from "lucide-react";
+
+import { useStopBounds } from "../../api/hooks";
+import { useAgencyId } from "../../api/useAgencyId";
+import { destHref } from "../../routes/destinations";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { AsyncSection } from "../../components/AsyncSection";
+import { Card } from "../../components/ui/Card";
+import { EmptyState } from "../../components/EmptyState";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { DelayBandLegend } from "../../components/analysis/StopChart";
+import { formatDate, formatMinutes } from "../../utils/format";
+import { useBusTownReplay, type BusTownReplay } from "./useBusTownReplay";
+import { useBusTownPlayback } from "./useBusTownPlayback";
+import { boundsFromPoints, formatServiceClock, onTimeCount, positionsAt, slowestRoute } from "./busTownModel";
+import "../../styles/scrubber.css";
+import "./busTown.css";
+
+/** Simulated seconds that pass per real second, at each speed pill. Framed
+ *  as minutes-of-the-day-per-second so a reader can picture the pace
+ *  without needing to know the window width in hours. */
+const SPEEDS = [60, 180, 360] as const;
+const DEFAULT_SPEED_INDEX = 1;
+
+function SpeedPills({ speed, onChange, t }: { speed: number; onChange: (speed: number) => void; t: ReturnType<typeof useTranslation>["t"] }) {
+  return (
+    <div className="bus-town-speeds" role="group" aria-label={t("busTown.speed_group_aria")}>
+      {SPEEDS.map((option) => {
+        const minutesPerSecond = option / 60;
+        return (
+          <button
+            key={option}
+            type="button"
+            className="bus-town-speed-pill"
+            aria-pressed={speed === option}
+            aria-label={t("busTown.speed_aria", { minutesPerSecond })}
+            onClick={() => onChange(option)}
+          >
+            {t("busTown.speed_label", { minutesPerSecond })}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function DayPicker({ replay, selectedDate, onChange, t }: {
+  replay: BusTownReplay;
+  selectedDate: string | null;
+  onChange: (date: string) => void;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  if (replay.availableDates.length === 0) return null;
+  const value = selectedDate ?? replay.date ?? "";
+  return (
+    <label className="bus-town-day-picker">
+      <span>{t("busTown.day_label")}</span>
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        {replay.availableDates.map((date) => (
+          <option key={date} value={date}>
+            {formatDate(date, { year: false, weekday: true })}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+export function BusTownPage() {
+  const { t } = useTranslation();
+  const agencyId = useAgencyId();
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [speed, setSpeed] = useState<number>(SPEEDS[DEFAULT_SPEED_INDEX]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // `useBusTownReplay` needs the playhead to know which window to prefetch
+  // next, but the playhead only exists once `useBusTownPlayback` has a model
+  // to animate, which comes from `useBusTownReplay` — so the two can't be
+  // called in a single data-flow direction. `playheadSec` breaks the cycle
+  // by trailing `playback.sec` one render behind, same idiom as React's
+  // "adjust state during render" pattern: a stale prefetch trigger by one
+  // render is harmless, since the window grid itself doesn't move that
+  // fast, while mirroring it through an effect would cost an extra commit
+  // every tick for no benefit.
+  const [playheadSec, setPlayheadSec] = useState(0);
+  const replay = useBusTownReplay(agencyId, selectedDate, playheadSec, speed);
+  const stopBoundsQuery = useStopBounds(agencyId);
+  const bounds = stopBoundsQuery.data ?? boundsFromPoints(replay.stopPoints);
+
+  const playback = useBusTownPlayback(
+    canvasRef,
+    replay.model,
+    replay.stopPoints,
+    replay.stopPairs,
+    bounds,
+    replay.minSec,
+    replay.maxSec,
+    speed,
+    !reducedMotion,
+  );
+  if (playback.sec !== playheadSec) setPlayheadSec(playback.sec);
+
+  const buses = positionsAt(replay.model, playback.sec);
+  const onTime = onTimeCount(buses);
+  const slowest = slowestRoute(replay.trips, replay.routeNames);
+
+  const data = replay.date != null ? replay : undefined;
+
+  return (
+    <div className="bus-town-page">
+      <PageHeader title={t("nav.bus-town")} subtitle={t("busTown.subtitle")} />
+      {agencyId != null && (
+        <Link to={destHref(agencyId, "pulse")} className="bus-town-back-link">
+          <ArrowLeft size={14} aria-hidden="true" /> {t("busTown.back_to_pulse")}
+        </Link>
+      )}
+
+      <AsyncSection
+        loading={replay.loading}
+        error={replay.error}
+        data={data}
+        hasContent={(d) => d.model.size > 0}
+        empty={<EmptyState title={t("busTown.empty_title")} hint={t("busTown.empty_hint")} />}
+      >
+        {() => (
+          <div className="bus-town-layout">
+            <div className="bus-town-stage">
+              <canvas ref={canvasRef} className="bus-town-canvas" role="img" aria-label={t("busTown.canvas_aria")} />
+              <div className="bus-town-controls">
+                <button
+                  type="button"
+                  className="bus-town-play-button"
+                  aria-pressed={playback.playing}
+                  aria-label={playback.playing ? t("busTown.pause") : t("busTown.play")}
+                  onClick={() => (playback.playing ? playback.pause() : playback.play())}
+                >
+                  {playback.playing ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
+                </button>
+                <input
+                  type="range"
+                  className="scrub-input"
+                  min={replay.minSec}
+                  max={replay.maxSec}
+                  step={60}
+                  value={playback.sec}
+                  aria-label={t("busTown.scrubber_aria")}
+                  onChange={(event) => playback.seek(Number(event.target.value))}
+                />
+                <span className="bus-town-clock num" aria-hidden="true">
+                  {formatServiceClock(playback.sec)}
+                </span>
+                <SpeedPills speed={speed} onChange={setSpeed} t={t} />
+                <DayPicker replay={replay} selectedDate={selectedDate} onChange={setSelectedDate} t={t} />
+              </div>
+              <div className="bus-town-legend">
+                <DelayBandLegend />
+              </div>
+            </div>
+
+            <div className="bus-town-cards">
+              <Card className="bus-town-card">
+                <h2>{t("busTown.on_time_title")}</h2>
+                {onTime.total === 0 ? (
+                  <p>{t("busTown.on_time_empty")}</p>
+                ) : (
+                  <p className="num">{t("busTown.on_time_value", { onTime: onTime.onTime, total: onTime.total })}</p>
+                )}
+              </Card>
+              <Card className="bus-town-card">
+                <h2>{t("busTown.slowest_route_title")}</h2>
+                {slowest == null ? (
+                  <p>{t("busTown.slowest_route_empty")}</p>
+                ) : (
+                  <p>{t("busTown.slowest_route_value", { route: slowest.name, delay: formatMinutes(slowest.meanDelayMin) })}</p>
+                )}
+              </Card>
+              <Card className="bus-town-card">
+                <h2>{t("busTown.how_it_works_title")}</h2>
+                <p>{t("busTown.how_it_works_body")}</p>
+              </Card>
+            </div>
+          </div>
+        )}
+      </AsyncSection>
+    </div>
+  );
+}

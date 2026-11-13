@@ -37,6 +37,7 @@ import type {
   OverviewSummary,
   PeakHourBreakdown,
   PerformanceStandardsResponse,
+  ReplayResponse,
   ReportMeta,
   ReportResponse,
   Route,
@@ -104,6 +105,46 @@ export function useStopBounds(agencyId: number | null): UseQueryResult<StopBound
     enabled: agencyId != null,
     staleTime: 60 * 60 * 1000,
   });
+}
+
+/** Shared by `useReplayWindow` and Bus Town's own `useQueries` call for its
+ *  neighbouring windows, so both build the exact same cache key and URL for
+ *  the same (date, fromHour, toHour) rather than risking two sets of query
+ *  options drifting apart. `date` null asks for the agency's default
+ *  (newest observed) service day, and `fromHour`/`toHour` null together asks
+ *  the server to pick that day's own default window — the one call this
+ *  doubles as both "find the day and its first window" and "load one more
+ *  window of an already-known day". A past service day's observations never
+ *  change, so the result is cached indefinitely once fetched. */
+export function replayWindowQueryOptions(
+  agencyId: number | null,
+  date: string | null,
+  fromHour: number | null,
+  toHour: number | null,
+): UseQueryOptions<ReplayResponse> {
+  const params = new URLSearchParams();
+  if (date != null) params.set("date", date);
+  if (fromHour != null && toHour != null) {
+    params.set("from_hour", String(fromHour));
+    params.set("to_hour", String(toHour));
+  }
+  const qs = params.toString();
+  return {
+    queryKey: ["bus-town-replay", agencyId, date, fromHour, toHour],
+    queryFn: ({ signal }) => apiGet<ReplayResponse>(`/api/agencies/${agencyId}/replay${qs ? `?${qs}` : ""}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: Infinity,
+    gcTime: 10 * 60_000,
+  };
+}
+
+export function useReplayWindow(
+  agencyId: number | null,
+  date: string | null,
+  fromHour: number | null,
+  toHour: number | null,
+): UseQueryResult<ReplayResponse> {
+  return useQuery(replayWindowQueryOptions(agencyId, date, fromHour, toHour));
 }
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {

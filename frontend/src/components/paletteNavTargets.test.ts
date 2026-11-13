@@ -20,7 +20,7 @@ describe("GO_TO_TARGETS", () => {
   });
 
   it("lists the destinations in rail order, then Ask", () => {
-    expect(GO_TO_TARGETS.map((g) => g.to)).toEqual(["pulse", "routes", "time", "why", "compare", "live", "reports", "ask"]);
+    expect(GO_TO_TARGETS.map((g) => g.to)).toEqual(["pulse", "routes", "time", "why", "compare", "live", "reports", "ask", "bus-town"]);
   });
 
   it("gives every target a sub-label", () => {

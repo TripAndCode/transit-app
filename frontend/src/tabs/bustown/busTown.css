@@ -1,0 +1,142 @@
+/* frontend/src/tabs/bustown/busTown.css
+   Bus Town: a schematic canvas plus a transport rail and three calm cards.
+   No keyframe animation lives here — the canvas redraws itself via rAF in
+   useBusTownPlayback, which the `playing` gate (not CSS) already stops
+   under reduced motion's default-paused start; every CSS transition below
+   uses global.css's own --dur-* tokens, which that file already zeroes
+   under prefers-reduced-motion. */
+
+.bus-town-page {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  color: var(--text-primary);
+}
+
+.bus-town-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: var(--text-sm);
+  margin-bottom: 16px;
+}
+.bus-town-back-link:hover { color: var(--text-primary); }
+
+.bus-town-layout {
+  display: grid;
+  gap: 24px;
+}
+
+.bus-town-stage {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 16px;
+}
+
+.bus-town-canvas {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  display: block;
+  border-radius: var(--radius-lg);
+}
+
+.bus-town-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.bus-town-play-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out);
+  flex: none;
+}
+.bus-town-play-button:hover { background: var(--bg-soft); }
+.bus-town-play-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.scrub-input { flex: 1 1 160px; min-width: 120px; }
+
+.bus-town-clock {
+  color: var(--text-primary);
+  min-width: 48px;
+  flex: none;
+}
+
+.bus-town-speeds {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.bus-town-speed-pill {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.bus-town-speed-pill:hover { background: var(--bg-soft); }
+.bus-town-speed-pill[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-surface);
+}
+.bus-town-speed-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.bus-town-day-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  flex: none;
+}
+.bus-town-day-picker select {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-page);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  font: inherit;
+}
+
+.bus-town-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.bus-town-legend span + span { margin-left: 4px; }
+
+.bus-town-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.bus-town-card h2 {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0 0 8px;
+}
+.bus-town-card p { margin: 0; color: var(--text-primary); }

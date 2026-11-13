@@ -30,7 +30,8 @@
     "pin_route": "Pin",
     "pin_route_full": "Up to {{max}} pinned routes",
     "station_figure_mean": "Today's mean {{delay}}",
-    "station_figure_unusual": "{{n}} unusually late today"
+    "station_figure_unusual": "{{n}} unusually late today",
+    "bus-town": "Bus Town"
   },
   "compare": {
     "mode_periods": "Weekdays and weekends/holidays",
@@ -2265,7 +2266,8 @@
       "go_to": "Go to {{target}}",
       "open_shortcuts": "Show this shortcut list",
       "extend_brush": "Extend the daily chart's selected range"
-    }
+    },
+    "nav_bus_town_sublabel": "Watch a past day's buses glide across the stops"
   },
   "empty_state": {
     "reason_format": "{{label}}: {{value}}",
@@ -2452,5 +2454,27 @@
     "between": "{{from}}–{{to}} min",
     "at_least": "{{from}} min or more",
     "no_data": "No data"
+  },
+  "busTown": {
+    "subtitle": "A past service day, replayed stop by stop.",
+    "back_to_pulse": "Back to Pulse",
+    "day_label": "Day",
+    "play": "Play",
+    "pause": "Pause",
+    "speed_group_aria": "Play speed",
+    "speed_label": "{{minutesPerSecond}} min/s",
+    "speed_aria": "Change play speed, currently {{minutesPerSecond}} simulated minutes per second",
+    "scrubber_aria": "Scrub through the day",
+    "canvas_aria": "Schematic map of buses replaying the day",
+    "on_time_title": "On time right now",
+    "on_time_value": "{{onTime}} of {{total}} buses",
+    "on_time_empty": "No buses on screen yet",
+    "slowest_route_title": "Slowest route",
+    "slowest_route_value": "{{route}}, mean {{delay}} late",
+    "slowest_route_empty": "Not enough data yet",
+    "how_it_works_title": "How we know",
+    "how_it_works_body": "Each bus glides in a straight line between the stops it was actually seen at, coloured by how late it was there. The map is schematic, not to scale.",
+    "empty_title": "No buses ran that we can replay",
+    "empty_hint": "Try a different day."
   }
 }
