@@ -34,7 +34,6 @@ import { FilterContextBar } from "../components/FilterContextBar";
 import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { Spinner } from "../components/Spinner";
 import { Skeleton } from "../components/Skeleton";
 import { PageHeader } from "../components/ui/PageHeader";
 import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
@@ -443,16 +442,19 @@ export function AskTab() {
                   role="status"
                   aria-live="polite"
                   style={{
-                    padding: 12,
-                    color: "var(--text-tertiary)",
-                    fontSize: 13,
                     display: "flex",
                     alignItems: "center",
-                    gap: 8,
+                    gap: "var(--space-3)",
+                    padding: 12,
+                    color: "var(--text-tertiary)",
+                    fontSize: "var(--text-sm)",
                   }}
                 >
-                  <Spinner size={14} />
                   {t("ask.thinking")}
+                  <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+                    <Skeleton width={96} height={8} />
+                    <Skeleton width={64} height={8} />
+                  </div>
                 </div>
               )}
 
