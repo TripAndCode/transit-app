@@ -26,6 +26,7 @@ from pipeline.db import departure_ch, stop_event_filter_ch
 from pipeline.live_filing import filing
 from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import (
+    SERVICE_DAY_CUTOVER_HOURS,
     clock_to_sec,
     filed_between_ch,
     scheduled_seconds_ch,
@@ -93,6 +94,11 @@ class ReplayTrip(BaseModel):
     delay: list[int]
 
 
+class ReplayHour(BaseModel):
+    hour: int = Field(description="Service-day hour: one past midnight runs on as 24, 25, ...")
+    departures: int = Field(description="Departures observed with a delay reading, over every route.")
+
+
 class ReplayResponse(BaseModel):
     date: str | None = Field(
         description="The service day replayed, or null when the agency has no observations at all."
@@ -108,6 +114,12 @@ class ReplayResponse(BaseModel):
     available_dates: list[str] = Field(
         description=f"Up to the agency's last {MAX_AVAILABLE_DATES} service days with observations, newest first."
     )
+    departures_by_hour: list[ReplayHour] = Field(
+        description=(
+            "The whole service day's departures per hour, not just the window's;"
+            " ascending, hours with departures only. Empty until the day is analyzed."
+        )
+    )
     stops: ReplayStops
     routes: list[ReplayRoute]
     trips: list[ReplayTrip]
@@ -118,12 +130,14 @@ def _empty_response(
     available_dates: list[CalendarDate],
     from_hour: int | None = None,
     to_hour: int | None = None,
+    departures_by_hour: list[ReplayHour] | None = None,
 ) -> ReplayResponse:
     return ReplayResponse(
         date=None if date is None else date.isoformat(),
         from_hour=from_hour,
         to_hour=to_hour,
         available_dates=[d.isoformat() for d in available_dates],
+        departures_by_hour=departures_by_hour or [],
         stops=ReplayStops(id=[], lat=[], lon=[]),
         routes=[],
         trips=[],
@@ -169,6 +183,27 @@ async def _available_dates(conn: asyncpg.Connection, ch: AsyncClient, agency_id:
     )
     fallback = await newest_filed_date_before(ch, agency_id, today_jst_midnight_utc)
     return [] if fallback is None else [fallback]
+
+
+async def _departures_by_hour(conn: asyncpg.Connection, agency_id: int, day: CalendarDate) -> list[ReplayHour]:
+    """The day's departures per service-day hour, read from `agg_hour_daily`
+    rather than by scanning the whole day on every window request.
+
+    The aggregate keeps the hour of the clock the feed wrote, so ``00:10`` is
+    hour 0 there, while the replay places it at 24:10
+    (`pipeline.service_day.service_day_offset`). Hours before the cutover
+    move on a day here the same way, and merge with a ``24:10`` the feed
+    wrote as such.
+    """
+    rows = await conn.fetch(
+        "SELECT CASE WHEN hour < $3 THEN hour + 24 ELSE hour END AS service_hour, SUM(samples) AS departures "
+        "FROM agg_hour_daily WHERE agency_id = $1 AND date = $2 "
+        "GROUP BY service_hour ORDER BY service_hour",
+        agency_id,
+        day,
+        SERVICE_DAY_CUTOVER_HOURS,
+    )
+    return [ReplayHour(hour=r["service_hour"], departures=r["departures"]) for r in rows]
 
 
 def _replay_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = "") -> str:
@@ -362,6 +397,7 @@ async def replay(
     if target_date is None:
         return _empty_response(None, available)
 
+    hours = await _departures_by_hour(conn, agency_id, target_date)
     table = await table_holding(ch, agency_id, target_date)
     filed = await filing(conn, ch, agency_id, target_date, target_date, table=table)
     params: dict[str, Any] = {"agency_id": agency_id, "target_date": target_date, **filed.params}
@@ -370,7 +406,7 @@ async def replay(
         probe = await ch.query(build_default_window_probe_sql(filed.stamp, table), parameters=params)
         lo = probe.result_rows[0][0] if probe.result_rows else None
         if lo is None:
-            return _empty_response(target_date, available)
+            return _empty_response(target_date, available, departures_by_hour=hours)
         from_hour = int(lo) // 3600
         to_hour = from_hour + MAX_REPLAY_WINDOW_HOURS
     # validate_replay_window already rejected one of the pair given alone,
@@ -384,7 +420,7 @@ async def replay(
     )
     trips, stop_ids, route_codes = build_replay_trips(result.result_rows)
     if not trips:
-        return _empty_response(target_date, available, from_hour, to_hour)
+        return _empty_response(target_date, available, from_hour, to_hour, hours)
 
     coords = await _stop_coordinates(conn, agency_id, stop_ids)
     labels = await _route_labels(conn, agency_id, route_codes)
@@ -393,6 +429,7 @@ async def replay(
         from_hour=from_hour,
         to_hour=to_hour,
         available_dates=[d.isoformat() for d in available],
+        departures_by_hour=hours,
         stops=ReplayStops(
             id=stop_ids,
             lat=[coords.get(s, (None, None))[0] for s in stop_ids],

@@ -23,6 +23,7 @@ function replayWindow(overrides: Partial<ReplayResponse>): ReplayResponse {
     from_hour: 4,
     to_hour: 7,
     available_dates: ["2026-01-05"],
+    departures_by_hour: [],
     stops: { id: [], lat: [], lon: [] },
     routes: [],
     trips: [],

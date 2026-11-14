@@ -37,6 +37,10 @@
   padding: 16px;
 }
 
+.bus-town-canvas-frame {
+  position: relative;
+}
+
 .bus-town-canvas {
   width: 100%;
   aspect-ratio: 16 / 10;
@@ -44,10 +48,33 @@
   border-radius: var(--radius-lg);
 }
 
+/* Echoes the scrubber's value over the canvas, so it takes no pointer
+   events. The glass matches the Map tab's floating chrome, written out here
+   because this page's chunk never loads the Map tab's CSS. */
+.bus-town-clock {
+  position: absolute;
+  top: 10px;
+  inset-inline-start: 10px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--glass-line);
+  background: var(--glass);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  pointer-events: none;
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bus-town-clock { background: var(--bg-surface); }
+}
+
+/* Top-aligned: the scrub column (slider, hour strip, caption) is taller than
+   the play button and speed pills, which belong beside the slider. */
 .bus-town-controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   margin-top: 12px;
 }
@@ -69,12 +96,49 @@
 .bus-town-play-button:hover { background: var(--bg-soft); }
 .bus-town-play-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.bus-town-controls .scrub-input { flex: 1 1 160px; min-width: 120px; }
+/* The hour strip shares the slider's column, so its bars sit under the rail
+   they summarize. */
+.bus-town-controls .bus-town-scrub {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 160px;
+  min-width: 120px;
+}
 
-.bus-town-clock {
-  color: var(--text-primary);
-  min-width: 48px;
-  flex: none;
+/* As tall as the play button, so the thumb sits level with it. At that
+   height the global input border would read as a text field, so the track
+   draws the rail instead. */
+.bus-town-controls .scrub-input { height: 32px; border: 0; }
+.bus-town-controls .scrub-input::-webkit-slider-runnable-track { background: var(--border-subtle); border-radius: 4px; }
+.bus-town-controls .scrub-input::-moz-range-track { background: var(--border-subtle); border-radius: 4px; }
+
+/* BusTownHourStrip.tsx insets the row by half the thumb's width, which lines
+   the bars up with the thumb's travel. */
+.bus-town-hour-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 28px;
+}
+
+.bus-town-hour-bar {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 0;
+  border-radius: 1px 1px 0 0;
+  background: var(--border-subtle);
+  transition: background var(--dur-1) var(--ease-out);
+}
+/* A quiet hour keeps its slot at zero height; any departures show at least
+   a sliver. */
+.bus-town-hour-bar.has-value { min-height: 3px; }
+.bus-town-hour-bar.is-current { background: var(--accent); }
+
+.bus-town-hour-caption {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
 }
 
 .bus-town-speeds {
@@ -178,5 +242,6 @@
 
   /* 44px is the touch-target floor; the icon inside keeps its own size. */
   .bus-town-play-button { width: 44px; height: 44px; }
+  .bus-town-controls .scrub-input { height: 44px; }
   .bus-town-speed-pill { min-width: 44px; min-height: 44px; padding: 4px 12px; }
 }

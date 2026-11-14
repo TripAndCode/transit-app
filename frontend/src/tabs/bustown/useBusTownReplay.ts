@@ -1,6 +1,6 @@
 import { useQueries, type UseQueryResult } from "@tanstack/react-query";
 import { replayWindowQueryOptions, useReplayWindow } from "../../api/hooks";
-import type { ReplayResponse } from "../../api/types";
+import type { ReplayHour, ReplayResponse } from "../../api/types";
 import {
   SCRUBBER_END_HOUR,
   buildBusTownModel,
@@ -17,6 +17,7 @@ import {
 
 const NO_WINDOWS: readonly ReplayResponse[] = [];
 const NO_DATES: string[] = [];
+const NO_HOURS: readonly ReplayHour[] = [];
 
 /** `useQueries`' own result array is new every render. A module-level
  *  `combine` lets it return the previous array while every query result is
@@ -34,6 +35,9 @@ export type BusTownReplay = {
   loaded: boolean;
   date: string | null;
   availableDates: string[];
+  /** The picked day's own hourly totals. Unlike `availableDates`, they never
+   *  fall back to the default day's response, which describes another day. */
+  departuresByHour: readonly ReplayHour[];
   originHour: number | null;
   minSec: number;
   maxSec: number;
@@ -97,6 +101,7 @@ export function useBusTownReplay(
     loaded: dayQuery.data !== undefined,
     date,
     availableDates: dayQuery.data?.available_dates ?? defaultDayQuery.data?.available_dates ?? NO_DATES,
+    departuresByHour: dayQuery.data?.departures_by_hour ?? NO_HOURS,
     originHour,
     minSec,
     maxSec,
