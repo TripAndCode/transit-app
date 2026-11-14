@@ -193,7 +193,10 @@ FastAPI + React SPA  <-------------------------------------------------+
   before it kept them, from the kept zips; with `--headways` it records again,
   from the same zips, the headways of archived timetables not kept at the
   current `agg_route_headway` version, whether kept at an older one or never
-  kept. A ClickHouse that predates these
+  kept. `static_calendar_archive` keeps each timetable's calendar under its
+  version name and content (a calendar-only refetch under the same name keeps
+  the first calendar), and `--calendars` keeps it, from the same zips, for
+  timetables archived before it was. A ClickHouse that predates these
   tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
   Postgres mirrors the map in `static_version_contents`, each name at its
   latest content, written right after each map row, so the definition stamp
@@ -209,6 +212,10 @@ FastAPI + React SPA  <-------------------------------------------------+
   latest timetable loaded that day until it is over. The service-delivered
   rate reads a saved day before the loaded timetable, so a reload no longer
   drops past days from it. Nothing reconstructs the days before the first save.
+  A day saved before its stop events were saved beside its trips keeps them
+  unknown until `scripts/fill_planned_stop_events.py` computes them from the
+  archived timetable in force that day, only where that timetable's calendar
+  is archived and its planned trips equal the day's saved count.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
   calls an LLM, and optional LLM features have kill switches.
 

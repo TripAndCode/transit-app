@@ -576,3 +576,133 @@ def test_a_mirror_write_that_fails_after_a_remap_still_leaves_the_rebuild_to_com
     second = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
     assert _mirrored(pg_conn, agency_id) == [_mapped_at(ch_client, agency_id)[-1]]
     assert _mirrored(pg_conn, agency_id)[0][1] == second
+
+
+def _set_calendar(pg_conn, agency_id, end=date(2026, 12, 31), removal="20261103"):
+    """Replace the loaded calendar: WD on weekdays through *end*, a removal of
+    WD on *removal*, an EX addition, a malformed date and a row with no
+    exception type."""
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        cur.execute("DELETE FROM static_calendar_dates WHERE agency_id = %s", (agency_id,))
+        cur.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date) VALUES (%s, 'WD', true, true, true, true, true, false, false, "
+            "'2026-10-01', %s)",
+            (agency_id, end),
+        )
+        cur.executemany(
+            "INSERT INTO static_calendar_dates (agency_id, service_id, date, exception_type) VALUES (%s, %s, %s, %s)",
+            [
+                (agency_id, "WD", removal, 2),
+                (agency_id, "EX", "20261107", 1),
+                (agency_id, "EX", "2026110", 1),
+                (agency_id, "EX", "20261108", None),
+            ],
+        )
+    pg_conn.commit()
+
+
+def _loaded_calendar(pg_conn, agency_id) -> static_archive.ArchivedCalendar:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT service_id, monday, tuesday, wednesday, thursday, friday, saturday, sunday, start_date, end_date "
+            "FROM static_calendar WHERE agency_id = %s ORDER BY service_id",
+            (agency_id,),
+        )
+        calendar = cur.fetchall()
+        cur.execute(
+            "SELECT service_id, date, exception_type FROM static_calendar_dates WHERE agency_id = %s "
+            "ORDER BY service_id, date",
+            (agency_id,),
+        )
+        calendar_dates = cur.fetchall()
+    pg_conn.rollback()
+    return static_archive.ArchivedCalendar(calendar, calendar_dates)
+
+
+def _calendar_rows(ch_client, agency_id) -> int:
+    return ch_client.query(
+        f"SELECT count() FROM {static_archive.CALENDAR} WHERE agency_id = {{a:Int32}}", parameters={"a": agency_id}
+    ).result_rows[0][0]
+
+
+def test_an_archived_timetable_keeps_its_calendar_under_its_name_and_content(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    _set_calendar(pg_conn, agency_id, end=date(9999, 12, 31))
+    loaded = _loaded_calendar(pg_conn, agency_id)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert static_archive.archived_calendar(ch_client, agency_id, "gtfs_static_20261025", key) == loaded
+    assert loaded.calendar[0][-1] == date(9999, 12, 31)
+    assert static_archive.calendar_versions(ch_client, agency_id) == {("gtfs_static_20261025", key)}
+    assert static_archive.archived_calendar(ch_client, agency_id, "gtfs_static_20261101", key) is None
+
+
+def test_archiving_the_same_timetable_again_adds_no_calendar_rows(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    _set_calendar(pg_conn, agency_id)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    kept = _calendar_rows(ch_client, agency_id)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert _calendar_rows(ch_client, agency_id) == kept == 5
+
+
+def test_two_names_of_the_same_content_keep_their_own_calendars(pg_conn, agency_id, ch_client):
+    """The content key covers trips and stop times, not the calendar: a
+    timetable reissued only to extend its calendar keeps the content of the
+    one before, and each name plans its own days."""
+    _seed(pg_conn, agency_id)
+    _set_calendar(pg_conn, agency_id, end=date(2026, 11, 30))
+    first = _loaded_calendar(pg_conn, agency_id)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    _set_stem(pg_conn, agency_id, "gtfs_static_20261101")
+    _set_calendar(pg_conn, agency_id, end=date(2027, 3, 31), removal="20261104")
+    second = _loaded_calendar(pg_conn, agency_id)
+    assert static_archive.archive_loaded(pg_conn, ch_client, agency_id) == key
+    assert static_archive.archived_calendar(ch_client, agency_id, "gtfs_static_20261025", key) == first
+    assert static_archive.archived_calendar(ch_client, agency_id, "gtfs_static_20261101", key) == second
+    assert first != second
+
+
+def test_a_timetable_with_no_calendar_keeps_none(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM static_calendar WHERE agency_id = %s", (agency_id,))
+        cur.execute("DELETE FROM static_calendar_dates WHERE agency_id = %s", (agency_id,))
+    pg_conn.commit()
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert key is not None
+    assert static_archive.calendar_versions(ch_client, agency_id) == set()
+
+
+def test_each_trips_service_and_stop_times_are_read_from_the_archived_schedule(pg_conn, agency_id, ch_client):
+    _seed(pg_conn, agency_id)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT t.trip_id, t.service_id, count(*) FROM static_trips t JOIN static_stop_times st "
+            "ON st.agency_id = t.agency_id AND st.trip_id = t.trip_id WHERE t.agency_id = %s GROUP BY 1, 2",
+            (agency_id,),
+        )
+        loaded = sorted(cur.fetchall())
+    pg_conn.rollback()
+    assert sorted(static_archive.service_trips(ch_client, agency_id, key)) == loaded
+
+
+def test_a_calendar_only_refetch_under_the_same_name_keeps_the_first_calendar_and_warns(
+    pg_conn, agency_id, ch_client, caplog
+):
+    """Name and content are the key, so the second calendar has nowhere to go:
+    the first stands, and the archive says so."""
+    _seed(pg_conn, agency_id)
+    _set_calendar(pg_conn, agency_id, end=date(2026, 11, 30))
+    first = _loaded_calendar(pg_conn, agency_id)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    with caplog.at_level("WARNING", logger="pipeline.static_archive"):
+        static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert "another calendar" not in caplog.text
+    _set_calendar(pg_conn, agency_id, end=date(2027, 3, 31))
+    with caplog.at_level("WARNING", logger="pipeline.static_archive"):
+        assert static_archive.archive_loaded(pg_conn, ch_client, agency_id) == key
+    assert "gtfs_static_20261025 carries another calendar than the one kept" in caplog.text
+    assert static_archive.archived_calendar(ch_client, agency_id, "gtfs_static_20261025", key) == first
