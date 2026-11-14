@@ -108,9 +108,8 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   too and a "module not found" is a real dependency gap. For a
   Playwright/real-browser e2e test, also build the SPA (`npm run build`) and
   bake it (`make bake`) inside the worktree being tested (`api/static` is
-  gitignored per-worktree), install Chromium (`poetry run playwright install
-  --with-deps chromium`), and set a dummy `GEMINI_API_KEY` if startup requires
-  one but the test never reaches the Ask/LLM path.
+  gitignored per-worktree), and install Chromium (`poetry run playwright install
+  --with-deps chromium`). No LLM key is needed: the app boots without one.
 - The same cwd-keyed resolution bites a *test or script that shells out*:
   a child invoked as `poetry run python ...` re-resolves the virtualenv from
   wherever it runs, so a suite launched from a worktree hands its subprocess a
