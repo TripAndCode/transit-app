@@ -28,6 +28,7 @@ Aggregation tables produced:
 - agg_route_daily_dist — per-day delay distribution (powers range-scoped reports
   and today/route-summary's same-day-type baseline)
 - agg_hour_daily       — per-day, per-hour-of-day delay (Overview peak-hour-by-DOW)
+- agg_route_band_daily — per-route, per-day, per-time-band delay (a time-band Overview)
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
@@ -66,11 +67,11 @@ divide SUM(sum_delay_sec) / SUM(samples) once, at the end, rather than
 re-weighting the already-rounded avg_min/avg_delay_sec (SUM(avg_min *
 samples) / SUM(samples)) — the latter pools a mean of ROUNDED per-row
 values, which is not the same as the true pooled mean over the underlying
-raw observations. The same rule covers these six tables and
-agg_route_daily_dist, which carries `sum_delay_sec` with no rounded mean
-beside it.
+raw observations. The same rule covers these six tables,
+agg_route_daily_dist and agg_route_band_daily, which carry `sum_delay_sec`
+with no rounded mean beside it.
 
-agg_daily_trend additionally carries `sum_late_sec`, the exact
+agg_daily_trend and agg_route_band_daily additionally carry `sum_late_sec`, the exact
 SUM(GREATEST(dep_delay, 0)) behind each row — a clamped TOTAL, not a mean, so
 a reader pooling multiple rows sums it directly (no division). A route's
 total lateness contribution must be computed by summing this per-observation
@@ -177,6 +178,7 @@ _AGG_TABLES_ORDERED = (
     "agg_route_daily",
     "agg_route_daily_dist",
     "agg_hour_daily",
+    "agg_route_band_daily",
     "agg_stop_daily",
     "agg_stop_routes",
     "agg_route_stop_daily",
@@ -201,6 +203,7 @@ _INCREMENTAL_AGG_TABLES = frozenset(
         "agg_daily_trend",
         "agg_feed_health",
         "agg_hour_daily",
+        "agg_route_band_daily",
         "agg_route_daily",
         "agg_route_daily_dist",
         "agg_route_daily_dwell_run",

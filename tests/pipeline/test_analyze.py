@@ -498,6 +498,11 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "(%s, '2099-01-01', 11, 99.9, 100)",
         ),
         (
+            "agg_route_band_daily",
+            "(agency_id, date, route_code, time_band, samples, sum_delay_sec, sum_late_sec)",
+            "(%s, '2099-01-01', 'GHOST', 'morning', 100, 999, 999)",
+        ),
+        (
             "agg_stop_daily",
             "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples)",
             "(%s, 'GHOST_STOP', '2099-01-01', '平日', 'morning', 999, 100)",
