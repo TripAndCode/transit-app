@@ -333,14 +333,11 @@
 }
 
 /* Present only while a change is pending, so the resting dock carries no
-   disabled button. Full-height and filled, so it never reads as a third
-   dropdown the way an equally-sized outlined button did. `.btn` and
-   `.btn--primary` are both single-class selectors of equal specificity, so a
-   same-weight override here would depend on chunk load order; scoping to
-   `.ops-dock` instead outranks both regardless of order, which is what lets
-   the dock's flush edge win over the shared control's fixed height, radius
-   and shadow. */
+   disabled button. Full-height and filled, flush with the dock's edge, so it
+   never reads as a third dropdown. Two classes outrank .btn's one whatever
+   the chunk order, and the flush edge takes no lift. */
 .ops-dock .ops-dock__apply { flex: 0 0 auto; height: auto; padding: 0 17px; border-left: 1px solid var(--card-border); border-radius: 0; box-shadow: none; }
+.ops-dock .ops-dock__apply:hover { background: var(--accent-strong); }
 .ops-dock .ops-dock__apply:hover,
 .ops-dock .ops-dock__apply:active {
   box-shadow: none;
@@ -370,10 +367,13 @@
 .ops-playback { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: var(--z-map-overlay); display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--radius-xl); }
 
 .ops-playback__transport { display: flex; gap: 4px; }
-/* `.btn--sm` pads for a text label; the play/pause control stays a square
-   icon target instead, scoped so it outranks `.btn--sm`'s own width/padding
-   regardless of chunk load order. */
+/* A square icon target: drops .btn--sm's label padding and fixes the width. */
 .ops-playback .ops-playback__play { width: var(--control-h-sm); padding: 0; }
+/* aria-pressed marks playback, but this stays the filled primary control
+   rather than taking the shared toggle's "on" look: it is the rail's main
+   action whether playing or not. */
+.ops-playback .ops-playback__play[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); box-shadow: var(--el-1); }
+.ops-playback .ops-playback__play[aria-pressed="true"]:hover { box-shadow: var(--el-2); }
 
 /* The load bar IS the scrubber's track: one band per frame, coloured by that
    frame's own mean delay, so the shape of the day is readable before anything
@@ -389,7 +389,7 @@
 .ops-playback__clock small { font-size: var(--text-xs); color: var(--text-tertiary); }
 .ops-playback__status { flex: 1 1 200px; margin: 0; font-size: var(--text-sm); color: var(--text-tertiary); }
 
-.ops-dock__playback { align-self: center; margin-right: 10px; white-space: nowrap; }
+.ops-dock__playback { align-self: center; margin-right: 10px; }
 
 /* BP.sm */
 @media (max-width: 640px) {
