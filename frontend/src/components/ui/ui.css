@@ -155,3 +155,68 @@
   @keyframes ui-spinner-rotate { to { transform: rotate(360deg); } }
   .ui-spinner svg { animation: ui-spinner-rotate calc(var(--dur-4) * 0.75) linear infinite; }
 }
+
+/* Segmented.tsx. The track's grid, its padding and the thumb's size and
+   cell offset are set inline: all of them follow from the caller's column
+   count and the component's one inset constant. */
+.seg {
+  position: relative;
+  display: grid;
+  border-radius: var(--control-radius);
+  background: var(--bg-soft);
+}
+.seg-thumb {
+  position: absolute;
+  border-radius: var(--control-radius-sm);
+  background: var(--bg-surface);
+  box-shadow: var(--el-1);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .seg-thumb { transition: transform var(--dur-3) var(--ease-spring), opacity var(--dur-2) var(--ease-out); }
+  .seg-thumb--appear { transition: opacity var(--dur-2) var(--ease-out); }
+}
+.seg-btn {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  z-index: var(--z-raised);
+  height: var(--control-h-sm);
+  min-width: 0;
+  padding: 0 10px;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--text-secondary);
+  border-radius: var(--control-radius-sm);
+  cursor: pointer;
+}
+.seg-btn[aria-checked="true"] { color: var(--text-primary); }
+/* The label, not the button, carries the ellipsis: a grid item's default
+   min-width is its content size, which defeats text-overflow until the
+   item itself opts into shrinking below that. */
+.seg-btn__label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* BP.sm, phone width: a narrow cell spends too much of itself on the
+   desktop padding, so this gives that width back to the label, and a label
+   that still doesn't fit takes a second line before it ellipsizes (two
+   lines at this line-height fit the button's height). The column count is
+   each caller's constant, never a breakpoint's: the thumb's grid is
+   computed from it alongside the buttons' grid. */
+@media (max-width: 640px) {
+  .seg-btn { padding: 0 4px; }
+  .seg-btn__label {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    line-height: 1.2;
+    text-align: center;
+  }
+}
