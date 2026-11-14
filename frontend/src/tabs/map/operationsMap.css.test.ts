@@ -27,3 +27,18 @@ describe("operationsMap.css floating chrome", () => {
     expect(keyframes).not.toMatch(/background|transform|box-shadow/);
   });
 });
+
+describe("operationsMap.css phone layout (BP.sm)", () => {
+  it("lets the freshness line wrap instead of overflowing the header", () => {
+    const bpSm = ruleBody(css, "@media (max-width: 640px) {");
+    const freshness = ruleBody(bpSm, ".ops-freshness {");
+    expect(decl(freshness, "white-space")).toBe("normal");
+    expect(decl(freshness, "min-width")).toBe("0");
+    expect(decl(freshness, "overflow-wrap")).toBe("anywhere");
+  });
+
+  it("keeps a legend item whole instead of breaking it mid-word", () => {
+    const chip = ruleBody(css, ".ops-map-ref__legend .legend-chip {");
+    expect(decl(chip, "white-space")).toBe("nowrap");
+  });
+});

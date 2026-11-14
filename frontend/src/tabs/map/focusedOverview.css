@@ -38,3 +38,12 @@
 .focus-queue-inspect { margin-top: 20px; }
 /* BP.md */
 @media (max-width: 900px) { .focused-overview .ops-workspace { grid-template-columns: 1fr; max-height: none; } .focused-overview .ops-map { height: 50dvh; } .focus-live-queue { padding: 16px 0; } .ops-resizer { display: none; } }
+
+/* BP.sm: the map sits below the header, freshness line and refresh button,
+   so what those give up in height the map gains directly. The title drops
+   to the next size down the type scale and loses its desktop line-height
+   headroom; the column gap between header and workspace tightens to match. */
+@media (max-width: 640px) {
+  .focused-overview { gap: 8px; }
+  .focused-overview .ops-heading h1 { font: 650 var(--text-xl) / 1.2 var(--font-body, sans-serif); }
+}
