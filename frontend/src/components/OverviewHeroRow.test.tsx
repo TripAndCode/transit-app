@@ -102,7 +102,61 @@ describe("OverviewHeroRow", () => {
       mockFeed(1);
       renderHero({ search: "?from=2026-05-11&to=2026-06-09&dow=1,2" });
       const link = screen.getByRole("link", { name: "Routes" });
-      expect(link.getAttribute("href")).toBe("/agencies/1/routes?from=2026-05-11&to=2026-06-09&dow=1%2C2");
+      expect(link.getAttribute("href")).toBe("/agencies/1/routes?from=2026-05-11&to=2026-06-09&dow=1%2C2&sort=on_time");
+    });
+
+    it("drops a stale report or sort from the scope", () => {
+      mockFeed(1);
+      renderHero({ search: "?from=2026-05-11&report=ranking_best&sort=avg" });
+      const href = screen.getByRole("link", { name: "Routes" }).getAttribute("href");
+      expect(href).toBe("/agencies/1/routes?from=2026-05-11&sort=on_time");
+    });
+
+    it("keeps a single-route selection on the Routes list", () => {
+      mockFeed(1);
+      renderHero({ search: "?routes=R1&from=2026-05-11&to=2026-06-09" });
+      const href = screen.getByRole("link", { name: "Routes" }).getAttribute("href");
+      expect(href).toBe("/agencies/1/routes?routes=R1&from=2026-05-11&to=2026-06-09&sort=on_time");
+    });
+
+    it("is present with the latest-day note, without a baseline, and with a withheld reference", () => {
+      mockFeed(1);
+      const daily: OverviewServiceSplitDay[] = Array.from({ length: 8 }, (_, i) => ({
+        date: `2026-06-0${i + 2}`,
+        day_type: "weekday",
+        avg_min: i === 7 ? 5.02 : i === 0 ? 5.32 : 3,
+        samples: 1000,
+      }));
+      const withNote = renderHero({ daily });
+      expect(withNote.container.querySelector(".ov-hero-note")).not.toBeNull();
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+      withNote.unmount();
+
+      const noBaseline = renderHero({
+        headline: headline({ avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null }),
+      });
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+      noBaseline.unmount();
+
+      renderHero({
+        headline: headline({
+          reference: {
+            avg_min: null,
+            delta_min: null,
+            delta_pct: null,
+            samples: 60,
+            window_from: "2026-03-05",
+            window_to: "2026-06-02",
+            days: 90,
+            days_selected: 90,
+            days_collected: 90,
+            min_days: 72,
+            min_samples: 100,
+            reason: "insufficient_samples",
+          },
+        }),
+      });
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
     });
   });
 

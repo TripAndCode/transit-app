@@ -17,7 +17,7 @@ import { latestDayStanding, storyVerdict, topRoutesShare, windowDays } from "./o
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { HeadlineReference } from "./overview/HeadlineReference";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
-import { destHref } from "../routes/destinations";
+import { reportHref } from "../routes/destinations";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
 import { EM_DASH, fixedTenth, formatDate, formatHourRange, formatReportTime } from "../utils/format";
@@ -193,7 +193,7 @@ export function OverviewHeroRow({
           <Trans
             t={t}
             i18nKey="overview.hero_row.on_time_pointer"
-            components={{ routes: <Link to={destHref(agencyId, "routes", search)} /> }}
+            components={{ routes: <Link to={reportHref(agencyId, "on_time", search)} /> }}
           />
         </p>
       </div>
