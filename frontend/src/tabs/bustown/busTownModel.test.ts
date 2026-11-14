@@ -4,6 +4,7 @@ import {
   boundsFromPoints,
   buildBusTownModel,
   desiredWindowKeys,
+  firstDepartureStart,
   fitProjection,
   formatServiceClock,
   mergeReplayWindows,
@@ -280,6 +281,29 @@ describe("window grid anchoring", () => {
 
     const nearEnd = desiredWindowKeys("2026-01-05", originHour, 8 * 3600 - 2, 1);
     expect(nearEnd.map((k) => k.fromHour)).toEqual([2, 5, 8]);
+  });
+});
+
+describe("firstDepartureStart", () => {
+  const MIN_SEC = 4 * 3600;
+
+  it("starts one minute before the first event, floored to the whole minute", () => {
+    const w = replayWindow({
+      trips: [{ trip_id: "t1", route_code: "R1", stop_idx: [0], t: [5 * 3600 + 42 * 60 + 30], delay: [0] }],
+    });
+    expect(firstDepartureStart(w, MIN_SEC)).toBe(5 * 3600 + 41 * 60);
+  });
+
+  it("clamps to minSec when the first event is within a minute of it", () => {
+    const w = replayWindow({
+      trips: [{ trip_id: "t1", route_code: "R1", stop_idx: [0], t: [4 * 3600 + 20], delay: [0] }],
+    });
+    expect(firstDepartureStart(w, MIN_SEC)).toBe(MIN_SEC);
+  });
+
+  it("falls back to minSec when the window has no events at all", () => {
+    expect(firstDepartureStart(replayWindow({ trips: [] }), MIN_SEC)).toBe(MIN_SEC);
+    expect(firstDepartureStart(undefined, MIN_SEC)).toBe(MIN_SEC);
   });
 });
 

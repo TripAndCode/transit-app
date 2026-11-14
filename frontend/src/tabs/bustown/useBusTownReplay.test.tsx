@@ -103,6 +103,56 @@ describe("useBusTownReplay", () => {
     expect(result.current.departuresByHour).toEqual([{ hour: 4, departures: 9 }]);
   });
 
+  it("starts the playhead one minute before the first departure on a cold load, not the scrubber's own start", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const day: ReplayResponse = {
+      ...replayWindow(4),
+      trips: [{ trip_id: "t1", route_code: "R1", stop_idx: [0, 1], t: [5 * 3600 + 42 * 60 + 30, 5 * 3600 + 50 * 60], delay: [0, 0] }],
+    };
+    client.setQueryData(["bus-town-replay", AGENCY, null, null, null], day);
+    for (const key of desiredWindowKeys(day.date!, day.from_hour!, 5 * 3600 + 41 * 60, SPEED)) {
+      client.setQueryData(["bus-town-replay", AGENCY, key.date, key.fromHour, key.toHour], day);
+    }
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useBusTownReplay(AGENCY, null, null, SPEED), { wrapper });
+
+    expect(result.current.playhead).toBe(5 * 3600 + 41 * 60);
+  });
+
+  it("re-resolves a null playhead to the newly picked day's own first departure", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const dayA = replayWindow(4);
+    const dayB: ReplayResponse = {
+      ...replayWindow(4),
+      date: "2026-01-06",
+      trips: [{ trip_id: "t1", route_code: "R1", stop_idx: [0, 1], t: [6 * 3600 + 10 * 60, 6 * 3600 + 20 * 60], delay: [0, 0] }],
+    };
+    client.setQueryData(["bus-town-replay", AGENCY, null, null, null], dayA);
+    for (const key of desiredWindowKeys(dayA.date!, dayA.from_hour!, PLAYHEAD, SPEED)) {
+      client.setQueryData(["bus-town-replay", AGENCY, key.date, key.fromHour, key.toHour], dayA);
+    }
+    client.setQueryData(["bus-town-replay", AGENCY, "2026-01-06", null, null], dayB);
+    for (const key of desiredWindowKeys(dayB.date!, dayB.from_hour!, 6 * 3600 + 9 * 60, SPEED)) {
+      client.setQueryData(["bus-town-replay", AGENCY, key.date, key.fromHour, key.toHour], dayB);
+    }
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+
+    const { result, rerender } = renderHook(
+      ({ date, sec }: { date: string | null; sec: number | null }) => useBusTownReplay(AGENCY, date, sec, SPEED),
+      { wrapper, initialProps: { date: null as string | null, sec: PLAYHEAD as number | null } },
+    );
+    expect(result.current.playhead).toBe(PLAYHEAD);
+
+    rerender({ date: "2026-01-06", sec: null });
+
+    expect(result.current.playhead).toBe(6 * 3600 + 9 * 60);
+  });
+
   it("never falls back to the default day's hourly totals for a picked day that hasn't loaded yet, unlike availableDates", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const defaultDay = { ...replayWindow(4), departures_by_hour: [{ hour: 4, departures: 9 }] };

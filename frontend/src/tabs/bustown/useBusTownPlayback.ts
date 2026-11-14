@@ -38,6 +38,12 @@ export type BusTownPlaybackOptions = {
    *  racing to own it. */
   sec: number;
   setSec: (sec: number) => void;
+  /** Identifies the service day being played — `replay.date` fits.
+   *  Switching to a day whose window is already cached resolves
+   *  synchronously, so the canvas never unmounts and the loop's own `t`
+   *  would otherwise keep running past the caller's reset `sec`. Changing
+   *  this restarts the loop so it re-reads `sec` instead. */
+  dayKey: string | null;
 };
 
 type LoopControls = {
@@ -52,8 +58,12 @@ type LoopControls = {
  * `bounds` are read fresh on every drawn frame without restarting the loop,
  * so a newly loaded window never resets play position. A separate effect
  * also repaints the current frame whenever any of them changes, so while
- * paused a day switch, a window arriving after a paused seek, or
- * the stop bounds resolving are never left stale on screen. The loop itself
+ * paused a window arriving after a paused seek, or the stop bounds
+ * resolving are never left stale on screen. `dayKey` does restart the loop:
+ * a day switch moves `sec` on its own, but switching to an already-cached
+ * day resolves synchronously and never unmounts the canvas, so without a
+ * restart the loop's own running clock would keep ticking from the old
+ * day's position instead of picking up the reset one. The loop itself
  * is only ever scheduled while playing (and the tab is visible and the
  * canvas on screen) — pausing cancels it outright rather than scheduling
  * empty frames.
@@ -69,6 +79,7 @@ export function useBusTownPlayback({
   autoplay,
   sec,
   setSec,
+  dayKey,
 }: BusTownPlaybackOptions): BusTownPlayback {
   /** The canvas itself lives in a ref, not state: the setup effect below
    *  resizes it directly (`el.width`/`el.height`), which the compiler only
@@ -205,7 +216,7 @@ export function useBusTownPlayback({
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("resize", resize);
     };
-  }, [canvasMounted, minSec, maxSec, setSec]);
+  }, [canvasMounted, minSec, maxSec, setSec, dayKey]);
 
   useEffect(() => {
     controls.current?.setPlaying(playing);

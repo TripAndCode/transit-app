@@ -24,6 +24,23 @@ export function scrubberStartHour(defaultFromHour: number | null): number {
     : Math.min(SCRUBBER_DEFAULT_START_HOUR, defaultFromHour);
 }
 
+/** One minute before the day's earliest observed stop event, floored to the
+ *  whole minute and never below `minSec` — the playhead a cold load or a day
+ *  switch should open on, so a long-idle town before the first bus never
+ *  shows. Reads a single window's own `trips` directly rather than the
+ *  merged model, which only knows about whatever windows the playhead has
+ *  already pulled in and would make this circular. */
+export function firstDepartureStart(response: ReplayResponse | undefined, minSec: number): number {
+  let earliest = Infinity;
+  for (const trip of response?.trips ?? []) {
+    for (const t of trip.t) {
+      if (t < earliest) earliest = t;
+    }
+  }
+  if (!Number.isFinite(earliest)) return minSec;
+  return Math.max(minSec, Math.floor(earliest / 60) * 60 - 60);
+}
+
 /** One stop event resolved against its own response's `stops` arrays, so an
  *  index from a different window's response can never leak in here. */
 type ResolvedStopEvent = {

@@ -43,6 +43,7 @@ type HarnessProps = {
   startMounted?: boolean;
   stopPoints?: readonly StopPoint[];
   bounds?: StopBounds | null;
+  dayKey?: string;
 };
 
 /** Mirrors `AsyncSection`: the `<canvas>` is absent on the first render and
@@ -58,9 +59,11 @@ function Harness({
   startMounted = true,
   stopPoints = STOP_POINTS,
   bounds = null,
+  dayKey: initialDayKey = "day-a",
 }: HarnessProps) {
   const [sec, setSec] = useState(minSec);
   const [mounted, setMounted] = useState(startMounted);
+  const [dayKey, setDayKey] = useState(initialDayKey);
   const { playing, play, pause, canvasRef } = useBusTownPlayback({
     model,
     stopPoints,
@@ -72,7 +75,15 @@ function Harness({
     autoplay,
     sec,
     setSec,
+    dayKey,
   });
+  /** Mirrors `BusTownPage`'s day-picker handler: resetting the playhead and
+   *  switching to the new day's key happen together, as they would for a day
+   *  already cached (resolved synchronously, no canvas unmount in between). */
+  function switchDay(nextDayKey: string, nextSec: number) {
+    setDayKey(nextDayKey);
+    setSec(nextSec);
+  }
   return (
     <>
       {mounted && <canvas ref={canvasRef} aria-hidden="true" />}
@@ -81,6 +92,9 @@ function Harness({
       </button>
       <button type="button" onClick={() => (playing ? pause() : play())}>
         {playing ? "playing" : "paused"}
+      </button>
+      <button type="button" onClick={() => switchDay("day-b", 5000)}>
+        switch day
       </button>
       <span data-testid="sec">{sec}</span>
     </>
@@ -195,6 +209,20 @@ describe("useBusTownPlayback", () => {
     expect(screen.getByRole("button", { name: "playing" })).toBeInTheDocument();
     frames.step();
     expect(screen.getByTestId("sec")).toHaveTextContent("60");
+  });
+
+  it("restarts the loop on a day switch so the reset playhead isn't immediately overwritten by the old running clock", () => {
+    const frames = driveFrames();
+    render(<Harness model={makeModel(100_000)} maxSec={100_000} speed={600} autoplay />);
+    frames.step();
+    frames.step();
+    expect(Number(screen.getByTestId("sec").textContent)).toBeGreaterThan(0);
+
+    act(() => screen.getByRole("button", { name: "switch day" }).click());
+    expect(screen.getByTestId("sec")).toHaveTextContent("5000");
+
+    frames.step();
+    expect(Number(screen.getByTestId("sec").textContent)).toBeGreaterThanOrEqual(5000);
   });
 
   it("repaints a paused canvas once the data it draws changes", () => {
