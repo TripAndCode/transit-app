@@ -38,6 +38,8 @@ export const loadTimeTab: TabLoader = () => import("../tabs/TimeTab").then((m) =
 export const loadWhyTab: TabLoader = () => import("../tabs/WhyTab").then((m) => ({ default: m.WhyTab }));
 export const loadCompareTab: TabLoader = () =>
   import("../tabs/CompareTab").then((m) => ({ default: m.CompareTab }));
+export const loadBusTownTab: TabLoader = () =>
+  import("../tabs/bustown/BusTownPage").then((m) => ({ default: m.BusTownPage }));
 
 /**
  * Agency-relative route segment → the chunk that segment renders. Keyed by the
@@ -56,6 +58,7 @@ export const ROUTE_CHUNK_LOADERS: Record<Destination | "ask", () => Promise<unkn
   // The Reports host lazy-loads its default view, so warm both.
   reports: () => Promise.all([loadSavedExportTab(), loadReportsHomeTab()]),
   ask: loadAskTab,
+  "bus-town": loadBusTownTab,
 };
 
 /**

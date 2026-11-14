@@ -7,7 +7,7 @@ export type GoToTarget = {
   sublabelKey?: string;
 };
 
-type NavTo = (typeof SIDEBAR_NAV_ITEMS)[number]["to"] | "ask";
+type NavTo = (typeof SIDEBAR_NAV_ITEMS)[number]["to"] | "ask" | "bus-town";
 
 /** `g` + this letter jumps straight to the destination, both inside the
  *  palette and globally (see `handleGlobalKeyDown` in CommandPalette.tsx).
@@ -22,6 +22,7 @@ const CHORD_KEYS: Record<NavTo, string> = {
   live: "l",
   reports: "e",
   ask: "q",
+  "bus-town": "b",
 };
 
 const SUBLABEL_KEYS: Record<NavTo, string> = {
@@ -33,6 +34,7 @@ const SUBLABEL_KEYS: Record<NavTo, string> = {
   live: "design:live",
   reports: "palette.nav_reports_sublabel",
   ask: "palette.nav_ask_sublabel",
+  "bus-town": "palette.nav_bus_town_sublabel",
 };
 
 /**
@@ -52,4 +54,5 @@ export const GO_TO_TARGETS: GoToTarget[] = [
     }),
   ),
   { to: "ask", chordKey: CHORD_KEYS.ask, labelKey: "nav.ask", sublabelKey: SUBLABEL_KEYS.ask },
+  { to: "bus-town", chordKey: CHORD_KEYS["bus-town"], labelKey: "nav.bus-town", sublabelKey: SUBLABEL_KEYS["bus-town"] },
 ];
