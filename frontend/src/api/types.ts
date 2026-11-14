@@ -1282,6 +1282,50 @@ export type StopBounds = [number, number, number, number];
 /** `GET /api/{agency_id}/stops/bounds`: null for an agency with no located stop. */
 export type StopBoundsResponse = { bounds: StopBounds | null };
 
+/** Every stop any returned trip visits, columnar: `lat[i]`/`lon[i]` go with
+ *  `id[i]`. A stop with no current static match keeps null coordinates. */
+type ReplayStops = {
+  id: string[];
+  lat: (number | null)[];
+  lon: (number | null)[];
+};
+
+type ReplayRoute = {
+  code: string;
+  name: string;
+  /** Always null: no route carries a color in this schema yet. */
+  color: string | null;
+};
+
+/** One trip's observed stops over the requested window, in schedule order.
+ *  `stop_idx`, `t` and `delay` are parallel arrays indexing into that same
+ *  response's own `stops` — an index is only meaningful against the `stops`
+ *  it was returned with, never across two different windows. */
+export type ReplayTrip = {
+  trip_id: string;
+  route_code: string | null;
+  stop_idx: number[];
+  /** Seconds since the service day's 00:00: scheduled second plus delay. */
+  t: number[];
+  delay: number[];
+};
+
+/** `GET /api/agencies/{agency_id}/replay`: one agency's buses over a bounded
+ *  window of one past service day. */
+export type ReplayResponse = {
+  /** The service day replayed, or null when the agency has no observations at all. */
+  date: string | null;
+  /** The window replayed, [from_hour, to_hour) in service-day hours; null
+   *  when there is no day to replay. */
+  from_hour: number | null;
+  to_hour: number | null;
+  /** Up to the agency's last 14 service days with observations, newest first. */
+  available_dates: string[];
+  stops: ReplayStops;
+  routes: ReplayRoute[];
+  trips: ReplayTrip[];
+};
+
 /** Why the agencies board leaves an agency unranked: the first check of
  *  pipeline.reports.comparability it fails, in that module's order. */
 type ComparableReason = "no_data" | "coverage_unknown" | "coverage_low" | "ci_wide" | "clamp_high";
