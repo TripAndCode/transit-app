@@ -113,13 +113,15 @@
 .bus-town-controls .scrub-input::-webkit-slider-runnable-track { background: var(--border-subtle); border-radius: 4px; }
 .bus-town-controls .scrub-input::-moz-range-track { background: var(--border-subtle); border-radius: 4px; }
 
-/* BusTownHourStrip.tsx insets the row by half the thumb's width, which lines
-   the bars up with the thumb's travel. */
+/* Inset by half the range thumb's 4px width (`scrubber.css`), the slack the
+   thumb's travel leaves at each end, so each bar starts where the thumb sits
+   at the start of its hour. */
 .bus-town-hour-bars {
   display: flex;
   align-items: flex-end;
   gap: 2px;
   height: 28px;
+  padding-inline: 2px;
 }
 
 .bus-town-hour-bar {

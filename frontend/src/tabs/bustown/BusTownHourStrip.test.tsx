@@ -20,7 +20,7 @@ describe("BusTownHourStrip", () => {
   });
 
   it("renders more bars when the day's own service starts before 04:00", () => {
-    const hours: ReplayHour[] = [{ hour: 2, departures: 1 }];
+    const hours: ReplayHour[] = [{ hour: 5, departures: 1 }];
     const { container } = render(
       <BusTownHourStrip hours={hours} startHour={2} endHour={28} playheadSec={2 * 3600} t={t} />,
     );
@@ -39,6 +39,17 @@ describe("BusTownHourStrip", () => {
     const current = all.filter((b) => b.classList.contains("is-current"));
     expect(current).toHaveLength(1);
     expect(current[0].style.height).toBe("100%");
+  });
+
+  it("marks no bar as current at the range's last instant", () => {
+    const hours: ReplayHour[] = [
+      { hour: 4, departures: 2 },
+      { hour: 5, departures: 4 },
+    ];
+    const { container } = render(
+      <BusTownHourStrip hours={hours} startHour={4} endHour={6} playheadSec={6 * 3600} t={t} />,
+    );
+    expect(bars(container).filter((b) => b.classList.contains("is-current"))).toHaveLength(0);
   });
 
   it("scales every bar's height relative to the busiest hour in range, with that bar at 100%", () => {
