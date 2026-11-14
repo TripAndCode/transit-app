@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { act, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, Link } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { BusTownPage } from "./BusTownPage";
@@ -212,6 +212,33 @@ describe("BusTownPage", () => {
     renderBusTown();
     expect(screen.getByRole("alert")).toBeInTheDocument();
     expect(screen.getByLabelText("Day")).toBeInTheDocument();
+  });
+
+  it("keys the playback loop's restart on the picked day, not the resolved one", () => {
+    const { playbackSpy } = setup(nonEmptyReplay({ date: "2026-01-05" }));
+    renderBusTown();
+    expect(playbackSpy.mock.calls.at(-1)![0].dayKey).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Day"), { target: { value: "2026-01-04" } });
+    expect(playbackSpy.mock.calls.at(-1)![0].dayKey).toBe("2026-01-04");
+  });
+
+  it("resets the playhead to null when another day is picked, so it re-resolves to that day's own first departure", () => {
+    const { playbackSpy } = setup(nonEmptyReplay());
+    const replaySpy = vi.mocked(replayModule.useBusTownReplay);
+    renderBusTown();
+
+    // Stand in for playback having advanced the playhead away from null,
+    // the way the real playback loop's own `setSec` calls would.
+    const setSec = playbackSpy.mock.calls.at(-1)![0].setSec;
+    act(() => setSec(6 * 3600));
+    expect(replaySpy.mock.calls.at(-1)![2]).toBe(6 * 3600);
+
+    fireEvent.change(screen.getByLabelText("Day"), { target: { value: "2026-01-04" } });
+
+    const lastCall = replaySpy.mock.calls.at(-1)!;
+    expect(lastCall[1]).toBe("2026-01-04");
+    expect(lastCall[2]).toBeNull();
   });
 
   it("resets the picked date when the agency switches", () => {

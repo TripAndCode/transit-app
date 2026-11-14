@@ -23,7 +23,7 @@ import { formatDate, formatMinutes } from "../../utils/format";
 import { useBusTownReplay, type BusTownReplay } from "./useBusTownReplay";
 import { useBusTownPlayback } from "./useBusTownPlayback";
 import { BusTownHourStrip } from "./BusTownHourStrip";
-import { boundsFromPoints, formatServiceClock, onTimeCount, positionsAt, scrubberStartHour, slowestRoute } from "./busTownModel";
+import { boundsFromPoints, formatServiceClock, onTimeCount, positionsAt, slowestRoute } from "./busTownModel";
 import "../../styles/scrubber.css";
 import "./busTown.css";
 
@@ -93,9 +93,15 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [speed, setSpeed] = useState<number>(SPEEDS[DEFAULT_SPEED_INDEX]);
-  const [sec, setSec] = useState(scrubberStartHour(null) * 3600);
+  /** Null follows the day's own default start (`firstDepartureStart`). */
+  const [sec, setSec] = useState<number | null>(null);
 
   const replay = useBusTownReplay(agencyId, selectedDate, sec, speed);
+
+  function handleDayChange(date: string) {
+    setSelectedDate(date);
+    setSec(null);
+  }
   const stopBoundsQuery = useStopBounds(agencyId);
   const bounds = stopBoundsQuery.data ?? boundsFromPoints(replay.stopPoints);
   const playhead = replay.playhead;
@@ -111,6 +117,7 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
     autoplay: !reducedMotion,
     sec: playhead,
     setSec,
+    dayKey: selectedDate,
   });
 
   const buses = positionsAt(replay.model, playhead);
@@ -127,7 +134,7 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
           <ArrowLeft size={14} aria-hidden="true" /> {t("busTown.back_to_pulse")}
         </Link>
       )}
-      <DayPicker replay={replay} selectedDate={selectedDate} onChange={setSelectedDate} t={t} />
+      <DayPicker replay={replay} selectedDate={selectedDate} onChange={handleDayChange} t={t} />
 
       <AsyncSection
         loading={replay.loading}
