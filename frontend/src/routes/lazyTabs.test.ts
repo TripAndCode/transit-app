@@ -36,6 +36,7 @@ describe("ROUTE_CHUNK_LOADERS", () => {
   it("maps each destination to the chunk it renders, and nothing else", () => {
     expect(Object.keys(ROUTE_CHUNK_LOADERS).sort()).toEqual([
       "ask",
+      "bus-town",
       "compare",
       "live",
       "pulse",

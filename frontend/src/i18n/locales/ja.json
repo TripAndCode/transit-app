@@ -30,7 +30,8 @@
     "pin_route": "ピン留め",
     "pin_route_full": "ピン留めは{{max}}系統まで",
     "station_figure_mean": "今日の平均 {{delay}}",
-    "station_figure_unusual": "今日の要注意 {{n}}"
+    "station_figure_unusual": "今日の要注意 {{n}}",
+    "bus-town": "バスタウン"
   },
   "compare": {
     "mode_periods": "平日と土日祝",
@@ -2265,7 +2266,8 @@
       "go_to": "{{target}}へ移動",
       "open_shortcuts": "このショートカット一覧を表示",
       "extend_brush": "日次チャートの選択範囲を拡張"
-    }
+    },
+    "nav_bus_town_sublabel": "過去の1日分のバスが停留所を巡る様子を眺める"
   },
   "empty_state": {
     "reason_format": "{{label}}: {{value}}",
@@ -2452,5 +2454,28 @@
     "between": "{{from}}〜{{to}}分",
     "at_least": "{{from}}分以上",
     "no_data": "データなし"
+  },
+  "busTown": {
+    "subtitle": "過去の運行日を、停留所ごとに再生します。",
+    "back_to_pulse": "パルスに戻る",
+    "day_label": "日付",
+    "play": "再生",
+    "pause": "一時停止",
+    "speed_group_aria": "再生速度",
+    "speed_label": "{{minutesPerSecond}}分/秒",
+    "speed_aria": "1秒あたり{{minutesPerSecond}}分の速さで再生",
+    "scrubber_aria": "再生位置を指定",
+    "canvas_aria": "その日のバスを再現した模式図",
+    "on_time_title": "現在の定時運行",
+    "on_time_value": "{{total}}台中{{onTime}}台",
+    "on_time_empty": "まだ画面にバスがいません",
+    "slowest_route_title": "最も遅れている路線",
+    "slowest_route_value": "{{route}}：平均{{delay}}の遅れ",
+    "slowest_route_empty": "データがまだありません",
+    "how_it_works_title": "どうやってわかるのか",
+    "how_it_works_body": "バスは実際に観測された停留所の間を直線で結んで動かしており、その時点の遅れで色分けしています。地図は模式図で、実際の位置関係とは異なります。",
+    "empty_title": "再現できるバスの記録がありません",
+    "empty_hint": "別の日を試してください。",
+    "estimate_note": "停留所と停留所のあいだの位置は推定です。"
   }
 }

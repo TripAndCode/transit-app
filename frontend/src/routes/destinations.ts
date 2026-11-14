@@ -1,7 +1,9 @@
 import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 
-/** The rail's destinations, in the order it lists them. */
-export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports"] as const;
+/** The rail's destinations, in the order it lists them, plus Bus Town, which
+ *  is reached only from the command palette rather than a rail stop; its own
+ *  in-page back-link leads out to Pulse, not in. */
+export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports", "bus-town"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 
 type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
