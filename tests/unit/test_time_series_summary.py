@@ -10,6 +10,8 @@ import pytest
 from api.range import RangeCtx
 from pipeline.query import tools
 
+pytestmark = pytest.mark.usefixtures("unstamped_tools")
+
 _CTX = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 31))
 _DAYS = [{"date": "2026-05-01", "avg_min": 1.5, "samples": 100, "top_offenders": []}]
 

@@ -9,9 +9,17 @@ from typing import Any
 
 import asyncpg
 from fastapi.encoders import decimal_encoder
+from pydantic import ValidationError
+
+from pipeline.reports.definition import DefinitionMeta
 
 _MAX_TITLE = 200
 _CONV_COLS = "conversation_id, user_id, agency_id, title, filter_ctx, pinned, created_at, updated_at"
+_MESSAGE_COLS = (
+    "message_id, conversation_id, role, chip_id, tool, args, signature_hash, "
+    "result, rendered_summary, conditions, definition, created_at"
+)
+_JSON_MESSAGE_COLS = ("args", "result", "conditions", "definition")
 
 
 class PermissionDenied(Exception):
@@ -45,6 +53,18 @@ def _json_value(value: Any) -> Any:
 
 def _to_json(value: Any) -> str | None:
     return None if value is None else json.dumps(value, default=_json_value)
+
+
+def _stamp_json(definition: DefinitionMeta | None) -> str | None:
+    return None if definition is None else definition.model_dump_json()
+
+
+def _row_to_message(row: asyncpg.Record) -> dict[str, Any]:
+    d = dict(row)
+    for key in _JSON_MESSAGE_COLS:
+        if isinstance(d.get(key), str):
+            d[key] = json.loads(d[key])
+    return d
 
 
 async def create_conversation(
@@ -169,18 +189,21 @@ async def append_message(
     result: dict[str, Any] | None,
     rendered_summary: str | None,
     conditions: dict[str, Any] | None = None,
+    definition: DefinitionMeta | None = None,
 ) -> dict[str, Any]:
     """``conditions`` is the dow/time_band/service RangeCtx the dispatch (if
     any) actually ran under -- the historical record for the Ask evidence
     card's provenance disclosure. ``None`` for user messages and for
-    assistant messages with no dispatch (e.g. an LLM-grounded follow-up)."""
+    assistant messages with no dispatch (e.g. an LLM-grounded follow-up).
+    ``definition`` is the method stamp of the figures in ``result``, ``None``
+    when no report computes them."""
     row = await conn.fetchrow(
-        """
+        f"""
         INSERT INTO ask_conversation_messages
-          (conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions)
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)
-        RETURNING message_id, conversation_id, role, chip_id, tool, args, signature_hash,
-                  result, rendered_summary, conditions, created_at
+          (conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions,
+           definition)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb, $10::jsonb)
+        RETURNING {_MESSAGE_COLS}
         """,
         conversation_id,
         role,
@@ -191,19 +214,13 @@ async def append_message(
         _to_json(result),
         rendered_summary,
         _to_json(conditions),
+        _stamp_json(definition),
     )
     await conn.execute(
         "UPDATE ask_conversations SET updated_at = now() WHERE conversation_id = $1",
         conversation_id,
     )
-    d = dict(row)
-    if isinstance(d.get("args"), str):
-        d["args"] = json.loads(d["args"])
-    if isinstance(d.get("result"), str):
-        d["result"] = json.loads(d["result"])
-    if isinstance(d.get("conditions"), str):
-        d["conditions"] = json.loads(d["conditions"])
-    return d
+    return _row_to_message(row)
 
 
 async def list_messages(
@@ -217,25 +234,10 @@ async def list_messages(
     if owner_row["user_id"] != user_id or owner_row["agency_id"] != agency_id:
         raise PermissionDenied(f"conversation {conversation_id} not owned by user {user_id} in agency {agency_id}")
     rows = await conn.fetch(
-        """
-        SELECT message_id, conversation_id, role, chip_id, tool, args, signature_hash,
-               result, rendered_summary, conditions, created_at
-        FROM ask_conversation_messages
-        WHERE conversation_id = $1 ORDER BY message_id
-        """,
+        f"SELECT {_MESSAGE_COLS} FROM ask_conversation_messages WHERE conversation_id = $1 ORDER BY message_id",
         conversation_id,
     )
-    out = []
-    for r in rows:
-        d = dict(r)
-        if isinstance(d.get("args"), str):
-            d["args"] = json.loads(d["args"])
-        if isinstance(d.get("result"), str):
-            d["result"] = json.loads(d["result"])
-        if isinstance(d.get("conditions"), str):
-            d["conditions"] = json.loads(d["conditions"])
-        out.append(d)
-    return out
+    return [_row_to_message(r) for r in rows]
 
 
 async def get_message(
@@ -271,9 +273,20 @@ async def get_message(
 
 _INSERT_ANON_MESSAGE = (
     "INSERT INTO ask_conversation_messages "
-    "(conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions) "
-    "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb)"
+    "(conversation_id, role, chip_id, tool, args, signature_hash, result, rendered_summary, conditions, definition) "
+    "VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb, $10::jsonb)"
 )
+
+
+def _anon_stamp(value: Any) -> DefinitionMeta | None:
+    """A browser-held stamp as the server would have returned it, or None
+    for anything that is not one: a stamp cannot be repaired, only dropped."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        return DefinitionMeta.model_validate(value)
+    except ValidationError:
+        return None
 
 
 def _anon_message(message: Any) -> tuple[Any, ...] | None:
@@ -306,6 +319,7 @@ def _anon_message(message: Any) -> tuple[Any, ...] | None:
         _to_json(obj("result")),
         text("rendered_summary"),
         _to_json(obj("conditions")),
+        _stamp_json(_anon_stamp(message.get("definition"))),
     )
 
 

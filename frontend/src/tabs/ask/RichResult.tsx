@@ -1,6 +1,7 @@
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import type { TFunction } from "i18next";
-import type { ToolResult, TrendDay } from "../../api/types";
+import type { DefinitionMeta, ToolResult, TrendDay } from "../../api/types";
+import { DefinitionMetaBlock } from "../../components/DefinitionMetaBlock";
 import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
 import { formatNumber } from "../../utils/format";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
@@ -18,7 +19,8 @@ type Conditions = { dow?: string; time_band?: string; service?: string } | null;
  *  wrapped in the Ask evidence card: a provenance badge, the chart/table
  *  first, a one-sentence summary, next-step chips, and a "where this comes
  *  from" disclosure — all derived from fields the Ask API already returns
- *  (`tool`, `args`, the message's persisted `conditions`). */
+ *  (`tool`, `args`, the message's persisted `conditions`), then the method
+ *  stamp the card was answered with, when it carries one. */
 export function RichResult({
   result,
   fallbackText,
@@ -27,6 +29,7 @@ export function RichResult({
   tool,
   args,
   conditions,
+  definition,
   onChip,
 }: {
   result: ToolResult;
@@ -36,11 +39,12 @@ export function RichResult({
   tool: string | null;
   args: Record<string, unknown> | null;
   conditions?: Conditions;
+  definition?: DefinitionMeta | null;
   onChip?: (action: NextStepAction) => void;
 }) {
   if (result.kind === "table" && result.rows && result.columns) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} t={t}>
         <ResultTable result={result} formatRoute={formatRoute} t={t} />
       </EvidenceCard>
     );
@@ -48,7 +52,7 @@ export function RichResult({
 
   if (result.kind === "kv" && result.pairs) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} t={t}>
         <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
           <tbody>
             {(result.pairs as [string, unknown][]).map(([k, v], i) => (
@@ -65,7 +69,7 @@ export function RichResult({
 
   if (result.kind === "series" && result.series && (result.series as unknown[]).length > 0) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} t={t}>
         <DailyChart days={result.series as TrendDay[]} granularity={seriesGranularity(args)} height={200} brushable={false} routeName={formatRoute} />
       </EvidenceCard>
     );
@@ -188,6 +192,7 @@ function EvidenceCard({
   tool,
   args,
   conditions,
+  definition,
   onChip,
   t,
   children,
@@ -196,6 +201,7 @@ function EvidenceCard({
   tool: string | null;
   args: Record<string, unknown> | null;
   conditions?: Conditions;
+  definition?: DefinitionMeta | null;
   onChip?: (action: NextStepAction) => void;
   t: TFunction;
   children: ReactNode;
@@ -299,6 +305,12 @@ function EvidenceCard({
           <dd>{t(path === "sql" ? "ask.evidence.confidence.sql" : "ask.evidence.confidence.llm")}</dd>
         </dl>
       </details>
+
+      {definition != null && (
+        <div style={{ marginTop: 10 }}>
+          <DefinitionMetaBlock definition={definition} />
+        </div>
+      )}
     </div>
   );
 }
