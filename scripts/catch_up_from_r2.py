@@ -48,18 +48,20 @@ the trip_id), so the order never changes its rows.
 database can be filled from R2 alone. The seed's first day S is taken as the
 open day, but archive S-1 is not read: it holds JST S-1 from 09:00, a day the
 seed does not cover, so S holds only its hours from 09:00 JST. The timetable in
-force on S loads first unless the one already loaded is no older, so each row is
-joined to the timetable in force on its day; for an agency whose ingest reads
-it, one loaded already and dated after S is refused. An agency that has rows
-plans as without the flag.
+force on S loads first unless the one already loaded is dated and no older than
+it, so each row is joined to the timetable in force on its day; for an agency
+whose ingest reads it, one loaded already and dated after S is refused. An
+agency that has rows plans as without the flag.
 
 The plan refuses an agency, and --apply runs nothing, when:
 - its ingest reads the timetable (REQUIRES_STATIC_TIMETABLE in
-  pipeline/strategies/__init__.py) and none is loaded, nor, under --seed-days,
-  does R2 hold one in force on the seed's first day;
+  pipeline/strategies/__init__.py) and none is loaded. Under --seed-days, R2's
+  in force on the seed's first day will do, and an undated one loaded counts as
+  none;
 - it has no rows and --seed-days is not given, or a seed would ingest nothing;
 - its loaded timetable came into force after the open day, or carries no
-  date to order R2's against, so those days would join the wrong one;
+  date to order R2's against, so those days would join the wrong one. Under
+  --seed-days, R2's in force on the seed's first day replaces an undated one;
 - R2 lists one day twice;
 - a local copy of a file it needs differs in size from R2's.
 An archive missing in R2 stops the agency's plan at that day, with the
@@ -306,6 +308,18 @@ def _in_force_hint(timetables: Sequence[RemoteFile], day: date) -> str:
     return f"; R2's in force on {day} is {found.key}"
 
 
+def _no_seed_timetable(state: AgencyState, timetables: Sequence[RemoteFile], first: date, today: date) -> str:
+    loaded = f"; the loaded {state.loaded_version!r} carries no date" if state.has_timetable else ""
+    earliest = f"; R2's first is {timetables[0].key}" if timetables else "; R2 holds none for it"
+    fewer = (today - timetables[0].day).days if timetables else 0
+    shorter = f"Use --seed-days {fewer} or fewer, or load" if fewer >= 1 else "Load"
+    return (
+        "its ingest joins every row to the loaded timetable (REQUIRES_STATIC_TIMETABLE), and none dated on or "
+        f"before {first}, the seed's first day, is loaded or in R2{loaded}{earliest}. {shorter} the one in force "
+        f"on {first} with gtfs_pipeline.py load_static, then rerun"
+    )
+
+
 def _add_ingest(plan: AgencyPlan, start: date, cutoff: date | None, archives: list[RemoteFile], today: date) -> None:
     last = (cutoff or today) - _DAY
     if last < start:
@@ -341,16 +355,12 @@ def plan_agency(
         # seed's first day, which an undated one cannot show: the seed load is
         # the one load that runs before any row exists, so a later load cannot
         # replace an older one in time.
-        if in_force is not None and (not state.has_timetable or current is None or current < in_force.day):
+        if in_force is not None and (current is None or current < in_force.day):
             seed = in_force
+        if seed is None and current is None and state.requires_timetable:
+            plan.refusal = _no_seed_timetable(state, timetables, first, today)
+            return plan
 
-    if seeding and state.requires_timetable and not state.has_timetable and seed is None:
-        earliest = f"; R2's first is {timetables[0].key}" if timetables else "; R2 holds none for it"
-        plan.refusal = (
-            "its ingest joins every row to the loaded timetable (REQUIRES_STATIC_TIMETABLE), and none dated on or "
-            f"before {first}, the seed's first day, is loaded or in R2{earliest}. Seed fewer days back"
-        )
-        return plan
     if first is None:
         plan.refusal = (
             "`updates` holds no rows for it. This tool continues an agency's history; --seed-days N starts one "

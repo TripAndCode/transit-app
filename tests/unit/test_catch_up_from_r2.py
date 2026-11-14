@@ -372,6 +372,42 @@ def test_a_seed_is_refused_when_no_timetable_in_r2_is_in_force_on_its_first_day(
     assert plan.steps == []
     assert plan.refusal is not None
     assert "gtfs_static_20261030.zip" in plan.refusal
+    assert "--seed-days 2 or fewer" in plan.refusal
+
+
+@pytest.mark.parametrize(
+    ("timetables", "named"),
+    [([], "R2 holds none"), (["20261101"], "gtfs_static_20261101.zip")],
+)
+def test_a_seed_no_shorter_seed_can_cure_is_pointed_at_a_load_by_hand(timetables, named):
+    plan = cu.plan_agency(
+        _empty(),
+        _archives(8, _days("20261020", "20261031")),
+        _timetables(8, timetables),
+        today=TODAY,
+        seed_from=date(2026, 10, 31),
+    )
+
+    assert plan.steps == []
+    assert plan.refusal is not None
+    assert named in plan.refusal
+    assert "--seed-days" not in plan.refusal
+    assert "load_static" in plan.refusal
+
+
+def test_a_seed_over_an_undated_timetable_with_none_in_force_in_r2_is_told_to_seed_fewer_days():
+    plan = cu.plan_agency(
+        _state(loaded="hiroden_static", newest_row=None),
+        _archives(8, _days("20261020", "20261031")),
+        _timetables(8, ["20261030"]),
+        today=TODAY,
+        seed_from=date(2026, 10, 29),
+    )
+
+    assert plan.steps == []
+    assert plan.refusal is not None
+    assert "'hiroden_static' carries no date" in plan.refusal
+    assert "--seed-days 2 or fewer" in plan.refusal
 
 
 def test_a_seed_that_would_ingest_nothing_is_refused():
