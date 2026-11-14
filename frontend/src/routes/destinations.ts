@@ -1,8 +1,8 @@
 import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 
 /** The rail's destinations, in the order it lists them, plus Bus Town, which
- *  is reached only from the command palette rather than a rail stop; its own
- *  in-page back-link leads out to Pulse, not in. */
+ *  has no rail stop: the command palette and the phone's More sheet reach it,
+ *  and its own in-page back-link leads out to Pulse, not in. */
 export const DESTINATIONS = ["pulse", "routes", "time", "why", "compare", "live", "reports", "bus-town"] as const;
 export type Destination = (typeof DESTINATIONS)[number];
 

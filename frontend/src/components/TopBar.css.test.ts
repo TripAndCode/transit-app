@@ -13,4 +13,9 @@ describe("TopBar.css", () => {
     const hover = ruleBody(css, ".topbar-search:hover {");
     expect(decl(hover, "box-shadow")).toBe("var(--el-1)");
   });
+
+  it("hides the ⌘K hint below BP.sm, where there is no keyboard shortcut to show", () => {
+    const phone = ruleBody(css, "@media (max-width: 640px)");
+    expect(decl(ruleBody(phone, ".topbar-kbd-group {"), "display")).toBe("none");
+  });
 });
