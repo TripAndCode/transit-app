@@ -20,10 +20,10 @@ export type ControlProps = {
   update: (patch: ScopePatch) => void;
   /** The controls' data, while it is loaded; every control works without it. */
   summary?: ScopeSummary;
-  /** Closes the popover this control renders in. Only the routes control
-   *  uses it, since its Apply both commits the staged picks and dismisses
-   *  the popover. Absent for a control rendered pinned in the scope strip,
-   *  which has no popover to close. */
+  /** Closes the popover this control renders in. A control that stages a
+   *  draft uses it so its Apply commits and dismisses together. Absent for a
+   *  control rendered pinned in the scope strip, which has no popover to
+   *  close. */
   close?: () => void;
 };
 
@@ -124,32 +124,101 @@ function dowPreset(dow: Scope["dow"]): (typeof DOW_PRESETS)[number] | null {
   return (DOW_PRESETS as readonly string[]).includes(dow) ? (dow as (typeof DOW_PRESETS)[number]) : null;
 }
 
-export function DaysControl({ scope, update, summary }: ControlProps) {
+function sameDays(a: Set<Weekday>, b: Set<Weekday>): boolean {
+  if (a.size !== b.size) return false;
+  for (const day of a) if (!b.has(day)) return false;
+  return true;
+}
+
+/** The Cancel/Apply footer of a control that stages a draft. Apply is
+ *  disabled while the draft matches what is committed; discarding,
+ *  committing and closing the popover are the caller's, through `onCancel`
+ *  and `onApply`. */
+function ApplyFoot({
+  hint,
+  applyLabel,
+  disabled,
+  onApply,
+  onCancel,
+}: {
+  hint?: string;
+  applyLabel: string;
+  disabled: boolean;
+  onApply: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="scope-apply">
+      {hint && <span className="scope-apply__hint">{hint}</span>}
+      <button type="button" className="btn btn--ghost btn--sm" onClick={onCancel}>
+        {t("common.cancel")}
+      </button>
+      <button type="button" className="btn btn--primary btn--sm scope-apply__button" disabled={disabled} onClick={onApply}>
+        {applyLabel}
+      </button>
+    </div>
+  );
+}
+
+/** A draft of the staged weekdays, committed only on Apply. When the
+ *  committed days change outside this control (a reset, or the pinned
+ *  strip and an open popover sharing one scope), the draft starts over from
+ *  them during render. A preset pick is instant, as the timetable select
+ *  already is, and replaces the draft too so a stale toggle can't linger
+ *  under a freshly picked preset. No preset shows as checked while a draft is
+ *  pending, since the chips no longer match the committed days. */
+export function DaysControl({ scope, update, summary, close }: ControlProps) {
   const { t } = useTranslation();
   const serviceId = useId();
-  const on = selectedDays(scope.dow);
+  const committedDays = selectedDays(scope.dow);
+  const [draft, setDraft] = useState<Set<Weekday>>(() => committedDays);
+  const [committed, setCommitted] = useState(scope.dow);
+  if (committed !== scope.dow) {
+    setCommitted(scope.dow);
+    setDraft(committedDays);
+  }
   const weekdayMeans = new Map(summary?.weekdays.map((w) => [w.dow, w.avg_min]) ?? []);
   const timetable = timetableChoices(scope.service, summary?.day_types);
   function toggle(day: Weekday) {
-    const next = new Set(on);
+    const next = new Set(draft);
     if (next.has(day)) next.delete(day);
     else next.add(day);
     if (next.size === 0) return;
-    update({ dow: WEEKDAYS.filter((d) => next.has(d)).join(",") as Scope["dow"] });
+    setDraft(next);
+  }
+  const unchanged = sameDays(draft, committedDays);
+  function commit() {
+    if (unchanged) return;
+    update({ dow: WEEKDAYS.filter((d) => draft.has(d)).join(",") as Scope["dow"] });
+    close?.();
+  }
+  function cancel() {
+    setDraft(committedDays);
+    close?.();
   }
   return (
     <div className="scope-control">
       <Segmented
         aria-label={t("scope.popover.days")}
         options={DOW_PRESETS.map((preset) => ({ value: preset, label: t(`scope.control.${preset === "all" ? "days_all" : preset}`) }))}
-        value={dowPreset(scope.dow)}
-        onChange={(preset) => update({ dow: preset })}
+        value={unchanged ? dowPreset(scope.dow) : null}
+        onChange={(preset) => {
+          update({ dow: preset });
+          setDraft(selectedDays(preset));
+        }}
       />
-      <div className="scope-pills">
+      <div className="scope-days">
         {WEEKDAYS.map((day) => {
           const mean = weekdayMeans.get(day);
           return (
-            <button key={day} type="button" className="scope-pill" aria-pressed={on.has(day)} onClick={() => toggle(day)}>
+            <button
+              key={day}
+              type="button"
+              className="btn btn--secondary btn--sm"
+              aria-pressed={draft.has(day)}
+              onClick={() => toggle(day)}
+            >
               {t(`forecast.dow_${day}`)}
               {mean != null && (
                 <>
@@ -174,6 +243,7 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
         ))}
       </select>
       <WholeDayNote scope={scope} update={update} summary={summary} />
+      <ApplyFoot applyLabel={t("scope.control.days_apply", { count: draft.size })} disabled={unchanged} onApply={commit} onCancel={cancel} />
     </div>
   );
 }
@@ -228,7 +298,7 @@ export function RoutesControl({ scope, update, summary, close }: ControlProps) {
   const applyLabel =
     draft.length === 0 ? t("filters.routes.apply_all") : t("filters.routes.apply_count", { count: draft.length });
   return (
-    <div className="scope-control routes-control">
+    <div className="scope-control">
       <RoutesPicker
         selected={draft}
         onChange={setDraft}
@@ -238,15 +308,7 @@ export function RoutesControl({ scope, update, summary, close }: ControlProps) {
         onSubmit={commit}
       />
       <WholeDayNote scope={scope} update={update} summary={summary} />
-      <div className="routes-control__foot">
-        <span className="routes-control__hint">{t("filters.routes.apply_hint")}</span>
-        <button type="button" className="btn btn--ghost btn--sm" onClick={cancel}>
-          {t("common.cancel")}
-        </button>
-        <button type="button" className="btn btn--primary btn--sm routes-control__apply" disabled={unchanged} onClick={commit}>
-          {applyLabel}
-        </button>
-      </div>
+      <ApplyFoot hint={t("filters.routes.apply_hint")} applyLabel={applyLabel} disabled={unchanged} onApply={commit} onCancel={cancel} />
     </div>
   );
 }

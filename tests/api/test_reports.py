@@ -779,6 +779,32 @@ async def test_a_rebuild_older_than_another_agencys_still_forgets_the_cached_row
 
 
 @pytest.mark.asyncio
+async def test_one_agencys_rebuild_forgets_its_cached_rows_and_keeps_another_agencys(reports_client):
+    client, agency_id, pool = reports_client
+    day = "2026-05-18"
+    other = await pool.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('Other', 'http://other.example.com') RETURNING agency_id"
+    )
+    for aid in (agency_id, other):
+        await _seed_route_dist(pool, aid, "RGATE", [(day, 100, 100 * 120, 40)])
+    await _record_builds(
+        pool, (agency_id, "agg_route_daily_dist", _BUILT_AT), (other, "agg_route_daily_dist", _BUILT_AT)
+    )
+    urls = {aid: f"/api/{aid}/reports/on_time?from={day}&to={day}" for aid in (agency_id, other)}
+    for url in urls.values():
+        assert float((await client.get(url)).json()["rows"][0][2]) == 40.0
+
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE agg_route_daily_dist SET on_time_count = 90, late5_count = samples - 90")
+        await conn.execute(
+            "UPDATE agg_table_state SET built_at = $2 WHERE agency_id = $1", agency_id, _BUILT_AT + timedelta(hours=1)
+        )
+
+    assert float((await client.get(urls[agency_id])).json()["rows"][0][2]) == 90.0
+    assert float((await client.get(urls[other])).json()["rows"][0][2]) == 40.0
+
+
+@pytest.mark.asyncio
 async def test_an_analyze_that_rebuilds_nothing_keeps_the_cached_rows(reports_client, ch_client, monkeypatch):
     """A periodic analyze that finds nothing new must not forget every cache."""
     import psycopg2

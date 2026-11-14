@@ -798,19 +798,6 @@ def test_a_definition_without_the_figures_states_none():
     assert DefinitionMeta.model_validate(_STAMPED.model_dump(exclude={"feed_quality"})).feed_quality is None
 
 
-def test_cached_rows_are_forgotten_whenever_the_builds_move(monkeypatch):
-    """Rows cached before a build must not be served under its stamp, so the
-    caches are cleared the first time a process looks and on every move after,
-    including a build that lands dated before one already seen."""
-    cleared: list[None] = []
-    monkeypatch.setattr(definition, "clear_all", lambda: cleared.append(None))
-    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
-    seen = [((2, 10), 1), ((2, 10), 1), ((2, 11), 2), ((3, 11), 3), ((3, 11), 3), ((0, None), 4)]
-    for builds, clears in seen:
-        definition._note_builds(builds)
-        assert len(cleared) == clears, builds
-
-
 class _BehindConn:
     """A connection to a database whose schema is behind the code: the source
     read fails with *error*, the build read answers."""
@@ -821,11 +808,10 @@ class _BehindConn:
     def is_in_transaction(self):
         return False
 
-    async def fetch(self, _sql, *_args):
+    async def fetch(self, sql, *_args):
+        if sql == definition._BUILDS_SQL:
+            return [(1, 1, 0.0, _BUILT_AT, True)]
         raise self.error("column h.archive_rows does not exist")
-
-    async def fetchrow(self, _sql, *_args):
-        return (1, 0.0, _BUILT_AT)
 
 
 @pytest.mark.asyncio
@@ -943,9 +929,6 @@ class _MirrorConn:
             if (agency, name) in self.contents
         ]
 
-    async def fetchrow(self, _sql, *_args):
-        return (1, 0.0, _BUILT_AT)
-
 
 def _schedule(rows):
     return ScheduleDays(date(2026, 5, 1), date(2026, 5, 2), rows)
@@ -1036,3 +1019,22 @@ async def test_a_database_without_the_mirror_names_its_timetables_with_no_hash(m
         TimetableVersion(agency_id=1, name=None, fetched_on=None, days=1),
     ]
     assert meta.source_mix is not None
+
+
+def test_a_build_evicts_only_the_agencies_whose_builds_moved(monkeypatch):
+    """Another agency's cached rows survive a rebuild; a vanished agency, a new
+    one and the first look are each handled."""
+    evicted: list[set] = []
+    cleared: list[None] = []
+    monkeypatch.setattr(definition, "clear_all", lambda: cleared.append(None))
+    monkeypatch.setattr(definition, "evict_for_rebuild", lambda agencies: evicted.append(set(agencies)))
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    definition._note_builds({1: (2, 10.0), 2: (2, 10.0)})
+    assert (len(cleared), evicted) == (1, [])
+    definition._note_builds({1: (2, 10.0), 2: (2, 10.0)})
+    assert evicted == []
+    definition._note_builds({1: (2, 11.0), 2: (2, 10.0)})
+    assert evicted == [{1}]
+    definition._note_builds({1: (2, 11.0), 3: (1, 5.0)})
+    assert evicted[-1] == {2, 3}
+    assert len(cleared) == 1

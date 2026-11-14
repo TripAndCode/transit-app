@@ -111,17 +111,17 @@ async def _archive_state(ch, agency_id: int) -> tuple:
     return state
 
 
-@async_lru_cache(maxsize=256, ttl_seconds=300)
+@async_lru_cache(maxsize=256, ttl_seconds=300, agency_arg="agency_id")
 async def _stamps_versions(conn, agency_id: int) -> bool:
     """Whether the agency's ingest stamps each row's timetable version."""
     strategy = await conn.fetchval("SELECT ingest_strategy FROM agencies WHERE agency_id = $1", agency_id)
     return strategy in VERSION_STAMPING_STRATEGIES
 
 
-# Cleared with every compute cache (pipeline.cache.clear_all), which a build
-# analyze records reaches, and by invalidate_schedule_joins after a load; the
-# TTL bounds a schedule copied in another process under names already mapped.
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+# Evicted for an agency whose recorded build moves (pipeline.cache.evict_for_rebuild)
+# and by invalidate_schedule_joins after a load; the TTL bounds a schedule copied
+# in another process under names already mapped.
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _schedule_join(ch, agency_id: int, state: tuple) -> ScheduleJoin:
     return await static_archive.schedule_join_async(ch, agency_id, None, by_service_date=True)
 

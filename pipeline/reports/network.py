@@ -327,7 +327,7 @@ _AGENCY_FEED_SQL = """
 """
 
 
-@async_lru_cache(maxsize=128, ttl_seconds=300)
+@async_lru_cache(maxsize=128, ttl_seconds=300, agency_arg="agency_id")
 async def compute_agency_feed_quality(conn, agency_id: int, from_date: date, to_date: date) -> FeedQuality | None:
     """*agency_id*'s completeness and clamp share over [from_date, to_date],
     the figures its row of :func:`compute_network_summary` over the same range

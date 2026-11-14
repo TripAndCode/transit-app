@@ -2340,7 +2340,9 @@
       "early_label": "早発の扱い",
       "early_counted": "早発も定時に含める",
       "early_limited": "{{n}}分を超える早発は定時に含めない",
-      "early_current": "いまは{{value}}"
+      "early_current": "いまは{{value}}",
+      "days_apply_one": "適用 · {{count}}曜日",
+      "days_apply_other": "適用 · {{count}}曜日"
     },
     "pin": "すべての条件を表示",
     "reset": "条件をリセット",
