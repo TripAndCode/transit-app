@@ -44,6 +44,8 @@
    down the type scale and loses its desktop line-height headroom; the
    column gap between header and workspace tightens to match. */
 @media (max-width: 640px) {
-  .focused-overview { gap: 8px; }
+  /* Compound, like the BP.sm height rule in operationsMap.css: that sheet loads
+     after this one, so its `.operations-page` gap would win a single class. */
+  .focused-overview.operations-page { gap: 8px; }
   .focused-overview .ops-heading h1 { font: 650 var(--text-lg) / 1.2 var(--font-body, sans-serif); }
 }

@@ -294,23 +294,20 @@
 @media (max-width: 640px) {
   .ops-header { gap: 10px; }
   .ops-heading { width: 100%; }
-  /* A fixed half-width basis, not `auto`: flex-wrap collects items onto a
-     line by their unshrunk hypothetical size, so an `auto` basis (the full,
-     unwrapped sentence) is already wider than the row and the refresh
-     button is pushed to a line of its own. The half-width basis is narrow
-     enough that the two collect onto one line together, leaving the
-     sentence room to wrap across it instead of overflowing past the
-     viewport edge. */
+  /* A zero basis, not `auto`: flex-wrap collects items onto a line by their
+     hypothetical size, and at `auto` (the whole unwrapped sentence) that is
+     wider than the row, so the refresh button would drop to its own line.
+     At zero the two always share the line, and the sentence wraps in the
+     room the button leaves. */
   .ops-freshness {
-    flex: 1 1 50%;
+    flex: 1;
     min-width: 0;
     white-space: normal;
   }
   /* The dot would otherwise shrink along with the row and read as an oval. */
   .ops-freshness > span { flex: none; }
-  /* Never shares a row: at the half-width basis above, a result message
-     alongside it would squeeze the sentence into a sliver instead of
-     reusing the room freed above. */
+  /* Never shares a row: beside a zero-basis sentence, a result message
+     would squeeze it into a sliver. */
   .ops-refresh-result { flex: 1 1 100%; max-width: none; }
 }
 
@@ -411,11 +408,11 @@
   .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; overflow: hidden; }
   .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
   .ops-resizer { display: none; }
-  /* The legend's own `flex-wrap: wrap` already carries the chips to a new
-     row as a unit; what each chip is missing is `nowrap` on its own label.
-     The body-wide `overflow-wrap: anywhere` lowers a flex item's automatic
-     minimum width to near zero, so without `nowrap` a chip this narrow
-     breaks its label mid-word instead of moving whole to the next row. */
+  /* The body-wide `overflow-wrap: anywhere` lowers a flex item's automatic
+     minimum width to near zero, so without `nowrap` a chip breaks its label
+     mid-word instead of moving whole to the legend's next row. A single
+     chip wider than the whole row (a long label, or large OS text) runs
+     past the card's edge instead, and `.ops-map` clips it. */
   .ops-map-ref__legend .legend-chip { white-space: nowrap; }
   /* The map fills the whole workspace here, so every piece of bottom-anchored
      map chrome shares an edge with the sheet -- and the same z-index rung, so

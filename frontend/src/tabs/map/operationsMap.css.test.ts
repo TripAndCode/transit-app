@@ -34,10 +34,10 @@ describe("operationsMap.css phone layout (BP.sm)", () => {
     expect(decl(freshness, "white-space")).toBe("nowrap");
   });
 
-  it("gives the freshness line a half-width basis so it wraps instead of overflowing the header", () => {
+  it("gives the freshness line a zero basis so it shares its row with the button and wraps instead of overflowing the header", () => {
     const bpSm = ruleBody(css, "@media (max-width: 640px) {");
     const freshness = ruleBody(bpSm, ".ops-freshness {");
-    expect(decl(freshness, "flex")).toBe("1 1 50%");
+    expect(decl(freshness, "flex")).toBe("1");
     expect(decl(freshness, "min-width")).toBe("0");
     expect(decl(freshness, "white-space")).toBe("normal");
   });
