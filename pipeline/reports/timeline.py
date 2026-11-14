@@ -272,7 +272,7 @@ async def _stop_positions(
     return by_pair, geo
 
 
-@async_lru_cache(maxsize=16, ttl_seconds=600)
+@async_lru_cache(maxsize=16, ttl_seconds=600, agency_arg="agency_id", rebuild="never")
 async def compute_delay_timeline(
     agency_id: int,
     day: date,

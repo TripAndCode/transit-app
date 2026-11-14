@@ -733,7 +733,7 @@ async def fetch_today_baselines(
 # them, and the next request's key differs if the load changed the class of
 # any lookback date. The TTL, the report caches', bounds how long a newly
 # analyzed day takes to reach the baseline.
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _closed_day_baselines(
     conn: asyncpg.Connection, agency_id: int, today: CalendarDate, day_types: DayTypes
 ) -> dict[str, dict[str, Any]]:
