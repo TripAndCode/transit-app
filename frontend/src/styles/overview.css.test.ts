@@ -205,7 +205,7 @@ describe("overview.css phone layout (BP.sm)", () => {
     expect(decl(ruleBody(heroPhone, ".ov-hero-fact-label {"), "grid-row")).toBe("1");
     expect(decl(ruleBody(heroPhone, ".ov-hero-fact-value {"), "grid-row")).toBe("2");
     const go = ruleBody(heroPhone, ".ov-hero-fact-go {");
-    expect(decl(go, "grid-row")).toBe("1 / -1");
+    expect(decl(go, "grid-row")).toBe("1 / span 2");
     expect(decl(go, "align-self")).toBe("center");
   });
 
@@ -214,7 +214,11 @@ describe("overview.css phone layout (BP.sm)", () => {
     expect(decl(row, "grid-template-columns")).toBe(
       "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
     );
-    expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-track {"), "grid-column")).toBe("plate / arrow");
+    const track = ruleBody(checkPhone, ".ov-check-row .ov-check-track {");
+    expect(decl(track, "grid-column")).toBe("plate / arrow");
+    // The desktop rule's inline-start margin would indent the bar off the badge's edge.
+    expect(decl(track, "margin-inline-start")).toBe("0");
+    expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-arrow {"), "grid-row")).toBe("1");
     expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-value {"), "grid-column")).toBe("value");
     const change = ruleBody(checkPhone, ".ov-check-row .ov-check-change {");
     expect(decl(change, "grid-column")).toBe("name / arrow");

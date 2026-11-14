@@ -569,7 +569,8 @@
   /* Spans the row's full width rather than the figures' own narrow value
      column (shared, in the desktop layout, by the short average) -- a
      comparison sentence is long enough to need it. A line of its own under
-     the ends: both are free-length text, so one cell would overlap them. */
+     the ends: both are free-length text, so one cell would overlap them. It
+     keeps the figures' right alignment, under the value it qualifies. */
   .ov-check-row .ov-check-change {
     grid-column: name / arrow;
     grid-row: 4;
@@ -580,10 +581,11 @@
     grid-row: 2;
     width: auto;
     margin-top: 8px;
+    margin-inline-start: 0;
   }
   .ov-check-row .ov-check-arrow {
     grid-column: arrow;
-    grid-row: 1 / -1;
+    grid-row: 1;
     align-self: center;
     margin-inline-start: 0;
   }
@@ -955,7 +957,7 @@
   .ov-hero-fact-go {
     grid-column: 2;
     /* The base align-items: baseline misplaces an item spanning both rows. */
-    grid-row: 1 / -1;
+    grid-row: 1 / span 2;
     align-self: center;
   }
 }
