@@ -214,7 +214,7 @@ export function LoginPage() {
             </div>
             <button
               type="submit"
-              className="login-card__btn login-card__btn--local"
+              className="btn btn--primary"
               aria-disabled={localPending}
               disabled={localPending}
             >

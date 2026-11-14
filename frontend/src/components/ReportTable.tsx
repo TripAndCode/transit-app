@@ -286,7 +286,7 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
     return t("snapshot.compare.today_value", { value: format(c, mark.today.get(c.index), t) });
   };
   const showMore = cappedRows.remaining > 0 && (
-    <button type="button" className="btn-ghost" onClick={cappedRows.showMore}>
+    <button type="button" className="btn btn--secondary btn--sm" onClick={cappedRows.showMore}>
       {t("common.show_more", { count: cappedRows.remaining })}
     </button>
   );

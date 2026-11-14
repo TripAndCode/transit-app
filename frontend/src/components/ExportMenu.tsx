@@ -166,7 +166,7 @@ export function ExportMenu<T>({ svgContainerRef, pngFilenameBase, csv, showPrint
       <button
         ref={triggerRef}
         type="button"
-        className="btn-ghost export-menu__trigger"
+        className="btn btn--secondary btn--sm export-menu__trigger"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}

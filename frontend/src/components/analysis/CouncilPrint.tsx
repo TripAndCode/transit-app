@@ -80,7 +80,7 @@ export function CouncilPrint({ report, snapshot }: { report: ReportResponse; sna
 
   return (
     <>
-      <button type="button" className="btn-ghost council-report__print" disabled={pending} onClick={() => void print()}>
+      <button type="button" className="btn btn--secondary btn--sm council-report__print" disabled={pending} onClick={() => void print()}>
         {t("reports.print")}
       </button>
       {pending && (

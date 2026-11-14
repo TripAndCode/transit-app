@@ -648,7 +648,7 @@ export function MapTab() {
               they count -- and above the delay list, so a long list can't
               push the export below the panel's scroll. */}
           {liveRows.length > 0 && (
-            <button type="button" className="btn-ghost ops-queue__export" disabled={!!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
+            <button type="button" className="btn btn--secondary btn--sm ops-queue__export" disabled={!!liveQuery.error} onClick={() => downloadCsv(`live-${id}`, buildCsv(liveRows, liveCsvColumns))}><Download size={13} aria-hidden="true" />{td("csv")}</button>
           )}
           {!liveQuery.isLoading && !liveQuery.error && liveRows.length > 0 && !delayedRows.length && <p className="focus-muted">{td("noDelayed", { edge: lateEdge })}</p>}
           {cappedDelayedRows.visible.map((trip) => <div className="focus-trip" key={trip.trip_id}>
@@ -659,7 +659,7 @@ export function MapTab() {
             {trip.route_code && <Link to={routeHref(String(id), trip.route_code)}>{td("openAnalysis")}</Link>}
           </div>)}
           {cappedDelayedRows.remaining > 0 && (
-            <button type="button" className="btn-ghost" onClick={cappedDelayedRows.showMore}>
+            <button type="button" className="btn btn--secondary btn--sm" onClick={cappedDelayedRows.showMore}>
               {t("common.show_more", { count: cappedDelayedRows.remaining })}
             </button>
           )}
