@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import pathlib
+import shutil
 import tarfile
 import zipfile
 from datetime import date, datetime, timedelta, timezone
@@ -124,7 +125,8 @@ def world(pg_conn, ch_client, tmp_path):
     later = _utc(d, 10)  # JST D 19:00
     _archive(rt / f"{d:%Y%m%d}.tar.gz", [later])
     static = bucket / "static" / str(agency_id)
-    _timetable(static / f"gtfs_static_{d - 20 * DAY:%Y%m%d}.zip", "06:00:00", d - 20 * DAY)
+    first = f"gtfs_static_{d - 20 * DAY:%Y%m%d}"
+    _timetable(static / f"{first}.zip", "06:00:00", d - 20 * DAY)
     new = f"gtfs_static_{d:%Y%m%d}"
     _timetable(static / f"{new}.zip", "08:00:00", d)
 
@@ -134,12 +136,31 @@ def world(pg_conn, ch_client, tmp_path):
         "store": DirectoryStore(bucket),
         "dirs": ["--archives-dir", str(tmp_path / "raw_archives"), "--static-dir", str(tmp_path / "raw_static")],
         "old": old,
+        "first": first,
         "new": new,
         "ingested": _member_name(ingested),
         "head": _member_name(head),
         "tail": _member_name(tail),
         "later": _member_name(later),
     }
+
+
+@pytest.fixture
+def fresh(world, pg_conn):
+    """A second agency with no timetable and no rows, as `make seed-agencies`
+    leaves one, and R2 holding the same files for it as for `world`'s. Seeding
+    4 days back starts it on JST D-1."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) VALUES (%s, %s, %s) RETURNING agency_id",
+            ("seed test", "http://example.com/seed.pb", "static_join"),
+        )
+        agency_id = cur.fetchone()[0]
+    pg_conn.commit()
+    root = world["store"].root
+    for kind in ("rt", "static"):
+        shutil.copytree(root / kind / str(world["agency_id"]), root / kind / str(agency_id))
+    return {**world, "agency_id": agency_id, "args": [*world["dirs"], "--agency-id", str(agency_id)]}
 
 
 def _rows(ch_client, agency_id: int) -> dict[str, list[tuple]]:
@@ -302,3 +323,50 @@ def test_an_escaped_load_with_no_rows_after_it_leaves_the_next_plan_refused(worl
     out = capsys.readouterr().out
     assert "REFUSED" in out
     assert "load_static" in out and "--allow-gaps" in out
+
+
+def test_an_agency_with_no_rows_is_refused_without_a_seed(fresh, ch_client, capsys):
+    assert cu.main([*fresh["args"], "--apply", "--yes"], store=fresh["store"], now=fresh["now"]) == 1
+
+    assert "--seed-days" in capsys.readouterr().out
+    assert _rows(ch_client, fresh["agency_id"]) == {}
+    assert fresh["store"].downloads == []
+
+
+def test_a_seed_plan_names_its_timetable_and_downloads_nothing(fresh, ch_client, capsys):
+    assert cu.main([*fresh["args"], "--seed-days", "4"], store=fresh["store"], now=fresh["now"]) == 0
+
+    assert f"load   {fresh['first']}.zip" in capsys.readouterr().out
+    assert fresh["store"].downloads == []
+    assert _rows(ch_client, fresh["agency_id"]) == {}
+
+
+def test_a_seed_starts_an_empty_agency_with_each_jst_day_joined_to_its_timetable(fresh, pg_conn, ch_client):
+    agency_id = fresh["agency_id"]
+    seed = [*fresh["args"], "--seed-days", "4", "--apply", "--yes"]
+
+    assert cu.main(seed, store=fresh["store"], now=fresh["now"]) == 0
+
+    first = _rows(ch_client, agency_id)
+    assert first == {
+        # JST D-1 joins the timetable in force on it, loaded before any ingest.
+        fresh["head"]: [(fresh["first"], 6 * 3600)],
+        fresh["tail"]: [(fresh["new"], 8 * 3600)],
+        fresh["later"]: [(fresh["new"], 8 * 3600)],
+    }
+    assert _runs(pg_conn, agency_id) == {"ingest": 2, "static": 2}
+    # Archive D-2's tail is JST D-1, but the seed reads no archive before its
+    # first day, so the day starts at 09:00 and nothing lands before it.
+    assert sorted(fresh["store"].downloads) == sorted(
+        [
+            f"rt/{agency_id}/{fresh['head'][:8]}.tar.gz",
+            f"rt/{agency_id}/{fresh['later'][:8]}.tar.gz",
+            f"static/{agency_id}/{fresh['first']}.zip",
+            f"static/{agency_id}/{fresh['new']}.zip",
+        ]
+    )
+
+    assert cu.main(seed, store=fresh["store"], now=fresh["now"]) == 0
+
+    assert _rows(ch_client, agency_id) == first
+    assert _runs(pg_conn, agency_id)["static"] == 2

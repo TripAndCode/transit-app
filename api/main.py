@@ -1,7 +1,7 @@
 """FastAPI application bootstrap.
 
-Wires routers, middleware, lifespan (asyncpg pool + LLM provider validation), CORS,
-and an optional SPA static mount. In production the multistage Dockerfile copies
+Wires routers, middleware, lifespan (asyncpg pool + a warning when no LLM provider
+is configured), CORS, and an optional SPA static mount. In production the multistage Dockerfile copies
 the built React frontend into ``api/static/``; this module then mounts the SPA
 at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
 fetches keep getting structured errors instead of HTML index pages.

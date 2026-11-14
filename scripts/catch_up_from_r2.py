@@ -44,12 +44,24 @@ source for it, and `aomori_index_scrape` names its zips by the fetching host's
 local date. Its ingest reads no timetable (its rows take their schedule from
 the trip_id), so the order never changes its rows.
 
+--seed-days N starts an agency that has no rows N JST days back, so a fresh
+database can be filled from R2 alone. The seed's first day S is taken as the
+open day, but archive S-1 is not read: it holds JST S-1 from 09:00, a day the
+seed does not cover, so S holds only its hours from 09:00 JST. The timetable in
+force on S loads first unless the one already loaded is dated and no older than
+it, so each row is joined to the timetable in force on its day; for an agency
+whose ingest reads it, one loaded already and dated after S is refused. An
+agency that has rows plans as without the flag.
+
 The plan refuses an agency, and --apply runs nothing, when:
 - its ingest reads the timetable (REQUIRES_STATIC_TIMETABLE in
-  pipeline/strategies/__init__.py) and none is loaded;
-- it has no rows: this tool continues a history, it does not start one;
+  pipeline/strategies/__init__.py) and none is loaded. Under --seed-days, R2's
+  in force on the seed's first day will do, and an undated one loaded counts as
+  none;
+- it has no rows and --seed-days is not given, or a seed would ingest nothing;
 - its loaded timetable came into force after the open day, or carries no
-  date to order R2's against, so those days would join the wrong one;
+  date to order R2's against, so those days would join the wrong one. Under
+  --seed-days, R2's in force on the seed's first day replaces an undated one;
 - R2 lists one day twice;
 - a local copy of a file it needs differs in size from R2's.
 An archive missing in R2 stops the agency's plan at that day, with the
@@ -73,7 +85,9 @@ would sit ahead of the next run's open day. The run stops before that load
 unless --allow-gaps takes those days as empty (an outage, or days the agency ran
 no service); an agency whose ingest reads no timetable is not checked. Loaded
 that way, the timetable is still ahead of the open day until a day from its
-own on holds rows, and a run before then is refused with the way back. Files download into the local layout `make fetch`
+own on holds rows, and a run before then is refused with the way back. A
+seed's load runs before any ingest, so it checks instead that `updates` still
+holds no row for the agency. Files download into the local layout `make fetch`
 uses (raw_archives/<id>/, raw_archives_static/<id>/), and each ingest step
 reads its own temporary directory of links to just its archives, never the
 whole local history. It stops at the first failure. A rerun is safe: ingested
@@ -89,6 +103,7 @@ the rows themselves keep the schedule each was joined to.
 Usage:
     poetry run python scripts/catch_up_from_r2.py [--agency-id ID ...]
     poetry run python scripts/catch_up_from_r2.py --apply [--analyze] [--agency-id ID ...]
+    poetry run python scripts/catch_up_from_r2.py --seed-days 3 --agency-id 1 [--apply [--analyze]]
 """
 
 from __future__ import annotations
@@ -181,7 +196,12 @@ class IngestStep:
 
 @dataclass(frozen=True)
 class LoadStep:
+    """``seed`` marks the load that starts an agency with no rows. It runs
+    before any ingest, so it is checked against `updates` still holding none
+    rather than against the open day."""
+
     timetable: RemoteFile
+    seed: bool = False
 
 
 Step = IngestStep | LoadStep
@@ -288,6 +308,18 @@ def _in_force_hint(timetables: Sequence[RemoteFile], day: date) -> str:
     return f"; R2's in force on {day} is {found.key}"
 
 
+def _no_seed_timetable(state: AgencyState, timetables: Sequence[RemoteFile], first: date, today: date) -> str:
+    loaded = f"; the loaded {state.loaded_version!r} carries no date" if state.has_timetable else ""
+    earliest = f"; R2's first is {timetables[0].key}" if timetables else "; R2 holds none for it"
+    fewer = (today - timetables[0].day).days if timetables else 0
+    shorter = f"Use --seed-days {fewer} or fewer, or load" if fewer >= 1 else "Load"
+    return (
+        "its ingest joins every row to the loaded timetable (REQUIRES_STATIC_TIMETABLE), and none dated on or "
+        f"before {first}, the seed's first day, is loaded or in R2{loaded}{earliest}. {shorter} the one in force "
+        f"on {first} with gtfs_pipeline.py load_static, then rerun"
+    )
+
+
 def _add_ingest(plan: AgencyPlan, start: date, cutoff: date | None, archives: list[RemoteFile], today: date) -> None:
     last = (cutoff or today) - _DAY
     if last < start:
@@ -304,24 +336,42 @@ def plan_agency(
     *,
     today: date,
     allow_gaps: bool = False,
+    seed_from: date | None = None,
 ) -> AgencyPlan:
     """The steps that catch ``state`` up from R2's ``archives`` and
-    ``timetables`` (each sorted by day), as of JST ``today``. The module
-    docstring states the rules; a refused plan has no steps."""
+    ``timetables`` (each sorted by day), as of JST ``today``, starting an
+    agency with no rows at ``seed_from`` when given. The module docstring
+    states the rules; a refused plan has no steps."""
     plan = AgencyPlan(state)
     first = state.open_day
+    seeding = False
+    seed: RemoteFile | None = None
+    if first is None and seed_from is not None:
+        seeding = True
+        first = seed_from
+        in_force = _in_force(timetables, seed_from)
+        current = version_day(state.loaded_version) if state.has_timetable else None
+        # A timetable already loaded stays only when it is in force on the
+        # seed's first day, which an undated one cannot show: the seed load is
+        # the one load that runs before any row exists, so a later load cannot
+        # replace an older one in time.
+        if in_force is not None and (current is None or current < in_force.day):
+            seed = in_force
+        if seed is None and current is None and state.requires_timetable:
+            plan.refusal = _no_seed_timetable(state, timetables, first, today)
+            return plan
 
-    if state.requires_timetable and not state.has_timetable:
-        hint = _in_force_hint(timetables, first) if first else ""
+    if first is None:
+        plan.refusal = (
+            "`updates` holds no rows for it. This tool continues an agency's history; --seed-days N starts one "
+            "N days back"
+        )
+        return plan
+    if state.requires_timetable and not state.has_timetable and seed is None:
+        hint = _in_force_hint(timetables, first)
         plan.refusal = (
             "its ingest joins every row to the loaded timetable (REQUIRES_STATIC_TIMETABLE) and none is loaded. "
             f"Load the one in force on the first day to write{hint}, with gtfs_pipeline.py load_static, then rerun"
-        )
-        return plan
-    if first is None:
-        plan.refusal = (
-            "`updates` holds no rows for it. This tool continues an agency's history; ingest its first days by hand, "
-            "with the timetable in force then loaded"
         )
         return plan
     days = [a.day for a in archives]
@@ -329,7 +379,10 @@ def plan_agency(
     if twice:
         plan.refusal = f"R2 lists more than one archive for {', '.join(map(str, twice))}; a day is ingested once"
         return plan
-    loaded_day = version_day(state.loaded_version) if state.has_timetable else None
+    if seed is not None:
+        loaded_day: date | None = seed.day
+    else:
+        loaded_day = version_day(state.loaded_version) if state.has_timetable else None
     if state.has_timetable and loaded_day is None and timetables:
         if state.requires_timetable:
             plan.refusal = (
@@ -343,6 +396,15 @@ def plan_agency(
             "ingest reads none, so R2's are left to load by hand"
         )
     if loaded_day is not None and loaded_day > first:
+        if state.requires_timetable and seeding:
+            fewer = (today - loaded_day).days
+            shorter = f"Use --seed-days {fewer} or fewer, or load" if fewer >= 1 else "Load"
+            plan.refusal = (
+                f"{state.loaded_version} is loaded, in force from {loaded_day}, after the seed's first day {first}. "
+                f"{shorter} the one in force on {first}{_in_force_hint(timetables, first)} with gtfs_pipeline.py "
+                "load_static, then rerun"
+            )
+            return plan
         if state.requires_timetable:
             # No flag passes this: `updates` cannot tell days not yet ingested
             # from days ingested with no rows, and the first kind would join a
@@ -361,7 +423,7 @@ def plan_agency(
             "so the order leaves its rows unchanged"
         )
 
-    since = first - _DAY
+    since = first if seeding else first - _DAY
     wanted = [a for a in archives if since <= a.day <= today - _DAY]
     present = {a.day for a in wanted}
     if present:
@@ -398,6 +460,8 @@ def plan_agency(
             f"{early[-1].name}, so that day is split between the two"
         )
 
+    if seed is not None:
+        plan.steps.append(LoadStep(seed, seed=True))
     start = first
     for timetable in loads:
         if timetable.day > start:
@@ -405,6 +469,14 @@ def plan_agency(
             start = timetable.day
         plan.steps.append(LoadStep(timetable))
     _add_ingest(plan, start, stop, wanted, today)
+    if seeding and not any(isinstance(step, IngestStep) for step in plan.steps):
+        plan.steps = []
+        plan.refusal = (
+            f"R2 holds no archive for JST {first}, the seed's first day. Start it on another day, or pass the "
+            "missing day with --allow-gaps"
+            if plan.stopped_at == first
+            else f"R2 holds no archive from JST {first} through {today - _DAY}, so the seed would ingest nothing"
+        )
     return plan
 
 
@@ -606,6 +678,7 @@ def plan_all(
     agency_ids: list[int] | None,
     today: date,
     allow_gaps: bool,
+    seed_from: date | None = None,
 ) -> list[AgencyPlan]:
     plans = []
     for state in read_states(conn, ch_client, agency_ids, today):
@@ -613,14 +686,16 @@ def plan_all(
         timetables: list[RemoteFile] = []
         odd_archives: list[str] = []
         odd_timetables: list[str] = []
-        # No open day means no rows, which plan_agency refuses whatever R2
-        # holds, so its listings would only page through the whole history.
-        if state.open_day is not None:
+        first = state.open_day if state.open_day is not None else seed_from
+        # No first day means no rows and no seed, which plan_agency refuses
+        # whatever R2 holds, so its listings would only page through the whole
+        # history.
+        if first is not None:
             prefix = f"rt/{state.agency_id}/"
-            after = f"{prefix}{state.open_day - 2 * _DAY:%Y%m%d}.tar.gz"
+            after = f"{prefix}{first - 2 * _DAY:%Y%m%d}.tar.gz"
             archives, odd_archives = archive_files(store.list(prefix, start_after=after))
             timetables, odd_timetables = timetable_files(store.list(f"static/{state.agency_id}/"))
-        plan = plan_agency(state, archives, timetables, today=today, allow_gaps=allow_gaps)
+        plan = plan_agency(state, archives, timetables, today=today, allow_gaps=allow_gaps, seed_from=seed_from)
         if odd_archives or odd_timetables:
             plan.notes.append(f"R2 names left alone: {', '.join(odd_archives + odd_timetables)}")
         if plan.refusal is None:
@@ -670,7 +745,8 @@ def print_plan(plans: list[AgencyPlan], layout: Layout, today: date) -> None:
                 )
             else:
                 t = step.timetable
-                print(f"  {i}. load   {t.name} ({_mb(t.size)}), in force from JST {t.day}")
+                seed = ", the seed's timetable" if step.seed else ""
+                print(f"  {i}. load   {t.name} ({_mb(t.size)}), in force from JST {t.day}{seed}")
         for gap in plan.gaps:
             print(f"  missing in R2: {gap:%Y%m%d}" + (" (gone past: --allow-gaps)" if plan.stopped_at is None else ""))
         if plan.stopped_at:
@@ -807,7 +883,10 @@ def _load_step(
     current_day = version_day(current)
     if current_day is not None and current_day > timetable.day:
         raise Refusal(f"{current} is loaded, newer than {timetable.name}; rerun to plan again")
-    if state.requires_timetable:
+    if step.seed:
+        if newest_row(ch_client, agency_id, jst_date(now))[0] is not None:
+            raise Refusal("`updates` gained rows for this agency since the plan was made; rerun to plan again")
+    elif state.requires_timetable:
         reached = open_day(*newest_row(ch_client, agency_id, jst_date(now)))
         warning = check_reached(reached, timetable, through, allow_gaps=allow_gaps)
         if warning:
@@ -841,6 +920,17 @@ def _analyze(conn, agency_ids: list[int]) -> list[int]:
     return failed
 
 
+def _seed_from(args, today: date) -> date | None:
+    return today - args.seed_days * _DAY if args.seed_days else None
+
+
+def _positive(value: str) -> int:
+    n = int(value)
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return n
+
+
 def run_apply(args, store: ObjectStore, layout: Layout, now: datetime) -> int:
     from pipeline.clickhouse import get_client
     from pipeline.locks import try_lock_ingest_analyze
@@ -853,7 +943,9 @@ def run_apply(args, store: ObjectStore, layout: Layout, now: datetime) -> int:
         if not try_lock_ingest_analyze(conn):
             raise Refusal("another ingest or analyze job holds the pipeline lock; rerun once it ends")
         ch_client = get_client()
-        plans = plan_all(conn, ch_client, store, layout, args.agency_id, today, args.allow_gaps)
+        plans = plan_all(
+            conn, ch_client, store, layout, args.agency_id, today, args.allow_gaps, _seed_from(args, today)
+        )
         conn.commit()
         print_plan(plans, layout, today)
         refused = [p.state.agency_id for p in plans if p.refusal]
@@ -906,7 +998,9 @@ def run_plan(args, store: ObjectStore, layout: Layout, now: datetime) -> int:
     conn = _pg_connect(readonly=True)
     try:
         ch_client = clickhouse_connect.get_client(**ch_conn_kwargs(), settings={"readonly": 1})
-        plans = plan_all(conn, ch_client, store, layout, args.agency_id, today, args.allow_gaps)
+        plans = plan_all(
+            conn, ch_client, store, layout, args.agency_id, today, args.allow_gaps, _seed_from(args, today)
+        )
     finally:
         conn.close()
     print_plan(plans, layout, today)
@@ -927,6 +1021,12 @@ def main(argv: list[str] | None = None, *, store: ObjectStore | None = None, now
         "--allow-gaps",
         action="store_true",
         help="pass days R2 has no archive for, and load a timetable after days with no rows",
+    )
+    parser.add_argument(
+        "--seed-days",
+        type=_positive,
+        metavar="N",
+        help="start an agency that has no rows N JST days back (default: refuse it)",
     )
     parser.add_argument("--archives-dir", type=pathlib.Path, default=ROOT / "raw_archives")
     parser.add_argument("--static-dir", type=pathlib.Path, default=ROOT / "raw_archives_static")
