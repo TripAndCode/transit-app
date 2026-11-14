@@ -7,7 +7,7 @@ import psycopg2
 
 from db import migrate
 
-_VERSION = "0100"
+_VERSION = "0101"
 _DOWN = migrate._MIGRATIONS_DIR / f"{_VERSION}_agg_route_band_daily.down.sql"
 
 
