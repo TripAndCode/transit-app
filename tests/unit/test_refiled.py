@@ -122,3 +122,10 @@ def test_a_filed_read_skips_the_longest_runs_when_there_are_more_than_it_has_slo
     params = written.filing_params((D1, pair[-1]))
     widths = [params[f"filed_skip_to_{i}"] - params[f"filed_skip_from_{i}"] for i in range(FILED_SKIP_RUNS)]
     assert widths[0] > widths[1] == widths[-1] > timedelta(0)
+
+
+def test_a_filed_read_reads_updates_only_where_a_date_it_reaches_is_unwritten():
+    assert FILED.filing_params((D1, D2))["filed_rest"] == 0
+    assert FILED.filing_params((D1, D3))["filed_rest"] == 1
+    assert FILED.params()["filed_rest"] == 1
+    assert "{filed_rest:UInt8} = 1" in static_archive.observation_rows("1", Stamp.FILED)

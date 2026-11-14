@@ -702,7 +702,11 @@ class ScheduleJoin(NamedTuple):
         filed = [(day, build) for day, build in self.filed if between is None or between[0] <= day <= between[1]]
         days = [day for day, _ in filed]
         skips = _capture_skips(days)
+        unwritten = between is None or (between[1] - between[0]).days + 1 > len(days)
         return {
+            # 0 when every date the read reaches is written: its rows of
+            # `updates` would all be filed under written dates or outside it.
+            "filed_rest": int(unwritten),
             "filed_dates": days,
             "filed_builds": [build for _, build in filed],
             # No written date binds an empty range, which reads none.
@@ -1071,7 +1075,9 @@ def observation_rows(
         if table != UPDATES_TABLE:
             raise ValueError(f"only {UPDATES_TABLE}' rows are written filed, not {table}'")
         rest = _marked_rows(
-            f"({where}) AND {_OUTSIDE_SKIPS} AND {FILED_DATE_SQL} NOT IN {{filed_dates:Array(Date)}}", table
+            f"{{filed_rest:UInt8}} = 1 AND ({where}) AND {_OUTSIDE_SKIPS} "
+            f"AND {FILED_DATE_SQL} NOT IN {{filed_dates:Array(Date)}}",
+            table,
         )
         return f"FROM (SELECT {_filed_columns(False)} FROM ({rest}) AS u UNION ALL {_written_rows(where)}) AS u{after}"
     events = by_stop_event and stamp is Stamp.REFIT
