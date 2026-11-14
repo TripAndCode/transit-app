@@ -294,17 +294,24 @@
 @media (max-width: 640px) {
   .ops-header { gap: 10px; }
   .ops-heading { width: 100%; }
-  /* Shares the row with the refresh button rather than claiming a row of
-     its own: without `nowrap` and with a shrinkable min-width, the flex
-     item wraps its own text to fit whatever width that sharing leaves it,
-     instead of overflowing past the viewport edge the way a fixed-width
-     one-line label did. */
+  /* A fixed half-width basis, not `auto`: flex-wrap collects items onto a
+     line by their unshrunk hypothetical size, so an `auto` basis (the full,
+     unwrapped sentence) is already wider than the row and the refresh
+     button is pushed to a line of its own. The half-width basis is narrow
+     enough that the two collect onto one line together, leaving the
+     sentence room to wrap across it instead of overflowing past the
+     viewport edge. */
   .ops-freshness {
-    margin-left: auto;
+    flex: 1 1 50%;
     min-width: 0;
     white-space: normal;
-    overflow-wrap: anywhere;
   }
+  /* The dot would otherwise shrink along with the row and read as an oval. */
+  .ops-freshness > span { flex: none; }
+  /* Never shares a row: at the half-width basis above, a result message
+     alongside it would squeeze the sentence into a sliver instead of
+     reusing the room freed above. */
+  .ops-refresh-result { flex: 1 1 100%; max-width: none; }
 }
 
 /* The map's own width, not the viewport's, decides when its overlays
@@ -392,9 +399,10 @@
 }
 
 /* BP.sm phone shell: the map fills the remaining height below the tab bar,
-   the legend collapses to one scrollable row instead of wrapping over the
-   map, and the queue/inspect/timeline content that the desktop grid gives a
-   side column moves into a bottom sheet layered over the map instead. */
+   the legend's chips wrap as whole units across however many rows they
+   need instead of breaking mid-word, and the queue/inspect/timeline
+   content that the desktop grid gives a side column moves into a bottom
+   sheet layered over the map instead. */
 @media (max-width: 640px) {
   .focused-overview.operations-page { height: 100%; }
   /* Clips again what the BP.md rule set visible: the bottom sheet is laid out
@@ -403,11 +411,11 @@
   .focused-overview .ops-workspace { display: block; height: 100%; max-height: none; position: relative; overflow: hidden; }
   .focused-overview .ops-map { position: absolute; inset: 0; height: 100%; }
   .ops-resizer { display: none; }
-  .ops-map-ref__legend { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  /* Each chip scrolls as a whole word rather than shrinking: the body-wide
-     `overflow-wrap: anywhere` lowers a flex item's automatic minimum width
-     to near zero, so without `nowrap` a chip this narrow breaks its label
-     mid-word instead of handing the overflow to the row's own scrollbar. */
+  /* The legend's own `flex-wrap: wrap` already carries the chips to a new
+     row as a unit; what each chip is missing is `nowrap` on its own label.
+     The body-wide `overflow-wrap: anywhere` lowers a flex item's automatic
+     minimum width to near zero, so without `nowrap` a chip this narrow
+     breaks its label mid-word instead of moving whole to the next row. */
   .ops-map-ref__legend .legend-chip { white-space: nowrap; }
   /* The map fills the whole workspace here, so every piece of bottom-anchored
      map chrome shares an edge with the sheet -- and the same z-index rung, so

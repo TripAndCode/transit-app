@@ -10,7 +10,7 @@ describe("focusedOverview.css phone layout (BP.sm)", () => {
   it("shrinks the title off the desktop token and tightens the header's own line-height", () => {
     const bpSm = ruleBody(css, "@media (max-width: 640px) {");
     const title = ruleBody(bpSm, ".focused-overview .ops-heading h1 {");
-    expect(decl(title, "font")).toBe("650 var(--text-xl) / 1.2 var(--font-body, sans-serif)");
+    expect(decl(title, "font")).toBe("650 var(--text-lg) / 1.2 var(--font-body, sans-serif)");
   });
 
   it("tightens the column gap above the map below the desktop value", () => {
