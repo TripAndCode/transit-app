@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
+import type { TierState } from "../../api/useCapabilityTier";
 import type {
-  CapabilityTier,
   CoverageGapReason,
   DwellRunPayload,
   HeadwayQualityResponse,
@@ -30,15 +30,20 @@ const COVERAGE_TEXT = {
 } as const satisfies Record<CoverageGapReason, string>;
 
 /** A basic-tier feed can't support any analysis the coverage gate guards,
- *  so its tier is the true cause, whatever state the gate reports. */
+ *  so its tier is the true cause, whatever state the gate reports. Until
+ *  the tier is known no cause is stated, so a pipeline reason never shows
+ *  for a moment before the tier replaces it. */
 function coverageNotShown(
   t: TFunction,
   reason: CoverageGapReason,
   lastChecked: string | null | undefined,
-  tier: CapabilityTier | undefined,
+  tier: TierState,
 ): NotShown {
   if (tier === "basic") {
     return { status: t("capability.basic.status"), text: t("capability.basic.reason") };
+  }
+  if (tier === "loading") {
+    return { status: t("capability.loading.status"), text: t("capability.loading.text") };
   }
   return {
     status: t(COVERAGE_STATUS[reason]),
@@ -54,7 +59,7 @@ function coverageNotShown(
 export function dwellNotShown(
   t: TFunction,
   payload: DwellRunPayload | undefined,
-  tier: CapabilityTier | undefined,
+  tier: TierState,
 ): NotShown | null {
   const reason = payload?.unavailable_reason;
   if (payload?.available) {
@@ -76,7 +81,7 @@ export function dwellNotShown(
 export function headwayNotShown(
   t: TFunction,
   data: HeadwayQualityResponse,
-  tier: CapabilityTier | undefined,
+  tier: TierState,
 ): NotShown | null {
   const reason = data.unavailable_reason;
   if (data.rows.length > 0 || reason == null) return null;

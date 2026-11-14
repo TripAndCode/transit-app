@@ -2488,6 +2488,10 @@
       "reason": "This agency's feed carries basic data only, which covers on-time performance. This needs timetable-matched records its feed doesn't provide.",
       "figure": "not part of basic data",
       "unranked": "Basic data: on-time only, so observation coverage can't be measured"
+    },
+    "loading": {
+      "status": "Loading",
+      "text": "Loading what this agency's feed covers…"
     }
   }
 }

@@ -420,3 +420,29 @@ async def test_today_is_held_to_a_stricter_limit_than_the_read(reports_client, a
     statuses = [(await client.get(f"/api/snapshots/{snapshot_id}/today")).status_code for _ in range(11)]
     assert statuses == [200] * 10 + [429]
     assert (await client.get(f"/api/snapshots/{snapshot_id}")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_read_states_the_agencys_capability_tier_as_it_stands_now(reports_client, aconn):  # noqa: F811
+    """A signed-out reader can't reach the agency catalogue, so the read
+    carries the tier, derived when it is read and never stored with the
+    snapshot."""
+    client, agency_id, _ = reports_client
+    snapshot_id = await _store(aconn, agency_id)
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'aomori_regex' WHERE agency_id = $1", agency_id)
+    assert (await client.get(f"/api/snapshots/{snapshot_id}")).json()["capability_tier"] == "basic"
+
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+    from tests.conftest import confirm_rt_field_coverage
+
+    await confirm_rt_field_coverage(aconn, agency_id)
+    assert (await client.get(f"/api/snapshots/{snapshot_id}")).json()["capability_tier"] == "full"
+    stored = await aconn.fetchval("SELECT payloads::text FROM snapshots WHERE snapshot_id = $1", snapshot_id)
+    assert "capability_tier" not in stored
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_of_an_agency_no_longer_on_record_has_no_tier(reports_client, aconn):  # noqa: F811
+    client, agency_id, _ = reports_client
+    snapshot_id = await _store(aconn, agency_id + 1000)
+    assert (await client.get(f"/api/snapshots/{snapshot_id}")).json()["capability_tier"] is None

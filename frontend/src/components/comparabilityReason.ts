@@ -1,5 +1,6 @@
 import type { useTranslation } from "react-i18next";
-import type { CapabilityTier, ComparabilityThresholds, NetworkAgencyRow } from "../api/types";
+import type { ComparabilityThresholds, NetworkAgencyRow } from "../api/types";
+import type { TierState } from "../api/useCapabilityTier";
 import { fixedTenth, formatNumber } from "../utils/format";
 
 /** The figures a reason reads: an agencies board row has them all, and the
@@ -14,7 +15,7 @@ type GateFigures = Pick<
   | "clamp_pct"
   | "delivered_missing"
   | "planned_trips"
-> & { capability_tier?: CapabilityTier };
+> & { capability_tier?: TierState };
 
 /** Half an on-time interval's width, rounded up to a tenth, so an interval
  *  the gate found wider than its limit never prints at the limit. The inner
@@ -54,6 +55,8 @@ export function unrankedReasonParts(
       return { key: "network.unranked_reason.no_data", values: {} };
     case "coverage_unknown":
       if (coverageOutsideTier(a)) return { key: "capability.basic.unranked", values: {} };
+      // Whether the tier is the cause isn't known yet, so no cause is given.
+      if (a.capability_tier === "loading" && coverageUnknownWhy(a) === "unmatched") return null;
       return {
         key: "network.unranked_reason.coverage_unknown",
         values: { why: `network.coverage_unknown_why.${coverageUnknownWhy(a)}` },

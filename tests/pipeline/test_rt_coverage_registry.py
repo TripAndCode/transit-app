@@ -20,6 +20,7 @@ from pipeline.strategies.static_join import (
     rt_field_coverage_confirmed,
     rt_field_coverage_confirmed_agencies,
     rt_field_coverage_gap,
+    rt_field_coverage_states,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -257,3 +258,23 @@ async def test_gap_names_the_reason_exactly_when_the_gate_is_closed(
         assert gap.last_checked == probed_day
     elif gap is not None:
         assert gap.last_checked is None
+
+
+async def test_states_are_read_for_many_agencies_at_once_and_judge_as_the_gate_does(aconn, aagency_id):
+    """One batch read serves every agency asked for, each judged by the same
+    rule the per-agency gap reader applies; an id with no agency is left out."""
+    await _set_strategy(aconn, aagency_id, "static_join")
+    await record_field_coverage_probe(aconn, aagency_id, _cov(), "https://feed.example/tu.bin")
+    other = await aconn.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+        "VALUES ('Other', 'http://other.example/rt', 'aomori_regex') RETURNING agency_id"
+    )
+
+    states = await rt_field_coverage_states(aconn, [aagency_id, other, 999_999])
+
+    assert set(states) == {aagency_id, other}
+    assert {f["field_name"] for f in states[aagency_id].probes} == set(RT_COVERAGE_FIELDS)
+    assert states[aagency_id].gap() is None
+    assert states[other].probes == []
+    assert states[other].gap().reason == "feed_unsupported"
+    assert await rt_field_coverage_states(aconn, []) == {}

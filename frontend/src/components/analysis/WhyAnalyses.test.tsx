@@ -69,6 +69,8 @@ function unavailableDwell(reason: DwellRunPayload["unavailable_reason"], lastChe
 }
 
 function show(payload: DwellRunPayload, weather: WeatherDelayResponse, headway: HeadwayQualityResponse) {
+  // The agency catalogue answered without a tier for this agency, unless a test set one.
+  if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useWeatherDelay").mockReturnValue({ data: weather, isLoading: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useHeadwayQuality").mockReturnValue({ data: headway, isLoading: false, error: null, refetch: vi.fn() } as never);

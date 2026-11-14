@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { DefinitionMeta, FeedQuality, SourceMix, TimetableVersion } from "../api/types";
 import { PRESET_NAMES } from "../api/onTimeDefault";
+import { useCapabilityTierOf, type TierState } from "../api/useCapabilityTier";
 import { toJstISO } from "../api/scope";
 import { fixedTenth, formatDate, formatDuration, formatNumber } from "../utils/format";
 
@@ -14,6 +15,9 @@ type BlockProps = Props & {
    *  timetables, sources and feed quality are then listed under their
    *  agency's name. */
   agencyNames?: ReadonlyMap<number, string>;
+  /** Each agency's capability tier, for a page that can't read the agency
+   *  catalogue; otherwise the catalogue's tiers are read. */
+  tiers?: ReadonlyMap<number, TierState>;
 };
 
 /** How the figures beside it were made, in plain words, behind one
@@ -27,7 +31,7 @@ type BlockProps = Props & {
  *  `definition` field (pipeline/reports/definition.py is the source of
  *  truth); an identifier this build has no words for is shown as the API
  *  sent it, so text and definition can never silently drift apart. */
-export function DefinitionMetaBlock({ definition, agencyNames }: BlockProps) {
+export function DefinitionMetaBlock({ definition, agencyNames, tiers }: BlockProps) {
   const { t } = useTranslation();
   const exclusion = definition.exclusion_threshold_sec;
   const sentences = [
@@ -56,7 +60,15 @@ export function DefinitionMetaBlock({ definition, agencyNames }: BlockProps) {
         <Sources mix={definition.source_mix} agencyNames={agencyNames} />
       )}
       {definition.feed_quality != null && definition.feed_quality.length > 0 && (
-        <FeedQualityLines quality={definition.feed_quality} agencyNames={agencyNames} />
+        tiers != null ? (
+          <FeedQualityLines
+            quality={definition.feed_quality}
+            agencyNames={agencyNames}
+            tierOf={(id) => tiers.get(id) ?? null}
+          />
+        ) : (
+          <CatalogueFeedQualityLines quality={definition.feed_quality} agencyNames={agencyNames} />
+        )
       )}
     </details>
   );
@@ -67,9 +79,20 @@ export function DefinitionMetaBlock({ definition, agencyNames }: BlockProps) {
  *  reads as the board's unranked reason does, plainly, and one it cannot
  *  compute says why, never 0. One sentence for one agency, and a list under
  *  each agency's name for several. */
-function FeedQualityLines({ quality, agencyNames }: { quality: FeedQuality[]; agencyNames?: ReadonlyMap<number, string> }) {
+type FeedQualityProps = { quality: FeedQuality[]; agencyNames?: ReadonlyMap<number, string> };
+
+function CatalogueFeedQualityLines(props: FeedQualityProps) {
+  const tierOf = useCapabilityTierOf();
+  return <FeedQualityLines {...props} tierOf={tierOf} />;
+}
+
+function FeedQualityLines({
+  quality,
+  agencyNames,
+  tierOf,
+}: FeedQualityProps & { tierOf: (agencyId: number) => TierState }) {
   const { t } = useTranslation();
-  if (quality.length === 1) return <p>{t("definitionMeta.feed_quality", qualityParts(quality[0], t))}</p>;
+  if (quality.length === 1) return <p>{t("definitionMeta.feed_quality", qualityParts(quality[0], t, tierOf(quality[0].agency_id)))}</p>;
   return (
     <>
       <p>{t("definitionMeta.feed_quality_heading")}</p>
@@ -78,7 +101,7 @@ function FeedQualityLines({ quality, agencyNames }: { quality: FeedQuality[]; ag
           <li key={own.agency_id}>
             {t("definitionMeta.feed_quality_agency", {
               agency: agencyNames?.get(own.agency_id) ?? String(own.agency_id),
-              ...qualityParts(own, t),
+              ...qualityParts(own, t, tierOf(own.agency_id)),
             })}
           </li>
         ))}
@@ -89,13 +112,19 @@ function FeedQualityLines({ quality, agencyNames }: { quality: FeedQuality[]; ag
 
 /** One agency's coverage and clamp share as the feed-quality sentences
  *  interpolate them. */
-function qualityParts(own: FeedQuality, t: TFunction): { coverage: string; clamp: string } {
-  return { coverage: coverageWords(own, t), clamp: clampWords(own, t) };
+function qualityParts(own: FeedQuality, t: TFunction, tier: TierState): { coverage: string; clamp: string } {
+  return { coverage: coverageWords(own, t, tier), clamp: clampWords(own, t) };
 }
 
-function coverageWords(own: FeedQuality, t: TFunction): string {
+/** A basic-tier feed's unmatched coverage is outside its tier, and while
+ *  the tier loads no cause is given rather than one the tier may replace. */
+function coverageWords(own: FeedQuality, t: TFunction, tier: TierState): string {
   if (own.coverage_pct == null) {
     const missing = own.coverage_missing ?? "no_data";
+    if (missing === "unmatched" && tier === "basic") {
+      return `${t("network.col_observed_coverage")} ${t("capability.basic.figure")}`;
+    }
+    if (missing === "unmatched" && tier === "loading") return t("network.observed_coverage_missing");
     const reason =
       missing === "no_data"
         ? t("definitionMeta.feed_quality_no_data")

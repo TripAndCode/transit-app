@@ -23,14 +23,14 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
-import { useCapabilityTier } from "../api/useCapabilityTier";
+import { useCapabilityTier, type TierState } from "../api/useCapabilityTier";
 import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { SHARED_TABLE, th, td } from "./tableStyles";
-import type { CapabilityTier, PerformanceStandardRow } from "../api/types";
+import type { PerformanceStandardRow } from "../api/types";
 import { ErrorBanner } from "./ErrorBanner";
 import { OnTimeDefinition } from "./DefinitionMetaBlock";
-import { fixedTenth, formatDuration, formatNumber, roundTenth } from "../utils/format";
+import { EM_DASH, fixedTenth, formatDuration, formatNumber, roundTenth } from "../utils/format";
 
 function fmtMetricValue(v: number | null, metricType: PerformanceStandardRow["metric_type"]): string {
   if (v == null) return "—";
@@ -56,7 +56,7 @@ const DELIVERY_METRICS: ReadonlySet<PerformanceStandardRow["metric_type"]> = new
   "vehicle_km_delivered_pct",
 ]);
 
-function notJudgedText(t: TFunction, notJudged: NotJudged, tier: CapabilityTier | undefined): string {
+function notJudgedText(t: TFunction, notJudged: NotJudged, tier: TierState): string {
   switch (notJudged.reason) {
     case "too_few_observations":
       return t("reports.performance_standard.not_judged_thin", {
@@ -75,6 +75,7 @@ function notJudgedText(t: TFunction, notJudged: NotJudged, tier: CapabilityTier 
     case "no_shapes":
       return t("reports.performance_standard.not_judged_no_shapes");
     default:
+      if (tier === "loading") return EM_DASH;
       return t("reports.performance_standard.not_judged_delivered", {
         reason: tier === "basic" ? t("capability.basic.label") : t(`network.delivered_missing.${notJudged.reason}`),
       });
@@ -91,7 +92,7 @@ function Judgement({
 }: {
   meets: boolean | null;
   notJudged: PerformanceStandardRow["not_judged"];
-  tier: CapabilityTier | undefined;
+  tier: TierState;
 }) {
   const { t } = useTranslation();
   if (meets != null) {

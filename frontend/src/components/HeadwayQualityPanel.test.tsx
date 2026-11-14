@@ -8,6 +8,8 @@ import type { HeadwayQualityResponse } from "../api/types";
 const CTX = { from: "2026-04-01", to: "2026-04-02", dow: "all", time_band: "all", service: "all", routes: [] } as const;
 
 function mockRoutes() {
+  // The agency catalogue answered without a tier for this agency, unless a test set one.
+  if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
 }
 
@@ -148,6 +150,16 @@ describe("HeadwayQualityPanel", () => {
     renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
     expect(screen.getByText(/carries basic data only/)).toBeInTheDocument();
     expect(screen.queryByText(/last check/)).not.toBeInTheDocument();
+  });
+
+  it("gives no cause while the agency's tier is still loading, so a pipeline reason never flashes", () => {
+    mockRoutes();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
+    mockHeadwayQuality({ data: { rows: [], ctx: CTX, unavailable_reason: "feed_unsupported", last_checked: null } });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText("Loading what this agency's feed covers…")).toBeInTheDocument();
+    expect(screen.queryByText(/can't be taken from this agency's feed/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/basic data/)).not.toBeInTheDocument();
   });
 
   it("says when the timetable has no high-frequency route at all", () => {

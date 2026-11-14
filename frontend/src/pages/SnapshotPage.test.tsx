@@ -92,6 +92,7 @@ function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     method_version: "2026.11.0",
     title: null,
     note: null,
+    capability_tier: "full",
     ...overrides,
   };
 }
@@ -173,6 +174,42 @@ describe("SnapshotPage", () => {
     expect(screen.getByText(prose.en)).toBeInTheDocument();
     await i18n.changeLanguage("ja");
     expect(await screen.findByText(prose.ja)).toBeInTheDocument();
+  });
+
+  it("words a basic-tier agency's missing figures by its tier, which the read carries", async () => {
+    const stored = {
+      ...council("On time 22.6% of the time."),
+      rows: [[22.6, 2.5, 540357, 2130, null, null, 4.2]],
+      delivered_missing: "feed_cannot_report",
+      comparability: {
+        comparable: false,
+        reason: "coverage_unknown",
+        coverage_pct: null,
+        observed_trips: null,
+        coverage_planned_trips: null,
+        ci_low: null,
+        ci_high: null,
+        clamp_pct: 0.2,
+        planned_trips: 2130,
+        delivered_missing: "feed_cannot_report",
+        thresholds: { min_coverage_pct: 70, max_ci_half_width_pp: 3, max_clamp_pct: 5 },
+      },
+    } as ReportResponse;
+    const fetchMock = stubFetch(
+      200,
+      snapshot({
+        screen: "council_report",
+        capability_tier: "basic",
+        payloads: { report: { ja: stored, en: stored }, routes: [], credit: { ja: null, en: null } },
+      }),
+    );
+    renderPage();
+    const figures = await screen.findByRole("list", { name: "Headline figures" });
+    expect(figures).toHaveTextContent("not part of basic data");
+    expect(figures).toHaveTextContent("Basic data: on-time only, so observation coverage can't be measured");
+    expect(figures).not.toHaveTextContent("cancellations");
+    expect(figures).not.toHaveTextContent("can't be matched to the timetable");
+    expect(fetchMock.mock.calls.map(([url]) => String(url)).some((url) => url.includes("/api/agencies"))).toBe(false);
   });
 
   it("prints a stored council report as it is, taking no new snapshot of it, even for an admin", async () => {

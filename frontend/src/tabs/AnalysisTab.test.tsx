@@ -55,6 +55,8 @@ function reportResponse(reportType: ReportType): ReportResponse {
 }
 
 function mockSupportHooks() {
+  // The agency catalogue answered without a tier for this agency, unless a test set one.
+  if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
 }
