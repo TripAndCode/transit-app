@@ -429,8 +429,11 @@ describe("ScopeSentence routes token", () => {
     mountRoutes();
     await userEvent.click(screen.getByRole("button", { name: "Show all filters" }));
     const strip = () => within(document.querySelector(".scope-strip")!);
+    // The days control shares the strip and stages its own Apply, so the
+    // routes cell is scoped by its search box, not the strip as a whole.
+    const routesCell = () => within(strip().getByRole("textbox", { name: "Search routes" }).closest(".scope-strip__cell")!);
     await userEvent.click(strip().getByRole("button", { name: /^2 ?Hill$/ }));
-    expect(strip().getByRole("button", { name: /^Apply/ })).toBeEnabled();
+    expect(routesCell().getByRole("button", { name: /^Apply/ })).toBeEnabled();
 
     await userEvent.click(screen.getByRole("button", { name: "all routes" }));
     const dialog = screen.getByRole("dialog", { name: "Routes" });
@@ -440,7 +443,7 @@ describe("ScopeSentence routes token", () => {
 
     expect(strip().getByRole("checkbox", { name: /^1 ?Coast$/ })).toBeChecked();
     expect(strip().getByRole("checkbox", { name: /^2 ?Hill$/ })).not.toBeChecked();
-    expect(strip().getByRole("button", { name: /^Apply/ })).toBeDisabled();
+    expect(routesCell().getByRole("button", { name: /^Apply/ })).toBeDisabled();
   });
 
   it("shows no plate badge with nothing picked", () => {
