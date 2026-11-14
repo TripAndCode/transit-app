@@ -90,9 +90,10 @@ def cache_briefly() -> None:
 
 def clear_all() -> None:
     """Clear every async_lru_cache in the process. The perf debug endpoint
-    calls it for cold-run benchmarks, and
-    pipeline.reports.definition.stamp_build the first time a process looks at
-    the builds; a later build clears only what :func:`evict_for_rebuild` names."""
+    calls it for cold-run benchmarks, pipeline.live_filing when an agency's
+    archive state moves, and pipeline.reports.definition.stamp_build the first
+    time a process looks at the builds; a later build clears only what
+    :func:`evict_for_rebuild` names."""
     for clear in _REGISTERED_CLEARS:
         clear()
 

@@ -118,9 +118,9 @@ async def _stamps_versions(conn, agency_id: int) -> bool:
     return strategy in VERSION_STAMPING_STRATEGIES
 
 
-# Cleared with every compute cache (pipeline.cache.clear_all), which a build
-# analyze records reaches, and by invalidate_schedule_joins after a load; the
-# TTL bounds a schedule copied in another process under names already mapped.
+# Evicted for an agency whose recorded build moves (pipeline.cache.evict_for_rebuild)
+# and by invalidate_schedule_joins after a load; the TTL bounds a schedule copied
+# in another process under names already mapped.
 @async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _schedule_join(ch, agency_id: int, state: tuple) -> ScheduleJoin:
     return await static_archive.schedule_join_async(ch, agency_id, None, by_service_date=True)
