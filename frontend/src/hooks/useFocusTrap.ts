@@ -104,9 +104,10 @@ export function useFocusTrap(
   }, [active, containerRef, initialFocusRef]);
 }
 
-/** An Escape that ends an IME composition belongs to the input method, not to
- *  the overlay: cancelling a kana conversion must not close what it is typed in. */
-function isImeKey(e: KeyboardEvent): boolean {
+/** A key that ends an IME composition belongs to the input method, not to the
+ *  surface it is typed in: Escape cancelling a kana conversion must not close
+ *  an overlay, and Enter confirming one must not submit a form. */
+export function isImeKey(e: KeyboardEvent): boolean {
   return e.isComposing || e.keyCode === 229;
 }
 

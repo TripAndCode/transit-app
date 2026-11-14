@@ -26,7 +26,7 @@ const TWO_ROUTES = [
 ];
 
 /** Mounts RoutesControl directly on a given scope and update spy, bypassing
- *  useScope/the router -- so a test can assert on `update`'s call count and
+ *  useScope's URL binding -- so a test can assert on `update`'s call count and
  *  arguments precisely, which an integration mount through the URL cannot. */
 function directMount(scope: Scope, update = vi.fn(), close?: () => void) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: TWO_ROUTES, isPending: false } as never);
@@ -462,6 +462,32 @@ describe("scope controls", () => {
       await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
       fireEvent.keyDown(screen.getByRole("textbox", { name: "Search routes" }), { key: "Enter" });
       expect(update).toHaveBeenCalledWith({ routes: ["101"] });
+    });
+
+    it("does nothing on Enter while the draft is unchanged, as the disabled Apply would", () => {
+      const close = vi.fn();
+      const update = directMount({ ...BASE_SCOPE, routes: ["101"] }, vi.fn(), close);
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Search routes" }), { key: "Enter" });
+      expect(update).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+    });
+
+    it("keeps its search text after its own Apply, where it stays mounted in the pinned strip", async () => {
+      mount(RoutesControl);
+      const search = screen.getByRole("textbox", { name: "Search routes" });
+      await userEvent.type(search, "Coast");
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 1 route" }));
+      expect(params().get("routes")).toBe("101");
+      expect(screen.getByRole("textbox", { name: "Search routes" })).toHaveValue("Coast");
+    });
+
+    it("hands focus to the search field when a tray button removes itself", async () => {
+      directMount({ ...BASE_SCOPE, routes: ["101", "102"] });
+      await userEvent.click(screen.getByRole("button", { name: /^Remove route .*\(101\)$/ }));
+      expect(screen.getByRole("textbox", { name: "Search routes" })).toHaveFocus();
+      await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+      expect(screen.getByRole("textbox", { name: "Search routes" })).toHaveFocus();
     });
   });
 });

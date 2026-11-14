@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRoutes } from "../api/hooks";
@@ -9,12 +9,7 @@ import type { Route } from "../api/types";
 import { FILTER_SEPARATOR } from "../utils/format";
 import { RoutePartsLabel } from "./RouteLabel";
 import { searchKey } from "../utils/searchText";
-
-/** Enter in the search field, while IME composition (kana→kanji) is not in
- *  progress: a composing Enter confirms the conversion, not the draft. */
-function isSubmitEnter(e: KeyboardEvent<HTMLInputElement>): boolean {
-  return e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229;
-}
+import { isImeKey } from "../hooks/useFocusTrap";
 
 type RouteVariant = { code: string; long_name: string | null; headsigns: string[]; searchText: string };
 type RouteGroup = {
@@ -120,6 +115,7 @@ export function RoutesPicker({
   const { data, isPending, refetch } = useRoutes(id);
   const names = useRouteNames(id);
   const [filter, setFilter] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   // Render cap keeps the first paint cheap for huge agencies; "show more"
   // raises it instead of silently dropping the tail (search still scans all).
@@ -139,6 +135,13 @@ export function RoutesPicker({
 
   function toggleCode(code: string) {
     onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);
+  }
+
+  /** A tray button removes itself from the DOM; hand focus to the search
+   *  field first, so a keyboard user is not dropped back to the page top. */
+  function removeFromTray(next: string[]) {
+    searchRef.current?.focus();
+    onChange(next);
   }
 
   function toggleGroup(g: RouteGroup) {
@@ -170,8 +173,9 @@ export function RoutesPicker({
         onChange={(e) => setFilter(e.target.value)}
         aria-label={t("filters.routes.search_label")}
         placeholder={t("filters.routes.search_placeholder")}
+        ref={searchRef}
         onKeyDown={(e) => {
-          if (isSubmitEnter(e)) onSubmit?.();
+          if (e.key === "Enter" && !isImeKey(e.nativeEvent)) onSubmit?.();
         }}
         style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
       />
@@ -199,7 +203,7 @@ export function RoutesPicker({
                     {parts ? <RoutePartsLabel parts={parts} compact nameOnly /> : code}
                     <button
                       type="button"
-                      onClick={() => toggleCode(code)}
+                      onClick={() => removeFromTray(selected.filter((c) => c !== code))}
                       aria-label={t("filters.routes.tray_remove", { route: parts ? `${routeNameText(parts)} (${code})` : code })}
                       style={{
                         appearance: "none",
@@ -217,11 +221,7 @@ export function RoutesPicker({
                   </span>
                 );
               })}
-              <button
-                type="button"
-                onClick={() => onChange([])}
-                style={{ background: "transparent", border: "none", color: "var(--accent-strong)", padding: "2px 4px", fontSize: 12, cursor: "pointer" }}
-              >
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => removeFromTray([])}>
                 {t("scope.control.clear")}
               </button>
             </div>

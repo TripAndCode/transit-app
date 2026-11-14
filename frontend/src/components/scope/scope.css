@@ -238,13 +238,14 @@
 }
 
 .routes-control__hint {
-  margin-inline-end: auto;
+  flex: 1 1 0;
+  min-width: 0;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
 
-/* Decorative stand-ins for the routes token's own label text, which stays
-   exactly as scopePhrases.ts already renders it (see routeTokenPlates). */
+/* Decorative plates shown beside the routes token's own label text, which
+   stays exactly as scopePhrases.ts renders it (see routeTokenPlates). */
 .scope-token__plates {
   display: inline-flex;
   align-items: center;
@@ -266,11 +267,12 @@
   border-color: var(--accent-strong);
 }
 
-/* BP.sm, phone width (kept in sync with styles/breakpoints.ts's BP.sm and
-   Sidebar.tsx's MOBILE_TABBAR_HEIGHT_PX, as global.css's own BP.sm rule
-   already is): the fixed bottom tab bar would otherwise sit over this
-   footer, so it clears the tab bar's own height instead of the viewport
-   edge, and its hint drops first since the control is tightest here. */
+/* BP.sm, phone width (kept in sync with styles/breakpoints.ts's BP.sm; the
+   56px is Sidebar.tsx's MOBILE_TABBAR_HEIGHT_PX, which tokens.test.ts pins):
+   the fixed bottom tab bar would otherwise sit over this footer, so it
+   clears the bar's own height instead of the viewport edge. The hint drops
+   first, since the control is tightest here, and both buttons take the
+   full-size tap height. */
 @media (max-width: 640px) {
   .routes-control__foot {
     bottom: calc(56px + env(safe-area-inset-bottom));
@@ -280,9 +282,12 @@
     display: none;
   }
 
+  .routes-control__foot .btn {
+    height: var(--control-h);
+  }
+
   .routes-control__apply {
-    flex: 1 1 100%;
-    min-height: 44px;
+    flex: 1 1 auto;
   }
 }
 

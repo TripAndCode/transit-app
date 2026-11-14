@@ -20,9 +20,9 @@ export type ControlProps = {
   /** The controls' data, while it is loaded; every control works without it. */
   summary?: ScopeSummary;
   /** Closes the popover this control renders in. Only the routes control
-   *  uses it -- every other control applies each change at once and has
-   *  nothing of its own to close. Absent for a control rendered pinned in
-   *  the scope strip, which has no popover to close. */
+   *  uses it, since its Apply both commits the staged picks and dismisses
+   *  the popover. Absent for a control rendered pinned in the scope strip,
+   *  which has no popover to close. */
   close?: () => void;
 };
 
@@ -198,17 +198,23 @@ function sameRoutes(a: string[], b: string[]): boolean {
   return b.every((code) => sa.has(code));
 }
 
-/** A draft of the picked routes, committed only on Apply -- unlike every
- *  other control here, which writes the scope on each change. Remounted
- *  under a key of the committed routes, so a change made outside this
- *  control (a reset, or the pinned strip and an open popover sharing one
- *  scope) starts the draft over without a synchronising effect. */
-function RoutesDraft({ scope, update, summary, close }: ControlProps) {
+/** A draft of the picked routes, committed only on Apply. When the
+ *  committed routes change outside this control (a reset, or the pinned
+ *  strip and an open popover sharing one scope), the draft starts over from
+ *  them during render; the picker's search and expanded lines stay as the
+ *  user left them. */
+export function RoutesControl({ scope, update, summary, close }: ControlProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<string[]>(() => scope.routes);
+  const [committed, setCommitted] = useState(scope.routes);
+  if (!sameRoutes(committed, scope.routes)) {
+    setCommitted(scope.routes);
+    setDraft(scope.routes);
+  }
   const delays = summary ? new Map(summary.routes.map((r) => [r.route_code, r])) : undefined;
   const unchanged = sameRoutes(draft, scope.routes);
   function commit() {
+    if (unchanged) return;
     update({ routes: draft.length > 0 ? draft : null });
     close?.();
   }
@@ -240,10 +246,6 @@ function RoutesDraft({ scope, update, summary, close }: ControlProps) {
       </div>
     </div>
   );
-}
-
-export function RoutesControl(props: ControlProps) {
-  return <RoutesDraft key={props.scope.routes.join(",")} {...props} />;
 }
 
 /** The summary comes from daily aggregates, which have no hour of day; say

@@ -256,6 +256,12 @@ describe("routeTokenPlates", () => {
     expect(routeTokenPlates(["50", "51", "61", "70"], plateCtx)).toEqual({ plates: ["50", "51"], more: 2 });
   });
 
+  it("folds a line with no plate of its own into the +N count, never dropping it", () => {
+    const ctx = { ...plateCtx, routePlate: (c: string) => (c === "x1" || c === "x2" ? null : (PLATES[c] ?? null)) };
+    expect(routeTokenPlates(["50", "70", "x1", "x2"], ctx)).toEqual({ plates: ["50", "A1"], more: 2 });
+    expect(routeTokenPlates(["50", "x1"], ctx)).toEqual({ plates: ["50"], more: 1 });
+  });
+
   it("falls back to the route code itself when the context names no plate", () => {
     expect(routeTokenPlates(["50", "70"], { t: i18n.getFixedT("ja"), agencyName: "x", routeLabel: (c) => c })).toEqual({
       plates: ["50", "70"],

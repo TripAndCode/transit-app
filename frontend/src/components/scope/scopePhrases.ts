@@ -68,9 +68,11 @@ function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx)
 
 /** The routes token's decorative plate stack: one plate per picked line (its
  *  first-selected variant), or, when every pick is one line, that line's own
- *  distinct variant plates -- up to three either way, with any remainder
- *  folded into a "+N" count. Purely visual: `routesLabel`'s own text is
- *  unaffected and stays the sentence's only accessible description. */
+ *  distinct variant plates -- up to three either way. A line past the third,
+ *  or one with no plate of its own, folds into a "+N" count, so the stack
+ *  never shows fewer lines than were picked. Purely visual: `routesLabel`'s
+ *  own text is unaffected and stays the sentence's only accessible
+ *  description. */
 export function routeTokenPlates(routes: string[], ctx: PhraseCtx): { plates: string[]; more: number } {
   if (routes.length === 0) return { plates: [], more: 0 };
   const plateOf = (code: string): string | null => (ctx.routePlate ? ctx.routePlate(code) : code);
@@ -85,12 +87,15 @@ export function routeTokenPlates(routes: string[], ctx: PhraseCtx): { plates: st
     sourceCodes.push(code);
   }
   const texts: string[] = [];
+  let folded = 0;
   for (const code of sourceCodes) {
     const text = plateOf(code);
     if (text && !texts.includes(text)) texts.push(text);
+    else if (!singleGroup) folded += 1;
   }
-  if (texts.length <= 3) return { plates: texts, more: 0 };
-  return { plates: texts.slice(0, 2), more: texts.length - 2 };
+  const total = texts.length + folded;
+  const plates = total <= 3 ? texts : texts.slice(0, 2);
+  return { plates, more: total - plates.length };
 }
 
 export function daysLabel(dow: Scope["dow"], t: LabelT): string {
