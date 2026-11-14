@@ -401,6 +401,16 @@ describe("scope controls", () => {
       fireEvent.pointerUp(slider);
       expect(params().get("late")).toBe("240");
     });
+
+    it("keeps the applied preset checked until a drag onto another one lands", () => {
+      mount(ToleranceControl);
+      const slider = screen.getByRole("slider", { name: "Counted on time up to" });
+      fireEvent.change(slider, { target: { value: "180" } });
+      expect(screen.getByRole("radio", { name: "5 min" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByRole("radio", { name: "3 min" })).toHaveAttribute("aria-checked", "false");
+      fireEvent.pointerUp(slider);
+      expect(screen.getByRole("radio", { name: "3 min" })).toHaveAttribute("aria-checked", "true");
+    });
   });
 
   describe("early", () => {

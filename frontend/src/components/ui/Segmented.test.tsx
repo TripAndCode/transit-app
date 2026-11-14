@@ -67,8 +67,9 @@ describe("Segmented", () => {
     expect(container.querySelector(".seg")).toHaveClass("seg--meta");
   });
 
-  it("keeps the one-line track when no choice has a figure", () => {
-    const { container } = render(<Segmented aria-label="Choice" options={OPTIONS} value="a" onChange={() => {}} />);
+  it("keeps the one-line track when no choice has a figure, or only an empty one", () => {
+    const options: SegmentedOption<string>[] = [{ value: "a", label: "A", meta: "" }, ...OPTIONS.slice(1)];
+    const { container } = render(<Segmented aria-label="Choice" options={options} value="a" onChange={() => {}} />);
     expect(container.querySelector(".seg")).not.toHaveClass("seg--meta");
     expect(container.querySelector(".seg-btn__meta")).toBeNull();
   });

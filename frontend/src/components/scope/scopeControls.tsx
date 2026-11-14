@@ -302,8 +302,7 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
   }
   return (
     <div className="scope-control">
-      {/* Marks the applied tolerance, not the slider's draft: the thumb
-          moves only once a drag lands. */}
+      {/* Marks the applied tolerance, not the slider's draft. */}
       <Segmented
         aria-label={t("scope.control.tolerance")}
         options={TOLERANCE_PRESETS_MIN.map((min) => {

@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import { useRef, useState } from "react";
 import "./ui.css";
 
@@ -7,7 +7,7 @@ export type SegmentedOption<T extends string> = {
   label: string;
   /** A figure under the label, such as the share a choice would give.
    *  Kept out of the tooltip, which names only the choice. */
-  meta?: ReactNode;
+  meta?: string;
 };
 
 type SegmentedProps<T extends string> = {
@@ -37,7 +37,7 @@ export function Segmented<T extends string>({
   columns,
 }: SegmentedProps<T>) {
   const cols = columns ?? options.length;
-  const hasMeta = options.some((o) => o.meta != null);
+  const hasMeta = options.some((o) => o.meta);
   const rows = Math.ceil(options.length / cols);
   const selectedIndex = options.findIndex((o) => o.value === value);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -104,7 +104,7 @@ export function Segmented<T extends string>({
           <span className="seg-btn__label">{option.label}</span>
           {/* The space keeps the label and the figure apart in the
               button's accessible name; a grid drops it from the layout. */}
-          {option.meta != null && (
+          {option.meta && (
             <>
               {" "}
               <span className="seg-btn__meta">{option.meta}</span>
