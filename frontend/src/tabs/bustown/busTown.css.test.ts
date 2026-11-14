@@ -6,52 +6,25 @@ import { decl, ruleBody } from "../../test/cssRules";
 
 const css = readFileSync(resolve(__dirname, "./busTown.css"), "utf-8");
 
-/** Every selector a stylesheet declares a rule for, at any nesting depth
- *  (including inside an `@media` block), comma lists split apart — so a
- *  scoping check can tell a bare `.scrub-input` from
- *  `.bus-town-controls .scrub-input` rather than matching either as a
- *  substring of the other, and so a rule added inside the phone `@media`
- *  block is not exempt from the same check. Brace-balanced, unlike a flat
- *  split on `}`, so a nested block's own declarations never leak into the
- *  header text of the rule that follows it. */
+/** Every selector a stylesheet declares a rule for, including rules inside
+ *  `@media`, comma lists split apart — so a scoping check can tell a bare
+ *  `.scrub-input` from `.bus-town-controls .scrub-input`, and a rule added
+ *  inside the phone block is not exempt. Reads the text before each `{`
+ *  rather than splitting on `}`: a flat split on `}` loses the first selector
+ *  after an at-rule's `{`, because it ends up glued to the at-rule's prelude.
+ *  Not for stylesheets with `@keyframes`, whose stops would read as
+ *  selectors. */
 function allSelectors(stylesheet: string): string[] {
   const src = stylesheet.replace(/\/\*[\s\S]*?\*\//g, "");
   const out: string[] = [];
-  let i = 0;
-  function block(): void {
-    while (i < src.length) {
-      const open = src.indexOf("{", i);
-      const close = src.indexOf("}", i);
-      if (close !== -1 && (open === -1 || close < open)) {
-        i = close + 1;
-        return;
-      }
-      if (open === -1) {
-        i = src.length;
-        return;
-      }
-      const head = src.slice(i, open).trim();
-      i = open + 1;
-      if (head.startsWith("@media") || head.startsWith("@supports")) {
-        block();
-      } else if (head.startsWith("@")) {
-        let depth = 1;
-        while (depth > 0 && i < src.length) {
-          if (src[i] === "{") depth += 1;
-          else if (src[i] === "}") depth -= 1;
-          i += 1;
-        }
-      } else {
-        const end = src.indexOf("}", i);
-        for (const selector of head.split(",")) {
-          const trimmed = selector.trim();
-          if (trimmed) out.push(trimmed);
-        }
-        i = end + 1;
-      }
+  for (const [head] of src.matchAll(/[^{}]+(?=\{)/g)) {
+    const trimmed = head.trim();
+    if (trimmed.startsWith("@")) continue;
+    for (const selector of trimmed.split(",")) {
+      const s = selector.trim();
+      if (s) out.push(s);
     }
   }
-  block();
   return out;
 }
 
@@ -59,7 +32,12 @@ const PHONE_MEDIA = "@media (max-width: 640px) {";
 
 describe("busTown.css scrubber scope", () => {
   it("never styles a bare .scrub-input, which the Map tab's PlaybackRail and MareyDiagram also use", () => {
-    const unscoped = allSelectors(css).filter(
+    const selectors = allSelectors(css);
+    // Pins that the walker actually found rules, including one nested inside
+    // the phone @media block, rather than passing on an empty list.
+    expect(selectors).toContain(".bus-town-controls .scrub-input");
+    expect(selectors).toContain(".bus-town-page .ui-page-header__title");
+    const unscoped = selectors.filter(
       (selector) => /\.scrub-input\b/.test(selector) && !selector.startsWith(".bus-town-controls "),
     );
     expect(unscoped).toEqual([]);
@@ -76,13 +54,19 @@ describe("busTown.css phone layout (BP.sm)", () => {
   it("shrinks the page title and tightens the header gap, scoped under the page's own root", () => {
     expect(decl(ruleBody(phone, ".bus-town-page .ui-page-header__title {"), "font-size")).toBe("var(--text-xl)");
     expect(decl(ruleBody(phone, ".bus-town-page .ui-page-header {"), "margin-bottom")).toBe("12px");
+    expect(decl(ruleBody(phone, ".bus-town-page .ui-page-header__text {"), "gap")).toBe("2px");
   });
 
   it("makes the back link and the day picker share a line box instead of forcing two block lines", () => {
+    expect(decl(ruleBody(phone, ".bus-town-back-link {"), "margin")).toBe("0 12px 10px 0");
+    expect(decl(ruleBody(phone, ".bus-town-back-link {"), "vertical-align")).toBe("middle");
     expect(decl(ruleBody(phone, ".bus-town-day-picker {"), "display")).toBe("inline-flex");
+    expect(decl(ruleBody(phone, ".bus-town-day-picker {"), "margin")).toBe("0 0 10px");
+    expect(decl(ruleBody(phone, ".bus-town-day-picker {"), "vertical-align")).toBe("middle");
   });
 
-  it("narrows the stage card's own padding so the canvas gets (nearly) the full content width", () => {
+  it("narrows the page and stage padding so the canvas gets (nearly) the full content width", () => {
+    expect(decl(ruleBody(phone, ".bus-town-page {"), "padding")).toBe("24px 16px 56px");
     expect(decl(ruleBody(phone, ".bus-town-stage {"), "padding")).toBe("10px 6px");
   });
 
@@ -100,6 +84,7 @@ describe("busTown.css phone layout (BP.sm)", () => {
     expect(decl(ruleBody(phone, ".bus-town-play-button {"), "height")).toBe("44px");
     expect(decl(ruleBody(phone, ".bus-town-speed-pill {"), "min-width")).toBe("44px");
     expect(decl(ruleBody(phone, ".bus-town-speed-pill {"), "min-height")).toBe("44px");
+    expect(decl(ruleBody(phone, ".bus-town-speed-pill {"), "padding")).toBe("4px 12px");
   });
 
   it("keeps the desktop play button at its own size outside the phone block", () => {
