@@ -90,6 +90,51 @@ function Cell({ value, missing }: { value: string | null; missing: FeedQualityMi
   );
 }
 
+/** The validator's days and each rule it counted, by rule id. A month with
+ *  no validated day reads not validated, never "no rule fired". */
+function ValidatorFigure({ m }: { m: AgencyFeedQualityMonth }) {
+  const { t } = useTranslation();
+  const small = { ...MUTED, fontSize: "var(--text-xs)" } as const;
+  const failed = m.validator_failed_days ?? 0;
+  const rules = Object.entries(m.validator_rules ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  return (
+    <div style={{ display: "grid", gap: 2 }}>
+      <Figure
+        value={
+          m.validator_ok_days == null || m.validator_rules == null
+            ? null
+            : t("admin.agency_diag.quality_validator_value", { ok: m.validator_ok_days, days: m.window_days })
+        }
+        missing={m.validator_ok_days == null ? "not_recorded" : m.validator_missing}
+      >
+        {t("admin.agency_diag.quality_validator_detail", { polls: m.validator_files_validated ?? 0 })}
+      </Figure>
+      {failed > 0 && <span style={small}>{t("admin.agency_diag.quality_validator_failed", { failed })}</span>}
+      {m.validator_rules != null &&
+        (rules.length === 0 ? (
+          <span style={small}>{t("admin.agency_diag.quality_validator_none")}</span>
+        ) : (
+          <ul style={{ ...small, margin: 0, paddingLeft: 16 }}>
+            {rules.map(([rule, r]) => (
+              <li key={rule}>
+                {rule} <span lang="en">{r.title}</span>
+                {t("admin.agency_diag.quality_list_separator")}
+                {t("admin.agency_diag.quality_validator_rule_counts", {
+                  occurrences: r.occurrences,
+                  polls: r.files_with_rule,
+                  days: r.days,
+                })}
+              </li>
+            ))}
+          </ul>
+        ))}
+      {m.validator_ok_days != null && (
+        <span style={small}>{t("admin.agency_diag.quality_validator_note")}</span>
+      )}
+    </div>
+  );
+}
+
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <>
@@ -212,6 +257,9 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
             }
             missing={latest.vehicle_positions_missing}
           />
+        </Row>
+        <Row label={t("admin.agency_diag.quality_validator")}>
+          <ValidatorFigure m={latest} />
         </Row>
       </div>
       <table

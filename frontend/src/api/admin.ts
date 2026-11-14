@@ -458,14 +458,26 @@ export type FeedQualityMissing =
   | "archive_stamped"
   | "no_header"
   | "feed_cannot_report"
-  | "not_recorded";
+  | "not_recorded"
+  | "not_validated";
+
+/** One GTFS-RT validator rule's counts over a month's validated days. */
+type ValidatorRule = {
+  severity: string;
+  title: string;
+  occurrences: number;
+  files_with_rule: number;
+  days: number;
+};
 
 /** A criterion of the month's grade (pipeline/feed_quality_grade.py's `CRITERIA`). */
 type FeedQualityCriterion = "rt_completeness" | "stale_polls" | "clamp" | "field_coverage";
 
 /** One month of an agency's feed-quality scorecard. Each figure is null
  *  exactly when its `*_missing` reason is set. The grade is null exactly
- *  when `grade_missing` names a criterion whose figure the month lacks. */
+ *  when `grade_missing` names a criterion whose figure the month lacks. The
+ *  validator figures are all null for a month built before they existed, and
+ *  never enter the grade. */
 export type AgencyFeedQualityMonth = {
   month: string;
   through_date: string;
@@ -499,6 +511,12 @@ export type AgencyFeedQualityMonth = {
   field_coverage_missing: FeedQualityMissing | null;
   vehicle_positions_available: boolean | null;
   vehicle_positions_missing: FeedQualityMissing | null;
+  validator_ok_days: number | null;
+  validator_failed_days: number | null;
+  validator_files_validated: number | null;
+  validator_rules: Record<string, ValidatorRule> | null;
+  validator_missing: FeedQualityMissing | null;
+  validator_ingested_at: string | null;
   grade: "A" | "B" | "C" | "D" | "F" | null;
   grade_failing: FeedQualityCriterion[];
   grade_missing: { criterion: FeedQualityCriterion; reason: FeedQualityMissing }[];

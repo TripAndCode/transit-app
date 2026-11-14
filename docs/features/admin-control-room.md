@@ -154,6 +154,13 @@ fails if any other route's declared `response_model` schema has a grade, or if
 that route stops requiring an admin. It stays admin-only
 until operators have had the methodology's advance notice and right of reply.
 
+Below the other figures, the newest month states the daily GTFS-RT validator's
+counts: the days validated of the month's window, the days the validator could
+not run, and each rule that fired with its occurrences, polls and days. A month
+with no validated day reads not validated, never no findings. The counts are
+recorded, never graded. They come from `rt_validation_daily`, which the ML
+store ingest fills (`docs/features/ml-forecast.md`).
+
 ### RT field-coverage verdicts
 
 The drawer's RT field diagnostics show the agency's verdicts in

@@ -15,6 +15,7 @@ cannot answer for.
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -376,6 +377,9 @@ def build_feed_quality(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
                 month[key] = value.isoformat()
             elif isinstance(value, Decimal):
                 month[key] = float(value)
+            elif key == "validator_rules" and isinstance(value, str):
+                # asyncpg hands JSONB over as its text.
+                month[key] = json.loads(value)
             else:
                 month[key] = value
         graded = grade_month(month)

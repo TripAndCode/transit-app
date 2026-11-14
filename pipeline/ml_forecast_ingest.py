@@ -97,21 +97,26 @@ def prune_forecast_ml_sql(days: int) -> str:
     return f"DELETE FROM agg_route_forecast_ml WHERE service_date < now()::date - INTERVAL '{int(days)} days'"
 
 
-def list_keys(s3_client: Any, bucket: str, prefix: str, suffix: str) -> list[str]:
-    """Every key under `prefix` ending in `suffix`, paging through the whole
+def list_etags(s3_client: Any, bucket: str, prefix: str) -> dict[str, str]:
+    """Every key under `prefix` and its ETag, paging through the whole
     prefix: one unpaginated `list_objects_v2` call silently stops at 1000
     keys, which a daily or weekly publish eventually passes."""
-    keys: list[str] = []
+    found: dict[str, str] = {}
     continuation_token: str | None = None
     while True:
         kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": prefix}
         if continuation_token:
             kwargs["ContinuationToken"] = continuation_token
         response = s3_client.list_objects_v2(**kwargs)
-        keys.extend(obj["Key"] for obj in response.get("Contents", []) if obj["Key"].endswith(suffix))
+        found.update((obj["Key"], obj.get("ETag", "")) for obj in response.get("Contents", []))
         if not response.get("IsTruncated"):
-            return keys
+            return found
         continuation_token = response.get("NextContinuationToken")
+
+
+def list_keys(s3_client: Any, bucket: str, prefix: str, suffix: str) -> list[str]:
+    """Every key under `prefix` ending in `suffix` (:func:`list_etags`)."""
+    return [key for key in list_etags(s3_client, bucket, prefix) if key.endswith(suffix)]
 
 
 def fetch_latest_manifest(s3_client: Any, bucket: str) -> dict[str, Any] | None:

@@ -42,7 +42,8 @@ def test_rolling_back_drops_the_table_and_migrating_up_restores_it(apply_schema)
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         assert _indexes(conn) == _EXPECTED
-        migrate.migrate_down(below, conn)
+        # Forced: rolling back to below this version also runs later downs, which can be `-- DESTRUCTIVE`.
+        migrate.migrate_down(below, conn, force_destructive=True)
         assert _indexes(conn) == {}
 
         migrate.migrate_up(conn)
