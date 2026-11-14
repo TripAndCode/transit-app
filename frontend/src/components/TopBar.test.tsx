@@ -54,6 +54,11 @@ describe("TopBar", () => {
     expect(screen.getByText("K")).toBeInTheDocument();
   });
 
+  it("groups the shortcut's keys in the one element the phone layout hides", () => {
+    renderBar();
+    expect(screen.getByText("K").parentElement).toHaveClass("topbar-kbd-group");
+  });
+
   it.each([
     ["MacIntel", "⌘"],
     ["Win32", "Ctrl"],

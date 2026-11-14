@@ -14,9 +14,11 @@
 }
 
 /* BP.sm: a phone has no ⌘K/Ctrl+K to invoke, so the hint is dead weight at
-   this width; the search button itself still opens the palette by tap. */
+   this width; the search button itself still opens the palette by tap. The
+   whole group goes, not each key, so no empty flex item keeps the button's
+   gap after the placeholder. */
 @media (max-width: 640px) {
-  .topbar-kbd {
+  .topbar-kbd-group {
     display: none;
   }
 }

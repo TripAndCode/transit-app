@@ -16,6 +16,6 @@ describe("TopBar.css", () => {
 
   it("hides the ⌘K hint below BP.sm, where there is no keyboard shortcut to show", () => {
     const phone = ruleBody(css, "@media (max-width: 640px)");
-    expect(decl(ruleBody(phone, ".topbar-kbd {"), "display")).toBe("none");
+    expect(decl(ruleBody(phone, ".topbar-kbd-group {"), "display")).toBe("none");
   });
 });

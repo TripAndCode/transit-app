@@ -40,10 +40,15 @@ const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
 /** On a phone the bottom bar holds Pulse, Routes, Live and Ask; the other
  *  destinations are reached from the More sheet, which keeps each tab's label
- *  on one line at phone widths. */
+ *  on one line at phone widths. The sheet also lists Bus Town, which has no
+ *  rail stop: the command palette finds it only by a typed query, so the
+ *  sheet is its one browse path on a phone. */
 const TAB_BAR_DESTINATIONS: ReadonlySet<string> = new Set(["pulse", "routes", "live"]);
 const TAB_BAR_ITEMS = ITEMS.filter((item) => TAB_BAR_DESTINATIONS.has(item.to));
-const MORE_SHEET_ITEMS = ITEMS.filter((item) => !TAB_BAR_DESTINATIONS.has(item.to));
+const MORE_SHEET_ITEMS = [
+  ...ITEMS.filter((item) => !TAB_BAR_DESTINATIONS.has(item.to)),
+  { to: "bus-town", labelKey: "nav.bus-town", Icon: Bus } as const,
+];
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 
@@ -244,21 +249,6 @@ export function Sidebar() {
                 <span>{t(item.labelKey)}</span>
               </PendingNavLink>
             ))}
-            {/* Bus Town has no sidebar entry: the desktop rail reaches it
-                only through the command palette, which a phone has no
-                keyboard shortcut for. The sheet is its only browse path
-                there, so it joins the same indicator-backed list as the
-                other destinations the tab bar leaves out. */}
-            <PendingNavLink
-              to={screenHref("bus-town")}
-              onMouseEnter={() => prefetchRouteChunk("bus-town")}
-              onFocus={() => prefetchRouteChunk("bus-town")}
-              onClick={() => onNavigate?.()}
-              style={railLinkStyle(false)}
-            >
-              <Bus size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0 }} />
-              <span>{t("nav.bus-town")}</span>
-            </PendingNavLink>
           </nav>
         )}
         <nav aria-label={t("nav.other")} style={{ display: "flex", flexDirection: "column", marginTop: 16 }}>

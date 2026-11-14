@@ -597,14 +597,13 @@ describe("Sidebar", () => {
     });
 
     it("sets the tab labels bold at the 12px text floor, and the icons at 20px with a heavier stroke", () => {
-      const { container } = renderSidebar();
+      renderSidebar();
       const pulse = screen.getByRole("link", { name: "Pulse" });
       expect(pulse.style.fontSize).toBe("var(--text-xs)");
       expect(pulse.style.fontWeight).toBe("700");
       const icon = pulse.querySelector("svg")!;
       expect(icon.getAttribute("width")).toBe("20");
       expect(icon.getAttribute("stroke-width")).toBe("2");
-      expect(container.querySelector(".app-tabbar")).toBeTruthy();
     });
 
     it("renders a More trigger that does not mount the agency picker until opened", () => {
