@@ -1262,15 +1262,16 @@ def _refile(
     agency_id: int, ch_client, join: static_archive.ScheduleJoin, scopes: dict[str, list | None]
 ) -> tuple[static_archive.ScheduleJoin, set]:
     """The refiled dates the run reads (_refit_dates), with *join* naming
-    their rows as written (pipeline.refiled.write), so every read of them
-    takes those rows and only the write joins the archive. The run's other
-    dates whose rows were written are written off: none of their rows is
-    refiled any more."""
+    their rows as written (pipeline.refiled.refresh): a date whose latest
+    write still serves a read keeps it, and every other is written now, so
+    every read of them takes those rows and only a write joins the archive.
+    The run's other dates whose rows were written are written off: none of
+    their rows is refiled any more."""
     if not join.force:
         return join, set()
     considered, refit = _refit_dates(agency_id, ch_client, join, scopes)
     with _step("refiled rows: write"):
-        join = refiled.write(ch_client, agency_id, join, refit)
+        join = refiled.refresh(ch_client, agency_id, join, refit)
         refiled.write_off(ch_client, agency_id, considered, keep=refit)
     return join, refit
 

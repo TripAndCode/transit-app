@@ -837,8 +837,8 @@ def updates_filter_ch(ctx: RangeCtx, *, refit: bool = False) -> UpdatesFilter:
             part.append(frag)
             params.update(p)
     if ctx.routes:
-        raw.append("(route_code IN {ch_routes:Array(String)} OR route_code IS NULL)")
-        filed.append("route_code IN {ch_routes:Array(String)}")
+        raw.append("(u.route_code IN {ch_routes:Array(String)} OR u.route_code IS NULL)")
+        filed.append("u.route_code IN {ch_routes:Array(String)}")
         params["ch_routes"] = list(ctx.routes)
     return UpdatesFilter(" AND ".join(raw), " AND ".join(filed), params)
 

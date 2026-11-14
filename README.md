@@ -202,7 +202,9 @@ FastAPI + React SPA  <-------------------------------------------------+
   rows were ingested against, `analyze` writes that date's rows filed under
   it to `updates_filed` (`pipeline/refiled.py`), and its own reads and the
   live scans take them from there instead of joining the archive, for as long
-  as `updates_filed_dates` shows the date's filing unchanged.
+  as `updates_filed_dates` shows the date's filing unchanged. A refiled date
+  analyze has not rebuilt since keeps none until
+  `scripts/write_refiled_history.py --apply` writes it.
   Postgres mirrors the map in `static_version_contents`, each name at its
   latest content, written right after each map row, so the definition stamp
   names each timetable's content without reading ClickHouse.

@@ -8,15 +8,17 @@ them (write), and its own reads and the live scans then take them in place
 of the join (Stamp.FILED).
 
 Written rows serve a read only while the filing they were written under
-holds (valid_builds): the version and content in force on the date, the
-content each version name on its rows maps to, and how many rows `updates`
-files under it. Anything that moves one of those, a load, a span recorded, a
-name remapped, rows landing or moving, makes a read join the archive again
-until analyze writes the date anew, so nothing that moves a filing has to
-clear this. Like analyze's own ledger, the count cannot see rows replaced by
-as many others.
+holds (valid_builds): the filing rules (RULES), the version and content in
+force on the date, the content each version name on its rows maps to, and
+how many rows `updates` files under it. A load, a span recorded, a name
+remapped or rows landing moves one of those, and a read then joins the
+archive again until analyze writes the date anew. Like analyze's own ledger,
+the count cannot see rows replaced by as many others, so whatever rewrites
+`updates` rows in place writes their agencies' dates off first
+(rows_rewritten).
 """
 
+import hashlib
 import secrets
 from collections import defaultdict
 from collections.abc import Iterable
@@ -25,8 +27,19 @@ from itertools import groupby
 from typing import NamedTuple
 
 from pipeline import ch_aggregates
-from pipeline.clickhouse import UPDATE_COLUMNS
-from pipeline.static_archive import FILED_COLUMNS, FILED_DATES, FILED_TABLE, ScheduleJoin, refiled_rows_sql
+from pipeline.clickhouse import UPDATE_COLUMNS, UPDATES_TABLE
+from pipeline.static_archive import (
+    FILED_COLUMNS,
+    FILED_DATE_SQL,
+    FILED_DATES,
+    FILED_TABLE,
+    ScheduleJoin,
+    refiled_rows_sql,
+)
+
+# The filing rules a write follows: its own SQL, which carries REFIT's. Rows
+# written under other rules serve no read.
+RULES = hashlib.sha256(refiled_rows_sql("{where}").encode()).hexdigest()[:16]
 
 
 class Written(NamedTuple):
@@ -37,10 +50,11 @@ class Written(NamedTuple):
     content: str  # and its content
     stamped: dict[str, str]  # each version name on the date's rows ('' for none), with the content it mapped to
     rows: int  # how many rows `updates` filed under the date
+    rules: str  # the RULES they were written under
 
 
 _LATEST_SQL = (
-    "SELECT filed_date, argMax(tuple(build, static_version_id, content_hash, stamped, source_rows), built_at) "
+    "SELECT filed_date, argMax(tuple(build, static_version_id, content_hash, stamped, source_rows, rules), built_at) "
     f"FROM {FILED_DATES} WHERE agency_id = {{agency:UInt16}} {{dates}}GROUP BY filed_date"
 )
 _BETWEEN = "AND filed_date BETWEEN {first:Date} AND {last:Date} "
@@ -54,8 +68,8 @@ def _latest(between: tuple[date, date] | None) -> tuple[str, dict]:
 
 def _written(rows) -> dict[date, Written]:
     return {
-        day: Written(build, stem, content, dict(stamped), int(count))
-        for day, (build, stem, content, stamped, count) in rows
+        day: Written(build, stem, content, dict(stamped), int(count), rules)
+        for day, (build, stem, content, stamped, count, rules) in rows
     }
 
 
@@ -96,9 +110,9 @@ def valid_builds(
     dates: Iterable[date],
 ) -> dict[date, str] | None:
     """The build of each of *dates*, or None unless every one's written rows
-    still file as REFIT would under *join*. *stamped* holds each version
-    name ('' for none) on `updates`' rows of a date, the date, and its rows
-    there, for every date of *dates*."""
+    still file as REFIT would under *join* and RULES. *stamped* holds each
+    version name ('' for none) on `updates`' rows of a date, the date, and
+    its rows there, for every date of *dates*."""
     mapped = dict(zip(join.stems, join.hashes, strict=True))
     names: dict[date, dict[str, int]] = defaultdict(dict)
     for stem, day, count in stamped:
@@ -106,7 +120,9 @@ def valid_builds(
     builds = {}
     for day in dates:
         kept = written.get(day)
-        if kept is None or not kept.build or _in_force_at(join, day) != (kept.stem, kept.content):
+        if kept is None or not kept.build or kept.rules != RULES:
+            return None
+        if _in_force_at(join, day) != (kept.stem, kept.content):
             return None
         here = names.get(day, {})
         if sum(here.values()) != kept.rows or set(here) != set(kept.stamped):
@@ -131,12 +147,49 @@ _RECORD_COLUMNS = [
     "content_hash",
     "stamped",
     "source_rows",
+    "rules",
     "built_at",
 ]
+_STAMPED_DAYS_SQL = (
+    f"SELECT ifNull(u.static_version_id, '') AS stem, {FILED_DATE_SQL} AS filed, count() FROM {UPDATES_TABLE} AS u "
+    "WHERE u.agency_id = {agency_id:UInt16} AND ({where}) GROUP BY stem, filed"
+)
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def stamped_days(ch, agency_id: int, dates: Iterable[date]) -> list[tuple[str, date, int]]:
+    """Each version name ('' for none) on `updates`' rows filed under one of
+    *dates*, the date, and its rows there, as valid_builds reads them."""
+    days = sorted(set(dates))
+    if not days:
+        return []
+    where, params = ch_aggregates.days_where(days)
+    rows = ch.query(
+        _STAMPED_DAYS_SQL.replace("{where}", where), parameters={"agency_id": agency_id, **params}
+    ).result_rows
+    return [(stem, day, int(count)) for stem, day, count in rows]
+
+
+def reusable(ch, agency_id: int, join: ScheduleJoin, dates: Iterable[date]) -> dict[date, str]:
+    """The build of each of *dates* whose latest write still serves a read under *join* (valid_builds)."""
+    days = sorted(set(dates))
+    if not days:
+        return {}
+    kept, stamped = written(ch, agency_id, (days[0], days[-1])), stamped_days(ch, agency_id, days)
+    return {day: builds[day] for day in days if (builds := valid_builds(join, kept, stamped, [day])) is not None}
+
+
+def refresh(ch, agency_id: int, join: ScheduleJoin, dates: Iterable[date]) -> ScheduleJoin:
+    """*join* naming each of *dates* written (ScheduleJoin.filed): by its
+    latest write where that still serves a read (reusable), else by a new
+    one (write)."""
+    days = sorted(set(dates))
+    kept = reusable(ch, agency_id, join, days)
+    join = join._replace(filed=tuple(sorted({**dict(join.filed), **kept}.items())))
+    return write(ch, agency_id, join, [day for day in days if day not in kept])
 
 
 def write(ch, agency_id: int, join: ScheduleJoin, dates: Iterable[date]) -> ScheduleJoin:
@@ -146,13 +199,14 @@ def write(ch, agency_id: int, join: ScheduleJoin, dates: Iterable[date]) -> Sche
 
     Each date is written whole under a build of its own, and recorded only
     once written, so a read never takes a date half written. Rows of a build
-    no date's latest write names are dropped first: a later write's rows
-    never mix with them, and a read still holding the write before is left
-    its rows. Under the agency's lock, as analyze holds it."""
+    no date's latest write names are dropped first, whether or not anything
+    is written: a later write's rows never mix with them, and a read still
+    holding the write before is left its rows until the next call. Under the
+    agency's lock, as analyze holds it."""
     days = sorted(set(dates))
+    _drop_superseded(ch, agency_id)
     if not days:
         return join
-    _drop_superseded(ch, agency_id)
     token = secrets.token_hex(8)
     mapped = dict(zip(join.stems, join.hashes, strict=True))
     builds: dict[date, str] = {}
@@ -182,7 +236,7 @@ def write(ch, agency_id: int, join: ScheduleJoin, dates: Iterable[date]) -> Sche
             stem, content = _in_force_at(join, day) or ("", "")
             builds[day] = f"{token}-{day.isoformat()}"
             stamped = {name: mapped.get(name, "") for name in stems}
-            records.append((agency_id, day, builds[day], stem, content, stamped, count, _now()))
+            records.append((agency_id, day, builds[day], stem, content, stamped, count, RULES, _now()))
     ch.insert(FILED_DATES, records, column_names=_RECORD_COLUMNS)
     return join._replace(filed=tuple(sorted({**dict(join.filed), **builds}.items())))
 
@@ -194,12 +248,24 @@ def write_off(ch, agency_id: int, dates: Iterable[date] | None, keep: Iterable[d
     within = None if dates is None else set(dates)
     kept_dates = set(keep)
     gone: list[tuple] = [
-        (agency_id, day, "", "", "", {}, 0, _now())
+        (agency_id, day, "", "", "", {}, 0, "", _now())
         for day, kept in written(ch, agency_id).items()
         if kept.build and day not in kept_dates and (within is None or day in within)
     ]
     if gone:
         ch.insert(FILED_DATES, gone, column_names=_RECORD_COLUMNS)
+
+
+def rows_rewritten(ch, agency_ids: Iterable[int] | None) -> None:
+    """Write off every date of *agency_ids* (every agency when None), before
+    `updates` rows of theirs are rewritten in place: such a rewrite can
+    leave a date's rows and version names as many as before, which
+    valid_builds would not see. Their next full analyze writes them again."""
+    if agency_ids is None:
+        rows = ch.query(f"SELECT DISTINCT agency_id FROM {FILED_DATES}").result_rows
+        agency_ids = [row[0] for row in rows]
+    for agency_id in agency_ids:
+        write_off(ch, agency_id, None)
 
 
 def _drop_superseded(ch, agency_id: int) -> None:

@@ -20,7 +20,7 @@ import hashlib
 import logging
 import secrets
 from collections.abc import Callable, Iterable
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from typing import NamedTuple
 
@@ -28,7 +28,7 @@ import psycopg2.extras
 
 from pipeline.clickhouse import UPDATE_COLUMNS, UPDATES_TABLE, checked_table
 from pipeline.planned_trips import WEEKDAY_COLUMNS
-from pipeline.service_day import filed_date_ch
+from pipeline.service_day import filed_date_ch, service_day_start_utc
 from pipeline.static_content import static_parts
 from pipeline.timetable_in_force import Segment, Version, gtfs_date, in_force, schedule_row, version_span
 
@@ -700,7 +700,17 @@ class ScheduleJoin(NamedTuple):
         if not self.filed:
             return {}
         filed = [(day, build) for day, build in self.filed if between is None or between[0] <= day <= between[1]]
-        return {"filed_dates": [day for day, _ in filed], "filed_builds": [build for _, build in filed]}
+        days = [day for day, _ in filed]
+        skip = _interior_run(days)
+        return {
+            "filed_dates": days,
+            "filed_builds": [build for _, build in filed],
+            # No written date binds an empty range, which reads none.
+            "filed_first": min(days, default=date(1970, 1, 2)),
+            "filed_last": max(days, default=date(1970, 1, 1)),
+            "filed_skip_from": service_day_start_utc(skip[0]),
+            "filed_skip_to": service_day_start_utc(skip[1] + timedelta(days=1)),
+        }
 
     def force_params(self, between: tuple[date, date] | None = None) -> dict:
         """The bound parameters of the segments in force, which IN_FORCE_STEM_SQL reads.
@@ -720,6 +730,26 @@ class ScheduleJoin(NamedTuple):
             "force_stems": [s.stem for s in force],
             "force_contents": [mapped[s.stem] for s in force],
         }
+
+
+def _interior_run(days: list[date]) -> tuple[date, date]:
+    """The longest run of *days* each of whose neighbours is in *days* too,
+    first and last; an empty run (last before first) with none. A row
+    captured on such a day's service day is filed under it or a neighbour
+    (FILED_DATE_SQL), so a FILED read takes every one from FILED_TABLE and
+    can skip that span of `updates` by its sort key."""
+    written = set(days)
+    interior = sorted(
+        day for day in written if day - timedelta(days=1) in written and day + timedelta(days=1) in written
+    )
+    best = (date(1970, 1, 2), date(1970, 1, 1))
+    start = None
+    for i, day in enumerate(interior):
+        if start is None or day - interior[i - 1] != timedelta(days=1):
+            start = day
+        if (day - start) > (best[1] - best[0]):
+            best = (start, day)
+    return best
 
 
 def schedule_join(ch, agency_id: int, current: str | None, *, by_service_date: bool = False) -> ScheduleJoin:
@@ -939,16 +969,22 @@ def refiled_rows_sql(where: str) -> str:
 
 def _written_rows(where: str) -> str:
     """FILED_TABLE's rows of the written dates a FILED read binds, matching
-    *where* on their stored columns, as filed_date and `updates`' columns filed."""
+    *where* on their stored columns, as filed_date and `updates`' columns
+    filed. *where* is tested in the inner query, where no filed alias exists,
+    so a bare column in it names the stored one, as on `updates`. The date
+    range lets the sort key and the partitions prune; the dates and builds
+    pick the written rows."""
     columns = ", ".join(
         f"u.filed_{column} AS {column}" if column in FILED_COLUMNS else f"u.{column} AS {column}"
         for column in UPDATE_COLUMNS
     )
-    return (
-        f"SELECT u.filed_date AS filed_date, {columns} FROM {FILED_TABLE} AS u "
-        "WHERE u.agency_id = {agency_id:UInt16} AND has({filed_dates:Array(Date)}, u.filed_date) "
+    rows = (
+        f"SELECT * FROM {FILED_TABLE} AS u WHERE u.agency_id = {{agency_id:UInt16}} "
+        "AND u.filed_date BETWEEN {filed_first:Date} AND {filed_last:Date} "
+        "AND has({filed_dates:Array(Date)}, u.filed_date) "
         f"AND has({{filed_builds:Array(String)}}, u.build) AND ({where})"
     )
+    return f"SELECT u.filed_date AS filed_date, {columns} FROM ({rows}) AS u"
 
 
 def _filed_columns(refit: bool) -> str:
@@ -1016,7 +1052,12 @@ def observation_rows(
     if stamp is Stamp.FILED:
         if table != UPDATES_TABLE:
             raise ValueError(f"only {UPDATES_TABLE}' rows are written filed, not {table}'")
-        rest = _marked_rows(f"({where}) AND NOT has({{filed_dates:Array(Date)}}, {FILED_DATE_SQL})", table)
+        rest = _marked_rows(
+            f"({where}) AND (u.captured_at < {{filed_skip_from:DateTime64}} "
+            "OR u.captured_at >= {filed_skip_to:DateTime64}) "
+            f"AND NOT has({{filed_dates:Array(Date)}}, {FILED_DATE_SQL})",
+            table,
+        )
         return f"FROM (SELECT {_filed_columns(False)} FROM ({rest}) AS u UNION ALL {_written_rows(where)}) AS u{after}"
     events = by_stop_event and stamp is Stamp.REFIT
     marked = _marked_rows(where, table, _stop_events(where, table) if events else None)

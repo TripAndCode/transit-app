@@ -28,19 +28,18 @@ from pipeline.static_archive import Stamp
 # Versions of the tables built in the loops below, which default to 1. A bump
 # goes here rather than into a second entry, which _index would reject.
 _VERSIONS: dict[str, int] = {
-    "agg_daily_trend": 6,
-    "agg_hour_daily": 7,
-    "agg_route_band_daily": 2,
-    "agg_route_daily": 6,
-    "agg_route_daily_dist": 6,
+    "agg_daily_trend": 5,
+    "agg_hour_daily": 6,
+    "agg_route_daily": 5,
+    "agg_route_daily_dist": 5,
     "agg_route_hour": 6,
     "agg_route_hour_dow": 6,
     "agg_route_stats": 5,
-    "agg_route_stop_daily": 7,
-    "agg_stop_daily": 7,
+    "agg_route_stop_daily": 6,
+    "agg_stop_daily": 6,
     "agg_stop_routes": 3,
-    "route_delay_counts": 7,
-    "stop_route_days": 4,
+    "route_delay_counts": 6,
+    "stop_route_days": 3,
 }
 
 # Any fixed month renders a monthly table's statement: only its date bounds
@@ -188,7 +187,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_headway_daily",
-            7,
+            6,
             Kind.DATED,
             Timetable.ARCHIVED,
             _headway_daily,
@@ -201,7 +200,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_daily_dwell_run",
-            6,
+            5,
             Kind.DATED,
             Timetable.ARCHIVED,
             lambda: [
@@ -410,22 +409,6 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
         },
     ),
     MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
-    MethodVersion(
-        "2026.11.16",
-        {
-            "agg_daily_trend": 6,
-            "agg_hour_daily": 7,
-            "agg_route_band_daily": 2,
-            "agg_route_daily": 6,
-            "agg_route_daily_dist": 6,
-            "agg_route_daily_dwell_run": 6,
-            "agg_route_headway_daily": 7,
-            "agg_route_stop_daily": 7,
-            "agg_stop_daily": 7,
-            "route_delay_counts": 7,
-            "stop_route_days": 4,
-        },
-    ),
 )
 
 # The method every report, CSV and council document names beside its figures

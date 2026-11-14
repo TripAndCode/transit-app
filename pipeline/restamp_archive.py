@@ -27,10 +27,11 @@ swapped in with EXCHANGE TABLES, and the rows as they were stay in
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
+from pipeline import refiled
 from pipeline.clickhouse import LIVE_SOURCED, jst_date
 
 _TABLE = "updates"
@@ -230,7 +231,9 @@ def preflight(client) -> None:
         raise RuntimeError(f"{free} bytes free, and the copy of {_TABLE} needs about {size}")
 
 
-def restamp_archive_rows(client, *, before_swap: Callable[[], None] | None = None) -> None:
+def restamp_archive_rows(
+    client, *, agencies: Iterable[int] | None = None, before_swap: Callable[[], None] | None = None
+) -> None:
     """Rewrite `updates` with every archive row restamped, keeping the rows as
     they were in BACKUP_TABLE.
 
@@ -242,7 +245,9 @@ def restamp_archive_rows(client, *, before_swap: Callable[[], None] | None = Non
     copy, the same rows, is dropped, so the backup is always the table before
     any restamp. *before_swap* runs last before the swap, where raising
     still leaves `updates` untouched: the CLI confirms there that it still
-    holds the pipeline lock.
+    holds the pipeline lock. *agencies* are those whose rows move (every
+    agency when None): their refiled rows are written off before the swap
+    (pipeline.refiled.rows_rewritten).
     """
     settle_interrupted_run(client)
     preflight(client)
@@ -268,5 +273,6 @@ def restamp_archive_rows(client, *, before_swap: Callable[[], None] | None = Non
     except Exception:
         client.command(f"DROP TABLE IF EXISTS {_STAGING}")
         raise
+    refiled.rows_rewritten(client, agencies)
     client.command(f"EXCHANGE TABLES {_TABLE} AND {_STAGING}")
     _finish_swap(client, before)

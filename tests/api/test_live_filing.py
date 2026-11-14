@@ -465,18 +465,78 @@ class _SyncSpy:
         return call
 
 
-def test_analyze_joins_the_archive_once_to_write_a_refiled_month_and_reads_it_filed(refiled, pg_conn, ch_client):
+def _full_analyze(pg_conn, ch_client, agency_id: int) -> list[str]:
+    """The archive joins a full rebuild of the agency runs."""
     from pipeline import static_archive
     from pipeline.analyze import mark_for_full_rebuild
 
-    mark_for_full_rebuild(pg_conn, [refiled.agency_id])
+    mark_for_full_rebuild(pg_conn, [agency_id])
     spy = _SyncSpy(ch_client)
-    analyze(refiled.agency_id, pg_conn, spy)
+    analyze(agency_id, pg_conn, spy)
     pg_conn.commit()
-    joins = [sql for sql in spy.statements if "ANY LEFT JOIN" in sql and static_archive.SCHEDULE in sql]
-    assert len(joins) == 1
-    assert joins[0].startswith(f"INSERT INTO {static_archive.FILED_TABLE}")
     assert any(f"FROM {static_archive.FILED_TABLE} AS u" in sql for sql in spy.statements)
+    return [sql for sql in spy.statements if "ANY LEFT JOIN" in sql and static_archive.SCHEDULE in sql]
+
+
+def test_analyze_joins_the_archive_once_to_write_a_refiled_month_and_then_reuses_the_write(refiled, pg_conn, ch_client):
+    from pipeline import refiled as refiled_rows
+    from pipeline import static_archive
+
+    refiled_rows.write_off(ch_client, refiled.agency_id, None)
+    (join,) = _full_analyze(pg_conn, ch_client, refiled.agency_id)
+    assert join.startswith(f"INSERT INTO {static_archive.FILED_TABLE}")
+    build = refiled_rows.written(ch_client, refiled.agency_id)[refiled.day].build
+    assert build
+    assert _full_analyze(pg_conn, ch_client, refiled.agency_id) == []
+    assert refiled_rows.written(ch_client, refiled.agency_id)[refiled.day].build == build
+
+
+def test_the_history_script_writes_each_refiled_date_no_write_serves(refiled, pg_conn, ch_client, aconn):
+    from pipeline import refiled as refiled_rows
+    from scripts import write_refiled_history
+
+    agency_id = refiled.agency_id
+    refiled_rows.write_off(ch_client, agency_id, None)
+    (planned,) = write_refiled_history.run(pg_conn, ch_client, [agency_id], apply=False)
+    assert (planned.refiled, planned.unwritten) == ([refiled.day], [refiled.day])
+    assert not refiled_rows.written(ch_client, agency_id)[refiled.day].build
+    write_refiled_history.run(pg_conn, ch_client, [agency_id], apply=True)
+    assert refiled_rows.written(ch_client, agency_id)[refiled.day].build
+    (planned,) = write_refiled_history.run(pg_conn, ch_client, [agency_id], apply=False)
+    assert planned.unwritten == []
+
+
+async def test_a_restamp_of_updates_writes_off_the_agencys_refiled_rows(refiled, aconn, ch_client, ch_async_client):
+    """A swap keeps every date's row count, so only writing off tells a read the written rows are stale."""
+    from pipeline import refiled as refiled_rows
+    from pipeline.restamp_archive import restamp_archive_rows
+
+    restamp_archive_rows(ch_client, agencies=[refiled.agency_id])
+    assert not refiled_rows.written(ch_client, refiled.agency_id)[refiled.day].build
+    filed = await filing(aconn, ch_async_client, refiled.agency_id, refiled.day, refiled.day)
+    assert filed.stamp is Stamp.REFIT
+
+
+async def test_a_bare_column_in_a_filed_reads_predicate_names_the_stored_value(refiled, aconn, ch_async_client):
+    """e and h were polled with no route, which filing gives them: a bare
+    `route_code` tested on the rows read filed is the stored one, as REFIT
+    tests it."""
+    from pipeline.ch_aggregates import days_where
+    from pipeline.static_archive import observation_rows
+
+    filed = await filing(aconn, ch_async_client, refiled.agency_id, refiled.day, refiled.day)
+    assert filed.stamp is Stamp.FILED
+    where, params = days_where([refiled.day])
+    raw = f"u.agency_id = {{agency_id:UInt16}} AND ({where}) AND route_code IS NULL"
+    refit = {name: value for name, value in filed.params.items() if not name.startswith("filed_")}
+    counts = {}
+    for stamp, bound in ((Stamp.FILED, filed.params), (Stamp.REFIT, refit)):
+        result = await ch_async_client.query(
+            f"SELECT count() {observation_rows(raw, stamp)}",
+            parameters={"agency_id": refiled.agency_id, **params, **bound},
+        )
+        counts[stamp] = result.result_rows[0][0]
+    assert counts[Stamp.FILED] == counts[Stamp.REFIT] > 0
 
 
 async def test_an_agency_whose_ingest_stamps_no_version_is_read_as_ingested(pg_conn, aconn, ch_async_client):

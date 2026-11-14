@@ -343,7 +343,8 @@ ORDER BY (agency_id, filed_date, captured_at, trip_id, stop_sequence);
 -- What each date's rows in updates_filed were filed against, one row per
 -- write. The latest built_at is the one in force, and an empty build writes
 -- the date off. A read checks it against the filing it would make now
--- (pipeline.refiled.valid_builds): the version and content in force on the
+-- (pipeline.refiled.valid_builds): the filing rules it was written under
+-- (pipeline.refiled.RULES), the version and content in force on the
 -- date, the content each version name on the date's rows mapped to, and how
 -- many rows `updates` files under the date.
 CREATE TABLE IF NOT EXISTS updates_filed_dates (
@@ -354,6 +355,7 @@ CREATE TABLE IF NOT EXISTS updates_filed_dates (
     content_hash      String,
     stamped           Map(String, String),
     source_rows       UInt64,
+    rules             String,
     built_at          DateTime64(3, 'UTC')
 ) ENGINE = MergeTree
 ORDER BY (agency_id, filed_date, built_at);
