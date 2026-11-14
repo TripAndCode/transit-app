@@ -527,8 +527,7 @@
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
   /* A route's badge, name, bar and figures side by side left each too
-     narrow; stacked into a 3-line card instead, each row owns the full
-     width. Doubled to outrank both the subgrid row below it and the
+     narrow; stacked into a card instead, each line owns the full width. Doubled to outrank both the subgrid row below it and the
      non-subgrid fallback's own unnamed columns (.ov-check-row, further
      down), which would otherwise tie it at equal specificity and win by
      coming later in the file. */
@@ -569,15 +568,12 @@
   }
   /* Spans the row's full width rather than the figures' own narrow value
      column (shared, in the desktop layout, by the short average) -- a
-     comparison sentence is long enough to need it. Shares the ends' span
-     and row so a route with both still reads as one secondary line, each
-     pinned to its own edge; the two are short meta text, not expected to
-     meet in the middle. */
+     comparison sentence is long enough to need it. A line of its own under
+     the ends: both are free-length text, so one cell would overlap them. */
   .ov-check-row .ov-check-change {
     grid-column: name / arrow;
-    grid-row: 3;
-    justify-self: end;
-    margin-top: 6px;
+    grid-row: 4;
+    margin-top: 2px;
   }
   .ov-check-row .ov-check-track {
     grid-column: plate / arrow;
@@ -610,6 +606,13 @@
     grid-row: 2;
     margin-top: 6px;
   }
+  /* Beside the widest day-type label and the figure, a phone leaves the bars
+     too little width for their scale's tick labels, which then overprint;
+     each label takes a line of its own above its bar instead. */
+  .ov-svc-list { grid-template-columns: minmax(0, 1fr) auto; }
+  .ov-svc-label,
+  .ov-svc-meta { grid-column: 1 / -1; }
+  .ov-svc-scale { grid-column: 1; }
   .ov-modal {
     width: 100%;
     max-height: 100vh;

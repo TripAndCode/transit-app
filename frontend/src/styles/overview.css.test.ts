@@ -209,19 +209,27 @@ describe("overview.css phone layout (BP.sm)", () => {
     expect(decl(go, "align-self")).toBe("center");
   });
 
-  it("rearranges a check row into a 3-line card at the phone breakpoint, each line the row's full width", () => {
+  it("rearranges a check row into a card at the phone breakpoint, the ends and the change on lines of their own", () => {
     const row = ruleBody(checkPhone, ".ov-check-row.ov-check-row {");
     expect(decl(row, "grid-template-columns")).toBe(
       "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
     );
     expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-track {"), "grid-column")).toBe("plate / arrow");
     expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-value {"), "grid-column")).toBe("value");
-    expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-change {"), "grid-column")).toBe("name / arrow");
+    const change = ruleBody(checkPhone, ".ov-check-row .ov-check-change {");
+    expect(decl(change, "grid-column")).toBe("name / arrow");
+    expect(decl(change, "grid-row")).toBe("4");
     const ends = ruleBody(
       checkPhone,
       ".ov-check-row .route-label.route-label--plate-column > .route-label__ends {",
     );
     expect(decl(ends, "grid-row")).toBe("3");
+  });
+
+  it("puts a service-day label on its own line on a phone, so the bars get the width their scale needs", () => {
+    expect(decl(ruleBody(checkPhone, ".ov-svc-list {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto");
+    expect(decl(ruleBody(checkPhone, ".ov-svc-label,\n  .ov-svc-meta {"), "grid-column")).toBe("1 / -1");
+    expect(decl(ruleBody(checkPhone, ".ov-svc-scale {"), "grid-column")).toBe("1");
   });
 });
 
