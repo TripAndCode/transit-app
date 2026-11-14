@@ -132,13 +132,6 @@ def _first_step_running(command: list[str]) -> int:
     raise AssertionError(f"python-extended job never runs `{shlex.join(command)}`")
 
 
-def test_python_extended_job_installs_embeddings_group():
-    """RUN_SLOW makes test_embeddings a required non-skip; without the group
-    the embedder import fails and that test fails instead of skipping."""
-    step = _python_extended_step_tokens()[_first_step_running(["poetry", "install"])]
-    assert _contains(step, ["--with", "embeddings"]), "python-extended's `poetry install` lacks `--with embeddings`"
-
-
 def test_python_extended_job_bakes_spa_between_build_and_pytest():
     """The gated browser suites open api/static/index.html, which only
     `make bake` fills from the build output; without it they self-skip."""

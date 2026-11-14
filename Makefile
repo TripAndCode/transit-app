@@ -46,7 +46,7 @@ bootstrap:
 	@command -v npm    >/dev/null || { echo "ERROR: npm not installed. brew install node"; exit 1; }
 	@test -f .env || { cp .env.example .env && echo "→ created .env from .env.example — edit it before \`make serve\`"; }
 	@echo "→ installing python deps"
-	@poetry install --with embeddings
+	@poetry install
 	@echo "→ installing npm deps"
 	@cd frontend && npm install --silent
 	@echo "→ bringing up Postgres + applying migrations"
@@ -113,7 +113,7 @@ doctor:
 		fi
 
 install:
-	poetry install --with embeddings
+	poetry install
 
 # ── Quality ──────────────────────────────────────────────────────────────────
 
