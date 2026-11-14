@@ -153,7 +153,7 @@ renders it with the reports' `DefinitionMetaBlock`.
    `/api/config` reports `llm_enabled: false`, which hides the follow-up box.
    The notebook's card dispatch (signed in and `/ask/card`), threads and
    exports need no key.
-5. All paths converge on `dispatch()` → a `_tool_*` handler in
+4. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
    `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
    on the **specific tool**, not uniformly on filter narrowness:
@@ -172,7 +172,7 @@ renders it with the reports' `DefinitionMetaBlock`.
      filter.
    Either way the result becomes a `ToolResult` →
    `render_tool_result()` produces the locale-specific summary string.
-6. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
+5. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
    log_query()` unless `ASK_QUERY_LOG_ENABLED=false`.
 
 **Follow-up path** (LLM-grounded, kill-switch gated):
@@ -310,20 +310,20 @@ so it is a separate mechanism to build, not a knob to turn on.
    through, or every card returns an empty result:
    `make fetch-ingest` (or `make load_static` before `ingest_live`), then
    `make analyze` for the agency.
-4. Open the app — the default route lands on Pulse
+3. Open the app — the default route lands on Pulse
    (`/agencies/{id}/pulse`; a fresh/remembered agency selection redirects
    there too). Click the top bar's search field (or press ⌘K), choose "Ask",
    and expect `/agencies/{id}/ask`; pressing `g` then `q` goes there directly.
-5. On the empty-thread landing view, click an instant card (e.g.
+4. On the empty-thread landing view, click an instant card (e.g.
    "Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,
    no LLM).
-6. Click a route-requiring pill (e.g. "Route delay trend"), pick a
+5. Click a route-requiring pill (e.g. "Route delay trend"), pick a
    route, then run it from the `ParamStrip` — expect a trend chart bubble.
-7. After any answer (for "Explore all stops by pattern", after selecting a
+6. After any answer (for "Explore all stops by pattern", after selecting a
    stop), type a question in the follow-up box and send it — expect a
    short LLM-generated explanation grounded only in the prior result.
-8. To exercise the NL router directly (not reachable from the
+7. To exercise the NL router directly (not reachable from the
    current template-only UI), call the API directly:
    ```bash
    # `csrf_guard` rejects a POST with no Origin header (403 "origin required").
@@ -338,7 +338,7 @@ so it is a separate mechanism to build, not a knob to turn on.
    Expect `router_stage: "rules"`. A genuinely novel/out-of-scope question
    should return `"llm"` (needs a working Gemini/OpenAI key) or a
    friendly refusal.
-9. Toggle `ASK_ROUTER_ENABLED=false` to force every question to the LLM stage,
+8. Toggle `ASK_ROUTER_ENABLED=false` to force every question to the LLM stage,
    or `ASK_HISTORY_ENABLED=false` to disable follow-up-phrase ("もっと")
    LLM rerouting.
 

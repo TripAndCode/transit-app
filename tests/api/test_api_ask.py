@@ -187,7 +187,7 @@ async def test_ask_sends_an_llm_answers_decimal_cells_as_numbers(ask_client, mon
 
 @pytest.mark.asyncio
 async def test_ask_sends_a_rule_answers_decimal_cells_as_numbers(ask_client, monkeypatch):
-    """The rule and embedding stages build the same result, and send numbers too."""
+    """A rule answer builds the same result as the LLM path, and sends numbers too."""
     client, agency_id = ask_client
 
     async def fake_dispatch(tool, args, ctx, conn, agency_id, **kwargs):

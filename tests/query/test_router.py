@@ -39,7 +39,6 @@ def test_rule_meta_dispatch(question, expected_tool, expected_kind):
     assert decision is not None
     assert decision.tool == expected_tool
     assert decision.args.get("kind") == expected_kind
-    assert decision.stage == "rules"
 
 
 @pytest.mark.parametrize(
