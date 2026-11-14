@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { REPORT_ROWS_MAX, useOverviewSummary, useReport } from "../../api/hooks";
 import { scopeToQueryString, type Scope } from "../../api/scope";
-import type { OverviewConcentration, ReportResponse } from "../../api/types";
+import type { OverviewConcentration, ReportFigures } from "../../api/types";
 import { reportHref } from "../../routes/destinations";
 import { OnTimeDefinition } from "../DefinitionMetaBlock";
 import { EM_DASH, fixedTenth, formatNumber } from "../../utils/format";
@@ -41,9 +41,9 @@ function Figure({
 }
 
 export type RouteSummarySources = {
-  ranking?: ReportResponse;
-  onTime?: ReportResponse;
-  worst?: ReportResponse;
+  ranking?: ReportFigures;
+  onTime?: ReportFigures;
+  worst?: ReportFigures;
   concentration?: OverviewConcentration;
 };
 

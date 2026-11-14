@@ -6,9 +6,9 @@ import { DelayBandLegend, StopChart } from "./StopChart";
 import { missingStopKey, previousWindow, windowDays, type SegmentRise } from "./routeDossier";
 import "../../styles/focusedAnalysis.css";
 
-/** A route's delay by stop, as its page draws it from one route-shape
- *  response: fetched live, or stored by a snapshot. Each part takes the
- *  stops and the reader's choices as props and fetches nothing. */
+// A route's delay by stop, as its page draws it from one route-shape
+// response: fetched live, or stored by a snapshot. Each part takes the stops
+// and the reader's choices as props and fetches nothing.
 
 /** Where delay grows most along the route, and the next largest. */
 export function RiseHeadline({ rise, nextRise }: { rise: SegmentRise | undefined; nextRise: SegmentRise | undefined }) {

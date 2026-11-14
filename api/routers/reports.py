@@ -267,6 +267,12 @@ async def fetch_live_ml_agencies(conn: asyncpg.Connection) -> set[int]:
     return {row["agency_id"] for row in rows}
 
 
+#: The most rows a report lists in one response (the client's
+#: ``REPORT_ROWS_MAX`` in ``frontend/src/api/hooks.ts``). A route's page asks
+#: the agency's route lists at this length and reads a shorter list as
+#: complete, so a list stored for its snapshot is asked at the same length.
+REPORT_ROWS_MAX = 500
+
 # Static metadata for the listing endpoint. Ordered for sidebar display.
 _REPORT_TYPES = (
     "route_table",
@@ -1480,7 +1486,7 @@ def _csv_response(
 async def get_report(
     request: Request,
     report_type: str,
-    limit: int | None = Query(default=None, ge=1, le=500),
+    limit: int | None = Query(default=None, ge=1, le=REPORT_ROWS_MAX),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,

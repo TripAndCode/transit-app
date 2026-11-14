@@ -121,6 +121,7 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
   // Both languages are stored; one missing would still leave the figures.
   const report = reports[locale] ?? reports.ja ?? reports.en;
   const routePage = snapshot.screen === "route_page" ? (pages[locale] ?? pages.ja ?? pages.en) : undefined;
+  const routeLists = snapshot.payloads.route_lists;
   const pageRoute = routePage ? (storedRoute(snapshot.params) ?? routePage.shape.route) : null;
   const credit = snapshot.payloads.credit?.[locale] ?? null;
   const names = buildRouteNames(snapshot.payloads.routes ?? [], t, { agencyName: snapshot.agency_name });
@@ -163,9 +164,10 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
           )}
         </section>
       )}
-      {routePage && pageRoute != null ? (
+      {routePage && routeLists && pageRoute != null ? (
         <RoutePageSnapshot
           page={routePage}
+          lists={routeLists}
           concentration={snapshot.payloads.concentration}
           route={pageRoute}
           from={String(snapshot.params.from ?? "")}

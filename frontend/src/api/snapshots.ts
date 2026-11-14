@@ -5,6 +5,7 @@ import type {
   CapabilityTier,
   OverviewConcentration,
   PerformanceStandardsResponse,
+  ReportFigures,
   ReportResponse,
   Route,
   RouteShapeResponse,
@@ -14,13 +15,18 @@ import type { Locale } from "../i18n";
 /** The screens a snapshot can be taken of (api/routers/snapshots.py). */
 export type SnapshotScreen = "council_report" | "route_table" | "route_page";
 
-/** One language's responses a route's page reads: the agency's route lists
- *  its standing comes from, its performance targets, and its delay by stop
- *  (`geometry` is never kept: only the map draws it). */
+/** The agency's route lists a route's page reads its standing from, at the
+ *  length the live page asks for, without their prose. */
+export type RouteListsPayload = {
+  ranking: ReportFigures;
+  on_time: ReportFigures;
+  worst_5min: ReportFigures;
+};
+
+/** One language's responses a route's page reads for the route itself: its
+ *  performance targets and its delay by stop (`geometry` is never kept:
+ *  only the map draws it). */
 export type RoutePagePayload = {
-  ranking: ReportResponse;
-  on_time: ReportResponse;
-  worst_5min: ReportResponse;
   standards: PerformanceStandardsResponse;
   shape: RouteShapeResponse;
 };
@@ -40,9 +46,11 @@ export type Snapshot = {
   params: Record<string, unknown>;
   payloads: {
     report?: Partial<Record<Locale, ReportResponse>>;
-    /** A route's page, in place of `report`. */
+    /** A route's page, in place of `report`: the route's own responses per
+     *  language, and the agency's lists and lateness by route, written in no
+     *  language and so stored once. */
     route_page?: Partial<Record<Locale, RoutePagePayload>>;
-    /** A route's page: the agency's lateness by route, written in no language. */
+    route_lists?: RouteListsPayload;
     concentration?: OverviewConcentration;
     routes?: Route[];
     credit?: Partial<Record<Locale, string | null>>;

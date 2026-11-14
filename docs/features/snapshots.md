@@ -50,23 +50,26 @@ One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
   - `routes`: the agency's route catalogue (`GET /api/{agency_id}/routes`), so
     the rows keep the labels they had.
   - `credit`: the open-data credit for the agency's feed, per language.
-  - A route's page stores, in place of `report`:
-    - `route_page`: per language, the responses its panels read, each asked
-      what the live page asks: the agency's route lists over the scope
-      without its route, in full (`ranking`, `on_time`, `worst_5min`, 500
-      rows), which the summary strip reads the route's rank and figures
-      from; the route's performance targets (`standards`,
-      `GET /api/{agency_id}/performance_standards?route=`); and its delay by
-      stop on its variant (`shape`, `GET /api/{agency_id}/route-shape`),
-      with `geometry` set to null, since only the map draws the line.
-      Everything but the reports' prose and serving time, the targets'
-      disclaimer and the stop names must match between the languages, or
-      the create answers 409: a stop the timetable leaves unnamed is named by
-      its sequence in each language.
+  - A route's page stores, in place of `report`, the responses its panels
+    read, each asked what the live page asks:
+    - `route_lists`: the agency's route lists over the scope without its
+      route (`ranking`, `on_time`, `worst_5min`), at the length the live page
+      asks for (the client's `REPORT_ROWS_MAX`), which the summary strip
+      reads the route's rank and figures from. Their figures are the same in
+      every language, so each is computed once and stored once, without its
+      prose (`text`).
     - `concentration`: the agency overview's lateness by route
       (`GET /api/{agency_id}/overview/summary`'s `concentration`), which the
       strip's share of all lateness reads. It is written in no language, so
       it is stored once.
+    - `route_page`: per language, the route's performance targets
+      (`standards`, `GET /api/{agency_id}/performance_standards?route=`) and
+      its delay by stop on its variant (`shape`,
+      `GET /api/{agency_id}/route-shape`), with `geometry` set to null, since
+      only the map draws the line. Everything but the targets' disclaimer and
+      the stop names must match between the languages, or the create answers
+      409: a stop the timetable leaves unnamed is named by its sequence in
+      each language.
 - `method_version`, `agency_name`, `created_at`, `created_by` and an optional
   `title` (up to 200 characters) and `note` (up to 2000).
 
@@ -111,7 +114,7 @@ The live page fetches through hooks and hands the same parts its responses.
   reference; the performance targets with their verdicts and disclaimer;
   and the delay at each stop with the segment where it grows most. Both the
   chart and the stop table are drawn, one under the other. Picking a stop
-  only changes which stop the side panel names.
+  moves the chart's marker and the side panel to it; no figure changes.
 - **Not stored, and said so:** the map, the day's trips (the Marey diagram)
   and the comparison with the previous period read live data. The page
   draws none of them, and says so in one line beneath the figures, never
@@ -178,13 +181,14 @@ own line into, and the print stylesheet shows it.
 ## Compared with today
 
 The page asks the API for the snapshot alone until the reader turns on
-「今日の数値と比較」 / "Compare with today's figures" (off on every visit). A
-route's page offers no comparison, and its `/today` answers
-`not_computable`: the endpoint answers one screen's report
-(`SnapshotToday.report`), and the page's comparison reads one report's
-figures, while a route's page is five responses, two of them not reports.
+「今日の数値と比較」 / "Compare with today's figures" (off on every visit).
 Then it asks `GET /api/snapshots/{id}/today` once, and marks the stored
 figures against today's; the stored figures themselves never change.
+
+A route's page offers no comparison, and its `/today` answers
+`not_computable`: the endpoint answers one screen's report
+(`SnapshotToday.report`), and the page's comparison reads one report's
+figures, while a route's page is several responses, not all of them reports.
 
 - **Like for like.** The endpoint replays the snapshot's stored `params` (the
   resolved dates, never a rolling window, the scope and the screen's options)

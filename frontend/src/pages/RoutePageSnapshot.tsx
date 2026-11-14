@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { OverviewConcentration } from "../api/types";
-import type { RoutePagePayload } from "../api/snapshots";
+import type { RouteListsPayload, RoutePagePayload } from "../api/snapshots";
 import type { TierState } from "../api/useCapabilityTier";
 import type { RouteNames } from "../api/useRouteNames";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
@@ -12,6 +12,7 @@ import { RouteVariantPicker } from "../components/analysis/RouteVariantPicker";
 import { RiseHeadline, SelectedStopAside, StopDelayTable, StopDelayTrend } from "../components/analysis/RouteStopDelay";
 import { initialStop, largestRises, pickableVariants } from "../components/analysis/routeDossier";
 import { orderedStops } from "../components/analysis/stopSeries";
+import "../styles/focusedAnalysis.css";
 
 const NO_STOPS: never[] = [];
 
@@ -22,6 +23,7 @@ const NO_STOPS: never[] = [];
  *  page says so rather than drawing them. */
 export function RoutePageSnapshot({
   page,
+  lists,
   concentration,
   route,
   from,
@@ -32,6 +34,7 @@ export function RoutePageSnapshot({
   tiers,
 }: {
   page: RoutePagePayload;
+  lists: RouteListsPayload;
   concentration: OverviewConcentration | undefined;
   route: string;
   from: string;
@@ -50,11 +53,11 @@ export function RoutePageSnapshot({
   const [rise, nextRise] = largestRises(shape.segments, stops);
   return (
     <section>
-      <DefinitionMetaBlock definition={page.on_time.definition} tiers={tiers} />
+      <DefinitionMetaBlock definition={lists.on_time.definition} tiers={tiers} />
       <RouteSummaryFigures
         route={route}
         timeBand={timeBand}
-        sources={{ ranking: page.ranking, onTime: page.on_time, worst: page.worst_5min, concentration }}
+        sources={{ ranking: lists.ranking, onTime: lists.on_time, worst: lists.worst_5min, concentration }}
       />
       <PerformanceStandardView data={page.standards} routeNames={names} tier={tier} />
       <section className="snapshot-route__stops" aria-labelledby="snapshot-stop-delay">

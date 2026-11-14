@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
-import type { DefinitionMeta, ReportResponse, Route } from "../api/types";
+import type { DefinitionMeta, ReportFigures, ReportResponse, Route } from "../api/types";
 import type { Snapshot, SnapshotToday } from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
 import { SnapshotPage } from "./SnapshotPage";
@@ -456,25 +456,27 @@ describe("SnapshotPage compared with today", () => {
   });
 });
 
-function listReport(reportType: string, rows: unknown[][], text: string): ReportResponse {
+function listReport(reportType: string, rows: unknown[][]): ReportFigures {
   return {
     report_type: reportType,
     rendered_at: "2026-11-09T05:05:00Z",
-    text,
     rows,
     ctx: CTX,
     definition: DEFINITION,
     scope_applied: {},
     rows_total: 174,
-  } as unknown as ReportResponse;
+  } as unknown as ReportFigures;
 }
+
+const ROUTE_LISTS = {
+  ranking: listReport("ranking", [["7", null, "5.1", "4", "9", 500], ["42", null, "3.06", "2", "8", 143516]]),
+  on_time: listReport("on_time", [["42", null, "49.0", "3.06", 143516, false, 0.3]]),
+  worst_5min: listReport("worst_5min", [["42", null, 26192, "3.06", 143516]]),
+};
 
 function routePage(locale: "ja" | "en") {
   const unnamed = locale === "ja" ? "2番停留所" : "Stop #2"; // i18n-ignore: the server's own name for an unnamed stop
   return {
-    ranking: listReport("ranking", [["7", null, "5.1", "4", "9", 500], ["42", null, "3.06", "2", "8", 143516]], "ranking"),
-    on_time: listReport("on_time", [["42", null, "49.0", "3.06", 143516, false, 0.3]], "on time"),
-    worst_5min: listReport("worst_5min", [["42", null, 26192, "3.06", 143516]], "worst"),
     standards: {
       rows: [{
         route_code: "42", metric_type: "on_time_pct", threshold_value: 85, bonus_malus_rate: 0.01, actual_value: 49,
@@ -508,6 +510,7 @@ function routePageSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
     params: { from: "2026-10-01", to: "2026-10-31", routes: ["42"], shape: "S1" },
     payloads: {
       route_page: { ja: routePage("ja"), en: routePage("en") },
+      route_lists: ROUTE_LISTS,
       concentration: { top_routes: [{ route_code: "42", route_short_name: "42", share_pct: 5 }], rest_share_pct: 95 },
       routes: ROUTES,
       credit: { ja: "出典：テスト", en: "Source: test" }, // i18n-ignore: fixture prose
@@ -577,7 +580,7 @@ describe("SnapshotPage, a route's page", () => {
     ];
     const withVariants = { ...page, shape: { ...page.shape, variants } };
     stubFetch(200, routePageSnapshot({
-      payloads: { route_page: { en: withVariants, ja: withVariants }, concentration: { top_routes: [], rest_share_pct: 0 }, routes: ROUTES, credit: {} } as Snapshot["payloads"],
+      payloads: { route_page: { en: withVariants, ja: withVariants }, route_lists: ROUTE_LISTS, concentration: { top_routes: [], rest_share_pct: 0 }, routes: ROUTES, credit: {} } as Snapshot["payloads"],
     }));
     renderPage();
     const picker = await screen.findByRole("combobox", { name: /Path/ });
