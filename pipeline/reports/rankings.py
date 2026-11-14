@@ -40,7 +40,7 @@ from pipeline.reports.filters import (
     _service_label,
     ctx_filing,
 )
-from pipeline.static_archive import Stamp, filed_date_sql, observation_rows
+from pipeline.static_archive import filed_date_sql, observation_rows
 
 
 def aggregates_serve(ctx: RangeCtx) -> bool:
@@ -930,9 +930,7 @@ async def _route_wd_we_avg_ch(
     )
     filed = await ctx_filing(conn, ch, agency_id, combined_ctx)
     filed.check(combined_ctx.from_date, combined_ctx.to_date)
-    where = band_candidates(
-        updates_filter_ch(combined_ctx, refit=filed.stamp is Stamp.REFIT), combined_ctx.time_band, filed
-    )
+    where = band_candidates(updates_filter_ch(combined_ctx, refit=filed.stamp.refiles), combined_ctx.time_band, filed)
     rows = observation_rows(
         stop_event_filter_ch(where.raw),
         filed.stamp,

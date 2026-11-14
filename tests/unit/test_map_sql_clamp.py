@@ -23,9 +23,11 @@ _CLAMP = f"BETWEEN -{MAX_PLAUSIBLE_DELAY_SEC} AND {MAX_PLAUSIBLE_DELAY_SEC}"
 _ANY_DAY = UpdatesFilter("1", "", {})
 # Each query files its rows under a stamp, and every stamp keeps the clamp.
 _STAMPS = pytest.mark.parametrize("stamp", list(Stamp))
+# The live delays read only `updates_live`, whose rows are never written filed.
+_LIVE_STAMPS = pytest.mark.parametrize("stamp", [stamp for stamp in Stamp if stamp is not Stamp.FILED])
 
 
-@_STAMPS
+@_LIVE_STAMPS
 def test_live_delays_dedup_clamps_dep_delay(stamp):
     assert _CLAMP in live_delays_sql(stamp)
 

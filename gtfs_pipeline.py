@@ -609,7 +609,7 @@ def cmd_restamp_archive(args):
             # since the rerun finds nothing left to move. A swap that then
             # fails costs only a rebuild that was not needed.
             mark_for_full_rebuild(conn, moved)
-            restamp_archive_rows(ch_client, before_swap=still_locked)
+            restamp_archive_rows(ch_client, agencies=moved, before_swap=still_locked)
         logger.info("restamped.")
         next_steps(sum(p.rows_refused for p in plan))
     finally:

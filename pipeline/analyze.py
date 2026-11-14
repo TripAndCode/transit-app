@@ -97,6 +97,7 @@ from pipeline import (
     ch_aggregates,
     feed_quality,
     rebuild_headline,
+    refiled,
     static_archive,
     static_headways,
 )
@@ -816,6 +817,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     # Both stores are checked before anything is built: the run records the
     # versions in force only at its end, after a rebuild that can take hours.
     static_archive.require_tables(ch_client)
+    refiled.require_tables(ch_client)
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s)", (IN_FORCE_TABLE,))
         if cur.fetchone()[0] is None:
@@ -1256,13 +1258,31 @@ def _rebuild_ch_aggregates(
         _copy_ch_aggregate(table, agency_id, None, conn, ch_client)
 
 
-def _refit_dates(agency_id: int, ch_client, join: static_archive.ScheduleJoin, scopes: dict[str, list | None]) -> set:
-    """The dates among those the run rebuilds of the tables filed under the
-    version in force that hold a row whose schedule comes from the archive
-    (static_archive.refit_dates): a read of none of them files its rows without
-    the archive join."""
+def _refile(
+    agency_id: int, ch_client, join: static_archive.ScheduleJoin, scopes: dict[str, list | None]
+) -> tuple[static_archive.ScheduleJoin, set]:
+    """The refiled dates the run reads (_refit_dates), with *join* naming
+    their rows as written (pipeline.refiled.refresh): a date whose latest
+    write still serves a read keeps it, and every other is written now, so
+    every read of them takes those rows and only a write joins the archive.
+    The run's other dates whose rows were written are written off: none of
+    their rows is refiled any more."""
     if not join.force:
-        return set()
+        return join, set()
+    considered, refit = _refit_dates(agency_id, ch_client, join, scopes)
+    with _step("refiled rows: write"):
+        join = refiled.refresh(ch_client, agency_id, join, refit)
+        refiled.write_off(ch_client, agency_id, considered, keep=refit)
+    return join, refit
+
+
+def _refit_dates(
+    agency_id: int, ch_client, join: static_archive.ScheduleJoin, scopes: dict[str, list | None]
+) -> tuple[list | None, set]:
+    """The dates the run rebuilds of the tables filed under the version in
+    force (None for every date), and those of them that hold a row whose
+    schedule comes from the archive (static_archive.refit_dates): a read of
+    none of them files its rows without the archive join."""
     filed = [
         scope
         for name, scope in scopes.items()
@@ -1271,17 +1291,18 @@ def _refit_dates(agency_id: int, ch_client, join: static_archive.ScheduleJoin, s
     where: str = "1"
     params: dict = {}
     between = None
+    days: list | None = None
     if all(scope is not None for scope in filed):
         days = sorted({day for scope in filed for day in scope or ()})
         if not days:
-            return set()
+            return days, set()
         where, params = ch_aggregates.days_where(days)
         between = (days[0], days[-1])
     with _step("plan: dates read from the schedule archive"):
         dates = static_archive.refit_dates(ch_client, agency_id, where, params, join, between)
     if dates:
         logger.info(f"  {len(dates)} date(s) hold rows ingested against another timetable than the one in force")
-    return dates
+    return days, dates
 
 
 class _Read(NamedTuple):
@@ -1408,8 +1429,7 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         builds_dwell_run = has_static and ingest_strategy in RT_INGEST_STRATEGIES
         dwell_scope = scopes["agg_route_daily_dwell_run"]
         scans_visits = builds_dwell_run and dwell_scope != []
-        join = plan.join
-        refit = _refit_dates(agency_id, ch_client, join, {**scopes, **ch_scopes})
+        join, refit = _refile(agency_id, ch_client, plan.join, {**scopes, **ch_scopes})
         visit_reads = []
         for read in _reads(agency_id, ch_client, join, refit, dwell_scope) if scans_visits else []:
             stems = ch_aggregates.version_names(
