@@ -306,6 +306,24 @@ def _route_delay_counts(source: str) -> str:
 _TIME_BAND = time_band_ch("d.")
 
 
+def _route_band_daily(source: str) -> str:
+    # Unlike the route tables above, a departure with no route is kept, under
+    # '': a time-band Pulse counts it in every figure but its route lists. The
+    # GROUP BY names the same ifNull, so NULL and '' never split a key.
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, date, route_code, time_band,
+               toInt32(n) AS samples, s AS sum_delay_sec, late AS sum_late_sec
+        FROM (
+            SELECT d.date AS date, ifNull(d.route_code, '') AS route_code, {_TIME_BAND} AS time_band,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n,
+                   sum(greatest(assumeNotNull(d.dep_delay), 0)) AS late
+            FROM ({source}) AS d
+            WHERE {_SEC} IS NOT NULL
+            GROUP BY d.date, ifNull(d.route_code, ''), time_band
+        )
+    """
+
+
 # Each row's timetable (static_archive.JOIN_CONTENT_SQL), computed once per row before the join.
 def _with_join_content(source: str) -> str:
     return f"SELECT *, {static_archive.JOIN_CONTENT_SQL} AS join_content FROM ({source})"
@@ -531,6 +549,11 @@ _SPECS: dict[str, _Spec] = {
     ),
     "agg_hour_daily": _Spec(
         ("agency_id", "date", "hour", "avg_min", "samples", "sum_delay_sec"), _hour_daily, scheduled_sec=True
+    ),
+    "agg_route_band_daily": _Spec(
+        ("agency_id", "date", "route_code", "time_band", "samples", "sum_delay_sec", "sum_late_sec"),
+        _route_band_daily,
+        scheduled_sec=True,
     ),
     "agg_stop_daily": _Spec(
         ("agency_id", "stop_id", "date", "service_type", "time_band", "delay_sum", "samples"),

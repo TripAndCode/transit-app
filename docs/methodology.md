@@ -378,10 +378,11 @@ CC0 のデータを使うのに法的な同意は要りません。それでも�
 <!-- method-changelog:start -->
 <!-- poetry run python scripts/render_method_changelog.py が METHOD_VERSIONS から書く。手で編集しない -->
 
-現在の算出方法は `2026.11.14` です。新しい版から順に、各版が設定した入力を示します。
+現在の算出方法は `2026.11.15` です。新しい版から順に、各版が設定した入力を示します。
 
 | 版 | 設定した入力 |
 |---|---|
+| `2026.11.15` | `agg_route_band_daily` = 1 |
 | `2026.11.14` | `agg_daily_trend` 4 → 5, `agg_hour_daily` 5 → 6, `agg_route_daily` 4 → 5, `agg_route_daily_dist` 4 → 5, `agg_route_daily_dwell_run` 4 → 5, `agg_route_headway_daily` 5 → 6, `agg_route_hour` 5 → 6, `agg_route_hour_dow` 5 → 6, `agg_route_stats` 4 → 5, `agg_route_stop_daily` 5 → 6, `agg_service_delivered_daily` 4 → 5, `agg_stop_daily` 5 → 6, `feed_quality_monthly` 6 → 7, `route_delay_counts` 5 → 6 |
 | `2026.11.13` | `agg_daily_trend` 3 → 4, `agg_hour_daily` 4 → 5, `agg_route_daily` 3 → 4, `agg_route_daily_dist` 3 → 4, `agg_route_daily_dwell_run` 3 → 4, `agg_route_headway_daily` 4 → 5, `agg_route_hour` 4 → 5, `agg_route_hour_dow` 4 → 5, `agg_route_stats` 3 → 4, `agg_route_stop_daily` 4 → 5, `agg_schedule_revision_daily` 2 → 3, `agg_service_delivered_daily` 3 → 4, `agg_stop_daily` 4 → 5, `agg_stop_routes` 2 → 3, `feed_quality_monthly` 5 → 6, `route_delay_counts` 4 → 5, `stop_route_days` 2 → 3 |
 | `2026.11.12` | `feed_quality_monthly` 4 → 5 |

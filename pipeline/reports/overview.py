@@ -15,9 +15,14 @@ Most helpers have two internal branches:
 * **Fast path** (``ctx.time_band == "all"``) — reads the pre-aggregated
   ``agg_daily_trend`` / ``agg_hour_daily`` tables, sub-millisecond even
   over multi-month ranges.
-* **Slow path** (any other time_band) — falls back to the live ``updates``
-  table (ClickHouse, via ``pipeline.reports.filters._dedup_cte_ch``) so the
-  hour-of-day filter is honoured.
+* **Slow path** (any other time_band) — derives every figure from one shared
+  grain (below), so the hour-of-day filter is honoured. The grain is read from
+  ``agg_route_band_daily`` and ``agg_hour_daily`` (:func:`_fetch_band_aggregate`),
+  and from the live ``updates`` table (ClickHouse, via
+  ``pipeline.reports.filters._dedup_cte_ch``) only for what those can't
+  answer: a band they can't split (:func:`_band_aggregate_answers`), an agency
+  analyze has not yet built them for (:func:`_band_aggregate_built`), or the
+  hour profiles under a ``routes`` filter.
 
 The three hour profiles (``peak_hour`` and its weekday/weekend pair, all from
 ``_peak_hour_by_dow``) read the per-day ``agg_hour_daily`` (filtering dates by
@@ -29,6 +34,10 @@ routes.
 
 The shared slow-path grain
 --------------------------
+Read from the band aggregates, the grain costs two indexed Postgres reads and
+no ClickHouse at all. The rest of this section is about the ClickHouse grain
+it falls back to, whose cost grows with the period's rows.
+
 The slow-path helpers share ONE round trip rather than each issuing its own
 ``_dedup_cte_ch`` scan of ``updates``: a dozen independent full dedup scans
 of *substantially the same rows*, each reading a large fraction of an
@@ -168,7 +177,9 @@ _GrainShape = Literal["full", "period_routes", "period_hours"]
 
 @dataclass(frozen=True)
 class _Grain:
-    """One request's worth of deduped ``updates``, fetched in ONE round trip.
+    """One request's worth of deduped departures: one ClickHouse round trip
+    (:func:`_fetch_grain`), or the band aggregates' rows
+    (:func:`_fetch_band_aggregate`).
 
     ``route_rows`` (the ``(date, route_code)`` set) span ``[from_date,
     to_date]``. ``hour_rows`` (the ``(date, hour)`` set) span ``[hours_from,
@@ -334,6 +345,10 @@ def _route_sums(grain: _Grain | None, ctx: RangeCtx, value_index: int = _SUM_DEL
 async def _fetch_grain(agency_id: int, ctx: RangeCtx, conn, ch, *, shape: _GrainShape = "full") -> _Grain:
     """Fetch the whole request's deduped ``updates`` in ONE ClickHouse query.
 
+    Under a time band it serves only a band the aggregates can't answer
+    (:func:`_band_aggregate_answers`); its ``"period_hours"`` shape also
+    serves the hour profiles under a routes filter.
+
     The slow-path stage helpers read this instead of each issuing its own
     ``_dedup_cte_ch`` scan (see the module docstring). Three things make a
     single shared scan possible:
@@ -458,6 +473,87 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, conn, ch, *, shape: _Grain
         from_date=span_ctx.from_date,
         hours_from=ctx.from_date,
         to_date=span_ctx.to_date,
+    )
+
+
+def _band_aggregate_answers(ctx: RangeCtx) -> bool:
+    """Whether the band aggregates can stand in for :func:`_fetch_grain` under
+    ``ctx``'s time band. ``agg_route_band_daily`` holds every band's route
+    rows; ``agg_hour_daily`` holds its hour rows only when both of the band's
+    edges fall on the hour (:func:`_whole_hour_band`)."""
+    return _whole_hour_band(ctx.time_band) is not None
+
+
+async def _fetch_band_aggregate(agency_id: int, ctx: RangeCtx, conn, hours: tuple[int, int]) -> _Grain:
+    """:func:`_fetch_grain`'s rows for a time band, read from Postgres.
+
+    The route rows come from ``agg_route_band_daily``, whose ``''`` route is
+    the grain's NULL one; the hour rows from ``agg_hour_daily``, an hour taken
+    modulo 24 against the band's ``hours`` (:func:`_whole_hour_band`) as the
+    band filter takes the clock.
+    That table pools every route, so under a ``routes`` filter the grain has
+    no hour rows and the caller fetches them. Both are the same integer sums
+    the grain groups, so every figure derived from them is the grain's.
+
+    The route rows reach back to :func:`_calendar_from`, the earliest day the
+    payload reads, so :func:`_route_weekly_history` reads them too rather than
+    scanning ``updates`` for a window narrower than its four weeks.
+    """
+    span_ctx = replace(ctx, from_date=_calendar_from(ctx))
+    service_frag, service_params, n = service_date_clause("date", span_ctx, 5)
+    routes_frag = ""
+    if ctx.routes:
+        routes_frag = f" AND route_code = ANY(${n}::text[])"
+        service_params = [*service_params, list(ctx.routes)]
+    route_rows = await conn.fetch(
+        "SELECT date, route_code, samples, sum_delay_sec, sum_late_sec FROM agg_route_band_daily\n"
+        "WHERE agency_id = $1 AND time_band = $2 AND date >= $3 AND date <= $4\n"
+        f"  AND {service_frag}{routes_frag}",
+        agency_id,
+        ctx.time_band,
+        span_ctx.from_date,
+        ctx.to_date,
+        *service_params,
+    )
+    hour_rows = None
+    if not ctx.routes:
+        service_frag, service_params, _ = service_date_clause("date", ctx, 6)
+        fetched = await conn.fetch(
+            "SELECT date, hour, samples, sum_delay_sec FROM agg_hour_daily\n"
+            "WHERE agency_id = $1 AND date >= $2 AND date <= $3 AND hour % 24 >= $4 AND hour % 24 < $5\n"
+            f"  AND sum_delay_sec IS NOT NULL AND {service_frag}",
+            agency_id,
+            ctx.from_date,
+            ctx.to_date,
+            *hours,
+            *service_params,
+        )
+        hour_rows = tuple((r["date"], int(r["hour"]), int(r["samples"]), int(r["sum_delay_sec"])) for r in fetched)
+    return _Grain(
+        route_rows=tuple(
+            (r["date"], r["route_code"] or None, int(r["samples"]), int(r["sum_delay_sec"]), int(r["sum_late_sec"]))
+            for r in route_rows
+        ),
+        hour_rows=hour_rows,
+        from_date=span_ctx.from_date,
+        hours_from=ctx.from_date,
+        to_date=ctx.to_date,
+    )
+
+
+async def _band_aggregate_built(agency_id: int, conn) -> bool:
+    """Whether analyze has built ``agg_route_band_daily`` for the agency.
+
+    An agency analyzed only before the table existed has no rows in it until
+    its next run, which says nothing about its departures, so its empty rows
+    are no answer; a built table's empty rows mean the band saw none.
+    """
+    return bool(
+        await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM agg_table_state WHERE agency_id = $1 AND table_name = $2)",
+            agency_id,
+            "agg_route_band_daily",
+        )
     )
 
 
@@ -1476,10 +1572,15 @@ async def compute_overview_summary(
     and no routes filter; most existing tests); real dispatch (the
     ``/overview/summary`` route) always passes the real client.
 
-    On the slow path (``ctx.time_band != 'all'``) the shared ClickHouse query
-    the payload needs is issued up front (:func:`_fetch_grain`) and handed to
-    every stage helper, which then derives its own numbers from it in Python.
-    It is the
+    On the slow path (``ctx.time_band != 'all'``) the shared grain is read up
+    front and handed to every stage helper, which then derives its own numbers
+    from it in Python. It comes from the band aggregates
+    (:func:`_fetch_band_aggregate`) whenever they answer the band
+    (:func:`_band_aggregate_answers`) and analyze has built them for the agency
+    (:func:`_band_aggregate_built`), with no ClickHouse read but the hour
+    profiles' under a routes filter, which degrade to null as under a routes
+    filter alone. Otherwise the shared ClickHouse query (:func:`_fetch_grain`)
+    serves it, as the rest of this docstring describes. That query is the
     only query for any ``ctx`` wide enough for the grain to also cover
     :func:`_route_weekly_history`'s 4-week sparkline span (every default 30-day
     request); a narrower ``ctx`` costs that one helper a second scan. Under a
@@ -1489,7 +1590,7 @@ async def compute_overview_summary(
     three fields to null. With neither filter ``grain`` stays ``None`` and
     every helper reads its ``agg_*`` table.
 
-    Under a time band, a grain past the ClickHouse client's row cap or its
+    Under a time band, a ClickHouse grain past the client's row cap or its
     time budget is fetched again over the period's route rows alone
     (:func:`_fetch_grain`'s ``"period_routes"``), and every figure that needs
     the window before the period or the hour set is null: the baseline and
@@ -1522,12 +1623,41 @@ async def compute_overview_summary(
     # degrades just those three fields to null rather than failing the payload.
     peaks_unavailable = False
     baseline_unavailable = False
-    if ctx.time_band != "all" or ctx.routes:
+    # The grain's Postgres reads borrow from the pool per statement when the
+    # stages hold their own connections.
+    grain_conn = conn if pool is None else PooledConnection(pool)
+
+    async def _period_hours() -> _Grain | None:
+        """The period's hour set from ClickHouse, or None once a failure has
+        degraded the three hour profiles: no other figure reads it."""
+        try:
+            return await _fetch_grain(agency_id, ctx, grain_conn, ch, shape="period_hours")
+        except Exception as exc:
+            _log.warning(
+                "ClickHouse grain fetch failed for agency %s — degrading the peak-hour profiles to null",
+                agency_id,
+                exc_info=True,
+            )
+            if not is_result_overflow(exc):
+                cache_briefly()
+            return None
+
+    band_hours = _whole_hour_band(ctx.time_band) if ctx.time_band != "all" else None
+    if band_hours is not None and _band_aggregate_answers(ctx):
+        async with perf.timed_block("overview.band_aggregate"):
+            grain = await _fetch_band_aggregate(agency_id, ctx, grain_conn, band_hours)
+            if not grain.route_rows and not await _band_aggregate_built(agency_id, grain_conn):
+                grain = None
+        if grain is not None and ctx.routes:
+            if ch is None:
+                raise RuntimeError("overview hour profiles under a routes filter require a ClickHouse client")
+            async with perf.timed_block("overview.grain"):
+                hours = await _period_hours()
+            grain = replace(grain, hour_rows=None if hours is None else hours.hour_rows)
+            peaks_unavailable = hours is None
+    if grain is None and (ctx.time_band != "all" or ctx.routes):
         if ch is None:
             raise RuntimeError("overview slow path requires a ClickHouse client")
-        # The grain's one Postgres read, the agency's ingest strategy, borrows
-        # from the pool per statement when the stages hold their own connections.
-        grain_conn = conn if pool is None else PooledConnection(pool)
         async with perf.timed_block("overview.grain"):
             if ctx.time_band != "all":
                 try:
@@ -1546,17 +1676,8 @@ async def compute_overview_summary(
                     if is_query_timeout(exc):
                         cache_briefly()
             else:
-                try:
-                    grain = await _fetch_grain(agency_id, ctx, grain_conn, ch, shape="period_hours")
-                except Exception as exc:
-                    _log.warning(
-                        "ClickHouse grain fetch failed for agency %s — degrading the peak-hour profiles to null",
-                        agency_id,
-                        exc_info=True,
-                    )
-                    peaks_unavailable = True
-                    if not is_result_overflow(exc):
-                        cache_briefly()
+                grain = await _period_hours()
+                peaks_unavailable = grain is None
 
     # The route lists leave out one set of codes, judged once over the period,
     # so every list leaves out the same codes whichever window it ranks over.
