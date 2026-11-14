@@ -20,7 +20,8 @@ Most helpers have two internal branches:
   ``agg_route_band_daily`` and ``agg_hour_daily`` (:func:`_fetch_band_aggregate`),
   and from the live ``updates`` table (ClickHouse, via
   ``pipeline.reports.filters._dedup_cte_ch``) only for what those can't
-  answer: a band they can't split (:func:`_band_aggregate_answers`), or the
+  answer: a band they can't split (:func:`_band_aggregate_answers`), an agency
+  analyze has not yet built them for (:func:`_band_aggregate_built`), or the
   hour profiles under a ``routes`` filter.
 
 The three hour profiles (``peak_hour`` and its weekday/weekend pair, all from
@@ -483,12 +484,13 @@ def _band_aggregate_answers(ctx: RangeCtx) -> bool:
     return _whole_hour_band(ctx.time_band) is not None
 
 
-async def _fetch_band_aggregate(agency_id: int, ctx: RangeCtx, conn) -> _Grain:
+async def _fetch_band_aggregate(agency_id: int, ctx: RangeCtx, conn, hours: tuple[int, int]) -> _Grain:
     """:func:`_fetch_grain`'s rows for a time band, read from Postgres.
 
     The route rows come from ``agg_route_band_daily``, whose ``''`` route is
     the grain's NULL one; the hour rows from ``agg_hour_daily``, an hour taken
-    modulo 24 against the band's edges as the band filter takes the clock.
+    modulo 24 against the band's ``hours`` (:func:`_whole_hour_band`) as the
+    band filter takes the clock.
     That table pools every route, so under a ``routes`` filter the grain has
     no hour rows and the caller fetches them. Both are the same integer sums
     the grain groups, so every figure derived from them is the grain's.
@@ -514,8 +516,7 @@ async def _fetch_band_aggregate(agency_id: int, ctx: RangeCtx, conn) -> _Grain:
         *service_params,
     )
     hour_rows = None
-    hours = _whole_hour_band(ctx.time_band)
-    if not ctx.routes and hours is not None:
+    if not ctx.routes:
         service_frag, service_params, _ = service_date_clause("date", ctx, 6)
         fetched = await conn.fetch(
             "SELECT date, hour, samples, sum_delay_sec FROM agg_hour_daily\n"
@@ -537,6 +538,22 @@ async def _fetch_band_aggregate(agency_id: int, ctx: RangeCtx, conn) -> _Grain:
         from_date=span_ctx.from_date,
         hours_from=ctx.from_date,
         to_date=ctx.to_date,
+    )
+
+
+async def _band_aggregate_built(agency_id: int, conn) -> bool:
+    """Whether analyze has built ``agg_route_band_daily`` for the agency.
+
+    An agency analyzed only before the table existed has no rows in it until
+    its next run, which says nothing about its departures, so its empty rows
+    are no answer; a built table's empty rows mean the band saw none.
+    """
+    return bool(
+        await conn.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM agg_table_state WHERE agency_id = $1 AND table_name = $2)",
+            agency_id,
+            "agg_route_band_daily",
+        )
     )
 
 
@@ -1559,7 +1576,8 @@ async def compute_overview_summary(
     front and handed to every stage helper, which then derives its own numbers
     from it in Python. It comes from the band aggregates
     (:func:`_fetch_band_aggregate`) whenever they answer the band
-    (:func:`_band_aggregate_answers`), with no ClickHouse read but the hour
+    (:func:`_band_aggregate_answers`) and analyze has built them for the agency
+    (:func:`_band_aggregate_built`), with no ClickHouse read but the hour
     profiles' under a routes filter, which degrade to null as under a routes
     filter alone. Otherwise the shared ClickHouse query (:func:`_fetch_grain`)
     serves it, as the rest of this docstring describes. That query is the
@@ -1624,17 +1642,20 @@ async def compute_overview_summary(
                 cache_briefly()
             return None
 
-    if ctx.time_band != "all" and _band_aggregate_answers(ctx):
+    band_hours = _whole_hour_band(ctx.time_band) if ctx.time_band != "all" else None
+    if band_hours is not None and _band_aggregate_answers(ctx):
         async with perf.timed_block("overview.band_aggregate"):
-            grain = await _fetch_band_aggregate(agency_id, ctx, grain_conn)
-        if ctx.routes:
+            grain = await _fetch_band_aggregate(agency_id, ctx, grain_conn, band_hours)
+            if not grain.route_rows and not await _band_aggregate_built(agency_id, grain_conn):
+                grain = None
+        if grain is not None and ctx.routes:
             if ch is None:
                 raise RuntimeError("overview hour profiles under a routes filter require a ClickHouse client")
             async with perf.timed_block("overview.grain"):
                 hours = await _period_hours()
             grain = replace(grain, hour_rows=None if hours is None else hours.hour_rows)
             peaks_unavailable = hours is None
-    elif ctx.time_band != "all" or ctx.routes:
+    if grain is None and (ctx.time_band != "all" or ctx.routes):
         if ch is None:
             raise RuntimeError("overview slow path requires a ClickHouse client")
         async with perf.timed_block("overview.grain"):

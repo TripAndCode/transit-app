@@ -22,5 +22,7 @@ CREATE TABLE IF NOT EXISTS agg_route_band_daily (
     PRIMARY KEY (agency_id, date, route_code, time_band)
 );
 
--- A read names one band over a range of dates.
-CREATE INDEX IF NOT EXISTS idx_agg_route_band_daily_band ON agg_route_band_daily (agency_id, time_band, date);
+-- A read names one band over a range of dates and takes every other column,
+-- so the index covers them and answers the read without visiting the table.
+CREATE INDEX IF NOT EXISTS idx_agg_route_band_daily_band ON agg_route_band_daily (agency_id, time_band, date)
+    INCLUDE (route_code, samples, sum_delay_sec, sum_late_sec);

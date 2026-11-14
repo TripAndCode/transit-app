@@ -11,25 +11,23 @@ _VERSION = "0101"
 _DOWN = migrate._MIGRATIONS_DIR / f"{_VERSION}_agg_route_band_daily.down.sql"
 
 
-def _indexes(conn) -> dict[str, list[str]]:
-    """Each index on the table, by name, with its columns in order."""
+def _indexes(conn) -> dict[str, str]:
+    """Each index on the table, by name: its columns, and those it includes."""
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT c.relname, a.attname FROM pg_index i "
+            "SELECT c.relname, pg_get_indexdef(i.indexrelid) FROM pg_index i "
             "JOIN pg_class c ON c.oid = i.indexrelid "
-            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-            "WHERE i.indrelid = to_regclass('agg_route_band_daily') "
-            "ORDER BY c.relname, array_position(i.indkey, a.attnum)"
+            "WHERE i.indrelid = to_regclass('agg_route_band_daily')"
         )
-        out: dict[str, list[str]] = {}
-        for index, column in cur.fetchall():
-            out.setdefault(index, []).append(column)
-    return out
+        return {name: definition.split(" USING btree ", 1)[1] for name, definition in cur.fetchall()}
 
 
 _EXPECTED = {
-    "agg_route_band_daily_pkey": ["agency_id", "date", "route_code", "time_band"],
-    "idx_agg_route_band_daily_band": ["agency_id", "time_band", "date"],
+    "agg_route_band_daily_pkey": "(agency_id, date, route_code, time_band)",
+    # Covering: a band read is answered from the index alone.
+    "idx_agg_route_band_daily_band": (
+        "(agency_id, time_band, date) INCLUDE (route_code, samples, sum_delay_sec, sum_late_sec)"
+    ),
 }
 
 

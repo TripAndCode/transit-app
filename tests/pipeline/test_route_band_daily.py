@@ -177,17 +177,54 @@ async def test_a_routes_filter_reads_only_its_hour_profiles_from_clickhouse(
     analyze(agency_id, pg_conn, ch_client)
     pg_conn.commit()
 
-    queries: list[str] = []
-
-    class _Recording:
-        async def query(self, sql, parameters=None, **kwargs):
-            queries.append(sql)
-            return await ch_async_client.query(sql, parameters=parameters, **kwargs)
-
+    recording = _RecordingCh(ch_async_client)
     ctx = RangeCtx(from_date=DAY, to_date=DAY, time_band="morning", routes=("R1",))
-    out = await _payload(agency_id, ctx, aconn, _Recording(), grain=False, monkeypatch=monkeypatch)
+    out = await _payload(agency_id, ctx, aconn, recording, grain=False, monkeypatch=monkeypatch)
 
-    assert len(queries) == 1
-    assert "GROUP BY date, " in queries[0] and "GROUPING SETS" not in queries[0]
+    assert len(recording.queries) == 1
+    assert "GROUP BY date, " in recording.queries[0] and "GROUPING SETS" not in recording.queries[0]
     assert out["peak_hour"] is not None
     assert out["headline"]["samples"] == 13
+
+
+class _RecordingCh:
+    """A ClickHouse client that records each query it forwards."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.queries: list[str] = []
+
+    async def query(self, sql, parameters=None, **kwargs):
+        self.queries.append(sql)
+        return await self._inner.query(sql, parameters=parameters, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_an_agency_not_yet_analyzed_into_the_aggregate_reads_the_grain(
+    agency_id, ch_client, ch_async_client, aconn, monkeypatch
+):
+    """Until analyze has built the table for the agency, its empty rows say
+    nothing about the band, so the Pulse reads the ClickHouse grain."""
+    _seed_two_days(ch_client, agency_id)
+    recording = _RecordingCh(ch_async_client)
+
+    ctx = RangeCtx(from_date=DAY, to_date=DAY, time_band="morning")
+    out = await _payload(agency_id, ctx, aconn, recording, grain=False, monkeypatch=monkeypatch)
+
+    assert any("GROUPING SETS" in sql for sql in recording.queries)
+    assert out["headline"]["samples"] == 26
+
+
+@pytest.mark.asyncio
+async def test_a_band_with_no_departures_in_a_built_aggregate_reads_no_clickhouse(
+    pg_conn, agency_id, ch_client, aconn, monkeypatch
+):
+    _seed_two_days(ch_client, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
+    pg_conn.commit()
+
+    ctx = RangeCtx(from_date=DAY, to_date=DAY, time_band="evening")
+    out = await _payload(agency_id, ctx, aconn, None, grain=False, monkeypatch=monkeypatch)
+
+    assert out["headline"]["samples"] == 0
+    assert out["headline"]["avg_min"] is None
