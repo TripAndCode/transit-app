@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import { decl, ruleBody } from "../../test/cssRules";
 
 const css = readFileSync(resolve(__dirname, "./focusedOverview.css"), "utf-8");
+const pageCss = readFileSync(resolve(__dirname, "./operationsMap.css"), "utf-8");
 
 describe("focusedOverview.css phone layout (BP.sm)", () => {
   it("shrinks the title off the desktop token and tightens the header's own line-height", () => {
@@ -16,8 +17,9 @@ describe("focusedOverview.css phone layout (BP.sm)", () => {
   it("tightens the column gap above the map below the desktop value", () => {
     const bpSm = ruleBody(css, "@media (max-width: 640px) {");
     const page = ruleBody(bpSm, ".focused-overview.operations-page {");
-    const desktopGap = decl(ruleBody(css, ".focused-overview {"), "gap");
+    // The page's desktop gap is the shared `.operations-page` rule's.
+    const desktopGap = decl(ruleBody(pageCss, ".operations-page {"), "gap");
     expect(decl(page, "gap")).toBe("8px");
-    expect(desktopGap).toBe("18px");
+    expect(desktopGap).toBe("10px");
   });
 });

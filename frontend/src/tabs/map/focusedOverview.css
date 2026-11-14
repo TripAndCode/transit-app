@@ -1,4 +1,3 @@
-.focused-overview { gap: 18px; }
 .focused-overview .ops-header { flex-wrap: wrap; }
 .focused-overview .ops-heading h1 { font: 650 28px/1.4 var(--font-body, sans-serif); }
 .focused-overview .ops-freshness { margin-left: auto; }
@@ -45,7 +44,7 @@
    column gap between header and workspace tightens to match. */
 @media (max-width: 640px) {
   /* Compound, like the BP.sm height rule in operationsMap.css: that sheet loads
-     after this one, so its `.operations-page` gap would win a single class. */
+     after this one, so its `.operations-page` gap wins a single class. */
   .focused-overview.operations-page { gap: 8px; }
   .focused-overview .ops-heading h1 { font: 650 var(--text-lg) / 1.2 var(--font-body, sans-serif); }
 }
