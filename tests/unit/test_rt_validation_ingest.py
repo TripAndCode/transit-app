@@ -94,6 +94,8 @@ def _broken(**over):
         pytest.param(_key(), _broken(rules=[{**_E022, "title": "a\x00b"}]), id="nul-in-a-rule-title"),
         pytest.param(_key(), _broken(status="no_archive", reason="a\x00", rules=[]), id="nul-in-the-reason"),
         pytest.param(_key(), _broken(**{"note\x00": 1}), id="nul-in-a-key"),
+        pytest.param(_key(), _broken(status="no_archive", reason="a\ud800", rules=[]), id="surrogate-in-the-reason"),
+        pytest.param(_key(), _broken(rules=[{**_E022, "title": "a\udc00"}]), id="surrogate-in-a-rule-title"),
     ],
 )
 def test_a_summary_that_cannot_be_trusted_is_refused(key, body):

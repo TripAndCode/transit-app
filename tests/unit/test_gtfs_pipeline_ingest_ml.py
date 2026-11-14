@@ -14,10 +14,10 @@ import gtfs_pipeline
 from pipeline import ml_evaluation_ingest, ml_forecast_ingest, rt_validation_ingest
 from pipeline.ml_evaluation_ingest import EvaluationIngest, EvaluationReadError
 from pipeline.ml_forecast_ingest import ForecastIngest, ForecastReadError, ForecastWriteError, StoreNotConfigured
-from pipeline.rt_validation_ingest import ValidationIngest, ValidationReadError
+from pipeline.rt_validation_ingest import MALFORMED, UNKNOWN_AGENCY, UNTRUSTED, ValidationIngest, ValidationReadError
 
 _NO_SUMMARIES = EvaluationIngest(listed=0, upserted=0, skipped=())
-_NO_VALIDATION = ValidationIngest(listed=0, fetched=0, upserted=0, skipped=())
+_NO_VALIDATION = ValidationIngest(listed=0, fetched=0, upserted=0, skipped={})
 
 
 def _run(
@@ -141,12 +141,26 @@ def test_says_no_live_scorecard_is_published_rather_than_zero(caplog):
     assert "no live scorecard has been published yet" in caplog.text
 
 
-def test_reports_the_validator_summaries_it_ingested_and_counts_the_skipped(caplog):
-    """The ingest itself logs why keys were skipped, one line per run."""
-    validation = ValidationIngest(listed=30, fetched=3, upserted=2, skipped=("validation/99/20261110.json",))
+def test_reports_the_validator_summaries_it_ingested_and_names_the_ones_to_fix(caplog):
+    """An untrusted or malformed key needs fixing at its source, so it is
+    named; an agency not in this database is history waiting for it."""
+    validation = ValidationIngest(
+        listed=30,
+        fetched=3,
+        upserted=2,
+        skipped={
+            UNTRUSTED: ("validation/8/20261110.json",),
+            MALFORMED: ("validation/notes.txt",),
+            UNKNOWN_AGENCY: ("validation/99/20261110.json", "validation/99/20261111.json"),
+        },
+    )
     with caplog.at_level(logging.INFO):
         _run(load_result=ForecastIngest(prefix=None, rows=0), validation_result=validation)
-    assert "upserted 2 validator summary(ies) of 3 fetched, 1 skipped" in caplog.text
+    assert "upserted 2 validator summary(ies) of 3 fetched" in caplog.text
+    assert "validation/8/20261110.json" in caplog.text
+    assert "validation/notes.txt" in caplog.text
+    assert "2 validator summary key(s) name an agency not in this database" in caplog.text
+    assert "validation/99/" not in caplog.text
 
 
 def test_says_no_validator_summary_is_published_rather_than_zero(caplog):

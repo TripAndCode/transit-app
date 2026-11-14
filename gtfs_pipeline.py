@@ -989,10 +989,16 @@ def cmd_ingest_ml(args):
     if validation.listed == 0:
         logger.info("ingest_ml: no validator summary has been published yet")
     else:
-        logger.info(
-            f"ingest_ml: upserted {validation.upserted} validator summary(ies) of {validation.fetched} fetched, "
-            f"{len(validation.skipped)} skipped"
-        )
+        logger.info(f"ingest_ml: upserted {validation.upserted} validator summary(ies) of {validation.fetched} fetched")
+    # Untrusted and malformed keys need fixing at their source; an unknown
+    # agency's keys are history waiting for it, picked up once it is added.
+    for reason in (rt_validation_ingest.UNTRUSTED, rt_validation_ingest.MALFORMED):
+        if validation.skipped.get(reason):
+            logger.warning(
+                f"ingest_ml: skipped validator summaries ({reason}): {', '.join(validation.skipped[reason])}"
+            )
+    if unknown := validation.skipped.get(rt_validation_ingest.UNKNOWN_AGENCY):
+        logger.warning(f"ingest_ml: {len(unknown)} validator summary key(s) name an agency not in this database")
 
 
 def main():

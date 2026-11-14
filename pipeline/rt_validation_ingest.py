@@ -4,7 +4,7 @@ scripts/rt_validate_sample.py) into ``rt_validation_daily``, one row per agency
 and service date.
 
 Every run lists the prefix and fetches only the keys whose ETag differs from
-the one stored beside their row, so the growing history is not downloaded
+the one stored beside their row (or that list none), so the growing history is not downloaded
 again on each sweep, and a re-published summary replaces its row. A key whose
 name is not a summary's, or names an agency the database does not hold, is
 skipped before it is fetched; a document that cannot be trusted is skipped
@@ -22,7 +22,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, NamedTuple
@@ -36,6 +35,10 @@ STATUSES = ("ok", "no_archive", "no_timetable", "validator_failed")
 PREFIX = "validation/"
 _KEY = re.compile(r"validation/(\d+)/(\d{8})\.json")
 _RULE_FIELDS = ("rule_id", "severity", "title", "occurrences", "files_with_rule")
+#: Why a key was skipped (:attr:`ValidationIngest.skipped`).
+MALFORMED = "not a summary key"
+UNKNOWN_AGENCY = "agency not in this database"
+UNTRUSTED = "untrusted"
 # The INT columns files_given and files_validated are stored in.
 _MAX_COUNT = 2**31 - 1
 
@@ -67,12 +70,13 @@ class ValidationWriteError(Exception):
 @dataclass(frozen=True)
 class ValidationIngest:
     """``fetched`` counts the summaries downloaded, ``upserted`` the rows
-    inserted or changed, ``skipped`` the keys refused."""
+    inserted or changed, ``skipped`` the keys refused under each reason
+    (MALFORMED, UNKNOWN_AGENCY, UNTRUSTED) that refused any."""
 
     listed: int
     fetched: int
     upserted: int
-    skipped: tuple[str, ...]
+    skipped: dict[str, tuple[str, ...]]
 
 
 class SummaryRow(NamedTuple):
@@ -97,14 +101,20 @@ def _count(value: Any, name: str, ceiling: int | None = None) -> int:
     return value
 
 
-def _has_nul(value: Any) -> bool:
-    """Whether any text in *value*, keys included, holds U+0000, which JSONB refuses."""
+def _unstorable(value: Any) -> bool:
+    """Whether any text in *value*, keys included, holds U+0000, which JSONB
+    refuses, or a lone surrogate (U+D800 to U+DFFF), which has no UTF-8
+    encoding for psycopg2 to send."""
     if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return True
         return "\x00" in value
     if isinstance(value, dict):
-        return any(_has_nul(key) or _has_nul(item) for key, item in value.items())
+        return any(_unstorable(key) or _unstorable(item) for key, item in value.items())
     if isinstance(value, list):
-        return any(_has_nul(item) for item in value)
+        return any(_unstorable(item) for item in value)
     return False
 
 
@@ -133,10 +143,10 @@ def parse_summary(key: str, body: bytes) -> SummaryRow:
     summary that is not ok, a count that is not one, or a non-finite number
     anywhere. So does a document the upsert would refuse, which would roll
     back every other summary of its batch: a reason that is not text, a file
-    count past its INT column, or a U+0000 anywhere."""
+    count past its INT column, or U+0000 or a lone surrogate anywhere."""
     document = json.loads(body)
-    if _has_nul(document):
-        raise ValueError("the document holds U+0000")
+    if _unstorable(document):
+        raise ValueError("the document holds U+0000 or a lone surrogate")
     if document.get("schema") != SCHEMA:
         raise ValueError(f"schema {document.get('schema')!r} is not {SCHEMA}")
     agency_id = document["agency_id"]
@@ -196,24 +206,23 @@ def load_validation(conn: Any, s3_client: Any, bucket: str) -> ValidationIngest:
     except Exception as exc:
         raise ValidationWriteError(str(exc)) from exc
 
-    due = sorted(key for key, etag in listed.items() if etags.get(key) != etag)
+    # Without an ETag an unchanged key cannot be told from a re-published one.
+    due = sorted(key for key, etag in listed.items() if not etag or etags.get(key) != etag)
     rows: list[tuple[Any, ...]] = []
-    skipped: list[str] = []
-    reasons: Counter[str] = Counter()
+    skipped: dict[str, list[str]] = {}
 
     def skip(key: str, reason: str, detail: object = "") -> None:
         _log.debug("rt_validation_ingest: skipped %s: %s %s", key, reason, detail)
-        skipped.append(key)
-        reasons[reason] += 1
+        skipped.setdefault(reason, []).append(key)
 
     fetched = 0
     for key in due:
         match = _KEY.fullmatch(key)
         if not match:
-            skip(key, "not a summary key")
+            skip(key, MALFORMED)
             continue
         if int(match.group(1)) not in agencies:
-            skip(key, "agency not in this database")
+            skip(key, UNKNOWN_AGENCY)
             continue
         try:
             body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
@@ -223,11 +232,11 @@ def load_validation(conn: Any, s3_client: Any, bucket: str) -> ValidationIngest:
         try:
             rows.append((*parse_summary(key, body), listed[key]))
         except Exception as exc:
-            skip(key, "untrusted", exc)
-    if reasons:
+            skip(key, UNTRUSTED, exc)
+    if skipped:
         _log.warning(
             "rt_validation_ingest: skipped %s",
-            ", ".join(f"{count} {reason}" for reason, count in sorted(reasons.items())),
+            ", ".join(f"{len(keys)} {reason}" for reason, keys in sorted(skipped.items())),
         )
 
     try:
@@ -246,7 +255,12 @@ def load_validation(conn: Any, s3_client: Any, bucket: str) -> ValidationIngest:
         except Exception:
             _log.debug("rt_validation_ingest: rollback failed", exc_info=True)
         raise ValidationWriteError(str(exc)) from exc
-    return ValidationIngest(listed=len(listed), fetched=fetched, upserted=len(changed), skipped=tuple(skipped))
+    return ValidationIngest(
+        listed=len(listed),
+        fetched=fetched,
+        upserted=len(changed),
+        skipped={reason: tuple(keys) for reason, keys in skipped.items()},
+    )
 
 
 def ingest_validation(conn: Any, s3_client: Any, bucket: str) -> int:

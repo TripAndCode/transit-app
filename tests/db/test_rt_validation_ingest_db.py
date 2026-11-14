@@ -5,9 +5,9 @@ without failing the rest."""
 
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
-from pipeline.rt_validation_ingest import ValidationIngest, load_validation
+from pipeline.rt_validation_ingest import UNKNOWN_AGENCY, UNTRUSTED, ValidationIngest, load_validation
 from scripts import rt_validate_sample as rv
 
 _DAY = date(2026, 11, 10)
@@ -67,7 +67,7 @@ def test_summaries_land_and_an_unknown_agency_costs_only_the_listing(pg_conn, ag
     store = _FakeS3({rv.summary_key(agency_id, _DAY): _summary(agency_id), unknown: _summary(agency_id + 1000)})
     with caplog.at_level(logging.WARNING):
         result = load_validation(pg_conn, store, "transit-ml")
-    assert result == ValidationIngest(listed=2, fetched=1, upserted=1, skipped=(unknown,))
+    assert result == ValidationIngest(listed=2, fetched=1, upserted=1, skipped={UNKNOWN_AGENCY: (unknown,)})
     assert store.fetched == [rv.summary_key(agency_id, _DAY)]
     assert [row[:6] for row in _rows(pg_conn)] == [(agency_id, _DAY, "ok", 58, "120", '"v1"')]
     # One line per run, counting the skipped keys by reason.
@@ -75,7 +75,7 @@ def test_summaries_land_and_an_unknown_agency_costs_only_the_listing(pg_conn, ag
     assert "1 agency not in this database" in warning.getMessage()
 
     again = _FakeS3({unknown: _summary(agency_id + 1000)})
-    assert load_validation(pg_conn, again, "transit-ml").skipped == (unknown,)
+    assert load_validation(pg_conn, again, "transit-ml").skipped == {UNKNOWN_AGENCY: (unknown,)}
     assert again.fetched == []
 
 
@@ -86,6 +86,7 @@ def test_a_poison_summary_is_skipped_without_blocking_its_neighbours(pg_conn, ag
     reason = rv.summary_key(agency_id, date(2026, 11, 11))
     nul = rv.summary_key(agency_id, date(2026, 11, 12))
     huge = rv.summary_key(agency_id, date(2026, 11, 13))
+    surrogate = rv.summary_key(agency_id, date(2026, 11, 14))
     failed = {**_summary(agency_id), "status": "no_archive", "rules": [], "files_validated": 0}
     store = _FakeS3(
         {
@@ -93,13 +94,15 @@ def test_a_poison_summary_is_skipped_without_blocking_its_neighbours(pg_conn, ag
             reason: {**failed, "service_date": "2026-11-11", "reason": {"why": "gone"}},
             nul: {**failed, "service_date": "2026-11-12", "reason": "gone\x00"},
             huge: {**failed, "service_date": "2026-11-13", "reason": "gone", "files_given": 2**31},
+            surrogate: {**failed, "service_date": "2026-11-14", "reason": "gone", "note\udc00": 1},
         }
     )
     with caplog.at_level(logging.WARNING):
         result = load_validation(pg_conn, store, "transit-ml")
-    assert (result.upserted, sorted(result.skipped)) == (1, sorted([reason, nul, huge]))
+    assert result.upserted == 1
+    assert result.skipped == {UNTRUSTED: tuple(sorted([reason, nul, huge, surrogate]))}
     assert [row[:3] for row in _rows(pg_conn)] == [(agency_id, _DAY, "ok")]
-    assert "3 untrusted" in caplog.text
+    assert "4 untrusted" in caplog.text
 
 
 def test_a_key_stored_under_its_etag_is_not_fetched_again(pg_conn, agency_id):
@@ -107,7 +110,7 @@ def test_a_key_stored_under_its_etag_is_not_fetched_again(pg_conn, agency_id):
     load_validation(pg_conn, _FakeS3({key: _summary(agency_id)}), "transit-ml")
     again = _FakeS3({key: _summary(agency_id)})
     assert load_validation(pg_conn, again, "transit-ml") == ValidationIngest(
-        listed=1, fetched=0, upserted=0, skipped=()
+        listed=1, fetched=0, upserted=0, skipped={}
     )
     assert again.fetched == []
 
@@ -123,7 +126,7 @@ def test_a_republished_summary_replaces_its_row_and_moves_ingested_at(pg_conn, a
     assert load_validation(pg_conn, republished, "transit-ml").upserted == 1
     (row,) = _rows(pg_conn)
     assert row[4:6] == ("7", '"v2"')
-    assert row[6].year == 2026 and row[6].month != 1
+    assert row[6] > datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def test_a_new_etag_over_the_same_document_keeps_ingested_at(pg_conn, agency_id):
@@ -155,3 +158,13 @@ def test_a_change_the_scorecard_does_not_read_keeps_ingested_at(pg_conn, agency_
         runtime, ingested_at = cur.fetchone()
     assert runtime == "99.5"
     assert (ingested_at.year, ingested_at.month, ingested_at.day) == (2026, 1, 1)
+
+
+def test_a_listing_without_an_etag_is_fetched_on_every_run(pg_conn, agency_id):
+    """With no ETag to compare, an unchanged key cannot be told from a
+    re-published one, so it is never taken as already stored."""
+    key = rv.summary_key(agency_id, _DAY)
+    load_validation(pg_conn, _FakeS3({key: _summary(agency_id)}, etags={key: ""}), "transit-ml")
+    again = _FakeS3({key: _summary(agency_id)}, etags={key: ""})
+    assert load_validation(pg_conn, again, "transit-ml").fetched == 1
+    assert again.fetched == [key]

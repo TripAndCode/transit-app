@@ -257,10 +257,13 @@ without a summary, under the same checks bar the summary's own fields. The daily
 GTFS-RT validator summaries (`validation/<agency_id>/<YYYYMMDD>.json`, written by
 `scripts/rt_validate_sample.py`) go into `rt_validation_daily`
 (`pipeline/rt_validation_ingest.py`), one row per agency and day. Only a key whose
-ETag differs from its stored row's is fetched, and a summary is skipped by name when
-it cannot be trusted or names an agency the database does not hold. The feed-quality
-scorecard counts them per month. Each of the four steps is guarded on its own, so one
-failing never skips the others.
+ETag differs from its stored row's, or that lists none, is fetched. A key naming an
+agency the database does not hold is skipped before it is fetched, and tried again on
+the next run, so an agency added later picks up its history. A summary that cannot
+be trusted is skipped too. The sweep logs one line counting the skips by reason;
+`make ingest-ml` names each untrusted or malformed key and counts the rest. The
+feed-quality scorecard counts the summaries per month. Each of the four steps is
+guarded on its own, so one failing never skips the others.
 
 Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
 forecast, every evaluation summary, every live scorecard and every new or changed

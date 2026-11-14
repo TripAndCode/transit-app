@@ -3,7 +3,8 @@
 -- day's TripUpdates, as pipeline.rt_validation_ingest reads it. summary is
 -- the whole document; status, reason and the two file counts are copied out
 -- of it. etag is the object's R2 ETag, so an unchanged summary is not fetched
--- again, and ingested_at moves only when the document changes.
+-- again. ingested_at moves only when what the scorecard reads changes: the
+-- status, files_validated or the rules.
 CREATE TABLE IF NOT EXISTS rt_validation_daily (
     agency_id        INT          NOT NULL REFERENCES agencies(agency_id) ON DELETE CASCADE,
     service_date     DATE         NOT NULL,
