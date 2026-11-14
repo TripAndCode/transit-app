@@ -119,9 +119,9 @@ body:has(.login-shell),
 
 /* Layout on top of the shared .btn family: full width in the narrow card,
    a consistent tap height, and a touch more gap than .btn's default for the
-   provider mark plus label. A pending click must stay blocked even though
-   nothing else disables the element, so pointer-events carries that; the
-   muted colours themselves come from .btn[aria-disabled]. */
+   provider mark plus label. The provider buttons carry only aria-disabled,
+   never the native disabled, so pointer-events is what blocks a second click
+   while a redirect is pending; the muted colours come from .btn[aria-disabled]. */
 .login-card__btn {
   width: 100%;
   height: 44px;
