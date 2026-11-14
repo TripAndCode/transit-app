@@ -10,6 +10,8 @@ import { SCOPE_EXTRAS_NONE, useScope, type Scope } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
 import { DaysControl, EarlyControl, PeriodControl, RoutesControl, TimeControl, ToleranceControl, type ControlProps } from "./scopeControls";
 
+const apply = () => screen.getByRole("button", { name: /^Apply/ });
+
 const BASE_SCOPE: Scope = {
   ...SCOPE_EXTRAS_NONE,
   from: "2026-09-01",
@@ -25,15 +27,15 @@ const TWO_ROUTES = [
   { route_id: "r102", route_short_name: "2", route_long_name: "Hill", route_code: "102", trip_headsigns: [] },
 ];
 
-/** Mounts RoutesControl directly on a given scope and update spy, bypassing
+/** Mounts a control directly on a given scope and update spy, bypassing
  *  useScope's URL binding -- so a test can assert on `update`'s call count and
  *  arguments precisely, which an integration mount through the URL cannot. */
-function directMount(scope: Scope, update = vi.fn(), close?: () => void) {
+function directMount(scope: Scope, update = vi.fn(), close?: () => void, Component: ComponentType<ControlProps> = RoutesControl) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: TWO_ROUTES, isPending: false } as never);
   renderWithProviders(
     <MemoryRouter initialEntries={["/agencies/1/time"]}>
       <Routes>
-        <Route path="/agencies/:agencyId/time" element={<RoutesControl scope={scope} update={update} close={close} />} />
+        <Route path="/agencies/:agencyId/time" element={<Component scope={scope} update={update} close={close} />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -106,16 +108,63 @@ describe("scope controls", () => {
   afterEach(() => vi.restoreAllMocks());
 
   describe("days", () => {
-    it("turns one weekday off from every day", async () => {
+    it("stages a tick without writing the scope, and only Apply writes it", async () => {
       mount(DaysControl);
       await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(params().has("dow")).toBe(false);
+      await userEvent.click(apply());
       expect(params().get("dow")).toBe("tue,wed,thu,fri,sat,sun");
     });
 
     it("refuses to turn the last day off", async () => {
-      mount(DaysControl, "?dow=mon");
+      directMount({ ...BASE_SCOPE, dow: "mon" }, vi.fn(), undefined, DaysControl);
       await userEvent.click(screen.getByRole("button", { name: "Mon" }));
-      expect(params().get("dow")).toBe("mon");
+      expect(screen.getByRole("button", { name: "Mon" })).toHaveAttribute("aria-pressed", "true");
+      expect(apply()).toBeDisabled();
+    });
+
+    it("disables Apply while the draft matches the committed days, and again once a toggle is undone", async () => {
+      const update = directMount({ ...BASE_SCOPE }, vi.fn(), undefined, DaysControl);
+      expect(apply()).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(apply()).toBeEnabled();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(apply()).toBeDisabled();
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it("discards the draft on Cancel, with no update call, and closes", async () => {
+      const close = vi.fn();
+      const update = directMount({ ...BASE_SCOPE }, vi.fn(), close, DaysControl);
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.getByRole("button", { name: "Mon" })).toHaveAttribute("aria-pressed", "true");
+      expect(update).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes through the close prop on Apply", async () => {
+      const close = vi.fn();
+      directMount({ ...BASE_SCOPE }, vi.fn(), close, DaysControl);
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      await userEvent.click(apply());
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("discards a staged draft on a preset pick, even re-picking the already-checked preset", async () => {
+      mount(DaysControl);
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(apply()).toBeEnabled();
+      await userEvent.click(screen.getByRole("radio", { name: "All" }));
+      expect(apply()).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Mon" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("shows the Apply label with the staged day count", async () => {
+      mount(DaysControl);
+      expect(screen.getByRole("button", { name: "Apply · 7 days" })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(screen.getByRole("button", { name: "Apply · 6 days" })).toBeInTheDocument();
     });
 
     it("applies a preset and the timetable at once", async () => {

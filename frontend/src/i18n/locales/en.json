@@ -2350,7 +2350,9 @@
       "early_label": "Early departures",
       "early_counted": "Count early departures as on time",
       "early_limited": "Not on time if more than {{n}} min early",
-      "early_current": "Now: {{value}}"
+      "early_current": "Now: {{value}}",
+      "days_apply_one": "Apply · {{count}} day",
+      "days_apply_other": "Apply · {{count}} days"
     },
     "pin": "Show all filters",
     "reset": "Reset conditions",

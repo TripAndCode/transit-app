@@ -9,26 +9,10 @@
   align-self: flex-start;
 }
 
-.scope-pills {
+.scope-days {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-}
-
-.scope-pill {
-  padding: 3px 10px;
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.scope-pill[aria-pressed="true"] {
-  color: var(--accent-strong);
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  gap: var(--space-1);
 }
 
 .scope-dates {
@@ -216,10 +200,10 @@
   text-decoration: line-through;
 }
 
-/* The routes control's own footer: staged picks commit only here, so it
-   stays reachable (sticky, opaque) under whatever grows above it -- the
-   route list, its tray of picked chips, and the daily-aggregate note. */
-.routes-control__foot {
+/* A staged control's own footer: its draft commits only here, so it stays
+   reachable (sticky, opaque) under whatever grows above it -- the picker or
+   chips, and the daily-aggregate note. */
+.scope-apply {
   position: sticky;
   bottom: 0;
   display: flex;
@@ -236,13 +220,13 @@
 /* Inside the token's popover only: bled to the popover's own edge, since
    .scope-strip__cell (the control's other home) has no padding of its own
    to bleed against and no border or background for the footer to meet. */
-.scope-popover .routes-control__foot {
+.scope-popover .scope-apply {
   margin: var(--space-1) calc(-1 * var(--space-3)) calc(-1 * var(--space-3));
   padding-inline: var(--space-3);
   border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px);
 }
 
-.routes-control__hint {
+.scope-apply__hint {
   flex: 1 1 0;
   min-width: 0;
   font-size: var(--text-xs);
@@ -279,19 +263,19 @@
    first, since the control is tightest here, and both buttons take the
    full-size tap height. */
 @media (max-width: 640px) {
-  .routes-control__foot {
+  .scope-apply {
     bottom: calc(56px + env(safe-area-inset-bottom));
   }
 
-  .routes-control__hint {
+  .scope-apply__hint {
     display: none;
   }
 
-  .routes-control__foot .btn {
+  .scope-apply .btn {
     height: var(--control-h);
   }
 
-  .routes-control__apply {
+  .scope-apply__button {
     flex: 1 1 auto;
   }
 }
