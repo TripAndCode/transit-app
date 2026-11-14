@@ -64,7 +64,7 @@ export function FilterDock({ agencyId, applied, onApply, playback }: {
       {playback && (
         <button
           type="button"
-          className={`ops-dock__playback${playback.active ? " ops-dock__playback--on" : ""}`}
+          className="btn btn--ghost btn--sm ops-dock__playback"
           aria-pressed={playback.active}
           onClick={playback.onToggle}
         >
@@ -76,7 +76,7 @@ export function FilterDock({ agencyId, applied, onApply, playback }: {
       )}
       {dirty && (
         <>
-          <button type="submit" className="ops-dock__apply">{t("apply")}</button>
+          <button type="submit" className="btn btn--primary ops-dock__apply">{t("apply")}</button>
           {/* The button appearing is the visual signal. This says the same
               thing for a screen reader, which can't see the dock's edge
               change colour — hidden rather than dropped so the state is
