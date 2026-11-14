@@ -24,7 +24,7 @@ const DEFINITION: DefinitionMeta = {
 };
 
 function agencies(): Agency[] {
-  return [{ agency_id: 1, agency_name: "Hiroden", feed_url: "x", static_url: null, latest_data_date: "2026-04-07" }];
+  return [{ agency_id: 1, agency_name: "Hiroden", feed_url: "x", static_url: null, latest_data_date: "2026-04-07", capability_tier: "full" }];
 }
 
 function trendResponse(days: TrendDay[] = []): ReportResponse {
@@ -274,7 +274,7 @@ describe("ReportsHomeTab", () => {
 function renderRecoveryTab(path: string) {
   vi.spyOn(hooks, "useReport").mockReturnValue({ data: trendResponse(), isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useAgencies").mockReturnValue({
-    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
+    data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01", capability_tier: "full" }],
     isPending: false,
   } as never);
   renderWithProviders(

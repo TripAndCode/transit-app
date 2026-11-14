@@ -139,6 +139,17 @@ describe("HeadwayQualityPanel", () => {
     expect(screen.queryByText(/enough data/)).not.toBeInTheDocument();
   });
 
+  it("states a basic-tier agency's tier instead of a pipeline reason", () => {
+    mockRoutes();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "basic" }],
+    } as never);
+    mockHeadwayQuality({ data: { rows: [], ctx: CTX, unavailable_reason: "probe_refuted", last_checked: "2026-09-11" } });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText(/carries basic data only/)).toBeInTheDocument();
+    expect(screen.queryByText(/last check/)).not.toBeInTheDocument();
+  });
+
   it("says when the timetable has no high-frequency route at all", () => {
     mockRoutes();
     mockHeadwayQuality({ data: { rows: [], ctx: CTX, unavailable_reason: "no_high_frequency_routes", last_checked: null } });

@@ -7,7 +7,7 @@ import { DEFAULT_RANGE_DAYS, isoDaysAgo, isoDaysBefore } from "./scope";
 import type { Agency } from "./types";
 
 function agency(partial: Partial<Agency> = {}): Agency {
-  return { agency_id: 1, agency_name: "Test", feed_url: "http://x", static_url: null, latest_data_date: null, ...partial };
+  return { agency_id: 1, agency_name: "Test", feed_url: "http://x", static_url: null, latest_data_date: null, capability_tier: "full", ...partial };
 }
 
 describe("latestDataWindow", () => {
@@ -17,11 +17,11 @@ describe("latestDataWindow", () => {
   });
 
   it("returns null when the agency has no data at all", () => {
-    expect(latestDataWindow(1, [agency({ latest_data_date: null })])).toBeNull();
+    expect(latestDataWindow(1, [agency({ latest_data_date: null, capability_tier: "full" })])).toBeNull();
   });
 
   it("returns a DEFAULT_RANGE_DAYS window ending at latest_data_date, regardless of today's date", () => {
-    const range = latestDataWindow(1, [agency({ latest_data_date: "2026-05-01" })]);
+    const range = latestDataWindow(1, [agency({ latest_data_date: "2026-05-01", capability_tier: "full" })]);
     expect(range).toEqual({ from: isoDaysBefore("2026-05-01", DEFAULT_RANGE_DAYS - 1), to: "2026-05-01" });
   });
 
@@ -55,7 +55,7 @@ describe("useJumpToLatestDataRange", () => {
 
   it("returns null (renders no control) when the agency has no latest data date", async () => {
     vi.spyOn(hooks, "useAgencies").mockReturnValue({
-      data: [agency({ latest_data_date: null })],
+      data: [agency({ latest_data_date: null, capability_tier: "full" })],
       isPending: false,
     } as never);
     render(
@@ -69,7 +69,7 @@ describe("useJumpToLatestDataRange", () => {
   it("overwrites an existing explicit from/to with the agency's latest-data window on click", async () => {
     const { default: userEvent } = await import("@testing-library/user-event");
     vi.spyOn(hooks, "useAgencies").mockReturnValue({
-      data: [agency({ latest_data_date: "2026-05-01" })],
+      data: [agency({ latest_data_date: "2026-05-01", capability_tier: "full" })],
       isPending: false,
     } as never);
     render(

@@ -894,6 +894,27 @@ describe("AnalysisTab council report", () => {
     expect(figure(COMPARISON)).toHaveTextContent("Observation coverage can't be measured: this feed's trips can't be matched to the timetable");
   });
 
+  it("states a basic-tier agency's tier for the delivered rate and the comparison, not a pipeline reason", () => {
+    const basic = { agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "basic" };
+    const unmatched = {
+      ...COMPARABLE,
+      comparable: false,
+      reason: "coverage_unknown",
+      coverage_pct: null,
+      observed_trips: null,
+      coverage_planned_trips: null,
+      ci_low: null,
+      ci_high: null,
+      delivered_missing: "feed_cannot_report",
+    };
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [basic] } as never);
+    showCouncil([], { comparability: unmatched, rows: [[22.6, 2.5, 540357, 2130, null, null]], delivered_missing: "feed_cannot_report" });
+    expect(figure("Service delivered %")).toHaveTextContent("not part of basic data");
+    expect(figure("Service delivered %")).not.toHaveTextContent("cancellations");
+    expect(figure(COMPARISON)).toHaveTextContent("Basic data: on-time only, so observation coverage can't be measured");
+    expect(figure(COMPARISON)).not.toHaveTextContent("can't be matched to the timetable");
+  });
+
   it("labels the comparison as the whole agency's when a filter narrows the on-time figures", () => {
     showCouncil(["R1"], { comparability: COMPARABLE });
     expect(value(`${COMPARISON} (whole agency)`)).toBe("Comparable");

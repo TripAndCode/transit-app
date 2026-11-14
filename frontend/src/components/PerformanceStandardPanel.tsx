@@ -23,10 +23,11 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
+import { useCapabilityTier } from "../api/useCapabilityTier";
 import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { SHARED_TABLE, th, td } from "./tableStyles";
-import type { PerformanceStandardRow } from "../api/types";
+import type { CapabilityTier, PerformanceStandardRow } from "../api/types";
 import { ErrorBanner } from "./ErrorBanner";
 import { OnTimeDefinition } from "./DefinitionMetaBlock";
 import { fixedTenth, formatDuration, formatNumber, roundTenth } from "../utils/format";
@@ -55,7 +56,7 @@ const DELIVERY_METRICS: ReadonlySet<PerformanceStandardRow["metric_type"]> = new
   "vehicle_km_delivered_pct",
 ]);
 
-function notJudgedText(t: TFunction, notJudged: NotJudged): string {
+function notJudgedText(t: TFunction, notJudged: NotJudged, tier: CapabilityTier | undefined): string {
   switch (notJudged.reason) {
     case "too_few_observations":
       return t("reports.performance_standard.not_judged_thin", {
@@ -75,7 +76,7 @@ function notJudgedText(t: TFunction, notJudged: NotJudged): string {
       return t("reports.performance_standard.not_judged_no_shapes");
     default:
       return t("reports.performance_standard.not_judged_delivered", {
-        reason: t(`network.delivered_missing.${notJudged.reason}`),
+        reason: tier === "basic" ? t("capability.basic.label") : t(`network.delivered_missing.${notJudged.reason}`),
       });
   }
 }
@@ -83,7 +84,15 @@ function notJudgedText(t: TFunction, notJudged: NotJudged): string {
 /** The verdict, or why there is none. A route page shows an on-time figure
  *  from fewer observations than a verdict needs, so a bare dash beside it
  *  would read as missing data. */
-function Judgement({ meets, notJudged }: { meets: boolean | null; notJudged: PerformanceStandardRow["not_judged"] }) {
+function Judgement({
+  meets,
+  notJudged,
+  tier,
+}: {
+  meets: boolean | null;
+  notJudged: PerformanceStandardRow["not_judged"];
+  tier: CapabilityTier | undefined;
+}) {
   const { t } = useTranslation();
   if (meets != null) {
     return (
@@ -93,7 +102,7 @@ function Judgement({ meets, notJudged }: { meets: boolean | null; notJudged: Per
     );
   }
   if (notJudged == null) return <>—</>;
-  return <span className="standard-unjudged">{notJudgedText(t, notJudged)}</span>;
+  return <span className="standard-unjudged">{notJudgedText(t, notJudged, tier)}</span>;
 }
 
 /** `route` narrows the panel to one route's targets, for that route's own page. */
@@ -101,6 +110,7 @@ export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx
   const { t } = useTranslation();
   const routeNames = useRouteNames(aid);
   const { data, error, refetch } = usePerformanceStandards(aid, ctx, true, route);
+  const tier = useCapabilityTier(aid);
   const rows = data?.rows ?? [];
 
   if (!error && rows.length === 0) return null;
@@ -138,7 +148,7 @@ export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx
                   <td style={td()}>{t(`reports.performance_standard.metric_label.${r.metric_type}`)}</td>
                   <td style={td({ align: "right" })}>{fmtMetricValue(r.threshold_value, r.metric_type)}</td>
                   <td style={td({ align: "right" })}>{fmtMetricValue(r.actual_value, r.metric_type)}</td>
-                  <td style={td()}><Judgement meets={r.meets} notJudged={r.not_judged} /></td>
+                  <td style={td()}><Judgement meets={r.meets} notJudged={r.not_judged} tier={tier} /></td>
                   <td style={td({ align: "right" })}>{fmtAchievementRate(r.achievement_rate)}</td>
                   <td style={td({ align: "right" })}>{fmtEstimate(r.estimated_bonus_deduction)}</td>
                 </tr>

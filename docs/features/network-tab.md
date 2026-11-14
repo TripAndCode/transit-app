@@ -133,6 +133,16 @@ checks run in a fixed order:
 | 4 | `ci_wide` | the on-time interval's half-width above `MAX_CI_HALF_WIDTH_PP` (3 points) | the interval then spans more than the gap between many neighbouring agencies' rates, so ranking them would order noise |
 | 5 | `clamp_high` | `clamp_pct`, to a tenth as printed, above `MAX_CLAMP_PCT` (5%) | a feed producing that many implausible readings makes the readings it kept suspect too |
 
+Each row also carries its agency's `capability_tier`
+(`pipeline/reports/capability.py`), derived from the same facts as the gates:
+`basic` when the agency's trip_ids cannot be matched to the timetable, its
+ingest strategy cannot carry the RT-optional fields, or a live RT field-coverage
+probe found them missing; `full` otherwise, including a capable feed whose probe
+lapsed or never ran. A basic row is labelled "Basic data: on-time only", and its
+service-delivered rate and unmeasurable coverage say they are not part of basic
+data instead of giving a pipeline reason. The agency catalogue
+(`GET /api/agencies`) serves the same tier for the picker and every agency page.
+
 Each check reads the figure the row prints, rounded as printed, so an
 operator can work out from the row itself why it is unranked: the reason line
 names the figure and the threshold, and the figures behind it (coverage with

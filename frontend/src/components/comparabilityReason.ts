@@ -1,5 +1,5 @@
 import type { useTranslation } from "react-i18next";
-import type { ComparabilityThresholds, NetworkAgencyRow } from "../api/types";
+import type { CapabilityTier, ComparabilityThresholds, NetworkAgencyRow } from "../api/types";
 import { fixedTenth, formatNumber } from "../utils/format";
 
 /** The figures a reason reads: an agencies board row has them all, and the
@@ -14,7 +14,7 @@ type GateFigures = Pick<
   | "clamp_pct"
   | "delivered_missing"
   | "planned_trips"
->;
+> & { capability_tier?: CapabilityTier };
 
 /** Half an on-time interval's width, rounded up to a tenth, so an interval
  *  the gate found wider than its limit never prints at the limit. The inner
@@ -33,6 +33,12 @@ function coverageUnknownWhy(a: GateFigures): "unreadable" | "unmatched" | "no_pl
   return a.planned_trips === 0 ? "no_plan" : "no_plan_observed";
 }
 
+/** Whether coverage is unmeasurable because the agency's basic-tier feed
+ *  can't be matched to the timetable at all, which its tier then states. */
+export function coverageOutsideTier(a: GateFigures): boolean {
+  return a.capability_tier === "basic" && coverageUnknownWhy(a) === "unmatched";
+}
+
 /** The first check of the comparability gate an agency fails, as the copy
  *  key that words it and the printed values that copy fills in (`why` is
  *  itself a copy key), so two verdicts with the same parts read the same in
@@ -47,6 +53,7 @@ export function unrankedReasonParts(
     case "no_data":
       return { key: "network.unranked_reason.no_data", values: {} };
     case "coverage_unknown":
+      if (coverageOutsideTier(a)) return { key: "capability.basic.unranked", values: {} };
       return {
         key: "network.unranked_reason.coverage_unknown",
         values: { why: `network.coverage_unknown_why.${coverageUnknownWhy(a)}` },

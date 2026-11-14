@@ -16,6 +16,11 @@ Endpoint: `GET /api/admin/board`. Reads `agencies`, `agg_meta`, and
 `agg_feed_health` for the collector tiles and freshness heatmap, plus
 `pipeline_runs` for the day's run timeline (empty, not an error, when any of
 these tables is absent or unreadable — each panel degrades on its own).
+Heatmap rows carry their realtime feed's `upstream_host`
+(`api.admin_board.upstream_host`) and arrive grouped by it; the page draws one
+group per host, so agencies sharing a vendor host share one block, and a newest
+day missing for every agency of a multi-agency host is stated once as that
+host's.
 Its staleness alerts come from `pipeline.health.aggregate_freshness`, the
 check `GET /api/admin/ops` reads, so the board and Ops always name the same
 agencies as behind; agencies never analyzed share one alert. The board holds

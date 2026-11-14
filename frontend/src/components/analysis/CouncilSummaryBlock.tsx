@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { SnapshotSpec } from "../../api/snapshots";
-import type { ReportResponse } from "../../api/types";
+import type { CapabilityTier, ReportResponse } from "../../api/types";
 import { EM_DASH, fmtPct, formatDuration, formatMinutes, formatNumber } from "../../utils/format";
 import { unrankedReason } from "../comparabilityReason";
 import type { CouncilMark } from "../snapshotCompare";
@@ -44,7 +44,7 @@ function plannedIsWider({ ctx, scope_applied: applied, delivered_scope_applied: 
  *  would rank this agency, and otherwise the first check it fails, in the
  *  board's own words, read from the verdict's own figures only; it has no
  *  words for a response that carries no verdict. */
-function tileWords(key: CouncilTile, report: CouncilReport, t: TFn): Words | null {
+function tileWords(key: CouncilTile, report: CouncilReport, t: TFn, tier: CapabilityTier | undefined): Words | null {
   const [onTimePct, avgDelayMin, samples, plannedTrips, , deliveredPct, earlyPct] = report.rows[0];
   const { covered_days: covered, window_days: days, delivered_missing: missing } = report;
   const agencyWide = plannedIsWider(report);
@@ -72,12 +72,17 @@ function tileWords(key: CouncilTile, report: CouncilReport, t: TFn): Words | nul
       return {
         label: agencyWide ? t("reports.council.delivered_agency_wide") : t("reports.council.delivered"),
         value: fmtPct(deliveredPct, t),
-        note: deliveredPct == null && missing != null ? t(`network.delivered_missing.${missing}`) : undefined,
+        note:
+          deliveredPct == null && tier === "basic"
+            ? t("capability.basic.figure")
+            : deliveredPct == null && missing != null
+              ? t(`network.delivered_missing.${missing}`)
+              : undefined,
       };
     case "comparison": {
       const gate = report.comparability;
       if (!gate) return null;
-      const reason = unrankedReason(gateFigures(gate), gate.thresholds, t);
+      const reason = unrankedReason({ ...gateFigures(gate), capability_tier: tier }, gate.thresholds, t);
       return {
         label: agencyWide ? t("reports.council.comparison_agency_wide") : t("reports.council.comparison"),
         value: gate.comparable ? t("reports.council.comparable") : t("reports.council.not_comparable"),
@@ -88,9 +93,9 @@ function tileWords(key: CouncilTile, report: CouncilReport, t: TFn): Words | nul
 }
 
 /** The tiles the report shows (councilTiles), in words. */
-function councilFigures(report: CouncilReport, t: TFn): Figure[] {
+function councilFigures(report: CouncilReport, t: TFn, tier: CapabilityTier | undefined): Figure[] {
   return councilTiles(report).flatMap(({ key }) => {
-    const words = tileWords(key, report, t);
+    const words = tileWords(key, report, t, tier);
     return words ? [{ key, ...words }] : [];
   });
 }
@@ -99,18 +104,18 @@ function councilFigures(report: CouncilReport, t: TFn): Figure[] {
  *  differently carries today's value (and today's note where that differs),
  *  a tile only the snapshot has says so, and the tiles only today has follow
  *  the snapshot's. */
-function comparedFigures(own: Figure[], compare: CouncilComparison, t: TFn): Figure[] {
+function comparedFigures(own: Figure[], compare: CouncilComparison, t: TFn, tier: CapabilityTier | undefined): Figure[] {
   const marked = own.map((f): Figure => {
     const mark = compare.marks.get(f.key);
     if (mark === "snapshot") return { ...f, side: "snapshot" };
-    const now = mark === "changed" ? tileWords(f.key, compare.today, t) : null;
+    const now = mark === "changed" ? tileWords(f.key, compare.today, t, tier) : null;
     if (now == null) return f;
     const note = now.note != null && now.note !== f.note ? now.note : null;
     const words = note == null ? t("snapshot.compare.today_value", { value: now.value }) : t("snapshot.compare.today_value_note", { value: now.value, note });
     return { ...f, today: words };
   });
   const added = [...compare.marks].flatMap(([key, mark]): Figure[] => {
-    const words = mark === "today" ? tileWords(key, compare.today, t) : null;
+    const words = mark === "today" ? tileWords(key, compare.today, t, tier) : null;
     return words ? [{ key, ...words, side: "today" }] : [];
   });
   return [...marked, ...added];
@@ -125,19 +130,22 @@ function comparedFigures(own: Figure[], compare: CouncilComparison, t: TFn): Fig
  *  does the comparison tile for an agency the board would not rank. A
  *  snapshot compared with today marks each tile whose figures moved. Given
  *  `snapshot`, the live screen's query, its print carries a snapshot of the
- *  figures (CouncilPrint). */
+ *  figures (CouncilPrint). Given the agency's `tier`, a basic-tier agency's
+ *  missing rate and unmeasurable coverage are stated as outside its tier. */
 export function CouncilSummaryBlock({
   report,
   compare,
   snapshot,
+  tier,
 }: {
   report: CouncilReport;
   compare?: CouncilComparison;
   snapshot?: SnapshotSpec | null;
+  tier?: CapabilityTier;
 }) {
   const { t } = useTranslation();
-  const own = councilFigures(report, t);
-  const figures = compare ? comparedFigures(own, compare, t) : own;
+  const own = councilFigures(report, t, tier);
+  const figures = compare ? comparedFigures(own, compare, t, tier) : own;
   const lines = report.text.split("\n").filter((line) => line.trim() !== "");
   const footnotes = lines.filter((line) => FOOTNOTE_MARK.test(line));
   const prose = lines.filter((line) => !FOOTNOTE_MARK.test(line));

@@ -241,6 +241,31 @@ describe("PerformanceStandardPanel", () => {
     }
   });
 
+  it("states a basic-tier agency's tier instead of why its feed can't be judged for delivery", () => {
+    mockRoutes();
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "basic" }],
+    } as never);
+    mockPerformanceStandards({
+      data: response([
+        {
+          route_code: "200",
+          metric_type: "service_delivered_pct",
+          threshold_value: 98,
+          bonus_malus_rate: 0,
+          actual_value: null,
+          achievement_rate: null,
+          estimated_bonus_deduction: null,
+          meets: null,
+          not_judged: { reason: "feed_cannot_report", observations: null, floor: null, planned_trips: null },
+        },
+      ]),
+    });
+    renderWithProviders(<PerformanceStandardPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText("Not judged: Basic data: on-time only")).toBeInTheDocument();
+    expect(screen.queryByText(/cancellations/)).not.toBeInTheDocument();
+  });
+
   it("says whether each on-time rate meets its target, in calm chips", () => {
     mockRoutes();
     mockPerformanceStandards({

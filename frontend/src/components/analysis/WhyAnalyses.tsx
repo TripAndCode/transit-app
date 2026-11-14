@@ -11,6 +11,7 @@ import { useHeadwayQuality, useWeatherDelay } from "../../api/hooks";
 import { scopeToQueryString, useScope } from "../../api/scope";
 import type { DwellRunPayload } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
+import { useCapabilityTier } from "../../api/useCapabilityTier";
 import { useJumpToLatestDataRange } from "../../api/latestDataWindow";
 import { useRouteNames } from "../../api/useRouteNames";
 import { useCappedList } from "../../hooks/useCappedList";
@@ -32,9 +33,10 @@ export function WhyAnalyses({ aid, payload }: { aid: number; payload: DwellRunPa
   const [ctx] = useScope();
   const weather = useWeatherDelay(aid, ctx, true);
   const headway = useHeadwayQuality(aid, ctx, true);
-  const dwellGap = dwellNotShown(t, payload);
+  const tier = useCapabilityTier(aid);
+  const dwellGap = dwellNotShown(t, payload, tier);
   const weatherGap = weather.data ? weatherNotShown(t, weather.data) : null;
-  const headwayGap = headway.data ? headwayNotShown(t, headway.data) : null;
+  const headwayGap = headway.data ? headwayNotShown(t, headway.data, tier) : null;
   const notShown = [
     dwellGap && { key: "dwell_run", name: reportLabel(t, "dwell_run"), ...dwellGap },
     weatherGap && { key: "weather", name: t("reports.weather_delay.title"), ...weatherGap },
