@@ -178,6 +178,9 @@ def load_validation(conn: Any, s3_client: Any, bucket: str) -> ValidationIngest:
         raise ValidationReadError(str(exc)) from exc
     try:
         etags, agencies = _stored(conn)
+        # Not left idle in a transaction across the fetches below, where its
+        # locks would queue a migration's ALTER and every query behind it.
+        conn.commit()
     except Exception as exc:
         raise ValidationWriteError(str(exc)) from exc
 

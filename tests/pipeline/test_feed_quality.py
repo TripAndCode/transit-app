@@ -780,3 +780,8 @@ def test_a_summary_ingested_after_its_closed_month_was_built_reaches_that_month(
     analyze(agency, pg_conn, ch_client)
     assert _stored(pg_conn, agency)[_APRIL]["validator_rules"]["E022"]["occurrences"] == 7
     assert _stored(pg_conn, agency)[_MAY]["validator_missing"] == "not_validated"
+
+    # Unchanged summaries rebuild nothing: a stamp that never matched would
+    # rebuild every closed month of every agency on every sweep.
+    assert feed_quality.rebuild(agency, "static_join", [], feed_quality.last_closed_day(), pg_conn, ch_client) is False
+    pg_conn.rollback()
