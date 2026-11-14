@@ -124,12 +124,23 @@ async def _payload(agency_id, ctx, aconn, ch, *, grain: bool, monkeypatch) -> di
         RangeCtx(from_date=DAY, to_date=DAY, time_band="late_night"),
         RangeCtx(from_date=BEFORE, to_date=DAY, time_band="morning", dow="thu"),
         RangeCtx(from_date=DAY, to_date=DAY, time_band="morning", routes=("R1", "R2")),
+        RangeCtx(from_date=BEFORE, to_date=DAY, time_band="morning", service="平日"),
+        RangeCtx(from_date=DAY, to_date=DAY, time_band="morning", service="平日", routes=("R1",)),
     ],
-    ids=["morning", "noon", "late_night", "dow", "routes"],
+    ids=["morning", "noon", "late_night", "dow", "routes", "service", "service_routes"],
 )
 async def test_a_time_band_pulse_from_the_aggregate_equals_the_grain(
     pg_conn, agency_id, ch_client, ch_async_client, aconn, ctx, monkeypatch
 ):
+    with pg_conn.cursor() as cur:
+        # A weekday timetable, so a service filter resolves its dates from a calendar.
+        cur.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday, "
+            "saturday, sunday, start_date, end_date, trips) "
+            "VALUES (%s, 'wk', true, true, true, true, true, false, false, '2026-01-01', '2026-12-31', 1)",
+            (agency_id,),
+        )
+    pg_conn.commit()
     _seed_two_days(ch_client, agency_id)
     analyze(agency_id, pg_conn, ch_client)
     pg_conn.commit()
