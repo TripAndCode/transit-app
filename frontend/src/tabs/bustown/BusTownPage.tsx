@@ -93,9 +93,7 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [speed, setSpeed] = useState<number>(SPEEDS[DEFAULT_SPEED_INDEX]);
-  /** Null defers to the day's own default start — one minute before its
-   *  first observed departure — rather than a fixed hour, so a reader
-   *  doesn't open on a long-idle town before the day's first bus. */
+  /** Null follows the day's own default start (`firstDepartureStart`). */
   const [sec, setSec] = useState<number | null>(null);
 
   const replay = useBusTownReplay(agencyId, selectedDate, sec, speed);
@@ -119,7 +117,7 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
     autoplay: !reducedMotion,
     sec: playhead,
     setSec,
-    dayKey: replay.date,
+    dayKey: selectedDate,
   });
 
   const buses = positionsAt(replay.model, playhead);

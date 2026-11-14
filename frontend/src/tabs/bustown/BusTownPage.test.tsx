@@ -214,10 +214,13 @@ describe("BusTownPage", () => {
     expect(screen.getByLabelText("Day")).toBeInTheDocument();
   });
 
-  it("passes the resolved day down as the playback loop's restart key", () => {
+  it("keys the playback loop's restart on the picked day, not the resolved one", () => {
     const { playbackSpy } = setup(nonEmptyReplay({ date: "2026-01-05" }));
     renderBusTown();
-    expect(playbackSpy.mock.calls.at(-1)![0].dayKey).toBe("2026-01-05");
+    expect(playbackSpy.mock.calls.at(-1)![0].dayKey).toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Day"), { target: { value: "2026-01-04" } });
+    expect(playbackSpy.mock.calls.at(-1)![0].dayKey).toBe("2026-01-04");
   });
 
   it("resets the playhead to null when another day is picked, so it re-resolves to that day's own first departure", () => {

@@ -46,9 +46,7 @@ export type BusTownReplay = {
    *  playback loop follow. The caller's own `playheadSec` can sit below
    *  `minSec` right after a switch to a day whose service starts later; the
    *  windows fetched and everything the page shows follow this one, so the
-   *  raw state never needs correcting from an effect. Null asks to follow
-   *  the day's own default start instead: one minute before its first
-   *  observed departure, or `minSec` while that day hasn't loaded yet. */
+   *  raw state never needs correcting from an effect. */
   playhead: number;
   model: BusTownModel;
   trips: ReadonlyMap<string, ResolvedTrip>;
@@ -73,6 +71,9 @@ export type BusTownReplay = {
  * the day picker vanish exactly when a reader needs it to escape that day.
  * Sharing `useReplayWindow`'s cache key means this costs no extra request
  * once the default day has loaded once, which every mount does first.
+ *
+ * A null `playheadSec` follows the day's own default start
+ * (`firstDepartureStart`), or `minSec` while that day hasn't loaded yet.
  */
 export function useBusTownReplay(
   agencyId: number | null,

@@ -38,11 +38,12 @@ export type BusTownPlaybackOptions = {
    *  racing to own it. */
   sec: number;
   setSec: (sec: number) => void;
-  /** Identifies the service day being played — `replay.date` fits.
-   *  Switching to a day whose window is already cached resolves
-   *  synchronously, so the canvas never unmounts and the loop's own `t`
-   *  would otherwise keep running past the caller's reset `sec`. Changing
-   *  this restarts the loop so it re-reads `sec` instead. */
+  /** The reader's picked day. Picking a day whose window is already cached
+   *  resolves synchronously, so the canvas never unmounts and the loop's own
+   *  `t` would otherwise keep running past the caller's reset `sec`.
+   *  Changing this restarts the loop so it re-reads `sec` instead. The
+   *  resolved day would also change on a cold load, in the same commit that
+   *  first mounts the canvas, and set the loop up twice. */
   dayKey: string | null;
 };
 
@@ -59,13 +60,10 @@ type LoopControls = {
  * so a newly loaded window never resets play position. A separate effect
  * also repaints the current frame whenever any of them changes, so while
  * paused a window arriving after a paused seek, or the stop bounds
- * resolving are never left stale on screen. `dayKey` does restart the loop:
- * a day switch moves `sec` on its own, but switching to an already-cached
- * day resolves synchronously and never unmounts the canvas, so without a
- * restart the loop's own running clock would keep ticking from the old
- * day's position instead of picking up the reset one. The loop itself
- * is only ever scheduled while playing (and the tab is visible and the
- * canvas on screen) — pausing cancels it outright rather than scheduling
+ * resolving are never left stale on screen. A newly picked day (`dayKey`)
+ * does restart the loop, so it re-reads the reset `sec`. The loop itself is
+ * only ever scheduled while playing (and the tab is visible and the canvas
+ * on screen) — pausing cancels it outright rather than scheduling
  * empty frames.
  */
 export function useBusTownPlayback({
