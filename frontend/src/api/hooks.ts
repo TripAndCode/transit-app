@@ -21,7 +21,7 @@ import type {
   ScopeSummary,
   AnonThread,
   AppendMessageResult,
-  AskResponse,
+  CardAnswer,
   ConvMessage,
   Conversation,
   DelayRecordStopsResponse,
@@ -746,8 +746,8 @@ type AppendMessageVars = {
    *  rendered_summary for the anonymous path instead of the machine-generated
    *  builderSummary() fallback. */
   user_summary?: string;
-  /** Current filter context (date range + routes). Forwarded as `ctx` in the
-   *  anonymous POST /ask body so the backend scopes the query correctly. */
+  /** Current filter context (date range + routes). Sent with a signed-out
+   *  card so the backend scopes it as a stored thread's filters scope one. */
   filter_ctx?: FilterCtx;
 };
 
@@ -768,27 +768,14 @@ export function useAppendMessage(agencyId: number) {
           { tool: vars.tool, args: vars.args, user_summary: humanLabel },
         );
       }
-      // Anonymous path: dispatch via POST /ask with __build__ sentinel.
-      const dispatchTool = vars.tool;
-      const dispatchArgs = vars.args;
-      const chipTitle = humanLabel;
-
-      const question = `__build__ ${dispatchTool} ${JSON.stringify(dispatchArgs)}`;
-      // Forward filter context so the backend scopes the query to the user's
-      // chosen date range and route list (scenario 08 — filter mid-thread).
-      const fc = vars.filter_ctx;
-      const askBody: Record<string, unknown> = { question };
-      if (fc) {
-        askBody.ctx = {
-          from: fc.from_date,
-          to: fc.to_date,
-          dow: fc.dow ?? "all",
-          time_band: fc.time_band ?? "all",
-          service: fc.service ?? "all",
-          routes: fc.routes ?? [],
-        };
-      }
-      const askResp = await apiPost<AskResponse>(`/api/${agencyId}/ask`, askBody);
+      // Signed out, the thread lives only in this browser: the card is
+      // answered without being stored, scoped by the thread's filters as a
+      // stored thread's are, and kept here with its method stamp.
+      const card = await apiPost<CardAnswer>(`/api/${agencyId}/ask/card`, {
+        tool: vars.tool,
+        args: vars.args,
+        filter_ctx: vars.filter_ctx ?? {},
+      });
 
       const now = new Date().toISOString();
       const baseId = -(Date.now());
@@ -797,11 +784,13 @@ export function useAppendMessage(agencyId: number) {
         conversation_id: vars.conversationId,
         role: "user",
         chip_id: null,
-        tool: dispatchTool,
-        args: dispatchArgs,
+        tool: vars.tool,
+        args: vars.args,
         signature_hash: null,
         result: null,
-        rendered_summary: chipTitle,
+        rendered_summary: humanLabel,
+        conditions: null,
+        definition: null,
         created_at: now,
       };
       const asstMsg: ConvMessage = {
@@ -809,20 +798,7 @@ export function useAppendMessage(agencyId: number) {
         conversation_id: vars.conversationId,
         role: "assistant",
         chip_id: null,
-        tool: dispatchTool,
-        args: askResp.canonical_args ?? dispatchArgs,
-        signature_hash: askResp.signature_hash ?? null,
-        result: askResp.result
-          ? {
-              kind: askResp.result.kind,
-              summary: askResp.result.summary ?? null,
-              rows: (askResp.result.rows as unknown[] | undefined) ?? null,
-              columns: askResp.result.columns ?? null,
-              series: askResp.result.series ?? null,
-              pairs: askResp.result.pairs ?? null,
-            }
-          : null,
-        rendered_summary: askResp.answer ?? null,
+        ...card,
         created_at: now,
       };
       conversationsAnon.appendMessage(vars.conversationId, userMsg);

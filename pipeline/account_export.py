@@ -62,7 +62,8 @@ async def collect_user_data(conn: asyncpg.Connection, user_id: int) -> dict[str,
     )
     messages = await conn.fetch(
         "SELECT m.conversation_id::text AS conversation_id, m.role, m.chip_id, m.tool, m.args::text AS args,"
-        " m.result::text AS result, m.rendered_summary, m.conditions::text AS conditions, m.created_at"
+        " m.result::text AS result, m.rendered_summary, m.conditions::text AS conditions,"
+        " m.definition::text AS definition, m.created_at"
         " FROM ask_conversation_messages m JOIN ask_conversations c USING (conversation_id)"
         " WHERE c.user_id = $1 ORDER BY m.message_id",
         user_id,
@@ -106,6 +107,7 @@ async def collect_user_data(conn: asyncpg.Connection, user_id: int) -> dict[str,
                 "result": _parsed(m["result"]),
                 "rendered_summary": m["rendered_summary"],
                 "conditions": _parsed(m["conditions"]),
+                "definition": _parsed(m["definition"]),
                 "created_at": m["created_at"],
             }
         )

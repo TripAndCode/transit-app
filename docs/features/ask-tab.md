@@ -78,8 +78,7 @@ What the user sees/does:
 - There is **no free-text primary input** in the current UI — the primary
   path is entirely the parameterized card/chip templates
   (`frontend/src/components/askCardTemplates.ts`). Free text only appears
-  in the follow-up box, plus internally via the anonymous `__build__`
-  sentinel (see below).
+  in the follow-up box.
 - Filter bar: `frontend/src/components/FilterContextBar.tsx` scopes every
   dispatch to the shared date/DOW/time-band/service/route context.
 
@@ -95,15 +94,35 @@ What the user sees/does:
 since the frontend template already supplies `tool`/`args`.
 
 **Anonymous user (anonymous-only mode), same templates:** `useAppendMessage`'s anon branch
-builds a synthetic `question = "__build__ <tool> <json-args>"` and calls
-`POST /api/{agency_id}/ask` (`api/routers/ask.py: ask()`). This still
-passes through Stage 1 (regex `_RULES`) and Stage 2 (embedding NN) first
-like any other question — both normally miss against the sentinel string,
-since it looks nothing like a real question — and only when neither stage
-decides does the request fall to `pipeline.query.chat.chat_with_tools`,
-which recognizes the `__build__` prefix and short-circuits to parse
-`(tool, args)` directly, dispatching **without ever calling the LLM**
-either way.
+calls `POST /api/{agency_id}/ask/card` (`api/routers/conversations.py:
+run_card_endpoint`) with `{tool, args, filter_ctx}`. It runs the same card
+dispatch as the signed-in path (`_run_card`, without the intent-cache write),
+stores nothing, and returns the assistant message's fields, which the browser
+keeps in its localStorage thread (`frontend/src/api/conversationsAnon.ts`).
+
+**Method stamp on saved cards:** a card whose figures a report computes carries
+that report's `DefinitionMeta`, built through
+`pipeline.reports.report_stamp.report_definition` (the function
+`render_report` uses) before the figures, over the scope the tool computed:
+
+| Card tool | Report whose stamp it carries |
+|---|---|
+| `top_n` `avg_delay` / `on_time_rate` / `worst_5min` | `ranking` / `on_time` / `worst_5min` |
+| `on_time` (`on_time_rate`) | `on_time`; a `threshold_min` is the window "up to N min late", read by `compute_on_time`'s own rule |
+| `trend` (`time_series`) | `trend` as exported (`format=csv`): the daily series alone |
+| `cmp_service` (`compare_segments`, `dimension="dow"`) | `compare_ranking` |
+
+Every other tool computes figures no report does and carries no stamp. A
+signed-in card stores it in `ask_conversation_messages.definition`; a
+signed-out card keeps the copy `/ask/card` returned, which the sign-in
+migration validates as a `DefinitionMeta` and stores, or drops. A card saved
+before the column existed reads `NULL` and shows no stamp. The evidence card
+renders it with the reports' `DefinitionMetaBlock`.
+
+**`__build__` sentinel on `/ask`:** a question `__build__ <tool> <json-args>`
+still dispatches that tool directly with no LLM
+(`pipeline.query.chat.chat_with_tools`). No product screen sends it any more,
+and its answer carries no method stamp; it remains a direct-API path only.
 
 **Free-text / natural-language path (the 3-stage router)** — reached via
 `POST /api/{agency_id}/ask` for any question that isn't a `__build__`
@@ -150,8 +169,8 @@ sentinel:
    that needs the LLM answers the "no AI provider is configured" message,
    follow-ups report disabled (`POST .../followup` returns 503), and
    `/api/config` reports `llm_enabled: false`, which hides the follow-up box.
-   The notebook's card dispatch, `__build__` path, threads and exports need no
-   key.
+   The notebook's card dispatch (signed in and `/ask/card`), threads and
+   exports need no key, nor does the direct-API `__build__` sentinel.
 5. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
    `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
@@ -172,8 +191,8 @@ sentinel:
    Either way the result becomes a `ToolResult` →
    `render_tool_result()` produces the locale-specific summary string.
 6. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
-   log_query()` unless `ASK_QUERY_LOG_ENABLED=false` (skipped for
-   `__build__` sentinels).
+   log_query()` unless `ASK_QUERY_LOG_ENABLED=false` (skipped for the
+   direct-API `__build__` sentinel).
 
 **Follow-up path** (LLM-grounded, kill-switch gated):
 `FollowupChipsRow` → `useFollowup` →
@@ -369,7 +388,7 @@ so it is a separate mechanism to build, not a knob to turn on.
   `ask.followup_*` (the follow-up box's placeholder and send label),
   `ask.evidence.*` (stop-evidence views and the follow-up box's
   selected-stop context), `ask.col.*` (table column headers),
-  `ask.build_labels.*` (anon `__build__` summary / builder-schema UI),
+  `ask.build_labels.*` (a card's fallback user-bubble summary / builder-schema UI),
   `ask.filter_bar.*` (the filter-context bar). New templates/params need
   matching keys in both locale files.
 - **Server-side**: `pipeline/query/tools.py`'s

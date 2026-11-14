@@ -315,9 +315,9 @@ async def ask(
         )
 
     if log_enabled:
-        # Build-mode synthetic questions (``__build__ tool {...}`` from the guided
-        # form) are machine-generated; logging the raw sentinel would pollute the
-        # analytics view of what users actually ask. Skip logging for those.
+        # The ``__build__ tool {...}`` sentinel is a machine-made direct-API
+        # dispatch, not a question anyone asked; logging it would pollute the
+        # analytics view of what users actually ask.
         if not body.question.startswith("__build__"):
             await log_query(
                 conn,
