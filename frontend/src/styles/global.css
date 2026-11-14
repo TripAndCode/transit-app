@@ -261,6 +261,15 @@
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+  /* Shared control sizing for the button family (and future segmented
+     controls/chips): a bare control is --control-h tall with
+     --control-radius corners, a compact one (e.g. an in-card CSV action)
+     is --control-h-sm with --control-radius-sm corners. BP.sm below raises
+     both heights so a phone's tap targets stay comfortable. */
+  --control-h: 40px;
+  --control-h-sm: 32px;
+  --control-radius: var(--radius-lg);
+  --control-radius-sm: var(--radius);
   /* Motion scale. --dur-1 is UI feedback (hover, focus, colour), --dur-2 a
      panel or menu opening, --dur-3 a chart or bar drawing itself in, --dur-4
      an ambient loop (skeleton pulse). --ease-out decelerates hard for things
@@ -273,6 +282,9 @@
   --dur-4: 1200ms;
   --ease-out: cubic-bezier(.22, 1, .36, 1);
   --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  /* A control that springs toward its pressed/released state (the button
+     family's active-state scale), rather than decelerating into rest. */
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
   --transition: var(--dur-1) var(--ease-out);
   /* Shared by .lift and any host that composes it; see .lift below. */
   --lift-transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
@@ -598,6 +610,12 @@ html, body, #root { height: 100%; margin: 0; }
    own bottom edge or the tab bar sits on top of whatever the active tab last
    renders instead of below it. */
 @media (max-width: 640px) {
+  /* Taller tap targets than the desktop control sizes. */
+  :root {
+    --control-h: 44px;
+    --control-h-sm: 36px;
+  }
+
   /* border-box, not the default content-box: main's height is a flex
      stretch value (its parent, .app-shell, is the 100dvh row), so an
      content-box padding would grow main taller than that stretch target
@@ -700,23 +718,95 @@ summary:focus-visible,
   stroke-width: 3;
   filter: drop-shadow(0 0 2px var(--focus-ring));
 }
-/* Shared secondary-button style (CSV downloads, share actions, etc.) --
-   an explicit visible border + accent text, so it never looks disabled
-   when the action is actually available (default browser button chrome
-   reads as flat/grey either way). */
-.btn-ghost {
-  background: var(--bg-surface);
-  color: var(--accent-strong);
-  border: 1px solid var(--card-border);
-  border-radius: var(--radius);
-  padding: 7px 13px;
-  font-size: 12px;
-  font-weight: 500;
+/* Shared button family: one base control (.btn) plus a visual variant
+   (primary/secondary/ghost/icon) and an optional .btn--sm size modifier for
+   compact in-card actions (CSV downloads, share actions). Also used on an
+   <a>/<Link> styled as a button, hence text-decoration: none in the base
+   rather than left to each caller. The muted disabled/aria-disabled rule is
+   declared last in this block so it wins ties against a variant's own
+   :hover at equal specificity. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-h);
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--control-radius);
+  font-size: var(--text-base);
+  font-weight: 700;
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    transform var(--dur-2) var(--ease-spring),
+    background-color var(--dur-1) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out),
+    color var(--dur-1) var(--ease-out);
 }
-.btn-ghost:disabled {
-  color: var(--text-tertiary);
-  border-color: var(--border-subtle);
+.btn--primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--el-1);
+}
+.btn--primary:hover {
+  box-shadow: var(--el-2);
+  transform: translateY(-1px);
+}
+
+.btn--secondary {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--card-border), var(--el-1);
+}
+.btn--secondary:hover {
+  box-shadow: inset 0 0 0 1px var(--text-tertiary), var(--el-1);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--accent-strong);
+}
+.btn--ghost:hover {
+  background: var(--accent-soft);
+}
+
+.btn--icon {
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  background: var(--bg-soft);
+  color: var(--text-secondary);
+}
+.btn--icon:hover {
+  background: var(--border-subtle);
+  color: var(--text-primary);
+}
+.btn--icon.btn--sm {
+  width: var(--control-h-sm);
+  padding: 0;
+}
+
+.btn--sm {
+  height: var(--control-h-sm);
+  padding: 0 12px;
+  border-radius: var(--control-radius-sm);
+  font-size: var(--text-sm);
+}
+
+/* After every variant's :hover: a press is also a hover, and the press must
+   win the transform. */
+.btn:active {
+  transform: scale(.96);
+}
+
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  transform: none;
   cursor: not-allowed;
+  background: var(--bg-soft);
+  color: var(--text-tertiary);
+  box-shadow: none;
 }
 
 /* The wrapper `Tooltip` (components/Tooltip.tsx) puts around its trigger. It

@@ -97,7 +97,7 @@ export function PlaybackRail({
       {!loading && error ? (
         <p className="ops-playback__status" role="status">
           {t("operations.playback.error")}{" "}
-          <button type="button" className="btn-ghost" onClick={controller.retry}>{t("common.retry")}</button>
+          <button type="button" className="btn btn--secondary btn--sm" onClick={controller.retry}>{t("common.retry")}</button>
         </p>
       ) : loading || frames.length === 0 ? (
         <p className="ops-playback__status" role="status">

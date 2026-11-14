@@ -156,7 +156,7 @@ export function CompareBars({ rows, resetKey }: { rows: readonly unknown[][]; re
         })}
       </div>
       {capped.remaining > 0 && (
-        <button type="button" className="btn-ghost" onClick={capped.showMore}>
+        <button type="button" className="btn btn--secondary btn--sm" onClick={capped.showMore}>
           {t("common.show_more", { count: capped.remaining })}
         </button>
       )}

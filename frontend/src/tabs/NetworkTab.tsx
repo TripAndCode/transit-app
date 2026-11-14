@@ -438,7 +438,7 @@ export function NetworkTab() {
                 </Fragment>
               ))}
               {cappedAgencies.remaining > 0 && (
-                <button type="button" className="btn-ghost" onClick={cappedAgencies.showMore}>
+                <button type="button" className="btn btn--secondary btn--sm" onClick={cappedAgencies.showMore}>
                   {t("common.show_more", { count: cappedAgencies.remaining })}
                 </button>
               )}

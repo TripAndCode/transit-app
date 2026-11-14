@@ -349,7 +349,7 @@
 /* Export lives with the counts it exports, in the queue panel, not among the
    filters: narrowing the view and taking the data away are different actions,
    and the CSV is exactly the rows those tiles count. */
-.ops-queue__export { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 16px; padding: 7px 11px; font-size: var(--text-xs); }
+.ops-queue__export { margin: 0 0 16px; }
 
 /* ── Day playback ──────────────────────────────────────────────────────────
    The rail spans the map's bottom edge rather than floating in a corner: it

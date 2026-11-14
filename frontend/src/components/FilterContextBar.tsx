@@ -75,7 +75,7 @@ const pillRowStyle: CSSProperties = {
   alignItems: "center",
   gap: 6,
   flexWrap: "wrap",
-  padding: "6px 10px",
+  padding: "4px 4px 4px 10px",
   background: "var(--bg-surface)",
   border: "1px solid var(--border-soft)",
   borderRadius: "var(--radius)",
@@ -84,15 +84,6 @@ const pillRowStyle: CSSProperties = {
 };
 
 const editButtonStyle: CSSProperties = {
-  background: "transparent",
-  border: "1px solid var(--border-soft)",
-  borderRadius: 6,
-  padding: "3px 10px",
-  fontSize: 12,
-  color: "var(--accent)",
-  cursor: "pointer",
-  fontWeight: 500,
-  transition: "opacity var(--transition)",
   marginLeft: "auto",
 };
 
@@ -166,6 +157,7 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
         <span>{routes}</span>
         <button
           type="button"
+          className="btn btn--secondary btn--sm"
           style={editButtonStyle}
           onClick={handleEdit}
           disabled={pending}
@@ -272,41 +264,10 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
           borderTop: "1px solid var(--border-soft)",
         }}
       >
-        <button
-          type="button"
-          onClick={handleCancel}
-          disabled={pending}
-          style={{
-            background: "transparent",
-            border: "1px solid var(--border-soft)",
-            borderRadius: 4,
-            padding: "6px 14px",
-            fontSize: 13,
-            color: "var(--text-secondary)",
-            cursor: pending ? "not-allowed" : "pointer",
-          }}
-        >
+        <button type="button" className="btn btn--ghost btn--sm" onClick={handleCancel} disabled={pending}>
           {t("common.cancel")}
         </button>
-        <button
-          type="button"
-          onClick={handleApply}
-          disabled={pending}
-          style={{
-            background: pending ? "var(--bg-soft)" : "var(--accent)",
-            color: pending ? "var(--text-tertiary)" : "var(--on-accent)",
-            border: "none",
-            borderRadius: 4,
-            padding: "6px 18px",
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: pending ? "not-allowed" : "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            boxShadow: pending ? "none" : "var(--el-1)",
-          }}
-        >
+        <button type="button" className="btn btn--primary btn--sm" onClick={handleApply} disabled={pending}>
           {pending && <span aria-hidden className="fcb-spinner" />}
           {t("ask.filter_bar.apply")}
         </button>

@@ -79,10 +79,10 @@ function NotShownList({ items, aid, offerElsewhere }: { items: NotShownItem[]; a
       </ul>
       {offerElsewhere && (
         <div className="why-not-shown__elsewhere">
-          <button type="button" className="btn-ghost" onClick={() => navigate(destHref(aid, "time", search))}>
+          <button type="button" className="btn btn--secondary btn--sm" onClick={() => navigate(destHref(aid, "time", search))}>
             {t("reports.dwell_run.see_when")}
           </button>
-          <button type="button" className="btn-ghost" onClick={() => navigate(reportHref(aid, "compare_ranking", search))}>
+          <button type="button" className="btn btn--secondary btn--sm" onClick={() => navigate(reportHref(aid, "compare_ranking", search))}>
             {t("reports.dwell_run.compare_day_types")}
           </button>
         </div>
@@ -159,7 +159,7 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
         </tbody>
       </table>
       {cappedRoutes.remaining > 0 && (
-        <button type="button" className="btn-ghost" onClick={cappedRoutes.showMore}>
+        <button type="button" className="btn btn--secondary btn--sm" onClick={cappedRoutes.showMore}>
           {t("common.show_more", { count: cappedRoutes.remaining })}
         </button>
       )}

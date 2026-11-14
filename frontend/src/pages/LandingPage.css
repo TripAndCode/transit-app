@@ -109,17 +109,8 @@
 .landing-hero__cta {
   align-self: flex-start;
   margin-top: 24px;
-  padding: 12px 28px;
-  border-radius: var(--radius-lg);
-  background: var(--accent-strong);
-  color: var(--on-accent);
   font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: opacity var(--transition);
 }
-.landing-hero__cta:hover { opacity: 0.9; }
 .landing-hero__cta:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 3px; }
 
 .landing-hero__note {

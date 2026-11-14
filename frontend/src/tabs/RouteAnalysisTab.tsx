@@ -180,7 +180,7 @@ export function RouteAnalysisTab() {
       {route && <p className="focus-muted focus-subtitle">{t("investigate")}</p>}
     </div><div className="focus-actions">
       {route && <PinRouteButton agencyId={id} code={route} />}
-      <button className="btn-ghost" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
+      <button className="btn btn--secondary btn--sm" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>

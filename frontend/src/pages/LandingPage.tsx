@@ -50,12 +50,12 @@ export function LandingPage() {
           </h1>
           <p className="landing-hero__subtitle">{t("landing.hero.subtitle")}</p>
           {session ? (
-            <Link to="/" className="landing-hero__cta">
+            <Link to="/" className="btn btn--primary landing-hero__cta">
               {t("landing.hero.open_dashboard")}
             </Link>
           ) : guest ? (
             <>
-              <Link to="/" className="landing-hero__cta">
+              <Link to="/" className="btn btn--primary landing-hero__cta">
                 {t("landing.hero.view_dashboard")}
               </Link>
               {config.auth_enabled && (
@@ -65,7 +65,7 @@ export function LandingPage() {
               )}
             </>
           ) : (
-            <Link to="/login" className="landing-hero__cta">
+            <Link to="/login" className="btn btn--primary landing-hero__cta">
               {t("common.login")}
             </Link>
           )}

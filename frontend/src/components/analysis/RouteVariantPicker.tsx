@@ -39,7 +39,7 @@ export function RouteVariantPicker({ variants, shown, onPick }: {
           ))}
         </select>
       </label>
-      {reverse && <button type="button" className="btn-ghost" onClick={() => onPick(reverse.shape_id)}>{t("reverseDirection")}</button>}
+      {reverse && <button type="button" className="btn btn--secondary btn--sm" onClick={() => onPick(reverse.shape_id)}>{t("reverseDirection")}</button>}
       <p className="focus-muted">{current.samples === 0 ? t("variantUnobserved") : t("variantShare", { share: share(current.share_pct) })}</p>
     </div>
   );

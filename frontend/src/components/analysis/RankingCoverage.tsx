@@ -102,7 +102,7 @@ export function RowsShown({ shown, total, onShowAll }: { shown: number; total: n
     <div className="ranking-rows-shown">
       <span>{t("reports.ranking_coverage.rows_shown", { shown, total })}</span>
       {onShowAll && (
-        <button type="button" className="btn-ghost" onClick={onShowAll}>
+        <button type="button" className="btn btn--secondary btn--sm" onClick={onShowAll}>
           {t("reports.ranking_coverage.show_all")}
         </button>
       )}
