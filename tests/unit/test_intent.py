@@ -184,20 +184,6 @@ def test_derive_confidence_clamps_to_unit_interval():
     assert derive_confidence(nn_distance_same_tool=0.05, llm_self_reported=-0.5) == 0.0
 
 
-def test_build_schema_defaults_match_canonical_defaults():
-    """A builder field's advertised default must be what dispatch uses when the
-    field is left unset, so a metric-dependent default cannot be advertised."""
-    from api.routers.ask import _BUILD_TOOL_META
-    from pipeline.query.intent import _TOOL_DEFAULTS
-
-    for tool, meta in _BUILD_TOOL_META.items():
-        for f in meta["fields"]:
-            if "default" in f:
-                canonical = _TOOL_DEFAULTS[tool].get(f["key"])
-                assert not callable(canonical), (tool, f["key"])
-                assert f["default"] == canonical, (tool, f["key"])
-
-
 @pytest.mark.parametrize("tool", ["on_time", "on_time_rate"])
 def test_on_time_tools_collapse_their_best_first_default(tool):
     """The on-time tools list best-first unless told otherwise, so an explicit

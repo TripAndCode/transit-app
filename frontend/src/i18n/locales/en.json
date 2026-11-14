@@ -2038,7 +2038,6 @@
         "askLlmEnabled": "Ask: AI answers (LLM)",
         "askRouterEnabled": "Ask: rules router",
         "askFollowupEnabled": "Ask: LLM follow-up",
-        "copilotInsightEnabled": "Copilot: proactive insight",
         "askHistoryEnabled": "Ask: conversation history",
         "askIntentCacheEnabled": "Ask: intent cache",
         "askQueryLogEnabled": "Ask: query log",
@@ -2227,15 +2226,6 @@
       },
       "table_label": "Ask query log"
     }
-  },
-  "copilot": {
-    "title": "Copilot",
-    "loading": "Thinking…",
-    "error": "Couldn't generate an insight right now.",
-    "low_confidence": "This is based on limited data.",
-    "followup_placeholder": "Ask a follow-up…",
-    "followup_submit": "Ask",
-    "no_insight": "Not enough data for an insight yet."
   },
   "palette": {
     "placeholder": "Search or jump to…",

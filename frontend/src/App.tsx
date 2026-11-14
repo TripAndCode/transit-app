@@ -3,7 +3,6 @@ import { Outlet, useMatch, useLocation, useMatches } from "react-router-dom";
 import { AgencyDataEndProvider } from "./api/AgencyDataEndProvider";
 import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
 import { useAgencyId } from "./api/useAgencyId";
-import { CopilotPanel } from "./components/CopilotPanel";
 import { NoticeStack } from "./components/NoticeStack";
 import { HelpHint } from "./components/HelpHint";
 import { FirstRunTourOnLive } from "./components/FirstRunTour";
@@ -72,7 +71,6 @@ export default function App() {
                   footer keeps the credit clear of it. */}
               <PrintCredit />
             </main>
-            {!focused && <CopilotPanel />}
             {/* Persisted in localStorage (transit.tourSeen); a no-op render
                 once a visitor has finished or dismissed it. Leaving Live mid-tour
                 closes it for that visit without marking it seen. */}

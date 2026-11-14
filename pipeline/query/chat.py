@@ -411,7 +411,6 @@ async def chat_with_tools(
     history: list | None = None,
     ch=None,
     force_tool_call: bool = False,
-    panel_ctx: dict | None = None,
     user_id: int | None = None,
     llm_approved: bool = True,
 ) -> dict:
@@ -451,16 +450,6 @@ async def chat_with_tools(
     it for a continuation phrase would return whichever answer was last
     cached for that exact text — ignoring this conversation's actual prior
     turn — instead of the history-aware answer this parameter exists to get.
-
-    ``panel_ctx``, when supplied by the Copilot side panel, carries the
-    frontend's active-tab hint (e.g. ``{"tab": "overview"}``). The API layer
-    (``api/routers/ask.py``'s ``PanelCtx`` model) restricts ``tab`` to a
-    known enum of tab names before it ever reaches this function, so this
-    dict-typed parameter is safe to interpolate into the system prompt
-    without its own length/type check. It is appended to the system prompt
-    as a one-line grounding hint only — it never reaches the rules/embedding
-    routing stage (resolved before calling this function) or the
-    tool-dispatch args.
 
     ``user_id``, when set by the API layer for a signed-in caller, is looked
     up against :func:`~pipeline.query.user_llm_keys.get_user_llm_key`. When a
@@ -673,13 +662,6 @@ async def chat_with_tools(
             args_compact = json.dumps(m.args, ensure_ascii=False, separators=(",", ":"))
             lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
         system_prompt = system_prompt + "\n" + "\n".join(lines)
-
-    # Copilot side-panel hint: a one-line grounding addendum naming the
-    # active tab, appended (never replacing the block above) so the
-    # rules/embedding routing stage — already resolved by the caller before
-    # this function runs — and tool-dispatch args stay untouched.
-    if panel_ctx and panel_ctx.get("tab"):
-        system_prompt += f"\nThe user is currently viewing the {panel_ctx['tab']} tab."
 
     # Bounded conversation memory: when the API layer threads prior turns,
     # fold the last few (question → tool(args)) into a dedicated system
