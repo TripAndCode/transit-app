@@ -99,9 +99,6 @@ def _allowed_providers() -> set[str] | None:
     return names or None
 
 
-_BUILD_SENTINEL = "__build__"
-
-
 def _as_args(value: Any) -> dict:
     """Tool arguments as a dict, or {} for anything else.
 
@@ -111,31 +108,6 @@ def _as_args(value: Any) -> dict:
     (likely a "missing required arg" empty result) rather than a 500.
     """
     return value if isinstance(value, dict) else {}
-
-
-def _parse_build_sentinel(question: str) -> tuple[str, dict] | None:
-    """Extract ``(tool, args)`` from a ``__build__ TOOL {json}`` question string.
-
-    The guided build form on the frontend submits the user's structured intent
-    as a question with this sentinel prefix so the orchestrator can dispatch it
-    **without calling the LLM** — the spec's "zero-LLM determinism path."
-    Returns ``None`` if the string doesn't match the format (caller falls
-    through to the normal LLM path).
-    """
-    if not question.startswith(_BUILD_SENTINEL):
-        return None
-    rest = question[len(_BUILD_SENTINEL) :].lstrip()
-    tool, _sep, json_part = rest.partition(" ")
-    if not tool:
-        return None
-    json_part = json_part.strip() or "{}"
-    try:
-        args = json.loads(json_part)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(args, dict):
-        return None
-    return tool, args
 
 
 # Extra per-call localisation strings. Keyed identically to the table in
@@ -313,7 +285,7 @@ async def _dispatch_and_respond(
     verb_suffix: str = "",
 ) -> dict:
     """Call :func:`dispatch` and shape the response dict, handling the
-    failure modes shared by every non-build-mode call site in this module
+    failure modes shared by every call site in this module
     identically: an HTTPException(503) or a mid-query ClickHouse error both
     degrade to the ``service_unavailable`` string (never the raw exception
     text, which can carry SQL fragments or endpoint URLs — see
@@ -490,7 +462,7 @@ async def chat_with_tools(
     # The operator's kill switch, checked inside _call_llm before any provider
     # or BYOK key is touched. The rules/embedding routing stages (resolved by
     # the caller before this function runs), the intent-cache pre-hit's
-    # undated rows, and the build sentinel never call _call_llm, so they keep
+    # undated rows never call _call_llm, so they keep
     # answering while it is off. A dated pre-hit row is nulled out by the
     # _carries_dates check below regardless of this flag, so it falls through
     # to _call_llm and surfaces "disabled" like any other question would.
@@ -552,94 +524,6 @@ async def chat_with_tools(
     # or visible prompt differences; downstream uses (prompt, cache key, log) all
     # benefit. The frontend keeps its own copy of the user's raw input.
     question = question.strip()
-    # Build-mode synthetic questions (sent by the guided form with an ``__build__``
-    # prefix) must never be written to the intent cache as last_question, otherwise
-    # machine-generated strings surface as chips / autocomplete suggestions.
-    _skip_cache_write = question.startswith(_BUILD_SENTINEL)
-
-    # Build-mode short-circuit: when the question is a build-form sentinel,
-    # parse (tool, args) directly and dispatch without ever calling the LLM.
-    # This is the spec's "zero-LLM determinism path" — confidence=1.0 because
-    # the user constructed the query directly. The cache flag is irrelevant
-    # here: the sentinel is frontend-controlled and the path must always be
-    # deterministic regardless of cache configuration.
-    if _skip_cache_write:
-        parsed = _parse_build_sentinel(question)
-        if parsed is not None:
-            build_tool, build_args = parsed
-            try:
-                can_args = canonicalize(build_tool, build_args)
-            except ValueError:
-                # Unknown tool — fall back to dispatching with raw args so the
-                # tool handler can return its own "unknown" error string.
-                can_args = dict(build_args)
-            sig_hash = signature_hash(build_tool, can_args)
-            try:
-                result = await dispatch(build_tool, can_args, ctx, conn, agency_id, locale=locale, ch=ch)
-            except HTTPException as exc:
-                if exc.status_code != 503:
-                    raise
-                _log.warning("Build-mode dispatch for %s unavailable: %s", build_tool, exc.detail)
-                return {
-                    "answer": _chat_str("service_unavailable", locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            except clickhouse_connect.driver.exceptions.Error as exc:
-                _log.exception("Build-mode dispatch for %s: ClickHouse query error", build_tool)
-                return {
-                    "answer": ch_failure_str(exc, locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            except (asyncpg.exceptions.UndefinedTableError, UnsupportedConnectionMethod):
-                # An agg_* table missing (migration/analyze behind) must propagate
-                # to FastAPI's registered aggregate_not_ready_handler so the
-                # frontend gets the machine-readable {"code": "aggregate_not_ready"}
-                # 503 it reacts to — not a generic 200 tool_error that masks it,
-                # the same carve-out _dispatch_and_respond makes. A call the
-                # pooled connection cannot serve is a programming error and is
-                # re-raised for the same reason: it must not read as a tool failure.
-                raise
-            except Exception:
-                _log.exception("Build-mode dispatch failed for %s", build_tool)
-                return {
-                    "answer": _chat_str("tool_error", locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            # render_tool_result formats a dispatched ToolResult deterministically —
-            # never LLM-authored prose — so the numeric guard has nothing to check.
-            return {
-                "answer": render_tool_result(result, locale=locale),
-                "tool_call": {"name": build_tool, "arguments": can_args},
-                "result": _result_to_dict(result),
-                "success": result.kind != "empty",
-                "numeric_guard_triggered": None,
-                "signature_hash": sig_hash,
-                "confidence": 1.0,
-                "canonical_args": can_args,
-                "cache_outcome": "bypass",
-            }
-
     user_prelude = _chat_str(
         "user_prelude",
         locale,
@@ -796,8 +680,7 @@ async def chat_with_tools(
             args = _as_args(pre_row["args"])
             sig_hash_pre = pre_row["signature_hash"]
             _pre_sig = IntentSignature(tool=name, args=args, confidence=float(pre_row.get("confidence") or 0.0))
-            if not _skip_cache_write:
-                await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
+            await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
             nn_dist_pre = _nn_distance_for_tool(rag_examples or [], name)
             final_conf_pre = derive_confidence(nn_dist_pre, float(pre_row.get("confidence") or 0.0))
             return await _dispatch_and_respond(
@@ -907,14 +790,12 @@ async def chat_with_tools(
         # Upsert on a hit or a miss (a hit bumps hit_count), only when all hold:
         # - text_keyed: the args were resolved without history, so they are
         #   what this text means for any asker;
-        # - not a build-mode sentinel, so machine-generated strings never
-        #   become last_question;
         # - a tool we dispatch, or a hallucinated name would be cached and
         #   every similar question would collapse onto that one hash.
         from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
 
         _known_tool = sig.tool in _KNOWN_TOOLS
-        if text_keyed and not _skip_cache_write and _known_tool:
+        if text_keyed and _known_tool:
             await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
 
         # Compute final confidence blending NN distance + LLM self-report.

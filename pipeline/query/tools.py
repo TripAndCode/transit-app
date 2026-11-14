@@ -1472,7 +1472,7 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
-    # Notebook cards (and the direct-API ``__build__`` sentinel) only;
+    # Notebook cards only;
     # deliberately absent from TOOLS so the LLM never selects it on its own.
     "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,

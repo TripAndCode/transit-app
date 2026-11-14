@@ -304,20 +304,6 @@ async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, 
 
 
 @pytest.mark.asyncio
-async def test_ask_signed_out_build_sentinel_answers_with_no_llm_provider(ask_client, no_llm_key):
-    """The direct-API `__build__ tool {json}` sentinel, which no product screen
-    sends, dispatches deterministically, so no provider key is needed."""
-    client, agency_id = ask_client
-    resp = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "__build__ capabilities {}"},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["tool_call"]["name"] == "capabilities"
-
-
-@pytest.mark.asyncio
 async def test_ask_free_text_degrades_to_a_message_with_no_llm_provider(ask_client, no_llm_key):
     """A question only the LLM could answer gets a clear 200 message, never a 500."""
     client, agency_id = ask_client

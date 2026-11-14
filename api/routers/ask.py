@@ -315,20 +315,16 @@ async def ask(
         )
 
     if log_enabled:
-        # The ``__build__ tool {...}`` sentinel is a machine-made direct-API
-        # dispatch, not a question anyone asked; logging it would pollute the
-        # analytics view of what users actually ask.
-        if not body.question.startswith("__build__"):
-            await log_query(
-                conn,
-                agency_id,
-                body.question,
-                stage,
-                tool_name,
-                success,
-                signature_hash=sig_hash,
-                cache_outcome=cache_outcome,
-                numeric_guard_triggered=numeric_guard_triggered,
-            )
+        await log_query(
+            conn,
+            agency_id,
+            body.question,
+            stage,
+            tool_name,
+            success,
+            signature_hash=sig_hash,
+            cache_outcome=cache_outcome,
+            numeric_guard_triggered=numeric_guard_triggered,
+        )
 
     return resp
