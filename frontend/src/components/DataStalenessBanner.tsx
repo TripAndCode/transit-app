@@ -51,11 +51,6 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
       : t("common.rel_hours_ago", { count: Math.floor(ageH) });
 
 
-  // Choose a calm warm-tan color (max saturation 50%) — never alarm red.
-  const bg = "hsl(38, 50%, 95%)";
-  const fg = "hsl(28, 45%, 32%)";
-  const border = "hsl(38, 45%, 78%)";
-
   return (
     <div
       role="status"
@@ -63,9 +58,6 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
       lang={i18n.language}
       data-shell-banner=""
       style={{
-        background: bg,
-        color: fg,
-        borderBottom: `1px solid ${border}`,
         padding: "6px 16px",
         fontSize: 13,
         display: "flex",
@@ -85,7 +77,7 @@ export function DataStalenessBanner({ hidden = false }: { hidden?: boolean }) {
         style={{
           background: "transparent",
           border: "none",
-          color: fg,
+          color: "inherit",
           cursor: "pointer",
           fontSize: 16,
           lineHeight: 1,

@@ -603,6 +603,10 @@ html, body, #root { height: 100%; margin: 0; }
      content-box padding would grow main taller than that stretch target
      instead of eating into it, pushing the whole shell past the viewport. */
   .app-main { padding-bottom: calc(56px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+
+  /* A long comparison would otherwise hold its figure's grid column wider
+     than a phone. */
+  .reference-chip { white-space: normal; max-width: 100%; }
 }
 
 body {
@@ -1105,6 +1109,22 @@ summary::-webkit-details-marker { display: none; }
 }
 .user-manual-content a {
   color: var(--accent);
+}
+
+/* The app-wide notices above the page (stale data, feed health): a calm
+   warning tint in either theme, never alarm red. */
+[data-shell-banner] {
+  background: var(--bg-soft);
+  background: color-mix(in srgb, var(--color-warning) 12%, var(--bg-surface));
+  color: var(--color-warning-text);
+  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-warning) 40%, var(--bg-surface));
+}
+
+.user-manual-content hr {
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  margin: 24px 0;
 }
 
 /* Print-only header and footer (components/PrintFrame): hidden on screen, shown

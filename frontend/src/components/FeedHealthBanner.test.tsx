@@ -59,6 +59,18 @@ describe("FeedHealthBanner", () => {
     expect(banner).toHaveAttribute("data-shell-banner");
   });
 
+  it("leaves its colours to the themed shell-banner rule", () => {
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: summary({ raw_samples: 1_011_299, clamp_count: 2_321 }),
+    } as never);
+    renderBanner();
+    const banner = screen.getByRole("status");
+    expect(banner.style.background).toBe("");
+    expect(banner.style.color).toBe("");
+    expect(banner.style.borderBottom).toBe("");
+    expect(screen.getByRole("button").style.color).toBe("inherit");
+  });
+
   it("shows at exactly a thousandth", () => {
     vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
       data: summary({ raw_samples: 100_000, clamp_count: 100 }),
