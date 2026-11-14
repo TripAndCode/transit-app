@@ -199,7 +199,7 @@ export function OverviewHeroRow({
             showEndDot={false}
             baseline={sparklineMean ?? undefined}
             glint
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+            className="ov-hero-sparkline"
           />
           {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
           <div className="ov-hero-label">

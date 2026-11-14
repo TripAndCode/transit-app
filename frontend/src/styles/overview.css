@@ -21,8 +21,15 @@
   margin: 0 auto;
   padding: 24px 24px 0;
 }
+/* BP.sm */
 @media (max-width: 640px) {
   .ov-page-head { padding: 16px 16px 0; }
+  /* Shrinks the shared page-header title (ui.css) under this page's own
+     wrapper rather than its shared class, which five other tabs also use:
+     at a phone's fold, --text-2xl pushes the headline figure below it. */
+  .ov-page-head .ui-page-header__title {
+    font-size: var(--text-xl);
+  }
 }
 
 /* ---------- Card surface (everything except hero) ---------- */
@@ -519,12 +526,68 @@
 @media (max-width: 640px) {
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
-  /* The route's name needs the width more than the bar does. */
+  /* A route's badge, name, bar and figures side by side left each too
+     narrow; stacked into a card instead, each line owns the full width.
+     The columns stay the list's, as .ov-pareto-list's below, so the names
+     still line up from card to card. */
+  .ov-check-list {
+    grid-template-columns: [plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto;
+  }
   .ov-check-row { padding: 10px 12px; }
-  .ov-check-track,
-  .ov-check-figures,
-  .ov-check-arrow { margin-inline-start: 8px; }
-  .ov-check-track { width: 48px; }
+  /* .ov-check-name, the label and its plate/line/ends children all give up
+     their own box (display: contents) so those children become direct grid
+     items of .ov-check-row and can be placed on the card's own rows; the
+     figures column does the same for its value and change children. */
+  .ov-check-row .ov-check-name,
+  .ov-check-row .ov-check-figures { display: contents; }
+  .ov-check-row .route-label.route-label--plate-column { display: contents; }
+  /* Each selector below repeats enough of RouteLabel.css's own compound
+     classes to outrank the rule it overrides there, regardless of which of
+     the two stylesheets' chunks happens to load last. */
+  .ov-check-row .route-label.route-label--plate-column > .route-label__plate {
+    grid-column: plate;
+    grid-row: 1;
+    justify-self: start;
+    margin-inline-end: 0.6em;
+  }
+  .ov-check-row .route-label.route-label--plate-column > .route-label__line {
+    grid-column: name;
+    grid-row: 1;
+  }
+  .ov-check-row .route-label.route-label--plate-column > .route-label__ends {
+    grid-column: name / arrow;
+    grid-row: 3;
+    justify-self: start;
+    margin-top: 6px;
+  }
+  .ov-check-row .ov-check-value {
+    grid-column: value;
+    grid-row: 1;
+    justify-self: end;
+  }
+  /* Spans the row's full width rather than the figures' own narrow value
+     column (shared, in the desktop layout, by the short average) -- a
+     comparison sentence is long enough to need it. A line of its own under
+     the ends: both are free-length text, so one cell would overlap them. It
+     keeps the figures' right alignment, under the value it qualifies. */
+  .ov-check-row .ov-check-change {
+    grid-column: name / arrow;
+    grid-row: 4;
+    margin-top: 2px;
+  }
+  .ov-check-row .ov-check-track {
+    grid-column: plate / arrow;
+    grid-row: 2;
+    width: auto;
+    margin-top: 8px;
+    margin-inline-start: 0;
+  }
+  .ov-check-row .ov-check-arrow {
+    grid-column: arrow;
+    grid-row: 1;
+    align-self: center;
+    margin-inline-start: 8px;
+  }
   /* A concentration route's name takes the row's whole width, its bar and
      share beneath it: beside them it had a third of a phone's width. */
   .ov-pareto-list {
@@ -544,6 +607,13 @@
     grid-row: 2;
     margin-top: 6px;
   }
+  /* Beside the widest day-type label and the figure, a phone leaves the bars
+     too little width for their scale's tick labels, which then overprint;
+     each label takes a line of its own above its bar instead. */
+  .ov-svc-list { grid-template-columns: minmax(0, 1fr) auto; }
+  .ov-svc-label,
+  .ov-svc-meta { grid-column: 1 / -1; }
+  .ov-svc-scale { grid-column: 1; }
   .ov-modal {
     width: 100%;
     max-height: 100vh;
@@ -636,6 +706,15 @@
 .ov-hero-figure > svg {
   -webkit-mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
   mask-image: linear-gradient(to right, rgb(0 0 0 / 20%) 250px, #000 330px);
+}
+/* The sparkline's own full-bleed box, pulled out of OverviewHeroRow.tsx's
+   inline style so a breakpoint below can reach it -- an inline style always
+   wins the cascade over a stylesheet rule short of `!important`. */
+.ov-hero-sparkline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 /* .label and .val below must stay `position: relative` -- without it they
    are non-positioned in-flow content, which paints BEFORE (under) the
@@ -737,6 +816,10 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 10px;
+  /* Unlike .ov-hero-reference just above, which wraps at the same width on
+     purpose, this line had no width cap: on a narrow figure the status text
+     ran past the fade and sat over the chart at near-full opacity. */
+  max-width: 250px;
   margin-top: 12px;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
@@ -842,6 +925,40 @@
     border-bottom: 1px solid var(--border-soft);
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   }
+  /* A shorter figure gives the line less headroom under `top_pad`, so its
+     peak can sit flush against the card's shadow ring (box-shadow is never
+     clipped by the figure's own overflow:hidden); a few px of top inset
+     reads as a gap again without moving the chart's bottom edge. */
+  .ov-hero-sparkline {
+    top: 8px;
+    height: calc(100% - 8px);
+  }
+  /* Two columns (label, value) read side by side fine at 880px, but at a
+     phone's width the label's share of them is too narrow for its period
+     clause, which wraps word by word. Stacked label-then-value with the
+     chevron spanning both rows reads cleanly at any label length. */
+  .ov-hero-fact {
+    grid-template-columns: minmax(0, 1fr) 14px;
+  }
+  .ov-hero-fact-label {
+    grid-column: 1;
+    grid-row: 1;
+    text-wrap: pretty;
+  }
+  .ov-hero-fact-period {
+    text-wrap: pretty;
+  }
+  .ov-hero-fact-value {
+    grid-column: 1;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .ov-hero-fact-go {
+    grid-column: 2;
+    /* The base align-items: baseline misplaces an item spanning both rows. */
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
 }
 
 /* The freshness dot's breath: a symmetric loop (the place --ease-in-out
@@ -892,6 +1009,11 @@
     }
     .ov-pareto-pct {
       grid-column: 2;
+    }
+    /* The phone card places its lines on named columns, which a row that
+       cannot inherit the list's has to name itself. */
+    .ov-check-row {
+      grid-template-columns: [plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto;
     }
   }
 }
