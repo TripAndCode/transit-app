@@ -142,3 +142,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # ClickHouse's YY.M releases each carry backward-incompatible changes,
+      # and only YY.3 and YY.8 are LTS. The pin stays on an LTS line and moves
+      # to the next one as a planned upgrade across every pin, the dev and
+      # production servers and their system-log config. A new major still
+      # opens a PR as the cue to plan it.
+      - dependency-name: "clickhouse/clickhouse-server"
+        update-types:
+          - "version-update:semver-minor"
