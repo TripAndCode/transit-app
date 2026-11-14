@@ -434,7 +434,8 @@
       "feed_status_live": "受信中",
       "feed_status_quiet": "フィード停止 {{duration}}",
       "feed_status_none": "まだ受信していません",
-      "feed_status_last": "最終報告 {{time}}"
+      "feed_status_last": "最終報告 {{time}}",
+      "on_time_pointer": "定時率は「<routes>路線</routes>」タブと各路線のページで確認できます。"
     },
     "story": {
       "state_behind_one": "前の{{count}}日間より +{{delta}}分",

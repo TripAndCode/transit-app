@@ -808,6 +808,22 @@
   color: var(--text-secondary);
   word-break: auto-phrase;
 }
+.ov-hero-pointer {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  word-break: auto-phrase;
+}
+.ov-hero-pointer a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ov-hero-pointer a:hover {
+  color: var(--text-secondary);
+}
 /* Today's feed, under the period's figure: a quiet meta line. Positioned
    for the same reason .ov-hero-label is. */
 .ov-hero-feed {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { act, cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewHeroRow, type HeroFact } from "./OverviewHeroRow";
 import { stubReducedMotion } from "../test/reducedMotion";
@@ -56,8 +57,10 @@ function renderHero(overrides: {
   routeCount?: number;
   daily?: OverviewServiceSplitDay[];
   onOpenFact?: (fact: HeroFact) => void;
+  search?: string;
 } = {}) {
   return renderWithProviders(
+    <MemoryRouter initialEntries={[`/agencies/1/pulse${overrides.search ?? ""}`]}>
     <OverviewHeroRow
       headline={overrides.headline ?? headline()}
       severeCount={overrides.severeCount ?? 3}
@@ -77,13 +80,84 @@ function renderHero(overrides: {
       concentration={overrides.concentration ?? concentration}
       daily={overrides.daily ?? []}
       onOpenFact={overrides.onOpenFact ?? (() => {})}
-    />,
+    />
+    </MemoryRouter>,
   );
 }
 
 describe("OverviewHeroRow", () => {
   beforeEach(() => {
     stubReducedMotion();
+  });
+
+  describe("on-time pointer", () => {
+    it("points to Routes and the route page for on-time %", () => {
+      mockFeed(1);
+      renderHero();
+      const link = screen.getByRole("link", { name: "Routes" });
+      expect(link.closest("p")?.textContent).toBe("On-time % is on Routes and on each route's page.");
+    });
+
+    it("links to the Routes tab with the current scope kept", () => {
+      mockFeed(1);
+      renderHero({ search: "?from=2026-05-11&to=2026-06-09&dow=1,2" });
+      const link = screen.getByRole("link", { name: "Routes" });
+      expect(link.getAttribute("href")).toBe("/agencies/1/routes?from=2026-05-11&to=2026-06-09&dow=1%2C2&sort=on_time");
+    });
+
+    it("drops a stale report or sort from the scope", () => {
+      mockFeed(1);
+      renderHero({ search: "?from=2026-05-11&report=ranking_best&sort=avg" });
+      const href = screen.getByRole("link", { name: "Routes" }).getAttribute("href");
+      expect(href).toBe("/agencies/1/routes?from=2026-05-11&sort=on_time");
+    });
+
+    it("keeps a single-route selection on the Routes list", () => {
+      mockFeed(1);
+      renderHero({ search: "?routes=R1&from=2026-05-11&to=2026-06-09" });
+      const href = screen.getByRole("link", { name: "Routes" }).getAttribute("href");
+      expect(href).toBe("/agencies/1/routes?routes=R1&from=2026-05-11&to=2026-06-09&sort=on_time");
+    });
+
+    it("is present with the latest-day note, without a baseline, and with a withheld reference", () => {
+      mockFeed(1);
+      const daily: OverviewServiceSplitDay[] = Array.from({ length: 8 }, (_, i) => ({
+        date: `2026-06-0${i + 2}`,
+        day_type: "weekday",
+        avg_min: i === 7 ? 5.02 : i === 0 ? 5.32 : 3,
+        samples: 1000,
+      }));
+      const withNote = renderHero({ daily });
+      expect(withNote.container.querySelector(".ov-hero-note")).not.toBeNull();
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+      withNote.unmount();
+
+      const noBaseline = renderHero({
+        headline: headline({ avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null }),
+      });
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+      noBaseline.unmount();
+
+      renderHero({
+        headline: headline({
+          reference: {
+            avg_min: null,
+            delta_min: null,
+            delta_pct: null,
+            samples: 60,
+            window_from: "2026-03-05",
+            window_to: "2026-06-02",
+            days: 90,
+            days_selected: 90,
+            days_collected: 90,
+            min_days: 72,
+            min_samples: 100,
+            reason: "insufficient_samples",
+          },
+        }),
+      });
+      expect(screen.getByRole("link", { name: "Routes" })).toBeInTheDocument();
+    });
   });
 
   afterEach(() => {
