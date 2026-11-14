@@ -54,7 +54,9 @@ class Written(NamedTuple):
 
 
 _LATEST_SQL = (
-    "SELECT filed_date, argMax(tuple(build, static_version_id, content_hash, stamped, source_rows, rules), built_at) "
+    # Among writes stamped in the same millisecond, a write-off (empty build) wins.
+    "SELECT filed_date, argMax(tuple(build, static_version_id, content_hash, stamped, source_rows, rules), "
+    "(built_at, build = '')) "
     f"FROM {FILED_DATES} WHERE agency_id = {{agency:UInt16}} {{dates}}GROUP BY filed_date"
 )
 _BETWEEN = "AND filed_date BETWEEN {first:Date} AND {last:Date} "

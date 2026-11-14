@@ -3,13 +3,14 @@ by joining the schedule archive again, and only while what they were filed
 against still holds (pipeline.refiled)."""
 
 import hashlib
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
 from pipeline import ch_aggregates, refiled, static_archive
 from pipeline.live_filing import refiled_dates
 from pipeline.refiled import Written
+from pipeline.service_day import filed_date_of
 from pipeline.static_archive import ScheduleJoin, Stamp
 from pipeline.timetable_in_force import Segment
 
@@ -129,3 +130,22 @@ def test_a_filed_read_reads_updates_only_where_a_date_it_reaches_is_unwritten():
     assert FILED.filing_params((D1, D3))["filed_rest"] == 1
     assert FILED.params()["filed_rest"] == 1
     assert "{filed_rest:UInt8} = 1" in static_archive.observation_rows("1", Stamp.FILED)
+
+
+def test_a_reading_captured_in_a_skipped_span_files_under_its_run_below_the_offset_bound():
+    """The capture skip is exact for scheduled offsets under
+    MAX_EXACT_SKIP_OFFSET_SEC, and only for those."""
+    run = [D1, D2]
+    start, end = static_archive._capture_skips(run)[0]
+    misfiled_under, misfiled_over = 0, 0
+    captured = start
+    while captured < end:
+        for offset in range(0, 50 * 3600, 600):
+            if filed_date_of(captured, offset) not in run:
+                if offset < static_archive.MAX_EXACT_SKIP_OFFSET_SEC:
+                    misfiled_under += 1
+                else:
+                    misfiled_over += 1
+        captured += timedelta(minutes=10)
+    assert misfiled_under == 0
+    assert misfiled_over > 0

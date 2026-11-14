@@ -743,13 +743,21 @@ FILED_SKIP_RUNS = 8
 _NO_SKIP = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
+# The latest scheduled offset _capture_skips files exactly: a later one
+# captured early in a run's day shifts back past the run's first day.
+MAX_EXACT_SKIP_OFFSET_SEC = 44 * 3600
+
+
 def _capture_skips(days: list[date]) -> list[tuple[datetime, datetime]]:
     """For each run of consecutive *days*, longest first and at most
     FILED_SKIP_RUNS, the captures a FILED read skips in `updates`: from its
     first day's start plus the filing reach to the day after its last's
     start less the reach. FILED_DATE_SQL files a reading captured there under
     a day of the run, whose rows FILED_TABLE holds, and one captured outside
-    can file under a day beside the run. Unused slots skip nothing."""
+    can file under a day beside the run. That holds for scheduled offsets
+    under 44:00 (MAX_EXACT_SKIP_OFFSET_SEC); a reading scheduled later and
+    captured in a run day's first hours files under the day before. Unused
+    slots skip nothing."""
     runs: list[tuple[date, date]] = []
     for day in sorted(set(days)):
         if runs and runs[-1][1] + timedelta(days=1) == day:
