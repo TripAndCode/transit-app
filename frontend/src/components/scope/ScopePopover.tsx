@@ -2,6 +2,8 @@ import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { usePopoverDismiss } from "../../hooks/usePopoverDismiss";
 import { popoverLeft } from "./popoverPosition";
 
+const TABBABLE = ["button", "input", "select", "textarea"].map((tag) => `${tag}:not([tabindex="-1"])`).join(", ");
+
 /** A condition's popover. Focus moves in on open. Escape closes it and hands
  *  focus back to the token, through the shared Escape stack so an overlay
  *  opened over it takes the Escape instead. A click outside also closes it;
@@ -45,7 +47,9 @@ export function ScopePopover({
       node.style.top = `${a.bottom - b.top + 6}px`;
       node.style.left = `${popoverLeft(a.left - b.left, node.offsetWidth, b.width)}px`;
     }
-    node?.querySelector<HTMLElement>("button, input, select, textarea")?.focus();
+    // The first control in tab order, not in DOM order: a radiogroup's
+    // unchecked options sit before its checked one with tabindex -1.
+    node?.querySelector<HTMLElement>(TABBABLE)?.focus();
   }, [returnFocusTo]);
 
   return (

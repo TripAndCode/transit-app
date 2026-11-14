@@ -7,6 +7,7 @@ import { timetableChoices } from "../../api/serviceDays";
 import type { ScopeSummary } from "../../api/types";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { RoutesPicker } from "../RoutesPicker";
+import { Segmented } from "../ui/Segmented";
 import { buildTimeBandOptions } from "../timeBandOptions";
 import { sinceStart } from "./brushMath";
 import { PeriodBrush } from "./PeriodBrush";
@@ -34,14 +35,6 @@ const MAX_LATE_SEC = 600;
  *  window's, one minute. */
 const EARLY_LIMIT_SEC = 60;
 
-function Pill({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: string }) {
-  return (
-    <button type="button" className="scope-pill" aria-pressed={pressed} onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-
 /** A small bar coloured by the delay ramp, with the mean beside it. */
 function DelayBar({ minutes }: { minutes: number }) {
   const { t } = useTranslation();
@@ -62,30 +55,37 @@ export function PeriodControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const anchor = defaultPeriod(use(DataEndContext)).to;
   const collectionStart = summary?.earliest ? sinceStart(summary.earliest, anchor) : null;
+  const presetChoices = PERIOD_PRESETS.map((days) => ({
+    value: `last-${days}`,
+    label: t("scope.control.last_days", { count: days }),
+    from: isoDaysBefore(anchor, days - 1),
+    to: anchor,
+  }));
+  // One choice per range: a single-choice group can check only one of two
+  // identical ranges, so the collection choice gives way to a preset that
+  // spans the same days.
+  const periodChoices =
+    collectionStart && !presetChoices.some((choice) => choice.from === collectionStart)
+      ? [...presetChoices, { value: "since-start", label: t("scope.control.since_start"), from: collectionStart, to: anchor }]
+      : presetChoices;
+  const periodValue = periodChoices.find((choice) => choice.from === scope.from && choice.to === scope.to)?.value ?? null;
   function setDate(edge: "from" | "to", value: string) {
     const next = { from: scope.from, to: scope.to, [edge]: value };
     if (value && next.from <= next.to) update({ [edge]: value });
   }
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {PERIOD_PRESETS.map((days) => {
-          const from = isoDaysBefore(anchor, days - 1);
-          return (
-            <Pill key={days} pressed={scope.from === from && scope.to === anchor} onClick={() => update({ from, to: anchor })}>
-              {t("scope.control.last_days", { count: days })}
-            </Pill>
-          );
-        })}
-        {collectionStart && (
-          <Pill
-            pressed={scope.from === collectionStart && scope.to === anchor}
-            onClick={() => update({ from: collectionStart, to: anchor })}
-          >
-            {t("scope.control.since_start")}
-          </Pill>
-        )}
-      </div>
+      <Segmented
+        aria-label={t("scope.popover.period")}
+        options={periodChoices}
+        // Two to a row, for the same narrow popover as the time bands.
+        columns={2}
+        value={periodValue}
+        onChange={(value) => {
+          const choice = periodChoices.find((c) => c.value === value);
+          if (choice) update({ from: choice.from, to: choice.to });
+        }}
+      />
       {summary && summary.days.length > 0 && (
         <PeriodBrush
           days={summary.days}
@@ -118,6 +118,12 @@ function selectedDays(dow: Scope["dow"]): Set<Weekday> {
   return new Set(dow.split(",") as Weekday[]);
 }
 
+const DOW_PRESETS = ["all", "weekday", "weekend"] as const;
+
+function dowPreset(dow: Scope["dow"]): (typeof DOW_PRESETS)[number] | null {
+  return (DOW_PRESETS as readonly string[]).includes(dow) ? (dow as (typeof DOW_PRESETS)[number]) : null;
+}
+
 export function DaysControl({ scope, update, summary }: ControlProps) {
   const { t } = useTranslation();
   const serviceId = useId();
@@ -133,13 +139,12 @@ export function DaysControl({ scope, update, summary }: ControlProps) {
   }
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {(["all", "weekday", "weekend"] as const).map((preset) => (
-          <Pill key={preset} pressed={scope.dow === preset} onClick={() => update({ dow: preset })}>
-            {t(`scope.control.${preset === "all" ? "days_all" : preset}`)}
-          </Pill>
-        ))}
-      </div>
+      <Segmented
+        aria-label={t("scope.popover.days")}
+        options={DOW_PRESETS.map((preset) => ({ value: preset, label: t(`scope.control.${preset === "all" ? "days_all" : preset}`) }))}
+        value={dowPreset(scope.dow)}
+        onChange={(preset) => update({ dow: preset })}
+      />
       <div className="scope-pills">
         {WEEKDAYS.map((day) => {
           const mean = weekdayMeans.get(day);
@@ -177,17 +182,15 @@ export function TimeControl({ scope, update }: ControlProps) {
   const { t } = useTranslation();
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {buildTimeBandOptions(t).map((band) => (
-          <Pill
-            key={band.value}
-            pressed={scope.hour == null && scope.time_band === band.value}
-            onClick={() => update({ time_band: band.value, hour: null })}
-          >
-            {band.label}
-          </Pill>
-        ))}
-      </div>
+      <Segmented
+        aria-label={t("scope.popover.time")}
+        options={buildTimeBandOptions(t)}
+        value={scope.hour == null ? scope.time_band : null}
+        onChange={(value) => update({ time_band: value, hour: null })}
+        // Two to a row: the popover is narrow at every width, and four en
+        // labels such as "Late morning (09–12)" don't fit side by side in it.
+        columns={2}
+      />
     </div>
   );
 }
@@ -388,21 +391,23 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
  *  anything else presses neither and is named beneath them. */
 function EarlyChoice({ scope, update }: ControlProps) {
   const { t } = useTranslation();
-  const labelId = useId();
   const early = scopeWindow(scope).early_sec;
+  const earlyLabelText = t("scope.control.early_label");
+  const earlyValue = early == null ? "counted" : early === EARLY_LIMIT_SEC ? "limited" : null;
   return (
     <>
-      <span id={labelId} className="scope-field">
-        {t("scope.control.early_label")}
-      </span>
-      <div className="scope-pills" role="group" aria-labelledby={labelId}>
-        <Pill pressed={early == null} onClick={() => update({ early: earlyParam(null) })}>
-          {t("scope.control.early_counted")}
-        </Pill>
-        <Pill pressed={early === EARLY_LIMIT_SEC} onClick={() => update({ early: earlyParam(EARLY_LIMIT_SEC) })}>
-          {t("scope.control.early_limited", { n: EARLY_LIMIT_SEC / 60 })}
-        </Pill>
-      </div>
+      <span className="scope-field">{earlyLabelText}</span>
+      <Segmented
+        aria-label={earlyLabelText}
+        options={[
+          { value: "counted", label: t("scope.control.early_counted") },
+          { value: "limited", label: t("scope.control.early_limited", { n: EARLY_LIMIT_SEC / 60 }) },
+        ]}
+        value={earlyValue}
+        onChange={(value) => update({ early: value === "counted" ? earlyParam(null) : earlyParam(EARLY_LIMIT_SEC) })}
+        // One to a row: each choice is a sentence, too long to share a row.
+        columns={1}
+      />
       {early != null && early !== EARLY_LIMIT_SEC && (
         <p className="scope-note">{t("scope.control.early_current", { value: earlyLabel(early, t) })}</p>
       )}

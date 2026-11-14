@@ -88,6 +88,12 @@ describe("ScopeSentence", () => {
     expect(token).toHaveFocus();
   });
 
+  it("opens a popover on its checked option rather than the first one", async () => {
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: "9/1 – 9/30 30 days" }));
+    expect(screen.getByRole("radio", { name: "Last 30 days" })).toHaveFocus();
+  });
+
   it("keeps the popover out of any paragraph, since it holds block content", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "all hours" }));
@@ -97,7 +103,7 @@ describe("ScopeSentence", () => {
   it("closes when Tab walks focus out of the popover", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "within 5 min" }));
-    screen.getByRole("button", { name: "Not on time if more than 1 min early" }).focus();
+    screen.getByRole("radio", { name: "Not on time if more than 1 min early" }).focus();
     await userEvent.tab();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "within 5 min" })).not.toHaveFocus();
@@ -149,7 +155,7 @@ describe("ScopeSentence", () => {
   it("shows a set early tolerance and lets it be cleared", async () => {
     mount("?from=2026-09-01&to=2026-09-30&early=120");
     await userEvent.click(screen.getByRole("button", { name: "early by up to 2 min" }));
-    await userEvent.click(screen.getByRole("button", { name: "Not on time if more than 1 min early" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Not on time if more than 1 min early" }));
     expect(params().has("early")).toBe(false);
     expect(region()).toHaveFocus();
   });
@@ -222,7 +228,7 @@ describe("ScopeSentence", () => {
   it("applies a change at once and keeps the popover open", async () => {
     mount();
     await userEvent.click(screen.getByRole("button", { name: "every day" }));
-    await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Weekdays" }));
     expect(params().get("dow")).toBe("weekday");
     expect(screen.getByRole("dialog", { name: "Days and timetable" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "weekdays" })).toBeInTheDocument();
@@ -283,10 +289,10 @@ describe("ScopeSentence", () => {
     const view = mount();
     const pin = screen.getByRole("button", { name: "Show all filters" });
     expect(pin).toHaveAttribute("aria-pressed", "false");
-    expect(screen.queryByRole("button", { name: "Weekdays" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Weekdays" })).toBeNull();
     await userEvent.click(pin);
     expect(pin).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Weekdays" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Weekdays" })).toBeInTheDocument();
     expect(localStorage.getItem("transit.scopePinned")).toBe("1");
     view.unmount();
     mount();
@@ -297,7 +303,7 @@ describe("ScopeSentence", () => {
     const { container } = mount();
     expect(screen.queryByRole("button", { name: "Reset conditions" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "every day" }));
-    await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Weekdays" }));
     await userEvent.keyboard("{Escape}");
     const reset = screen.getByRole("button", { name: "Reset conditions" });
     expect(reset).toHaveTextContent(/^Reset$/);
@@ -361,7 +367,7 @@ describe("ScopeSentence", () => {
     expect(header).toContainElement(pin);
     expect(region()).not.toContainElement(pin);
     await userEvent.click(pin);
-    expect(region()).toContainElement(screen.getByRole("button", { name: "Weekdays" }));
+    expect(region()).toContainElement(screen.getByRole("radio", { name: "Weekdays" }));
   });
 });
 

@@ -120,7 +120,7 @@ describe("scope controls", () => {
 
     it("applies a preset and the timetable at once", async () => {
       mount(DaysControl);
-      await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Weekdays" }));
       expect(params().get("dow")).toBe("weekday");
       await userEvent.selectOptions(screen.getByRole("combobox", { name: "Timetable type" }), "平日");
       expect(params().get("service")).toBe("平日");
@@ -191,11 +191,21 @@ describe("scope controls", () => {
   });
 
   describe("time", () => {
+    it("selects no band while an hour range is set", () => {
+      mount(TimeControl, "?hour=7-9");
+      for (const radio of screen.getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
+    });
+
     it("picks a band and drops an hour range", async () => {
       mount(TimeControl, "?hour=7-9");
-      await userEvent.click(screen.getByRole("button", { name: "Morning (05–09)" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Morning (05–09)" }));
       expect(params().get("time_band")).toBe("morning");
       expect(params().has("hour")).toBe(false);
+    });
+
+    it("lays the bands out two to a row", () => {
+      mount(TimeControl);
+      expect(screen.getByRole("radiogroup")).toHaveStyle({ gridTemplateColumns: "repeat(2, 1fr)" });
     });
 
     it("makes no promises about features to come", () => {
@@ -211,30 +221,30 @@ describe("scope controls", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-10-03T03:00:00Z"));
       mount(PeriodControl);
-      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("radio", { name: "Last 30 days" })).toHaveAttribute("aria-checked", "true");
     });
 
     it("ends the presets where the default period ends, leaving out a partial today", async () => {
       vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
       vi.setSystemTime(new Date("2026-09-29T03:00:00Z"));
       mount(PeriodControl, "", { ...SUMMARY, latest: "2026-09-29" });
-      expect(screen.getByRole("button", { name: "Last 30 days" })).toHaveAttribute("aria-pressed", "true");
-      await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+      expect(screen.getByRole("radio", { name: "Last 30 days" })).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(screen.getByRole("radio", { name: "Last 7 days" }));
       expect(params().get("to")).toBe("2026-09-28");
     });
 
     it("anchors a preset on the agency's latest data", async () => {
       mount(PeriodControl);
-      await userEvent.click(screen.getByRole("button", { name: "Last 7 days" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Last 7 days" }));
       expect(params().get("from")).toBe("2026-09-22");
       expect(params().get("to")).toBe("2026-09-28");
     });
 
     it("offers two weeks and the whole collection once the data is in", async () => {
       mount(PeriodControl, "", SUMMARY);
-      await userEvent.click(screen.getByRole("button", { name: "Last 14 days" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Last 14 days" }));
       expect(params().get("from")).toBe("2026-09-15");
-      await userEvent.click(screen.getByRole("button", { name: "Since collection began" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Since collection began" }));
       expect(params().get("from")).toBe("2026-06-01");
       expect(params().get("to")).toBe("2026-09-28");
     });
@@ -244,10 +254,21 @@ describe("scope controls", () => {
       expect(screen.getByRole("img", { name: "Daily mean delay" })).toBeInTheDocument();
     });
 
+    it("offers one choice per range when the collection spans exactly a preset", () => {
+      mount(PeriodControl, "?from=2026-09-22&to=2026-09-28", { ...SUMMARY, earliest: "2026-09-22" });
+      expect(screen.queryByRole("radio", { name: "Since collection began" })).toBeNull();
+      expect(screen.getByRole("radio", { name: "Last 7 days" })).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("lays the presets out two to a row", () => {
+      mount(PeriodControl, "", SUMMARY);
+      expect(screen.getByRole("radiogroup", { name: "Period" })).toHaveStyle({ gridTemplateColumns: "repeat(2, 1fr)" });
+    });
+
     it("leaves out the bars and the collection preset without data", () => {
       mount(PeriodControl);
       expect(screen.queryByRole("img", { name: "Daily mean delay" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Since collection began" })).toBeNull();
+      expect(screen.queryByRole("radio", { name: "Since collection began" })).toBeNull();
     });
 
     it("ignores a start after the end", () => {
@@ -256,6 +277,11 @@ describe("scope controls", () => {
       expect(params().get("from")).toBe("2026-09-01");
       fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-09-05" } });
       expect(params().get("from")).toBe("2026-09-05");
+    });
+
+    it("selects no preset while a custom range is set", () => {
+      mount(PeriodControl, "?from=2026-09-01&to=2026-09-10");
+      for (const radio of screen.getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
     });
   });
 
@@ -328,14 +354,14 @@ describe("scope controls", () => {
 
     it("limits early departures to one minute by default, and counts them all on request", async () => {
       mount(ToleranceControl);
-      const group = screen.getByRole("group", { name: "Early departures" });
-      const counted = within(group).getByRole("button", { name: "Count early departures as on time" });
-      const limited = within(group).getByRole("button", { name: "Not on time if more than 1 min early" });
-      expect(limited).toHaveAttribute("aria-pressed", "true");
-      expect(counted).toHaveAttribute("aria-pressed", "false");
+      const group = screen.getByRole("radiogroup", { name: "Early departures" });
+      const counted = within(group).getByRole("radio", { name: "Count early departures as on time" });
+      const limited = within(group).getByRole("radio", { name: "Not on time if more than 1 min early" });
+      expect(limited).toHaveAttribute("aria-checked", "true");
+      expect(counted).toHaveAttribute("aria-checked", "false");
       await userEvent.click(counted);
       expect(params().get("early")).toBe("any");
-      expect(counted).toHaveAttribute("aria-pressed", "true");
+      expect(counted).toHaveAttribute("aria-checked", "true");
       await userEvent.click(limited);
       expect(params().has("early")).toBe(false);
     });
@@ -343,21 +369,21 @@ describe("scope controls", () => {
     it("is the industry window, no more than one minute early and five late, with nothing set", () => {
       mount(ToleranceControl);
       expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByRole("button", { name: "Not on time if more than 1 min early" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("radio", { name: "Not on time if more than 1 min early" })).toHaveAttribute("aria-checked", "true");
       expect([params().get("early"), params().get("late")]).toEqual([null, null]);
     });
 
     it("reaches the legacy definition, every early departure and up to one minute late", async () => {
       mount(ToleranceControl);
       await userEvent.click(screen.getByRole("button", { name: "1 min" }));
-      await userEvent.click(screen.getByRole("button", { name: "Count early departures as on time" }));
+      await userEvent.click(screen.getByRole("radio", { name: "Count early departures as on time" }));
       expect([params().get("early"), params().get("late")]).toEqual(["any", "60"]);
     });
 
     it("says what an early tolerance neither choice names is, pressing neither", () => {
       mount(ToleranceControl, "?early=120");
-      const group = screen.getByRole("group", { name: "Early departures" });
-      for (const button of within(group).getAllByRole("button")) expect(button).toHaveAttribute("aria-pressed", "false");
+      const group = screen.getByRole("radiogroup", { name: "Early departures" });
+      for (const radio of within(group).getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
       expect(screen.getByText("Now: early by up to 2 min")).toBeInTheDocument();
     });
 
@@ -374,9 +400,14 @@ describe("scope controls", () => {
   describe("early", () => {
     it("offers the same early-departure choice as the tolerance control", async () => {
       mount(EarlyControl, "?early=any");
-      expect(screen.getByRole("button", { name: "Count early departures as on time" })).toHaveAttribute("aria-pressed", "true");
-      await userEvent.click(screen.getByRole("button", { name: "Not on time if more than 1 min early" }));
+      expect(screen.getByRole("radio", { name: "Count early departures as on time" })).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(screen.getByRole("radio", { name: "Not on time if more than 1 min early" }));
       expect(params().has("early")).toBe(false);
+    });
+
+    it("stacks its sentence-long choices one to a row", () => {
+      mount(EarlyControl);
+      expect(screen.getByRole("radiogroup", { name: "Early departures" })).toHaveStyle({ gridTemplateColumns: "repeat(1, 1fr)" });
     });
   });
 
