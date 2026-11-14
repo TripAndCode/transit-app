@@ -295,7 +295,8 @@ ORDER BY (agency_id, static_version_id, recorded_at);
 -- Each kept timetable's calendar as the loader stored it: its static_calendar
 -- rows (kind 'calendar') and static_calendar_dates rows (kind
 -- 'calendar_dates'), under the version name it was loaded as and its content
--- (pipeline.static_archive.archive_calendar). The content key does not cover
+-- (pipeline.static_archive.archive_calendar), with a digest of the rows to
+-- tell a changed calendar from the kept one. The content key does not cover
 -- the calendar, so the name tells apart two calendars of one content. A
 -- calendar row's start and end dates are ISO text, since a feed's open end is
 -- past Date32. A calendar_dates row's date is the feed's raw text, as loaded.
@@ -303,6 +304,7 @@ CREATE TABLE IF NOT EXISTS static_calendar_archive (
     agency_id         Int32,
     static_version_id String,
     content_hash      String,
+    calendar_digest   String,
     kind              Enum8('calendar' = 1, 'calendar_dates' = 2),
     service_id        String,
     monday            Bool,

@@ -5,12 +5,16 @@ beside its trips keeps them unknown (NULL), and the feed-quality scorecard
 leaves it out. For each such day this computes them as the capture would have
 saved them, with the same SQL (pipeline.planned_trips.rows_plan), from the
 archived timetable in force that day (pipeline.static_archive): the calendar
-kept under that version's name and its content's kept schedule. A day is
-filled only when that timetable also plans the planned trips the day was
-saved with: a timetable loaded after its first day covers days the outgoing
-one was captured for, and the first save stands. The kept schedule holds no
-trip without a stop time, so a timetable with one plans fewer trips here and
-its days stay unknown.
+kept under that version's name and its content's kept schedule.
+
+A day is filled only where the in-force timetable's planned trips equal the
+day's saved count. Nothing saved with a day names the timetable its capture
+read, and the two can differ: a timetable loaded after its first day covers
+days the outgoing one was captured for, and the first save stands. The count
+check catches such a day unless the two timetables plan as many trips on it,
+when it is filled from the in-force one. The kept schedule holds no trip
+without a stop time, so a timetable with one plans fewer trips here and its
+days stay unknown.
 
 A day stays unknown, and is counted per agency, when no archived timetable is
 in force on it, when that timetable's calendar is not archived (one archived
@@ -76,7 +80,10 @@ def plan_agency(conn, ch, agency_id: int, days: list[tuple[date, int]]) -> Outco
             by_version[version].append((day, trips))
     for (stem, content), own in by_version.items():
         calendar = static_archive.archived_calendar(ch, agency_id, stem, content)
-        assert calendar is not None
+        if calendar is None:
+            outcome.left[_NO_CALENDAR] += [day for day, _ in own]
+            outcome.uncalendared.add(stem)
+            continue
         plan = planned_trips.rows_plan(
             conn,
             agency_id,

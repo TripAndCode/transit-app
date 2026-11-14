@@ -687,3 +687,22 @@ def test_each_trips_service_and_stop_times_are_read_from_the_archived_schedule(p
         loaded = sorted(cur.fetchall())
     pg_conn.rollback()
     assert sorted(static_archive.service_trips(ch_client, agency_id, key)) == loaded
+
+
+def test_a_calendar_only_refetch_under_the_same_name_keeps_the_first_calendar_and_warns(
+    pg_conn, agency_id, ch_client, caplog
+):
+    """Name and content are the key, so the second calendar has nowhere to go:
+    the first stands, and the archive says so."""
+    _seed(pg_conn, agency_id)
+    _set_calendar(pg_conn, agency_id, end=date(2026, 11, 30))
+    first = _loaded_calendar(pg_conn, agency_id)
+    key = static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    with caplog.at_level("WARNING", logger="pipeline.static_archive"):
+        static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    assert "another calendar" not in caplog.text
+    _set_calendar(pg_conn, agency_id, end=date(2027, 3, 31))
+    with caplog.at_level("WARNING", logger="pipeline.static_archive"):
+        assert static_archive.archive_loaded(pg_conn, ch_client, agency_id) == key
+    assert "gtfs_static_20261025 carries another calendar than the one kept" in caplog.text
+    assert static_archive.archived_calendar(ch_client, agency_id, "gtfs_static_20261025", key) == first

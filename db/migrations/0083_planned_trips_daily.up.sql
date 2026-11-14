@@ -8,8 +8,10 @@
 --
 -- pipeline.planned_trips writes it on every analyze run, for the days before
 -- today, and before every reload replaces the calendar, for the outgoing
--- timetable's days before the incoming one starts, later days included. It
--- inserts only days that have no row yet. The first count saved for a day stands; nothing updates or
+-- timetable's days before the incoming one starts, later days included. The
+-- capture inserts only days with no row, so the first count saved for a day
+-- stands; the only later write is the one-time fill of a NULL
+-- planned_stop_events (scripts/fill_planned_stop_events.py), and nothing
 -- deletes a row except its agency's deletion. Days before the first capture
 -- are not reconstructed: the reload that replaced their timetable erased them.
 --

@@ -219,3 +219,13 @@ def test_a_fill_that_fails_still_leaves_the_scorecards_state_cleared(
     monkeypatch.setattr(fill, "fill", stop)
     with pytest.raises(RuntimeError, match="stopped"):
         fill.main(["--apply"])
+
+
+def test_a_calendar_gone_after_planning_leaves_its_days_unknown(
+    tmp_path, pg_conn, agency_id, ch_client, monkeypatch, capsys
+):
+    captured = _two_timetables(tmp_path, pg_conn, agency_id, ch_client, monkeypatch)
+    monkeypatch.setattr(static_archive, "archived_calendar", lambda *args: None)
+    assert fill.main(["--apply"]) == 0
+    assert "24 whose timetable's calendar is not archived" in capsys.readouterr().out
+    assert _saved(pg_conn, agency_id) == dict.fromkeys(captured)

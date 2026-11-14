@@ -541,11 +541,10 @@ def _plan_calendars(ch, agency_id: int, static_dir: Path) -> list[Uncalendared]:
     return found
 
 
-def _calendar_in_scratch(scratch_conn, ch, ch_write, agency_id: int, name: Uncalendared) -> str | None:
-    """Load *name*'s zip into the scratch and keep its calendar in the archive
-    through *ch_write*; why it was not kept, or None once it is."""
-    assert name.zip is not None
-    parts = _load_scratch(scratch_conn, ch, agency_id, name.zip)
+def _calendar_in_scratch(scratch_conn, ch, ch_write, agency_id: int, name: Uncalendared, path: Path) -> str | None:
+    """Load *name*'s kept zip at *path* into the scratch and keep its calendar
+    in the archive through *ch_write*; why it was not kept, or None once it is."""
+    parts = _load_scratch(scratch_conn, ch, agency_id, path)
     try:
         if static_archive.content_hash(parts) != name.content:
             return f"does not reproduce {name.content}"
@@ -567,7 +566,7 @@ def _calendars(args, ch, target_conn, scratch_conn) -> int:
     else:
         agencies = sorted({mapping.agency_id for mapping in static_archive.latest_mappings(ch)})
     rows: dict[int, tuple] = {}
-    chosen: dict[int, list[Uncalendared]] = {}
+    chosen: dict[int, list[tuple[Uncalendared, Path]]] = {}
     for agency in agencies:
         row = _agency_row(target_conn, scratch_conn, agency)
         if row is None:
@@ -577,7 +576,7 @@ def _calendars(args, ch, target_conn, scratch_conn) -> int:
             continue
         rows[agency] = row
         found = _plan_calendars(ch, agency, args.static_dir)
-        chosen[agency] = [name for name in found if name.zip is not None and name.unloadable is None]
+        chosen[agency] = [(name, name.zip) for name in found if name.zip is not None and name.unloadable is None]
     total = sum(map(len, chosen.values()))
     if not total:
         print("nothing to archive")
@@ -597,15 +596,15 @@ def _calendars(args, ch, target_conn, scratch_conn) -> int:
             if not names:
                 continue
             _ensure_agency(scratch_conn, agency, rows[agency])
-            for name in names:
+            for name, path in names:
                 try:
-                    failure = _calendar_in_scratch(scratch_conn, ch, ch_write, agency, name)
+                    failure = _calendar_in_scratch(scratch_conn, ch, ch_write, agency, name, path)
                 except Exception as error:
                     _rollback(scratch_conn)
                     failure = f"could not load it: {error}"
                 if failure:
                     failed += 1
-                    print(f"  {name.zip}: {failure}; no calendar archived")
+                    print(f"  {path}: {failure}; no calendar archived")
                 else:
                     print(f"archived {name.stem}'s calendar as {name.content}")
     finally:

@@ -13,7 +13,9 @@ and a reload (:mod:`pipeline.static_loader`) replaces an agency's calendar, so
 every day before the new calendar starts loses its plan when the new one
 lands. ``planned_trips_daily`` keeps each day's count as the loaded timetable
 planned it when it was captured, with the stop events and the routes of those
-trips, and the first count saved for a day stands.
+trips. The capture inserts only days with no row, so the first count saved for
+a day stands; the only later write is the one-time fill of a NULL
+planned_stop_events (scripts/fill_planned_stop_events.py).
 
 :func:`capture_planned_trips` runs on every analyze run and saves the days
 before today. The day in progress is read from the loaded timetable until it
@@ -45,6 +47,10 @@ logger = logging.getLogger(__name__)
 #: window and inserts only the days with no row yet; a day further back is
 #: saved only if an earlier capture reached it.
 CAPTURE_LOOKBACK_DAYS = MAX_RANGE_DAYS
+
+#: calendar.txt's weekly flags, Monday first (the order of ``date.weekday()``),
+#: as ``static_calendar`` names its columns.
+WEEKDAY_COLUMNS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 
 class PlanSource(NamedTuple):
@@ -192,8 +198,6 @@ def route_plan_ctes(agency_ids: str) -> str:
     )"""
 
 
-_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-
 # A timetable given as rows (rows_plan), each relation a CTE unnested from
 # array parameters into its table's columns. A trip's stop times are expanded
 # from its count, one row each, as static_stop_times holds them.
@@ -210,9 +214,9 @@ _ROWS_CTES = (
     rows_calendar AS (
         SELECT %(agency_id)s AS agency_id, a.*
         FROM unnest(%(calendar_services)s::text[], """
-    + "".join(f"%(calendar_{day})s::boolean[], " for day in _WEEKDAYS)
+    + "".join(f"%(calendar_{day})s::boolean[], " for day in WEEKDAY_COLUMNS)
     + f"""%(calendar_starts)s::date[], %(calendar_ends)s::date[])
-            AS a(service_id, {", ".join(_WEEKDAYS)}, start_date, end_date)
+            AS a(service_id, {", ".join(WEEKDAY_COLUMNS)}, start_date, end_date)
     ),
     rows_calendar_dates AS (
         SELECT %(agency_id)s AS agency_id, a.*
@@ -275,7 +279,7 @@ def rows_plan(
         "dates": [row[1] for row in date_rows],
         "dates_exceptions": [row[2] for row in date_rows],
     }
-    for i, day in enumerate(_WEEKDAYS, start=1):
+    for i, day in enumerate(WEEKDAY_COLUMNS, start=1):
         params[f"calendar_{day}"] = [row[i] for row in calendar_rows]
     with conn.cursor() as cur:
         cur.execute(_ROWS_PLAN_SQL, params)
