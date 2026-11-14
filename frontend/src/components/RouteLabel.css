@@ -1,5 +1,6 @@
 /* A route's label (see RouteLabel.tsx). Sized in em so one label serves a
-   page title, a list row and a table cell alike. */
+   page title, a list row and a table cell alike; its smaller parts floor at
+   --text-xs so a label in a small cell stays readable. */
 .route-label {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -49,7 +50,7 @@
 
 .route-label__ends {
   color: var(--text-tertiary);
-  font-size: 0.8em;
+  font-size: max(0.8em, var(--text-xs));
   font-weight: 400;
   line-height: 1.4;
 }
@@ -62,12 +63,12 @@
   min-width: 2.2em;
   padding: 0.18em 0.32em 0.12em;
   border-radius: 4px;
-  font-size: 0.92em;
+  font-size: max(0.92em, var(--text-xs));
 }
 
 .route-label__aside {
   color: var(--text-tertiary);
-  font-size: 0.9em;
+  font-size: max(0.9em, var(--text-xs));
 }
 
 /* A label in a list that lines its routes' names up on one column, plate or
