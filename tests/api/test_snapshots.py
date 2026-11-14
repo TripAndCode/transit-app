@@ -203,13 +203,13 @@ async def test_a_cross_site_create_is_refused(reports_client, aconn):  # noqa: F
     [
         {"payloads": {"report": {"ja": {"rows": [[99.9]]}}}},
         {"query": {"from": DAY, "rows": "[[99.9]]"}},
-        {"screen": "route_page"},
+        {"screen": "dashboard"},
     ],
-    ids=["client-figures", "unknown-param", "route-page"],
+    ids=["client-figures", "unknown-param", "unknown-screen"],
 )
 async def test_the_figures_are_never_the_clients(reports_client, aconn, extra):  # noqa: F811
     """Only the server's own compute fills a snapshot: a body naming figures or
-    an unknown parameter is refused, as is a screen this slice cannot render."""
+    an unknown parameter is refused, as is a screen it has no computation for."""
     client, agency_id, pool = reports_client
     await _seed(pool, agency_id, _BEFORE)
     sid = (await seed_session(aconn, role="admin")).sid
@@ -446,3 +446,252 @@ async def test_a_snapshot_of_an_agency_no_longer_on_record_has_no_tier(reports_c
     client, agency_id, _ = reports_client
     snapshot_id = await _store(aconn, agency_id + 1000)
     assert (await client.get(f"/api/snapshots/{snapshot_id}")).json()["capability_tier"] is None
+
+
+# The route page: one route's own page, whose panels read five endpoints.
+_ROUTE = "A"
+_PAGE_QUERIES = {
+    "default": {"from": DAY, "to": DAY, "routes": _ROUTE},
+    "weekday-late": {"from": DAY, "to": DAY, "routes": _ROUTE, "service": "平日", "late": "120"},
+}
+# Enough observations that the agency's route lists rank both routes, some
+# of them late under a 120 s tolerance but on time under the default's.
+_PAGE_BEFORE = {"A": [0] * 120 + [200] * 40 + [400] * 40, "B": [0] * 150 + [2000] * 50}
+_PAGE_AFTER = {"A": [0] * 200, "B": [900] * 200}
+
+
+@pytest.fixture
+async def route_page_client(reports_app, ch_async_client):  # noqa: F811
+    """``reports_client`` with a real ClickHouse client: the route page's delay
+    by stop (``GET /route-shape``) reads ``updates`` from ClickHouse."""
+    import httpx
+    from httpx import ASGITransport
+
+    app, agency_id, pool = reports_app
+    app.state.ch_client = ch_async_client
+    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client, agency_id, pool
+    app.state.ch_client = None
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE agg_route_daily, static_shapes, route_performance_standards CASCADE")
+
+
+async def _seed_route_page(pool, ch_client, agency_id):
+    """Route A as its page reads it: its list figures, the agency's lateness
+    by route, a target, and two observed departures on a variant whose middle
+    stop has no name, so each language names that stop its own way."""
+    from tests.conftest import mirror_updates_to_ch
+    from tests.fixtures.clock import jst_midday
+
+    await _seed(pool, agency_id, _PAGE_BEFORE)
+    day = date.fromisoformat(DAY)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, "
+            "worst_delay_sec, trips_observed, samples, last_seen_at, sum_delay_sec) "
+            "VALUES ($1, $2, $3, '', 0, 0, 1, 1, $4, 0)",
+            agency_id,
+            day,
+            _ROUTE,
+            jst_midday(day),
+        )
+        for code, late_sec in (("A", 24_000), ("B", 100_000)):
+            await conn.execute(
+                "INSERT INTO agg_daily_trend (agency_id, date, route_code, service_type, avg_min, samples, "
+                "sum_delay_sec, sum_late_sec) VALUES ($1, $2, $3, '', 2.0, 200, $4, $4)",
+                agency_id,
+                day,
+                code,
+                late_sec,
+            )
+        await conn.execute(
+            "INSERT INTO route_performance_standards "
+            "(agency_id, route_code, metric_type, threshold_value, bonus_malus_rate) "
+            "VALUES ($1, $2, 'on_time_pct', 80, 0.01)",
+            agency_id,
+            _ROUTE,
+        )
+        await conn.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, shape_id) VALUES ($1, 'T1', $2, 'S1')",
+            agency_id,
+            _ROUTE,
+        )
+        await conn.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name, stop_lat, stop_lon, geom) "
+            "VALUES ($1, 'ST1', '駅前', 40.82, 140.74, ST_SetSRID(ST_MakePoint(140.74, 40.82), 4326)), "
+            "       ($1, 'ST2', NULL, 40.83, 140.75, ST_SetSRID(ST_MakePoint(140.75, 40.83), 4326)), "
+            "       ($1, 'ST3', '終点', 40.84, 140.76, ST_SetSRID(ST_MakePoint(140.76, 40.84), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time) "
+            "VALUES ($1, 'T1', 1, 'ST1', '09:00:00', '09:00:00'), "
+            "       ($1, 'T1', 2, 'ST2', '09:05:00', '09:05:00'), "
+            "       ($1, 'T1', 3, 'ST3', '09:10:00', '09:10:00')",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO static_shapes (agency_id, shape_id, geom) VALUES ($1, 'S1', "
+            "ST_SetSRID(ST_MakeLine(ARRAY[ST_MakePoint(140.74, 40.82), ST_MakePoint(140.76, 40.84)]), 4326))",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO updates (agency_id, trip_id, route_code, stop_sequence, dep_delay, captured_at, "
+            "file_name, service_type, scheduled_time) "
+            "VALUES ($1, 'T1', $2, 1, 60, $3, 'test.pb', 'weekday', '09:00:00'), "
+            "       ($1, 'T1', $2, 2, 150, $3, 'test.pb', 'weekday', '09:05:00')",
+            agency_id,
+            _ROUTE,
+            jst_midday(day),
+        )
+    mirror_updates_to_ch(ch_client, agency_id)
+
+
+async def _live_route_page(client, agency_id, query, locale):
+    """What the live route page's hooks fetch for ``query``: the agency's
+    route lists and overview over the scope without its route
+    (RouteSummaryStrip), the route's targets (PerformanceStandardPanel), and
+    its delay by stop (RouteAnalysisTab)."""
+    headers = {"Accept-Language": locale}
+    agency_wide = urlencode({k: v for k, v in query.items() if k != "routes"})
+    own = urlencode({**query, "route": _ROUTE})
+    base = f"/api/{agency_id}"
+    page = {}
+    for key in ("ranking", "on_time", "worst_5min"):
+        resp = await client.get(f"{base}/reports/{key}?{agency_wide}&limit=500", headers=headers)
+        assert resp.status_code == 200, resp.text
+        page[key] = resp.json()
+    standards = await client.get(f"{base}/performance_standards?{own}", headers=headers)
+    shape = await client.get(f"{base}/route-shape?{own}", headers=headers)
+    overview = await client.get(f"{base}/overview/summary?{agency_wide}", headers=headers)
+    for resp in (standards, shape, overview):
+        assert resp.status_code == 200, resp.text
+    page["standards"] = standards.json()
+    page["shape"] = shape.json()
+    return page, overview.json()["concentration"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(_PAGE_QUERIES))
+async def test_a_route_page_snapshot_freezes_what_the_live_page_reads(route_page_client, aconn, ch_client, case):
+    """Each panel's stored response is the one the live page's own request
+    gets, in each language, all but the moment it was served; the map's line
+    is not kept. After a rebuild the stored figures stay as they were."""
+    client, agency_id, pool = route_page_client
+    query = _PAGE_QUERIES[case]
+    await _seed_route_page(pool, ch_client, agency_id)
+    await _record_builds(pool, (agency_id, "agg_route_daily_dist", _BUILT))
+    sid = (await seed_session(aconn, role="admin")).sid
+    live = {locale: await _live_route_page(client, agency_id, query, locale) for locale in ("ja", "en")}
+
+    created = await _create(client, sid, agency_id, "route_page", query=query, title="Route A, May")
+    assert created.status_code == 201, created.text
+    snapshot_id = created.json()["snapshot_id"]
+    assert created.json()["screen"] == "route_page"
+
+    await _reanalyze(pool, agency_id, _PAGE_AFTER, _REBUILT)
+    moved, _ = await _live_route_page(client, agency_id, query, "ja")
+    assert live["ja"][0]["ranking"]["rows"]
+    assert {r["route_code"] for r in live["ja"][1]["top_routes"]} == {"A", "B"}
+    assert moved["ranking"]["rows"] != live["ja"][0]["ranking"]["rows"]
+
+    body = (await client.get(f"/api/snapshots/{snapshot_id}")).json()
+    stored = body["payloads"]["route_page"]
+    assert set(stored) == {"ja", "en"}
+    for locale, (page, concentration) in live.items():
+        for key in ("ranking", "on_time", "worst_5min"):
+            assert _figures(stored[locale][key]) == _figures(page[key]), (locale, key)
+        assert stored[locale]["standards"] == page["standards"]
+        assert stored[locale]["shape"] == {**page["shape"], "geometry": None}
+        assert body["payloads"]["concentration"] == concentration
+    assert page["shape"]["geometry"] is not None
+    assert [s["stop_sequence"] for s in stored["ja"]["shape"]["stops"]] == [1, 2]
+    assert stored["ja"]["shape"]["stops"][1]["stop_name"] != stored["en"]["shape"]["stops"][1]["stop_name"]
+    assert [row["metric_type"] for row in stored["ja"]["standards"]["rows"]] == ["on_time_pct"]
+    assert stored["ja"]["standards"]["disclaimer"] != stored["en"]["standards"]["disclaimer"]
+    assert body["params"]["routes"] == [_ROUTE]
+    assert body["params"]["shape"] == "S1"
+    assert (body["params"]["from"], body["params"]["to"]) == (DAY, DAY)
+    assert body["method_version"] == METHOD_VERSION
+    assert body["title"] == "Route A, May"
+    assert "report" not in body["payloads"]
+    assert set(body["payloads"]["credit"]) == {"ja", "en"}
+
+
+@pytest.mark.asyncio
+async def test_a_route_page_snapshot_stores_the_variant_the_page_showed(route_page_client, aconn, ch_client):
+    """A picked variant is part of the page's query, and the snapshot names it."""
+    client, agency_id, pool = route_page_client
+    await _seed_route_page(pool, ch_client, agency_id)
+    sid = (await seed_session(aconn, role="admin")).sid
+    query = {**_PAGE_QUERIES["default"], "shape": "S1"}
+    created = await _create(client, sid, agency_id, "route_page", query=query)
+    assert created.status_code == 201, created.text
+    body = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()
+    assert body["payloads"]["route_page"]["ja"]["shape"]["shape_id"] == "S1"
+    assert body["params"]["shape"] == "S1"
+
+
+@pytest.mark.asyncio
+async def test_route_page_locales_that_disagree_on_a_target_store_nothing(
+    route_page_client, aconn, ch_client, monkeypatch
+):
+    """The targets' figures are two computations too: anything but the
+    disclaimer differing between the languages stores nothing."""
+    import api.routers.snapshots as snapshots
+
+    client, agency_id, pool = route_page_client
+    await _seed_route_page(pool, ch_client, agency_id)
+    real = snapshots.render_performance_standards
+
+    async def moved_between_locales(*args, **kwargs):
+        rendered = await real(*args, **kwargs)
+        if kwargs["locale"] == "en":
+            row = rendered.rows[0].model_copy(update={"actual_value": 1.0})
+            return rendered.model_copy(update={"rows": [row]})
+        return rendered
+
+    monkeypatch.setattr(snapshots, "render_performance_standards", moved_between_locales)
+    sid = (await seed_session(aconn, role="admin")).sid
+    resp = await _create(client, sid, agency_id, "route_page", query=_PAGE_QUERIES["default"])
+    assert resp.status_code == 409
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("screen", "query"),
+    [
+        ("route_page", {"from": DAY, "to": DAY}),
+        ("route_page", {"from": DAY, "to": DAY, "routes": "A,B"}),
+        ("route_page", {"from": DAY, "to": DAY, "routes": "A", "sort": "on_time"}),
+        ("route_page", {"from": DAY, "to": DAY, "routes": "A", "preset": "legacy_60s"}),
+        ("route_page", {"from": DAY, "to": DAY, "routes": "A", "include_sparse": "1"}),
+        ("route_page", {"from": DAY, "to": DAY, "routes": "A", "limit": "5"}),
+        ("route_table", {"from": DAY, "to": DAY, "shape": "S1"}),
+    ],
+    ids=["no-route", "two-routes", "sort", "preset", "sparse", "limit", "shape-off-the-route-page"],
+)
+async def test_a_query_the_screen_would_never_send_is_refused(reports_client, aconn, screen, query):  # noqa: F811
+    """A route page is one route's, under the scope alone (and its variant);
+    an option it has no control for, or a variant on another screen, would be
+    stored as though it shaped figures it never touched."""
+    client, agency_id, _ = reports_client
+    sid = (await seed_session(aconn, role="admin")).sid
+    resp = await _create(client, sid, agency_id, screen, query=query)
+    assert resp.status_code == 422, resp.text
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+
+
+@pytest.mark.asyncio
+async def test_today_is_not_computed_for_a_route_page(route_page_client, aconn, ch_client):
+    """The comparison reads one report; a route page is several responses,
+    so today's figures are unavailable for it, calmly."""
+    client, agency_id, pool = route_page_client
+    await _seed_route_page(pool, ch_client, agency_id)
+    sid = (await seed_session(aconn, role="admin")).sid
+    created = await _create(client, sid, agency_id, "route_page", query=_PAGE_QUERIES["default"])
+    assert created.status_code == 201, created.text
+    resp = await client.get(f"/api/snapshots/{created.json()['snapshot_id']}/today")
+    assert resp.status_code == 200
+    assert resp.json() == {"report": None, "unavailable": "not_computable"}

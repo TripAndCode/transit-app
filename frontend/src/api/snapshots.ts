@@ -1,11 +1,29 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
 import { useLocalizedQuery } from "./hooks";
-import type { CapabilityTier, ReportResponse, Route } from "./types";
+import type {
+  CapabilityTier,
+  OverviewConcentration,
+  PerformanceStandardsResponse,
+  ReportResponse,
+  Route,
+  RouteShapeResponse,
+} from "./types";
 import type { Locale } from "../i18n";
 
 /** The screens a snapshot can be taken of (api/routers/snapshots.py). */
-export type SnapshotScreen = "council_report" | "route_table";
+export type SnapshotScreen = "council_report" | "route_table" | "route_page";
+
+/** One language's responses a route's page reads: the agency's route lists
+ *  its standing comes from, its performance targets, and its delay by stop
+ *  (`geometry` is never kept: only the map draws it). */
+export type RoutePagePayload = {
+  ranking: ReportResponse;
+  on_time: ReportResponse;
+  worst_5min: ReportResponse;
+  standards: PerformanceStandardsResponse;
+  shape: RouteShapeResponse;
+};
 
 /** A frozen snapshot as anyone holding its id reads it: what the screen's own
  *  endpoints served when it was taken. `report` is that endpoint's response
@@ -15,13 +33,17 @@ export type SnapshotScreen = "council_report" | "route_table";
 export type Snapshot = {
   snapshot_id: string;
   created_at: string;
-  /** A screen this build may not render yet, such as `route_page`. */
+  /** A screen this build may not render yet. */
   screen: SnapshotScreen | (string & {});
   agency_id: number;
   agency_name: string;
   params: Record<string, unknown>;
   payloads: {
     report?: Partial<Record<Locale, ReportResponse>>;
+    /** A route's page, in place of `report`. */
+    route_page?: Partial<Record<Locale, RoutePagePayload>>;
+    /** A route's page: the agency's lateness by route, written in no language. */
+    concentration?: OverviewConcentration;
     routes?: Route[];
     credit?: Partial<Record<Locale, string | null>>;
   };

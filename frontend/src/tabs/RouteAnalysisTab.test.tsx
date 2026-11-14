@@ -1,12 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
+import * as snapshots from "../api/snapshots";
+import * as adminHook from "../api/useIsAdmin";
 import { ScopeRouteContext } from "../api/scope";
 import { RouteAnalysisTab } from "./RouteAnalysisTab";
 import { readAnalyses } from "../components/analysis/savedAnalyses";
@@ -50,6 +52,27 @@ function renderTab(initialPath: string) {
 describe("RouteAnalysisTab", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("lets an admin freeze the route's page as it is asked for, and shows everyone else no new control", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    const path = "/agencies/1/route-analysis?routes=R1&from=2026-09-24&to=2026-10-23&late=120&variant=S2";
+    renderTab(path);
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    renderTab(path);
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    expect(create).toHaveBeenCalledTimes(1);
+    const spec = create.mock.calls[0][0];
+    expect(spec).toMatchObject({ screen: "route_page", agencyId: 1 });
+    expect(Object.fromEntries(new URLSearchParams(spec.query))).toMatchObject({
+      routes: "R1", from: "2026-09-24", to: "2026-10-23", late: "120", shape: "S2",
+    });
   });
 
   it("prompts to choose a route and pattern when no single route is selected", () => {

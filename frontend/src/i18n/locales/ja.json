@@ -1594,6 +1594,9 @@
       "today_value_note": "今日 {{value}}（{{note}}）",
       "only_snapshot": "スナップショットのみ",
       "only_today": "今日のみ"
+    },
+    "route_page": {
+      "not_frozen": "このスナップショットに含まれないもの：地図、1日の運行（ダイヤ図）、前の期間との比較。これらは最新のデータを読むため、保存していません。"
     }
   },
   "insight_panel": {

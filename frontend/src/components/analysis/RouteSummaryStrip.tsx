@@ -3,11 +3,13 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { REPORT_ROWS_MAX, useOverviewSummary, useReport } from "../../api/hooks";
 import { scopeToQueryString, type Scope } from "../../api/scope";
+import type { OverviewConcentration, ReportResponse } from "../../api/types";
 import { reportHref } from "../../routes/destinations";
 import { OnTimeDefinition } from "../DefinitionMetaBlock";
 import { EM_DASH, fixedTenth, formatNumber } from "../../utils/format";
 import { routeStanding } from "./routeDossier";
 import { RouteReferenceNote } from "./RouteReference";
+import "../../styles/focusedAnalysis.css";
 
 /** Every route the lists rank, so this route's place among them is known. */
 const WHOLE_LIST = { limit: REPORT_ROWS_MAX } as const;
@@ -38,6 +40,18 @@ function Figure({
   );
 }
 
+export type RouteSummarySources = {
+  ranking?: ReportResponse;
+  onTime?: ReportResponse;
+  worst?: ReportResponse;
+  concentration?: OverviewConcentration;
+};
+
+/** Which of the sources are still on their way; a frozen page has none. */
+type RouteSummaryPending = { ranking: boolean; onTime: boolean; worst: boolean; overview: boolean };
+
+const NONE_PENDING: RouteSummaryPending = { ranking: false, onTime: false, worst: false, overview: false };
+
 /** One route's standing within its agency over the page's scope: its mean
  *  delay and rank, on-time rate, share over five minutes late and share of
  *  all lateness, read from the agency's own route lists and overview so
@@ -51,23 +65,52 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
   const onTime = useReport(agencyId, "on_time", agencyWide, WHOLE_LIST);
   const worst = useReport(agencyId, "worst_5min", agencyWide, WHOLE_LIST);
   const overview = useOverviewSummary(agencyId, agencyWide);
-  const standing = routeStanding(route, {
-    ranking: ranking.data,
-    onTime: onTime.data,
-    worst: worst.data,
-    concentration: overview.data?.concentration,
-  });
-  const pct = (v: number | null) => (v == null ? null : t("summaryPct", { value: formatNumber(Math.round(v)) }));
   const routeQuery = scopeToQueryString({ ...ctx, routes: [route] });
-  const topCount = overview.data?.concentration.top_routes.length ?? 0;
-  const refs = onTime.data?.reference ?? null;
-  const timeBand = onTime.data?.ctx?.time_band ?? ctx.time_band;
+  return (
+    <RouteSummaryFigures
+      route={route}
+      timeBand={ctx.time_band}
+      sources={{ ranking: ranking.data, onTime: onTime.data, worst: worst.data, concentration: overview.data?.concentration }}
+      pending={{ ranking: ranking.isPending, onTime: onTime.isPending, worst: worst.isPending, overview: overview.isPending }}
+      links={
+        <p className="route-summary__links">
+          <Link to={reportHref(agencyId, "trend", routeQuery)}>{t("summaryTimeLink")}</Link>
+          <Link to={reportHref(agencyId, "dwell_run", routeQuery)}>{t("summaryWhyLink")}</Link>
+        </p>
+      }
+    />
+  );
+}
+
+/** The strip's figures from the responses it reads, fetched by the live page
+ *  or stored by a snapshot. `links` lead on to the route's live reports, which
+ *  a frozen page has none of. */
+export function RouteSummaryFigures({
+  route,
+  timeBand: scopeTimeBand,
+  sources,
+  pending = NONE_PENDING,
+  links,
+}: {
+  route: string;
+  timeBand: string;
+  sources: RouteSummarySources;
+  pending?: RouteSummaryPending;
+  links?: ReactNode;
+}) {
+  const { t } = useTranslation("design");
+  const { onTime } = sources;
+  const standing = routeStanding(route, sources);
+  const pct = (v: number | null) => (v == null ? null : t("summaryPct", { value: formatNumber(Math.round(v)) }));
+  const topCount = sources.concentration?.top_routes.length ?? 0;
+  const refs = onTime?.reference ?? null;
+  const timeBand = onTime?.ctx?.time_band ?? scopeTimeBand;
   return (
     <section className="route-summary" aria-label={t("summaryLabel")}>
       <dl className="route-summary__figures">
         <Figure
           label={t("summaryAvg")}
-          pending={ranking.isPending || onTime.isPending}
+          pending={pending.ranking || pending.onTime}
           value={standing.avgMin == null ? null : t("summaryAvgValue", { value: fixedTenth(standing.avgMin) })}
           note={
             standing.rank != null
@@ -80,7 +123,7 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
         />
         <Figure
           label={t("summaryOnTime")}
-          pending={onTime.isPending}
+          pending={pending.onTime}
           value={pct(standing.onTimePct)}
           reference={
             refs && (
@@ -88,10 +131,10 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
             )
           }
         />
-        <Figure label={t("summaryLate5")} pending={worst.isPending} value={pct(standing.late5Pct)} />
+        <Figure label={t("summaryLate5")} pending={pending.worst} value={pct(standing.late5Pct)} />
         <Figure
           label={t("summaryShare")}
-          pending={overview.isPending}
+          pending={pending.overview}
           value={standing.sharePct == null ? null : t("summaryPct", { value: fixedTenth(standing.sharePct) })}
           note={
             standing.shareRank != null
@@ -100,11 +143,8 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
           }
         />
       </dl>
-      {onTime.data && <OnTimeDefinition definition={onTime.data.definition} />}
-      <p className="route-summary__links">
-        <Link to={reportHref(agencyId, "trend", routeQuery)}>{t("summaryTimeLink")}</Link>
-        <Link to={reportHref(agencyId, "dwell_run", routeQuery)}>{t("summaryWhyLink")}</Link>
-      </p>
+      {onTime && <OnTimeDefinition definition={onTime.definition} />}
+      {links}
     </section>
   );
 }
