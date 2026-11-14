@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
-import type { DefinitionMeta, ReportResponse, Route } from "../api/types";
+import type { DefinitionMeta, ReportFigures, ReportResponse, Route } from "../api/types";
 import type { Snapshot, SnapshotToday } from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
 import { SnapshotPage } from "./SnapshotPage";
@@ -453,5 +453,139 @@ describe("SnapshotPage compared with today", () => {
     expect(within(figures).getByText("540,357").closest("li")).not.toHaveTextContent("today");
     expect(screen.getByText("On time 22.6% of the time.")).toBeInTheDocument();
     expect(screen.getByText("1 difference from today's figures.")).toBeInTheDocument();
+  });
+});
+
+function listReport(reportType: string, rows: unknown[][]): ReportFigures {
+  return {
+    report_type: reportType,
+    rendered_at: "2026-11-09T05:05:00Z",
+    rows,
+    ctx: CTX,
+    definition: DEFINITION,
+    scope_applied: {},
+    rows_total: 174,
+  } as unknown as ReportFigures;
+}
+
+const ROUTE_LISTS = {
+  ranking: listReport("ranking", [["7", null, "5.1", "4", "9", 500], ["42", null, "3.06", "2", "8", 143516]]),
+  on_time: listReport("on_time", [["42", null, "49.0", "3.06", 143516, false, 0.3]]),
+  worst_5min: listReport("worst_5min", [["42", null, 26192, "3.06", 143516]]),
+};
+
+function routePage(locale: "ja" | "en") {
+  const unnamed = locale === "ja" ? "2番停留所" : "Stop #2"; // i18n-ignore: the server's own name for an unnamed stop
+  return {
+    standards: {
+      rows: [{
+        route_code: "42", metric_type: "on_time_pct", threshold_value: 85, bonus_malus_rate: 0.01, actual_value: 49,
+        achievement_rate: 0.58, estimated_bonus_deduction: -0.4, meets: false, not_judged: null,
+      }],
+      ctx: CTX,
+      disclaimer: locale === "ja" ? "試算です（保存時）" : "A simulation, as stored", // i18n-ignore: fixture prose
+      on_time_definition: DEFINITION,
+      scope_applied: {},
+    },
+    shape: {
+      route: "42",
+      shape_id: "S1",
+      variants: [],
+      segments: [{ from_sequence: 2, to_sequence: 3, increase_min: 1.5, pairs: 40 }],
+      geometry: null,
+      stops: [
+        { stop_sequence: 1, stop_name: "Hill Gate", lon: 140.7, lat: 40.8, avg_min: 0.2, samples: 1200 },
+        { stop_sequence: 2, stop_name: unnamed, lon: 140.71, lat: 40.81, avg_min: 1.0, samples: 1100 },
+        { stop_sequence: 3, stop_name: "Summit", lon: 140.72, lat: 40.82, avg_min: 2.5, samples: 1000 },
+      ],
+      unobserved_stops: [],
+      scope_applied: {},
+    },
+  };
+}
+
+function routePageSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
+  return snapshot({
+    screen: "route_page",
+    params: { from: "2026-10-01", to: "2026-10-31", routes: ["42"], shape: "S1" },
+    payloads: {
+      route_page: { ja: routePage("ja"), en: routePage("en") },
+      route_lists: ROUTE_LISTS,
+      concentration: { top_routes: [{ route_code: "42", route_short_name: "42", share_pct: 5 }], rest_share_pct: 95 },
+      routes: ROUTES,
+      credit: { ja: "出典：テスト", en: "Source: test" }, // i18n-ignore: fixture prose
+    } as Snapshot["payloads"],
+    ...overrides,
+  });
+}
+
+describe("SnapshotPage, a route's page", () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    await i18n.changeLanguage("en");
+  });
+
+  it("draws the stored standing, targets and delay by stop with the live page's own parts", async () => {
+    stubFetch(200, routePageSnapshot());
+    renderPage();
+    expect(await screen.findByRole("heading", { level: 1, name: /Hillside line/ })).toBeInTheDocument();
+    const strip = screen.getByRole("region", { name: "This route at a glance" });
+    expect(strip).toHaveTextContent("Mean delay3.1 minNo. 2 of 174 routes, most delayed first");
+    expect(strip).toHaveTextContent("On time49%");
+    expect(strip).toHaveTextContent("Over 5 min late18%");
+    expect(strip).toHaveTextContent("Share of all lateness5.0%No. 1 in the agency");
+    expect(screen.getByText("Minimum performance standard")).toBeInTheDocument();
+    expect(screen.getByText("A simulation, as stored")).toBeInTheDocument();
+    expect(screen.getByText("Below standard")).toBeInTheDocument();
+    const byStop = within(screen.getByRole("region", { name: "Delay by stop" })).getByRole("table");
+    expect(within(byStop).getByText("Stop #2")).toBeInTheDocument();
+    expect(within(byStop).getByText("2.5")).toBeInTheDocument();
+    expect(screen.getByText(/Delay grows most from Stop #2 to Summit/)).toBeInTheDocument();
+    expect(screen.getByText("Source: test")).toBeInTheDocument();
+  });
+
+  it("reads only the snapshot itself, and links to nothing live", async () => {
+    const fetchMock = stubFetch(200, routePageSnapshot());
+    renderPage();
+    await screen.findByRole("region", { name: "Delay by stop" });
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+    expect(screen.queryAllByRole("link")).toEqual([]);
+  });
+
+  it("says plainly what it does not hold, and offers no comparison with today", async () => {
+    stubFetch(200, routePageSnapshot());
+    renderPage();
+    expect(await screen.findByText(/the map, the day's trips and the comparison with the previous period/)).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "Compare with today's figures" })).toBeNull();
+  });
+
+  it("follows the reader's language with the language's own stored responses", async () => {
+    stubFetch(200, routePageSnapshot());
+    renderPage();
+    await screen.findByText("A simulation, as stored");
+    await i18n.changeLanguage("ja");
+    expect(await screen.findByText("試算です（保存時）")).toBeInTheDocument(); // i18n-ignore: fixture prose
+    const byStop = within(screen.getByRole("region", { name: "停留所ごとの遅延" })).getByRole("table"); // i18n-ignore: the design namespace's own heading
+    expect(within(byStop).getByText("2番停留所")).toBeInTheDocument(); // i18n-ignore: fixture prose
+  });
+
+  it("names the variant it stored without offering another", async () => {
+    const page = routePage("en");
+    const variants = [
+      { shape_id: "S1", first_stop_name: "Hill Gate", last_stop_name: "Summit", stop_count: 3, samples: 900, share_pct: 90 },
+      { shape_id: "S2", first_stop_name: "Summit", last_stop_name: "Hill Gate", stop_count: 3, samples: 100, share_pct: 10 },
+    ];
+    const withVariants = { ...page, shape: { ...page.shape, variants } };
+    stubFetch(200, routePageSnapshot({
+      payloads: { route_page: { en: withVariants, ja: withVariants }, route_lists: ROUTE_LISTS, concentration: { top_routes: [], rest_share_pct: 0 }, routes: ROUTES, credit: {} } as Snapshot["payloads"],
+    }));
+    renderPage();
+    const picker = await screen.findByRole("combobox", { name: /Path/ });
+    expect(picker).toBeDisabled();
+    expect(picker).toHaveValue("S1");
+    expect(screen.queryByRole("button", { name: "Other direction" })).toBeNull();
   });
 });

@@ -8,11 +8,12 @@ the number that was handed out.
 
 ## Who does what
 
-- **Admins** take snapshots. On the council report (Reports, `doc=council`)
-  and the Routes table, an admin sees an Export menu whose "Create snapshot"
-  item (「スナップショットを作成」) stores the screen as it is asked for (scope,
-  on-time window, sort, order, sparse and left-out toggles, row count) and
-  copies the snapshot's link, `/s/{id}`. An admin's print of the council
+- **Admins** take snapshots. On the council report (Reports, `doc=council`),
+  the Routes table and a route's own page, an admin sees an Export menu whose
+  "Create snapshot" item (「スナップショットを作成」) stores the screen as it is
+  asked for (scope, on-time window, sort, order, sparse and left-out toggles,
+  row count; on a route's page, the route and its variant) and copies the
+  snapshot's link, `/s/{id}`. An admin's print of the council
   report takes one too and prints its link ([On paper](#on-paper)). Everyone
   else sees no change on those screens.
 - **Anyone holding the link** reads it, signed in or not: the page
@@ -33,12 +34,11 @@ the number that was handed out.
 
 One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
 
-- `screen`: `council_report` or `route_table`. The table also allows
-  `route_page`, which cannot be created yet: the route page fetches its data
-  inside its own components, so there is nothing yet to render it from stored
-  responses.
+- `screen`: `council_report`, `route_table` or `route_page`.
 - `params`: the resolved scope, with explicit dates even when the request
-  left them to the default window, and the screen's own options.
+  left them to the default window, and the screen's own options. A route
+  page's names its one route (`routes`) and the variant it showed (`shape`),
+  even when the server picked it.
 - `payloads`:
   - `report`: the response the screen's endpoint
     (`GET /api/{agency_id}/reports/{council_summary|route_table}`) serves,
@@ -50,13 +50,38 @@ One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
   - `routes`: the agency's route catalogue (`GET /api/{agency_id}/routes`), so
     the rows keep the labels they had.
   - `credit`: the open-data credit for the agency's feed, per language.
+  - A route's page stores, in place of `report`, the responses its panels
+    read, each asked what the live page asks:
+    - `route_lists`: the agency's route lists over the scope without its
+      route (`ranking`, `on_time`, `worst_5min`), at the length the live page
+      asks for (the client's `REPORT_ROWS_MAX`), which the summary strip
+      reads the route's rank and figures from. Their figures are the same in
+      every language, so each is computed once and stored once, without its
+      prose (`text`).
+    - `concentration`: the agency overview's lateness by route
+      (`GET /api/{agency_id}/overview/summary`'s `concentration`), which the
+      strip's share of all lateness reads. It is written in no language, so
+      it is stored once.
+    - `route_page`: per language, the route's performance targets
+      (`standards`, `GET /api/{agency_id}/performance_standards?route=`) and
+      its delay by stop on its variant (`shape`,
+      `GET /api/{agency_id}/route-shape`), with `geometry` set to null, since
+      only the map draws the line. Everything but the targets' disclaimer and
+      the stop names must match between the languages, or the create answers
+      409: a stop the timetable leaves unnamed is named by its sequence in
+      each language.
 - `method_version`, `agency_name`, `created_at`, `created_by` and an optional
   `title` (up to 200 characters) and `note` (up to 2000).
 
 The server computes every payload itself, through the same function the
-screen's endpoint runs (`api.routers.reports.render_report`); a create request
-names only the screen, the agency and the query, and any other field is
-refused. Payloads over 1 MiB serialized are refused with 413.
+screen's endpoint runs (`api.routers.reports.render_report`, and for a route's
+page also `render_performance_standards`, `api.routers.map.render_route_shape`
+and `api.routers.overview.render_overview_summary`); a create request names
+only the screen, the agency and the query, and any other field is refused. A
+route page's query names exactly one route and may name its variant (`shape`);
+the report screens' options (preset, sort, order, the sparse and left-out
+toggles, row count) are refused on it, and a variant on any other screen.
+Payloads over 1 MiB serialized are refused with 413.
 
 ## The page
 
@@ -73,6 +98,33 @@ figures.
 Only the screen's own report is frozen. The panels the Routes screen shows
 beside its table (headway quality, the agency's performance standards) come
 from endpoints of their own and are not part of a snapshot.
+
+### A route's page
+
+`/s/{id}` draws a route's page with the live page's own parts, from the
+stored responses in the reader's language
+(`frontend/src/pages/RoutePageSnapshot.tsx`): the route's name as its title,
+the definition block, the summary strip (`RouteSummaryFigures`), the
+performance targets (`PerformanceStandardView`), and the delay by stop
+(`RiseHeadline`, `StopDelayTrend`, `StopDelayTable`, `SelectedStopAside`).
+The live page fetches through hooks and hands the same parts its responses.
+
+- **Frozen:** the strip's mean delay and rank, on-time rate, share over five
+  minutes late and share of all lateness, each with the route's 90-day
+  reference; the performance targets with their verdicts and disclaimer;
+  and the delay at each stop with the segment where it grows most. Both the
+  chart and the stop table are drawn, one under the other. Picking a stop
+  moves the chart's marker and the side panel to it; no figure changes.
+- **Not stored, and said so:** the map, the day's trips (the Marey diagram)
+  and the comparison with the previous period read live data. The page
+  draws none of them, and says so in one line beneath the figures, never
+  showing today's data beside the frozen figures.
+- **No live links.** The strip's links on to the route's reports are left
+  out, and the variant is named in a disabled picker with no other-direction
+  button.
+- **The scope sentence** strikes nothing through: the panels each honour
+  their own part of the scope, so no one panel's `scope_applied` speaks for
+  the page.
 
 ## On paper
 
@@ -132,6 +184,11 @@ The page asks the API for the snapshot alone until the reader turns on
 「今日の数値と比較」 / "Compare with today's figures" (off on every visit).
 Then it asks `GET /api/snapshots/{id}/today` once, and marks the stored
 figures against today's; the stored figures themselves never change.
+
+A route's page offers no comparison, and its `/today` answers
+`not_computable`: the endpoint answers one screen's report
+(`SnapshotToday.report`), and the page's comparison reads one report's
+figures, while a route's page is several responses, not all of them reports.
 
 - **Like for like.** The endpoint replays the snapshot's stored `params` (the
   resolved dates, never a rolling window, the scope and the screen's options)

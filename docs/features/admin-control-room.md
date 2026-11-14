@@ -335,12 +335,12 @@ signed-out visitors; it is the recovery switch when OAuth is down (see
 ## Snapshots
 
 No page of its own: an admin takes a snapshot from the Export menu of the
-council report or the Routes table, or by printing the council report, and
-lists or deletes them through the API ([snapshots.md](snapshots.md)).
+council report, the Routes table or a route's page, or by printing the council
+report, and lists or deletes them through the API ([snapshots.md](snapshots.md)).
 
 Endpoints:
-- `POST /api/admin/snapshots` — compute the named screen's response for the
-  given scope and store it; answers the id and its `/s/{id}` page.
+- `POST /api/admin/snapshots` — compute the named screen's responses for the
+  given scope and store them; answers the id and its `/s/{id}` page.
 - `GET /api/admin/snapshots` — newest first, without the payloads.
 - `DELETE /api/admin/snapshots/{id}` — remove one for good.
 

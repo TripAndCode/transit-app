@@ -344,5 +344,22 @@ async def overview_summary(
     and one held here across that fan-out is what lets enough concurrent
     requests wait on each other forever.
     """
-    payload = await compute_overview_summary(agency_id, ctx, None, pool=request.app.state.pool, ch=ch)
+    return await render_overview_summary(agency_id, ctx, pool=request.app.state.pool, ch=ch)
+
+
+async def render_overview_summary(
+    agency_id: int,
+    ctx: RangeCtx,
+    *,
+    conn: asyncpg.Connection | None = None,
+    pool: asyncpg.Pool | None = None,
+    ch: AsyncClient | None,
+) -> OverviewSummary:
+    """``GET /overview/summary``'s whole response for ``ctx``, its service
+    filter unresolved (the compute resolves it over the wider span it reads).
+    With ``pool`` the stages fan out on connections of their own; a caller
+    already holding ``conn`` passes that instead, and the stages run on it in
+    turn, since fanning out while one connection is held is what lets
+    concurrent requests starve each other."""
+    payload = await compute_overview_summary(agency_id, ctx, conn, pool=pool, ch=ch)
     return OverviewSummary(**payload, scope_applied=_SUMMARY_SCOPE)

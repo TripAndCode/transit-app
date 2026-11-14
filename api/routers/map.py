@@ -622,6 +622,22 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
+    return await render_route_shape(conn, ch, agency_id, route, ctx, locale=locale, shape=shape)
+
+
+async def render_route_shape(
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    agency_id: int,
+    route: str,
+    ctx: RangeCtx,
+    *,
+    locale: str,
+    shape: str | None = None,
+) -> dict[str, Any]:
+    """``GET /route-shape``'s whole response, for a caller that resolved the
+    request itself: a route page's snapshot stores exactly what the page's
+    delay by stop was served."""
     body = await compute_route_shape(conn, ch, agency_id, str(route), ctx, locale=locale, shape=shape)
     return {**body, "scope_applied": _ROUTE_SHAPE_SCOPE}
 

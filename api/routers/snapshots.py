@@ -18,6 +18,10 @@ stored, and the route catalogue the labels are drawn from is stored beside
 them. Today's figures come from the same code, asked the stored resolved
 scope and options, so a difference between the two is the aggregates' or the
 method's, never the query's.
+
+A route's page is not one report but the responses its panels read: the
+agency's route lists and overview its standing comes from, the route's
+performance targets and its delay by stop, each from its endpoint's own code.
 """
 
 from __future__ import annotations
@@ -25,20 +29,30 @@ from __future__ import annotations
 import json
 import re
 import secrets
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Literal
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from api.admin_audit import record_admin_action
 from api.deps import get_ch, get_conn, get_locale
 from api.middleware.locale import SUPPORTED_LOCALES
 from api.middleware.ratelimit import SNAPSHOT_TODAY_LIMIT, limiter, tier_limit
 from api.range import RangeCtx, clamp_range_ctx, ctx_payload, resolve_service_dates
-from api.routers.reports import ReportResponse, render_report, scope_early
+from api.routers.map import render_route_shape
+from api.routers.overview import render_overview_summary
+from api.routers.reports import (
+    REPORT_ROWS_MAX,
+    ReportResponse,
+    render_performance_standards,
+    render_report,
+    scope_early,
+)
 from api.routers.static import fetch_static_routes
 from api.security import User, csrf_guard, require_admin
 from pipeline.data_sources import credit_line
@@ -49,13 +63,22 @@ from pipeline.reports.rankings import EARLY_ANY
 admin_router = APIRouter(prefix="/api/admin/snapshots", tags=["admin"])
 router = APIRouter(prefix="/api/snapshots", tags=["snapshots"])
 
-#: The serialized payloads a snapshot may hold. Far above any screen's
-#: response (a Routes table at its longest, in every locale, with the agency's
-#: route catalogue), so reaching it means a request the screens never make.
+#: The serialized payloads a snapshot may hold. Well above what any screen's
+#: responses take at their row limit, in every locale they are stored in, with
+#: the agency's route catalogue, so reaching it means a request the screens
+#: never make.
 MAX_PAYLOAD_BYTES = 1024 * 1024
 
-#: The report each screen's own endpoint serves.
+#: The report each screen's own endpoint serves. A route's page has none of
+#: its own: it reads several, so it is absent here.
 _REPORT_TYPES = {"council_report": "council_summary", "route_table": "route_table"}
+
+#: The agency's route lists a route's page reads the route's standing from,
+#: each at the length the live page asks for (:data:`REPORT_ROWS_MAX`).
+_ROUTE_PAGE_LISTS = ("ranking", "on_time", "worst_5min")
+
+#: The options of the report screens, which a route's page has no control for.
+_REPORT_SCREEN_OPTIONS = ("preset", "sort", "order", "include_sparse", "include_retired", "include_zero_delay", "limit")
 
 # Matches the table's CHECK. An id outside it cannot exist, so it is refused
 # before the lookup, with the same answer an unknown id gets.
@@ -76,6 +99,7 @@ _SCREEN_OPTIONS = {
     "include_retired",
     "include_zero_delay",
     "limit",
+    "shape",
 }
 
 
@@ -103,7 +127,9 @@ class SnapshotQuery(BaseModel):
     include_sparse: bool = False
     include_retired: bool = False
     include_zero_delay: bool = False
-    limit: int | None = Field(default=None, ge=1, le=500)
+    limit: int | None = Field(default=None, ge=1, le=REPORT_ROWS_MAX)
+    #: The route page's variant (``GET /route-shape``'s ``shape``).
+    shape: str | None = Field(default=None, min_length=1, max_length=300)
 
 
 class SnapshotCreate(BaseModel):
@@ -112,7 +138,7 @@ class SnapshotCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    screen: Literal["council_report", "route_table"]
+    screen: Literal["council_report", "route_table", "route_page"]
     agency_id: int
     query: SnapshotQuery = Field(default_factory=SnapshotQuery)
     title: str | None = Field(default=None, max_length=200)
@@ -122,6 +148,24 @@ class SnapshotCreate(BaseModel):
     @classmethod
     def _blank_is_none(cls, v: str | None) -> str | None:
         return (v.strip() or None) if v is not None else None
+
+    @model_validator(mode="after")
+    def _only_the_screens_own_options(self) -> SnapshotCreate:
+        """A route's page takes the scope and its variant alone. An option a
+        screen has no control for would be stored as though it shaped figures
+        it never touched."""
+        q = self.query
+        if self.screen == "route_page":
+            given = [name for name in _REPORT_SCREEN_OPTIONS if getattr(q, name) not in (None, False)]
+            if given:
+                raise ValueError(f"the route page takes no {', '.join(given)}")
+        elif q.shape is not None:
+            raise ValueError("shape applies to the route page only")
+        return self
+
+
+def _route_codes(routes: str | None) -> list[str]:
+    return [code for code in routes.split(",") if code] if routes else []
 
 
 class SnapshotCreated(BaseModel):
@@ -169,7 +213,12 @@ class SnapshotOut(BaseModel):
     ``payloads`` holds ``report`` (the screen endpoint's response per locale,
     each with its ``definition``), ``routes`` (the agency's route catalogue,
     ``GET /api/{agency_id}/routes``'s rows) and ``credit`` (the open-data
-    credit per locale, None where no source covers the feed)."""
+    credit per locale, None where no source covers the feed). A route page
+    holds, in place of ``report``, ``route_lists`` (the agency's ``ranking``,
+    ``on_time`` and ``worst_5min`` lists, without their prose) and
+    ``concentration`` (the agency overview's), each written in no language
+    and so stored once, and ``route_page`` (per locale, the route's
+    ``standards`` and its delay by stop, ``shape``)."""
 
     snapshot_id: str
     created_at: datetime
@@ -198,6 +247,35 @@ def _figures(report: dict[str, Any]) -> dict[str, Any]:
     across locales: anything else that differs means the aggregates moved
     between the two computations."""
     return {k: v for k, v in report.items() if k not in _LOCALE_VARYING}
+
+
+def _unnamed(items: list[dict[str, Any]], *names: str) -> list[dict[str, Any]]:
+    return [{k: v for k, v in item.items() if k not in names} for item in items]
+
+
+def _route_page_figures(page: dict[str, Any]) -> dict[str, Any]:
+    """A route page's per-language responses without what each language
+    writes its own way: the targets' disclaimer, and the stop names, since a
+    stop the timetable leaves unnamed is named by its sequence in the
+    reader's language."""
+    shape = page["shape"]
+    return {
+        "standards": {k: v for k, v in page["standards"].items() if k != "disclaimer"},
+        "shape": {
+            **shape,
+            "stops": _unnamed(shape["stops"], "stop_name"),
+            "unobserved_stops": _unnamed(shape["unobserved_stops"], "stop_name"),
+            "variants": _unnamed(shape["variants"], "first_stop_name", "last_stop_name"),
+        },
+    }
+
+
+def _disagree(figures: list[dict[str, Any]]) -> bool:
+    first, *others = figures
+    return any(other != first for other in others)
+
+
+_LOCALES_DISAGREE = "the aggregates changed while the snapshot was taken; try again"
 
 
 def _client_ip(request: Request) -> str | None:
@@ -271,31 +349,45 @@ async def create_snapshot(
         raise HTTPException(status_code=404, detail=f"Agency {body.agency_id} not found")
 
     q = body.query
-    ctx = clamp_range_ctx(
+    scope = clamp_range_ctx(
         from_=q.from_,
         to=q.to,
         dow=q.dow,
         time_band=q.time_band,
         service=q.service,
-        routes=q.routes.split(",") if q.routes else (),
+        routes=_route_codes(q.routes),
         hour=q.hour,
         stop=q.stop,
         direction=q.dir_,
     )
-    if ctx.service != "all":
-        ctx = await resolve_service_dates(ctx, conn, body.agency_id)
-    report_type = _REPORT_TYPES[body.screen]
+    if body.screen == "route_page" and len(scope.routes) != 1:
+        raise HTTPException(status_code=422, detail="a route page snapshot names exactly one route")
+    ctx = await resolve_service_dates(scope, conn, body.agency_id) if scope.service != "all" else scope
+    params = {**ctx_payload(ctx), **q.model_dump(include=_SCREEN_OPTIONS)}
 
-    reports: dict[str, dict[str, Any]] = {}
-    for locale in SUPPORTED_LOCALES:
-        rendered = await _render(report_type, q, agency_id=body.agency_id, ctx=ctx, conn=conn, ch=ch, locale=locale)
-        reports[locale] = rendered.model_dump(mode="json", by_alias=True)
-    first, *others = reports.values()
-    if any(_figures(other) != _figures(first) for other in others):
-        raise HTTPException(status_code=409, detail="the aggregates changed while the snapshot was taken; try again")
+    screen_payloads: dict[str, Any]
+    if body.screen == "route_page":
+        screen_payloads = await _route_page_payloads(
+            q, agency_id=body.agency_id, scope=scope, ctx=ctx, conn=conn, ch=ch
+        )
+        method_version = screen_payloads["route_lists"]["on_time"]["definition"]["method_version"]
+        # The variant the page showed, named even when the server picked it,
+        # as the dates are named even when the request left them to default.
+        params["shape"] = next(iter(screen_payloads["route_page"].values()))["shape"]["shape_id"]
+    else:
+        report_type = _REPORT_TYPES[body.screen]
+        reports: dict[str, dict[str, Any]] = {}
+        for locale in SUPPORTED_LOCALES:
+            rendered = await _render(report_type, q, agency_id=body.agency_id, ctx=ctx, conn=conn, ch=ch, locale=locale)
+            reports[locale] = rendered.model_dump(mode="json", by_alias=True)
+        if _disagree([_figures(report) for report in reports.values()]):
+            raise HTTPException(status_code=409, detail=_LOCALES_DISAGREE)
+        screen_payloads = {"report": reports}
+        method_version = next(iter(reports.values()))["definition"]["method_version"]
+        params = {"report_type": report_type, **params}
 
     payloads = {
-        "report": reports,
+        **screen_payloads,
         "routes": [r.model_dump(mode="json") for r in await fetch_static_routes(conn, body.agency_id)],
         "credit": {locale: credit_line(agency["feed_url"], locale) for locale in SUPPORTED_LOCALES},
     }
@@ -303,8 +395,6 @@ async def create_snapshot(
     if len(encoded.encode()) > MAX_PAYLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"snapshot payload exceeds {MAX_PAYLOAD_BYTES} bytes")
 
-    params = {"report_type": report_type, **ctx_payload(ctx), **q.model_dump(include=_SCREEN_OPTIONS)}
-    method_version = first["definition"]["method_version"]
     snapshot_id = secrets.token_urlsafe(16)
     async with conn.transaction():
         created_at = await conn.fetchval(
@@ -345,6 +435,67 @@ async def create_snapshot(
         agency_id=body.agency_id,
         method_version=method_version,
     )
+
+
+async def _route_page_payloads(
+    q: SnapshotQuery,
+    *,
+    agency_id: int,
+    scope: RangeCtx,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+) -> dict[str, Any]:
+    """What one route's page reads for ``ctx``, each response computed by its
+    endpoint's own code and asked what the page asks it:
+
+    - the agency's route lists and overview over the scope without its route
+      (``RouteSummaryStrip``). Their figures are the same in every language,
+      so each is computed once: the lists are kept without their prose, the
+      overview for its lateness concentration alone, asked the unresolved
+      ``scope`` as its endpoint is;
+    - per language, the route's performance targets
+      (``PerformanceStandardPanel``) and its delay by stop on its variant
+      (``RouteAnalysisTab``), without the variant's line, which only the map
+      draws and a snapshot does not keep.
+
+    409 when any language's figures disagree with another's."""
+    route = ctx.routes[0]
+    agency_wide = replace(ctx, routes=())
+    early = scope_early(q.early)
+    lists: dict[str, dict[str, Any]] = {}
+    for report_type in _ROUTE_PAGE_LISTS:
+        rendered = await render_report(
+            report_type,
+            agency_id=agency_id,
+            ctx=agency_wide,
+            conn=conn,
+            ch=ch,
+            locale=SUPPORTED_LOCALES[0],
+            limit=REPORT_ROWS_MAX,
+            late=q.late,
+            early=early,
+        )
+        assert isinstance(rendered, ReportResponse)  # no format=csv, so never the CSV stream
+        lists[report_type] = rendered.model_dump(mode="json", by_alias=True, exclude={"text"})
+    overview = await render_overview_summary(agency_id, replace(scope, routes=()), conn=conn, ch=ch)
+    pages: dict[str, dict[str, Any]] = {}
+    for locale in SUPPORTED_LOCALES:
+        standards = await render_performance_standards(
+            agency_id, ctx, conn, ch, locale=locale, route=route, late=q.late, early=early
+        )
+        shape = await render_route_shape(conn, ch, agency_id, route, ctx, locale=locale, shape=q.shape)
+        pages[locale] = {
+            "standards": standards.model_dump(mode="json", by_alias=True),
+            "shape": {**jsonable_encoder(shape), "geometry": None},
+        }
+    if _disagree([_route_page_figures(page) for page in pages.values()]):
+        raise HTTPException(status_code=409, detail=_LOCALES_DISAGREE)
+    return {
+        "route_lists": lists,
+        "concentration": overview.model_dump(mode="json", by_alias=True)["concentration"],
+        "route_page": pages,
+    }
 
 
 @admin_router.get("", response_model=list[SnapshotSummary])

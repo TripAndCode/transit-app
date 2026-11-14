@@ -1,6 +1,6 @@
 import { isoDaysBefore } from "../../api/scope";
 import { REPORT_ROWS_MAX } from "../../api/hooks";
-import type { OverviewConcentration, ReportResponse, RouteSegment, RouteShapeStop, RouteVariant } from "../../api/types";
+import type { OverviewConcentration, ReportFigures, RouteSegment, RouteShapeStop, RouteVariant } from "../../api/types";
 
 const DAY_MS = 86_400_000;
 
@@ -93,13 +93,13 @@ export type RouteStanding = {
 };
 
 type StandingSources = {
-  ranking?: ReportResponse;
-  onTime?: ReportResponse;
-  worst?: ReportResponse;
+  ranking?: ReportFigures;
+  onTime?: ReportFigures;
+  worst?: ReportFigures;
   concentration?: OverviewConcentration;
 };
 
-function rowOf(report: ReportResponse | undefined, route: string): { row: unknown[]; index: number } | null {
+function rowOf(report: ReportFigures | undefined, route: string): { row: unknown[]; index: number } | null {
   const rows = (report?.rows ?? []) as unknown[][];
   const index = rows.findIndex((r) => r[0] === route);
   return index < 0 ? null : { row: rows[index], index };

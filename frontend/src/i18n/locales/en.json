@@ -1594,6 +1594,9 @@
       "today_value_note": "today {{value}} ({{note}})",
       "only_snapshot": "only in the snapshot",
       "only_today": "only today"
+    },
+    "route_page": {
+      "not_frozen": "Not part of this snapshot: the map, the day's trips and the comparison with the previous period. They read live data, so the snapshot leaves them out."
     }
   },
   "insight_panel": {
