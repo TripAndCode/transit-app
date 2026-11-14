@@ -29,10 +29,6 @@ describe("control tokens", () => {
     expect(decl(phone, "--control-h")).toBe("44px");
     expect(decl(phone, "--control-h-sm")).toBe("36px");
   });
-
-  it("still catches a token that forgot to raise at BP.sm, proving the assertion is meaningful", () => {
-    expect(decl("--control-h: 40px;", "--control-h")).not.toBe("44px");
-  });
 });
 
 describe(".btn base", () => {
@@ -68,11 +64,15 @@ describe(".btn base", () => {
     expect(decl(disabled, "box-shadow")).toBe("none");
   });
 
-  it("declares the disabled rule after every variant's :hover, so it wins equal-specificity ties", () => {
+  it("declares :active after every variant's :hover and :disabled after :active, so equal-specificity ties resolve press over hover and disabled over both", () => {
+    const activeAt = css.indexOf(".btn:active {");
     const disabledAt = css.indexOf('.btn:disabled,\n.btn[aria-disabled="true"] {');
-    expect(disabledAt).toBeGreaterThan(-1);
+    expect(activeAt).toBeGreaterThan(-1);
+    expect(disabledAt).toBeGreaterThan(activeAt);
     for (const hoverSelector of [".btn--primary:hover {", ".btn--secondary:hover {", ".btn--ghost:hover {", ".btn--icon:hover {"]) {
-      expect(disabledAt).toBeGreaterThan(css.indexOf(hoverSelector));
+      const hoverAt = css.indexOf(hoverSelector);
+      expect(hoverAt).toBeGreaterThan(-1);
+      expect(activeAt).toBeGreaterThan(hoverAt);
     }
   });
 });
@@ -113,7 +113,9 @@ describe(".btn variants", () => {
     const hover = ruleBody(css, ".btn--icon:hover {");
     expect(decl(hover, "background")).toBe("var(--border-subtle)");
     expect(decl(hover, "color")).toBe("var(--text-primary)");
-    expect(decl(ruleBody(css, ".btn--icon.btn--sm {"), "width")).toBe("var(--control-h-sm)");
+    const iconSm = ruleBody(css, ".btn--icon.btn--sm {");
+    expect(decl(iconSm, "width")).toBe("var(--control-h-sm)");
+    expect(decl(iconSm, "padding")).toBe("0");
   });
 
   it("--sm shrinks height, padding, radius and type for compact in-card actions", () => {
@@ -126,14 +128,17 @@ describe(".btn variants", () => {
   });
 });
 
+describe("companion classes", () => {
+  it("leave the landing CTA's transition to the family, since its lazily loaded sheet wins equal-specificity ties", () => {
+    const landing = readFileSync(path.join(root, "pages", "LandingPage.css"), "utf8");
+    expect(decl(ruleBody(landing, ".landing-hero__cta {"), "transition")).toBeNull();
+  });
+});
+
 describe(".btn-ghost retirement", () => {
   it("is gone from every stylesheet and every component", () => {
     const files = walk(root).filter((f) => /\.(css|tsx?)$/.test(f) && !f.endsWith("buttonFamily.test.ts"));
     const offenders = files.filter((f) => readFileSync(f, "utf8").includes("btn-ghost")).map((f) => path.relative(root, f));
     expect(offenders).toEqual([]);
-  });
-
-  it("still catches a leftover reference, proving the scan is meaningful", () => {
-    expect('<button className="btn-ghost">').toContain("btn-ghost");
   });
 });

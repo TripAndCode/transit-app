@@ -16,9 +16,9 @@
    this is the same fact for a screen reader. */
 .focus-filters__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .focus-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-/* `:not(.btn)` so this generic fallback (plain, unstyled actions such as
-   the route page's "save" button) does not out-specificity-tie the shared
-   .btn family's own variant rules, which are also single-class selectors. */
+/* A fallback for plain actions such as the route page's "save" button.
+   `:not(.btn)` because a class+type selector outranks every single-class
+   .btn rule and would restyle the shared buttons. */
 .focus-actions button:not(.btn), .focus-actions a:not(.btn) { padding: 8px 12px; border: 1px solid var(--border-subtle); border-radius: var(--radius); background: var(--bg-surface); color: var(--text-primary); text-decoration: none; font-size: 13px; }
 .focus-split { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; }
 .focus-tab-panel { margin-bottom: 16px; }

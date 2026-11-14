@@ -75,7 +75,7 @@ const pillRowStyle: CSSProperties = {
   alignItems: "center",
   gap: 6,
   flexWrap: "wrap",
-  padding: "6px 10px",
+  padding: "4px 4px 4px 10px",
   background: "var(--bg-surface)",
   border: "1px solid var(--border-soft)",
   borderRadius: "var(--radius)",

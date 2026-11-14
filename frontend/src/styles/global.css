@@ -744,10 +744,6 @@ summary:focus-visible,
     box-shadow var(--dur-2) var(--ease-out),
     color var(--dur-1) var(--ease-out);
 }
-.btn:active {
-  transform: scale(.96);
-}
-
 .btn--primary {
   background: var(--accent);
   color: var(--on-accent);
@@ -788,6 +784,7 @@ summary:focus-visible,
 }
 .btn--icon.btn--sm {
   width: var(--control-h-sm);
+  padding: 0;
 }
 
 .btn--sm {
@@ -795,6 +792,12 @@ summary:focus-visible,
   padding: 0 12px;
   border-radius: var(--control-radius-sm);
   font-size: var(--text-sm);
+}
+
+/* After every variant's :hover: a press is also a hover, and the press must
+   win the transform. */
+.btn:active {
+  transform: scale(.96);
 }
 
 .btn:disabled,
