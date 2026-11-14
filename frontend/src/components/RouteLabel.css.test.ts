@@ -46,7 +46,6 @@ describe("RouteLabel.css plate column without subgrid", () => {
   });
 });
 
-
 describe("RouteLabel.css small parts", () => {
   it.each([
     ["the ends line", "\n.route-label__ends {", "max(0.8em, var(--text-xs))"],

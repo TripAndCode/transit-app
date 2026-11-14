@@ -1111,7 +1111,7 @@ summary::-webkit-details-marker { display: none; }
   color: var(--accent);
 }
 
-/* The app-wide notices above the page (stale data, feed health): a calm
+/* The notices above the routed page (stale data, feed health): a calm
    warning tint in either theme, never alarm red. */
 [data-shell-banner] {
   background: color-mix(in srgb, var(--color-warning) 12%, var(--bg-surface));
