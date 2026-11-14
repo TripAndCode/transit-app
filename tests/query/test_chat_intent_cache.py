@@ -331,6 +331,28 @@ async def test_build_sentinel_short_circuits_llm(pool_with_agency, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_sentinel_and_free_text_with_no_llm_provider(pool_with_agency, monkeypatch):
+    """With no provider key at all, the `__build__` path still answers, and a
+    free-text question degrades to the unconfigured message rather than raising."""
+    from pipeline.query import llm_client
+
+    monkeypatch.setenv("CHAT_PROVIDERS", "gemini,openai")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    llm_client.reset_client_for_tests()
+    try:
+        pool, agency_id = pool_with_agency
+        async with pool.acquire() as conn:
+            built = await chat_with_tools("__build__ capabilities {}", _ctx(), conn, agency_id, locale="en")
+            free = await chat_with_tools("why is the 3 bus late?", _ctx(), conn, agency_id, locale="en")
+    finally:
+        llm_client.reset_client_for_tests()
+    assert built["tool_call"]["name"] == "capabilities"
+    assert free["success"] is False
+    assert free["answer"] == chat_module._chat_str("llm_unconfigured", "en")
+
+
+@pytest.mark.asyncio
 async def test_cache_paraphrase_collapses_to_same_dispatch(pool_with_agency, monkeypatch):
     """The spec's core promise: two differently-worded questions that emit the
     same canonical IntentSignature collapse to one cache row.

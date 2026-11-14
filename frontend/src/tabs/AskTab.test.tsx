@@ -5,6 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { AskTab } from "./AskTab";
 import * as hooks from "../api/hooks";
+import * as config from "../api/config";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { ConvMessage } from "../api/types";
 
@@ -120,6 +121,61 @@ describe("AskTab layout", () => {
     expect(dock).toBeInTheDocument();
     // Now the dock comes AFTER the conversation area.
     expect(dock!.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+});
+
+describe("AskTab follow-up box", () => {
+  beforeEach(() => {
+    mockAllHooks();
+    Element.prototype.scrollTo = vi.fn();
+  });
+
+  function openResultThread(llmEnabled: boolean | undefined) {
+    vi.spyOn(hooks, "useIsLlmApproved").mockReturnValue(true);
+    vi.spyOn(hooks, "useFollowupEnabled").mockReturnValue({ data: { enabled: true, max_question_chars: 500 } } as never);
+    vi.spyOn(config, "useConfig").mockReturnValue({ data: { llm_enabled: llmEnabled } } as never);
+    vi.spyOn(hooks, "useConversation").mockReturnValue({
+      data: {
+        conversation: {
+          conversation_id: "t1",
+          user_id: 1,
+          agency_id: 5,
+          title: "T",
+          filter_ctx: {},
+          pinned: false,
+          created_at: "",
+          updated_at: "",
+        },
+        messages: [
+          {
+            message_id: 2,
+            conversation_id: "t1",
+            role: "assistant",
+            chip_id: null,
+            tool: "top_n",
+            args: {},
+            signature_hash: null,
+            result: { kind: "table", summary: "s", rows: [["A"]], columns: ["route"] },
+            rendered_summary: "Result",
+            created_at: "2026-09-01T00:00:00Z",
+          },
+        ],
+      },
+      isPending: false,
+      isError: false,
+      refetch: vi.fn(),
+    } as never);
+    renderAskTab("/agencies/5/ask?conversation=t1");
+  }
+
+  it("shows the follow-up box when the deployment has a usable LLM provider", () => {
+    openResultThread(true);
+    expect(screen.getByPlaceholderText("Ask about this result...")).toBeInTheDocument();
+  });
+
+  it.each([false, undefined])("hides the follow-up box when /api/config llm_enabled is %s", (llmEnabled) => {
+    openResultThread(llmEnabled);
+    expect(screen.queryByPlaceholderText("Ask about this result...")).not.toBeInTheDocument();
   });
 });
 

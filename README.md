@@ -20,15 +20,15 @@ of its figures before they are published.
 - [Poetry](https://python-poetry.org/) 2.5+ (`requires-poetry` in `pyproject.toml`;
   `poetry self update` upgrades an older install)
 - Docker Desktop
-- An LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`). The API
-  refuses to start without one; any non-empty value boots it, but LLM-backed
-  answers need a real key.
+- Optional: an LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`).
+  The API starts without one and serves the deterministic Ask notebook;
+  LLM-backed answers and follow-ups stay off until a real key is set.
 
 ### Local setup
 
 ```bash
 cp .env.example .env
-# Set GEMINI_API_KEY in .env (required to start). Other settings have local defaults.
+# Optionally set GEMINI_API_KEY in .env for LLM-backed Ask. Other settings have local defaults.
 make bootstrap
 make doctor
 make serve
@@ -348,9 +348,9 @@ curl -X POST http://localhost:8000/api/1/ask \
 Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
-- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder. At
-  least one provider listed in `CHAT_PROVIDERS` needs a key, or the API will
-  not start.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder. With no
+  key for any provider listed in `CHAT_PROVIDERS` the API still starts, LLM-backed
+  features are disabled and `/api/config` reports `llm_enabled: false`.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
   `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`, `ADMIN_EMAILS`: optional
