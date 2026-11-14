@@ -61,7 +61,7 @@ export function PlaybackRail({
           <>
             <button
               type="button"
-              className="ops-playback__button"
+              className="btn btn--icon btn--sm"
               aria-label={t("operations.playback.step_back")}
               onClick={() => controller.step(-1)}
               disabled={frames.length === 0}
@@ -70,7 +70,7 @@ export function PlaybackRail({
             </button>
             <button
               type="button"
-              className="ops-playback__button"
+              className="btn btn--icon btn--sm"
               aria-label={t("operations.playback.step_forward")}
               onClick={() => controller.step(1)}
               disabled={frames.length === 0}
@@ -81,7 +81,7 @@ export function PlaybackRail({
         ) : (
           <button
             type="button"
-            className="ops-playback__button ops-playback__button--primary"
+            className="btn btn--primary btn--sm ops-playback__play"
             aria-label={playing ? t("operations.playback.pause") : t("operations.playback.play")}
             aria-pressed={playing}
             onClick={controller.toggle}
@@ -139,7 +139,7 @@ export function PlaybackRail({
 
       <button
         type="button"
-        className="ops-playback__button ops-playback__speed num"
+        className="btn btn--ghost btn--sm num"
         aria-label={t("operations.playback.speed", { speed })}
         onClick={controller.cycleSpeed}
         disabled={steppingOnly}
@@ -149,7 +149,7 @@ export function PlaybackRail({
 
       <button
         type="button"
-        className="ops-playback__button"
+        className="btn btn--icon btn--sm"
         aria-label={t("operations.playback.exit")}
         onClick={onExit}
       >

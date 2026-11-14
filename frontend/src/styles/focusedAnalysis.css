@@ -8,10 +8,11 @@
 .focus-filters label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-secondary); }
 .focus-filters select, .focus-filters input { max-width: 235px; min-height: 38px; padding: 6px 9px; }
 /* Present only while a change is pending, so the resting bar carries no
-   disabled button. Filled and aligned to the controls' baseline so it reads
-   as the action, not as another field. */
-.focus-filters__apply { align-self: end; min-height: 38px; padding: 8px 18px; border: 0; border-radius: var(--radius); color: var(--on-accent); background: var(--accent-strong); font-size: 13px; font-weight: 600; cursor: pointer; }
-.focus-filters__apply:hover { background: var(--accent); }
+   disabled button. Filled (via `.btn--primary`) and aligned to the controls'
+   baseline so it reads as the action, not as another field; the scoped
+   selector outranks `.btn`'s own single-class height rule, letting it match
+   the 38px selects beside it instead of the shared control height. */
+.focus-filters .focus-filters__apply { align-self: end; height: auto; min-height: 38px; }
 /* Visually hidden: the Apply button's appearance is the sighted signal, and
    this is the same fact for a screen reader. */
 .focus-filters__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
