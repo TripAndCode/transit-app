@@ -160,6 +160,15 @@ describe("scope controls", () => {
       expect(screen.getByRole("button", { name: "Mon" })).toHaveAttribute("aria-pressed", "true");
     });
 
+    it("unchecks the preset while a draft is pending, and restores it on Cancel", async () => {
+      mount(DaysControl);
+      expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
+      await userEvent.click(screen.getByRole("button", { name: "Mon" }));
+      expect(screen.getByRole("radio", { name: "All" })).not.toBeChecked();
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.getByRole("radio", { name: "All" })).toBeChecked();
+    });
+
     it("shows the Apply label with the staged day count", async () => {
       mount(DaysControl);
       expect(screen.getByRole("button", { name: "Apply · 7 days" })).toBeInTheDocument();

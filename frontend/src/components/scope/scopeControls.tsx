@@ -20,10 +20,10 @@ export type ControlProps = {
   update: (patch: ScopePatch) => void;
   /** The controls' data, while it is loaded; every control works without it. */
   summary?: ScopeSummary;
-  /** Closes the popover this control renders in. The routes and days
-   *  controls use it, since each stages a draft and its Apply both commits
-   *  that draft and dismisses the popover. Absent for a control rendered
-   *  pinned in the scope strip, which has no popover to close. */
+  /** Closes the popover this control renders in. A control that stages a
+   *  draft uses it so its Apply commits and dismisses together. Absent for a
+   *  control rendered pinned in the scope strip, which has no popover to
+   *  close. */
   close?: () => void;
 };
 
@@ -130,9 +130,10 @@ function sameDays(a: Set<Weekday>, b: Set<Weekday>): boolean {
   return true;
 }
 
-/** The footer any staged control (routes, days) shares: a cancel that
- *  discards the draft and an Apply that commits it, both closing the
- *  popover this control renders in. */
+/** The Cancel/Apply footer of a control that stages a draft. Apply is
+ *  disabled while the draft matches what is committed; discarding,
+ *  committing and closing the popover are the caller's, through `onCancel`
+ *  and `onApply`. */
 function ApplyFoot({
   hint,
   applyLabel,
@@ -165,7 +166,8 @@ function ApplyFoot({
  *  strip and an open popover sharing one scope), the draft starts over from
  *  them during render. A preset pick is instant, as the timetable select
  *  already is, and replaces the draft too so a stale toggle can't linger
- *  under a freshly picked preset. */
+ *  under a freshly picked preset. No preset shows as checked while a draft is
+ *  pending, since the chips no longer match the committed days. */
 export function DaysControl({ scope, update, summary, close }: ControlProps) {
   const { t } = useTranslation();
   const serviceId = useId();
@@ -200,7 +202,7 @@ export function DaysControl({ scope, update, summary, close }: ControlProps) {
       <Segmented
         aria-label={t("scope.popover.days")}
         options={DOW_PRESETS.map((preset) => ({ value: preset, label: t(`scope.control.${preset === "all" ? "days_all" : preset}`) }))}
-        value={dowPreset(scope.dow)}
+        value={unchanged ? dowPreset(scope.dow) : null}
         onChange={(preset) => {
           update({ dow: preset });
           setDraft(selectedDays(preset));
