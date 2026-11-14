@@ -13,9 +13,10 @@ archive is, so this is also how a store gets them.
 Every statement is CREATE TABLE IF NOT EXISTS, so re-applying is idempotent
 and there is no migration chain. It creates a missing table and leaves an
 existing one as it is. The one change it makes to existing tables is the
-nullable-column self-heal below, and that reaches only the observation
-tables; any other change to an existing table's shape is a deliberate manual
-step, like the type migration described next.
+nullable-column self-heal below, and that reaches only the tables with
+`updates`' columns (_UPDATES_SHAPED_TABLES); any other change to an existing
+table's shape is a deliberate manual step, like the type migration described
+next.
 
 NOTE: the live dev ClickHouse instance (a large, real-data `updates` table)
 predates the trip_id/scheduled_time LowCardinality change in schema.sql and
@@ -78,22 +79,25 @@ _NEW_NULLABLE_COLUMNS = [
 ]
 
 
-# `updates_filed` keeps each `updates` column beside its filed ones, so a
-# column added to `updates` reaches it too.
-_OBSERVATION_TABLES = ("updates", "updates_live", "updates_filed")
+# The tables with every `updates` column: the observation tables, and
+# `updates_filed`, which keeps each beside its filed ones. A column added to
+# `updates` reaches each.
+_UPDATES_SHAPED_TABLES = ("updates", "updates_live", "updates_filed")
 
 
 def apply_schema(client) -> None:
     """Run every `;`-separated statement in schema.sql against *client*, then
-    ensure every column in _NEW_NULLABLE_COLUMNS exists on each observation
-    table. `updates_live` is created `AS updates`, so it inherits whatever
-    shape `updates` has at that moment and needs the same self-healing step
+    ensure every column in _NEW_NULLABLE_COLUMNS exists on each of
+    _UPDATES_SHAPED_TABLES. `updates_live` is created `AS updates`, so it
+    inherits whatever shape `updates` has at that moment, and `updates_filed`
+    declares the columns `updates` had when it was added; both need the same
+    self-healing step
     (see module docstring for why that step runs even when CREATE TABLE IF NOT
     EXISTS is a no-op).
     """
     sql = SCHEMA_PATH.read_text()
     for statement in filter(None, (s.strip() for s in sql.split(";"))):
         client.command(statement)
-    for table in _OBSERVATION_TABLES:
+    for table in _UPDATES_SHAPED_TABLES:
         for column, col_type in _NEW_NULLABLE_COLUMNS:
             client.command(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {col_type}")

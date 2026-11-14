@@ -356,7 +356,8 @@ CREATE TABLE IF NOT EXISTS updates_filed_dates (
     stamped           Map(String, String),
     source_rows       UInt64,
     rules             String,
-    built_at          DateTime64(3, 'UTC')
+    -- The server's clock, so writers on several hosts order by one.
+    built_at          DateTime64(3, 'UTC') DEFAULT now64(3)
 ) ENGINE = MergeTree
 ORDER BY (agency_id, filed_date, built_at);
 

@@ -28,7 +28,7 @@ import psycopg2.extras
 
 from pipeline.clickhouse import UPDATE_COLUMNS, UPDATES_TABLE, checked_table
 from pipeline.planned_trips import WEEKDAY_COLUMNS
-from pipeline.service_day import filed_date_ch, service_day_start_utc
+from pipeline.service_day import FILING_REACH_HOURS, filed_date_ch, service_day_start_utc
 from pipeline.static_content import static_parts
 from pipeline.timetable_in_force import Segment, Version, gtfs_date, in_force, schedule_row, version_span
 
@@ -701,15 +701,15 @@ class ScheduleJoin(NamedTuple):
             return {}
         filed = [(day, build) for day, build in self.filed if between is None or between[0] <= day <= between[1]]
         days = [day for day, _ in filed]
-        skip = _interior_run(days)
+        skips = _capture_skips(days)
         return {
             "filed_dates": days,
             "filed_builds": [build for _, build in filed],
             # No written date binds an empty range, which reads none.
             "filed_first": min(days, default=date(1970, 1, 2)),
             "filed_last": max(days, default=date(1970, 1, 1)),
-            "filed_skip_from": service_day_start_utc(skip[0]),
-            "filed_skip_to": service_day_start_utc(skip[1] + timedelta(days=1)),
+            **{f"filed_skip_from_{i}": start for i, (start, _end) in enumerate(skips)},
+            **{f"filed_skip_to_{i}": end for i, (_start, end) in enumerate(skips)},
         }
 
     def force_params(self, between: tuple[date, date] | None = None) -> dict:
@@ -732,24 +732,40 @@ class ScheduleJoin(NamedTuple):
         }
 
 
-def _interior_run(days: list[date]) -> tuple[date, date]:
-    """The longest run of *days* each of whose neighbours is in *days* too,
-    first and last; an empty run (last before first) with none. A row
-    captured on such a day's service day is filed under it or a neighbour
-    (FILED_DATE_SQL), so a FILED read takes every one from FILED_TABLE and
-    can skip that span of `updates` by its sort key."""
-    written = set(days)
-    interior = sorted(
-        day for day in written if day - timedelta(days=1) in written and day + timedelta(days=1) in written
-    )
-    best = (date(1970, 1, 2), date(1970, 1, 1))
-    start = None
-    for i, day in enumerate(interior):
-        if start is None or day - interior[i - 1] != timedelta(days=1):
-            start = day
-        if (day - start) > (best[1] - best[0]):
-            best = (start, day)
-    return best
+# How many runs of written dates a FILED read skips in `updates` by capture:
+# a fixed count, so its SQL text never depends on the data. A read reaching
+# more runs skips the longest, and tests the rest row by row.
+FILED_SKIP_RUNS = 8
+_NO_SKIP = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _capture_skips(days: list[date]) -> list[tuple[datetime, datetime]]:
+    """For each run of consecutive *days*, longest first and at most
+    FILED_SKIP_RUNS, the captures a FILED read skips in `updates`: from its
+    first day's start plus the filing reach to the day after its last's
+    start less the reach. FILED_DATE_SQL files a reading captured there under
+    a day of the run, whose rows FILED_TABLE holds, and one captured outside
+    can file under a day beside the run. Unused slots skip nothing."""
+    runs: list[tuple[date, date]] = []
+    for day in sorted(set(days)):
+        if runs and runs[-1][1] + timedelta(days=1) == day:
+            runs[-1] = (runs[-1][0], day)
+        else:
+            runs.append((day, day))
+    runs.sort(key=lambda run: run[1] - run[0], reverse=True)
+    reach = timedelta(hours=FILING_REACH_HOURS)
+    skips = [
+        (service_day_start_utc(first) + reach, service_day_start_utc(last + timedelta(days=1)) - reach)
+        for first, last in runs[:FILED_SKIP_RUNS]
+    ]
+    return skips + [(_NO_SKIP, _NO_SKIP)] * (FILED_SKIP_RUNS - len(skips))
+
+
+# A FILED read's `updates` rows outside every skipped span, as ranges the sort key prunes on.
+_OUTSIDE_SKIPS = " AND ".join(
+    f"(u.captured_at < {{filed_skip_from_{i}:DateTime64}} OR u.captured_at >= {{filed_skip_to_{i}:DateTime64}})"
+    for i in range(FILED_SKIP_RUNS)
+)
 
 
 def schedule_join(ch, agency_id: int, current: str | None, *, by_service_date: bool = False) -> ScheduleJoin:
@@ -897,9 +913,9 @@ def _stop_events(where: str, table: str) -> str:
     """*table*'s rows matching *where*, one per stop event (a trip's stop on
     the service day it is filed under, FILED_DATE_SQL) and stored schedule and
     version name, with `updates`'
-    columns: the latest poll's capture, file name, departure delay and both
-    schedule relationships, by (captured_at, file_name), and any poll's of the
-    rest. Every poll grouped together is filed alike, so a read keeping only
+    columns: the latest poll's capture, file name, departure delay, both
+    schedule relationships and stop, by (captured_at, file_name), and any
+    poll's of the rest. Every poll grouped together is filed alike, so a read keeping only
     each stop event's latest poll among those it files together, and whether
     that poll withdraws the departure (pipeline.db.latest_departure_ch), reads
     the same rows from these, filing a fraction as many. The latest poll's
@@ -907,7 +923,7 @@ def _stop_events(where: str, table: str) -> str:
     NULL argument."""
     latest = "max((u.captured_at, u.file_name))"
     reading = (
-        "argMax(tuple(u.dep_delay, u.schedule_relationship_trip, u.schedule_relationship_stop), "
+        "argMax(tuple(u.dep_delay, u.schedule_relationship_trip, u.schedule_relationship_stop, u.stop_id), "
         "(u.captured_at, u.file_name))"
     )
     picked = {
@@ -916,6 +932,7 @@ def _stop_events(where: str, table: str) -> str:
         "dep_delay": f"tupleElement({reading}, 1)",
         "schedule_relationship_trip": f"tupleElement({reading}, 2)",
         "schedule_relationship_stop": f"tupleElement({reading}, 3)",
+        "stop_id": f"tupleElement({reading}, 4)",
     }
     columns = ", ".join(
         f"u.{column} AS event_{column}"
@@ -1054,10 +1071,7 @@ def observation_rows(
         if table != UPDATES_TABLE:
             raise ValueError(f"only {UPDATES_TABLE}' rows are written filed, not {table}'")
         rest = _marked_rows(
-            f"({where}) AND (u.captured_at < {{filed_skip_from:DateTime64}} "
-            "OR u.captured_at >= {filed_skip_to:DateTime64}) "
-            f"AND {FILED_DATE_SQL} NOT IN {{filed_dates:Array(Date)}}",
-            table,
+            f"({where}) AND {_OUTSIDE_SKIPS} AND {FILED_DATE_SQL} NOT IN {{filed_dates:Array(Date)}}", table
         )
         return f"FROM (SELECT {_filed_columns(False)} FROM ({rest}) AS u UNION ALL {_written_rows(where)}) AS u{after}"
     events = by_stop_event and stamp is Stamp.REFIT

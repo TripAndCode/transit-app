@@ -203,8 +203,9 @@ FastAPI + React SPA  <-------------------------------------------------+
   it to `updates_filed` (`pipeline/refiled.py`), and its own reads and the
   live scans take them from there instead of joining the archive, for as long
   as `updates_filed_dates` shows the date's filing unchanged. A refiled date
-  analyze has not rebuilt since keeps none until
-  `scripts/write_refiled_history.py --apply` writes it.
+  outside analyze's rebuild scope has no valid write until
+  `scripts/write_refiled_history.py --apply` writes it, so it is run again
+  after the filing rules (`pipeline.refiled.RULES`) change.
   Postgres mirrors the map in `static_version_contents`, each name at its
   latest content, written right after each map row, so the definition stamp
   names each timetable's content without reading ClickHouse.

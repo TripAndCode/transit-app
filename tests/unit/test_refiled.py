@@ -90,20 +90,35 @@ def test_written_rows_are_never_read_once_their_filing_can_have_moved(join, writ
     assert refiled.valid_builds(join, written, stamped, {D2}) is None
 
 
-def test_a_filed_read_skips_by_capture_only_the_service_days_whose_rows_file_under_written_dates():
-    from pipeline.service_day import service_day_start_utc
+def test_a_filed_read_skips_by_capture_each_run_of_written_dates_less_the_filing_reach():
+    from datetime import timedelta
 
-    d4, d5 = date(2026, 10, 4), date(2026, 10, 5)
-    written = JOIN._replace(filed=tuple((day, "b") for day in (D1, D2, D3, d5)))
-    params = written.filing_params((D1, d5))
-    # Rows captured on D2's service day file under D1, D2 or D3, all written;
-    # D1's and D3's can file under D0 or D4, which are not.
-    assert (params["filed_skip_from"], params["filed_skip_to"]) == (
-        service_day_start_utc(D2),
-        service_day_start_utc(D3),
-    )
-    longer = JOIN._replace(filed=tuple((day, "b") for day in (D1, D2, D3, d4, d5)))
-    skip = longer.filing_params((D1, d5))
-    assert (skip["filed_skip_from"], skip["filed_skip_to"]) == (service_day_start_utc(D2), service_day_start_utc(d5))
-    lone = FILED.filing_params((D1, D2))
-    assert lone["filed_skip_from"] >= lone["filed_skip_to"]
+    from pipeline.service_day import FILING_REACH_HOURS, service_day_start_utc
+    from pipeline.static_archive import FILED_SKIP_RUNS
+
+    reach = timedelta(hours=FILING_REACH_HOURS)
+    d5, d6, d9 = date(2026, 10, 5), date(2026, 10, 6), date(2026, 10, 9)
+    written = JOIN._replace(filed=tuple((day, "b") for day in (D1, d5, d6, d9)))
+    params = written.filing_params((D1, d9))
+    skips = [(params[f"filed_skip_from_{i}"], params[f"filed_skip_to_{i}"]) for i in range(FILED_SKIP_RUNS)]
+    # A run of two days first, then each single day; a reading captured
+    # within the reach of a run's edge can file under the day beside it.
+    assert skips[:3] == [
+        (service_day_start_utc(d5) + reach, service_day_start_utc(d6 + timedelta(days=1)) - reach),
+        (service_day_start_utc(D1) + reach, service_day_start_utc(D2) - reach),
+        (service_day_start_utc(d9) + reach, service_day_start_utc(d9 + timedelta(days=1)) - reach),
+    ]
+    assert all(start == end for start, end in skips[3:])
+
+
+def test_a_filed_read_skips_the_longest_runs_when_there_are_more_than_it_has_slots_for():
+    from datetime import timedelta
+
+    from pipeline.static_archive import FILED_SKIP_RUNS
+
+    singles = [D1 + timedelta(days=2 * i) for i in range(FILED_SKIP_RUNS + 2)]
+    pair = [singles[-1] + timedelta(days=5), singles[-1] + timedelta(days=6)]
+    written = JOIN._replace(filed=tuple((day, "b") for day in (*singles, *pair)))
+    params = written.filing_params((D1, pair[-1]))
+    widths = [params[f"filed_skip_to_{i}"] - params[f"filed_skip_from_{i}"] for i in range(FILED_SKIP_RUNS)]
+    assert widths[0] > widths[1] == widths[-1] > timedelta(0)

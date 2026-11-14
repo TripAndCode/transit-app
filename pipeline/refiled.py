@@ -22,7 +22,7 @@ import hashlib
 import secrets
 from collections import defaultdict
 from collections.abc import Iterable
-from datetime import date, datetime, timezone
+from datetime import date
 from itertools import groupby
 from typing import NamedTuple
 
@@ -136,8 +136,9 @@ def valid_builds(
 _COLUMNS = ", ".join([*UPDATE_COLUMNS, "filed_date", *(f"filed_{column}" for column in FILED_COLUMNS), "build"])
 _STATS_SQL = (
     "SELECT filed_date, count(), groupUniqArray(ifNull(static_version_id, '')) "
-    f"FROM {FILED_TABLE} WHERE agency_id = {{agency:UInt16}} AND has({{dates:Array(Date)}}, filed_date) "
-    "AND startsWith(build, {build:String}) GROUP BY filed_date"
+    f"FROM {FILED_TABLE} WHERE agency_id = {{agency:UInt16}} "
+    "AND filed_date BETWEEN {first:Date} AND {last:Date} AND filed_date IN {dates:Array(Date)} "
+    "AND build IN {builds:Array(String)} GROUP BY filed_date"
 )
 _RECORD_COLUMNS = [
     "agency_id",
@@ -148,16 +149,11 @@ _RECORD_COLUMNS = [
     "stamped",
     "source_rows",
     "rules",
-    "built_at",
 ]
 _STAMPED_DAYS_SQL = (
     f"SELECT ifNull(u.static_version_id, '') AS stem, {FILED_DATE_SQL} AS filed, count() FROM {UPDATES_TABLE} AS u "
     "WHERE u.agency_id = {agency_id:UInt16} AND ({where}) GROUP BY stem, filed"
 )
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def stamped_days(ch, agency_id: int, dates: Iterable[date]) -> list[tuple[str, date, int]]:
@@ -210,9 +206,9 @@ def write(ch, agency_id: int, join: ScheduleJoin, dates: Iterable[date]) -> Sche
     token = secrets.token_hex(8)
     mapped = dict(zip(join.stems, join.hashes, strict=True))
     builds: dict[date, str] = {}
-    records = []
     for _month, in_month in groupby(days, key=lambda day: (day.year, day.month)):
         month_days = list(in_month)
+        month_builds = {day: f"{token}-{day.isoformat()}" for day in month_days}
         where, params = ch_aggregates.days_where(month_days)
         rows = refiled_rows_sql(f"u.agency_id = {{agency_id:UInt16}} AND ({where})")
         ch.command(
@@ -225,31 +221,37 @@ def write(ch, agency_id: int, join: ScheduleJoin, dates: Iterable[date]) -> Sche
                 **join.params(between=(month_days[0], month_days[-1])),
             },
         )
-        stats = {
-            day: (count, stems)
-            for day, count, stems in ch.query(
-                _STATS_SQL, parameters={"agency": agency_id, "dates": month_days, "build": token}
-            ).result_rows
+        parameters = {
+            "agency": agency_id,
+            "first": month_days[0],
+            "last": month_days[-1],
+            "dates": month_days,
+            "builds": list(month_builds.values()),
         }
+        stats = {day: (count, stems) for day, count, stems in ch.query(_STATS_SQL, parameters=parameters).result_rows}
+        records = []
         for day in month_days:
             count, stems = stats.get(day, (0, []))
             stem, content = _in_force_at(join, day) or ("", "")
-            builds[day] = f"{token}-{day.isoformat()}"
             stamped = {name: mapped.get(name, "") for name in stems}
-            records.append((agency_id, day, builds[day], stem, content, stamped, count, RULES, _now()))
-    ch.insert(FILED_DATES, records, column_names=_RECORD_COLUMNS)
+            records.append((agency_id, day, month_builds[day], stem, content, stamped, count, RULES))
+        # Each month as soon as it is written: a write that dies later keeps it.
+        ch.insert(FILED_DATES, records, column_names=_RECORD_COLUMNS)
+        builds.update(month_builds)
     return join._replace(filed=tuple(sorted({**dict(join.filed), **builds}.items())))
 
 
 def write_off(ch, agency_id: int, dates: Iterable[date] | None, keep: Iterable[date] = ()) -> None:
     """Record that no read takes the written rows of *dates* (every date when
-    None) but *keep* any more: the dates analyze finds no row of refiled on.
-    Their rows go at the next write."""
+    None), but *keep*, any more. Their rows go at the next write."""
     within = None if dates is None else set(dates)
     kept_dates = set(keep)
+    between = None if not within else (min(within), max(within))
+    if within is not None and not within:
+        return
     gone: list[tuple] = [
-        (agency_id, day, "", "", "", {}, 0, "", _now())
-        for day, kept in written(ch, agency_id).items()
+        (agency_id, day, "", "", "", {}, 0, "")
+        for day, kept in written(ch, agency_id, between).items()
         if kept.build and day not in kept_dates and (within is None or day in within)
     ]
     if gone:

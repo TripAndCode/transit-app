@@ -2,10 +2,12 @@
 write a read can take (pipeline.refiled), so its reads stop joining the
 timetable archive.
 
-analyze writes the refiled dates it rebuilds. A date it does not rebuild
-keeps none until it does: every date refiled before analyze wrote any, and
-every date a rewrite of `updates` wrote off (refiled.rows_rewritten) until the
-full rebuild that rewrite calls for. This finds, per agency whose ingest
+analyze writes the refiled dates it rebuilds, so a refiled date outside its
+rebuild scope has no write a read can take: every date refiled before
+analyze wrote any, every date a rewrite of `updates` wrote off
+(refiled.rows_rewritten) until the full rebuild that rewrite calls for, and
+every date written under other filing rules (refiled.RULES) once the rules
+change. Run this again after any of those. This finds, per agency whose ingest
 stamps versions and that has versions in force, the dates whose rows REFIT
 refiles over its whole history (static_archive.refit_dates), and lists those
 without a write that still serves a read. With --apply it writes them under
@@ -29,7 +31,7 @@ import clickhouse_connect
 import psycopg2
 
 from pipeline import refiled, static_archive
-from pipeline.clickhouse import ch_conn_kwargs, get_client
+from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC, ch_conn_kwargs, get_client
 from pipeline.locks import agency_ingest_lock
 from pipeline.strategies.static_join import VERSION_STAMPING_STRATEGIES
 
@@ -73,7 +75,7 @@ def run(conn, ch, agency_ids: list[int], *, apply: bool) -> list[Plan]:
         with agency_ingest_lock(conn, agency_id):
             planned, join = plan(ch, agency_id)
             if planned.unwritten:
-                refiled.refresh(ch, agency_id, join, planned.refiled)
+                refiled.write(ch, agency_id, join, planned.unwritten)
         plans.append(planned)
     return plans
 
@@ -87,7 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     if not url:
         print("DATABASE_URL is not set", file=sys.stderr)
         return 2
-    ch = get_client() if args.apply else clickhouse_connect.get_client(**ch_conn_kwargs(), settings={"readonly": 1})
+    # A scan of an agency's whole history outlasts the default receive timeout.
+    if args.apply:
+        ch = get_client(send_receive_timeout=ANALYZE_SEND_RECEIVE_TIMEOUT_SEC)
+    else:
+        ch = clickhouse_connect.get_client(
+            **ch_conn_kwargs(), settings={"readonly": 1}, send_receive_timeout=ANALYZE_SEND_RECEIVE_TIMEOUT_SEC
+        )
     conn = psycopg2.connect(url)
     try:
         if not args.apply:

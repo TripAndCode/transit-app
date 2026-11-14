@@ -517,6 +517,87 @@ async def test_a_restamp_of_updates_writes_off_the_agencys_refiled_rows(refiled,
     assert filed.stamp is Stamp.REFIT
 
 
+def _copy_poll(ch_client, agency_id: int, trip_id: str, replace: str, parameters: dict) -> None:
+    """Insert a copy of one of *trip_id*'s stored polls with *replace*'s columns."""
+    ch_client.command(
+        f"INSERT INTO updates SELECT * REPLACE ({replace}, concat(file_name, '_copy') AS file_name) FROM updates "
+        "WHERE agency_id = {agency:UInt16} AND trip_id = {trip:String} ORDER BY captured_at DESC LIMIT 1",
+        parameters={"agency": agency_id, "trip": trip_id, **parameters},
+    )
+
+
+def _rows(ch_client, stamp: Stamp, join, agency_id: int, first: date, last: date) -> list[tuple]:
+    """Every stored row filed under *first*..*last*, as *stamp* files it under *join*."""
+    from pipeline.service_day import filed_between_ch
+    from pipeline.static_archive import observation_rows
+
+    where = "u.agency_id = {agency_id:UInt16} AND " + filed_between_ch("{lo:Date}", "{hi:Date}")
+    sql = (
+        "SELECT u.filed_date, u.captured_at, u.trip_id, u.stop_sequence, u.static_version_id, u.scheduled_sec, "
+        f"u.route_code {observation_rows(where, stamp)} ORDER BY ALL"
+    )
+    params = {"agency_id": agency_id, "lo": first, "hi": last, **join.filing_params((first, last))}
+    return ch_client.query(sql, parameters=params).result_rows
+
+
+@pytest.mark.parametrize("run", ["one day", "two days"])
+def test_a_filed_read_keeps_each_reading_near_a_cutover_that_files_beside_its_written_run(refiled, run, ch_client):
+    """A reading captured within the filing reach of a written run's edge
+    can file under the unwritten day beside it, so the skip of `updates`
+    by capture stops short of it, and filed and refit rows agree."""
+    from pipeline import refiled as refiled_rows
+    from pipeline import static_archive
+    from pipeline.service_day import filed_date_of
+
+    agency_id, day = refiled.agency_id, refiled.day
+    first = refiled.before if run == "two days" else day
+    after = day + timedelta(days=1)
+    edges = [
+        # Captured on the run's first service day: a departure at 27:50 of the day before.
+        (datetime.combine(first, time(7, 30), tzinfo=JST), 3 * 3600 + 50 * 60, refiled.a, first - timedelta(days=1)),
+        # Captured on its last service day: a 04:10 departure of the day after, when B is in force.
+        (datetime.combine(after, time(0, 30), tzinfo=JST), 4 * 3600 + 10 * 60, refiled.b, after),
+    ]
+    for at, sec, stem, files_under in edges:
+        assert filed_date_of(at, sec) == files_under
+        _copy_poll(
+            ch_client,
+            agency_id,
+            "a",
+            "{at:DateTime64} AS captured_at, {sec:Int32} AS scheduled_sec, "
+            "{clock:String} AS scheduled_time, {stem:String} AS static_version_id",
+            {"at": at.astimezone(timezone.utc), "sec": sec, "clock": _clock(sec), "stem": stem},
+        )
+    join = static_archive.schedule_join(ch_client, agency_id, None, by_service_date=True)
+    written = refiled_rows.refresh(ch_client, agency_id, join, [first, day])
+    assert written.filed_dates() == {first, day}
+    lo, hi = first - timedelta(days=1), after
+    filed = _rows(ch_client, Stamp.FILED, written, agency_id, lo, hi)
+    assert filed == _rows(ch_client, Stamp.REFIT, join, agency_id, lo, hi)
+    assert {row[0] for row in filed} >= {lo, hi}
+
+
+def test_the_day_playback_reads_each_stop_event_filed_as_refit_reads_it(refiled, ch_client):
+    """A later poll of b's first stop names another stop: each reads the latest poll's."""
+    from api.routers.replay import build_replay_sql
+    from pipeline import refiled as refiled_rows
+    from pipeline import static_archive
+
+    agency_id, day = refiled.agency_id, refiled.day
+    _copy_poll(ch_client, agency_id, "b", "captured_at + 1 AS captured_at, 'S6' AS stop_id", {})
+    join = static_archive.schedule_join(ch_client, agency_id, None, by_service_date=True)
+    written = refiled_rows.refresh(ch_client, agency_id, join, [day])
+    window = {"agency_id": agency_id, "target_date": day, "from_sec": 0, "to_sec": 30 * 3600}
+    played = {
+        stamp: ch_client.query(
+            build_replay_sql(stamp, "updates"), parameters={**window, **bound.filing_params((day, day))}
+        ).result_rows
+        for stamp, bound in ((Stamp.FILED, written), (Stamp.REFIT, join))
+    }
+    assert played[Stamp.FILED] == played[Stamp.REFIT]
+    assert "S6" in repr(played[Stamp.FILED])
+
+
 async def test_a_bare_column_in_a_filed_reads_predicate_names_the_stored_value(refiled, aconn, ch_async_client):
     """e and h were polled with no route, which filing gives them: a bare
     `route_code` tested on the rows read filed is the stored one, as REFIT
