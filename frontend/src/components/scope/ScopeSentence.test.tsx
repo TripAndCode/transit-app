@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
@@ -22,12 +22,13 @@ function mount(
   search = "?from=2026-09-01&to=2026-09-30",
   applied?: Partial<Record<ScopeField, boolean>>,
   page = <ScopeSentence applied={applied} />,
+  routes: unknown[] = [],
 ) {
   vi.spyOn(hooks, "useAgencies").mockReturnValue({
     data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: "2026-09-30" }],
     isLoading: false,
   } as never);
-  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isPending: false, isLoading: false } as never);
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: routes, isPending: false, isLoading: false } as never);
   return renderWithProviders(
     <DataEndContext value="2026-09-30">
       <MemoryRouter initialEntries={[`/agencies/1/time${search}`]}>
@@ -49,6 +50,17 @@ function mount(
 
 const params = () => new URLSearchParams(screen.getByTestId("params").textContent ?? "");
 const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+const TWO_ROUTES = [
+  { route_id: "r101", route_short_name: "1", route_long_name: "Coast", route_code: "101", trip_headsigns: [] },
+  { route_id: "r102", route_short_name: "2", route_long_name: "Hill", route_code: "102", trip_headsigns: [] },
+];
+
+/** `mount`, but with two real routes so the routes token's own control has
+ *  something to pick from. */
+function mountRoutes(search = "?from=2026-09-01&to=2026-09-30") {
+  return mount(search, undefined, undefined, TWO_ROUTES);
+}
 
 describe("ScopeSentence", () => {
   beforeEach(() => localStorage.clear());
@@ -350,5 +362,92 @@ describe("ScopeSentence", () => {
     expect(region()).not.toContainElement(pin);
     await userEvent.click(pin);
     expect(region()).toContainElement(screen.getByRole("button", { name: "Weekdays" }));
+  });
+});
+
+describe("ScopeSentence routes token", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("stages a pick behind Apply, then shows it as the token's own label and closes back to it", async () => {
+    mountRoutes();
+    const token = screen.getByRole("button", { name: "all routes" });
+    await userEvent.click(token);
+    const dialog = screen.getByRole("dialog", { name: "Routes" });
+    await userEvent.click(within(dialog).getByRole("button", { name: /^1 ?Coast$/ }));
+    expect(params().has("routes")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Apply · 1 route" }));
+    expect(params().get("routes")).toBe("101");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: /^1 ?Coast$/ })).toHaveFocus();
+  });
+
+  it("discards the draft on Escape, leaving the committed pick alone", async () => {
+    mountRoutes("?from=2026-09-01&to=2026-09-30&routes=101");
+    const token = screen.getByRole("button", { name: /^1 ?Coast$/ });
+    await userEvent.click(token);
+    const dialog = screen.getByRole("dialog", { name: "Routes" });
+    await userEvent.click(within(dialog).getByRole("button", { name: /^2 ?Hill$/ }));
+    await userEvent.keyboard("{Escape}");
+    expect(params().get("routes")).toBe("101");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+    const reopened = screen.getByRole("dialog", { name: "Routes" });
+    expect(within(reopened).getByRole("checkbox", { name: /^2 ?Hill$/ })).not.toBeChecked();
+  });
+
+  it("discards the draft on a click outside the popover", async () => {
+    mountRoutes("?from=2026-09-01&to=2026-09-30&routes=101");
+    await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+    const dialog = screen.getByRole("dialog", { name: "Routes" });
+    await userEvent.click(within(dialog).getByRole("button", { name: /^2 ?Hill$/ }));
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(params().get("routes")).toBe("101");
+  });
+
+  it("keeps the popover open when removing a tray chip or clearing it, rather than reading the click as outside", async () => {
+    mountRoutes();
+    await userEvent.click(screen.getByRole("button", { name: "all routes" }));
+    const dialog = screen.getByRole("dialog", { name: "Routes" });
+    await userEvent.click(within(dialog).getByRole("button", { name: /^1 ?Coast$/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: /^2 ?Hill$/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove route 1 Coast (101)" }));
+    expect(screen.getByRole("dialog", { name: "Routes" })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Clear" }));
+    expect(screen.getByRole("dialog", { name: "Routes" })).toBeInTheDocument();
+    expect(params().has("routes")).toBe(false);
+  });
+
+  it("keeps the pinned strip's own draft in step with a commit made through the token's own popover", async () => {
+    mountRoutes();
+    await userEvent.click(screen.getByRole("button", { name: "Show all filters" }));
+    const strip = () => within(document.querySelector(".scope-strip")!);
+    await userEvent.click(strip().getByRole("button", { name: /^2 ?Hill$/ }));
+    expect(strip().getByRole("button", { name: /^Apply/ })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole("button", { name: "all routes" }));
+    const dialog = screen.getByRole("dialog", { name: "Routes" });
+    await userEvent.click(within(dialog).getByRole("button", { name: /^1 ?Coast$/ }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Apply · 1 route" }));
+    expect(params().get("routes")).toBe("101");
+
+    expect(strip().getByRole("checkbox", { name: /^1 ?Coast$/ })).toBeChecked();
+    expect(strip().getByRole("checkbox", { name: /^2 ?Hill$/ })).not.toBeChecked();
+    expect(strip().getByRole("button", { name: /^Apply/ })).toBeDisabled();
+  });
+
+  it("shows no plate badge with nothing picked", () => {
+    mountRoutes();
+    const token = screen.getByRole("button", { name: "all routes" });
+    expect(token.querySelector(".scope-token__plates")).toBeNull();
+  });
+
+  it("stacks each picked route's plate beside the token, leaving the label's own words alone", () => {
+    mountRoutes("?from=2026-09-01&to=2026-09-30&routes=101,102");
+    const token = screen.getByRole("button", { name: "2 routes" });
+    const plates = [...token.querySelectorAll(".scope-token__plate")].map((p) => p.textContent);
+    expect(plates).toEqual(["1", "2"]);
+    expect(token.querySelector(".scope-token__label")!.textContent).toBe("2 routes");
   });
 });

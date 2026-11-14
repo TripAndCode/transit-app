@@ -13,6 +13,9 @@ export type PhraseCtx = {
   routeLabel: (code: string) => string;
   /** The line a route code belongs to, as the route picker groups them. */
   routeGroup?: (code: string) => string | undefined;
+  /** A route code's plate text (its number/letter badge), for the routes
+   *  token's decorative plate stack. */
+  routePlate?: (code: string) => string | null;
 };
 
 const DEFAULT_LATE_SEC = DEFAULT_WINDOW.late_sec;
@@ -61,6 +64,39 @@ function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx)
     return `${group} ${translationT(t, "filters.routes.variant_count", { count: routes.length })}`;
   }
   return translationT(t, "scope.routes_count", { count: routes.length });
+}
+
+/** The routes token's decorative plate stack: one plate per picked line (its
+ *  first-selected variant), or, when every pick is one line, that line's own
+ *  distinct variant plates -- up to three either way. Across several lines,
+ *  a line past the third or one with no plate of its own folds into a "+N"
+ *  count, so the stack never shows fewer lines than were picked. A single
+ *  line shows only the plates its variants have, possibly none, since the
+ *  label already names that line. Purely visual: `routesLabel`'s own text
+ *  is unaffected and stays the sentence's only accessible description. */
+export function routeTokenPlates(routes: string[], ctx: PhraseCtx): { plates: string[]; more: number } {
+  if (routes.length === 0) return { plates: [], more: 0 };
+  const plateOf = (code: string): string | null => (ctx.routePlate ? ctx.routePlate(code) : code);
+  const groupOf = (code: string) => ctx.routeGroup?.(code) ?? code;
+  const singleGroup = new Set(routes.map(groupOf)).size === 1;
+  const sourceCodes: string[] = [];
+  const seenGroups = new Set<string>();
+  for (const code of routes) {
+    const g = groupOf(code);
+    if (!singleGroup && seenGroups.has(g)) continue;
+    seenGroups.add(g);
+    sourceCodes.push(code);
+  }
+  const texts: string[] = [];
+  let folded = 0;
+  for (const code of sourceCodes) {
+    const text = plateOf(code);
+    if (text && !texts.includes(text)) texts.push(text);
+    else if (!singleGroup) folded += 1;
+  }
+  const total = texts.length + folded;
+  const plates = total <= 3 ? texts : texts.slice(0, 2);
+  return { plates, more: total - plates.length };
 }
 
 export function daysLabel(dow: Scope["dow"], t: LabelT): string {

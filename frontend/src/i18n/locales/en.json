@@ -778,7 +778,13 @@
       "show_more": "Show more ({{count}} remaining)",
       "empty_title": "No routes registered yet.",
       "empty_hint": "If the initial ingest is still running, try again in a few minutes.",
-      "search_label": "Search routes"
+      "search_label": "Search routes",
+      "tray_empty": "Nothing picked: all routes",
+      "tray_remove": "Remove route {{route}}",
+      "apply_hint": "Enter applies · Esc cancels",
+      "apply_all": "Show all routes",
+      "apply_count_one": "Apply · {{count}} route",
+      "apply_count_other": "Apply · {{count}} routes"
     }
   },
   "operations": {

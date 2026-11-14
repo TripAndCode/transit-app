@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRoutes } from "../api/hooks";
@@ -9,6 +9,7 @@ import type { Route } from "../api/types";
 import { FILTER_SEPARATOR } from "../utils/format";
 import { RoutePartsLabel } from "./RouteLabel";
 import { searchKey } from "../utils/searchText";
+import { isImeKey } from "../hooks/useFocusTrap";
 
 type RouteVariant = { code: string; long_name: string | null; headsigns: string[]; searchText: string };
 type RouteGroup = {
@@ -92,18 +93,29 @@ export function RoutesPicker({
   onChange,
   delays,
   renderDelay,
+  tray = false,
+  onSubmit,
 }: {
   selected: string[];
   onChange: (v: string[]) => void;
   /** Mean delay per route code; each line shows its own beside its name. */
   delays?: ReadonlyMap<string, RouteDelay>;
   renderDelay?: (minutes: number) => ReactNode;
+  /** Shows the picked routes as removable chips above the list, with a
+   *  Clear button, for a caller that stages edits behind its own Apply
+   *  step. Off by default so a caller that applies every tick at once
+   *  (FilterContextBar's own draft) is unchanged. */
+  tray?: boolean;
+  /** Enter in the search field submits the caller's own pending change
+   *  (only meaningful together with `tray`). */
+  onSubmit?: () => void;
 }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { data, isPending, refetch } = useRoutes(id);
   const names = useRouteNames(id);
   const [filter, setFilter] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   // Render cap keeps the first paint cheap for huge agencies; "show more"
   // raises it instead of silently dropping the tail (search still scans all).
@@ -123,6 +135,13 @@ export function RoutesPicker({
 
   function toggleCode(code: string) {
     onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code]);
+  }
+
+  /** A tray button removes itself from the DOM; hand focus to the search
+   *  field first, so a keyboard user is not dropped back to the page top. */
+  function removeFromTray(next: string[]) {
+    searchRef.current?.focus();
+    onChange(next);
   }
 
   function toggleGroup(g: RouteGroup) {
@@ -154,8 +173,61 @@ export function RoutesPicker({
         onChange={(e) => setFilter(e.target.value)}
         aria-label={t("filters.routes.search_label")}
         placeholder={t("filters.routes.search_placeholder")}
+        ref={searchRef}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !isImeKey(e.nativeEvent)) onSubmit?.();
+        }}
         style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
       />
+      {tray && (
+        <div style={{ marginBottom: 6 }}>
+          {selected.length === 0 ? (
+            <p style={{ color: "var(--text-tertiary)", fontSize: 12, margin: 0 }}>{t("filters.routes.tray_empty")}</p>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+              {selected.map((code) => {
+                const parts = names.parts.get(code);
+                return (
+                  <span
+                    key={code}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      padding: "2px 4px 2px 8px",
+                      borderRadius: "var(--radius)",
+                      background: "var(--accent-soft)",
+                      fontSize: 12,
+                    }}
+                  >
+                    {parts ? <RoutePartsLabel parts={parts} compact nameOnly /> : code}
+                    <button
+                      type="button"
+                      onClick={() => removeFromTray(selected.filter((c) => c !== code))}
+                      aria-label={t("filters.routes.tray_remove", { route: parts ? `${routeNameText(parts)} (${code})` : code })}
+                      style={{
+                        appearance: "none",
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "var(--text-tertiary)",
+                        padding: "0 2px",
+                        fontSize: 14,
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => removeFromTray([])}>
+                {t("scope.control.clear")}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       <div
         style={{
           maxHeight: 220,

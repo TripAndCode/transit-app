@@ -19,6 +19,11 @@ export type ControlProps = {
   update: (patch: ScopePatch) => void;
   /** The controls' data, while it is loaded; every control works without it. */
   summary?: ScopeSummary;
+  /** Closes the popover this control renders in. Only the routes control
+   *  uses it, since its Apply both commits the staged picks and dismisses
+   *  the popover. Absent for a control rendered pinned in the scope strip,
+   *  which has no popover to close. */
+  close?: () => void;
 };
 
 const PERIOD_PRESETS = [7, 14, 30] as const;
@@ -187,17 +192,58 @@ export function TimeControl({ scope, update }: ControlProps) {
   );
 }
 
-export function RoutesControl({ scope, update, summary }: ControlProps) {
+function sameRoutes(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = new Set(a);
+  return b.every((code) => sa.has(code));
+}
+
+/** A draft of the picked routes, committed only on Apply. When the
+ *  committed routes change outside this control (a reset, or the pinned
+ *  strip and an open popover sharing one scope), the draft starts over from
+ *  them during render; the picker's search and expanded lines stay as the
+ *  user left them. */
+export function RoutesControl({ scope, update, summary, close }: ControlProps) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<string[]>(() => scope.routes);
+  const [committed, setCommitted] = useState(scope.routes);
+  if (!sameRoutes(committed, scope.routes)) {
+    setCommitted(scope.routes);
+    setDraft(scope.routes);
+  }
   const delays = summary ? new Map(summary.routes.map((r) => [r.route_code, r])) : undefined;
+  const unchanged = sameRoutes(draft, scope.routes);
+  function commit() {
+    if (unchanged) return;
+    update({ routes: draft.length > 0 ? draft : null });
+    close?.();
+  }
+  function cancel() {
+    setDraft(scope.routes);
+    close?.();
+  }
+  const applyLabel =
+    draft.length === 0 ? t("filters.routes.apply_all") : t("filters.routes.apply_count", { count: draft.length });
   return (
-    <div className="scope-control">
+    <div className="scope-control routes-control">
       <RoutesPicker
-        selected={scope.routes}
-        onChange={(routes) => update({ routes: routes.length > 0 ? routes : null })}
+        selected={draft}
+        onChange={setDraft}
         delays={delays}
         renderDelay={(minutes) => <DelayBar minutes={minutes} />}
+        tray
+        onSubmit={commit}
       />
       <WholeDayNote scope={scope} update={update} summary={summary} />
+      <div className="routes-control__foot">
+        <span className="routes-control__hint">{t("filters.routes.apply_hint")}</span>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={cancel}>
+          {t("common.cancel")}
+        </button>
+        <button type="button" className="btn btn--primary btn--sm routes-control__apply" disabled={unchanged} onClick={commit}>
+          {applyLabel}
+        </button>
+      </div>
     </div>
   );
 }

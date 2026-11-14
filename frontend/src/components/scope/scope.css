@@ -211,6 +211,86 @@
   text-decoration: line-through;
 }
 
+/* The routes control's own footer: staged picks commit only here, so it
+   stays reachable (sticky, opaque) under whatever grows above it -- the
+   route list, its tray of picked chips, and the daily-aggregate note. */
+.routes-control__foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  padding: var(--space-2) 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Inside the token's popover only: bled to the popover's own edge, since
+   .scope-strip__cell (the control's other home) has no padding of its own
+   to bleed against and no border or background for the footer to meet. */
+.scope-popover .routes-control__foot {
+  margin: var(--space-1) calc(-1 * var(--space-3)) calc(-1 * var(--space-3));
+  padding-inline: var(--space-3);
+  border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px);
+}
+
+.routes-control__hint {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* Decorative plates shown beside the routes token's own label text, which
+   stays exactly as scopePhrases.ts renders it (see routeTokenPlates). */
+.scope-token__plates {
+  display: inline-flex;
+  align-items: center;
+}
+
+.scope-token__plate {
+  margin-inline-start: var(--space-1);
+  background: var(--bg-surface);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.scope-token__plate + .scope-token__plate {
+  margin-inline-start: -6px;
+}
+
+.scope-token__plate--more {
+  color: var(--on-accent);
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+/* BP.sm, phone width (kept in sync with styles/breakpoints.ts's BP.sm; the
+   56px is Sidebar.tsx's MOBILE_TABBAR_HEIGHT_PX, which tokens.test.ts pins):
+   the fixed bottom tab bar would otherwise sit over this footer, so it
+   clears the bar's own height instead of the viewport edge. The hint drops
+   first, since the control is tightest here, and both buttons take the
+   full-size tap height. */
+@media (max-width: 640px) {
+  .routes-control__foot {
+    bottom: calc(56px + env(safe-area-inset-bottom));
+  }
+
+  .routes-control__hint {
+    display: none;
+  }
+
+  .routes-control__foot .btn {
+    height: var(--control-h);
+  }
+
+  .routes-control__apply {
+    flex: 1 1 auto;
+  }
+}
+
 .scope-sr-only {
   position: absolute;
   width: 1px;

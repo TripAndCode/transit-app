@@ -947,10 +947,12 @@ describe("tooltip surface", () => {
 
 // The tab bar's height is a number in Sidebar.tsx (it positions the More
 // sheet above the bar) and a length in global.css (it reserves the same
-// space under the routed content). Edited in one place only, the bar either
-// overlaps the content or leaves a gap, and nothing else notices.
+// space under the routed content) and in scope.css (it lifts the routes
+// control's sticky Apply footer above the bar). Edited in one place only,
+// the bar either overlaps what sits above it or leaves a gap, and nothing
+// else notices.
 describe("mobile tab bar height", () => {
-  it("is the same value in Sidebar.tsx and global.css", () => {
+  it("is the same value in Sidebar.tsx, global.css and scope.css", () => {
     const ts = readFileSync(resolve(process.cwd(), "src/components/Sidebar.tsx"), "utf8");
     const fromTs = ts.match(/const MOBILE_TABBAR_HEIGHT_PX = (\d+);/)?.[1];
     expect(fromTs, "MOBILE_TABBAR_HEIGHT_PX not found in Sidebar.tsx").toBeDefined();
@@ -960,6 +962,11 @@ describe("mobile tab bar height", () => {
     expect(fromCss, "the .app-main mobile padding rule was not found").toBeDefined();
 
     expect(fromCss).toBe(fromTs);
+
+    const scopeCss = readFileSync(resolve(process.cwd(), "src/components/scope/scope.css"), "utf8");
+    const fromScope = scopeCss.match(/\.routes-control__foot \{\s*bottom: calc\((\d+)px \+ env\(safe-area-inset-bottom\)\)/)?.[1];
+    expect(fromScope, "the .routes-control__foot mobile offset rule was not found").toBeDefined();
+    expect(fromScope).toBe(fromTs);
   });
 });
 

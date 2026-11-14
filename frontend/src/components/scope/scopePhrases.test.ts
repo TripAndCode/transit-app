@@ -5,6 +5,7 @@ import {
   durationLabel,
   isScopeConditionOff,
   periodDays,
+  routeTokenPlates,
   scopeTitle,
   scopeTokens,
   sentenceParts,
@@ -218,6 +219,59 @@ describe("isScopeConditionOff", () => {
     expect(isScopeConditionOff(token(scope, "time"), scope, undefined)).toBe(false);
     expect(isScopeConditionOff(token(base, "time"), base, { time_band: false })).toBe(false);
     expect(isScopeConditionOff(token(base, "agency"), base, { time_band: false })).toBe(false);
+  });
+});
+
+describe("routeTokenPlates", () => {
+  const PLATES: Record<string, string> = { "50": "50", "51": "51", "61": "K37", "62": "K37", "63": "K38", "70": "A1" };
+  const plateCtx = {
+    t: i18n.getFixedT("ja"),
+    agencyName: "x",
+    routeLabel: (c: string) => `R${c}`,
+    routeGroup: (c: string) => GROUPS[c],
+    routePlate: (c: string) => PLATES[c] ?? null,
+  };
+
+  it("shows nothing for no routes picked", () => {
+    expect(routeTokenPlates([], plateCtx)).toEqual({ plates: [], more: 0 });
+  });
+
+  it("shows one plate for one route, grouped or not", () => {
+    expect(routeTokenPlates(["50"], plateCtx)).toEqual({ plates: ["50"], more: 0 });
+  });
+
+  it("dedupes a single line's variants that all plate the same, instead of stacking the same plate three times", () => {
+    expect(routeTokenPlates(["61", "62"], plateCtx)).toEqual({ plates: ["K37"], more: 0 });
+  });
+
+  it("shows a single line's distinct variant plates, up to three", () => {
+    expect(routeTokenPlates(["61", "62", "63"], plateCtx)).toEqual({ plates: ["K37", "K38"], more: 0 });
+  });
+
+  it("shows one plate per line for a few different lines", () => {
+    expect(routeTokenPlates(["50", "61", "70"], plateCtx)).toEqual({ plates: ["50", "K37", "A1"], more: 0 });
+  });
+
+  it("folds a line past the third into a +N plate, keeping the first two", () => {
+    expect(routeTokenPlates(["50", "51", "61", "70"], plateCtx)).toEqual({ plates: ["50", "51"], more: 2 });
+  });
+
+  it("folds a line with no plate of its own into the +N count, never dropping it", () => {
+    const ctx = { ...plateCtx, routePlate: (c: string) => (c === "x1" || c === "x2" ? null : (PLATES[c] ?? null)) };
+    expect(routeTokenPlates(["50", "70", "x1", "x2"], ctx)).toEqual({ plates: ["50", "A1"], more: 2 });
+    expect(routeTokenPlates(["50", "x1"], ctx)).toEqual({ plates: ["50"], more: 1 });
+  });
+
+  it("shows nothing for a single line whose variants have no plate, since the label names it", () => {
+    const ctx = { ...plateCtx, routeGroup: () => "X line", routePlate: () => null };
+    expect(routeTokenPlates(["x1", "x2"], ctx)).toEqual({ plates: [], more: 0 });
+  });
+
+  it("falls back to the route code itself when the context names no plate", () => {
+    expect(routeTokenPlates(["50", "70"], { t: i18n.getFixedT("ja"), agencyName: "x", routeLabel: (c) => c })).toEqual({
+      plates: ["50", "70"],
+      more: 0,
+    });
   });
 });
 
