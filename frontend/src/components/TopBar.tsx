@@ -57,7 +57,7 @@ export function TopBar() {
           {t("topbar.ask_placeholder")}
         </span>
         {!coarsePointer && (
-        <span aria-hidden="true" style={{ display: "flex", gap: 3 }}>
+        <span aria-hidden="true" className="topbar-kbd-group" style={{ display: "flex", gap: 3 }}>
           {[modifierKeyLabel(), "K"].map((k) => (
             <kbd
               key={k}
