@@ -33,7 +33,7 @@ GUARD = _load_guard()
 # port or volume added there is held off the replica too.
 DEV_PORTS = tuple(GUARD.DEV_PORTS)
 DEV_VOLUMES = tuple(yaml.safe_load((ROOT / "compose.yml").read_text())["volumes"])
-# Every system log ClickHouse 26.8 writes on its own is either kept with a TTL or
+# Every system log the pinned ClickHouse writes on its own is either kept with a TTL or
 # turned off. The others (backup_log, s3queue_log, query_views_log, …) fill only
 # from features the replica never uses.
 KEPT_LOGS = ("query_log", "part_log", "error_log", "asynchronous_metric_log", "background_schedule_pool_log")
