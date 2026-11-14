@@ -61,8 +61,9 @@ make catch-up-from-r2 SEED_DAYS=3                     # the plan: days, timetabl
 make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1   # ingest them and build the aggregates
 ```
 
-`AGENCY="1 9"` narrows it to some agencies. Without an R2 key, choose one of
-these:
+`AGENCY="1 9"` narrows it to some agencies. An agency the plan marks `REFUSED`
+stops the whole apply, so leave it out with `AGENCY=` or follow its refusal
+first. Without an R2 key, choose one of these:
 
 ```bash
 # Fallback: load each agency's timetable, sample the current agency feeds into

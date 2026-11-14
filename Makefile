@@ -75,7 +75,7 @@ bake:
 # ── Sanity check ─────────────────────────────────────────────────────────────
 # Reports the state of env, DB container, port 8000, and SSO env without
 # starting anything. Exit code 0 always — informational.
-# The SSO and ClickHouse lines count `.env` assignments with `grep -c`, which
+# The SSO, ClickHouse and R2 lines count `.env` assignments with `grep -c`, which
 # prints no count at all for a file it cannot open, so an empty count (no
 # readable `.env`) is read as zero.
 
