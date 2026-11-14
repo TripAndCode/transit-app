@@ -2038,7 +2038,6 @@
         "askLlmEnabled": "Ask: AI による回答（LLM）",
         "askRouterEnabled": "Ask: ルールルーター",
         "askFollowupEnabled": "Ask: LLM フォローアップ",
-        "copilotInsightEnabled": "Copilot: 自動インサイト",
         "askHistoryEnabled": "Ask: 会話履歴",
         "askIntentCacheEnabled": "Ask: インテントキャッシュ",
         "askQueryLogEnabled": "Ask: クエリログ",
@@ -2227,15 +2226,6 @@
       },
       "table_label": "Ask クエリログ"
     }
-  },
-  "copilot": {
-    "title": "コパイロット",
-    "loading": "考え中…",
-    "error": "現在インサイトを生成できませんでした。",
-    "low_confidence": "データが限定的です。",
-    "followup_placeholder": "続けて質問…",
-    "followup_submit": "質問する",
-    "no_insight": "まだ傾向を示せるだけのデータがありません。"
   },
   "palette": {
     "placeholder": "検索・移動…",

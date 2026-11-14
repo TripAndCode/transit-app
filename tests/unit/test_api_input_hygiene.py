@@ -16,11 +16,9 @@ from pydantic import ValidationError
 from api.deps import get_conn
 from api.routers import me as me_router
 from api.routers.admin import ApiKeyCreate, InviteCreate
-from api.routers.ask import ask_suggest
 from api.routers.auth import ProviderRejected, _fetch_userinfo
 from api.routers.conversations import _MAX_FILTER_CTX_BYTES, CreateConversation, UpdateConversation
 from api.security import require_user
-from pipeline.query.followup import MAX_QUESTION_CHARS
 from tests.fixtures.users import admin_user
 
 
@@ -108,16 +106,6 @@ def test_update_conversation_bounds_filter_ctx_but_allows_none():
     assert UpdateConversation(filter_ctx=None).filter_ctx is None
     with pytest.raises(ValidationError):
         UpdateConversation(filter_ctx=_oversized_ctx())
-
-
-# ── ask/suggest q ────────────────────────────────────────────────────────────
-def test_ask_suggest_q_is_bounded_to_the_question_length():
-    import inspect
-
-    q = inspect.signature(ask_suggest).parameters["q"].default
-    # FastAPI keeps a Query's length bound as an annotated-types `MaxLen` in
-    # `metadata`, not as a `max_length` attribute on the param itself.
-    assert [getattr(m, "max_length", None) for m in q.metadata] == [MAX_QUESTION_CHARS]
 
 
 # ── GitHub error bodies ──────────────────────────────────────────────────────

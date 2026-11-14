@@ -847,9 +847,8 @@ async def _concentration(
 
 
 #: A route averaging at least this late (minutes) over the current window
-#: counts as delayed in ``delayed_count``, which the Copilot overview insight
-#: reads. The count carries it, so a reader states the threshold it was
-#: counted against instead of keeping its own copy.
+#: counts as delayed in ``delayed_count``. The count carries it, so a reader
+#: states the threshold it was counted against instead of keeping its own copy.
 DELAYED_ROUTE_MIN = 2.0
 
 #: The fewest observations a route needs in the current window to be listed

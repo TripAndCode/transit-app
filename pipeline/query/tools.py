@@ -332,47 +332,6 @@ _LOCALES: dict[tuple[str, str], str] = {
     # pipeline.query.hallucination_guard.verify_numeric_claims).
     ("numeric_guard_fallback", "ja"): "現在のデータでその数値を確認できませんでした。",
     ("numeric_guard_fallback", "en"): "I can't confirm that number from the current data.",
-    # Copilot proactive-insight templates. Every number is interpolated here
-    # from the caller's already-fetched view payload, never authored by the
-    # model, so these templates must not introduce a placeholder the payload
-    # cannot fill (see pipeline.query.copilot_templates).
-    ("copilot_overview_top_delay", "ja"): (
-        "この期間にもっとも平均遅延が大きい路線は {name} で、{top_avg} 分です。"
-        "全路線の平均は {avg} 分で、その前の同じ日数の {baseline} 分から {delta}% {direction}しています"
-        "（{delayed_count} 路線が遅延）。"
-    ),
-    ("copilot_overview_top_delay", "en"): (
-        "Route {name} ran the longest average delay over this period, at {top_avg} min. "
-        "Across all routes the average is {avg} min, {direction} {delta}% "
-        "from {baseline} min over the same number of days before it ({delayed_count} routes delayed)."
-    ),
-    ("copilot_overview_top_delay_no_baseline", "ja"): (
-        "この期間にもっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（{delayed_count} 路線が遅延）。"
-        "比べられる前の期間のデータはまだありません。"
-    ),
-    ("copilot_overview_top_delay_no_baseline", "en"): (
-        "Route {name} ran the longest average delay over this period, at {top_avg} min "
-        "({delayed_count} routes delayed). There is no earlier period to compare it with yet."
-    ),
-    ("copilot_overview_top_route", "ja"): (
-        "この期間にもっとも平均遅延が大きい路線は {name} で、{top_avg} 分です（{delayed_count} 路線が遅延）。"
-    ),
-    ("copilot_overview_top_route", "en"): (
-        "Route {name} ran the longest average delay over this period, at {top_avg} min "
-        "({delayed_count} routes delayed)."
-    ),
-    ("copilot_overview_top_delay_cite", "ja"): "{samples}件の観測に基づく · 概況の集計",
-    ("copilot_overview_top_delay_cite", "en"): "Based on {samples} departures · Pulse summary",
-    ("copilot_delta_up", "ja"): "増加",
-    ("copilot_delta_up", "en"): "up",
-    ("copilot_delta_down", "ja"): "減少",
-    ("copilot_delta_down", "en"): "down",
-    ("copilot_no_signal", "ja"): "現在のビューに目立った傾向はありません。この期間の遅延はおおむね平常どおりです。",
-    ("copilot_no_signal", "en"): (
-        "Nothing stands out from the current view — delays look broadly typical for this range."
-    ),
-    ("copilot_no_signal_cite", "ja"): "目立った傾向なし",
-    ("copilot_no_signal_cite", "en"): "no notable pattern",
 }
 
 
