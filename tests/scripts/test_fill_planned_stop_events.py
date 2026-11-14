@@ -8,6 +8,8 @@ Saturday.
 import zipfile
 from datetime import date, timedelta
 
+import pytest
+
 from pipeline import feed_quality, planned_trips, static_archive
 from pipeline.planned_trips import capture_planned_trips
 from pipeline.static_loader import load_static
@@ -192,3 +194,28 @@ def test_apply_clears_the_scorecards_state_so_the_next_analyze_rebuilds_it(
         cur.execute("SELECT table_name FROM agg_table_state WHERE agency_id = %s", (agency_id,))
         assert cur.fetchall() == [("other",)]
     pg_conn.rollback()
+
+
+def test_a_fill_that_fails_still_leaves_the_scorecards_state_cleared(
+    tmp_path, pg_conn, agency_id, ch_client, monkeypatch
+):
+    """Cleared before the write too: once a day is filled no rerun finds it
+    pending, so a run stopped after the write could not clear it later."""
+    _two_timetables(tmp_path, pg_conn, agency_id, ch_client, monkeypatch)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES (%s, %s, 'x')",
+            (agency_id, feed_quality.TABLE),
+        )
+    pg_conn.commit()
+
+    def stop(conn, agency, fills):
+        with pg_conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM agg_table_state WHERE agency_id = %s", (agency,))
+            assert cur.fetchone()[0] == 0
+        pg_conn.rollback()
+        raise RuntimeError("stopped")
+
+    monkeypatch.setattr(fill, "fill", stop)
+    with pytest.raises(RuntimeError, match="stopped"):
+        fill.main(["--apply"])

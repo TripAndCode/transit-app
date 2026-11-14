@@ -167,6 +167,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"dry run: {total} day(s) would be filled; --apply fills them")
             return 0
         for agency_id, fills in plans.items():
+            # Cleared before the write as well as after: a filled day is no
+            # longer pending, so a run stopped after its write would leave no
+            # rerun to clear the state, and one analyze ran in between keeps
+            # the scorecard it built before the fill.
+            static_archive.clear_states(conn, agency_id, [feed_quality.TABLE])
             written = fill(conn, agency_id, fills)
             static_archive.clear_states(conn, agency_id, [feed_quality.TABLE])
             print(f"agency {agency_id}: filled {written} day(s)")
