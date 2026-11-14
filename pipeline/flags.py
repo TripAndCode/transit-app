@@ -87,9 +87,6 @@ REGISTRY: tuple[FlagDefinition, ...] = (
     FlagDefinition("ask_router_enabled", "ASK_ROUTER_ENABLED", "admin.flags.labels.askRouterEnabled", True),
     FlagDefinition("ask_llm_enabled", "ASK_LLM_ENABLED", "admin.flags.labels.askLlmEnabled", True),
     FlagDefinition("ask_followup_enabled", "ASK_FOLLOWUP_ENABLED", "admin.flags.labels.askFollowupEnabled", False),
-    FlagDefinition(
-        "copilot_insight_enabled", "COPILOT_INSIGHT_ENABLED", "admin.flags.labels.copilotInsightEnabled", False
-    ),
     FlagDefinition("ask_history_enabled", "ASK_HISTORY_ENABLED", "admin.flags.labels.askHistoryEnabled", True),
     FlagDefinition(
         "ask_intent_cache_enabled", "ASK_INTENT_CACHE_ENABLED", "admin.flags.labels.askIntentCacheEnabled", False

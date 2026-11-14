@@ -35,10 +35,6 @@ PERMANENTLY_EXEMPT = {
 # Those handlers carry `response_model=None` to keep FastAPI's plain
 # jsonable_encoder path, and stay listed here until they gain a real model.
 PENDING = {
-    "GET /api/{agency_id}/ask/build-schema",
-    "GET /api/{agency_id}/ask/dashboard/anomalies",
-    "GET /api/{agency_id}/ask/dashboard/heatmap",
-    "GET /api/{agency_id}/ask/dashboard/movers",
     "GET /api/{agency_id}/ask/followup-enabled",
     "GET /api/{agency_id}/conversations",
     "GET /api/{agency_id}/conversations/{conversation_id}",

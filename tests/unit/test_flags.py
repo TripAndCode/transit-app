@@ -50,14 +50,14 @@ def test_flag_reads_env_var_over_env_default(monkeypatch):
 
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", " true "])
 def test_flag_env_var_truthy_values(monkeypatch, value):
-    monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", value)
-    assert flags.flag("copilot_insight_enabled", False) is True
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", value)
+    assert flags.flag("ask_followup_enabled", False) is True
 
 
 @pytest.mark.parametrize("value", ["0", "false", "no", "", "maybe"])
 def test_flag_env_var_falsy_values(monkeypatch, value):
-    monkeypatch.setenv("COPILOT_INSIGHT_ENABLED", value)
-    assert flags.flag("copilot_insight_enabled", True) is False
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", value)
+    assert flags.flag("ask_followup_enabled", True) is False
 
 
 def test_flag_unknown_key_raises():
@@ -306,7 +306,6 @@ def test_registry_covers_every_known_gated_env_var():
         "ASK_ROUTER_ENABLED",
         "ASK_LLM_ENABLED",
         "ASK_FOLLOWUP_ENABLED",
-        "COPILOT_INSIGHT_ENABLED",
         "ASK_HISTORY_ENABLED",
         "ASK_INTENT_CACHE_ENABLED",
         "ASK_QUERY_LOG_ENABLED",
@@ -317,6 +316,26 @@ def test_registry_covers_every_known_gated_env_var():
         "ML_FORECAST_ENABLED",
     }
     assert {d.env_var for d in flags.REGISTRY} == expected
+
+
+def test_an_override_row_for_a_retired_flag_is_ignored(monkeypatch):
+    """A `feature_flags` row outlives its registry entry when a flag is
+    retired. Readers resolve only registered keys, so the stale row must
+    neither crash the refresh nor surface as a flag, and it must not disturb a
+    live flag's override beside it."""
+    stale = (True, "left over", 1, None)
+    monkeypatch.setattr(
+        flags,
+        "_load_overrides",
+        lambda: {"retired_flag_enabled": stale, "weather_ingest_enabled": (True, "set", 1, None)},
+    )
+    flags.reset_cache()
+    flags.warm()
+
+    assert flags.get_flag_state("weather_ingest_enabled").source == "override"
+    with pytest.raises(KeyError):
+        flags.get_flag_state("retired_flag_enabled")
+    assert set(flags._build_states({"retired_flag_enabled": stale})) == {d.key for d in flags.REGISTRY}
 
 
 def test_registry_keys_are_unique():
@@ -332,7 +351,6 @@ def test_registry_env_defaults_match_prior_hardcoded_defaults():
         "ask_router_enabled": True,
         "ask_llm_enabled": True,
         "ask_followup_enabled": False,
-        "copilot_insight_enabled": False,
         "ask_history_enabled": True,
         "ask_intent_cache_enabled": False,
         "ask_query_log_enabled": True,

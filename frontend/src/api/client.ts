@@ -80,8 +80,7 @@ export async function apiGetOrNull<T>(path: string, opts?: { signal?: AbortSigna
  * `/admin/users/:uid` PATCH) don't have to narrow — callers of
  * 204-only endpoints should type T as `void`. Accepts an optional `signal`
  * (mirroring `apiGet`) so a react-query `queryFn` can abort a superseded,
- * still-in-flight POST instead of letting it run to completion unseen, as the
- * Copilot insight query does. */
+ * still-in-flight POST instead of letting it run to completion unseen. */
 export async function apiPost<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
   return requestMaybeEmpty<T>(path, {
     method: "POST",

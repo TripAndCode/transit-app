@@ -264,7 +264,7 @@ describe("RichResult evidence card", () => {
   it("renders the one-sentence summary using the display font token", () => {
     renderWithProviders(<Wrapper result={tableResult} />);
     const summary = screen.getByText(tableResult.summary);
-    expect(summary).toHaveStyle({ fontFamily: "var(--font-display)" });
+    expect(summary.style.fontFamily).toBe("var(--font-display)");
   });
 
   it("renders next-step chips and forwards a tap to onChip", async () => {

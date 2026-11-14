@@ -6,7 +6,6 @@ from datetime import date
 
 from api.range import RangeCtx, date_range_clause
 from pipeline import analyze as analyze_mod
-from pipeline import dashboard_queries
 from pipeline.reports import filters, overview, rankings
 from tests.fixtures.service_dates import selecting
 
@@ -36,7 +35,7 @@ def test_agg_filter_and_dist_filter_render_the_same_predicate_shape():
 
 
 def test_no_reader_casts_the_trend_date_column():
-    for mod in (overview, rankings, filters, dashboard_queries):
+    for mod in (overview, rankings, filters):
         source = inspect.getsource(mod)
         assert "date::date" not in source, mod.__name__
 

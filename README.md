@@ -369,7 +369,6 @@ value when neither an override nor the env var is set.
 | `ask_router_enabled` | `ASK_ROUTER_ENABLED` | on |
 | `ask_llm_enabled` | `ASK_LLM_ENABLED` | on |
 | `ask_followup_enabled` | `ASK_FOLLOWUP_ENABLED` | off |
-| `copilot_insight_enabled` | `COPILOT_INSIGHT_ENABLED` | off |
 | `ask_history_enabled` | `ASK_HISTORY_ENABLED` | on |
 | `ask_intent_cache_enabled` | `ASK_INTENT_CACHE_ENABLED` | off |
 | `ask_query_log_enabled` | `ASK_QUERY_LOG_ENABLED` | on |

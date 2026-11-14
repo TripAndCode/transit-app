@@ -120,7 +120,7 @@ export function AnalysisFilters({ agencyId }: { agencyId: number | null }) {
       {ctx.service !== "all" && <button type="button" onClick={() => update({ service: "all" })}>{serviceValueLabel(ctx.service, t)} ×</button>}
       {dirty && (
         <>
-          <button type="submit" className="focus-filters__apply">{t("apply")}</button>
+          <button type="submit" className="btn btn--primary focus-filters__apply">{t("apply")}</button>
           {/* The button appearing is the sighted signal; this is the same
               fact for a screen reader. */}
           <p className="focus-filters__pending" role="status">{t("pendingChanges")}</p>
