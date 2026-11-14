@@ -73,10 +73,10 @@ def version_names(
     """Each version name the agency's `updates` rows matching *where* are filed
     under ('' for none), as *stamp* files them, with its row count. A *stamp*
     other than INGESTED reads *join*'s versions in force over *between*, the
-    dates *where* can reach (`ScheduleJoin.force_params`). REFIT files a row
-    under the same name IN_FORCE does, so it is read as IN_FORCE, without the
-    schedule archive's join."""
-    stamp = Stamp.IN_FORCE if stamp is Stamp.REFIT else stamp
+    dates *where* can reach (`ScheduleJoin.force_params`). REFIT and FILED
+    file a row under the same name IN_FORCE does, so they are read as
+    IN_FORCE, without the schedule archive's join or the written rows."""
+    stamp = Stamp.IN_FORCE if stamp.refiles else stamp
     rows = ch.query(
         "SELECT ifNull(u.static_version_id, '') AS stem, count() "
         f"{observation_rows(f'u.agency_id = {{agency_id:UInt16}} AND ({where})', stamp)} GROUP BY stem",
@@ -108,14 +108,18 @@ def month_span(month: int, days: list[date] | None = None) -> tuple[date, date]:
 
 def stamp_for(join: ScheduleJoin | None, refit: Set[date] | None, dates: Iterable[date]) -> Stamp:
     """How a read of *dates* files its rows: INGESTED without versions in
-    force, else REFIT where *refit*, the dates whose rows need the archive's
-    schedule (static_archive.refit_dates), names one of them or is unknown
-    (None), else IN_FORCE."""
+    force; IN_FORCE where *refit*, the dates whose rows need the archive's
+    schedule (static_archive.refit_dates), names none of them; FILED where
+    *join* names each one it does as written (ScheduleJoin.filed); else, or
+    with *refit* unknown (None), REFIT."""
     if join is None or not join.force:
         return Stamp.INGESTED
-    if refit is None or not refit.isdisjoint(dates):
+    if refit is None:
         return Stamp.REFIT
-    return Stamp.IN_FORCE
+    refiled = {day for day in dates if day in refit}
+    if not refiled:
+        return Stamp.IN_FORCE
+    return Stamp.FILED if refiled <= join.filed_dates() else Stamp.REFIT
 
 
 def month_bounds(month: int) -> tuple[date, date]:
@@ -646,14 +650,17 @@ WHOLE_HISTORY_TABLES: tuple[str, ...] = tuple(_WHOLE_SPECS)
 COPIED_TABLES: tuple[str, ...] = (*TABLES, *WHOLE_HISTORY_TABLES)
 ALL_TABLES: tuple[str, ...] = (*MONTHLY_TABLES, *WHOLE_HISTORY_TABLES)
 # Every persistent ClickHouse table besides the observation ones (`updates`,
-# `updates_live`): what analyze builds and the timetable archive. db/clickhouse/schema.sql
-# creates exactly these and the observation tables.
+# `updates_live`): what analyze builds, the timetable archive, and the rows
+# analyze wrote refiled. db/clickhouse/schema.sql creates exactly these and the
+# observation tables.
 STORE_TABLES: tuple[str, ...] = (
     *ALL_TABLES,
     static_archive.ARCHIVE,
     static_archive.SCHEDULE,
     static_archive.VERSION_MAP,
     static_archive.SPANS,
+    static_archive.FILED_TABLE,
+    static_archive.FILED_DATES,
 )
 _ALL_SPECS: dict[str, _Spec | _WholeSpec] = {**_SPECS, **_WHOLE_SPECS}
 COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _ALL_SPECS.items()}

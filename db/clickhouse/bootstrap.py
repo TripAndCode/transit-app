@@ -3,7 +3,8 @@ ClickHouse tables: the observation tables (`updates`, `updates_live`), the
 aggregate and internal tables pipeline.ch_aggregates computes (its
 ALL_TABLES), and the timetable archive pipeline.static_archive keeps
 (`static_stop_times_archive`, `static_schedule_archive`, `static_version_map`,
-`static_version_spans`). The work tables built
+`static_version_spans`), and the rows analyze wrote refiled pipeline.refiled
+keeps (`updates_filed`, `updates_filed_dates`). The work tables built
 and dropped during a run are not here. analyze refuses to run while any
 table in ALL_TABLES or the archive is missing, and load_static while the
 archive is, so this is also how a store gets them.
@@ -76,13 +77,15 @@ _NEW_NULLABLE_COLUMNS = [
 ]
 
 
-_OBSERVATION_TABLES = ("updates", "updates_live")
+# `updates_filed` keeps each `updates` column beside its filed ones, so a
+# column added to `updates` reaches it too.
+_OBSERVATION_TABLES = ("updates", "updates_live", "updates_filed")
 
 
 def apply_schema(client) -> None:
     """Run every `;`-separated statement in schema.sql against *client*, then
-    ensure every column in _NEW_NULLABLE_COLUMNS exists on both observation
-    tables. `updates_live` is created `AS updates`, so it inherits whatever
+    ensure every column in _NEW_NULLABLE_COLUMNS exists on each observation
+    table. `updates_live` is created `AS updates`, so it inherits whatever
     shape `updates` has at that moment and needs the same self-healing step
     (see module docstring for why that step runs even when CREATE TABLE IF NOT
     EXISTS is a no-op).

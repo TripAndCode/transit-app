@@ -805,7 +805,7 @@ class UpdatesFilter(NamedTuple):
     (`pipeline.static_archive.observation_rows`) tests apart.
 
     *raw* is tested on each row as ingest stored it, and *filed* on the filed
-    row ('' for no test). Only a read that refits rows (Stamp.REFIT) can
+    row ('' for no test). Only a read that refiles rows (Stamp.refiles) can
     rewrite the scheduled time and the route, so only it splits them: its
     *filed* tests the time band and the route, and its *raw* keeps both a
     row of the route and a row with no route, which filing may give it. Any

@@ -195,6 +195,11 @@ FastAPI + React SPA  <-------------------------------------------------+
   current `agg_route_headway` version, whether kept at an older one or never
   kept. A ClickHouse that predates these
   tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
+  Where the version in force on a date has other content than the one its
+  rows were ingested against, `analyze` writes that date's rows filed under
+  it to `updates_filed` (`pipeline/refiled.py`), and its own reads and the
+  live scans take them from there instead of joining the archive, for as long
+  as `updates_filed_dates` shows the date's filing unchanged.
   Postgres mirrors the map in `static_version_contents`, each name at its
   latest content, written right after each map row, so the definition stamp
   names each timetable's content without reading ClickHouse.

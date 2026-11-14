@@ -281,11 +281,9 @@ def _noon(day: date) -> RangeCtx:
 # ── the filing itself ──────────────────────────────────────────────────────
 
 
-async def test_a_refiled_day_is_read_with_the_archive_and_a_correctly_stamped_day_as_ingested(
-    refiled, aconn, ch_async_client
-):
+async def test_a_refiled_day_is_read_filed_and_a_correctly_stamped_day_as_ingested(refiled, aconn, ch_async_client):
     on_day = await filing(aconn, ch_async_client, refiled.agency_id, refiled.day, refiled.day)
-    assert on_day.stamp is Stamp.REFIT
+    assert on_day.stamp is Stamp.FILED
     assert on_day.params["force_stems"] == [refiled.a]
     before = await filing(aconn, ch_async_client, refiled.agency_id, refiled.before, refiled.before)
     assert before == (Stamp.INGESTED, (refiled.before, refiled.before), {})
@@ -300,19 +298,33 @@ async def test_the_refit_decision_agrees_with_analyzes_refit_dates(refiled, acon
         where, params = days_where([day])
         refit = static_archive.refit_dates(ch_client, refiled.agency_id, where, params, join, (day, day))
         filed = await filing(aconn, ch_async_client, refiled.agency_id, day, day)
-        assert (filed.stamp is Stamp.REFIT) == bool(refit) == (day == refiled.day)
+        assert filed.stamp.refiles == bool(refit) == (day == refiled.day)
 
 
-async def test_the_live_form_of_a_refit_read_gives_the_rows_of_analyzes_form(refiled, aconn, ch_async_client):
-    """The hashed archive key and the band's narrowing change the cost, never the rows."""
+def _read_as(stamp: Stamp, ch_client, agency_id: int) -> None:
+    """Leave the agency's refiled days to be read *stamp*: FILED as analyze
+    wrote them, or REFIT once their written rows are written off."""
+    from pipeline import refiled
+
+    if stamp is Stamp.REFIT:
+        refiled.write_off(ch_client, agency_id, None)
+
+
+@pytest.mark.parametrize("stamp", [Stamp.FILED, Stamp.REFIT])
+async def test_the_live_form_of_a_refit_read_gives_the_rows_of_analyzes_form(
+    refiled, stamp, aconn, ch_client, ch_async_client
+):
+    """The written rows, and the hashed archive key and the band's narrowing,
+    change the cost, never the rows."""
     from api.range import updates_filter_ch
     from pipeline.db import build_dedup_ch_sql
     from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
 
+    _read_as(stamp, ch_client, refiled.agency_id)
     for band in ("noon", "morning", "afternoon"):
         ctx = RangeCtx(from_date=refiled.day, to_date=refiled.day, time_band=band)
         filed = await ctx_filing(aconn, ch_async_client, refiled.agency_id, ctx)
-        assert filed.stamp is Stamp.REFIT
+        assert filed.stamp is stamp
         cte, params = _dedup_cte_ch(ctx, filed)
         where = updates_filter_ch(ctx, refit=True)
         exact = build_dedup_ch_sql(extra_where=where.raw, filed_where=where.filed, stamp=Stamp.REFIT)
@@ -341,8 +353,130 @@ async def test_a_scan_of_correctly_stamped_days_never_joins_the_schedule_archive
     spy = _Spy(ch_async_client)
     await compute_route_table(refiled.agency_id, _noon(refiled.day), aconn, ch=spy, min_samples=1)
     ((sql, params),) = spy.scans()
-    assert "static_schedule_archive" in sql
+    assert "updates_filed" in sql
     assert params["force_stems"] == [refiled.a]
+
+
+# ── the refiled rows analyze wrote ─────────────────────────────────────────
+
+
+def _poison_the_archive(ch_client, agency_id: int) -> None:
+    """Move every archived departure of the agency to 03:00: a read that
+    joins the archive again files the refiled polls out of every band."""
+    ch_client.command(
+        "ALTER TABLE static_schedule_archive UPDATE scheduled_time = '03:00:00', scheduled_sec = 10800 "
+        "WHERE agency_id = {agency:Int32}",
+        parameters={"agency": agency_id},
+        settings={"mutations_sync": 2},
+    )
+
+
+async def test_a_day_analyze_refiled_is_read_from_the_rows_it_wrote_filed(refiled, aconn, ch_client, ch_async_client):
+    from pipeline.reports.route_table import compute_route_table
+
+    on_day = await filing(aconn, ch_async_client, refiled.agency_id, refiled.day, refiled.day)
+    assert on_day.stamp is Stamp.FILED
+    _poison_the_archive(ch_client, refiled.agency_id)
+    spy = _Spy(ch_async_client)
+    rows = await compute_route_table(refiled.agency_id, _noon(refiled.day), aconn, ch=spy, min_samples=1)
+    assert {r[0]: r[5] for r in rows} == {ROUTE: 24, OTHER: 6}
+    ((sql, params),) = spy.scans()
+    assert "static_schedule_archive" not in sql
+    assert params["filed_dates"] == [refiled.day]
+
+
+async def test_rows_landed_on_a_refiled_day_since_analyze_wrote_it_are_filed_through_the_archive(
+    refiled, pg_conn, ch_client, aconn, ch_async_client
+):
+    ch_client.command(
+        "INSERT INTO updates SELECT * REPLACE (concat(file_name, '_again') AS file_name) FROM updates "
+        "WHERE agency_id = {agency:UInt16} AND trip_id = 'g' LIMIT 1",
+        parameters={"agency": refiled.agency_id},
+    )
+    filed = await filing(aconn, ch_async_client, refiled.agency_id, refiled.day, refiled.day)
+    assert filed.stamp is Stamp.REFIT
+    analyze(refiled.agency_id, pg_conn, ch_client)
+    pg_conn.commit()
+    filed = await filing(aconn, ch_async_client, refiled.agency_id, refiled.day, refiled.day)
+    assert filed.stamp is Stamp.FILED
+
+
+async def test_a_refiled_day_whose_version_in_force_moved_is_filed_through_the_archive(
+    refiled, ch_client, aconn, ch_async_client
+):
+    from pipeline import live_filing, static_archive
+
+    static_archive.record_span(
+        ch_client, refiled.agency_id, refiled.b, (refiled.day, refiled.day + timedelta(days=180))
+    )
+    live_filing.invalidate_schedule_joins()
+    filed = await filing(aconn, ch_async_client, refiled.agency_id, refiled.day, refiled.day)
+    assert filed.stamp is Stamp.REFIT
+    assert filed.params["force_stems"] == [refiled.b]
+
+
+async def test_todays_rows_in_the_live_table_are_filed_through_the_archive(today, aconn, ch_async_client):
+    agency_id, day = today
+    filed = await filing(aconn, ch_async_client, agency_id, day, day, table=LIVE_TABLE)
+    assert filed.stamp is Stamp.REFIT
+
+
+def test_a_write_leaves_the_write_before_it_to_reads_still_holding_it_and_drops_older_ones(refiled, ch_client):
+    from pipeline import refiled as refiled_rows
+    from pipeline import static_archive
+
+    agency_id, day = refiled.agency_id, refiled.day
+    join = static_archive.schedule_join(ch_client, agency_id, None, by_service_date=True)
+
+    def builds() -> set[str]:
+        rows = ch_client.query(
+            f"SELECT DISTINCT build FROM {static_archive.FILED_TABLE} WHERE agency_id = {{agency:UInt16}}",
+            parameters={"agency": agency_id},
+        ).result_rows
+        return {row[0] for row in rows}
+
+    generations = [refiled_rows.written(ch_client, agency_id)[day].build]
+    for _ in range(2):
+        refiled_rows.write(ch_client, agency_id, join, [day])
+        generations.append(refiled_rows.written(ch_client, agency_id)[day].build)
+        assert builds() == set(generations[-2:])
+    refiled_rows.write_off(ch_client, agency_id, [day])
+    assert refiled_rows.written(ch_client, agency_id)[day].build == ""
+
+
+class _SyncSpy:
+    """A ClickHouse client that records the SQL of every call made through it."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.statements: list[str] = []
+
+    def __getattr__(self, name):
+        attribute = getattr(self._inner, name)
+        if not callable(attribute):
+            return attribute
+
+        def call(*args, **kwargs):
+            sql = args[0] if args else kwargs.get("query", kwargs.get("cmd"))
+            if isinstance(sql, str):
+                self.statements.append(sql)
+            return attribute(*args, **kwargs)
+
+        return call
+
+
+def test_analyze_joins_the_archive_once_to_write_a_refiled_month_and_reads_it_filed(refiled, pg_conn, ch_client):
+    from pipeline import static_archive
+    from pipeline.analyze import mark_for_full_rebuild
+
+    mark_for_full_rebuild(pg_conn, [refiled.agency_id])
+    spy = _SyncSpy(ch_client)
+    analyze(refiled.agency_id, pg_conn, spy)
+    pg_conn.commit()
+    joins = [sql for sql in spy.statements if "ANY LEFT JOIN" in sql and static_archive.SCHEDULE in sql]
+    assert len(joins) == 1
+    assert joins[0].startswith(f"INSERT INTO {static_archive.FILED_TABLE}")
+    assert any(f"FROM {static_archive.FILED_TABLE} AS u" in sql for sql in spy.statements)
 
 
 async def test_an_agency_whose_ingest_stamps_no_version_is_read_as_ingested(pg_conn, aconn, ch_async_client):
@@ -542,11 +676,14 @@ async def test_a_live_stamp_names_the_content_of_the_join_that_filed_its_rows(
     assert stamped(await client.get(url)) == [(refiled.b, after[:8])]
 
 
-async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(withdrawn, aconn, ch_async_client):
-    """Each stop's latest report decides whether it departed, in the live form
-    of a REFIT read as in analyze's: of the route's 24 noon departures, f
-    keeps its first three and g none, and b keeps its last stop at the delay
-    predicted after the skip."""
+@pytest.mark.parametrize("stamp", [Stamp.FILED, Stamp.REFIT])
+async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(
+    withdrawn, stamp, aconn, ch_client, ch_async_client
+):
+    """Each stop's latest report decides whether it departed, in the written
+    rows and the live form of a REFIT read as in analyze's: of the route's 24
+    noon departures, f keeps its first three and g none, and b keeps its
+    last stop at the delay predicted after the skip."""
     from api.range import updates_filter_ch
     from pipeline.db import build_dedup_ch_sql
     from pipeline.reports.filters import _dedup_cte_ch, _stop_visits_cte_ch, ctx_filing
@@ -554,9 +691,10 @@ async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(with
     from pipeline.reports.route_table import compute_route_table
 
     agency_id, day = withdrawn.agency_id, withdrawn.day
+    _read_as(stamp, ch_client, agency_id)
     ctx = _noon(day)
     filed = await ctx_filing(aconn, ch_async_client, agency_id, ctx)
-    assert filed.stamp is Stamp.REFIT
+    assert filed.stamp is stamp
     cte, params = _dedup_cte_ch(ctx, filed)
     where = updates_filter_ch(ctx, refit=True)
     exact = build_dedup_ch_sql(extra_where=where.raw, filed_where=where.filed, stamp=Stamp.REFIT)

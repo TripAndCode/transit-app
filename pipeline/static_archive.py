@@ -36,6 +36,10 @@ VERSION_MAP = "static_version_map"
 SPANS = "static_version_spans"
 # The Postgres mirror of VERSION_MAP (migration 0097).
 MIRROR = "static_version_contents"
+# The rows of each date analyze read refiled, as REFIT filed them, and what
+# each date's were filed against (pipeline.refiled).
+FILED_TABLE = "updates_filed"
+FILED_DATES = "updates_filed_dates"
 _BATCH = 50_000
 
 
@@ -452,13 +456,18 @@ class ScheduleJoin(NamedTuple):
     rows of a mapped name join anything. *force* is the versions in force over
     the agency's service dates (pipeline.timetable_in_force), each a mapped
     name whose content's schedule is kept, so a row of a date one covers is
-    filed under it (Stamp).
+    filed under it (Stamp). *filed* is the dates whose refiled rows
+    pipeline.refiled wrote, each with the build a read takes (Stamp.FILED).
     """
 
     stems: list[str]
     hashes: list[str]
     current: str
     force: tuple[Segment, ...] = ()
+    filed: tuple[tuple[date, str], ...] = ()
+
+    def filed_dates(self) -> set[date]:
+        return {day for day, _build in self.filed}
 
     def content_of(self) -> Callable[[str], str]:
         """The content each version name joins: its mapped one, else the loaded one."""
@@ -472,8 +481,13 @@ class ScheduleJoin(NamedTuple):
 
     def filing_params(self, between: tuple[date, date]) -> dict:
         """The bound parameters observation_rows reads to file rows of the
-        service dates *between* (force_params) under Stamp.IN_FORCE or REFIT."""
-        return {"join_stems": self.stems, "join_hashes": self.hashes, **self.force_params(between)}
+        service dates *between* (force_params) under Stamp.IN_FORCE, REFIT or FILED."""
+        return {
+            "join_stems": self.stems,
+            "join_hashes": self.hashes,
+            **self.force_params(between),
+            **self._filed_params(between),
+        }
 
     def params(self, present: Iterable[str] | None = None, between: tuple[date, date] | None = None) -> dict:
         """The join's bound parameters. *present*, the version names of the rows
@@ -491,7 +505,15 @@ class ScheduleJoin(NamedTuple):
             "join_current": self.current,
             "join_contents": sorted(contents - {""}),
             **self.force_params(between),
+            **self._filed_params(between),
         }
+
+    def _filed_params(self, between: tuple[date, date] | None) -> dict:
+        """The written dates of *filed* within *between* and their builds, which a FILED read binds."""
+        if not self.filed:
+            return {}
+        filed = [(day, build) for day, build in self.filed if between is None or between[0] <= day <= between[1]]
+        return {"filed_dates": [day for day, _ in filed], "filed_builds": [build for _, build in filed]}
 
     def force_params(self, between: tuple[date, date] | None = None) -> dict:
         """The bound parameters of the segments in force, which IN_FORCE_STEM_SQL reads.
@@ -580,11 +602,24 @@ class Stamp(str, Enum):
     timetable's route for the trip where the feed names none, and the stored
     row does not say which, so a route ingest filled from another timetable
     stays. A trip_id rarely changes route between revisions.
+
+    FILED: REFIT's rows, without its archive join. The rows of each date
+    ScheduleJoin.filed names are read from FILED_TABLE, where pipeline.refiled
+    wrote them as REFIT files them, and every other date's rows as IN_FORCE
+    reads them. Exact where no other date the read reaches holds a row REFIT
+    refiles (refit_dates), and only while each written date's filing holds
+    (pipeline.refiled.valid_builds).
     """
 
     INGESTED = "ingested"
     IN_FORCE = "in_force"
     REFIT = "refit"
+    FILED = "filed"
+
+    @property
+    def refiles(self) -> bool:
+        """Whether a row's schedule and route can be other than ingest stored."""
+        return self in (Stamp.REFIT, Stamp.FILED)
 
 
 # The service date a stored row is filed under (pipeline.service_day.filed_date_ch).
@@ -679,11 +714,61 @@ def _stop_events(where: str, table: str) -> str:
     )
 
 
+_IN_FORCE_STEM = "if(u.force_at = 0, u.static_version_id, {force_stems:Array(String)}[u.force_at])"
+
+# The columns filing rewrites, which FILED_TABLE keeps beside the stored ones as filed_<column>.
+FILED_COLUMNS = ("static_version_id", *_REFIT_COLUMNS)
+
+
+def _archive_join(live_form: bool) -> str:
+    """REFIT's join of _marked_rows' rows, aliased `u`, to the schedules of the
+    contents in force, aliased `s`."""
+    if live_form:
+        keys = "cityHash64(content_hash, trip_id, stop_sequence) AS archive_key"
+        on = "s.archive_key = cityHash64(u.refit_content, toString(u.trip_id), toInt32(u.stop_sequence))"
+    else:
+        keys = "content_hash, trip_id, stop_sequence"
+        on = "s.content_hash = u.refit_content AND s.trip_id = u.trip_id AND s.stop_sequence = toInt32(u.stop_sequence)"
+    return (
+        f"ANY LEFT JOIN (SELECT {keys}, service_type, route_id, scheduled_time, "
+        f"scheduled_sec FROM {SCHEDULE} WHERE agency_id = {{agency_id:UInt16}} "
+        "AND has({force_contents:Array(String)}, content_hash)) AS s "
+        f"ON {on}"
+    )
+
+
+def refiled_rows_sql(where: str) -> str:
+    """The SELECT of `updates`' rows matching *where* (on `u.` columns) that
+    FILED_TABLE keeps: every column as stored, in UPDATE_COLUMNS order, then
+    filed_date, then each of FILED_COLUMNS as REFIT files it, as filed_<column>.
+    It binds ScheduleJoin.params and joins the archive on its exact keys, as
+    analyze's REFIT reads do, so a FILED read gives their rows."""
+    filed = {column: _REFIT_COLUMNS.get(column, _IN_FORCE_STEM) for column in FILED_COLUMNS}
+    columns = [f"u.{column} AS {column}" for column in UPDATE_COLUMNS]
+    columns.append("u.filed_date AS filed_date")
+    columns += [f"{filed[column]} AS filed_{column}" for column in FILED_COLUMNS]
+    return f"SELECT {', '.join(columns)} FROM ({_marked_rows(where, UPDATES_TABLE)}) AS u {_archive_join(False)}"
+
+
+def _written_rows(where: str) -> str:
+    """FILED_TABLE's rows of the written dates a FILED read binds, matching
+    *where* on their stored columns, as filed_date and `updates`' columns filed."""
+    columns = ", ".join(
+        f"u.filed_{column} AS {column}" if column in FILED_COLUMNS else f"u.{column} AS {column}"
+        for column in UPDATE_COLUMNS
+    )
+    return (
+        f"SELECT u.filed_date AS filed_date, {columns} FROM {FILED_TABLE} AS u "
+        "WHERE u.agency_id = {agency_id:UInt16} AND has({filed_dates:Array(Date)}, u.filed_date) "
+        f"AND has({{filed_builds:Array(String)}}, u.build) AND ({where})"
+    )
+
+
 def _filed_columns(refit: bool) -> str:
     columns = ["u.filed_date AS filed_date"]
     for column in UPDATE_COLUMNS:
         if column == "static_version_id":
-            expression = "if(u.force_at = 0, u.static_version_id, {force_stems:Array(String)}[u.force_at])"
+            expression = _IN_FORCE_STEM
         elif refit and column in _REFIT_COLUMNS:
             expression = _REFIT_COLUMNS[column]
         else:
@@ -733,27 +818,24 @@ def observation_rows(
     join. *by_stop_event* files one row per stop event and stored schedule
     (_stop_events) under REFIT, for a read that keeps only each stop event's
     latest delay.
+
+    FILED reads `updates` only, and needs neither: it joins nothing. Its
+    written dates' rows come from FILED_TABLE, tested by *where* on their
+    stored columns as a row of `updates` is, and the rest from *table*.
     """
     if stamp is Stamp.INGESTED:
         return f"FROM {checked_table(table)} AS u WHERE {where}" + (f" AND ({filed_where})" if filed_where else "")
+    after = f" WHERE {filed_where}" if filed_where else ""
+    if stamp is Stamp.FILED:
+        if table != UPDATES_TABLE:
+            raise ValueError(f"only {UPDATES_TABLE}' rows are written filed, not {table}'")
+        rest = _marked_rows(f"({where}) AND NOT has({{filed_dates:Array(Date)}}, {FILED_DATE_SQL})", table)
+        return f"FROM (SELECT {_filed_columns(False)} FROM ({rest}) AS u UNION ALL {_written_rows(where)}) AS u{after}"
     events = by_stop_event and stamp is Stamp.REFIT
     marked = _marked_rows(where, table, _stop_events(where, table) if events else None)
-    after = f" WHERE {filed_where}" if filed_where else ""
     if stamp is Stamp.IN_FORCE:
         return f"FROM (SELECT {_filed_columns(False)} FROM ({marked}) AS u) AS u{after}"
-    if live_form:
-        keys = "cityHash64(content_hash, trip_id, stop_sequence) AS archive_key"
-        on = "s.archive_key = cityHash64(u.refit_content, toString(u.trip_id), toInt32(u.stop_sequence))"
-    else:
-        keys = "content_hash, trip_id, stop_sequence"
-        on = "s.content_hash = u.refit_content AND s.trip_id = u.trip_id AND s.stop_sequence = toInt32(u.stop_sequence)"
-    return (
-        f"FROM (SELECT {_filed_columns(True)} FROM ({marked}) AS u "
-        f"ANY LEFT JOIN (SELECT {keys}, service_type, route_id, scheduled_time, "
-        f"scheduled_sec FROM {SCHEDULE} WHERE agency_id = {{agency_id:UInt16}} "
-        "AND has({force_contents:Array(String)}, content_hash)) AS s "
-        f"ON {on}) AS u{after}"
-    )
+    return f"FROM (SELECT {_filed_columns(True)} FROM ({marked}) AS u {_archive_join(live_form)}) AS u{after}"
 
 
 def filed_date_sql(stamp: Stamp) -> str:

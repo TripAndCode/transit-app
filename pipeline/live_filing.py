@@ -9,9 +9,15 @@ otherwise every row already carries the schedule in force, and the read takes
 the rows as ingested, which files them the same way without the join. No
 reader here reads a row's version name, the one column the two differ in.
 
-A live scan answers inside the API's time budget, so a REFIT read joins the
-archive on a hashed key (static_archive.observation_rows) and, under a time
-band, first narrows the rows to those the band can keep (band_candidates).
+Where analyze wrote each refiled date's rows filed, and they still file as
+REFIT would now (pipeline.refiled.valid_builds), the read takes them instead
+of joining (Stamp.FILED). Only `updates` is written, and only a read of whole
+days can be checked against what was written.
+
+Otherwise a live scan still answers inside the API's time budget: its REFIT
+read joins the archive on a hashed key (static_archive.observation_rows) and,
+under a time band, first narrows the rows to those the band can keep
+(band_candidates).
 """
 
 from __future__ import annotations
@@ -23,7 +29,7 @@ from datetime import date, datetime
 from typing import NamedTuple
 
 from api.range import TimeBand, UpdatesFilter, time_band_clause_ch_for
-from pipeline import static_archive
+from pipeline import refiled, static_archive
 from pipeline.cache import async_lru_cache, clear_all
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.service_day import filed_capture_span
@@ -155,9 +161,25 @@ async def filing(
     params = {} if join is None else join.filing_params(between)
     if join is None or not params["force_stems"]:
         return Filing(Stamp.INGESTED, between, {})
-    if not refits(join, await _stamped_spans(ch, agency_id, between, table, since)):
+    stamped = await _stamped_days(ch, agency_id, between, table, since)
+    needed = refiled_dates(join, stamped)
+    if not needed:
         return Filing(Stamp.INGESTED, between, {})
+    if table == UPDATES_TABLE and since is None:
+        written = await refiled.written_async(ch, agency_id, between)
+        builds = refiled.valid_builds(join, written, stamped, needed)
+        if builds is not None:
+            return Filing(
+                Stamp.FILED, between, join._replace(filed=tuple(sorted(builds.items()))).filing_params(between)
+            )
     return Filing(Stamp.REFIT, between, params)
+
+
+def refiled_dates(join: ScheduleJoin, stamped: Iterable[tuple[str, date, int]]) -> set[date]:
+    """The dates of *stamped*, each version name ('' for none) on a date's
+    rows with the date and its rows there, holding a row Stamp.REFIT reads
+    the schedule of from the archive (refits)."""
+    return {day for stem, day, _count in stamped if refits(join, [(stem, day, day)])}
 
 
 def refits(join: ScheduleJoin, stamped: Iterable[tuple[str, date, date]]) -> bool:
@@ -177,29 +199,30 @@ def refits(join: ScheduleJoin, stamped: Iterable[tuple[str, date, date]]) -> boo
     )
 
 
-# Each version name the agency's rows in the window were stamped with, and
-# the first and last service date its rows are filed under. It reads the rows
-# the read it decides about reads, but only the columns that file them,
-# grouped by one LowCardinality column, so it costs a fraction of that read.
-_STAMPED_SPANS_SQL = (
-    f"SELECT ifNull(u.static_version_id, '') AS stem, min({static_archive.FILED_DATE_SQL}), "
-    f"max({static_archive.FILED_DATE_SQL}) FROM {{table}} AS u "
+# Each version name the agency's rows in the window were stamped with, each
+# service date its rows are filed under, and how many there. It reads the
+# rows the read it decides about reads, but only the columns that file them,
+# grouped by a LowCardinality column and a date, so it costs a fraction of
+# that read.
+_STAMPED_DAYS_SQL = (
+    f"SELECT ifNull(u.static_version_id, '') AS stem, {static_archive.FILED_DATE_SQL} AS filed, count() "
+    f"FROM {{table}} AS u "
     "WHERE u.agency_id = {{agency_id:UInt16}} AND u.captured_at >= {{stamped_from:DateTime64}} "
     "AND u.captured_at < {{stamped_to:DateTime64}} "
     f"AND {static_archive.FILED_DATE_SQL} BETWEEN {{{{stamped_first:Date}}}} AND {{{{stamped_last:Date}}}} "
-    "GROUP BY stem"
+    "GROUP BY stem, filed"
 )
 
 
-async def _stamped_spans(
+async def _stamped_days(
     ch, agency_id: int, between: tuple[date, date], table: str, since: datetime | None = None
-) -> list[tuple[str, date, date]]:
+) -> list[tuple[str, date, int]]:
     """Each version name *table*'s rows filed under the service dates
     *between* (static_archive.FILED_DATE_SQL), captured from *since* when
-    given, carry, with the first and last date it is filed on."""
+    given, carry, with each date it is filed on and its rows there."""
     start, end = filed_capture_span(*between)
     result = await ch.query(
-        _STAMPED_SPANS_SQL.format(table=checked_table(table)),
+        _STAMPED_DAYS_SQL.format(table=checked_table(table)),
         parameters={
             "agency_id": agency_id,
             "stamped_from": since or start,
@@ -208,7 +231,7 @@ async def _stamped_spans(
             "stamped_last": between[1],
         },
     )
-    return [(stem, first, last) for stem, first, last in result.result_rows]
+    return [(stem, day, count) for stem, day, count in result.result_rows]
 
 
 def band_candidates(where: UpdatesFilter, band: TimeBand, filing: Filing) -> UpdatesFilter:
