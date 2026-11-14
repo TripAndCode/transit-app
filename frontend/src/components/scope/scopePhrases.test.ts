@@ -262,6 +262,11 @@ describe("routeTokenPlates", () => {
     expect(routeTokenPlates(["50", "x1"], ctx)).toEqual({ plates: ["50"], more: 1 });
   });
 
+  it("shows nothing for a single line whose variants have no plate, since the label names it", () => {
+    const ctx = { ...plateCtx, routeGroup: () => "X line", routePlate: () => null };
+    expect(routeTokenPlates(["x1", "x2"], ctx)).toEqual({ plates: [], more: 0 });
+  });
+
   it("falls back to the route code itself when the context names no plate", () => {
     expect(routeTokenPlates(["50", "70"], { t: i18n.getFixedT("ja"), agencyName: "x", routeLabel: (c) => c })).toEqual({
       plates: ["50", "70"],

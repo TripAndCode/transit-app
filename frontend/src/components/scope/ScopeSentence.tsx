@@ -105,9 +105,10 @@ function Token({
     if (next == null) return;
     onClose();
   }
-  // Unlike Escape or an outside click, an explicit Cancel/Apply inside the
-  // popover leaves nothing else to take focus, so it returns to the token
-  // the same way Escape does.
+  // Escape already returns focus to the token through the popover's own
+  // dismiss handler, and an outside click leaves it where the click landed.
+  // Cancel and Apply unmount the very button that held focus, so they
+  // refocus the token explicitly, as Escape does.
   function closeAndFocus() {
     onClose();
     ref.current?.focus();
