@@ -8,6 +8,7 @@ import { EM_DASH, formatDateTime, formatDuration, formatShortDate } from "../../
 import { AdminButton } from "./adminControls";
 import { currentStepIndex, isAbandoned, runState, stoppedStepIndex, type RunState } from "./agencyRunState";
 import "./agencyRuns.css";
+import type { LabelT } from "../../utils/filterValueLabels";
 
 /** How a step is drawn: finished, the one the run is on, stopped there,
  *  still to come, or skipped because the run ended first. */
@@ -197,7 +198,7 @@ function StepResult({
 }
 
 function segLabel(
-  t: (key: string, opts?: Record<string, unknown>) => string,
+  t: LabelT,
   run: AgencyRun,
   state: RunState,
   stoppedAt: number,

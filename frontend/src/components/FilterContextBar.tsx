@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { CalendarDays } from "lucide-react";
 import type { FilterCtx } from "../api/types";
 import type { DowFilter } from "../api/scope";
-import { dowValueLabel } from "../utils/filterValueLabels";
+import { dowValueLabel, type LabelT } from "../utils/filterValueLabels";
 import { DataEndContext, defaultPeriod } from "../api/scope";
 import { rangeLabel } from "../utils/rangeLabel";
 import { useAgencyId } from "../api/useAgencyId";
@@ -31,7 +31,7 @@ type Props = {
  *  block is shared. */
 function filterSummary(
   fc: FilterCtx,
-  t: (key: string, opts?: Record<string, unknown>) => string,
+  t: LabelT,
   anchorDay: string,
 ): string {
   const parts: string[] = [];

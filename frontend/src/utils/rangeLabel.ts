@@ -1,5 +1,6 @@
 import type { FilterCtx } from "../api/types";
 import { formatDateRange } from "./format";
+import type { LabelT } from "./filterValueLabels";
 
 /**
  * Format a filter context's date range for display.
@@ -12,7 +13,7 @@ import { formatDateRange } from "./format";
  */
 export function rangeLabel(
   fc: FilterCtx,
-  t: (key: string, opts?: Record<string, unknown>) => string,
+  t: LabelT,
   anchorDay: string,
 ): string | null {
   if (!fc.from_date || !fc.to_date) return null;
