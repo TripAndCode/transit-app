@@ -119,6 +119,11 @@ migration validates as a `DefinitionMeta` and stores, or drops. A card saved
 before the column existed reads `NULL` and shows no stamp. The evidence card
 renders it with the reports' `DefinitionMetaBlock`.
 
+**`__build__` sentinel on `/ask`:** a question `__build__ <tool> <json-args>`
+still dispatches that tool directly with no LLM
+(`pipeline.query.chat.chat_with_tools`). No product screen sends it any more,
+and its answer carries no method stamp; it remains a direct-API path only.
+
 **Free-text / natural-language path (the 3-stage router)** — reached via
 `POST /api/{agency_id}/ask` for any question that isn't a `__build__`
 sentinel:
@@ -164,8 +169,8 @@ sentinel:
    that needs the LLM answers the "no AI provider is configured" message,
    follow-ups report disabled (`POST .../followup` returns 503), and
    `/api/config` reports `llm_enabled: false`, which hides the follow-up box.
-   The notebook's card dispatch, `__build__` path, threads and exports need no
-   key.
+   The notebook's card dispatch (signed in and `/ask/card`), threads and
+   exports need no key, nor does the direct-API `__build__` sentinel.
 5. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
    `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
@@ -186,8 +191,8 @@ sentinel:
    Either way the result becomes a `ToolResult` →
    `render_tool_result()` produces the locale-specific summary string.
 6. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
-   log_query()` unless `ASK_QUERY_LOG_ENABLED=false` (skipped for
-   `__build__` sentinels).
+   log_query()` unless `ASK_QUERY_LOG_ENABLED=false` (skipped for the
+   direct-API `__build__` sentinel).
 
 **Follow-up path** (LLM-grounded, kill-switch gated):
 `FollowupChipsRow` → `useFollowup` →
@@ -383,7 +388,7 @@ so it is a separate mechanism to build, not a knob to turn on.
   `ask.followup_*` (the follow-up box's placeholder and send label),
   `ask.evidence.*` (stop-evidence views and the follow-up box's
   selected-stop context), `ask.col.*` (table column headers),
-  `ask.build_labels.*` (anon `__build__` summary / builder-schema UI),
+  `ask.build_labels.*` (a card's fallback user-bubble summary / builder-schema UI),
   `ask.filter_bar.*` (the filter-context bar). New templates/params need
   matching keys in both locale files.
 - **Server-side**: `pipeline/query/tools.py`'s

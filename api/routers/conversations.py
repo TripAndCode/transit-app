@@ -379,7 +379,9 @@ async def _run_card(
     browser: the answer, the conditions it ran under and its method stamp
     (:attr:`pipeline.query.results.ToolResult.definition`). A failed dispatch
     is a message with no result and no stamp. *cache_question*, when given,
-    is recorded in the intent cache under the card's signature."""
+    is recorded in the intent cache under the card's signature, and the
+    dispatch then runs in a savepoint of the caller's transaction; without it,
+    nothing is written and no transaction is opened."""
     try:
         can_args = canonicalize(tool, args)
     except ValueError:
@@ -396,13 +398,16 @@ async def _run_card(
         }
 
     try:
-        # A savepoint (or, outside a transaction, one of its own). Any Postgres
-        # error raised by dispatch() below -- not just the UndefinedTableError
-        # case -- would otherwise abort the caller's transaction, so the
-        # message written for the failure would raise
-        # InFailedSQLTransactionError instead.
-        async with conn.transaction():
-            if cache_question is not None:
+        if cache_question is None:
+            # Nothing to write: no transaction is held open across the
+            # dispatch, which can be a long ClickHouse scan.
+            result = await dispatch(tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
+        else:
+            # A savepoint inside the caller's transaction: any Postgres error
+            # raised here -- not just the UndefinedTableError case -- would
+            # otherwise abort that transaction, so the message written for
+            # the failure would raise InFailedSQLTransactionError instead.
+            async with conn.transaction():
                 await _intent_cache.upsert(
                     conn,
                     sig_hash,
@@ -411,7 +416,7 @@ async def _run_card(
                     agency_id,
                     question=cache_question,
                 )
-            result = await dispatch(tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
+                result = await dispatch(tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
     except HTTPException as exc:
         if exc.status_code != 503:
             raise

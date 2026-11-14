@@ -305,8 +305,8 @@ async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, 
 
 @pytest.mark.asyncio
 async def test_ask_signed_out_build_sentinel_answers_with_no_llm_provider(ask_client, no_llm_key):
-    """A signed-out notebook card posts `__build__ tool {json}`; it dispatches
-    deterministically, so no provider key is needed."""
+    """The direct-API `__build__ tool {json}` sentinel, which no product screen
+    sends, dispatches deterministically, so no provider key is needed."""
     client, agency_id = ask_client
     resp = await client.post(
         f"/api/{agency_id}/ask",

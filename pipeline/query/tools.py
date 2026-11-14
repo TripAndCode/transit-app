@@ -28,12 +28,14 @@ because the frontend i18n layer translates display names client-side.
 
 from __future__ import annotations
 
+import logging
 import unicodedata
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import asyncpg
 import clickhouse_connect
 
 from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
@@ -62,8 +64,11 @@ from pipeline.reports import (
 from pipeline.reports.definition import DefinitionMeta
 from pipeline.reports.rankings import _weighted_avg_min, on_time_window, threshold_aggregates_serve
 from pipeline.reports.report_stamp import report_definition
+from pipeline.reports.savepoint import savepoint
 from pipeline.route_catalog import left_out_unless_named, route_list, rows_to_fetch
 from pipeline.stats import annotate_on_time_pct_confidence
+
+_log = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -1033,14 +1038,28 @@ async def _require_registered_route(args: dict, conn, agency_id: int, locale: st
     return route
 
 
-async def _report_stamp(report_type: str, ctx: RangeCtx, conn, agency_id: int, ch, **kwargs: Any) -> DefinitionMeta:
+async def _report_stamp(
+    report_type: str, ctx: RangeCtx, conn, agency_id: int, ch, **kwargs: Any
+) -> DefinitionMeta | None:
     """The stamp *report_type* carries for *ctx*, for a tool computing that
     report's figures over *ctx*: the scope the tool computes for, after any
     route or service it narrows to. Built before the figures, as the report
     builds it. The tools left unstamped (route_stats, segment_hotspots,
     route_stop_patterns, compare_segments by service type and the rest)
-    compute figures no report does, so no report's stamp describes them."""
-    definition, _ = await report_definition(conn, ch, agency_id, ctx, report_type, **kwargs)
+    compute figures no report does, so no report's stamp describes them.
+
+    The stamp is context beside the figures, so one that cannot be built is
+    None rather than a failed answer, read inside a savepoint so the caller's
+    transaction outlives the failure. A missing aggregate table still raises:
+    the figures would fail on it too, and its handler answers it."""
+    try:
+        async with savepoint(conn):
+            definition, _ = await report_definition(conn, ch, agency_id, ctx, report_type, **kwargs)
+    except asyncpg.exceptions.UndefinedTableError:
+        raise
+    except Exception:
+        _log.exception("%s method stamp for agency %s could not be built", report_type, agency_id)
+        return None
     return definition
 
 
@@ -1453,8 +1472,8 @@ _HANDLERS = {
     "on_time_rate": _tool_on_time_rate,
     "route_meta": _tool_route_meta,
     "segment_hotspots": _tool_segment_hotspots,
-    # Guided-card only (``__build__``); deliberately absent from TOOLS so the
-    # LLM never selects it on its own.
+    # Notebook cards (and the direct-API ``__build__`` sentinel) only;
+    # deliberately absent from TOOLS so the LLM never selects it on its own.
     "route_stop_patterns": _tool_route_stop_patterns,
     "time_pattern": _tool_time_pattern,
     "schedule_realism": _tool_schedule_realism,
