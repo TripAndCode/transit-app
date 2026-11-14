@@ -55,6 +55,24 @@ describe("Segmented", () => {
     expect(span.style.transform).toBe("translate(100%, 100%)");
   });
 
+  it("shows a choice's figure under its label, in its name but not its tooltip", () => {
+    const options: SegmentedOption<string>[] = [
+      { value: "a", label: "A", meta: "40%" },
+      { value: "b", label: "B" },
+    ];
+    const { container } = render(<Segmented aria-label="Choice" options={options} value="a" onChange={() => {}} />);
+    const radio = screen.getByRole("radio", { name: "A 40%" });
+    expect(radio).toHaveAttribute("title", "A");
+    expect(radio.querySelector(".seg-btn__meta")).toHaveTextContent("40%");
+    expect(container.querySelector(".seg")).toHaveClass("seg--meta");
+  });
+
+  it("keeps the one-line track when no choice has a figure", () => {
+    const { container } = render(<Segmented aria-label="Choice" options={OPTIONS} value="a" onChange={() => {}} />);
+    expect(container.querySelector(".seg")).not.toHaveClass("seg--meta");
+    expect(container.querySelector(".seg-btn__meta")).toBeNull();
+  });
+
   it("hides the thumb when no option matches", () => {
     const { container } = render(<Segmented aria-label="Choice" options={OPTIONS} value={null} onChange={() => {}} />);
     expect(thumb(container).style.opacity).toBe("0");

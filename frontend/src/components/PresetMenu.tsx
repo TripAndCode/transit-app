@@ -131,7 +131,7 @@ export function PresetMenu({
       <button
         ref={triggerRef}
         type="button"
-        className="scope-pill"
+        className="btn btn--secondary btn--sm"
         aria-haspopup="dialog"
         aria-expanded={menuOpen}
         onClick={toggleMenu}

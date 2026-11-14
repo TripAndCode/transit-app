@@ -302,28 +302,21 @@ export function ToleranceControl({ scope, update, summary }: ControlProps) {
   }
   return (
     <div className="scope-control">
-      <div className="scope-pills">
-        {TOLERANCE_PRESETS_MIN.map((min) => {
+      {/* Marks the applied tolerance, not the slider's draft: the thumb
+          moves only once a drag lands. */}
+      <Segmented
+        aria-label={t("scope.control.tolerance")}
+        options={TOLERANCE_PRESETS_MIN.map((min) => {
           const share = summary?.tolerance.find((p) => p.late_sec === min * 60)?.on_time_pct;
-          return (
-            <button
-              key={min}
-              type="button"
-              className="scope-pill"
-              aria-pressed={current === min * 60}
-              onClick={() => write(min * 60)}
-            >
-              {t("scope.control.minutes", { n: min })}
-              {share != null && (
-                <>
-                  {" "}
-                  <span className="scope-share">{t("scope.control.share", { pct: Math.round(share) })}</span>
-                </>
-              )}
-            </button>
-          );
+          return {
+            value: String(min),
+            label: t("scope.control.minutes", { n: min }),
+            meta: share == null ? undefined : t("scope.control.share", { pct: Math.round(share) }),
+          };
         })}
-      </div>
+        value={TOLERANCE_PRESETS_MIN.find((min) => min * 60 === current)?.toString() ?? null}
+        onChange={(min) => write(Number(min) * 60)}
+      />
       {summary && summary.tolerance.length > 0 && (
         <>
           {/* Stretched to the slider's full width, so the marker sits above
@@ -420,7 +413,7 @@ function ClearValue({ value, onClear }: { value: string; onClear: () => void }) 
   return (
     <div className="scope-control">
       <span className="scope-field">{value}</span>
-      <button type="button" className="scope-pill" onClick={onClear}>
+      <button type="button" className="btn btn--secondary btn--sm" onClick={onClear}>
         {t("scope.control.clear")}
       </button>
     </div>
