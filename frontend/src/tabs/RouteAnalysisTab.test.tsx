@@ -54,6 +54,30 @@ describe("RouteAnalysisTab", () => {
     vi.restoreAllMocks();
   });
 
+  it("names the page's own route in the snapshot it asks for, where the route is the path", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
+    const create = vi.spyOn(snapshots, "createSnapshot").mockReturnValue(new Promise(() => {}));
+    renderWithProviders(
+      <MemoryRouter initialEntries={["/agencies/1/routes/R1?from=2026-09-24&to=2026-10-23"]}>
+        <Routes>
+          <Route
+            path="/agencies/:agencyId/routes/:routeCode"
+            element={
+              <ScopeRouteContext value="R1">
+                <RouteAnalysisTab />
+              </ScopeRouteContext>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create snapshot" }));
+    expect(new URLSearchParams(create.mock.calls[0][0].query).get("routes")).toBe("R1");
+  });
+
   it("lets an admin freeze the route's page as it is asked for, and shows everyone else no new control", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);

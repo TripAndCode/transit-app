@@ -66,8 +66,9 @@ type SnapshotCreated = {
 };
 
 /** What a screen asks a snapshot of: itself, for its agency, with the query
- *  string its own report endpoint was asked (`reportQueryString`), so the
- *  server computes exactly what the screen shows. */
+ *  string it asks its data with (a report screen's `reportQueryString`; a
+ *  route's page, its scope and its variant as `shape`), so the server
+ *  computes exactly what the screen shows. */
 export type SnapshotSpec = { screen: SnapshotScreen; agencyId: number; query: string };
 
 /** Admin only: the server computes and stores the screen's figures and
