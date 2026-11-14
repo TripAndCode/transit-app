@@ -1033,3 +1033,98 @@ async def test_followup_enabled_endpoint_reports_flag_and_max_chars(conv_app, mo
     body = r.json()
     assert body["enabled"] is True
     assert body["max_question_chars"] == conv_router._followup.MAX_QUESTION_CHARS
+
+
+@pytest.mark.asyncio
+async def test_followup_is_disabled_when_no_llm_provider_is_configured(conv_app, monkeypatch, no_llm_key):
+    """The flag is on, but with no provider the follow-up answers a clear 503
+    disabled response, not a 502 provider error, and never reaches the LLM."""
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, _pool = conv_app
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "q", "context_message_id": 1},
+            headers=_CSRF,
+        )
+        flag = await c.get(f"/api/{agency}/ask/followup-enabled")
+    assert r.status_code == 503
+    assert r.json()["detail"] == "followup_disabled"
+    assert flag.json()["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_notebook_card_dispatch_works_with_no_llm_provider(conv_app, no_llm_key):
+    """Card dispatch ({tool, args}) is deterministic: it appends both messages
+    with no provider configured."""
+    app, agency, uid, _pool = conv_app
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "No key", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["assistant"]["tool"] == "describe_data"
+
+
+async def _followup_post_and_flag(app, agency, uid):
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "q", "context_message_id": 1},
+            headers=_CSRF,
+        )
+        flag = await c.get(f"/api/{agency}/ask/followup-enabled")
+    return r, flag
+
+
+@pytest.mark.asyncio
+async def test_followup_is_disabled_when_the_llm_kill_switch_is_off(conv_app, monkeypatch):
+    from pipeline import flags
+    from pipeline.query import llm_client
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    monkeypatch.setenv("ASK_LLM_ENABLED", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    llm_client.reset_client_for_tests()
+    flags.invalidate()
+    try:
+        r, flag = await _followup_post_and_flag(*conv_app[:3])
+    finally:
+        llm_client.reset_client_for_tests()
+        flags.invalidate()
+    assert r.status_code == 503
+    assert r.json()["detail"] == "followup_disabled"
+    assert flag.json()["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_followup_is_disabled_when_only_a_non_allowed_provider_is_keyed(conv_app, monkeypatch):
+    from pipeline import flags
+    from pipeline.query import llm_client
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    monkeypatch.delenv("ASK_LLM_ENABLED", raising=False)
+    monkeypatch.setenv("CHAT_PROVIDERS", "gemini,openai")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "k")
+    monkeypatch.setenv("ASK_FOLLOWUP_PROVIDERS", "gemini")
+    llm_client.reset_client_for_tests()
+    flags.invalidate()
+    try:
+        r, flag = await _followup_post_and_flag(*conv_app[:3])
+    finally:
+        llm_client.reset_client_for_tests()
+        flags.invalidate()
+    assert r.status_code == 503
+    assert r.json()["detail"] == "followup_disabled"
+    assert flag.json()["enabled"] is False

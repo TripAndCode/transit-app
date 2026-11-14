@@ -82,7 +82,7 @@ bake:
 doctor:
 	@echo "── env ──"
 	@test -f .env && echo "  .env present" || echo "  .env MISSING (run \`cp .env.example .env\`)"
-	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  GEMINI_API_KEY/OPENAI_API_KEY MISSING — API startup will fail"
+	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  no GEMINI_API_KEY/OPENAI_API_KEY (LLM-backed Ask features off; the API still starts)"
 	@n=$$(grep -cE '^(SESSION_SIGNING_KEY|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
 		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
 		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \
