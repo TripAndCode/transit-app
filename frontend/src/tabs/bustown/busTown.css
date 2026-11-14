@@ -147,3 +147,36 @@
   margin: 0 0 8px;
 }
 .bus-town-card p { margin: 0; color: var(--text-primary); }
+
+/* BP.sm. Kept after this file's own base rules, which a `max-width`
+   override must follow to win at equal specificity. The header overrides
+   below reach into ui.css's shared `.ui-page-header*` classes, but win there
+   on specificity (two classes, not one) rather than load order, since a
+   lazy-loaded page chunk's CSS can land before or after the shared one. */
+@media (max-width: 640px) {
+  .bus-town-page { padding: 24px 16px 56px; }
+
+  /* Scoped to this page's own root rather than touching ui.css, since
+     ui-page-header is shared by every page and a lazy chunk's CSS applies
+     app-wide once loaded. */
+  .bus-town-page .ui-page-header { margin-bottom: 12px; }
+  .bus-town-page .ui-page-header__text { gap: 2px; }
+  .bus-town-page .ui-page-header__title { font-size: var(--text-xl); }
+
+  /* The back link and the day picker have no shared wrapper, so the one-row
+     layout comes from making both inline-level: they then share a line box
+     and wrap to a second row on their own, the same way text wraps, once
+     they no longer both fit. */
+  .bus-town-back-link { margin: 0 12px 10px 0; vertical-align: middle; }
+  .bus-town-day-picker { display: inline-flex; margin: 0 0 10px; vertical-align: middle; }
+
+  /* Padding this tight leaves the canvas (nearly) the full content width;
+     the schematic itself grows with the box because fitProjection scales
+     uniformly to whatever width/height the canvas resolves to. */
+  .bus-town-stage { padding: 10px 6px; }
+  .bus-town-canvas { aspect-ratio: 4 / 3; }
+
+  /* 44px is the touch-target floor; the icon inside keeps its own size. */
+  .bus-town-play-button { width: 44px; height: 44px; }
+  .bus-town-speed-pill { min-width: 44px; min-height: 44px; padding: 4px 12px; }
+}
