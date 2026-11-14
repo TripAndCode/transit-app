@@ -1,8 +1,12 @@
 import { WEEKDAYS } from "../api/scope";
 
 /** Structural so both i18next's `TFunction` and the narrower `t` shapes that
- *  components thread through helpers are accepted. */
-export type LabelT = (key: string, opts?: Record<string, unknown>) => string;
+ *  components thread through helpers are accepted. Overloads, not an optional
+ *  `opts`: `TFunction` only matches a signature whose options are required. */
+export type LabelT = {
+  (key: string): string;
+  (key: string, opts: Record<string, unknown>): string;
+};
 
 /** Looks `key` up in the main `translation` resource (ja.json/en.json),
  *  never a feature namespace like "design": callers bound to a different

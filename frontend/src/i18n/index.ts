@@ -94,6 +94,9 @@ export async function initI18n(instance: I18n, loaders: TranslationLoaders = tra
       },
       interpolation: { escapeValue: false },
       returnNull: false,
+      // ja joins sentences with no separator, so an empty translation is a
+      // real value, not a missing one.
+      returnEmptyString: true,
     });
   return instance.hasResourceBundle(instance.language, "translation");
 }

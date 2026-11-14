@@ -63,7 +63,7 @@ class ServiceHours(NamedTuple):
 # stop times, and a load in this process forgets them at once
 # (:func:`invalidate_service_hours`). The TTL bounds how long a load run by
 # another process takes to show.
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def load_service_hours(conn, agency_id: int, day: date) -> ServiceHours | None:
     """Service day ``day``'s hours for ``agency_id``, or None when the loaded
     timetable runs no timed trip that day: it does not cover the day, or covers

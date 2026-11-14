@@ -371,3 +371,91 @@ def test_a_brief_result_never_outlives_the_decorators_own_ttl(cache_clock):
 
     asyncio.run(run())
     assert calls["n"] == 2
+
+
+def _counting(**options):
+    calls: list[tuple] = []
+
+    @cache.async_lru_cache(maxsize=16, ttl_seconds=60, **options)
+    async def fn(day, agency_id, *, extra=0):
+        calls.append((day, agency_id, extra))
+        return agency_id
+
+    return fn, calls
+
+
+def test_a_rebuild_evicts_only_that_agencys_entries_however_the_key_was_spelt():
+    fn, calls = _counting(agency_arg="agency_id")
+
+    async def run():
+        await fn("d", 1)
+        await fn("d", agency_id=1, extra=2)
+        await fn("d", 2)
+        await fn("d", None)
+        cache.evict_for_rebuild([1])
+        calls.clear()
+        await fn("d", 1)
+        await fn("d", agency_id=1, extra=2)
+        await fn("d", 2)
+        await fn("d", None)
+
+    asyncio.run(run())
+    assert sorted(calls, key=repr) == sorted([("d", 1, 0), ("d", 1, 2), ("d", None, 0)], key=repr)
+
+
+def test_a_cache_without_an_agency_is_evicted_whole_and_a_never_cache_is_kept():
+    whole, whole_calls = _counting()
+    kept, kept_calls = _counting(agency_arg="agency_id", rebuild="never")
+
+    async def run():
+        await whole("d", 2)
+        await kept("d", 2)
+        cache.evict_for_rebuild([1])
+        await whole("d", 2)
+        await kept("d", 2)
+
+    asyncio.run(run())
+    assert len(whole_calls) == 2
+    assert len(kept_calls) == 1
+
+
+def test_a_key_that_cannot_name_its_agency_is_evicted_by_every_rebuild():
+    calls = []
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60, agency_arg="agency_id")
+    async def fn(agency_id=cache._UNREADABLE):
+        calls.append(agency_id)
+
+    async def run():
+        await fn()
+        cache.evict_for_rebuild([1])
+        await fn()
+
+    asyncio.run(run())
+    assert len(calls) == 2
+
+
+def test_a_keyword_only_agency_is_read_from_the_keywords():
+    calls = []
+
+    @cache.async_lru_cache(maxsize=4, ttl_seconds=60, agency_arg="agency_id")
+    async def fn(day, *, agency_id):
+        calls.append(agency_id)
+
+    async def run():
+        await fn("d", agency_id=1)
+        await fn("d", agency_id=2)
+        cache.evict_for_rebuild([1])
+        await fn("d", agency_id=1)
+        await fn("d", agency_id=2)
+
+    asyncio.run(run())
+    assert calls == [1, 2, 1]
+
+
+def test_an_agency_argument_the_function_does_not_take_is_refused_at_decoration():
+    with pytest.raises(TypeError):
+
+        @cache.async_lru_cache(agency_arg="agency_id")
+        async def fn(day):
+            return day
