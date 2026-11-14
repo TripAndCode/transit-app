@@ -661,6 +661,7 @@ STORE_TABLES: tuple[str, ...] = (
     static_archive.SPANS,
     static_archive.FILED_TABLE,
     static_archive.FILED_DATES,
+    static_archive.CALENDAR,
 )
 _ALL_SPECS: dict[str, _Spec | _WholeSpec] = {**_SPECS, **_WHOLE_SPECS}
 COLUMNS: dict[str, tuple[str, ...]] = {name: spec.columns for name, spec in _ALL_SPECS.items()}
