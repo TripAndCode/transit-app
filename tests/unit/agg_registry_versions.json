@@ -11,6 +11,10 @@
     "hash": "6d40924bef56e8b7cde79fcc24ba5e962b386518b5051becd2ce947628aec2d8",
     "version": 6
   },
+  "agg_route_band_daily": {
+    "hash": "737353947d11ebb3fd3ac1cbd08a7d9d73010362ab4c2f2ff499347856e5b762",
+    "version": 1
+  },
   "agg_route_daily": {
     "hash": "d0fd339711eaefb561d3439d7b82c63c8aacad783ea4a4eeb5bad627fe8aa803",
     "version": 5

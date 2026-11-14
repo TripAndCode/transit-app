@@ -995,8 +995,10 @@ class Observed:
     response for each time band the truth departs
     in; the headway quality response for every window ``_windows`` names;
     the agency's row of the agencies board over the whole period; the feed
-    quality the route table's definition stamp states over it; and the dwell
-    report's payload for every window ``_windows`` names. ``truth`` is the
+    quality the route table's definition stamp states over it; the dwell
+    report's payload for every window ``_windows`` names; and the Pulse of
+    each of those time bands over each of those windows, from the ClickHouse
+    grain and from the band aggregate (``_read_pulse``). ``truth`` is the
     oracle's outcome of the scenario, derived once, since deriving it
     simulates every poll."""
 
@@ -1012,6 +1014,7 @@ class Observed:
     board: dict[str, Any]
     stamp: dict[str, Any]
     dwell: dict[tuple[date, date], dict[str, Any]]
+    pulse: dict[tuple[str, tuple[date, date]], tuple[dict[str, Any], dict[str, Any]]]
 
     @cached_property
     def choice(self) -> Choice:
@@ -2071,6 +2074,33 @@ class _Reads:
     board: dict[str, Any]
     stamp: dict[str, Any]
     dwell: dict[tuple[date, date], dict[str, Any]]
+    pulse: dict[tuple[str, tuple[date, date]], tuple[dict[str, Any], dict[str, Any]]]
+
+
+async def _read_pulse(get, client, app, bands: list[str], windows: list[tuple[date, date]]) -> dict:
+    """Each band's Pulse over each window, read as (the ClickHouse grain's,
+    the band aggregate's). The aggregate is read with no ClickHouse client at
+    all, so a read of `updates` would fail it."""
+    from api.middleware.ratelimit import limiter
+    from pipeline.cache import clear_all
+
+    pulse = {}
+    for band in bands:
+        for window in windows:
+            query = f"from={window[0]}&to={window[1]}&time_band={band}"
+            limiter.reset()
+            clear_all()
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr("pipeline.reports.overview._band_aggregate_answers", lambda ctx: False)
+                from_grain = await get(client, "overview/summary", query)
+            clear_all()
+            ch_client, app.state.ch_client = app.state.ch_client, None
+            try:
+                from_aggregate = await get(client, "overview/summary", query)
+            finally:
+                app.state.ch_client = ch_client
+            pulse[band, window] = (from_grain, from_aggregate)
+    return pulse
 
 
 async def _read_reports(scenario: Scenario, truth: oracle.Outcome, agency_id: int) -> _Reads:
@@ -2109,7 +2139,8 @@ async def _read_reports(scenario: Scenario, truth: oracle.Outcome, agency_id: in
             window: (await get(client, "reports/dwell_run", f"from={window[0]}&to={window[1]}"))["rows"][0]
             for window in _windows(scenario)
         }
-    return _Reads(reports, trend, council, banded, headways, board, stamp, dwell)
+        pulse = await _read_pulse(get, client, app, bands, _windows(scenario))
+    return _Reads(reports, trend, council, banded, headways, board, stamp, dwell, pulse)
 
 
 def _empty_stores(pg_conn, ch_client, reset_sql: str) -> None:
@@ -2212,6 +2243,7 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
         board=reads.board,
         stamp=reads.stamp,
         dwell=reads.dwell,
+        pulse=reads.pulse,
     )
 
 
@@ -2315,6 +2347,14 @@ def test_daily_dwell_and_running_times_pair_each_arrival_with_its_departure(obse
 @pytest.mark.parametrize("observed", _ALL, indirect=True)
 def test_dwell_report_matches_the_truth(observed):
     _assert_clean(_hard_mismatches(observed, _DWELL_REPORT))
+
+
+@pytest.mark.parametrize("observed", _ALL, indirect=True)
+def test_a_time_band_pulse_from_its_aggregate_equals_the_clickhouse_grain(observed):
+    assert observed.pulse, "no band to compare, so this would pass vacuously"
+    differing = [key for key, (from_grain, from_aggregate) in observed.pulse.items() if from_aggregate != from_grain]
+    assert not differing, f"the band aggregate's Pulse differs from the grain's for {differing}"
+    assert any(grain["headline"]["samples"] for grain, _ in observed.pulse.values())
 
 
 @pytest.mark.parametrize("observed", [_TIMETABLE_CHANGE], indirect=True)

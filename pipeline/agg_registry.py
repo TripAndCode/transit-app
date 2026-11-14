@@ -408,6 +408,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
             "route_delay_counts": 6,
         },
     ),
+    MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
 )
 
 # The method every report, CSV and council document names beside its figures
