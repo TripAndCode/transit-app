@@ -973,7 +973,8 @@ def _written_rows(where: str) -> str:
     filed. *where* is tested in the inner query, where no filed alias exists,
     so a bare column in it names the stored one, as on `updates`. The date
     range lets the sort key and the partitions prune; the dates and builds
-    pick the written rows."""
+    pick the written rows, by IN, which tests a set where has() would scan
+    the array for every row."""
     columns = ", ".join(
         f"u.filed_{column} AS {column}" if column in FILED_COLUMNS else f"u.{column} AS {column}"
         for column in UPDATE_COLUMNS
@@ -981,8 +982,8 @@ def _written_rows(where: str) -> str:
     rows = (
         f"SELECT * FROM {FILED_TABLE} AS u WHERE u.agency_id = {{agency_id:UInt16}} "
         "AND u.filed_date BETWEEN {filed_first:Date} AND {filed_last:Date} "
-        "AND has({filed_dates:Array(Date)}, u.filed_date) "
-        f"AND has({{filed_builds:Array(String)}}, u.build) AND ({where})"
+        "AND u.filed_date IN {filed_dates:Array(Date)} "
+        f"AND u.build IN {{filed_builds:Array(String)}} AND ({where})"
     )
     return f"SELECT u.filed_date AS filed_date, {columns} FROM ({rows}) AS u"
 
@@ -1055,7 +1056,7 @@ def observation_rows(
         rest = _marked_rows(
             f"({where}) AND (u.captured_at < {{filed_skip_from:DateTime64}} "
             "OR u.captured_at >= {filed_skip_to:DateTime64}) "
-            f"AND NOT has({{filed_dates:Array(Date)}}, {FILED_DATE_SQL})",
+            f"AND {FILED_DATE_SQL} NOT IN {{filed_dates:Array(Date)}}",
             table,
         )
         return f"FROM (SELECT {_filed_columns(False)} FROM ({rest}) AS u UNION ALL {_written_rows(where)}) AS u{after}"

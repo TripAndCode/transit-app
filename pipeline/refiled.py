@@ -270,7 +270,7 @@ def rows_rewritten(ch, agency_ids: Iterable[int] | None) -> None:
 
 def _drop_superseded(ch, agency_id: int) -> None:
     live = sorted(kept.build for kept in written(ch, agency_id).values() if kept.build)
-    where = "agency_id = {agency:UInt16} AND NOT has({live:Array(String)}, build)"
+    where = "agency_id = {agency:UInt16} AND build NOT IN {live:Array(String)}"
     parameters = {"agency": agency_id, "live": live}
     if ch.query(f"SELECT count() FROM {FILED_TABLE} WHERE {where}", parameters=parameters).result_rows[0][0]:
         ch.command(f"DELETE FROM {FILED_TABLE} WHERE {where}", parameters=parameters)

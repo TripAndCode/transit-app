@@ -22,9 +22,9 @@ def test_a_filed_read_takes_its_refiled_dates_from_the_filed_rows_and_never_join
     rows = static_archive.observation_rows("u.agency_id = {agency_id:UInt16}", Stamp.FILED)
     assert static_archive.SCHEDULE not in rows
     assert f"FROM {static_archive.FILED_TABLE} AS u" in rows
-    assert "has({filed_builds:Array(String)}, u.build)" in rows
+    assert "u.build IN {filed_builds:Array(String)}" in rows
     # Every other date's rows are read from `updates` as IN_FORCE reads them.
-    assert "NOT has({filed_dates:Array(Date)}, " in rows
+    assert f"{static_archive.FILED_DATE_SQL} NOT IN {{filed_dates:Array(Date)}}" in rows
 
 
 def test_only_rows_of_updates_are_filed():
