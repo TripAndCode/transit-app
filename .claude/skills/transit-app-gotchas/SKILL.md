@@ -59,11 +59,12 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   `scripts/run_integration_tests.sh` itself also accepts `TEST_PG_PORT`/
   `TEST_CH_PORT` overrides (defaulting to the shared `:5544`/`:8124` pair)
   for a caller that starts its own containers by some other means.
-- `run_full_ci.sh` mirrors only the backend jobs (`backend-static`, and the `test`
-  shards run as one unsharded suite) and does not measure pytest coverage by default, matching `ci.yml`, whose backend `coverage` job runs only on
-  `main` pushes; the squash-merge's CI-skip trailer suppresses that run, so the number
-  exists only when you pass `COVERAGE=1` here. Nothing gates on it. The instrumentation adds minutes per run, and this gate is
-  often paid more than once per branch. Frontend coverage does gate: CI's `frontend`
+- `run_full_ci.sh` mirrors only the backend jobs (`backend-static`, and the
+  `test` shards run as one unsharded suite) and does not measure pytest
+  coverage by default, matching `ci.yml`, whose backend `coverage` job runs
+  only on `main` pushes, so before a merge the number exists only when you
+  pass `COVERAGE=1` here. Nothing gates on it. The instrumentation adds
+  minutes per run, and this gate is often paid more than once per branch. Frontend coverage does gate: CI's `frontend`
   job runs `npm run test:coverage` against `vitest.config.ts`'s thresholds on every PR.
 - A fixture whose rows a date bucket, a service day or a date window will judge
   reads the clock once, as `day = jst_today()`. It seeds at `jst_midday(day)`
@@ -140,10 +141,10 @@ description: Non-obvious repo rules — which DB to touch, the test-DB build, i1
   Root `AGENTS.md` owns the policy this serves — when CI has to run and
   when it must be green. This entry is only the mechanism, which is easy to
   get wrong in either direction.
-  Under that policy branch commits carry no trailer, so the usual direction
-  of the mistake is one slipping in: a tip that carries it produces no run,
-  and the merge gate then has nothing to read rather than something to
-  fail — which looks like a stuck queue, not a mistake. Amend and
-  `push --force-with-lease`; an empty follow-up commit works too but leaves
-  the confusing commit in history. Only the squash-merge `--body` should
-  contain the trailer.
+  Under that policy no commit carries the trailer, the squash-merge
+  `--body` included, so the mistake is one slipping in: a tip that carries
+  it produces no run, and the merge gate then has nothing to read rather
+  than something to fail — which looks like a stuck queue, not a mistake.
+  Amend and `push --force-with-lease`; an empty follow-up commit works too
+  but leaves the confusing commit in history. A squash-merge that carries it
+  skips `main`'s run of the merged result.

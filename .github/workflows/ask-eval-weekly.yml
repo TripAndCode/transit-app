@@ -2,9 +2,7 @@ name: Ask Eval (weekly)
 
 # Runs the golden-set live-LLM eval (tests/ask_eval/test_baseline.py) on a
 # schedule so router/LLM regressions on the Ask tab actually get caught,
-# instead of relying on RUN_LLM_EVAL=1 being run by hand. Doesn't conflict
-# with the [skip ci] convention — schedule/workflow_dispatch triggers are
-# unaffected by that commit-trailer.
+# instead of relying on RUN_LLM_EVAL=1 being run by hand.
 on:
   schedule:
     - cron: "0 3 * * 1" # Monday 03:00 UTC
