@@ -288,23 +288,29 @@ describe("scope controls", () => {
   describe("tolerance", () => {
     it("applies presets, with five minutes, the industry window's, as the default", async () => {
       mount(ToleranceControl, "?late=60");
-      expect(screen.getByRole("button", { name: "1 min" })).toHaveAttribute("aria-pressed", "true");
-      await userEvent.click(screen.getByRole("button", { name: "3 min" }));
+      expect(screen.getByRole("radio", { name: "1 min" })).toHaveAttribute("aria-checked", "true");
+      await userEvent.click(screen.getByRole("radio", { name: "3 min" }));
       expect(params().get("late")).toBe("180");
-      await userEvent.click(screen.getByRole("button", { name: "5 min" }));
+      await userEvent.click(screen.getByRole("radio", { name: "5 min" }));
       expect(params().has("late")).toBe(false);
     });
 
-    it("presses five minutes when the scope names no tolerance", () => {
+    it("checks five minutes when the scope names no tolerance", () => {
       mount(ToleranceControl);
-      expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("radio", { name: "5 min" })).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("checks no preset while the tolerance is one the slider set", () => {
+      mount(ToleranceControl, "?late=90");
+      const group = screen.getByRole("radiogroup", { name: "Counted on time up to" });
+      for (const radio of within(group).getAllByRole("radio")) expect(radio).toHaveAttribute("aria-checked", "false");
     });
 
     it("names each preset's on-time share once the data is in", () => {
       mount(ToleranceControl, "", SUMMARY);
-      expect(screen.getByRole("button", { name: "1 min 34% on time" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "3 min 60% on time" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "5 min 75% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: "1 min 34% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: "3 min 60% on time" })).toBeInTheDocument();
+      expect(screen.getByRole("radio", { name: "5 min 75% on time" })).toBeInTheDocument();
     });
 
     it("draws the on-time curve with a marker at the current tolerance", () => {
@@ -368,14 +374,14 @@ describe("scope controls", () => {
 
     it("is the industry window, no more than one minute early and five late, with nothing set", () => {
       mount(ToleranceControl);
-      expect(screen.getByRole("button", { name: "5 min" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("radio", { name: "5 min" })).toHaveAttribute("aria-checked", "true");
       expect(screen.getByRole("radio", { name: "Not on time if more than 1 min early" })).toHaveAttribute("aria-checked", "true");
       expect([params().get("early"), params().get("late")]).toEqual([null, null]);
     });
 
     it("reaches the legacy definition, every early departure and up to one minute late", async () => {
       mount(ToleranceControl);
-      await userEvent.click(screen.getByRole("button", { name: "1 min" }));
+      await userEvent.click(screen.getByRole("radio", { name: "1 min" }));
       await userEvent.click(screen.getByRole("radio", { name: "Count early departures as on time" }));
       expect([params().get("early"), params().get("late")]).toEqual(["any", "60"]);
     });
@@ -394,6 +400,16 @@ describe("scope controls", () => {
       expect(params().has("late")).toBe(false);
       fireEvent.pointerUp(slider);
       expect(params().get("late")).toBe("240");
+    });
+
+    it("keeps the applied preset checked until a drag onto another one lands", () => {
+      mount(ToleranceControl);
+      const slider = screen.getByRole("slider", { name: "Counted on time up to" });
+      fireEvent.change(slider, { target: { value: "180" } });
+      expect(screen.getByRole("radio", { name: "5 min" })).toHaveAttribute("aria-checked", "true");
+      expect(screen.getByRole("radio", { name: "3 min" })).toHaveAttribute("aria-checked", "false");
+      fireEvent.pointerUp(slider);
+      expect(screen.getByRole("radio", { name: "3 min" })).toHaveAttribute("aria-checked", "true");
     });
   });
 
