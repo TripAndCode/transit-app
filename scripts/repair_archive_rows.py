@@ -68,7 +68,7 @@ import clickhouse_connect  # noqa: E402  (sys.path injection above)
 import psycopg2  # noqa: E402
 from clickhouse_connect.driver.external import ExternalData  # noqa: E402
 
-from pipeline import restamp_archive  # noqa: E402
+from pipeline import refiled, restamp_archive  # noqa: E402
 from pipeline.clickhouse import LIVE_SOURCED, ch_conn_kwargs, jst_date  # noqa: E402
 from pipeline.locks import agency_ingest_lock, held_pipeline_locks, try_lock_ingest_analyze  # noqa: E402
 from pipeline.static_loader import read_static_rows, resolve_static_zip  # noqa: E402
@@ -793,6 +793,7 @@ def run_apply(args, sc: Scope, extras: list[tuple[int, str]]) -> int:
                 raise RuntimeError("the pipeline lock was lost during the copy; nothing was swapped")
             if _row_count(client, TABLE) != before:
                 raise RuntimeError(f"{TABLE} changed while the copy was written; nothing was swapped")
+            refiled.rows_rewritten(client, sc.agencies)
             client.command(f"EXCHANGE TABLES {TABLE} AND {WORK_TABLE}")
             print(f"swapped: {TABLE} now holds the repaired rows")
             problems = finalize(client, before)

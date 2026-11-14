@@ -270,7 +270,7 @@ async def compute_record_trips(agency_id: int, day: date, route_code: str, conn,
         raise RuntimeError("compute_record_trips requires a ClickHouse client")
     table = await table_holding(ch, agency_id, day)
     filed = await filing(conn, ch, agency_id, day, day, table=table)
-    where = _record_filter(day, route_code, refit=filed.stamp is Stamp.REFIT)
+    where = _record_filter(day, route_code, refit=filed.stamp.refiles)
     result = await ch.query(
         record_trips_sql(where, table, filed.stamp),
         parameters={"agency_id": agency_id, **where.params, **filed.params},
@@ -293,7 +293,7 @@ async def compute_record_stops(agency_id: int, day: date, route_code: str, trip_
         raise RuntimeError("compute_record_stops requires a ClickHouse client")
     table = await table_holding(ch, agency_id, day)
     filed = await filing(conn, ch, agency_id, day, day, table=table)
-    where = _record_filter(day, route_code, trip_id, refit=filed.stamp is Stamp.REFIT)
+    where = _record_filter(day, route_code, trip_id, refit=filed.stamp.refiles)
     result = await ch.query(
         record_stops_sql(where, table, filed.stamp),
         parameters={"agency_id": agency_id, **where.params, **filed.params},

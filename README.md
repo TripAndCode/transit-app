@@ -198,6 +198,14 @@ FastAPI + React SPA  <-------------------------------------------------+
   the first calendar), and `--calendars` keeps it, from the same zips, for
   timetables archived before it was. A ClickHouse that predates these
   tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
+  Where the version in force on a date has other content than the one its
+  rows were ingested against, `analyze` writes that date's rows filed under
+  it to `updates_filed` (`pipeline/refiled.py`), and its own reads and the
+  live scans take them from there instead of joining the archive, for as long
+  as `updates_filed_dates` shows the date's filing unchanged. A refiled date
+  outside analyze's rebuild scope has no valid write until
+  `scripts/write_refiled_history.py --apply` writes it, so it is run again
+  after the filing rules (`pipeline.refiled.RULES`) change.
   Postgres mirrors the map in `static_version_contents`, each name at its
   latest content, written right after each map row, so the definition stamp
   names each timetable's content without reading ClickHouse.
