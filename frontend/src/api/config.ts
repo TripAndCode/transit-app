@@ -6,6 +6,7 @@ type AppConfig = {
   local_admin_enabled: boolean;
   login_required?: boolean;
   feedback_url?: string | null;
+  llm_enabled?: boolean;
 };
 
 /** Public client config from ``GET /api/config``. ``auth_enabled`` hides the
@@ -20,7 +21,10 @@ type AppConfig = {
  *  `login_required` says whether the API currently refuses signed-out
  *  callers; a backend that does not send it has no login gate, so its
  *  absence reads as off. `feedback_url` is the deployment's feedback address
- *  (https or mailto), or null when it names none. */
+ *  (https or mailto), or null when it names none. `llm_enabled` is false
+ *  when no LLM provider is usable (or the operator switched LLM answers off),
+ *  so LLM-only affordances hide rather than offer something that cannot
+ *  answer; absence reads as off. */
 export function useConfig() {
   return useQuery({
     queryKey: ["config"],

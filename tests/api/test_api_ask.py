@@ -303,6 +303,47 @@ async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, 
     assert "agg_route_daily_dist" not in data["detail"]
 
 
+@pytest.fixture
+def no_llm_key(monkeypatch):
+    from pipeline.query import llm_client
+
+    monkeypatch.setenv("CHAT_PROVIDERS", "gemini,openai")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    llm_client.reset_client_for_tests()
+    yield
+    llm_client.reset_client_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_ask_signed_out_build_sentinel_answers_with_no_llm_provider(ask_client, no_llm_key):
+    """A signed-out notebook card posts `__build__ tool {json}`; it dispatches
+    deterministically, so no provider key is needed."""
+    client, agency_id = ask_client
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "__build__ capabilities {}"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tool_call"]["name"] == "capabilities"
+
+
+@pytest.mark.asyncio
+async def test_ask_free_text_degrades_to_a_message_with_no_llm_provider(ask_client, no_llm_key):
+    """A question only the LLM could answer gets a clear 200 message, never a 500."""
+    client, agency_id = ask_client
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "雨の日とそうでない日を比べたいです"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tool_call"] is None
+    assert body["answer"]
+
+
 @pytest.mark.asyncio
 async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatch):
     """Novel question → router returns None → chat_with_tools called with rag_examples kwarg."""

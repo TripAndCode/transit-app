@@ -19,7 +19,7 @@ import os
 
 from pipeline.flags import aflag, flag
 from pipeline.query.hallucination_guard import verify_numeric_claims
-from pipeline.query.llm_client import get_client
+from pipeline.query.llm_client import get_client, llm_available
 from pipeline.query.tools import _summary
 
 _log = logging.getLogger(__name__)
@@ -46,8 +46,8 @@ _SYS_PROMPT_EN = (
 
 
 def is_enabled() -> bool:
-    """True iff the follow-up feature is turned on."""
-    return flag("ask_followup_enabled", False)
+    """True iff the follow-up feature is turned on and a provider can answer it."""
+    return flag("ask_followup_enabled", False) and llm_available()
 
 
 async def ais_enabled() -> bool:
@@ -59,7 +59,7 @@ async def ais_enabled() -> bool:
     answers it with the old one while the re-read runs behind it. With
     nothing cached at all, the synchronous form reads Postgres inline, which
     on the event loop stalls every other request."""
-    return await aflag("ask_followup_enabled")
+    return await aflag("ask_followup_enabled") and llm_available()
 
 
 def _allowed_providers() -> set[str]:
