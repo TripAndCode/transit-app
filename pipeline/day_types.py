@@ -223,7 +223,7 @@ def _gtfs_date(value: str) -> date | None:
         return None
 
 
-@async_lru_cache(maxsize=256, ttl_seconds=300)
+@async_lru_cache(maxsize=256, ttl_seconds=300, agency_arg="agency_id")
 async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -> DayTypes:
     """:func:`resolve_day_types` over the agency's loaded static calendar.
 
@@ -262,7 +262,7 @@ async def load_day_types(conn, agency_id: int, from_date: date, to_date: date) -
     return resolve_day_types(from_date, to_date, weekly, exceptions, trips)
 
 
-@async_lru_cache(maxsize=256, ttl_seconds=300)
+@async_lru_cache(maxsize=256, ttl_seconds=300, agency_arg="agency_id")
 async def load_dominant_day_types(conn, agency_id: int) -> dict[str, DayType | None]:
     """Each route's dominant service's class (see `pipeline.headways.dominant_service_ctes`),
     as :func:`service_class` names it: None for a service it does not class, or

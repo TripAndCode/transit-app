@@ -297,7 +297,7 @@ async def _read_dist_with_hist(agency_id: int, ctx: RangeCtx, conn) -> list:
 
 
 @perf.timed("reports.ranking")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_ranking(
     agency_id: int,
     ctx: RangeCtx,
@@ -415,7 +415,7 @@ async def _ranking_live(
 
 
 @perf.timed("reports.on_time")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_on_time(
     agency_id: int,
     ctx: RangeCtx,
@@ -601,7 +601,7 @@ async def _on_time_live_window(
 
 
 @perf.timed("reports.worst_5min")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_worst_5min(
     agency_id: int,
     ctx: RangeCtx,
@@ -710,7 +710,7 @@ async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int, 
 
 
 @perf.timed("reports.dow_ranking")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_dow_ranking(
     agency_id: int,
     ctx: RangeCtx,
@@ -805,7 +805,7 @@ async def _dow_ranking_live(agency_id: int, overridden: RangeCtx, conn, ch, labe
 
 
 @perf.timed("reports.compare_ranking")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_compare_ranking(
     agency_id: int,
     ctx: RangeCtx,
@@ -1004,7 +1004,7 @@ async def _compare_ranking_live(
 
 
 @perf.timed("reports.hourly_heatmap")
-@async_lru_cache(maxsize=16, ttl_seconds=300)
+@async_lru_cache(maxsize=16, ttl_seconds=300, agency_arg="agency_id")
 async def compute_hourly_heatmap(
     agency_id: int,
     ctx: RangeCtx,
@@ -1082,7 +1082,7 @@ async def compute_hourly_heatmap(
 
 
 @perf.timed("reports.trend_series")
-@async_lru_cache(maxsize=32, ttl_seconds=300)
+@async_lru_cache(maxsize=32, ttl_seconds=300, agency_arg="agency_id")
 async def compute_trend_series(
     agency_id: int,
     ctx: RangeCtx,

@@ -160,6 +160,12 @@ sentinel:
    `openai` is a supported but optional paid rung, meant to be placed
    last. The chosen tool call is dispatched the same
    way; out-of-scope questions get a friendly refusal with suggestions.
+   The API starts with no provider key: the ladder is then empty, a request
+   that needs the LLM answers the "no AI provider is configured" message,
+   follow-ups report disabled (`POST .../followup` returns 503), and
+   `/api/config` reports `llm_enabled: false`, which hides the follow-up box.
+   The notebook's card dispatch, `__build__` path, threads and exports need no
+   key.
 5. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
    `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
@@ -314,7 +320,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 1. `cp .env.example .env`; set a real `GEMINI_API_KEY` (and optionally
    `OPENAI_API_KEY` as the paid fallback per `CHAT_PROVIDERS`) to
-   exercise Stage 3. `ASK_FOLLOWUP_ENABLED=true` ships as the
+   exercise Stage 3; with no key the API still boots. `ASK_FOLLOWUP_ENABLED=true` ships as the
    `.env.example` local-dev default, so the follow-up box works out of the
    box for a signed-in user an admin has marked `llm_approved`; set it
    `false` to verify the kill-switch (box hidden, `POST /followup` returns
