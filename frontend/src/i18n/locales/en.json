@@ -434,7 +434,8 @@
       "feed_status_live": "Reporting live",
       "feed_status_quiet": "Feed quiet for {{duration}}",
       "feed_status_none": "No reports yet",
-      "feed_status_last": "Last report {{time}}"
+      "feed_status_last": "Last report {{time}}",
+      "on_time_pointer": "On-time % is on <routes>Routes</routes> and on each route's page."
     },
     "story": {
       "state_behind_one": "+{{delta}} min on the day before",

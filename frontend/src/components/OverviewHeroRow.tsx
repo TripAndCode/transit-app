@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router-dom";
 import { useTodayRouteSummary } from "../api/hooks";
 import type { TFunction } from "i18next";
 import type {
@@ -16,6 +17,7 @@ import { latestDayStanding, storyVerdict, topRoutesShare, windowDays } from "./o
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { HeadlineReference } from "./overview/HeadlineReference";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
+import { destHref } from "../routes/destinations";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
 import { EM_DASH, fixedTenth, formatDate, formatHourRange, formatReportTime } from "../utils/format";
@@ -118,6 +120,7 @@ export function OverviewHeroRow({
   onOpenFact,
 }: Props) {
   const { t } = useTranslation();
+  const { search } = useLocation();
   const { data: feedSummary } = useTodayRouteSummary(agencyId, { autoRefresh: false });
 
   const hasBaseline = headline.baseline_avg_min != null && headline.delta_min != null;
@@ -186,6 +189,13 @@ export function OverviewHeroRow({
             })}
           </p>
         )}
+        <p className="ov-hero-pointer">
+          <Trans
+            t={t}
+            i18nKey="overview.hero_row.on_time_pointer"
+            components={{ routes: <Link to={destHref(agencyId, "routes", search)} /> }}
+          />
+        </p>
       </div>
       <div className="ov-hero">
         {/* Both charts live in the figure column, which clips them: the fact
