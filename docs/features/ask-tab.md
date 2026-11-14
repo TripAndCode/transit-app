@@ -146,6 +146,12 @@ sentinel:
    `openai` is a supported but optional paid rung, meant to be placed
    last. The chosen tool call is dispatched the same
    way; out-of-scope questions get a friendly refusal with suggestions.
+   The API starts with no provider key: the ladder is then empty, a request
+   that needs the LLM answers the "no AI provider is configured" message,
+   follow-ups report disabled (`POST .../followup` returns 503), and
+   `/api/config` reports `llm_enabled: false`, which hides the follow-up box.
+   The notebook's card dispatch, `__build__` path, threads and exports need no
+   key.
 5. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
    `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
@@ -176,21 +182,9 @@ sentinel:
 `pipeline/query/followup.py: answer_followup()` — answers strictly from
 the prior tool result's serialized data (never re-dispatches a tool).
 
-**Other Ask-adjacent endpoints** (`api/routers/ask.py`):
-
-- `GET /ask/suggest` — autocomplete via embedding NN, or top hit-count
-  chunks for an empty query.
-- `GET /ask/build-schema` — metadata for a guided-builder UI form.
-- `POST /ask/edit-action` — records confirm/edit verdict on a cached
-  low-confidence interpretation (`ASK_INTENT_CACHE_ENABLED`).
-- `GET /ask/followup-enabled` (in `api/routers/conversations.py`) —
-  `{enabled, max_question_chars}`, drives `useFollowupEnabled`.
-
-`api/routers/ask_dashboard.py` (`GET /ask/dashboard/{heatmap,anomalies,movers}`,
-backed by `pipeline/dashboard_queries.py`) exists per its own docstring for
-Ask-tab analysis previews, but no current file under
-`frontend/src/tabs/ask/` or `AskTab.tsx` calls it — treat as
-unwired/consumed elsewhere rather than assuming it's live in this UI.
+**Other Ask-adjacent endpoints:** `GET /ask/followup-enabled` (in
+`api/routers/conversations.py`) — `{enabled, max_question_chars}`, drives
+`useFollowupEnabled`.
 
 ## Who may reach the Stage-3 LLM
 
@@ -202,10 +196,6 @@ one structural reason:
 | --- | --- | --- |
 | `POST /conversations/{id}/followup` | `require_llm_approved(user)` at the top of the handler (`api/security.py`) | `403 llm_not_approved` |
 | `POST /ask` | inside `chat_with_tools`'s `_call_llm` (`pipeline/query/chat.py`), via the `llm_approved` argument the router threads in | `200` with an honest-degradation answer |
-
-The Copilot panel's `POST /copilot/insight` calls no LLM (its template is
-chosen and filled in code, `pipeline/query/copilot.py`), so it is open to every
-caller while `copilot_insight_enabled` is on.
 
 `/ask` cannot reject the whole request upfront the way the follow-up does:
 Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
@@ -250,9 +240,8 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 | File | Role |
 |---|---|
-| `api/routers/ask.py` | `POST /ask` (3-stage router entry), `/ask/suggest`, `/ask/build-schema`, `/ask/edit-action` |
+| `api/routers/ask.py` | `POST /ask` (3-stage router entry) |
 | `api/routers/conversations.py` | Conversation CRUD, `POST /messages` (primary deterministic dispatch), `POST /followup`, `GET /ask/followup-enabled`, anon-migration |
-| `api/routers/ask_dashboard.py` | `/ask/dashboard/{heatmap,anomalies,movers}` |
 
 **Backend — `pipeline/query/`**
 
@@ -292,7 +281,6 @@ so it is a separate mechanism to build, not a knob to turn on.
   `tests/query/test_query_log.py`, `tests/query/test_schema_linker.py`.
 - API-level: `tests/api/test_api_ask.py` (end-to-end `/ask` — rule-hit
   skip, ClickHouse-degrade, follow-up rerouting, query-log writes, CSRF),
-  `tests/api/test_ask_endpoints.py`, `tests/api/test_ask_dashboard.py`,
   `tests/api/test_conversations.py` (includes follow-up endpoint +
   kill-switch behavior).
 - Gold-set canonicalization gate: `tests/ask_eval/test_ask_eval.py` shells
@@ -318,7 +306,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 1. `cp .env.example .env`; set a real `GEMINI_API_KEY` (and optionally
    `OPENAI_API_KEY` as the paid fallback per `CHAT_PROVIDERS`) to
-   exercise Stage 3. `ASK_FOLLOWUP_ENABLED=true` ships as the
+   exercise Stage 3; with no key the API still boots. `ASK_FOLLOWUP_ENABLED=true` ships as the
    `.env.example` local-dev default, so the follow-up box works out of the
    box for a signed-in user an admin has marked `llm_approved`; set it
    `false` to verify the kill-switch (box hidden, `POST /followup` returns

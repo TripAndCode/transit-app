@@ -45,15 +45,30 @@ _SYS_PROMPT_EN = (
 )
 
 
+def _has_allowed_provider() -> bool:
+    """True when the shared ladder holds a provider ``ASK_FOLLOWUP_PROVIDERS`` allows.
+
+    The follow-up never uses a BYOK key, so only the shared ladder counts."""
+    allowed = _allowed_providers()
+    return any(p.name in allowed for p in get_client().providers())
+
+
 def is_enabled() -> bool:
-    """True iff the follow-up feature is turned on."""
-    return flag("ask_followup_enabled", False)
+    """True iff the follow-up is on, LLM answers are not switched off, and a
+    shared-ladder provider the follow-up may use is configured."""
+    return flag("ask_followup_enabled", False) and flag("ask_llm_enabled", True) and _has_allowed_provider()
 
 
 async def ais_enabled() -> bool:
-    """:func:`is_enabled` for a caller on the event loop -- see
-    `pipeline.query.copilot.ais_enabled` for why the distinction matters."""
-    return await aflag("ask_followup_enabled")
+    """:func:`is_enabled` for a caller on the event loop.
+
+    Read through `aflag()`, not the synchronous `flag()`: after `invalidate()`
+    the async read waits for the re-read, so the request right after an
+    operator flips this switch sees the new value; the synchronous form
+    answers it with the old one while the re-read runs behind it. With
+    nothing cached at all, the synchronous form reads Postgres inline, which
+    on the event loop stalls every other request."""
+    return await aflag("ask_followup_enabled") and await aflag("ask_llm_enabled") and _has_allowed_provider()
 
 
 def _allowed_providers() -> set[str]:

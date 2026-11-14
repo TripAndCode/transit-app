@@ -2038,7 +2038,6 @@
         "askLlmEnabled": "Ask: AI による回答（LLM）",
         "askRouterEnabled": "Ask: ルールルーター",
         "askFollowupEnabled": "Ask: LLM フォローアップ",
-        "copilotInsightEnabled": "Copilot: 自動インサイト",
         "askHistoryEnabled": "Ask: 会話履歴",
         "askIntentCacheEnabled": "Ask: インテントキャッシュ",
         "askQueryLogEnabled": "Ask: クエリログ",
@@ -2150,7 +2149,11 @@
         "agencies_never_analyzed_other": "{{count}} 事業者はまだ一度も集計されていません"
       },
       "check_failed": "状態を確認できませんでした",
-      "details": "詳細"
+      "details": "詳細",
+      "host_group_one": "{{host}} · {{count}}事業者",
+      "host_group_other": "{{host}} · {{count}}事業者",
+      "host_unknown": "配信元ホスト不明",
+      "host_no_data": "{{date}}はいずれの事業者からもデータがありません"
     },
     "alert_center": {
       "bell_label": "アラート",
@@ -2227,15 +2230,6 @@
       },
       "table_label": "Ask クエリログ"
     }
-  },
-  "copilot": {
-    "title": "コパイロット",
-    "loading": "考え中…",
-    "error": "現在インサイトを生成できませんでした。",
-    "low_confidence": "データが限定的です。",
-    "followup_placeholder": "続けて質問…",
-    "followup_submit": "質問する",
-    "no_insight": "まだ傾向を示せるだけのデータがありません。"
   },
   "palette": {
     "placeholder": "検索・移動…",
@@ -2350,7 +2344,9 @@
       "early_label": "早発の扱い",
       "early_counted": "早発も定時に含める",
       "early_limited": "{{n}}分を超える早発は定時に含めない",
-      "early_current": "いまは{{value}}"
+      "early_current": "いまは{{value}}",
+      "days_apply_one": "適用 · {{count}}曜日",
+      "days_apply_other": "適用 · {{count}}曜日"
     },
     "pin": "すべての条件を表示",
     "reset": "条件をリセット",
@@ -2484,5 +2480,18 @@
     "empty_hint": "別の日を試してください。",
     "estimate_note": "停留所と停留所のあいだの位置は推定です。",
     "busiest_hour": "いちばん便が多い時間: {{time}}"
+  },
+  "capability": {
+    "basic": {
+      "label": "基本データ（定時性のみ）",
+      "status": "基本データ",
+      "reason": "この事業者の配信は基本データのみで、定時性を扱えます。これには、配信に含まれない時刻表と照合できる記録が必要です。",
+      "figure": "基本データには含まれません",
+      "unranked": "基本データ（定時性のみ）のため、観測カバー率を測れません"
+    },
+    "loading": {
+      "status": "読み込み中",
+      "text": "この事業者の配信が扱う範囲を読み込んでいます…"
+    }
   }
 }

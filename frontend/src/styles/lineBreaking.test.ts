@@ -15,7 +15,6 @@ describe("Japanese line breaking", () => {
   it.each([
     ["global.css", "h1, h2, h3"],
     ["overview.css", ".ov-hero-story"],
-    ["../components/CopilotPanel.css", ".copilot-panel p"],
     ["../pages/ModelPage.css", ".model-page"],
     ["../pages/LoginPage.css", ".login-card__sub"],
     ["../pages/LoginPage.css", ".login-card__footer"],

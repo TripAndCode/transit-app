@@ -90,11 +90,8 @@ class _Conn:
     def is_in_transaction(self):
         return False
 
-    async def fetch(self, _sql, *_args):
+    async def fetch(self, sql, *_args):
         return []
-
-    async def fetchrow(self, _sql, *_args):
-        return (0, None, None)
 
 
 _SCHEDULE = ScheduleDays(date(2026, 5, 1), date(2026, 5, 2), [])

@@ -10,7 +10,7 @@ import { COMMAND_PALETTE_OPEN_EVENT } from "./commandPaletteEvents";
 import { TopBar } from "./TopBar";
 
 function agency(agency_id: number, latest_data_date: string | null): Agency {
-  return { agency_id, agency_name: `Agency ${agency_id}`, feed_url: "", static_url: null, latest_data_date };
+  return { agency_id, agency_name: `Agency ${agency_id}`, feed_url: "", static_url: null, latest_data_date, capability_tier: "full" };
 }
 
 function summary(latest_captured_at: string | null): RouteSummaryResponse {

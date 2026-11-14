@@ -69,7 +69,7 @@ RouteTableOrder = Literal["worst", "best"]
 
 
 @perf.timed("reports.route_table")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_route_table(
     agency_id: int,
     ctx: RangeCtx,
@@ -205,7 +205,7 @@ def sort_route_table(rows: Sequence[tuple], sort: str, order: RouteTableOrder) -
 
 
 @perf.timed("reports.route_references")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_route_references(
     agency_id: int,
     ctx: RangeCtx,

@@ -193,6 +193,25 @@
   cursor: pointer;
 }
 .seg-btn[aria-checked="true"] { color: var(--text-primary); }
+/* A choice with a figure stacks it under the label, so every cell grows
+   to the full control height together and the thumb's share of the track
+   still matches one cell. */
+.seg--meta .seg-btn {
+  height: auto;
+  min-height: var(--control-h);
+  padding-block: 4px;
+}
+.seg-btn__meta {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-num);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
 /* The label, not the button, carries the ellipsis: a grid item's default
    min-width is its content size, which defeats text-overflow until the
    item itself opts into shrinking below that. */

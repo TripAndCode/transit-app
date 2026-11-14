@@ -62,6 +62,7 @@ from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.freshness import is_stale
 from pipeline.histogram import on_time_count_sql
 from pipeline.reports import comparability
+from pipeline.reports.capability import capability_tiers
 from pipeline.reports.comparability import (
     BOARD_ON_TIME_WINDOW,
     MAX_CLAMP_PCT,
@@ -181,6 +182,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
     # samples in range) stay distinguishable below.
     weighted_on_time = await compute_ridership_weighted_on_time_by_agency(conn, from_date, to_date)
     _NOT_CONFIGURED = object()
+    tiers = await capability_tiers(conn, [a["agency_id"] for a in agencies])
 
     rows: list[dict[str, Any]] = []
     for a in agencies:
@@ -236,6 +238,7 @@ async def compute_network_summary(conn, ch, from_date: date, to_date: date) -> l
                 "covered_days": d["covered_days"],
                 "window_days": d["window_days"],
                 "delivered_missing": d["delivered_missing"],
+                "capability_tier": tiers[aid],
                 "observed_trips": gate.observed_trips,
                 "coverage_planned_trips": gate.coverage_planned_trips,
                 "coverage_pct": gate.coverage_pct,
@@ -327,7 +330,7 @@ _AGENCY_FEED_SQL = """
 """
 
 
-@async_lru_cache(maxsize=128, ttl_seconds=300)
+@async_lru_cache(maxsize=128, ttl_seconds=300, agency_arg="agency_id")
 async def compute_agency_feed_quality(conn, agency_id: int, from_date: date, to_date: date) -> FeedQuality | None:
     """*agency_id*'s completeness and clamp share over [from_date, to_date],
     the figures its row of :func:`compute_network_summary` over the same range

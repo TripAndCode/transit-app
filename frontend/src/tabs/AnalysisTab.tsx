@@ -32,6 +32,7 @@ import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
+import { useCapabilityTier } from "../api/useCapabilityTier";
 import { ReportList } from "../components/analysis/ReportList";
 import { reportLabel } from "../components/analysis/reportGroups";
 import { WhyAnalyses } from "../components/analysis/WhyAnalyses";
@@ -90,6 +91,7 @@ export function AnalysisTab({
   const [searchParams, setSearchParams] = useSearchParams();
   const reportType = pickReport(searchParams.get("report"), reportTypes, defaultReport);
   const id = useAgencyId();
+  const tier = useCapabilityTier(id);
   const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
   const jumpToLatestData = useJumpToLatestDataRange(id);
@@ -257,7 +259,11 @@ export function AnalysisTab({
               // Figures held over from another scope while this one loads
               // are not what the screen's query names, so their print
               // carries no snapshot.
-              <CouncilSummaryBlock report={detail.data} snapshot={detail.isPlaceholderData ? null : councilSnapshot} />
+              <CouncilSummaryBlock
+                report={detail.data}
+                snapshot={detail.isPlaceholderData ? null : councilSnapshot}
+                tier={tier}
+              />
             ) : detail.data.report_type === "compare_ranking" && detail.data.rows.length > 0 ? (
               <>
                 <CompareBars rows={detail.data.rows} resetKey={`${id ?? "none"}:${scopeToQueryString(ctx)}`} />

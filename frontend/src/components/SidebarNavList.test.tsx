@@ -43,6 +43,6 @@ describe("SidebarNavList", () => {
     expect([indicator.style.transform, indicator.style.height]).toEqual(["translateY(0px)", "40px"]);
     rerender(<SidebarNavList ariaLabel="Sections" width={240} items={ITEMS} activeKey="b" onSelect={vi.fn()} />);
     expect([indicator.style.transform, indicator.style.height]).toEqual(["translateY(40px)", "60px"]);
-    expect(screen.getByRole("button", { name: /Second section/ }).style.background).toBe("transparent");
+    expect(screen.getByRole("button", { name: /Second section/ }).style.backgroundColor).toBe("transparent");
   });
 });

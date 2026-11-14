@@ -10,6 +10,7 @@ from api.deps import get_conn, invalidate_agency
 from api.security import User, csrf_guard, require_admin
 from pipeline.audit import record_event
 from pipeline.query import agencies as _agencies
+from pipeline.reports.capability import CapabilityTier, capability_tiers
 from pipeline.reports.network import invalidate_network_summary
 from pipeline.strategies.static_join import invalidate_field_coverage_probes
 from pipeline.url_guard import FeedURLError, validate_feed_url
@@ -60,6 +61,8 @@ class AgencyOut(BaseModel):
     # pipeline/health.py's _AGG_MAX_SQL; the query lives in
     # pipeline/query/agencies.py.
     latest_data_date: str | None = None
+    # pipeline.reports.capability: which figures this agency's feed can support.
+    capability_tier: CapabilityTier
 
 
 class AdminAgencyOut(BaseModel):
@@ -75,7 +78,9 @@ class AdminAgencyOut(BaseModel):
 
 @router.get("", response_model=list[AgencyOut])
 async def list_agencies(conn: asyncpg.Connection = Depends(get_conn)) -> list[dict[str, Any]]:
-    return await _agencies.list_agencies(conn, include_deleted=False)
+    agencies = await _agencies.list_agencies(conn, include_deleted=False)
+    tiers = await capability_tiers(conn, [a["agency_id"] for a in agencies])
+    return [{**a, "capability_tier": tiers[a["agency_id"]]} for a in agencies]
 
 
 @router.get("/{agency_id}", response_model=AgencyOut)
@@ -89,7 +94,8 @@ async def get_agency(agency_id: int, conn: asyncpg.Connection = Depends(get_conn
     )
     if not row:
         raise HTTPException(status_code=404, detail=f"Agency {agency_id} not found")
-    return _agencies.agency_row_to_dict(row)
+    tiers = await capability_tiers(conn, [agency_id])
+    return {**_agencies.agency_row_to_dict(row), "capability_tier": tiers[agency_id]}
 
 
 def _check_strategies(body: AgencyCreate | AgencyPatch, stored: Mapping[str, Any] | None = None) -> None:

@@ -20,7 +20,7 @@ vi.mock("../api/auth", () => ({
   useLogout: () => ({ mutate: vi.fn(), isPending: false, isError: false }),
 }));
 
-// Matches the rest of the suite's convention (e.g. CopilotPanel.test.tsx): a
+// Matches the rest of the suite's convention (e.g. ErrorBanner.test.tsx): a
 // fresh spy per test so call counts/histories don't leak across tests.
 afterEach(() => vi.restoreAllMocks());
 
@@ -42,7 +42,7 @@ describe("AccountPage BYOK section", () => {
     );
     renderPage();
     // Bilingual match — jsdom's detected language isn't pinned here (matches
-    // the ErrorBanner.test.tsx / CopilotPanel.test.tsx convention for
+    // the ErrorBanner.test.tsx convention for
     // un-pinned-locale assertions).
     expect(
       await screen.findByText(/using the shared free tier|無料の共有枠を使用中/i),

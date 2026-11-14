@@ -24,11 +24,12 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import threading
 import time
 from collections import OrderedDict
 from contextvars import ContextVar
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, Iterable, Literal, TypeVar
 
 from pipeline import perf
 
@@ -36,6 +37,23 @@ T = TypeVar("T")
 
 # Every decorated function registers its cache_clear here, for clear_all.
 _REGISTERED_CLEARS: list[Callable[[], None]] = []
+
+# Each decorated cache's eviction for a rebuild: given the agencies whose
+# aggregates were rewritten, it drops the entries a rebuild can have made stale.
+_REGISTERED_EVICTORS: list[Callable[[frozenset[Any]], None]] = []
+
+# The clears in _REGISTERED_CLEARS that belong to a decorated cache, which
+# evict_for_rebuild replaces with that cache's own eviction.
+_DECORATED_CLEARS: set[Callable[[], None]] = set()
+
+# An agency a key does not name reliably; such an entry is evicted by every rebuild.
+_UNREADABLE: Any = object()
+
+#: How a cache is treated when analyze rewrites aggregates: ``"all"`` drops
+#: every entry, or with an ``agency_arg`` only that agency's (and any whose key
+#: names no agency); ``"never"`` keeps them, for rows that do not come from the
+#: aggregates and so no rebuild can make stale.
+Rebuild = Literal["all", "never"]
 
 # The clock every entry's age is read on; a module attribute so a test can move it.
 _monotonic = time.monotonic
@@ -72,15 +90,37 @@ def cache_briefly() -> None:
 
 def clear_all() -> None:
     """Clear every async_lru_cache in the process. The perf debug endpoint
-    calls it for cold-run benchmarks, and
-    pipeline.reports.definition.stamp_build when analyze records a build, so
-    rows served are never older than the build they are stamped with."""
+    calls it for cold-run benchmarks, pipeline.live_filing when an agency's
+    archive state moves, and pipeline.reports.definition.stamp_build the first
+    time a process looks at the builds; a later build clears only what
+    :func:`evict_for_rebuild` names."""
     for clear in _REGISTERED_CLEARS:
         clear()
 
 
-def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
+def evict_for_rebuild(agency_ids: Iterable[Any]) -> None:
+    """Drop what a rebuild of *agency_ids*' aggregates can have made stale: those
+    agencies' entries, every entry whose key names no agency (the board's, and
+    any whose agency cannot be read from the key), and every cache registered
+    with a plain clear. Entries of other agencies stay, as do the caches of
+    rows that do not come from the aggregates (``rebuild="never"``)."""
+    agencies = frozenset(agency_ids)
+    for evict in _REGISTERED_EVICTORS:
+        evict(agencies)
+    for clear in _REGISTERED_CLEARS:
+        if clear not in _DECORATED_CLEARS:
+            clear()
+
+
+def async_lru_cache(
+    maxsize: int = 64, ttl_seconds: int = 300, *, agency_arg: str | None = None, rebuild: Rebuild = "all"
+):
     """Decorate an async function with bounded LRU + TTL caching.
+
+    *agency_arg* names the parameter that carries the agency an entry belongs
+    to, read back from the key whether the caller passed it positionally or by
+    keyword, so :func:`evict_for_rebuild` can drop one agency's entries. A cache
+    with none is evicted whole by every rebuild unless *rebuild* is ``"never"``.
 
     Cache key is built from positional args and sorted kwargs items, with
     asyncpg ``Connection`` objects ignored (they are not part of the
@@ -93,6 +133,7 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
     """
 
     def decorator(fn: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
+        agency_of = _agency_reader(fn, agency_arg) if agency_arg is not None else None
         # key -> (the monotonic time the entry expires at, the result)
         _cache: OrderedDict[Any, tuple[float, T]] = OrderedDict()
         # Per-key futures for in-flight computes (stampede coalescing).
@@ -196,11 +237,53 @@ def async_lru_cache(maxsize: int = 64, ttl_seconds: int = 300):
                 _cache.clear()
                 inflight.clear()
 
+        def _evict(agencies: frozenset[Any]) -> None:
+            if rebuild == "never":
+                return
+            if agency_of is None:
+                _cache_clear()
+                return
+            with lock:
+                for store in (_cache, inflight):
+                    for key in [k for k in store if (a := agency_of(k)) is _UNREADABLE or a is None or a in agencies]:
+                        del store[key]
+
         wrapper.cache_clear = _cache_clear  # type: ignore[attr-defined]
         _REGISTERED_CLEARS.append(_cache_clear)
+        _DECORATED_CLEARS.add(_cache_clear)
+        _REGISTERED_EVICTORS.append(_evict)
         return wrapper
 
     return decorator
+
+
+def _agency_reader(fn: Callable[..., Any], name: str) -> Callable[[Any], Any]:
+    """A reader of the agency *name* from one of *fn*'s cache keys (positional
+    args, then sorted keyword items), or :data:`_UNREADABLE` for a key that does
+    not carry it. Raises at decoration when *name* cannot be passed by keyword,
+    since no key could then be trusted to carry it."""
+    params = list(inspect.signature(fn).parameters.values())
+    index = next((i for i, p in enumerate(params) if p.name == name), None)
+    if index is None or params[index].kind not in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    ):
+        raise TypeError(f"{fn.__qualname__}: agency_arg {name!r} must be a named, keyword-passable parameter")
+    keyword_only = params[index].kind is inspect.Parameter.KEYWORD_ONLY
+    if not keyword_only and any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params[:index]):
+        raise TypeError(f"{fn.__qualname__}: agency_arg {name!r} must not follow *args")
+    default = params[index].default
+
+    def read(key: Any) -> Any:
+        args, kwargs = key
+        for k, v in kwargs:
+            if k == name:
+                return v
+        if not keyword_only and index < len(args):
+            return args[index]
+        return _UNREADABLE if default is inspect.Parameter.empty else default
+
+    return read
 
 
 def _keyable(obj: Any) -> Any:

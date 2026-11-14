@@ -27,7 +27,7 @@ _log = logging.getLogger(__name__)
 # Bounds every provider call, on the shared ladder and the BYOK path alike. A
 # rung that hangs has to give up while the caller is still waiting, or the
 # ladder never reaches the next provider; the SDK's own default read timeout is
-# far longer than any Ask/Copilot/follow-up caller waits.
+# far longer than any Ask/follow-up caller waits.
 REQUEST_TIMEOUT = Timeout(30.0, connect=5.0)
 
 # Built-in defaults for each provider we support; provider_endpoint applies
@@ -109,7 +109,7 @@ def _load_providers() -> list[ProviderConfig]:
     names = [n.strip().lower() for n in raw.split(",") if n.strip()]
     cfgs = [c for c in (_load_provider(n) for n in names) if c is not None]
     if not cfgs:
-        _log.error("CHAT_PROVIDERS=%r resolves to zero usable providers", raw)
+        _log.warning("CHAT_PROVIDERS=%r resolves to zero usable providers; LLM features are disabled", raw)
     return cfgs
 
 
@@ -321,6 +321,16 @@ def get_client() -> LLMClient:
     if _singleton is None:
         _singleton = LLMClient()
     return _singleton
+
+
+def llm_available() -> bool:
+    """True when the shared provider ladder holds at least one usable provider.
+
+    The one answer to "can this deployment call an LLM at all": every
+    LLM-backed feature that needs the shared ladder gates on it, so a
+    deployment with no key serves only the deterministic notebook.
+    """
+    return bool(get_client().providers())
 
 
 def reset_client_for_tests() -> None:

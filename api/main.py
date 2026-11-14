@@ -1,7 +1,7 @@
 """FastAPI application bootstrap.
 
-Wires routers, middleware, lifespan (asyncpg pool + LLM provider validation), CORS,
-and an optional SPA static mount. In production the multistage Dockerfile copies
+Wires routers, middleware, lifespan (asyncpg pool + a warning when no LLM provider
+is configured), CORS, and an optional SPA static mount. In production the multistage Dockerfile copies
 the built React frontend into ``api/static/``; this module then mounts the SPA
 at ``/`` with an explicit JSON 404 for unknown ``/api/*`` paths so frontend
 fetches keep getting structured errors instead of HTML index pages.
@@ -44,11 +44,9 @@ from api.routers.admin_ask import router as admin_ask_router
 from api.routers.admin_flags import router as admin_flags_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
-from api.routers.ask_dashboard import router as ask_dashboard_router
 from api.routers.auth import local_admin_enabled, seed_local_admin
 from api.routers.auth import router as auth_router
 from api.routers.conversations import router as conversations_router
-from api.routers.copilot import router as copilot_router
 from api.routers.debug import router as debug_router
 from api.routers.internal import collector_router
 from api.routers.internal import router as internal_router
@@ -67,8 +65,8 @@ from api.security import cookie_secure
 from api.sso import SSO_ENV as _AUTH_ENV
 from api.sso import sso_status as auth_status
 from pipeline.db import DEFAULT_DATABASE_URL
-from pipeline.flags import flag
-from pipeline.query.llm_client import ProviderConfig
+from pipeline.flags import aflag, flag
+from pipeline.query.llm_client import llm_available
 from pipeline.runs import reap_abandoned_runs_best_effort
 
 _log = logging.getLogger(__name__)
@@ -165,21 +163,6 @@ def _require_docs_enabled() -> None:
         raise HTTPException(status_code=404, detail="Not found")
 
 
-def _validate_llm_providers(providers: list[ProviderConfig]) -> None:
-    """Refuse to boot with zero usable LLM providers configured.
-
-    ``providers`` is the resolved ladder from
-    :func:`pipeline.query.llm_client._load_providers` — already filtered to
-    entries with a real API key. An empty ladder means the Ask tab has no
-    provider to fall back to at all.
-    """
-    if not providers:
-        raise RuntimeError(
-            "No usable LLM provider configured. Set at least one provider's "
-            "API key (e.g. GEMINI_API_KEY) — see .env.example."
-        )
-
-
 async def _close_startup_resources(app: FastAPI) -> None:
     """Close the ClickHouse client and the connection pool, tolerating either
     being absent or already failed. Shared by the startup-failure path and
@@ -208,9 +191,9 @@ async def lifespan(app: FastAPI):
     flow would leak state cookies without ever completing.
     """
     from pipeline.flags import warm as warm_flags
-    from pipeline.query.llm_client import _load_providers
 
-    _validate_llm_providers(_load_providers())
+    if not llm_available():
+        _log.warning("No LLM provider key configured; LLM-backed Ask features are disabled")
     enabled, missing = auth_status()
     if not enabled and len(missing) != len(_AUTH_ENV):
         raise RuntimeError(
@@ -386,10 +369,8 @@ app.include_router(admin_flags_router)
 app.include_router(admin_snapshots_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
-app.include_router(ask_dashboard_router)
 app.include_router(auth_router)
 app.include_router(conversations_router)
-app.include_router(copilot_router)
 app.include_router(debug_router)
 app.include_router(map_router)
 app.include_router(ml_router)
@@ -429,6 +410,7 @@ class ClientConfig(BaseModel):
     local_admin_enabled: bool
     login_required: bool
     feedback_url: str | None
+    llm_enabled: bool
 
 
 # The SPA renders the feedback address as a link, so only these schemes leave the API
@@ -453,13 +435,16 @@ async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
     show/hide the break-glass local-admin password form, send signed-out
     visitors to sign in while ``login_required`` says the API refuses them, and
-    link to the deployment's feedback address when it has one."""
+    link to the deployment's feedback address when it has one. ``llm_enabled`` is
+    False when no LLM provider is usable or the operator's kill switch is off, so
+    the SPA hides LLM-only affordances instead of offering ones that cannot answer."""
     enabled, _ = auth_status()
     return {
         "auth_enabled": enabled,
         "local_admin_enabled": local_admin_enabled(),
         "login_required": await enforcement_active(),
         "feedback_url": feedback_url(),
+        "llm_enabled": llm_available() and await aflag("ask_llm_enabled"),
     }
 
 

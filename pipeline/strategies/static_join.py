@@ -227,13 +227,41 @@ def coverage_gap(ingest_strategy: str | None, rows: Iterable[Mapping[str, Any]],
     return CoverageGap("probe_expired", last_checked)
 
 
-_COVERAGE_STATE_SQL = """
-    SELECT a.ingest_strategy, now() AS now,
+_COVERAGE_STATES_SQL = """
+    SELECT a.agency_id, a.ingest_strategy, now() AS now,
            p.field_name, p.confirmed, p.probed_at, p.expires_at
     FROM agencies a
     LEFT JOIN rt_field_coverage_probes p ON p.agency_id = a.agency_id
-    WHERE a.agency_id = $1
+    WHERE a.agency_id = ANY($1::int[])
 """
+
+
+@dataclass(frozen=True)
+class CoverageState:
+    """What the coverage gate judges for one agency: its ingest strategy, its
+    ``rt_field_coverage_probes`` rows, and the database's clock they are
+    judged by."""
+
+    ingest_strategy: str | None
+    probes: list[Mapping[str, Any]]
+    now: datetime
+
+    def gap(self) -> CoverageGap | None:
+        return coverage_gap(self.ingest_strategy, self.probes, self.now)
+
+
+async def rt_field_coverage_states(conn, agency_ids: Iterable[int]) -> dict[int, CoverageState]:
+    """The :class:`CoverageState` of each of *agency_ids*, in one round trip.
+    An id with no agency row is left out."""
+    ids = list(agency_ids)
+    if not ids:
+        return {}
+    states: dict[int, CoverageState] = {}
+    for r in await conn.fetch(_COVERAGE_STATES_SQL, ids):
+        state = states.setdefault(r["agency_id"], CoverageState(r["ingest_strategy"], [], r["now"]))
+        if r["field_name"] is not None:
+            state.probes.append(r)
+    return states
 
 
 async def rt_field_coverage_gap(agency_id: int, conn) -> CoverageGap | None:
@@ -243,11 +271,10 @@ async def rt_field_coverage_gap(agency_id: int, conn) -> CoverageGap | None:
     ``rt_field_coverage_confirmed``: it is None exactly when that gate is
     open, so the two cannot disagree about whether to show the data.
     """
-    rows = await conn.fetch(_COVERAGE_STATE_SQL, agency_id)
-    if not rows:
+    state = (await rt_field_coverage_states(conn, [agency_id])).get(agency_id)
+    if state is None:
         return coverage_gap(None, [], datetime.now().astimezone())
-    probes = [r for r in rows if r["field_name"] is not None]
-    return coverage_gap(rows[0]["ingest_strategy"], probes, rows[0]["now"])
+    return state.gap()
 
 
 def assess_field_coverage(cov: dict) -> dict[str, bool] | None:

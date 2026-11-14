@@ -261,9 +261,8 @@ async def test_a_question_asked_with_history_writes_no_cache_row(pool_with_agenc
 @pytest.mark.asyncio
 async def test_a_question_asked_with_history_leaves_a_matching_row_untouched(pool_with_agency, monkeypatch):
     """A history-resolved signature that matches an existing row still reads
-    it, but must not relabel it with this question's text: the text pre-hit,
-    /ask/suggest and promotion all treat last_question as what the row's args
-    answer."""
+    it, but must not relabel it with this question's text: the text pre-hit
+    and promotion both treat last_question as what the row's args answer."""
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
     await _seed_cache_row(pool, agency_id, "どんな指標がある？", "describe_data", {"kind": "metrics"})
@@ -329,6 +328,28 @@ async def test_build_sentinel_short_circuits_llm(pool_with_agency, monkeypatch):
     async with pool.acquire() as conn:
         count = await conn.fetchval("SELECT count(*) FROM ask_intent_cache")
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_build_sentinel_and_free_text_with_no_llm_provider(pool_with_agency, monkeypatch):
+    """With no provider key at all, the `__build__` path still answers, and a
+    free-text question degrades to the unconfigured message rather than raising."""
+    from pipeline.query import llm_client
+
+    monkeypatch.setenv("CHAT_PROVIDERS", "gemini,openai")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    llm_client.reset_client_for_tests()
+    try:
+        pool, agency_id = pool_with_agency
+        async with pool.acquire() as conn:
+            built = await chat_with_tools("__build__ capabilities {}", _ctx(), conn, agency_id, locale="en")
+            free = await chat_with_tools("why is the 3 bus late?", _ctx(), conn, agency_id, locale="en")
+    finally:
+        llm_client.reset_client_for_tests()
+    assert built["tool_call"]["name"] == "capabilities"
+    assert free["success"] is False
+    assert free["answer"] == chat_module._chat_str("llm_unconfigured", "en")
 
 
 @pytest.mark.asyncio

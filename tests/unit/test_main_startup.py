@@ -7,9 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 import api.main
-from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_llm_providers, _validate_session_signing_key
+from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_session_signing_key
 from api.middleware.forwarded import ForwardedClientMiddleware
-from pipeline.query.llm_client import ProviderConfig
 
 
 def test_validate_cors_origins_rejects_wildcard_with_credentials():
@@ -60,18 +59,6 @@ def test_session_key_guard_ignores_dev_default_when_auth_disabled():
     """Anonymous-only mode never mints those cookies, so the dev default is
     harmless there — don't block local/anon boots."""
     _validate_session_signing_key(enabled=False, signing_key=_DEV_SIGNING_KEY)
-
-
-def test_validate_llm_providers_rejects_empty_ladder():
-    """Zero usable providers means the Ask tab has nothing to fall back to
-    at all — fail loud at startup instead of a silent 503 on every request."""
-    with pytest.raises(RuntimeError, match="No usable LLM provider configured"):
-        _validate_llm_providers([])
-
-
-def test_validate_llm_providers_allows_nonempty_ladder():
-    """At least one usable provider is the supported configuration — no error."""
-    _validate_llm_providers([ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")])
 
 
 def test_openapi_docs_off_when_unset(monkeypatch):
@@ -156,10 +143,6 @@ async def test_lifespan_closes_pool_when_post_pool_setup_fails(monkeypatch):
     monkeypatch.setattr(api.main.asyncpg, "create_pool", AsyncMock(return_value=mock_pool))
     monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=mock_ch_client))
     monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("boom")))
-    monkeypatch.setattr(
-        "pipeline.query.llm_client._load_providers",
-        lambda: [ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")],
-    )
 
     fake_app = SimpleNamespace(state=SimpleNamespace())
 
@@ -188,10 +171,6 @@ async def test_lifespan_failure_reports_the_startup_error_not_a_cleanup_error(mo
     monkeypatch.setattr(api.main.asyncpg, "create_pool", AsyncMock(return_value=mock_pool))
     monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=mock_ch_client))
     monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("boom")))
-    monkeypatch.setattr(
-        "pipeline.query.llm_client._load_providers",
-        lambda: [ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")],
-    )
 
     fake_app = SimpleNamespace(state=SimpleNamespace())
 
@@ -210,10 +189,6 @@ async def test_lifespan_opens_the_pool_with_its_session_settings_as_startup_para
     monkeypatch.setattr(api.main.asyncpg, "create_pool", create_pool)
     monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=AsyncMock()))
     monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("stop")))
-    monkeypatch.setattr(
-        "pipeline.query.llm_client._load_providers",
-        lambda: [ProviderConfig(name="gemini", api_key="x", base_url="https://x", model="m")],
-    )
 
     with pytest.raises(RuntimeError, match="stop"):
         async with api.main.lifespan(SimpleNamespace(state=SimpleNamespace())):
@@ -229,3 +204,28 @@ def test_the_forwarded_client_address_is_set_outside_every_other_middleware():
     request.client, so the forwarded address must be in place before any of
     them runs. add_middleware puts the latest addition first."""
     assert api.main.app.user_middleware[0].cls is ForwardedClientMiddleware
+
+
+async def test_lifespan_boots_with_no_llm_provider_configured(monkeypatch, caplog):
+    """A deployment with no LLM key still serves the deterministic notebook, so
+    an empty provider ladder must not stop startup. seed_local_admin failing
+    marks the first step after the provider check was passed."""
+    for var in api.main._AUTH_ENV:
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("CHAT_PROVIDERS", raising=False)
+    monkeypatch.setattr(api.main.asyncpg, "create_pool", AsyncMock(return_value=AsyncMock()))
+    monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=AsyncMock()))
+    monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("reached")))
+    from pipeline.query import llm_client
+
+    llm_client.reset_client_for_tests()
+    try:
+        with caplog.at_level("WARNING", logger=api.main._log.name):
+            with pytest.raises(RuntimeError, match="reached"):
+                async with api.main.lifespan(SimpleNamespace(state=SimpleNamespace())):
+                    pass
+    finally:
+        llm_client.reset_client_for_tests()
+    assert "No LLM provider key configured" in caplog.text

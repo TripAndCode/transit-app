@@ -20,15 +20,15 @@ of its figures before they are published.
 - [Poetry](https://python-poetry.org/) 2.5+ (`requires-poetry` in `pyproject.toml`;
   `poetry self update` upgrades an older install)
 - Docker Desktop
-- An LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`). The API
-  refuses to start without one; any non-empty value boots it, but LLM-backed
-  answers need a real key.
+- Optional: an LLM provider API key (Gemini by default; see `CHAT_PROVIDERS`).
+  The API starts without one and serves the deterministic Ask notebook;
+  LLM-backed answers and follow-ups stay off until a real key is set.
 
 ### Local setup
 
 ```bash
 cp .env.example .env
-# Set GEMINI_API_KEY in .env (required to start). Other settings have local defaults.
+# Optionally set GEMINI_API_KEY in .env for LLM-backed Ask. Other settings have local defaults.
 make bootstrap
 make doctor
 make serve
@@ -52,7 +52,18 @@ returns to `:5173` instead of `:8000`.
 
 ## Load Data
 
-The bootstrap database is empty. Choose one path:
+The bootstrap database is empty. With a read-only R2 key (the four
+`OBJECT_STORE_*` variables in `.env`; `make doctor` reports them), fill it with
+the last few days of real data:
+
+```bash
+make catch-up-from-r2 SEED_DAYS=3                     # the plan: days, timetable loads, download size
+make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1   # ingest them and build the aggregates
+```
+
+`AGENCY="1 9"` narrows it to some agencies. An agency the plan marks `REFUSED`
+stops the whole apply, so leave it out with `AGENCY=` or follow its refusal
+first. Without an R2 key, choose one of these:
 
 ```bash
 # Fallback: load each agency's timetable, sample the current agency feeds into
@@ -216,7 +227,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze` | Rebuild one agency's changed dates (`FULL=1`: every date) |
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline (`SINCE=YYYYMMDD` fetches only that day's RT archives and later; per-agency layout only) |
-| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `AGENCY="8 53"` narrows it) |
+| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `SEED_DAYS=3` starts an agency with no rows 3 JST days back, `AGENCY="8 53"` narrows it) |
 | `make check-aggs` | Detect stale aggregate tables |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
@@ -338,9 +349,9 @@ curl -X POST http://localhost:8000/api/1/ask \
 Copy `.env.example` and set only what your environment needs. Important groups:
 
 - `DATABASE_URL`, `CLICKHOUSE_*`: database connections.
-- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder. At
-  least one provider listed in `CHAT_PROVIDERS` needs a key, or the API will
-  not start.
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CHAT_PROVIDERS`: Ask provider ladder. With no
+  key for any provider listed in `CHAT_PROVIDERS` the API still starts, LLM-backed
+  features are disabled and `/api/config` reports `llm_enabled: false`.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
   `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`, `ADMIN_EMAILS`: optional
@@ -369,7 +380,6 @@ value when neither an override nor the env var is set.
 | `ask_router_enabled` | `ASK_ROUTER_ENABLED` | on |
 | `ask_llm_enabled` | `ASK_LLM_ENABLED` | on |
 | `ask_followup_enabled` | `ASK_FOLLOWUP_ENABLED` | off |
-| `copilot_insight_enabled` | `COPILOT_INSIGHT_ENABLED` | off |
 | `ask_history_enabled` | `ASK_HISTORY_ENABLED` | on |
 | `ask_intent_cache_enabled` | `ASK_INTENT_CACHE_ENABLED` | off |
 | `ask_query_log_enabled` | `ASK_QUERY_LOG_ENABLED` | on |

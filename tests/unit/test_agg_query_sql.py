@@ -91,16 +91,6 @@ def test_peak_hour_sql_counts_only_the_averaged_population():
         assert "SUM(samples) AS samples" not in sql
 
 
-def test_movers_counts_only_the_averaged_population():
-    """The movers card shows `samples` as the evidence behind its current
-    average, so it must exclude rows that average excluded."""
-    import pipeline.dashboard_queries as dq
-
-    src = inspect.getsource(dq)
-    assert "COALESCE(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) AS n" in src
-    assert "SUM(samples) AS n" not in src
-
-
 def test_route_hour_dow_pattern_counts_only_the_averaged_population():
     """Same rule for the Ask tool's time-pattern query, including its floor:
     a group must not clear the threshold on rows that contributed nothing to

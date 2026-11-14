@@ -70,6 +70,7 @@ function stored(en: ReportResponse, ja: ReportResponse = en): Snapshot {
     method_version: "2026.11.0",
     title: null,
     note: null,
+    capability_tier: "full",
   };
 }
 

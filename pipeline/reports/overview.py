@@ -847,9 +847,8 @@ async def _concentration(
 
 
 #: A route averaging at least this late (minutes) over the current window
-#: counts as delayed in ``delayed_count``, which the Copilot overview insight
-#: reads. The count carries it, so a reader states the threshold it was
-#: counted against instead of keeping its own copy.
+#: counts as delayed in ``delayed_count``. The count carries it, so a reader
+#: states the threshold it was counted against instead of keeping its own copy.
 DELAYED_ROUTE_MIN = 2.0
 
 #: The fewest observations a route needs in the current window to be listed
@@ -1433,7 +1432,7 @@ def _change(avg_min: float | None, against: float | None) -> tuple[float | None,
 
 
 @perf.timed("reports.overview")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_overview_summary(
     agency_id: int,
     ctx: RangeCtx,

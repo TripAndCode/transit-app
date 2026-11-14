@@ -60,7 +60,6 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -305,6 +304,35 @@ async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, 
 
 
 @pytest.mark.asyncio
+async def test_ask_signed_out_build_sentinel_answers_with_no_llm_provider(ask_client, no_llm_key):
+    """A signed-out notebook card posts `__build__ tool {json}`; it dispatches
+    deterministically, so no provider key is needed."""
+    client, agency_id = ask_client
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "__build__ capabilities {}"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["tool_call"]["name"] == "capabilities"
+
+
+@pytest.mark.asyncio
+async def test_ask_free_text_degrades_to_a_message_with_no_llm_provider(ask_client, no_llm_key):
+    """A question only the LLM could answer gets a clear 200 message, never a 500."""
+    client, agency_id = ask_client
+    resp = await client.post(
+        f"/api/{agency_id}/ask",
+        json={"question": "雨の日とそうでない日を比べたいです"},
+        headers={"Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["tool_call"] is None
+    assert body["answer"]
+
+
+@pytest.mark.asyncio
 async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatch):
     """Novel question → router returns None → chat_with_tools called with rag_examples kwarg."""
     client, agency_id = ask_client
@@ -321,7 +349,6 @@ async def test_ask_router_fallthrough_passes_rag_examples(ask_client, monkeypatc
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -360,7 +387,6 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -419,7 +445,6 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -468,7 +493,6 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -519,7 +543,6 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -752,7 +775,6 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -893,7 +915,6 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -939,7 +960,6 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        panel_ctx=None,
         user_id=None,
         llm_approved=True,
     ):
@@ -1047,103 +1067,6 @@ async def test_anonymous_caller_never_reaches_llm(ask_client, monkeypatch):
         assert resp.json()["tool_call"] is None
 
     assert calls["n"] == 0, "the LLM provider must never be reached by an unapproved caller"
-
-
-@pytest.mark.asyncio
-async def test_ask_forwards_panel_ctx_to_chat_with_tools(ask_client, monkeypatch):
-    """The Copilot side panel's optional panel_ctx hint reaches chat_with_tools
-    untouched — it is a system-prompt grounding hint only, never consulted by
-    the rules/embedding routing stage above it.
-    """
-    client, agency_id = ask_client
-    captured = {}
-
-    async def fake_chat(
-        question,
-        ctx,
-        conn,
-        agency_id,
-        locale="ja",
-        rag_examples=None,
-        history=None,
-        ch=None,
-        force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
-        llm_approved=True,
-    ):
-        captured["panel_ctx"] = panel_ctx
-        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
-
-    async def no_decision(*a, **k):
-        return (None, [])
-
-    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
-
-    resp = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "遅延状況は？", "panel_ctx": {"tab": "overview"}},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp.status_code == 200
-    assert captured["panel_ctx"] == {"tab": "overview"}
-
-
-@pytest.mark.asyncio
-async def test_ask_omits_panel_ctx_by_default(ask_client, monkeypatch):
-    """A request with no panel_ctx field forwards None — the pre-existing,
-    Ask-tab (non-Copilot) call shape is unaffected.
-    """
-    client, agency_id = ask_client
-    captured = {}
-
-    async def fake_chat(
-        question,
-        ctx,
-        conn,
-        agency_id,
-        locale="ja",
-        rag_examples=None,
-        history=None,
-        ch=None,
-        force_tool_call=False,
-        panel_ctx=None,
-        user_id=None,
-        llm_approved=True,
-    ):
-        captured["panel_ctx"] = panel_ctx
-        return {"answer": "ok", "tool_call": None, "result": None, "success": True}
-
-    async def no_decision(*a, **k):
-        return (None, [])
-
-    monkeypatch.setattr("api.routers.ask.chat_with_tools", fake_chat)
-    monkeypatch.setattr("api.routers.ask.route_or_examples", no_decision)
-
-    resp = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "遅延状況は？"},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp.status_code == 200
-    assert captured["panel_ctx"] is None
-
-
-@pytest.mark.asyncio
-async def test_ask_rejects_unknown_panel_ctx_tab(ask_client):
-    """panel_ctx.tab is a closed enum (the frontend's known tab routes) — an
-    arbitrary/oversized string must be rejected before it can ever reach the
-    system prompt chat_with_tools builds from this hint.
-    """
-    client, agency_id = ask_client
-
-    resp = await client.post(
-        f"/api/{agency_id}/ask",
-        json={"question": "遅延状況は？", "panel_ctx": {"tab": "not-a-real-tab"}},
-        headers={"Origin": TEST_ORIGIN},
-    )
-    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio

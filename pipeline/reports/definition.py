@@ -24,7 +24,7 @@ from pydantic import AwareDatetime, BaseModel
 
 from pipeline import static_archive
 from pipeline.agg_registry import METHOD_VERSION
-from pipeline.cache import clear_all
+from pipeline.cache import clear_all, evict_for_rebuild
 from pipeline.clickhouse import jst_date
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import LEGACY_PRESET_NAME, LEGACY_SEVERE_LATE_TOLERANCE_SEC
@@ -244,8 +244,8 @@ class DefinitionMeta(BaseModel):
     feed_quality: list[FeedQuality] | None = None
 
 
-# The builds analyze had recorded, for every agency, when this process last
-# looked; _UNSEEN before its first look.
+# Each agency's builds analyze had recorded, when this process last looked,
+# as {agency_id: (table count, sum of build times)}; _UNSEEN before its first look.
 _UNSEEN = object()
 _seen_builds: object = _UNSEEN
 
@@ -256,12 +256,15 @@ _seen_builds: object = _UNSEEN
 # agency named, built_at covers the agencies the board lists, not deleted.
 # Not the feed-quality scorecard: no report reads it, and it rewrites its month in progress.
 _BUILDS_SQL = """
-SELECT count(*) AS builds,
+SELECT s.agency_id,
+       count(*) AS builds,
        sum(extract(epoch FROM s.built_at)) AS stamps,
-       max(s.built_at) FILTER (WHERE s.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)) AS built_at
+       max(s.built_at) AS built_at,
+       a.deleted_at IS NULL AS listed
 FROM agg_table_state s
 JOIN agencies a USING (agency_id)
 WHERE s.table_name <> 'feed_quality_monthly'
+GROUP BY s.agency_id, a.deleted_at
 """
 
 
@@ -313,9 +316,10 @@ async def stamp_build(
     content. A live stamp given no join names none.
 
     Call it before computing the rows. The compute caches outlive a rebuild,
-    so when analyze has rewritten any table since this process last looked, every
-    cache is forgotten first: rows served after this call are then no older
-    than the build it names.
+    so when analyze has rewritten a table since this process last looked, the
+    caches that rewrite can have made stale are forgotten first, other agencies'
+    rows kept: rows served after this call are then no older than the build it
+    names.
     """
     sources = await _read_source_days(conn, agency_id, schedule.from_date, schedule.to_date)
     versions = _timetables(schedule)
@@ -325,9 +329,10 @@ async def stamp_build(
         "source_mix": None if sources is None else _source_mix(sources, schedule.from_date, schedule.to_date),
     }
     if meta.source == "aggregates":
-        builds, stamps, built_at = await conn.fetchrow(_BUILDS_SQL, agency_id)
-        _note_builds((builds, stamps))
-        update["built_at"] = built_at
+        rows = await conn.fetch(_BUILDS_SQL)
+        _note_builds({row[0]: (row[1], row[2]) for row in rows})
+        built = [row[3] for row in rows if row[0] == agency_id or (agency_id is None and row[4])]
+        update["built_at"] = max(built, default=None)
     if agency_id is not None and read_feed_quality:
         # Imported here: pipeline.reports.network reads the gate, whose module imports this one.
         from pipeline.reports import network
@@ -468,14 +473,19 @@ def _source_mix(rows: list, from_date: date, to_date: date) -> list[SourceMix]:
     return mix
 
 
-def _note_builds(builds: object) -> None:
-    """Forget every cached compute result when *builds* are not the ones this
-    process last saw. The first look forgets too: rows cached before it are of
-    unknown builds."""
+def _note_builds(builds: dict[int, tuple]) -> None:
+    """Forget the cached compute results a build since this process last looked
+    can have made stale: the entries of each agency whose builds moved or
+    vanished, and those of no one agency. The first look forgets everything:
+    rows cached before it are of unknown builds."""
     global _seen_builds
-    if builds != _seen_builds:
+    seen = _seen_builds
+    if seen is _UNSEEN:
         clear_all()
-        _seen_builds = builds
+    elif seen != builds:
+        assert isinstance(seen, dict)
+        evict_for_rebuild(a for a in seen.keys() | builds.keys() if seen.get(a) != builds.get(a))
+    _seen_builds = builds
 
 
 # The reports that show an early-departure rate beside their on-time figures.

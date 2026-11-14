@@ -74,8 +74,7 @@ async def upsert(
     """Insert a new cache row OR increment hit_count + refresh last_question/used_at.
 
     A promoted row keeps its last_question: that text is what its
-    ``rag_chunks`` suggestion published (and what /ask/suggest joins on), and
-    the row is exempt from the retention prune, so a later asker's wording
+    ``rag_chunks`` suggestion published, and the row is exempt from the retention prune, so a later asker's wording
     must not land in it.
     """
     await conn.execute(
@@ -164,8 +163,7 @@ async def mark_promoted(
     means the promotion predates stamping.
 
     ``question`` is the text the chunk published. The row keeps it as
-    last_question, which /ask/suggest joins on and later hits no longer
-    replace; None leaves last_question as it is.
+    last_question, which later hits no longer replace; None leaves last_question as it is.
     """
     await conn.execute(
         "UPDATE ask_intent_cache SET promoted_at = now(), embedding_version = $3, "

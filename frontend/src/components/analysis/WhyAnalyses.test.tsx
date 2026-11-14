@@ -61,11 +61,16 @@ const DWELL: DwellRunPayload = {
   ],
 };
 
+const BASIC_REASON =
+  "This agency's feed carries basic data only, which covers on-time performance. This needs timetable-matched records its feed doesn't provide.";
+
 function unavailableDwell(reason: DwellRunPayload["unavailable_reason"], lastChecked: string | null = null): DwellRunPayload {
   return { available: false, time_band_supported: true, routes: [], unavailable_reason: reason, last_checked: lastChecked };
 }
 
 function show(payload: DwellRunPayload, weather: WeatherDelayResponse, headway: HeadwayQualityResponse) {
+  // The agency catalogue answered without a tier for this agency, unless a test set one.
+  if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useWeatherDelay").mockReturnValue({ data: weather, isLoading: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useHeadwayQuality").mockReturnValue({ data: headway, isLoading: false, error: null, refetch: vi.fn() } as never);
@@ -169,6 +174,20 @@ describe("WhyAnalyses", () => {
     show({ available: true, time_band_supported: true, routes: [], unavailable_reason: null, last_checked: null }, WEATHER, HEADWAY);
     expect(screen.getByText("No matching data")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Analyses not shown" })).not.toBeInTheDocument();
+  });
+
+  it("states a basic-tier agency's tier instead of a pipeline reason", () => {
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({
+      data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "basic" }],
+    } as never);
+    show(unavailableDwell("feed_unsupported"), WEATHER, { rows: [], ctx: CTX, unavailable_reason: "feed_unsupported", last_checked: null });
+
+    for (const name of ["Dwell/running time", "Headway quality"]) {
+      expect(within(row(name)).getByText("Basic data")).toBeInTheDocument();
+      expect(within(row(name)).getByText(BASIC_REASON)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("Not supported")).not.toBeInTheDocument();
+    expect(screen.queryByText(/can't be taken from this agency's feed/)).not.toBeInTheDocument();
   });
 
   it("dates a refutation and calls it unsupported", () => {
