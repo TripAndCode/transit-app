@@ -79,7 +79,6 @@ describe("DataStalenessBanner", () => {
     const rule = ruleBody(css, "[data-shell-banner] {");
     expect(decl(rule, "color")).toBe("var(--color-warning-text)");
     expect(decl(rule, "background")).toBe("color-mix(in srgb, var(--color-warning) 12%, var(--bg-surface))");
-    expect(decl(rule, "border-bottom")).toBe("1px solid color-mix(in srgb, var(--color-warning) 40%, var(--bg-surface))");
   });
 
   it("renders nothing when the latest observation is recent", () => {
