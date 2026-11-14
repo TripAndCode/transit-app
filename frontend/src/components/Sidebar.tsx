@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { PendingNavLink } from "./navPending";
 import { NavIndicator } from "./NavIndicator";
 import {
+  Bus,
   Gauge,
   HelpCircle,
   Info,
@@ -39,10 +40,15 @@ const ITEMS: readonly SidebarNavItem[] = SIDEBAR_NAV_ITEMS;
 
 /** On a phone the bottom bar holds Pulse, Routes, Live and Ask; the other
  *  destinations are reached from the More sheet, which keeps each tab's label
- *  on one line at phone widths. */
+ *  on one line at phone widths. The sheet also lists Bus Town, which has no
+ *  rail stop: the command palette finds it only by a typed query, so the
+ *  sheet is its one browse path on a phone. */
 const TAB_BAR_DESTINATIONS: ReadonlySet<string> = new Set(["pulse", "routes", "live"]);
 const TAB_BAR_ITEMS = ITEMS.filter((item) => TAB_BAR_DESTINATIONS.has(item.to));
-const MORE_SHEET_ITEMS = ITEMS.filter((item) => !TAB_BAR_DESTINATIONS.has(item.to));
+const MORE_SHEET_ITEMS = [
+  ...ITEMS.filter((item) => !TAB_BAR_DESTINATIONS.has(item.to)),
+  { to: "bus-town", labelKey: "nav.bus-town", Icon: Bus } as const,
+];
 
 const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
 
@@ -401,6 +407,7 @@ export function Sidebar() {
       padding: "6px 2px 2px",
       color: isActive ? "var(--accent)" : "var(--text-secondary)",
       fontSize: "var(--text-xs)",
+      fontWeight: 700,
       textDecoration: "none",
       transition: "color var(--transition)",
     });
@@ -444,7 +451,7 @@ export function Sidebar() {
                 onFocus={() => prefetchRouteChunk(item.to)}
                 style={tabItemStyle}
               >
-                <item.Icon size={20} strokeWidth={1.5} aria-hidden="true" />
+                <item.Icon size={20} strokeWidth={2} aria-hidden="true" />
                 <span>{t(item.labelKey)}</span>
               </PendingNavLink>
             ))}
@@ -455,7 +462,7 @@ export function Sidebar() {
               onFocus={() => prefetchRouteChunk("ask")}
               style={tabItemStyle}
             >
-              <HelpCircle size={20} strokeWidth={1.5} aria-hidden="true" />
+              <HelpCircle size={20} strokeWidth={2} aria-hidden="true" />
               <span>{t("nav.ask")}</span>
             </PendingNavLink>
           )}
@@ -468,7 +475,7 @@ export function Sidebar() {
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(true)}
           >
-            <MoreHorizontal size={20} strokeWidth={1.5} aria-hidden="true" />
+            <MoreHorizontal size={20} strokeWidth={2} aria-hidden="true" />
             <span>{t("nav.more")}</span>
           </button>
         </nav>
