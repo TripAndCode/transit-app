@@ -9,7 +9,7 @@ when there is none (see ``pipeline.flags``).
 to enable. The reset endpoint wipes all caches, which is a cheap DoS lever
 if exposed, so it additionally requires an authenticated admin and is
 CSRF-guarded; the read-only snapshot has no user dependency, matching sibling
-read-routers (reports, overview, ask_dashboard).
+read-routers (reports, overview).
 
 The flag gate is a router-level dependency so it runs ahead of the per-route
 auth dependency. A disabled surface must answer 404 to every caller — an

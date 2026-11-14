@@ -10,19 +10,18 @@ The request body carries the global :class:`~api.range.RangeCtx`
 user's chosen window without having to mention it in the prompt.
 """
 
-import asyncio
 import json
 import logging
-from typing import Any, Literal
+from typing import Any
 
 import asyncpg
 import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
-from api.deps import get_agency, get_ch, get_conn, get_current_user_optional, get_locale, get_pooled_conn
+from api.deps import get_agency, get_ch, get_current_user_optional, get_locale, get_pooled_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import (
     RangeCtx,
@@ -31,14 +30,11 @@ from api.range import (
 )
 from api.security import User, csrf_guard
 from pipeline.flags import aflag
-from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.chat import _chat_str, ch_failure_str, chat_with_tools
-from pipeline.query.embeddings import get_embedder
 from pipeline.query.followup import MAX_QUESTION_CHARS
 from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
-from pipeline.query.rag_index import nearest as rag_nearest
-from pipeline.query.router import _load_golden, is_follow_up, needs_history, needs_previous_turn, route_or_examples
+from pipeline.query.router import is_follow_up, needs_history, needs_previous_turn, route_or_examples
 from pipeline.query.tools import _summary, dispatch, render_tool_result
 
 _log = logging.getLogger(__name__)
@@ -79,26 +75,10 @@ class Turn(BaseModel):
         return v
 
 
-# The tab hints the Copilot panel may send (frontend/src/components/CopilotPanel.tsx),
-# not the SPA's route names: the closed set the system prompt accepts. An enum,
-# not a free-form string, so an arbitrary/oversized value can never reach the
-# system prompt that chat_with_tools builds from this hint.
-PanelTab = Literal["overview", "map", "ask", "live", "analysis", "network"]
-
-
-class PanelCtx(BaseModel):
-    """Grounding hint from the Copilot side panel (e.g. {"tab": "overview"})."""
-
-    tab: PanelTab | None = None
-
-
 class AskRequest(BaseModel):
     question: str = Field(max_length=MAX_QUESTION_CHARS)
     ctx: AskCtx | None = None
     history: list[Turn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
-    # Threaded through to chat_with_tools's system-prompt addendum only — never
-    # consulted by the rules/embedding routing stage above.
-    panel_ctx: PanelCtx | None = None
 
 
 class AskResponse(BaseModel):
@@ -313,7 +293,6 @@ async def ask(
             history=history,
             ch=ch,
             force_tool_call=force_tool_call,
-            panel_ctx=body.panel_ctx.model_dump() if body.panel_ctx else None,
             user_id=user.user_id if user is not None else None,
             llm_approved=user.llm_approved if user is not None else False,
         )
@@ -353,254 +332,3 @@ async def ask(
             )
 
     return resp
-
-
-# Build-schema metadata
-
-# Tools that are useful in the guided builder UI.  capabilities and route_meta
-# are excluded: capabilities is a discovery tool, route_meta requires a route
-# arg that isn't meaningful as a standalone builder form.
-_BUILD_TOOL_NAMES = ("top_n", "time_series", "compare_segments", "route_stats", "describe_data")
-
-# Per-tool labels (ja / en) and field override metadata for the builder UI.
-# This dict supplies the human-readable labels and the enum option lists for
-# each builder tool.
-# NOTE: ``service_type`` is intentionally absent from every tool's builder
-# fields, as are dates. Those overlap with the per-thread FilterContextBar
-# (期間 ・ 曜日 ・ 時間帯), which is the single source of truth for time + DOW
-# scope. Chips MAY pre-set these as args (overriding filter context for that
-# specific dispatch); the builder UI does not duplicate them.
-_BUILD_TOOL_META: dict[str, dict[str, Any]] = {
-    "top_n": {
-        "label_ja": "ランキング",
-        "label_en": "Ranking",
-        "fields": [
-            {
-                "key": "metric",
-                "type": "enum",
-                "options": ["avg_delay", "on_time_rate", "worst_5min"],
-            },
-            {"key": "n", "type": "int", "min": 1, "max": 50, "default": 10},
-            {"key": "best_first", "type": "bool", "optional": True},
-        ],
-    },
-    "time_series": {
-        "label_ja": "トレンド",
-        "label_en": "Trend",
-        "fields": [
-            {"key": "route", "type": "string", "optional": True},
-            {
-                "key": "granularity",
-                "type": "enum",
-                "options": ["day", "week", "month"],
-                "default": "day",
-            },
-        ],
-    },
-    "compare_segments": {
-        "label_ja": "セグメント比較",
-        "label_en": "Segment Comparison",
-        "fields": [
-            {"key": "route", "type": "string", "optional": True},
-            {
-                "key": "dimension",
-                "type": "enum",
-                "options": ["dow", "service_type"],
-                "default": "dow",
-            },
-        ],
-    },
-    "route_stats": {
-        "label_ja": "路線統計",
-        "label_en": "Route Stats",
-        "fields": [
-            {"key": "route", "type": "string"},
-        ],
-    },
-    "describe_data": {
-        "label_ja": "データ照会",
-        "label_en": "Data Info",
-        "fields": [
-            {
-                "key": "kind",
-                "type": "enum",
-                "options": [
-                    "routes",
-                    "stops",
-                    "date_range",
-                    "agencies",
-                    "sample_counts",
-                    "overview",
-                    "metrics",
-                ],
-            },
-            {"key": "limit", "type": "int", "min": 1, "max": 200, "default": 50},
-        ],
-    },
-}
-
-
-@router.get("/ask/build-schema", response_model=None)
-async def ask_build_schema(
-    request: Request,
-    agency_id: int = Depends(get_agency),
-    locale: str = Depends(get_locale),
-) -> dict[str, Any]:
-    """Return tool-form metadata for the frontend's guided build mode.
-
-    Driven by ``_BUILD_TOOL_META``. The ``capabilities`` and ``route_meta``
-    tools are excluded as they are not useful in a builder.
-    """
-    tools_out = []
-    for name in _BUILD_TOOL_NAMES:
-        meta = _BUILD_TOOL_META.get(name, {})
-        entry: dict[str, Any] = {
-            "name": name,
-            "label_ja": meta.get("label_ja", name),
-            "label_en": meta.get("label_en", name),
-            "fields": meta.get("fields", []),
-        }
-        tools_out.append(entry)
-
-    return {"tools": tools_out}
-
-
-# Suggest endpoint
-
-
-class AskSuggestion(BaseModel):
-    """One autocomplete candidate: the stored question plus the tool call it
-    maps to. ``distance`` is the cosine distance from the typed query, or
-    ``None`` for the starter set (which is ranked by hit count, not similarity)."""
-
-    question: str
-    tool: str
-    args: dict[str, Any]
-    distance: float | None
-
-
-class AskSuggestResponse(BaseModel):
-    """Envelope for ``GET /ask/suggest`` — an object, so the endpoint can later
-    say *why* it has nothing to offer instead of returning a bare empty array."""
-
-    rows: list[AskSuggestion] = []
-
-
-def _ask_suggestion(golden: dict, chunk_id: str, question: str, distance: float | None) -> AskSuggestion:
-    """Pair a RAG chunk with the golden-set tool call it stands for; a chunk
-    with no golden entry still shows up, with an empty tool call."""
-    tool, args = golden.get(chunk_id, ("", {}))
-    return AskSuggestion(question=question, tool=tool, args=dict(args), distance=distance)
-
-
-# Autocomplete runs per keystroke, so a persistently broken embedder or vector
-# index would emit a traceback per request and bury every other warning in the
-# log. The first failure of each kind is a warning with its traceback — the
-# signal an operator needs — and the repeats that follow are debug until the
-# path succeeds again, which clears the state so a later outage is announced
-# afresh. Losing the failure entirely to `debug` is the other way to get this
-# wrong.
-_SUGGEST_FAILING: set[str] = set()
-
-
-def _log_suggest_failure(stage: str) -> None:
-    if stage in _SUGGEST_FAILING:
-        _log.debug("ask_suggest: %s still failing; returning no suggestions", stage, exc_info=True)
-        return
-    _SUGGEST_FAILING.add(stage)
-    _log.warning("ask_suggest: %s failed; returning no suggestions", stage, exc_info=True)
-
-
-@router.get("/ask/suggest", response_model=AskSuggestResponse)
-@limiter.limit(tier_limit)
-async def ask_suggest(
-    request: Request,
-    agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
-    q: str = Query(default="", max_length=MAX_QUESTION_CHARS),
-    limit: int = Query(default=8),
-) -> AskSuggestResponse:
-    """Live autocomplete for the Ask input.
-
-    With a non-empty ``q``: e5-embed the query, nearest-neighbour against
-    ``rag_chunks``, return up to ``limit`` (max 12) results ordered by
-    ascending cosine distance.
-
-    With an empty ``q``: return top-N most-hit chunks as a starter chip
-    set, ordered by ``hit_count DESC``.
-    """
-    # Clamp limit to [1, 12] even if FastAPI validation lets something through.
-    limit = max(1, min(12, limit))
-
-    if not q or not q.strip():
-        # Empty query: return top-N most-hit chunks for this agency.
-        rows = await conn.fetch(
-            """
-            SELECT rc.chunk_id, rc.content
-            FROM rag_chunks rc
-            LEFT JOIN ask_intent_cache aic
-              ON aic.last_question = rc.content
-             AND aic.agency_id = rc.agency_id
-            WHERE rc.agency_id = $1
-            ORDER BY aic.hit_count DESC NULLS LAST, rc.chunk_id
-            LIMIT $2
-            """,
-            agency_id,
-            limit,
-        )
-        golden = _load_golden()
-        return AskSuggestResponse(rows=[_ask_suggestion(golden, row["chunk_id"], row["content"], None) for row in rows])
-
-    # Non-empty query: embed + NN search.
-    embedder = get_embedder()
-    if not getattr(embedder, "available", False):
-        return AskSuggestResponse()
-
-    try:
-        qvec = await asyncio.to_thread(embedder.embed, q.strip(), mode="query")
-    except Exception:
-        _log_suggest_failure("embedding")
-        return AskSuggestResponse()
-
-    try:
-        matches = await rag_nearest(conn, agency_id, qvec, k=limit)
-    except Exception:
-        _log_suggest_failure("rag_nearest")
-        return AskSuggestResponse()
-    _SUGGEST_FAILING.clear()
-
-    golden = _load_golden()
-    return AskSuggestResponse(rows=[_ask_suggestion(golden, m.chunk_id, m.content, m.distance) for m in matches])
-
-
-# Edit-action endpoint
-
-
-class EditActionRequest(BaseModel):
-    signature_hash: str
-    action: str
-
-
-@router.post("/ask/edit-action")
-@limiter.limit(tier_limit)
-async def ask_edit_action(
-    request: Request,
-    body: EditActionRequest,
-    agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> dict[str, bool]:
-    """Record the user's verdict on a cached interpretation.
-
-    Body: ``{"signature_hash": str, "action": "confirmed"|"edited"}``
-    Returns ``{"ok": true}`` on success, 400 on unknown action.
-
-    Same CSRF + rate-limit guards as ``POST /ask`` — without them a cross-
-    origin attacker could mark arbitrary cache rows as ``edited`` (blocking
-    promotion) or ``confirmed`` (rubber-stamping bad interpretations).
-    """
-    csrf_guard(request)
-    try:
-        await _intent_cache.update_user_action(conn, body.signature_hash, agency_id, body.action)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"ok": True}

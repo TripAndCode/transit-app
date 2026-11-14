@@ -99,8 +99,8 @@ async def get_agency(agency_id: int, request: Request):
     ``Depends(get_conn)``: a ``yield`` dependency stays open until the request
     finishes, so borrowing that one would pin a pool connection for the whole
     handler — including across a multi-second provider call on the routes that
-    make one (``/copilot/insight``, ``/conversations/{id}/followup``), which
-    deliberately declare no ``conn`` of their own for exactly that reason.
+    make one (``/conversations/{id}/followup``), which deliberately declares
+    no ``conn`` of its own for exactly that reason.
     Routes that do declare ``Depends(get_conn)`` list it after this
     dependency, so the two acquisitions are sequential, not concurrent.
     """

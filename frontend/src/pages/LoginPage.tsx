@@ -111,7 +111,7 @@ export function LoginPage() {
           {configError ? (
             <button
               type="button"
-              className="login-card__btn login-card__btn--local"
+              className="btn btn--primary login-card__btn login-card__btn--local"
               onClick={() => { void refetchConfig(); }}
             >
               <span>{t("common.retry")}</span>
@@ -160,9 +160,11 @@ export function LoginPage() {
 
         {config?.auth_enabled && (
           <div className="login-card__buttons">
+            {/* Every identity provider wears the same button, so none reads as
+                the recommended one. */}
             <button
               type="button"
-              className="login-card__btn login-card__btn--provider"
+              className="btn btn--secondary login-card__btn"
               aria-label={t("account.login.google_aria")}
               aria-disabled={pending !== null}
               onClick={handleSubmit("google")}
@@ -172,7 +174,7 @@ export function LoginPage() {
             </button>
             <button
               type="button"
-              className="login-card__btn login-card__btn--provider"
+              className="btn btn--secondary login-card__btn"
               aria-label={t("account.login.github_aria")}
               aria-disabled={pending !== null}
               onClick={handleSubmit("github")}
@@ -214,7 +216,7 @@ export function LoginPage() {
             </div>
             <button
               type="submit"
-              className="login-card__btn login-card__btn--local"
+              className="btn btn--primary login-card__btn login-card__btn--local"
               aria-disabled={localPending}
               disabled={localPending}
             >

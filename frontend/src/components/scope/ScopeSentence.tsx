@@ -306,7 +306,7 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
           onSelect={(rc) => update(presetScopePatch(rc))}
         />
       )}
-      <button type="button" className="scope-pill" aria-pressed={pinned} onClick={togglePinned}>
+      <button type="button" className="btn btn--secondary btn--sm" aria-pressed={pinned} onClick={togglePinned}>
         {t("scope.pin")}
       </button>
     </>
