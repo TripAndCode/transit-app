@@ -193,7 +193,7 @@ def test_on_time_tools_collapse_their_best_first_default(tool):
     assert canonicalize(tool, {"k": 5, "best_first": False}) != omitted
 
 
-async def test_explicit_all_services_survives_canonicalization_and_dispatches_the_same(monkeypatch):
+async def test_explicit_all_services_survives_canonicalization_and_dispatches_the_same(monkeypatch, unstamped_tools):
     """With the UI on 平日, an explicit service_type='all' ranks every service,
     where leaving it out keeps 平日. Canonicalization must not turn the first
     into the second, or the intent-cache path answers a different question

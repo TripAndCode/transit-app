@@ -463,9 +463,8 @@ Useful entry points:
 - Dev databases are read-only; see `AGENTS.md`. Use the throwaway `:5544`/
   `:8124` pair described above for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
-- Branch commits carry no `[skip ci]`, so every push to a PR runs CI and the
-  merge gate has a result to read. Only the squash-merge commit carries the
-  trailer, keeping `main` from re-running what the branch proved. See
+- No commit carries `[skip ci]`, the squash-merge included, so every push to a
+  PR runs CI for the merge gate and every merge runs CI on `main`. See
   `AGENTS.md` for the rule and `transit-app-gotchas` for how it behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.

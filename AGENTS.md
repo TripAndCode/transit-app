@@ -225,13 +225,13 @@ tier routing, the high-risk overlay and the fix cap.
   conflicts, and re-run the review pass on the result before readying or merging.
 - Every PR body starts with `**Origin:** Interactive session`, as in
   `.github/PULL_REQUEST_TEMPLATE.md`.
-- CI must be green on the PR's head before it merges. Branch commits carry no
-  `[skip ci]`: every push to a PR runs CI, which is what the gate reads. Only the
-  squash-merge commit keeps the trailer, so `main` does not re-run what the branch
-  already proved.
-  - `transit-app-gotchas` owns the mechanism and its traps. Chiefly, a tip that does
-    carry the trailer produces no run at all, so the gate has nothing to read rather
-    than something to fail.
+- CI must be green on the PR's head before it merges. No commit carries
+  `[skip ci]`, the squash-merge included: every push to a PR runs CI, which is what
+  the gate reads, and every merge runs CI on `main`, which checks the merged result
+  the PR head never saw and measures backend coverage.
+  - `transit-app-gotchas` owns the trailer's mechanism. A commit that carries it
+    produces no run at all, so a gate has nothing to read rather than something to
+    fail.
 - For stacked PRs, retarget dependants to `main` before deleting their base branch;
   GitHub otherwise closes them.
 - After a PR merge, clean up persistent local/VPS clones with `make git-cleanup`

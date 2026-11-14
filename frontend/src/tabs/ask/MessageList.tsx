@@ -61,6 +61,7 @@ function Bubble({
             tool={msg.tool}
             args={msg.args}
             conditions={msg.conditions}
+            definition={msg.definition}
             onChip={onChip}
           />
         ) : (

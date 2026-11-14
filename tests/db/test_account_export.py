@@ -147,3 +147,20 @@ async def test_an_action_someone_else_took_on_the_account_exports_without_their_
         ("suspended", None, None),
     ]
     assert "10.0.0.9" not in json.dumps(data, default=str)
+
+
+@pytest.mark.asyncio
+async def test_the_export_holds_each_saved_cards_method_stamp(aconn, aagency_id):
+    uid = await aconn.fetchval("INSERT INTO users (email) VALUES ('stamp@x') RETURNING user_id")
+    conv = await aconn.fetchval(
+        "INSERT INTO ask_conversations (user_id, agency_id, title) VALUES ($1, $2, 't') RETURNING conversation_id",
+        uid,
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO ask_conversation_messages (conversation_id, role, tool, definition) VALUES "
+        "($1, 'assistant', 'on_time', '{\"preset\": \"standard_m1_p5\"}'::jsonb), ($1, 'assistant', 'on_time', NULL)",
+        conv,
+    )
+    [conversation] = (await collect_user_data(aconn, uid))["conversations"]
+    assert [m["definition"] for m in conversation["messages"]] == [{"preset": "standard_m1_p5"}, None]

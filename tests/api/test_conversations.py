@@ -1128,3 +1128,35 @@ async def test_followup_is_disabled_when_only_a_non_allowed_provider_is_keyed(co
     assert r.status_code == 503
     assert r.json()["detail"] == "followup_disabled"
     assert flag.json()["enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_only_a_card_with_an_intent_to_record_runs_inside_a_transaction(conv_app, monkeypatch):
+    """A signed-in card records its intent, so its dispatch runs in a savepoint
+    that keeps the thread's transaction writable after a failure. A signed-out
+    card writes nothing, so its dispatch, a ClickHouse scan possibly, holds no
+    transaction open on its connection."""
+    import api.routers.conversations as conv_router
+    from pipeline.query.results import ToolResult
+
+    app, agency, uid, _pool = conv_app
+    in_transaction: list[bool] = []
+
+    async def fake_dispatch(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        in_transaction.append(conn.is_in_transaction())
+        return ToolResult(kind="kv", summary="ok")
+
+    monkeypatch.setattr(conv_router, "dispatch", fake_dispatch)
+    async with _authed_client(app, uid) as c:
+        signed_out = await c.post(
+            f"/api/{agency}/ask/card", json={"tool": "describe_data", "args": {}, "filter_ctx": {}}, headers=_CSRF
+        )
+        assert signed_out.status_code == 200, signed_out.text
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        signed_in = await c.post(
+            f"/api/{agency}/conversations/{cr.json()['conversation_id']}/messages",
+            json={"tool": "describe_data", "args": {}},
+            headers=_CSRF,
+        )
+        assert signed_in.status_code == 200, signed_in.text
+    assert in_transaction == [False, True]

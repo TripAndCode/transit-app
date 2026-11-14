@@ -28,13 +28,13 @@
 #        COVERAGE=1 scripts/run_full_ci.sh   # same gate, plus a coverage report
 #
 # Coverage is off by default, matching the run this script exists to
-# reproduce: ci.yml's `coverage` job runs only on a push to `main`, which the
-# squash-merge's CI-skip trailer suppresses, so this script with COVERAGE=1 is
-# where the number comes from. Nothing gates on it and instrumenting every
-# line the suite executes is not free. Every other use of this script -- the pre-merge
-# check, the re-check after a review fix -- is a pass/fail gate that would
-# be paying for a report nobody reads, and on a host sharing CPU with a
-# concurrent job that is minutes per run. Set COVERAGE=1 when the number
+# reproduce: ci.yml's `coverage` job runs only on a push to `main`, so before a
+# merge this script with COVERAGE=1 is where the number comes from. Nothing
+# gates on it and instrumenting every line the suite executes is not free.
+# Every other use of this script -- the pre-merge check, the re-check after a
+# review fix -- is a pass/fail gate that would be paying for a report nobody
+# reads, and on a host sharing CPU with a concurrent job that is minutes per
+# run. Set COVERAGE=1 when the number
 # itself is the point.
 #
 # Requires: docker, curl, poetry (with `poetry install` already run in this

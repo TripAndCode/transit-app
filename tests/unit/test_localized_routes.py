@@ -31,6 +31,7 @@ LOCALIZED_GET_ROUTES = {
 # Not cached as GET responses: Ask answers and follow-ups are mutations.
 LOCALIZED_POST_ROUTES = {
     ("POST", "/api/{agency_id}/ask"),
+    ("POST", "/api/{agency_id}/ask/card"),
     ("POST", "/api/{agency_id}/conversations/{conversation_id}/followup"),
     ("POST", "/api/{agency_id}/conversations/{conversation_id}/messages"),
 }

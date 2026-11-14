@@ -272,18 +272,19 @@ describe("hooks for endpoints that write text in the request's language", () => 
   });
 });
 
+/** A signed-out card answer with no result, as POST /ask/card returns a
+ *  failed dispatch. */
+function failedCard(rendered: string) {
+  return { tool: "top_n", args: {}, signature_hash: null, result: null, rendered_summary: rendered, conditions: null, definition: null };
+}
+
 // ─── builderSummary: also private to hooks.ts. Exercised through the one
 // caller that falls back to it — useAppendMessage's anonymous path, when no
 // explicit user_summary is supplied. ─────────────────────────────────────────
 describe("builderSummary (observed via useAppendMessage's anon fallback label)", () => {
   it("renders a translated tool label plus up to 4 translated key: value pairs", async () => {
     sessionUserId = null; // anonymous
-    mockApiPost.mockResolvedValue({
-      answer: "done",
-      tool_call: null,
-      result: null,
-      ctx: { from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all" },
-    });
+    mockApiPost.mockResolvedValue(failedCard("done"));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { result } = renderHook(() => useAppendMessage(1), withProviders(queryClient));
 
@@ -307,12 +308,7 @@ describe("builderSummary (observed via useAppendMessage's anon fallback label)",
 
   it("falls back to the tool name itself for an unrecognized tool with no args", async () => {
     sessionUserId = null;
-    mockApiPost.mockResolvedValue({
-      answer: "done",
-      tool_call: null,
-      result: null,
-      ctx: { from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all" },
-    });
+    mockApiPost.mockResolvedValue(failedCard("done"));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { result } = renderHook(() => useAppendMessage(1), withProviders(queryClient));
 
@@ -427,25 +423,45 @@ describe("useAppendMessage authed/anon fork", () => {
     expect(conversationsAnonMock.appendMessage).not.toHaveBeenCalled();
   });
 
-  it("dispatches via /ask and appends both messages to local storage when anonymous", async () => {
+  it("runs the card and keeps its answer and method stamp in local storage when anonymous", async () => {
     sessionUserId = null;
+    const definition = { preset: null, early_tolerance_sec: null, late_tolerance_sec: null, source: "aggregates" };
+    const conditions = { dow: "weekday", time_band: "all", service: "all" };
+    const answer = { kind: "table", summary: "Top 5", rows: [["R1", 2.5]], columns: ["route_code", "avg_min"], series: [], pairs: [] };
     mockApiPost.mockResolvedValue({
-      answer: "The answer",
-      tool_call: null,
-      result: null,
-      ctx: { from: "2026-01-01", to: "2026-01-31", dow: "all", time_band: "all" },
+      tool: "top_n",
+      args: { metric: "avg_delay", k: 5 },
+      signature_hash: "0123456789abcdef",
+      result: answer,
+      rendered_summary: "The answer",
+      conditions,
+      definition,
     });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { result } = renderHook(() => useAppendMessage(1), withProviders(queryClient));
 
     let outcome: Awaited<ReturnType<typeof result.current.mutateAsync>> | undefined;
+    const filter_ctx = { from_date: "2026-01-01", to_date: "2026-01-31", dow: "weekday" as const };
     await act(async () => {
-      outcome = await result.current.mutateAsync({ conversationId: "local-1", tool: "top_n", args: {}, user_summary: "Ranking" });
+      outcome = await result.current.mutateAsync({
+        conversationId: "local-1", tool: "top_n", args: { metric: "avg_delay" }, user_summary: "Ranking", filter_ctx,
+      });
     });
 
-    expect(mockApiPost).toHaveBeenCalledWith("/api/1/ask", { question: expect.stringContaining("__build__ top_n") });
+    expect(mockApiPost).toHaveBeenCalledWith("/api/1/ask/card", { tool: "top_n", args: { metric: "avg_delay" }, filter_ctx });
     expect(conversationsAnonMock.appendMessage).toHaveBeenCalledTimes(2);
-    expect(outcome?.assistant.rendered_summary).toBe("The answer");
+    expect(conversationsAnonMock.appendMessage).toHaveBeenLastCalledWith("local-1", outcome?.assistant);
+    expect(outcome?.assistant).toMatchObject({
+      role: "assistant",
+      tool: "top_n",
+      args: { metric: "avg_delay", k: 5 },
+      signature_hash: "0123456789abcdef",
+      result: answer,
+      rendered_summary: "The answer",
+      conditions,
+      definition,
+    });
+    expect(outcome?.user).toMatchObject({ role: "user", rendered_summary: "Ranking", definition: null });
   });
 });
 
