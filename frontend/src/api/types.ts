@@ -925,22 +925,6 @@ export type ToolResult = {
   pairs?: [string, unknown][];
 };
 
-export type AskResponse = {
-  answer: string;
-  tool_call: { name: string; arguments: Record<string, unknown> } | null;
-  result: ToolResult | null;
-  ctx: ResponseCtx;
-  // Canonical intent fields — null when ASK_INTENT_CACHE_ENABLED is off
-  signature_hash?: string | null;
-  confidence?: number | null;
-  canonical_args?: Record<string, unknown> | null;
-  cache_outcome?: CacheOutcome | null;
-};
-
-// Canonical intent + guided UX
-
-type CacheOutcome = "hit" | "miss" | "bypass";
-
 export type FilterCtx = {
   dow?: DowFilter;
   time_band?: string;
@@ -985,10 +969,21 @@ export type ConvMessage = {
    *  message was sent. `null` for user messages and for a dispatch-free
    *  assistant reply (e.g. an LLM-grounded follow-up). */
   conditions?: { dow: string; time_band: string; service: string } | null;
+  /** The method stamp the report computing this card's figures carries, as
+   *  the card was answered. `null` when no report computes them, and absent
+   *  from a card saved before cards carried one: neither shows a stamp. */
+  definition?: DefinitionMeta | null;
   created_at: string;
 };
 
 export type AppendMessageResult = { user: ConvMessage; assistant: ConvMessage };
+
+/** POST /ask/card: a signed-out card's answer, the assistant fields a
+ *  signed-in thread stores, for the browser to keep in its own thread. */
+export type CardAnswer = Pick<
+  ConvMessage,
+  "tool" | "args" | "signature_hash" | "result" | "rendered_summary" | "conditions" | "definition"
+>;
 
 // Anonymous (localStorage) shape — mirrors a Conversation + inline messages
 export type AnonThread = {

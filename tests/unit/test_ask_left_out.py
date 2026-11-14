@@ -16,6 +16,8 @@ from pipeline import route_catalog
 from pipeline.query import tools
 from pipeline.route_catalog import RETIRED, ZERO_DELAY
 
+pytestmark = pytest.mark.usefixtures("unstamped_tools")
+
 _CTX = RangeCtx(from_date=date(2026, 9, 24), to_date=date(2026, 10, 23))
 _LEFT_OUT = {RETIRED: frozenset({"OLD"}), ZERO_DELAY: frozenset({"ECHO"})}
 

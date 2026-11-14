@@ -10,7 +10,8 @@ import asyncpg
 import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
 from api.middleware.ratelimit import limiter, tier_limit
@@ -23,6 +24,7 @@ from pipeline.query.chat import _chat_str, ch_failure_str
 from pipeline.query.followup_context import select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.tools import dispatch, render_tool_result
+from pipeline.reports.definition import DefinitionMeta
 
 _log = logging.getLogger(__name__)
 
@@ -340,9 +342,9 @@ async def append_message_endpoint(
 
     ctx_obj = _ctx_from_stored_filters(conv["filter_ctx"])
 
-    # Wrap user-msg + cache upsert + dispatch + assistant-msg in one transaction.
-    # Without it, a concurrent DELETE of this conversation would FK-cascade-delete
-    # the user_msg row mid-flight, producing a 500 instead of a clean 404.
+    # User message + card in one transaction. Without it, a concurrent DELETE of
+    # this conversation would FK-cascade-delete the user_msg row mid-flight,
+    # producing a 500 instead of a clean 404.
     async with conn.transaction():
         user_msg = await _conv.append_message(
             conn,
@@ -354,114 +356,166 @@ async def append_message_endpoint(
             result=None,
             rendered_summary=user_summary,
         )
+        card = await _run_card(
+            conn, resolved_tool, resolved_args, ctx_obj, agency_id, locale, ch, cache_question=user_summary
+        )
+        assistant_msg = await _conv.append_message(conn, conversation_id, role="assistant", **card)
+    return {"user": user_msg, "assistant": assistant_msg}
 
-        # Canonicalize + cache upsert (always bumps hit_count for chip/builder paths)
-        try:
-            can_args = canonicalize(resolved_tool, resolved_args)
-        except ValueError:
-            can_args = dict(resolved_args)
-        sig_hash = signature_hash(resolved_tool, can_args)
-        try:
-            # Nested transaction (asyncpg emits a SAVEPOINT here since we're
-            # already inside conn.transaction()). Any Postgres error raised by
-            # dispatch() below — not just the UndefinedTableError case — would
-            # otherwise abort the OUTER transaction, poisoning `conn` so the
-            # append_message() calls in the except branches below raise
-            # asyncpg.exceptions.InFailedSQLTransactionError instead of writing
-            # the intended graceful tool_error/service_unavailable message.
-            # The savepoint confines that abort to the upsert+dispatch scope,
-            # leaving the outer transaction (holding user_msg) writable.
-            async with conn.transaction():
+
+async def _run_card(
+    conn: asyncpg.Connection,
+    tool: str,
+    args: dict[str, Any],
+    ctx_obj: RangeCtx,
+    agency_id: int,
+    locale: str,
+    ch: AsyncClient,
+    *,
+    cache_question: str | None,
+) -> dict[str, Any]:
+    """Dispatch one notebook card and return its assistant message's fields,
+    as a signed-in thread stores them and a signed-out one keeps them in the
+    browser: the answer, the conditions it ran under and its method stamp
+    (:attr:`pipeline.query.results.ToolResult.definition`). A failed dispatch
+    is a message with no result and no stamp. *cache_question*, when given,
+    is recorded in the intent cache under the card's signature."""
+    try:
+        can_args = canonicalize(tool, args)
+    except ValueError:
+        can_args = dict(args)
+    sig_hash = signature_hash(tool, can_args)
+
+    def failed(rendered: str) -> dict[str, Any]:
+        return {
+            "tool": tool,
+            "args": can_args,
+            "signature_hash": sig_hash,
+            "result": None,
+            "rendered_summary": rendered,
+        }
+
+    try:
+        # A savepoint (or, outside a transaction, one of its own). Any Postgres
+        # error raised by dispatch() below -- not just the UndefinedTableError
+        # case -- would otherwise abort the caller's transaction, so the
+        # message written for the failure would raise
+        # InFailedSQLTransactionError instead.
+        async with conn.transaction():
+            if cache_question is not None:
                 await _intent_cache.upsert(
                     conn,
                     sig_hash,
-                    IntentSignature(tool=resolved_tool, args=resolved_args, confidence=1.0),
+                    IntentSignature(tool=tool, args=args, confidence=1.0),
                     can_args,
                     agency_id,
-                    question=user_summary,
+                    question=cache_question,
                 )
-                result = await dispatch(resolved_tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
-        except HTTPException as exc:
-            if exc.status_code != 503:
-                raise
-            _log.warning("Tool %s unavailable: %s", resolved_tool, exc.detail)
-            rendered = _chat_str("service_unavailable", locale, name=resolved_tool)
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=resolved_tool,
-                args=can_args,
-                signature_hash=sig_hash,
-                result=None,
-                rendered_summary=rendered,
-            )
-            return {"user": user_msg, "assistant": assistant_msg}
-        except clickhouse_connect.driver.exceptions.Error as exc:
-            _log.exception("Tool %s failed: ClickHouse query error", resolved_tool)
-            rendered = ch_failure_str(exc, locale, name=resolved_tool)
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=resolved_tool,
-                args=can_args,
-                signature_hash=sig_hash,
-                result=None,
-                rendered_summary=rendered,
-            )
-            return {"user": user_msg, "assistant": assistant_msg}
-        except asyncpg.exceptions.UndefinedTableError:
-            # A missing agg_* table (migration/analyze behind) must propagate to
-            # FastAPI's registered aggregate_not_ready_handler (api/main.py +
-            # api/aggregate_errors.py) so the frontend gets the machine-readable
-            # {"code": "aggregate_not_ready"} 503 it reacts to — not a persisted
-            # tool_error that masks it. Every Ask/chat dispatch path lets this
-            # error propagate the same way (api/routers/ask.py,
-            # pipeline/query/chat.py). Propagating out of the outer
-            # `conn.transaction()` also rolls back user_msg, so the exchange is
-            # not half-written.
+            result = await dispatch(tool, can_args, ctx_obj, conn, agency_id, locale=locale, ch=ch)
+    except HTTPException as exc:
+        if exc.status_code != 503:
             raise
-        except Exception:
-            # Never interpolate raw exception text into a persisted message —
-            # it can carry internal details (SQL fragments, relation names,
-            # endpoint URLs) that would resurface every time this conversation
-            # is reloaded. Full detail still goes to the server-side log.
-            _log.exception("Tool %s failed", resolved_tool)
-            rendered = _chat_str("tool_error", locale, name=resolved_tool)
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=resolved_tool,
-                args=can_args,
-                signature_hash=sig_hash,
-                result=None,
-                rendered_summary=rendered,
-            )
-            return {"user": user_msg, "assistant": assistant_msg}
+        _log.warning("Tool %s unavailable: %s", tool, exc.detail)
+        return failed(_chat_str("service_unavailable", locale, name=tool))
+    except clickhouse_connect.driver.exceptions.Error as exc:
+        _log.exception("Tool %s failed: ClickHouse query error", tool)
+        return failed(ch_failure_str(exc, locale, name=tool))
+    except asyncpg.exceptions.UndefinedTableError:
+        # A missing agg_* table (migration/analyze behind) must propagate to
+        # FastAPI's registered aggregate_not_ready_handler (api/main.py +
+        # api/aggregate_errors.py) so the frontend gets the machine-readable
+        # {"code": "aggregate_not_ready"} 503 it reacts to -- not a persisted
+        # tool_error that masks it. Propagating out of the caller's
+        # transaction also rolls back its user message, so the exchange is
+        # not half-written.
+        raise
+    except Exception:
+        # Never interpolate raw exception text into a message -- it can carry
+        # internal details (SQL fragments, relation names, endpoint URLs) that
+        # would resurface every time this conversation is reloaded. Full
+        # detail still goes to the server-side log.
+        _log.exception("Tool %s failed", tool)
+        return failed(_chat_str("tool_error", locale, name=tool))
 
-        rendered = render_tool_result(result, locale=locale)
-        result_dict = {
+    return {
+        "tool": tool,
+        "args": can_args,
+        "signature_hash": sig_hash,
+        "result": {
             "kind": result.kind,
             "summary": result.summary,
             "rows": result.rows,
             "columns": result.columns,
             "series": result.series,
             "pairs": result.pairs,
-        }
-        assistant_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="assistant",
-            tool=resolved_tool,
-            args=can_args,
-            signature_hash=sig_hash,
-            result=result_dict,
-            rendered_summary=rendered,
-            conditions={"dow": ctx_obj.dow, "time_band": ctx_obj.time_band, "service": ctx_obj.service},
-        )
-    return {"user": user_msg, "assistant": assistant_msg}
+        },
+        "rendered_summary": render_tool_result(result, locale=locale),
+        "conditions": {"dow": ctx_obj.dow, "time_band": ctx_obj.time_band, "service": ctx_obj.service},
+        "definition": result.definition,
+    }
+
+
+_MAX_CARD_ARGS_BYTES = 8192
+
+
+class RunCard(BaseModel):
+    tool: str = Field(max_length=64)
+    args: dict[str, Any] = Field(default_factory=dict)
+    filter_ctx: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("args")
+    @classmethod
+    def _bounded_args(cls, v: dict[str, Any]) -> dict[str, Any]:
+        if len(json.dumps(v).encode()) > _MAX_CARD_ARGS_BYTES:
+            raise ValueError(f"args exceeds {_MAX_CARD_ARGS_BYTES} bytes serialized")
+        return v
+
+    @field_validator("filter_ctx")
+    @classmethod
+    def _bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_filter_ctx(v)
+
+
+class CardAnswer(BaseModel):
+    """A notebook card's assistant message fields, as a signed-in thread
+    stores them; ``definition`` is the method stamp of its figures, None when
+    no report computes them or the dispatch failed."""
+
+    tool: str
+    args: dict[str, Any]
+    signature_hash: str
+    result: dict[str, Any] | None = None
+    rendered_summary: str
+    conditions: dict[str, str] | None = None
+    definition: DefinitionMeta | None = None
+
+    @field_serializer("result")
+    def _result_as_stored(self, result: dict[str, Any] | None) -> Any:
+        # Pydantic dumps a Decimal inside an untyped dict as a string; the
+        # stored message holds it as a JSON number, and the browser's copy
+        # must chart the same.
+        return jsonable_encoder(result)
+
+
+@router.post("/ask/card", response_model=CardAnswer)
+@limiter.limit(tier_limit)
+async def run_card_endpoint(
+    request: Request,
+    body: RunCard,
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+    locale: str = Depends(get_locale),
+) -> CardAnswer:
+    """Answer one notebook card for a signed-out thread, which lives only in
+    the browser: nothing is stored, and the card comes back with the fields a
+    signed-in thread stores, its method stamp included, scoped by
+    *filter_ctx* exactly as a stored thread's filters scope its cards."""
+    csrf_guard(request)
+    ctx_obj = _ctx_from_stored_filters(body.filter_ctx)
+    return CardAnswer(
+        **await _run_card(conn, body.tool, body.args, ctx_obj, agency_id, locale, ch, cache_question=None)
+    )
 
 
 # ─── LLM follow-up (kill-switch gated) ────────────────────────────────────────

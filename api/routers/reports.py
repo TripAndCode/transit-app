@@ -29,7 +29,6 @@ from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.data_sources import credit_line
 from pipeline.day_types import DayType
 from pipeline.flags import aflag
-from pipeline.live_filing import schedule_join
 from pipeline.query.formatter import (
     format_council_summary_footnotes,
     format_council_summary_text,
@@ -85,8 +84,8 @@ from pipeline.reports.forecast import (
 from pipeline.reports.network import compute_agency_feed_quality, feed_quality_of
 from pipeline.reports.rankings import DEFAULT_PRESET, EARLY_ANY, EarlyTolerance, on_time_window, report_reads_aggregates
 from pipeline.reports.reference import REFERENCE_MIN_SAMPLES, ReferenceReason
+from pipeline.reports.report_stamp import report_definition, scanned_schedule
 from pipeline.reports.route_table import RouteTableOrder, compute_route_references, route_references_for
-from pipeline.reports.schedule_revision import ScheduleDays, read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
 from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
@@ -754,7 +753,7 @@ async def get_performance_standards(
         live = not report_reads_aggregates(
             "route_table", ctx, early_tolerance_sec=early_tolerance_sec, late_tolerance_sec=late_tolerance_sec
         )
-        schedule, joined = await _scanned_schedule(conn, ch, agency_id, ctx, live)
+        schedule, joined = await scanned_schedule(conn, ch, agency_id, ctx, live)
         on_time_definition = await stamp_build(
             conn,
             resolve_definition_meta("on_time", early_tolerance_sec, late_tolerance_sec, live=live),
@@ -779,27 +778,6 @@ async def get_performance_standards(
         on_time_definition=on_time_definition,
         scope_applied=_ON_TIME_STANDARDS_SCOPE if judges_on_time else _STANDARDS_SCOPE,
     )
-
-
-async def _scanned_schedule(
-    conn: asyncpg.Connection, ch: AsyncClient, agency_id: int, ctx: RangeCtx, live: bool
-) -> tuple[ScheduleDays, dict[tuple[int, str], str] | None]:
-    """The timetables the request's figures were computed under, for its
-    definition stamp: as analyze recorded them, or for a live scan, each day
-    named after the version the scan filed it under, with the content the
-    scan's join maps each (agency, name) to. Read here first in the request,
-    it is the join the process's cache then files the rows under, unless that
-    cache is cleared or its archive state expires before they are read. No
-    contents beside aggregates, or for an agency whose ingest stamps no
-    version, which has no join."""
-    schedule = await read_schedule_days(conn, agency_id, ctx.from_date, ctx.to_date)
-    if not live:
-        return schedule, None
-    join = await schedule_join(conn, ch, agency_id)
-    if join is None:
-        return schedule, None
-    joined = {(agency_id, stem): content for stem, content in zip(join.stems, join.hashes, strict=True)}
-    return schedule.filed_under(agency_id, join.force), joined
 
 
 class WeatherStation(BaseModel):
@@ -1698,20 +1676,15 @@ async def render_report(
     # Resolved from the same (now-validated) params compute_on_time/
     # compute_worst_5min themselves consume below, so this can never show a
     # tolerance different from the one the rows were actually computed with.
-    live = not report_reads_aggregates(
-        report_type,
+    definition, schedule = await report_definition(
+        conn,
+        ch,
+        agency_id,
         ctx,
-        csv=format == "csv",
+        report_type,
         early_tolerance_sec=early_tolerance_sec,
         late_tolerance_sec=late_tolerance_sec,
-    )
-    schedule, joined = await _scanned_schedule(conn, ch, agency_id, ctx, live)
-    definition = await stamp_build(
-        conn,
-        resolve_definition_meta(report_type, early_tolerance_sec, late_tolerance_sec, live=live),
-        agency_id,
-        schedule,
-        joined,
+        csv=format == "csv",
         # The council report states the figures its verdict reads instead.
         read_feed_quality=report_type != "council_summary",
     )

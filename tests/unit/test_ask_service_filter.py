@@ -8,6 +8,8 @@ import pytest
 from api.range import RangeCtx, resolve_service_dates, selected_service_dates
 from pipeline.query import tools
 
+pytestmark = pytest.mark.usefixtures("unstamped_tools")
+
 
 class _NoCalendarConn:
     """A connection whose agency has no calendar loaded: the weekday rule decides."""

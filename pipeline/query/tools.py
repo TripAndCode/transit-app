@@ -59,7 +59,9 @@ from pipeline.reports import (
     compute_trend_series,
     compute_worst_5min,
 )
-from pipeline.reports.rankings import _weighted_avg_min, on_time_window
+from pipeline.reports.definition import DefinitionMeta
+from pipeline.reports.rankings import _weighted_avg_min, on_time_window, threshold_aggregates_serve
+from pipeline.reports.report_stamp import report_definition
 from pipeline.route_catalog import left_out_unless_named, route_list, rows_to_fetch
 from pipeline.stats import annotate_on_time_pct_confidence
 
@@ -413,6 +415,9 @@ _LEFT_OUT_NOTE = (
 
 # The top_n schema's metric enum and _tool_top_n's guard both read this one tuple.
 _TOP_N_METRICS = ("avg_delay", "on_time_rate", "worst_5min")
+# The report each top_n metric's ranking is: compute_ranking orders the same
+# figures either way, so a best-first list is the ranking report's too.
+_TOP_N_REPORTS = {"avg_delay": "ranking", "on_time_rate": "on_time", "worst_5min": "worst_5min"}
 
 
 TOOLS: list[dict] = [
@@ -1028,6 +1033,17 @@ async def _require_registered_route(args: dict, conn, agency_id: int, locale: st
     return route
 
 
+async def _report_stamp(report_type: str, ctx: RangeCtx, conn, agency_id: int, ch, **kwargs: Any) -> DefinitionMeta:
+    """The stamp *report_type* carries for *ctx*, for a tool computing that
+    report's figures over *ctx*: the scope the tool computes for, after any
+    route or service it narrows to. Built before the figures, as the report
+    builds it. The tools left unstamped (route_stats, segment_hotspots,
+    route_stop_patterns, compare_segments by service type and the rest)
+    compute figures no report does, so no report's stamp describes them."""
+    definition, _ = await report_definition(conn, ch, agency_id, ctx, report_type, **kwargs)
+    return definition
+
+
 async def _tool_route_stats(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
@@ -1090,6 +1106,10 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
     if raw_service and raw_service in _SERVICE_TYPE_MAP:
         ctx = await resolve_service_dates(replace(ctx, service=_SERVICE_TYPE_MAP[raw_service]), conn, agency_id)
 
+    early_sec, late_sec = on_time_window() if metric == "on_time_rate" else (None, None)
+    definition = await _report_stamp(
+        _TOP_N_REPORTS[metric], ctx, conn, agency_id, ch, early_tolerance_sec=early_sec, late_tolerance_sec=late_sec
+    )
     left_out = await left_out_unless_named(conn, agency_id, ctx)
     n_fetch = rows_to_fetch(n, left_out)
     if metric == "avg_delay":
@@ -1126,6 +1146,7 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         summary=_summary(summary_key, lang=locale, label=label, count=len(rows)),
         rows=_without_service_slot(rows),
         columns=cols,
+        definition=definition,
     )
 
 
@@ -1138,6 +1159,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
         # compute function actually narrows the query (the post-filter on a
         # top-50 result was missing routes outside the top).
         cmp_ctx = replace(ctx, routes=(str(route),)) if route else ctx
+        definition = await _report_stamp("compare_ranking", cmp_ctx, conn, agency_id, ch)
         left_out = await left_out_unless_named(conn, agency_id, cmp_ctx)
         rows = await compute_compare_ranking(agency_id, cmp_ctx, conn, limit=rows_to_fetch(50, left_out), ch=ch)
         rows, _ = route_list(rows, 50, left_out, ())
@@ -1151,6 +1173,7 @@ async def _tool_compare_segments(args: dict, ctx: RangeCtx, conn, agency_id: int
             summary=_summary("compare_summary_dow", lang=locale),
             rows=[list(r) for r in rows],
             columns=["route_code", "heijitsu_min", "kyujitsu_min", "abs_delta", "signed_delta"],
+            definition=definition,
         )
 
     if dimension == "service_type":
@@ -1189,6 +1212,8 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
     series_ctx = replace(ctx, routes=(str(route),)) if route else ctx
     # Granularity comes from args (default "day") and is forwarded to the series.
     granularity = args.get("granularity", "day")
+    # The daily series alone, as the trend export writes it.
+    definition = await _report_stamp("trend", series_ctx, conn, agency_id, ch, csv=True)
     series = await compute_trend_series(agency_id, series_ctx, conn, granularity=granularity, ch=ch)
     days = series.get("days") or []
     if not days:
@@ -1206,6 +1231,7 @@ async def _tool_time_series(args: dict, ctx: RangeCtx, conn, agency_id: int, loc
             avg=avg,
         ),
         series=days,
+        definition=definition,
     )
 
 
@@ -1218,6 +1244,16 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
     # Card chips send "k"; LLM tool calls send "n".
     n = int(args.get("k", args.get("n", 20)))
     best_first = bool(args.get("best_first", True))
+    # A threshold is the window "up to threshold_sec late, any early departure
+    # on time", which compute_on_time reads by its own rule.
+    window, live = (
+        (on_time_window(), None)
+        if threshold_sec is None
+        else ((None, threshold_sec), not threshold_aggregates_serve(ctx, threshold_sec))
+    )
+    definition = await _report_stamp(
+        "on_time", ctx, conn, agency_id, ch, early_tolerance_sec=window[0], late_tolerance_sec=window[1], live=live
+    )
     left_out = await left_out_unless_named(conn, agency_id, ctx)
     rows = await compute_on_time(
         agency_id,
@@ -1248,6 +1284,7 @@ async def _tool_on_time_rate(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
         ),
         rows=_without_service_slot(rows),
         columns=["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
+        definition=definition,
     )
 
 

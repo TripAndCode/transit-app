@@ -80,3 +80,16 @@ def pytest_collection_modifyitems(session, config, items):
         raise pytest.UsageError(
             "tests/unit holds ClickHouse-gated tests; move them to tests/clickhouse/:\n  " + "\n  ".join(offenders)
         )
+
+
+@pytest.fixture
+def unstamped_tools(monkeypatch):
+    """Ask tools whose figures a report computes build that report's method
+    stamp from the database first; with none here, they carry no stamp.
+    tests/api/test_ask_card_stamp.py covers the stamp itself."""
+    from pipeline.query import tools
+
+    async def no_stamp(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(tools, "_report_stamp", no_stamp)

@@ -456,3 +456,92 @@ async def test_append_message_stores_database_numbers_and_dates_as_json(pool_wit
     assert msgs[0]["args"] == {"n": 10}
     assert type(msgs[0]["args"]["n"]) is int  # no fractional digits: an int, as FastAPI encodes it
     assert msgs[0]["conditions"] == {"from": "2026-09-01"}
+
+
+def _stamp():
+    from datetime import datetime, timezone
+
+    from pipeline.reports.definition import DefinitionMeta, TimetableVersion
+
+    return DefinitionMeta(
+        preset="standard_m1_p5",
+        early_tolerance_sec=60,
+        late_tolerance_sec=300,
+        built_at=datetime(2026, 11, 5, 15, 30, tzinfo=timezone.utc),
+        timetable_versions=[TimetableVersion(agency_id=1, name="gtfs_static_20260401", fetched_on=None, days=3)],
+    )
+
+
+@pytest.mark.asyncio
+async def test_append_message_persists_and_returns_the_method_stamp(pool_with_users):
+    """A message stores the stamp it was made under as the reports serve it,
+    and one saved without a stamp reads back with none."""
+    pool, agency, u1, _ = pool_with_users
+    stamp = _stamp()
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        user_msg = await append_message(
+            c,
+            conv["conversation_id"],
+            role="user",
+            tool=None,
+            args=None,
+            signature_hash=None,
+            result=None,
+            rendered_summary="質問",
+        )
+        stamped = await append_message(
+            c,
+            conv["conversation_id"],
+            role="assistant",
+            tool="on_time",
+            args={},
+            signature_hash="abcdef0123456789",
+            result={"kind": "table"},
+            rendered_summary="定時率",
+            definition=stamp,
+        )
+        msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
+    assert user_msg["definition"] is None
+    assert stamped["definition"] == stamp.model_dump(mode="json")
+    assert [m["definition"] for m in msgs] == [None, stamp.model_dump(mode="json")]
+
+
+@pytest.mark.asyncio
+async def test_a_message_saved_before_the_stamp_reads_back_with_none(pool_with_users):
+    pool, agency, u1, _ = pool_with_users
+    async with pool.acquire() as c:
+        conv = await create_conversation(c, user_id=u1, agency_id=agency, title="X", filter_ctx={})
+        await c.execute(
+            "INSERT INTO ask_conversation_messages (conversation_id, role, tool, result, rendered_summary) "
+            "VALUES ($1, 'assistant', 'on_time', '{\"kind\": \"table\"}'::jsonb, 'old')",
+            conv["conversation_id"],
+        )
+        [msg] = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
+    assert msg["definition"] is None
+
+
+@pytest.mark.asyncio
+async def test_migrate_anon_threads_keeps_a_valid_stamp_and_drops_a_malformed_one(pool_with_users):
+    """A signed-out card's stamp is the browser's copy of what the server
+    returned: kept when it is a stamp, stored as none when it is not, without
+    failing the thread."""
+    pool, agency, u1, _ = pool_with_users
+    stamp = _stamp().model_dump(mode="json")
+    payload = [
+        {
+            "client_id": "anon-stamped",
+            "title": "Anon S",
+            "filter_ctx": {},
+            "messages": [
+                {"role": "assistant", "tool": "on_time", "result": {"kind": "table"}, "definition": stamp},
+                {"role": "assistant", "tool": "on_time", "definition": {"preset": "x", "source": "guessed"}},
+                {"role": "assistant", "tool": "on_time", "definition": "not an object"},
+            ],
+        },
+    ]
+    async with pool.acquire() as c:
+        assert await migrate_anon_threads(c, user_id=u1, agency_id=agency, threads=payload) == 1
+        [conv] = await list_conversations(c, user_id=u1, agency_id=agency, limit=10)
+        msgs = await list_messages(c, conv["conversation_id"], user_id=u1, agency_id=agency)
+    assert [m["definition"] for m in msgs] == [stamp, None, None]

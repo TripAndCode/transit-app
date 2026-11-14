@@ -58,6 +58,13 @@ def tolerance_aggregates_serve(ctx: RangeCtx, early_tolerance_sec: int | None, l
     return aggregates_serve(ctx) and within_histogram(early_tolerance_sec, late_tolerance_sec)
 
 
+def threshold_aggregates_serve(ctx: RangeCtx, threshold_sec: int) -> bool:
+    """Whether the aggregates answer :func:`compute_on_time`'s *threshold_sec*
+    exactly: only their exact columns do, so any other threshold is scanned
+    live even where the merged histogram could estimate it."""
+    return aggregates_serve(ctx) and exact_window(None, threshold_sec)
+
+
 def hourly_aggregates_serve(ctx: RangeCtx) -> bool:
     """Whether agg_hour_daily can answer *ctx*: it pools every route, so a
     route filter falls back to the live scan as well."""
@@ -454,7 +461,7 @@ async def compute_on_time(
     one.
     """
     if threshold_sec is not None:
-        if not aggregates_serve(ctx) or not exact_window(None, threshold_sec):
+        if not threshold_aggregates_serve(ctx, threshold_sec):
             if ch is None:
                 raise RuntimeError(
                     "compute_on_time's time_band/threshold-filtered live fallback requires a ClickHouse client"
