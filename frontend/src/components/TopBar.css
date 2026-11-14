@@ -12,3 +12,11 @@
 .topbar-kbd {
   border-radius: 7px;
 }
+
+/* BP.sm: a phone has no ⌘K/Ctrl+K to invoke, so the hint is dead weight at
+   this width; the search button itself still opens the palette by tap. */
+@media (max-width: 640px) {
+  .topbar-kbd {
+    display: none;
+  }
+}

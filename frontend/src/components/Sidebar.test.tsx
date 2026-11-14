@@ -60,6 +60,11 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
   });
 
+  it("never lists Bus Town in the desktop rail, which reaches it only through the command palette", () => {
+    renderSidebar();
+    expect(screen.queryByRole("link", { name: "Bus Town" })).toBeNull();
+  });
+
   it("keeps its destinations on Help, leading back to the last chosen agency", () => {
     writeLastAgency(3);
     try {
@@ -591,6 +596,17 @@ describe("Sidebar", () => {
       expect(more.style.fontSize).toBe(pulse.style.fontSize);
     });
 
+    it("sets the tab labels bold at the 12px text floor, and the icons at 20px with a heavier stroke", () => {
+      const { container } = renderSidebar();
+      const pulse = screen.getByRole("link", { name: "Pulse" });
+      expect(pulse.style.fontSize).toBe("var(--text-xs)");
+      expect(pulse.style.fontWeight).toBe("700");
+      const icon = pulse.querySelector("svg")!;
+      expect(icon.getAttribute("width")).toBe("20");
+      expect(icon.getAttribute("stroke-width")).toBe("2");
+      expect(container.querySelector(".app-tabbar")).toBeTruthy();
+    });
+
     it("renders a More trigger that does not mount the agency picker until opened", () => {
       renderSidebar();
       expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
@@ -650,15 +666,47 @@ describe("Sidebar", () => {
       expect(close.parentElement?.style.position).toBe("sticky");
     });
 
-    it("carries the destinations that have no tab of its own on a phone, and Help", async () => {
+    it("carries the destinations that have no tab of its own on a phone, Bus Town, and Help", async () => {
       const user = userEvent.setup();
       renderSidebar("/agencies/1/live?from=2026-06-01&to=2026-06-07");
       await user.click(screen.getByRole("button", { name: "More" }));
       const dialog = screen.getByRole("dialog");
       const nav = within(dialog).getByRole("navigation", { name: "Destinations" });
-      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Time", "Why", "Compare", "Reports"]);
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual([
+        "Time",
+        "Why",
+        "Compare",
+        "Reports",
+        "Bus Town",
+      ]);
       expect(within(nav).getByRole("link", { name: "Reports" })).toHaveAttribute("href", "/agencies/1/reports");
+      expect(within(nav).getByRole("link", { name: "Bus Town" })).toHaveAttribute("href", "/agencies/1/bus-town");
       expect(within(dialog).getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
+    });
+
+    it("closes the sheet when the Bus Town link is clicked, like its other destinations", async () => {
+      const user = userEvent.setup();
+      renderSidebar();
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(within(screen.getByRole("dialog")).getByRole("link", { name: "Bus Town" }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("leaves Bus Town out of the sheet outside any agency context, like the other agency-scoped links", async () => {
+      const user = userEvent.setup();
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <I18nextProvider i18n={i18n}>
+            <ToastProvider>
+              <MemoryRouter initialEntries={["/"]}>
+                <Sidebar />
+              </MemoryRouter>
+            </ToastProvider>
+          </I18nextProvider>
+        </QueryClientProvider>,
+      );
+      await user.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.queryByRole("link", { name: "Bus Town" })).toBeNull();
     });
 
     it("closes when the close button inside it is clicked", async () => {

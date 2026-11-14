@@ -3,6 +3,7 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import { PendingNavLink } from "./navPending";
 import { NavIndicator } from "./NavIndicator";
 import {
+  Bus,
   Gauge,
   HelpCircle,
   Info,
@@ -243,6 +244,21 @@ export function Sidebar() {
                 <span>{t(item.labelKey)}</span>
               </PendingNavLink>
             ))}
+            {/* Bus Town has no sidebar entry: the desktop rail reaches it
+                only through the command palette, which a phone has no
+                keyboard shortcut for. The sheet is its only browse path
+                there, so it joins the same indicator-backed list as the
+                other destinations the tab bar leaves out. */}
+            <PendingNavLink
+              to={screenHref("bus-town")}
+              onMouseEnter={() => prefetchRouteChunk("bus-town")}
+              onFocus={() => prefetchRouteChunk("bus-town")}
+              onClick={() => onNavigate?.()}
+              style={railLinkStyle(false)}
+            >
+              <Bus size={18} strokeWidth={1.5} aria-hidden="true" style={{ marginTop: 2, flexShrink: 0 }} />
+              <span>{t("nav.bus-town")}</span>
+            </PendingNavLink>
           </nav>
         )}
         <nav aria-label={t("nav.other")} style={{ display: "flex", flexDirection: "column", marginTop: 16 }}>
@@ -401,6 +417,7 @@ export function Sidebar() {
       padding: "6px 2px 2px",
       color: isActive ? "var(--accent)" : "var(--text-secondary)",
       fontSize: "var(--text-xs)",
+      fontWeight: 700,
       textDecoration: "none",
       transition: "color var(--transition)",
     });
@@ -444,7 +461,7 @@ export function Sidebar() {
                 onFocus={() => prefetchRouteChunk(item.to)}
                 style={tabItemStyle}
               >
-                <item.Icon size={20} strokeWidth={1.5} aria-hidden="true" />
+                <item.Icon size={20} strokeWidth={2} aria-hidden="true" />
                 <span>{t(item.labelKey)}</span>
               </PendingNavLink>
             ))}
@@ -455,7 +472,7 @@ export function Sidebar() {
               onFocus={() => prefetchRouteChunk("ask")}
               style={tabItemStyle}
             >
-              <HelpCircle size={20} strokeWidth={1.5} aria-hidden="true" />
+              <HelpCircle size={20} strokeWidth={2} aria-hidden="true" />
               <span>{t("nav.ask")}</span>
             </PendingNavLink>
           )}
@@ -468,7 +485,7 @@ export function Sidebar() {
             aria-expanded={moreOpen}
             onClick={() => setMoreOpen(true)}
           >
-            <MoreHorizontal size={20} strokeWidth={1.5} aria-hidden="true" />
+            <MoreHorizontal size={20} strokeWidth={2} aria-hidden="true" />
             <span>{t("nav.more")}</span>
           </button>
         </nav>
