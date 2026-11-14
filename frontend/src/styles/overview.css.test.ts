@@ -210,15 +210,20 @@ describe("overview.css phone layout (BP.sm)", () => {
   });
 
   it("rearranges a check row into a card at the phone breakpoint, the ends and the change on lines of their own", () => {
-    const row = ruleBody(checkPhone, ".ov-check-row.ov-check-row {");
-    expect(decl(row, "grid-template-columns")).toBe(
+    // On the list, not the row, so the rows stay its subgrids and the names
+    // still line up from card to card.
+    expect(decl(ruleBody(checkPhone, ".ov-check-list {"), "grid-template-columns")).toBe(
       "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
     );
+    expect(decl(ruleBody(checkPhone, ".ov-check-row {"), "grid-template-columns")).toBeNull();
     const track = ruleBody(checkPhone, ".ov-check-row .ov-check-track {");
     expect(decl(track, "grid-column")).toBe("plate / arrow");
     // The desktop rule's inline-start margin would indent the bar off the badge's edge.
     expect(decl(track, "margin-inline-start")).toBe("0");
-    expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-arrow {"), "grid-row")).toBe("1");
+    const arrow = ruleBody(checkPhone, ".ov-check-row .ov-check-arrow {");
+    expect(decl(arrow, "grid-row")).toBe("1");
+    // The value is right-aligned in its box, so without this the figure touches the chevron.
+    expect(decl(arrow, "margin-inline-start")).toBe("8px");
     expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-value {"), "grid-column")).toBe("value");
     const change = ruleBody(checkPhone, ".ov-check-row .ov-check-change {");
     expect(decl(change, "grid-column")).toBe("name / arrow");
@@ -258,6 +263,13 @@ describe("overview.css route lists without subgrid", () => {
     expect(decl(ruleBody(phone, ".ov-pareto-label {"), "grid-column")).toBe("1 / -1");
     expect(decl(ruleBody(phone, ".ov-pareto-track {"), "grid-column")).toBe("1");
     expect(decl(ruleBody(phone, ".ov-pareto-pct {"), "grid-column")).toBe("2");
+  });
+
+  it("names a phone check card's columns on the row itself, where the list's do not reach", () => {
+    const phone = ruleBody(fallback, "@media (max-width: 640px) {");
+    expect(decl(ruleBody(phone, ".ov-check-row {"), "grid-template-columns")).toBe(
+      "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
+    );
   });
 
   it("comes after the phone rules it overrides", () => {

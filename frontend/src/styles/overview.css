@@ -527,14 +527,13 @@
   .ov-page { padding: 24px 16px 60px; }
   .ov-card { padding: 22px; }
   /* A route's badge, name, bar and figures side by side left each too
-     narrow; stacked into a card instead, each line owns the full width. Doubled to outrank both the subgrid row below it and the
-     non-subgrid fallback's own unnamed columns (.ov-check-row, further
-     down), which would otherwise tie it at equal specificity and win by
-     coming later in the file. */
-  .ov-check-row.ov-check-row {
+     narrow; stacked into a card instead, each line owns the full width.
+     The columns stay the list's, as .ov-pareto-list's below, so the names
+     still line up from card to card. */
+  .ov-check-list {
     grid-template-columns: [plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto;
-    padding: 10px 12px;
   }
+  .ov-check-row { padding: 10px 12px; }
   /* .ov-check-name, the label and its plate/line/ends children all give up
      their own box (display: contents) so those children become direct grid
      items of .ov-check-row and can be placed on the card's own rows; the
@@ -587,7 +586,7 @@
     grid-column: arrow;
     grid-row: 1;
     align-self: center;
-    margin-inline-start: 0;
+    margin-inline-start: 8px;
   }
   /* A concentration route's name takes the row's whole width, its bar and
      share beneath it: beside them it had a third of a phone's width. */
@@ -1010,6 +1009,11 @@
     }
     .ov-pareto-pct {
       grid-column: 2;
+    }
+    /* The phone card places its lines on named columns, which a row that
+       cannot inherit the list's has to name itself. */
+    .ov-check-row {
+      grid-template-columns: [plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto;
     }
   }
 }
