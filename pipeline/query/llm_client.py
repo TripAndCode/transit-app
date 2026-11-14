@@ -27,7 +27,7 @@ _log = logging.getLogger(__name__)
 # Bounds every provider call, on the shared ladder and the BYOK path alike. A
 # rung that hangs has to give up while the caller is still waiting, or the
 # ladder never reaches the next provider; the SDK's own default read timeout is
-# far longer than any Ask/Copilot/follow-up caller waits.
+# far longer than any Ask/follow-up caller waits.
 REQUEST_TIMEOUT = Timeout(30.0, connect=5.0)
 
 # Built-in defaults for each provider we support; provider_endpoint applies
