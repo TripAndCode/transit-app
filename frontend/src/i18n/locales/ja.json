@@ -1974,8 +1974,16 @@
         "archive_stamped": "アーカイブ取得のファイル名から取得時刻が分からない",
         "no_header": "フィードに時刻がない",
         "feed_cannot_report": "この形式のフィードでは保存されない",
-        "not_recorded": "記録なし"
-      }
+        "not_recorded": "記録なし",
+        "not_validated": "未検証"
+      },
+      "quality_validator": "RT検証",
+      "quality_validator_value": "{{days, number}} 日中 {{ok, number}} 日を検証",
+      "quality_validator_detail": "取得 {{polls, number}} 回、1 日に 1 時間を抽出",
+      "quality_validator_failed": "{{failed, number}} 日は実行できず",
+      "quality_validator_rule": "{{rule}} {{title}}：{{days, number}} 日の取得 {{polls, number}} 回で {{occurrences, number}} 件",
+      "quality_validator_none": "該当したルールなし",
+      "quality_validator_note": "MobilityData の GTFS-RT 検証ツールによる件数です。件数は記録するだけで評価には含めません。共通の配信基盤が、配信するすべてのフィードで同じルールに該当するためです。"
     },
     "architecture": {
       "title": "アーキテクチャ",

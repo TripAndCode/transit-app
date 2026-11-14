@@ -39,6 +39,15 @@ function month(m: string, over: Partial<AgencyFeedQualityMonth> = {}): AgencyFee
     field_coverage_missing: null,
     vehicle_positions_available: null,
     vehicle_positions_missing: "not_recorded",
+    validator_ok_days: 28,
+    validator_failed_days: 2,
+    validator_files_validated: 1624,
+    validator_rules: {
+      W001: { severity: "WARNING", title: "Timestamps should be populated", occurrences: 40, files_with_rule: 40, days: 3 },
+      E022: { severity: "ERROR", title: "Times are not increasing", occurrences: 3360, files_with_rule: 1624, days: 28 },
+    },
+    validator_missing: null,
+    validator_ingested_at: "2026-10-31T00:40:00+00:00",
     grade: "C",
     grade_failing: ["rt_completeness", "stale_polls"],
     grade_missing: [],
@@ -52,6 +61,11 @@ function renderTrend(months: AgencyFeedQualityMonth[]) {
       <FeedQualityTrend months={months} />
     </I18nextProvider>,
   );
+}
+
+/** The validator row's headline figure, without the rule list under it. */
+function validatorFigure() {
+  return screen.getByText("RT validator").nextElementSibling?.firstElementChild?.firstElementChild?.textContent;
 }
 
 describe("FeedQualityTrend", () => {
@@ -154,6 +168,57 @@ describe("FeedQualityTrend", () => {
     expect(label.nextElementSibling?.textContent).toBe("— not recorded");
   });
 
+  it("shows the validator's days and each rule it counted, recorded beside the grade, not in it", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([month("2026-10")]);
+    expect(validatorFigure()).toBe(
+      "28 of 30 days validated 1,624 polls, one sampled hour a day",
+    );
+    expect(screen.getByText("could not run on 2 days")).toBeInTheDocument();
+    const rules = screen.getAllByRole("listitem").map((li) => li.textContent);
+    expect(rules).toEqual([
+      "E022 Times are not increasing: 3,360 in 1,624 polls on 28 days",
+      "W001 Timestamps should be populated: 40 in 40 polls on 3 days",
+    ]);
+    expect(screen.getByText(/recorded, not graded/)).toBeInTheDocument();
+  });
+
+  it("reads a month with no validated day as not validated, never as no findings", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([
+      month("2026-10", {
+        validator_ok_days: 0,
+        validator_failed_days: 0,
+        validator_files_validated: null,
+        validator_rules: null,
+        validator_missing: "not_validated",
+        validator_ingested_at: null,
+      }),
+    ]);
+    expect(validatorFigure()).toBe("— not validated");
+    expect(screen.queryByText("no rule fired")).toBeNull();
+    expect(screen.queryByRole("listitem")).toBeNull();
+  });
+
+  it("says a validated month where no rule fired so, and a month built before the validator has it not recorded", async () => {
+    await i18n.changeLanguage("en");
+    const { unmount } = renderTrend([month("2026-10", { validator_rules: {}, validator_failed_days: 0 })]);
+    expect(screen.getByText("no rule fired")).toBeInTheDocument();
+    expect(screen.queryByText(/could not run/)).toBeNull();
+    unmount();
+    renderTrend([
+      month("2026-10", {
+        validator_ok_days: null,
+        validator_failed_days: null,
+        validator_files_validated: null,
+        validator_rules: null,
+        validator_missing: null,
+        validator_ingested_at: null,
+      }),
+    ]);
+    expect(validatorFigure()).toBe("— not recorded");
+  });
+
   it("speaks Japanese", async () => {
     await i18n.changeLanguage("ja");
     renderTrend([month("2026-10", { through_date: "2026-10-20" })]);
@@ -162,6 +227,7 @@ describe("FeedQualityTrend", () => {
     expect(screen.getByText("計測した取得 16 回")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "直近6か月" })).toBeInTheDocument();
     expect(screen.getByText("基準に届かない項目：便の充足率、65秒を超えた取得")).toBeInTheDocument();
+    expect(screen.getByText("30 日中 28 日を検証")).toBeInTheDocument();
     await i18n.changeLanguage("en");
   });
 });

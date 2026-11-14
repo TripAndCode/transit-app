@@ -65,6 +65,17 @@ The figures:
   does send for a cancelled trip with neither a delay nor a stop status is
   left out with them.
 - **VehiclePositions available**: not recorded anywhere the app reads.
+- **GTFS-RT validator**: over the window's days, the daily validator summaries
+  ``rt_validation_daily`` holds (pipeline.rt_validation_ingest), each of one
+  sampled hour of the day's TripUpdates: the days validated (status ``ok``),
+  the days whose summary says the validator could not run, the polls
+  validated, and per rule its occurrences, polls and days fired
+  (:func:`validator_figures`). A day with no summary was not validated, and
+  neither was one whose validator could not run: neither is a day of zero
+  findings. The counts are recorded, never graded. ``validator_ingested_at``
+  records when the newest summary the row counts last changed, so a summary
+  that arrives after its month was built rebuilds that month
+  (:func:`validation_moved`).
 
 A figure the feed or the app cannot supply is ``None`` beside a
 :data:`Missing` reason, never 0, and a completeness figure's two counts are
@@ -87,16 +98,17 @@ A figure the feed or the app cannot supply is ``None`` beside a
 - ``no_header``: no poll whose capture instant is known carried a FeedHeader
   timestamp;
 - ``feed_cannot_report``: the ingest strategy never stores the fields;
-- ``not_recorded``: the app records no source for the figure.
+- ``not_recorded``: the app records no source for the figure;
+- ``not_validated``: no day of the window has a summary whose validator ran.
 """
 
 from __future__ import annotations
 
 import inspect
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pipeline.clickhouse import LIVE_SOURCED, TRIP_LEVEL_STOP_SEQUENCE
 from pipeline.db import plausible_delay_ch, timely_reading_ch, timetable_cancellation_ch, withdrawn_ch
@@ -128,6 +140,7 @@ Missing = Literal[
     "no_header",
     "feed_cannot_report",
     "not_recorded",
+    "not_validated",
 ]
 
 #: Message age's median and 95th percentile, by linear interpolation between
@@ -138,6 +151,15 @@ MESSAGE_AGE_QUANTILES = (0.5, 0.95)
 #: Older than this at capture, a poll's message is stale: Cal-ITP's freshness
 #: threshold, and the MobilityData GTFS-RT validator's W008.
 STALE_MESSAGE_AGE_SEC = 65
+
+VALIDATOR_COLUMNS: tuple[str, ...] = (
+    "validator_ok_days",
+    "validator_failed_days",
+    "validator_files_validated",
+    "validator_rules",
+    "validator_missing",
+    "validator_ingested_at",
+)
 
 COLUMNS: tuple[str, ...] = (
     "agency_id",
@@ -170,6 +192,7 @@ COLUMNS: tuple[str, ...] = (
     "field_coverage_missing",
     "vehicle_positions_available",
     "vehicle_positions_missing",
+    *VALIDATOR_COLUMNS,
 )
 
 # The window's rows: from the first service day's start to the start of the
@@ -252,6 +275,23 @@ FEED_HEALTH_SQL = """
     SELECT COALESCE(SUM(raw_samples), 0), COALESCE(SUM(clamp_count), 0), COALESCE(SUM(total_rows), 0)
     FROM agg_feed_health
     WHERE agency_id = %(agency_id)s AND date BETWEEN %(first)s AND %(last)s
+"""
+
+VALIDATION_SQL = """
+    SELECT service_date, status, files_validated, summary->'rules', ingested_at
+    FROM rt_validation_daily
+    WHERE agency_id = %(agency_id)s AND service_date BETWEEN %(first)s AND %(last)s
+    ORDER BY service_date
+"""
+
+# Per month, the summaries a window ending no later than *last* counts and
+# when the newest of them last changed: the stamp a built row records as its
+# validator_ok_days + validator_failed_days and validator_ingested_at.
+VALIDATION_STAMP_SQL = """
+    SELECT date_trunc('month', service_date)::date, COUNT(*), MAX(ingested_at)
+    FROM rt_validation_daily
+    WHERE agency_id = %(agency_id)s AND service_date <= %(last)s
+    GROUP BY 1
 """
 
 
@@ -366,7 +406,10 @@ def read_month_bounds(agency_id: int, windows: Mapping[date, date], cur) -> dict
 
 
 def plan_months(
-    scope: list[date] | None, spans: Mapping[date, tuple[date, date]], stored: Mapping[date, tuple[date, date]]
+    scope: list[date] | None,
+    spans: Mapping[date, tuple[date, date]],
+    stored: Mapping[date, tuple[date, date]],
+    validation_moved: Collection[date] = (),
 ) -> tuple[list[date] | None, list[date]]:
     """``(purge, build)``: the months whose rows this run deletes (None for
     every month) and those it builds.
@@ -381,8 +424,10 @@ def plan_months(
     coverage day grow as the listed agencies' aggregates reach later days,
     with or without this feed's own observations, so a feed that stops
     reporting still has its planned days counted against it, and shrink when
-    the agency holding the newest day goes. A stored month outside the
-    agency's months goes.
+    the agency holding the newest day goes. So is a month of
+    *validation_moved*, whose validator summaries changed since its row was
+    built (:func:`validation_moved`). A stored month outside the agency's
+    months goes.
     """
     months = sorted(spans)
     if scope is None:
@@ -390,8 +435,55 @@ def plan_months(
     # A date past its month's window is in no window, so it rebuilds nothing.
     wanted = {month_of(day) for day in scope if month_of(day) in spans and day <= spans[month_of(day)][1]}
     wanted |= {month for month, span in spans.items() if stored.get(month) != span}
+    wanted |= {month for month in validation_moved if month in spans}
     wanted |= {month for month in stored if month not in spans}
     return sorted(wanted), [month for month in months if month in wanted]
+
+
+def validation_moved(
+    current: Mapping[date, tuple[int, datetime | None]],
+    stored: Mapping[date, tuple[int | None, datetime | None]],
+    months: Iterable[date],
+) -> list[date]:
+    """Those of *months* whose stamp in *current* (:data:`VALIDATION_STAMP_SQL`)
+    differs from the one their row records in *stored*. A month with no
+    summary is stamped ``(0, None)``."""
+    return [month for month in months if month in stored and current.get(month, (0, None)) != stored[month]]
+
+
+class ValidationDay(NamedTuple):
+    """One row of :data:`VALIDATION_SQL`: a day's summary."""
+
+    service_date: date
+    status: str
+    files_validated: int
+    rules: Sequence[Mapping[str, Any]]
+    ingested_at: datetime
+
+
+def validator_figures(days: Iterable[ValidationDay]) -> dict[str, Any]:
+    """The validator columns of a window from its days' summaries, oldest
+    first. Each rule's severity and title are its newest day's. Without an
+    ``ok`` day the polls and rules are None beside ``not_validated``."""
+    days = list(days)
+    ok = [day for day in days if day.status == "ok"]
+    rules: dict[str, dict[str, Any]] = {}
+    for day in ok:
+        for rule in day.rules:
+            entry = rules.setdefault(rule["rule_id"], {"occurrences": 0, "files_with_rule": 0, "days": 0})
+            entry["severity"], entry["title"] = rule["severity"], rule["title"]
+            entry["occurrences"] += rule["occurrences"]
+            entry["files_with_rule"] += rule["files_with_rule"]
+            entry["days"] += 1
+    validated = bool(ok)
+    return {
+        "validator_ok_days": len(ok),
+        "validator_failed_days": len(days) - len(ok),
+        "validator_files_validated": sum(day.files_validated for day in ok) if validated else None,
+        "validator_rules": {rule_id: rules[rule_id] for rule_id in sorted(rules)} if validated else None,
+        "validator_missing": None if validated else "not_validated",
+        "validator_ingested_at": max((day.ingested_at for day in days), default=None),
+    }
 
 
 def _share_pct(count: int, total: int) -> float:
@@ -434,6 +526,7 @@ def shape(
     raw_samples: int,
     clamp_count: int,
     total_rows: int,
+    validation: Iterable[ValidationDay],
 ) -> dict[str, Any]:
     """One ``feed_quality_monthly`` row from what the window's reads returned.
 
@@ -446,8 +539,9 @@ def shape(
     *day_rows* each service date's ``stop_time_updates``, ``<field>_rows`` and
     ``stop_events`` counts; *dated_polls* whose capture instant is known and
     *undated_polls* whose is not, of which *polls* carried a header, whose age
-    quantiles are *ages* and of which *stale_polls* were stale; and
-    agg_feed_health's sums.
+    quantiles are *ages* and of which *stale_polls* were stale;
+    agg_feed_health's sums; and *validation*, the window's validator
+    summaries.
     """
     coverage = coverage_of(service, (last - month).days + 1)
     matchable = trips_matchable(ingest_strategy)
@@ -536,6 +630,7 @@ def shape(
         "field_coverage_missing": field_missing,
         "vehicle_positions_available": None,
         "vehicle_positions_missing": "not_recorded",
+        **validator_figures(validation),
     }
 
 
@@ -572,6 +667,8 @@ def build_month(
         stop_plan = dict(cur.fetchall())
         cur.execute(FEED_HEALTH_SQL, params)
         raw_samples, clamp_count, total_rows = (int(v) for v in cur.fetchone())
+        cur.execute(VALIDATION_SQL, params)
+        validation = [ValidationDay(*row) for row in cur.fetchall()]
     rows = ch_client.query(ROWS_CH_SQL, parameters=params)
     day_rows = with_stop_events(
         {row[0]: dict(zip(rows.column_names[1:], row[1:], strict=True)) for row in rows.result_rows},
@@ -599,6 +696,7 @@ def build_month(
         raw_samples=raw_samples,
         clamp_count=clamp_count,
         total_rows=total_rows,
+        validation=validation,
     )
 
 
@@ -629,10 +727,20 @@ def rebuild(
         last_day = last_counted_day(last_closed, cur.fetchone()[0])
         windows = month_windows(first_day, last_day)
         bounds = read_month_bounds(agency_id, windows, cur)
-        cur.execute(f"SELECT month, through_date, window_days FROM {TABLE} WHERE agency_id = %s", (agency_id,))
-        stored = {month: (through, month + timedelta(days=days - 1)) for month, through, days in cur.fetchall()}
+        cur.execute(
+            "SELECT month, through_date, window_days, validator_ok_days + validator_failed_days, "
+            f"validator_ingested_at FROM {TABLE} WHERE agency_id = %s",
+            (agency_id,),
+        )
+        built = cur.fetchall()
+        stored = {month: (through, month + timedelta(days=days - 1)) for month, through, days, _, _ in built}
+        stamps = {}
+        if last_day is not None:
+            cur.execute(VALIDATION_STAMP_SQL, {"agency_id": agency_id, "last": last_day})
+            stamps = {month: (int(count), at) for month, count, at in cur.fetchall()}
     spans = {month: (bounds[month][0], last) for month, last in windows.items()}
-    purge, build = plan_months(scope, spans, stored)
+    moved = validation_moved(stamps, {month: (count, at) for month, _, _, count, at in built}, spans)
+    purge, build = plan_months(scope, spans, stored, moved)
     rows = [
         build_month(agency_id, month, *spans[month], bounds[month][1], ingest_strategy, conn, ch_client)
         for month in build
@@ -645,10 +753,16 @@ def rebuild(
         for row in rows:
             cur.execute(
                 f"INSERT INTO {TABLE} ({', '.join(COLUMNS)}) VALUES ({', '.join(['%s'] * len(COLUMNS))})",
-                [row[column] for column in COLUMNS],
+                [_adapt(row[column]) for column in COLUMNS],
             )
     logger.info(f"  {TABLE}: {len(rows)} month(s)")
     return purge is None or bool(purge)
+
+
+def _adapt(value: Any) -> Any:
+    from psycopg2.extras import Json
+
+    return Json(value) if isinstance(value, dict) else value
 
 
 def render() -> list[str]:
@@ -661,6 +775,10 @@ def render() -> list[str]:
         ROWS_CH_SQL,
         STOP_EVENTS_CH_SQL,
         MESSAGE_AGE_CH_SQL,
+        VALIDATION_SQL,
+        VALIDATION_STAMP_SQL,
+        inspect.getsource(validator_figures),
+        inspect.getsource(validation_moved),
         inspect.getsource(build_month),
         inspect.getsource(with_stop_events),
         inspect.getsource(_window_params),

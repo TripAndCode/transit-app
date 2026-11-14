@@ -99,9 +99,21 @@ class FeedQualityGradeMissing(BaseModel):
     reason: str
 
 
+class ValidatorRule(BaseModel):
+    """One GTFS-RT validator rule's counts over a month's validated days."""
+
+    severity: str
+    title: str
+    occurrences: int
+    files_with_rule: int
+    days: int
+
+
 class FeedQualityMonth(BaseModel):
     """One month of the feed-quality scorecard (pipeline.feed_quality). Each
-    figure is ``None`` exactly when its ``*_missing`` reason is set. The grade
+    figure is ``None`` exactly when its ``*_missing`` reason is set, and the
+    validator figures are ``None`` throughout for a month built before they
+    existed. The grade
     (pipeline.feed_quality_grade) is admin-only: no other response carries it."""
 
     month: str
@@ -136,6 +148,12 @@ class FeedQualityMonth(BaseModel):
     field_coverage_missing: str | None
     vehicle_positions_available: bool | None
     vehicle_positions_missing: str | None
+    validator_ok_days: int | None
+    validator_failed_days: int | None
+    validator_files_validated: int | None
+    validator_rules: dict[str, ValidatorRule] | None
+    validator_missing: str | None
+    validator_ingested_at: str | None
     grade: Literal["A", "B", "C", "D", "F"] | None
     grade_failing: list[Criterion]
     grade_missing: list[FeedQualityGradeMissing]

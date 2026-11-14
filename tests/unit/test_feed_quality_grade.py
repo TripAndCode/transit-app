@@ -152,3 +152,17 @@ def test_figures_outside_the_criteria_never_decide_the_grade():
         )
     )
     assert graded.grade == "A"
+
+
+def test_validator_findings_never_move_the_grade():
+    """The shared vendor platform fires some rules on every feed it serves,
+    so the counts are recorded beside the grade, not graded."""
+    noisy = _month(
+        validator_ok_days=30,
+        validator_failed_days=0,
+        validator_files_validated=1800,
+        validator_rules={"E022": {"severity": "ERROR", "title": "t", "occurrences": 99999, "files_with_rule": 1800}},
+        validator_missing=None,
+    )
+    assert grade_month(noisy) == grade_month(_month())
+    assert grade_month(noisy).grade == "A"

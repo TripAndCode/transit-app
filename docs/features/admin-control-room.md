@@ -124,7 +124,7 @@ as one a migration adds to the static tables, reaches a timetable whose
 source has not changed. The page's buttons have no such option.
 
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
-`rt_field_coverage_probes`, `agg_feed_health`, `feed_quality_monthly`, `static_trips`,
+`rt_field_coverage_probes`, `agg_feed_health`, `feed_quality_monthly`, `rt_validation_daily`, `static_trips`,
 `static_calendar`, `static_calendar_dates`, `agg_static_version_summary`,
 `agency_weather_stations`, `route_performance_standards`,
 `ridership_weights`. The two editors write `route_performance_standards`
@@ -153,6 +153,13 @@ No other endpoint carries the grade: `tests/unit/test_agency_feed_quality.py`
 fails if any other route's declared `response_model` schema has a grade, or if
 that route stops requiring an admin. It stays admin-only
 until operators have had the methodology's advance notice and right of reply.
+
+Below the other figures, the newest month states the daily GTFS-RT validator's
+counts: the days validated of the month's window, the days the validator could
+not run, and each rule that fired with its occurrences, polls and days. A month
+with no validated day reads not validated, never no findings. The counts are
+recorded, never graded. They come from `rt_validation_daily`, which the ML
+store ingest fills (`docs/features/ml-forecast.md`).
 
 ### RT field-coverage verdicts
 

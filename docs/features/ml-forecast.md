@@ -253,11 +253,18 @@ number; a week whose document is unchanged is left as it is. A summary that
 cannot be fetched at all is a read failure, not a skipped document. Every weekly
 live scorecard (`evaluations/<run_date>/live.json`, see Live scorecard) goes the
 same way into `ml_live_evaluations`, its own table because a live week can exist
-without a summary, under the same checks bar the summary's own fields. Each of the
-three steps is guarded on its own, so one failing never skips the others.
+without a summary, under the same checks bar the summary's own fields. The daily
+GTFS-RT validator summaries (`validation/<agency_id>/<YYYYMMDD>.json`, written by
+`scripts/rt_validate_sample.py`) go into `rt_validation_daily`
+(`pipeline/rt_validation_ingest.py`), one row per agency and day. Only a key whose
+ETag differs from its stored row's is fetched, and a summary is skipped by name when
+it cannot be trusted or names an agency the database does not hold. The feed-quality
+scorecard counts them per month. Each of the four steps is guarded on its own, so one
+failing never skips the others.
 
 Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
-forecast, every evaluation summary and every live scorecard into the database
+forecast, every evaluation summary, every live scorecard and every new or changed
+validator summary into the database
 `.env`'s `DATABASE_URL` names, reading `ML_STORE_*` from the same file (a read-only
 token is enough). Unlike the sweep it exits non-zero on a missing variable, an
 unreadable publish or a failed upsert, and says "no forecast has been published

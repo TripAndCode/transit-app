@@ -716,3 +716,67 @@ def test_a_month_whose_every_archived_poll_is_undated_has_no_message_age(pg_conn
     assert (april["message_age_polls"], april["message_age_undated_polls"]) == (0, 1)
     assert (april["message_age_p50_sec"], april["message_age_missing"]) == (None, "archive_stamped")
     assert (april["message_age_stale_polls"], april["message_age_stale_pct"]) == (None, None)
+
+
+def _validator_summary(pg_conn, agency_id: int, day: date, occurrences: int) -> None:
+    """The day's summary, as the ML store ingest stores it."""
+    import json
+
+    from pipeline.rt_validation_ingest import load_validation
+    from scripts import rt_validate_sample as rv
+
+    document = rv.summary(
+        agency_id=agency_id,
+        service_date=day,
+        validator=rv.validator_identity("docker"),
+        status="ok",
+        files_given=60,
+        files_validated=58,
+        rules=[
+            {"rule_id": "E022", "severity": "ERROR", "title": "t", "occurrences": occurrences, "files_with_rule": 9},
+        ],
+    )
+    key = rv.summary_key(agency_id, day)
+
+    class _Store:
+        def list_objects_v2(self, **_):
+            return {"Contents": [{"Key": key, "ETag": f'"{occurrences}"'}]}
+
+        def get_object(self, **_):
+            return {"Body": type("Body", (), {"read": lambda self: json.dumps(document).encode()})()}
+
+    assert load_validation(pg_conn, _Store(), "transit-ml").upserted == 1
+
+
+def test_a_summary_ingested_after_its_closed_month_was_built_reaches_that_month(
+    pg_conn, ch_client, closed_on_may_first
+):
+    """The validator publishes a day's summary the next morning, so the last
+    day of a month arrives once its month has closed and no changed date of
+    the feed's would rebuild it."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 30))
+    _observed_elsewhere(pg_conn, ch_client, _MAY)
+    agency = _agency(pg_conn, "joined", "static_join")
+    _timetable(pg_conn, agency, stops=2)
+    insert_updates(ch_client, agency, _live_polls())
+    analyze(agency, pg_conn, ch_client)
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["validator_ok_days"], april["validator_rules"], april["validator_missing"]) == (
+        0,
+        None,
+        "not_validated",
+    )
+
+    _validator_summary(pg_conn, agency, date(2026, 4, 30), occurrences=120)
+    analyze(agency, pg_conn, ch_client)
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert april["validator_ok_days"] == 1
+    assert april["validator_files_validated"] == 58
+    assert april["validator_rules"]["E022"]["occurrences"] == 120
+    assert april["validator_missing"] is None
+
+    # Re-published with other counts, it rebuilds the month again.
+    _validator_summary(pg_conn, agency, date(2026, 4, 30), occurrences=7)
+    analyze(agency, pg_conn, ch_client)
+    assert _stored(pg_conn, agency)[_APRIL]["validator_rules"]["E022"]["occurrences"] == 7
+    assert _stored(pg_conn, agency)[_MAY]["validator_missing"] == "not_validated"

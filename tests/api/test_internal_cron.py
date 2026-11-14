@@ -256,6 +256,7 @@ def _no_evaluation_ingest(monkeypatch):
 
     monkeypatch.setattr(internal_module, "ingest_evaluations", lambda conn, s3, bucket: 0)
     monkeypatch.setattr(internal_module, "ingest_live_evaluations", lambda conn, s3, bucket: 0)
+    monkeypatch.setattr(internal_module, "ingest_validation", lambda conn, s3, bucket: 0)
 
 
 def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
@@ -277,6 +278,29 @@ def test_the_sweep_ingests_the_ml_forecast_after_analyze(monkeypatch):
     # (which needs ClickHouse/live agencies already covered by this file's
     # other tests) -- the fake replaces ingest_forecast, so the connection
     # object passed through is never actually used.
+    internal_module._ingest_ml_forecast(object())
+    assert calls == ["transit-ml"]
+
+
+def test_the_sweep_ingests_the_validator_summaries_even_when_an_earlier_step_fails(monkeypatch):
+    import api.routers.internal as internal_module
+
+    calls = []
+
+    def raising_ingest_forecast(conn, s3_client, bucket):
+        raise RuntimeError("boom")
+
+    def fake_ingest_validation(conn, s3_client, bucket):
+        calls.append(bucket)
+        return 0
+
+    monkeypatch.setattr(internal_module, "ingest_forecast", raising_ingest_forecast)
+    monkeypatch.setattr(internal_module, "ingest_validation", fake_ingest_validation)
+    monkeypatch.setenv("ML_STORE_BUCKET", "transit-ml")
+    monkeypatch.setenv("ML_STORE_ENDPOINT", "https://example.r2")
+    monkeypatch.setenv("ML_STORE_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("ML_STORE_SECRET_ACCESS_KEY", "test")
+
     internal_module._ingest_ml_forecast(object())
     assert calls == ["transit-ml"]
 

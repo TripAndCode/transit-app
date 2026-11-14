@@ -32,6 +32,7 @@ from pipeline import runs as pipeline_runs
 from pipeline.locks import try_lock_ingest_analyze_timed
 from pipeline.ml_evaluation_ingest import ingest_evaluations, ingest_live_evaluations
 from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env, store_configured
+from pipeline.rt_validation_ingest import ingest_validation
 from pipeline.url_guard import redact_urls_in_text
 
 router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema=False)
@@ -458,10 +459,10 @@ def _ingest_and_analyze_sweep(
     # not what an operator asked for by pressing one button.
     if run_weather and kind == "ingest" and requested_agency_ids is None:
         _run_weather_ingest(db_url)
-    # The ML store's forecast and evaluation summaries are fleet-wide too
-    # (published once for every agency, not once per agency) -- same scoping
-    # as weather, but its own gate rather than run_weather's: an operator who
-    # asked to skip the weather fetch hasn't said anything about the ML store.
+    # The ML store's documents are fleet-wide too (one listing reads every
+    # agency's) -- same scoping as weather, but its own gate rather than
+    # run_weather's: an operator who asked to skip the weather fetch hasn't
+    # said anything about the ML store.
     if kind == "ingest" and requested_agency_ids is None:
         _run_ml_forecast_ingest(db_url)
         # Fleet-wide like the two passes above, and it fetches the agencies'
@@ -564,7 +565,8 @@ def _run_agency_update(
 
 def _ingest_ml_forecast(conn: Any) -> None:
     """Best-effort: the ML store's latest forecast, its weekly evaluation
-    summaries and its weekly live scorecards, each step guarded on its own, so a
+    summaries, its weekly live scorecards and the daily GTFS-RT validator
+    summaries, each step guarded on its own, so a
     missing/misconfigured bucket, a transient R2 failure, or one step failing
     never aborts the others or the surrounding ingest+analyze sweep. Each ingest already logs
     and swallow their own read/write failures; these guards cover building
@@ -589,13 +591,17 @@ def _ingest_ml_forecast(conn: Any) -> None:
         _log.info("cron: ml_live_evaluation ingest upserted %d scorecard(s)", ingest_live_evaluations(conn, s3, bucket))
     except Exception:
         _log.exception("cron: ml_live_evaluation ingest failed")
+    try:
+        _log.info("cron: rt_validation ingest upserted %d summary(ies)", ingest_validation(conn, s3, bucket))
+    except Exception:
+        _log.exception("cron: rt_validation ingest failed")
 
 
 def _run_ml_forecast_ingest(db_url: str) -> None:
     """Reads the ML workbench's latest published forecast, its weekly
-    evaluation summaries and its weekly live scorecards from R2 into
-    `agg_route_forecast_ml`, `ml_evaluations` and `ml_live_evaluations`, on its
-    own connection opened
+    evaluation summaries, its weekly live scorecards and the daily GTFS-RT
+    validator summaries from R2 into `agg_route_forecast_ml`, `ml_evaluations`,
+    `ml_live_evaluations` and `rt_validation_daily`, on its own connection opened
     only after `_run_ingest_and_analyze`'s advisory lock has already been
     released -- same reasoning as `_run_weather_ingest`'s own dedicated
     connection just below: a slow R2 round trip must not extend the
