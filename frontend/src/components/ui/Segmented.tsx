@@ -5,6 +5,9 @@ import "./ui.css";
 export type SegmentedOption<T extends string> = {
   value: T;
   label: string;
+  /** A figure under the label, such as the share a choice would give.
+   *  Kept out of the tooltip, which names only the choice. */
+  meta?: string;
 };
 
 type SegmentedProps<T extends string> = {
@@ -34,6 +37,7 @@ export function Segmented<T extends string>({
   columns,
 }: SegmentedProps<T>) {
   const cols = columns ?? options.length;
+  const hasMeta = options.some((o) => o.meta);
   const rows = Math.ceil(options.length / cols);
   const selectedIndex = options.findIndex((o) => o.value === value);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -80,7 +84,7 @@ export function Segmented<T extends string>({
   };
 
   return (
-    <div className="seg" role="radiogroup" aria-label={ariaLabel} style={{ padding: INSET_PX, gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
+    <div className={hasMeta ? "seg seg--meta" : "seg"} role="radiogroup" aria-label={ariaLabel} style={{ padding: INSET_PX, gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
       <span aria-hidden="true" className={thumb.appearing ? "seg-thumb seg-thumb--appear" : "seg-thumb"} style={thumbStyle} />
       {options.map((option, index) => (
         <button
@@ -98,6 +102,14 @@ export function Segmented<T extends string>({
           onKeyDown={(e) => onKeyDown(e, index)}
         >
           <span className="seg-btn__label">{option.label}</span>
+          {/* The space keeps the label and the figure apart in the
+              button's accessible name; a grid drops it from the layout. */}
+          {option.meta && (
+            <>
+              {" "}
+              <span className="seg-btn__meta">{option.meta}</span>
+            </>
+          )}
         </button>
       ))}
     </div>

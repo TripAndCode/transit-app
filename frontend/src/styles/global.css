@@ -794,6 +794,14 @@ summary:focus-visible,
   font-size: var(--text-sm);
 }
 
+/* A toggle that is on (aria-pressed) reads as chosen whatever its variant;
+   after the variants so it outranks their :hover at equal specificity. */
+.btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 /* After every variant's :hover: a press is also a hover, and the press must
    win the transform. */
 .btn:active {
