@@ -303,18 +303,6 @@ async def test_ask_stage1_dispatch_propagates_undefined_table_error(ask_client, 
     assert "agg_route_daily_dist" not in data["detail"]
 
 
-@pytest.fixture
-def no_llm_key(monkeypatch):
-    from pipeline.query import llm_client
-
-    monkeypatch.setenv("CHAT_PROVIDERS", "gemini,openai")
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    llm_client.reset_client_for_tests()
-    yield
-    llm_client.reset_client_for_tests()
-
-
 @pytest.mark.asyncio
 async def test_ask_signed_out_build_sentinel_answers_with_no_llm_provider(ask_client, no_llm_key):
     """A signed-out notebook card posts `__build__ tool {json}`; it dispatches

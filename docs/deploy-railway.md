@@ -521,7 +521,8 @@ Skip entirely if it's only demo data.
 | Symptom | Check |
 |---------|-------|
 | DB empty after redeploy | Volume not mounted at `/var/lib/postgresql/data` on the `db` service (step 1.6). |
-| App healthcheck failing | Deploy Logs — usually `DATABASE_URL` wrong (private host must resolve `${{db.RAILWAY_PRIVATE_DOMAIN}}`, port `5432`) (a missing provider key does not stop boot; it only disables LLM-backed Ask). |
+| App healthcheck failing | Deploy Logs — usually `DATABASE_URL` wrong (private host must resolve `${{db.RAILWAY_PRIVATE_DOMAIN}}`, port `5432`). |
+| Ask answers "No AI provider is configured." | No provider key is set for any provider in `CHAT_PROVIDERS`; the app still runs, with LLM-backed Ask off. |
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
 | `POST /internal/cron/ingest` returns 401 / 503 | 401: the caller's `X-Cron-Secret` header doesn't match `CRON_SECRET` in the `app` Variables. 503: `CRON_SECRET` is unset on `app`. |
