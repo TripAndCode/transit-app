@@ -7,6 +7,7 @@ import { classifyError } from "../api/errorClass";
 import { JST_TZ, parseScope, toJstISO, type Scope } from "../api/scope";
 import { useSnapshot, useSnapshotToday, type Snapshot, type SnapshotToday } from "../api/snapshots";
 import type { DefinitionMeta, ReportResponse } from "../api/types";
+import type { TierState } from "../api/useCapabilityTier";
 import { buildRouteNames, type RouteNames } from "../api/useRouteNames";
 import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionMetaBlock";
 import { EmptyState } from "../components/EmptyState";
@@ -122,6 +123,10 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
   const [comparing, setComparing] = useState(false);
   const today = useSnapshotToday(snapshot.snapshot_id, comparing && comparable);
   const comparison = comparing ? compareWithToday(report, today.data?.report) : null;
+  // The read carries the tier, since a signed-out reader can't reach the
+  // agency catalogue.
+  const tier: TierState = snapshot.capability_tier;
+  const tiers = new Map([[snapshot.agency_id, tier]]);
   return (
     <>
       <div className="snapshot-banner" role="note">
@@ -156,10 +161,16 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
           report={report}
           names={names}
           params={snapshot.params}
+          tiers={tiers}
           comparison={comparison?.report_type === "route_table" ? comparison : undefined}
         />
       ) : report?.report_type === "council_summary" ? (
-        <CouncilSnapshot report={report} comparison={comparison?.report_type === "council_summary" ? comparison : undefined} />
+        <CouncilSnapshot
+          report={report}
+          comparison={comparison?.report_type === "council_summary" ? comparison : undefined}
+          tiers={tiers}
+          tier={snapshot.capability_tier}
+        />
       ) : (
         <EmptyState title={t("snapshot.unsupported")} />
       )}
@@ -295,10 +306,12 @@ function RouteTableSnapshot({
   names,
   params,
   comparison,
+  tiers,
 }: {
   report: RouteTableReport;
   names: RouteNames;
   params: Record<string, unknown>;
+  tiers: ReadonlyMap<number, TierState>;
   comparison?: Extract<Comparison, { report_type: "route_table" }>;
 }) {
   const { t } = useTranslation();
@@ -307,7 +320,7 @@ function RouteTableSnapshot({
   const kept = { retired: params.include_retired === true, zero_delay: params.include_zero_delay === true };
   return (
     <section>
-      <DefinitionMetaBlock definition={report.definition} />
+      <DefinitionMetaBlock definition={report.definition} tiers={tiers} />
       <div className="snapshot-page__coverage">
         {report.reliable_min_samples != null && (
           <SparseToggle checked={params.include_sparse === true} floor={report.reliable_min_samples} />
@@ -345,16 +358,24 @@ function RouteTableSnapshot({
 function CouncilSnapshot({
   report,
   comparison,
+  tiers,
+  tier,
 }: {
   report: CouncilReport;
   comparison?: Extract<Comparison, { report_type: "council_summary" }>;
+  tiers: ReadonlyMap<number, TierState>;
+  tier: TierState;
 }) {
   const { t } = useTranslation();
   const compare = comparison && { today: comparison.today, marks: comparison.marks };
   return (
     <section>
-      <DefinitionMetaBlock definition={report.definition} />
-      {report.rows.length > 0 ? <CouncilSummaryBlock report={report} compare={compare} /> : <EmptyState title={t("reports.no_data.title")} />}
+      <DefinitionMetaBlock definition={report.definition} tiers={tiers} />
+      {report.rows.length > 0 ? (
+        <CouncilSummaryBlock report={report} compare={compare} tier={tier} />
+      ) : (
+        <EmptyState title={t("reports.no_data.title")} />
+      )}
     </section>
   );
 }

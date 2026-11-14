@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
@@ -6,6 +6,7 @@ import { formatDateTime } from "../../utils/format";
 import {
   useAdminBoard,
   useTriggerRun,
+  type AdminBoard,
   type BoardCollector,
   type BoardFreshnessDay,
 } from "../../api/admin";
@@ -126,6 +127,94 @@ function CollectorTile({ collector }: { collector: BoardCollector }) {
         </details>
       )}
       <Sparkline history={collector.history} />
+    </div>
+  );
+}
+
+type FreshnessRow = AdminBoard["freshness"][number];
+type HostGroupRows = { host: string | null; rows: FreshnessRow[] };
+
+/** The heatmap's rows by upstream host, in the order the server sent them. */
+function hostGroups(rows: FreshnessRow[]): HostGroupRows[] {
+  const groups = new Map<string | null, FreshnessRow[]>();
+  for (const row of rows) groups.set(row.upstream_host, [...(groups.get(row.upstream_host) ?? []), row]);
+  return [...groups].map(([host, grouped]) => ({ host, rows: grouped }));
+}
+
+/** One upstream host's agencies, under a heading naming the host. Agencies
+ *  sharing a host share its outages, so a newest day missing for every one
+ *  of them is stated once, as the host's. */
+function HostGroup({ group, dayCount }: { group: HostGroupRows; dayCount: number }) {
+  const { t } = useTranslation();
+  const id = useId();
+  const last = group.rows[0]?.days.at(-1)?.date;
+  const allMissing =
+    group.rows.length > 1 && last != null && group.rows.every((row) => row.days.at(-1)?.state === "missing");
+  return (
+    <div role="group" aria-labelledby={id} style={{ display: "grid", gap: 4 }}>
+      <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
+        <span id={id}>
+          {t("admin.board.host_group", { host: group.host ?? t("admin.board.host_unknown"), count: group.rows.length })}
+        </span>
+        {allMissing && (
+          <>
+            {" · "}
+            <span>{t("admin.board.host_no_data", { date: last })}</span>
+          </>
+        )}
+      </p>
+      {group.rows.map((row) => (
+        <FreshnessHeatmapRow key={row.agency_id} row={row} dayCount={dayCount} />
+      ))}
+    </div>
+  );
+}
+
+function FreshnessHeatmapRow({ row, dayCount }: { row: FreshnessRow; dayCount: number }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="freshness-row"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `minmax(90px, 140px) repeat(${dayCount}, minmax(0, 1fr))`,
+        gap: 3,
+        alignItems: "center",
+      }}
+    >
+      <span
+        style={{
+          fontSize: "var(--text-xs)",
+          color: "var(--text-secondary)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {row.agency_name}
+      </span>
+      {row.days.map((day) => (
+        <span
+          key={day.date}
+          data-testid="freshness-cell"
+          data-state={day.state}
+          title={
+            day.clamp_pct == null
+              ? t("admin.board.cell_tooltip", {
+                  agency: row.agency_name,
+                  date: day.date,
+                  state: t(`admin.board.state.${day.state}`),
+                })
+              : t("admin.board.cell_tooltip_clamp", {
+                  agency: row.agency_name,
+                  date: day.date,
+                  state: t(`admin.board.state.${day.state}`),
+                  pct: day.clamp_pct,
+                })
+          }
+          style={{ display: "block", height: 16, borderRadius: 3, ...CELL_STYLES[day.state] }}
+        />
+      ))}
     </div>
   );
 }
@@ -339,52 +428,9 @@ export function AdminBoardPage() {
           <EmptyState title={t("admin.board.freshness_empty")} />
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <div style={{ display: "grid", gap: 4, minWidth: 420 }}>
-              {freshness.map((row) => (
-                <div
-                  key={row.agency_id}
-                  data-testid="freshness-row"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: `minmax(90px, 140px) repeat(${dayCount}, minmax(0, 1fr))`,
-                    gap: 3,
-                    alignItems: "center",
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: "var(--text-xs)",
-                      color: "var(--text-secondary)",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {row.agency_name}
-                  </span>
-                  {row.days.map((day) => (
-                    <span
-                      key={day.date}
-                      data-testid="freshness-cell"
-                      data-state={day.state}
-                      title={
-                        day.clamp_pct == null
-                          ? t("admin.board.cell_tooltip", {
-                              agency: row.agency_name,
-                              date: day.date,
-                              state: t(`admin.board.state.${day.state}`),
-                            })
-                          : t("admin.board.cell_tooltip_clamp", {
-                              agency: row.agency_name,
-                              date: day.date,
-                              state: t(`admin.board.state.${day.state}`),
-                              pct: day.clamp_pct,
-                            })
-                      }
-                      style={{ display: "block", height: 16, borderRadius: 3, ...CELL_STYLES[day.state] }}
-                    />
-                  ))}
-                </div>
+            <div style={{ display: "grid", gap: 10, minWidth: 420 }}>
+              {hostGroups(freshness).map((group) => (
+                <HostGroup key={group.host ?? ""} group={group} dayCount={dayCount} />
               ))}
             </div>
           </div>

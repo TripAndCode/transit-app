@@ -294,6 +294,21 @@ async def test_compute_service_delivered_not_available_when_not_static_join(net_
     assert row["delivered_missing"] == "feed_cannot_report"
 
 
+async def test_each_row_states_its_agencys_capability_tier(net_pool, ch_async_client):
+    """The board labels an agency whose feed cannot support its timetable
+    figures by its tier, read from the same verdicts the gates read."""
+    pool, a, b, cc = net_pool
+    await _set_ingest_strategy(pool, a, "static_join")
+    await _set_ingest_strategy(pool, cc, "static_join")
+    await confirm_rt_field_coverage(pool, cc, confirmed=False)
+    # b's ingest_strategy is left NULL, which ingests as aomori_regex.
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    assert {r["agency_id"]: r["capability_tier"] for r in rows} == {a: "full", b: "basic", cc: "basic"}
+
+
 async def test_compute_service_delivered_not_available_for_unconfirmed_static_join_agency(net_pool, ch_async_client):
     """`ingest_strategy == 'static_join'` alone is not sufficient trust: an
     agency with no live verdict in `rt_field_coverage_probes` must still read
@@ -587,6 +602,7 @@ async def test_network_summary_endpoint(net_client, ch_client):
         "covered_days",
         "window_days",
         "delivered_missing",
+        "capability_tier",
         "has_ridership_weights",
         "weighted_on_time_pct",
     }

@@ -2149,7 +2149,11 @@
         "agencies_never_analyzed_other": "{{count}} agencies have never been analyzed"
       },
       "check_failed": "Couldn't check its status",
-      "details": "Details"
+      "details": "Details",
+      "host_group_one": "{{host}} · {{count}} agency",
+      "host_group_other": "{{host}} · {{count}} agencies",
+      "host_unknown": "Feed host unknown",
+      "host_no_data": "No data from any of them on {{date}}"
     },
     "alert_center": {
       "bell_label": "Alerts",
@@ -2476,5 +2480,18 @@
     "empty_hint": "Try a different day.",
     "estimate_note": "Positions between stops are estimated.",
     "busiest_hour": "Busiest hour: {{time}}"
+  },
+  "capability": {
+    "basic": {
+      "label": "Basic data: on-time only",
+      "status": "Basic data",
+      "reason": "This agency's feed carries basic data only, which covers on-time performance. This needs timetable-matched records its feed doesn't provide.",
+      "figure": "not part of basic data",
+      "unranked": "Basic data: on-time only, so observation coverage can't be measured"
+    },
+    "loading": {
+      "status": "Loading",
+      "text": "Loading what this agency's feed covers…"
+    }
   }
 }

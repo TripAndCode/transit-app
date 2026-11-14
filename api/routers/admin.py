@@ -1370,7 +1370,7 @@ _OPS_STATUS_REPO_ENV = "OPS_STATUS_REPO"
 _COLLECTOR_BUDGET_SECONDS = 5.0
 
 _BOARD_FRESHNESS_SQL = """
-    SELECT a.agency_id, a.agency_name, m.analyzed_at, h.date, h.raw_samples, h.clamp_count
+    SELECT a.agency_id, a.agency_name, a.feed_url, m.analyzed_at, h.date, h.raw_samples, h.clamp_count
     FROM agencies a
     LEFT JOIN agg_meta m ON m.agency_id = a.agency_id
     LEFT JOIN agg_feed_health h ON h.agency_id = a.agency_id AND h.date >= $1 AND h.date < $2
@@ -1378,7 +1378,9 @@ _BOARD_FRESHNESS_SQL = """
     ORDER BY a.agency_id, h.date
 """
 
-_BOARD_AGENCIES_SQL = "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+_BOARD_AGENCIES_SQL = (
+    "SELECT agency_id, agency_name, feed_url FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+)
 
 _PENDING_LLM_APPROVALS_SQL = "SELECT count(*) FROM users WHERE NOT llm_approved AND suspended_at IS NULL"
 
@@ -1402,6 +1404,8 @@ class FreshnessDayOut(BaseModel):
 class AgencyFreshnessRowOut(BaseModel):
     agency_id: int
     agency_name: str
+    #: `api.admin_board.upstream_host`; rows arrive grouped by it.
+    upstream_host: str | None
     days: list[FreshnessDayOut]
 
 

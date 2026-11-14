@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
 import { useLocalizedQuery } from "./hooks";
-import type { ReportResponse, Route } from "./types";
+import type { CapabilityTier, ReportResponse, Route } from "./types";
 import type { Locale } from "../i18n";
 
 /** The screens a snapshot can be taken of (api/routers/snapshots.py). */
@@ -28,6 +28,9 @@ export type Snapshot = {
   method_version: string;
   title: string | null;
   note: string | null;
+  /** The agency's capability tier as it stands when read, never stored;
+   *  null for an agency no longer on record. */
+  capability_tier: CapabilityTier | null;
 };
 
 type SnapshotCreated = {

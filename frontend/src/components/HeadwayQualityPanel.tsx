@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useHeadwayQuality } from "../api/hooks";
 import { useRouteNames } from "../api/useRouteNames";
+import { useCapabilityTier } from "../api/useCapabilityTier";
 import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
@@ -38,6 +39,8 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const { t } = useTranslation();
   const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);
+  const tier = useCapabilityTier(aid);
+  const notShown = data ? headwayNotShown(t, data, tier) : null;
 
   return (
     <div style={{ marginTop: 20, background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16 }}>
@@ -47,7 +50,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
       {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
       {data && data.rows.length === 0 && (
         <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
-          {headwayNotShown(t, data)?.text ??
+          {notShown?.text ??
             t((data.routes_off_timetable ?? 0) > 0 ? "reports.headway_quality.empty_off_timetable" : "reports.headway_quality.empty")}
         </p>
       )}
@@ -59,7 +62,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
           {t("reports.headway_quality.some_off_timetable", { count: data.routes_off_timetable })}
         </p>
       )}
-      {data && !headwayNotShown(t, data) && (data.days_timetable_not_kept ?? 0) > 0 && (
+      {data && !notShown && (data.days_timetable_not_kept ?? 0) > 0 && (
         <p style={{ margin: data.rows.length > 0 ? "0 0 8px" : "8px 0 0", fontSize: 12, color: "var(--text-tertiary)" }}>
           {t("reports.headway_quality.timetable_not_kept", { count: data.days_timetable_not_kept })}
         </p>

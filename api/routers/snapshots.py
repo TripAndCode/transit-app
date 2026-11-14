@@ -43,6 +43,7 @@ from api.routers.static import fetch_static_routes
 from api.security import User, csrf_guard, require_admin
 from pipeline.data_sources import credit_line
 from pipeline.reports import ROUTE_TABLE_SORTS
+from pipeline.reports.capability import CapabilityTier, capability_tiers
 from pipeline.reports.rankings import EARLY_ANY
 
 admin_router = APIRouter(prefix="/api/admin/snapshots", tags=["admin"])
@@ -180,6 +181,11 @@ class SnapshotOut(BaseModel):
     method_version: str
     title: str | None
     note: str | None
+    #: pipeline.reports.capability, derived when read rather than stored: a
+    #: signed-out reader can't reach the agency catalogue, and the page words
+    #: a basic agency's missing figures by its tier. None for an agency no
+    #: longer on record.
+    capability_tier: CapabilityTier | None
 
 
 #: The response fields that legitimately differ between the locales'
@@ -395,7 +401,15 @@ async def read_snapshot(
 ) -> SnapshotOut:
     """One snapshot by its id."""
     row = await _snapshot_row(conn, snapshot_id, f"snapshot_id, created_at, {_SNAPSHOT_COLUMNS}, payloads")
-    return SnapshotOut(**{**dict(row), "params": json.loads(row["params"]), "payloads": json.loads(row["payloads"])})
+    tier = (await capability_tiers(conn, [row["agency_id"]])).get(row["agency_id"])
+    return SnapshotOut(
+        **{
+            **dict(row),
+            "params": json.loads(row["params"]),
+            "payloads": json.loads(row["payloads"]),
+            "capability_tier": tier,
+        }
+    )
 
 
 @router.get("/{snapshot_id}/today", response_model=SnapshotToday)

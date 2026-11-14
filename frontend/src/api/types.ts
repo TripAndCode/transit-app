@@ -2,12 +2,18 @@ import type { RouteTableOrder, RouteTableSort } from "../routes/destinations";
 import type { DowFilter, TimeBand } from "./scope";
 import type { Band } from "./timeBands";
 
+/** Which figures an agency's feed can support (pipeline.reports.capability):
+ *  `basic` feeds carry on-time data only, so the timetable-matched figures
+ *  are stated as outside the tier rather than given a pipeline reason. */
+export type CapabilityTier = "full" | "basic";
+
 export type Agency = {
   agency_id: number;
   agency_name: string;
   feed_url: string;
   static_url: string | null;
   latest_data_date: string | null;
+  capability_tier: CapabilityTier;
 };
 
 type RouteBucket = "anomaly" | "watch" | "normal" | "no_baseline";
@@ -1364,6 +1370,7 @@ export type NetworkAgencyRow = {
   /** Why service_delivered_pct is null, or null beside a rate:
    *  `unreadable` means planned_trips' 0 is a failed read, not a plan. */
   delivered_missing: DeliveredMissing | null;
+  capability_tier: CapabilityTier;
   /** Observation coverage and its two counts; docs/features/network-tab.md
    *  ("Comparability gate") defines them and when each is null. */
   observed_trips: number | null;
