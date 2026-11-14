@@ -379,7 +379,6 @@ async def chat_with_tools(
     conn,
     agency_id: int,
     locale: str = "ja",
-    rag_examples: list | None = None,
     history: list | None = None,
     ch=None,
     force_tool_call: bool = False,
@@ -460,7 +459,7 @@ async def chat_with_tools(
     """
     client = _get_client()
     # The operator's kill switch, checked inside _call_llm before any provider
-    # or BYOK key is touched. The rules/embedding routing stages (resolved by
+    # or BYOK key is touched. The rules stage (resolved by
     # the caller before this function runs), the intent-cache pre-hit's
     # undated rows never call _call_llm, so they keep
     # answering while it is off. A dated pre-hit row is nulled out by the
@@ -534,18 +533,7 @@ async def chat_with_tools(
         question=question,
     )
 
-    # Few-shot block: when the upstream router supplied nearest-neighbour
-    # examples from the golden-set RAG index, append them to the system
-    # prompt so the model can pattern-match similar questions onto the
-    # right tool + arg shape. Kept off the static SYSTEM_PROMPT because
-    # the block is per-request and varies with retrieval.
     system_prompt = SYSTEM_PROMPT
-    if rag_examples:
-        lines = ["\n", "== 類似質問の例 (参考) =="]
-        for m in rag_examples:
-            args_compact = json.dumps(m.args, ensure_ascii=False, separators=(",", ":"))
-            lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
-        system_prompt = system_prompt + "\n" + "\n".join(lines)
 
     # Bounded conversation memory: when the API layer threads prior turns,
     # fold the last few (question → tool(args)) into a dedicated system
@@ -681,8 +669,7 @@ async def chat_with_tools(
             sig_hash_pre = pre_row["signature_hash"]
             _pre_sig = IntentSignature(tool=name, args=args, confidence=float(pre_row.get("confidence") or 0.0))
             await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
-            nn_dist_pre = _nn_distance_for_tool(rag_examples or [], name)
-            final_conf_pre = derive_confidence(nn_dist_pre, float(pre_row.get("confidence") or 0.0))
+            final_conf_pre = derive_confidence(float(pre_row.get("confidence") or 0.0))
             return await _dispatch_and_respond(
                 name,
                 args,
@@ -798,9 +785,7 @@ async def chat_with_tools(
         if text_keyed and _known_tool:
             await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
 
-        # Compute final confidence blending NN distance + LLM self-report.
-        nn_dist = _nn_distance_for_tool(rag_examples or [], name)
-        final_conf = derive_confidence(nn_dist, sig.confidence)
+        final_conf = derive_confidence(sig.confidence)
 
         return await _dispatch_and_respond(
             name,
@@ -826,7 +811,7 @@ async def chat_with_tools(
         # non-answer from the caller's perspective. success=False so
         # analytics don't count it either way.
         # Route by failure kind: quota exhaustion steers the user toward
-        # question types the rules/embedding routing stages answer without
+        # question types the rules stage answers without
         # any LLM; everything else falls back to the generic retry message.
         key = _ERROR_KIND_LOCALE_KEY.get(error_kind or "", "service_unreachable")
         return {
@@ -883,22 +868,7 @@ def _result_to_dict(r: ToolResult) -> dict:
     }
 
 
-def _nn_distance_for_tool(rag_examples: list, tool: str) -> float | None:
-    """Return the smallest cosine distance among RAG examples whose tool matches.
-
-    Each element of ``rag_examples`` is expected to have ``.tool`` and
-    ``.distance`` attributes (a :class:`~pipeline.query.rag_index.Match`
-    enriched by :func:`~pipeline.query.router._enrich`).
-
-    Returns ``None`` when ``rag_examples`` is empty or no example maps to
-    ``tool``. Used by Stage 3 to derive a confidence score without calling
-    the LLM a second time — the NN distance is already computed upstream.
-    """
-    distances = [m.distance for m in rag_examples if getattr(m, "tool", None) == tool]
-    return min(distances) if distances else None
-
-
 # Re-export the locale lookup helper so tests / shared code can use the
 # same fallback semantics without reaching into the tools module's
 # private namespace.
-__all__ = ["_nn_distance_for_tool", "_summary", "chat_with_tools"]
+__all__ = ["_summary", "chat_with_tools"]

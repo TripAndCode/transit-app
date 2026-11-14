@@ -950,11 +950,11 @@ export function useTriggerRun() {
   });
 }
 
-// ── Ask ops (query log, route funnel, promote-to-intent-cache, eval) ─────
+// ── Ask ops (query log, route funnel, eval) ───────────────────────────────
 //
 // "route" here is the Ask pipeline stage that answered a question (rules ->
-// nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
-// AGENTS.md's architecture naming, not a transit route/line. `no_history` is
+// nn (retired embedding stage; historic rows only) -> rag (LLM)), not a
+// transit route/line. `no_history` is
 // the router's own early-exit case (a follow-up with nothing to continue).
 // There is no "user" field and `providers` below is always null because
 // ask_query_log carries neither identity nor a per-query provider/latency
@@ -974,7 +974,6 @@ export type AskQueryLogRow = {
   cache_outcome: string | null;
   numeric_guard_triggered: boolean | null;
   created_at: string;
-  promotable: boolean;
 };
 
 type AskQueryLogPage = { rows: AskQueryLogRow[]; next_cursor: string | null };
@@ -1012,19 +1011,6 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
   return useQuery({
     queryKey: ["adminAskFunnel", params],
     queryFn: ({ signal }) => apiGet<AskFunnel>(`/api/admin/ask/funnel?${qs}`, { signal }),
-  });
-}
-
-type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
-
-/** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
- * Nothing is invalidated: the query-log rows carry no promoted state
- * (`promotable` depends only on the row having a cached intent), so a
- * promote leaves the list unchanged, and a repeat click is answered with
- * `reason: "already_promoted"`. */
-export function usePromoteAskQuery() {
-  return useMutation({
-    mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
   });
 }
 

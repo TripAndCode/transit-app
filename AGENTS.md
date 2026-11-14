@@ -60,8 +60,8 @@ tier routing, the high-risk overlay and the fix cap.
 - Raw GTFS-RT `updates` is in ClickHouse. Postgres holds aggregates, OLTP, PostGIS,
   and pgvector. Default reports use precomputed aggregates; narrow filters may scan
   ClickHouse.
-- Ask routing is rules → embedding nearest-neighbour → RAG LLM. Only the third stage
-  calls an LLM.
+- Ask free text is rules → LLM; only the second stage calls a model. The notebook's
+  cards (`/ask/card`, conversations) dispatch deterministically.
 - Admin control room: `api/routers/admin*.py` (board, agencies, users, audit, flags,
   ask ops) behind `RequireAdmin`/`require_admin`. See
   `docs/features/admin-control-room.md` for routes, endpoints, and tables per section.
@@ -156,7 +156,6 @@ tier routing, the high-risk overlay and the fix cap.
   `CLICKHOUSE_*` test variables are set. A passing run with skips is not full
   integration evidence.
 - Put pure logic tests under `tests/unit/`; that directory bypasses DB fixtures.
-  Mock the ML embedder unless a test is explicitly slow.
 
 ## Frontend and user-facing text
 

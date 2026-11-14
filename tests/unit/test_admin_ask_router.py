@@ -9,7 +9,6 @@ pool, database, or ML embedder.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import date
 
 from fastapi import FastAPI
@@ -36,20 +35,6 @@ class _CaptureConn:
     async def fetch(self, sql, *args):
         self.calls.append((sql, args))
         return []
-
-
-class _PromoteConn:
-    """Just enough to reach the embedder-availability check in
-    ``promote_query_log`` -- an unavailable embedder 503s before anything
-    else on the connection is touched."""
-
-    def __init__(self, log_row):
-        self._log_row = log_row
-
-    async def fetchrow(self, sql, *_args):
-        if "FROM ask_query_log WHERE id=$1" in sql:
-            return self._log_row
-        raise AssertionError(f"unexpected fetchrow: {sql}")
 
 
 def _client(conn) -> tuple[TestClient, CountingPool]:
@@ -97,49 +82,3 @@ def test_funnel_runs_unbounded_when_both_bounds_are_given(monkeypatch):
     assert r.status_code == 200
     _sql, args = conn.calls[0]
     assert args == (date(2020, 1, 1), date(2020, 1, 31))
-
-
-# ── embedder load off the event loop (A20) ──────────────────────────────────
-
-
-def test_promote_loads_the_embedder_via_asyncio_to_thread(monkeypatch):
-    calls: list[object] = []
-    real_to_thread = asyncio.to_thread
-
-    async def _spy_to_thread(fn, *args, **kwargs):
-        calls.append(fn)
-        return await real_to_thread(fn, *args, **kwargs)
-
-    monkeypatch.setattr(admin_ask.asyncio, "to_thread", _spy_to_thread)
-    monkeypatch.setattr(admin_ask, "csrf_guard", lambda _request: None)
-
-    class _UnavailableEmbedder:
-        available = False
-
-    monkeypatch.setattr(admin_ask, "get_embedder", lambda: _UnavailableEmbedder())
-    conn = _PromoteConn({"agency_id": 1, "signature_hash": "abc"})
-
-    r = _client(conn)[0].post("/api/admin/ask/promote", json={"query_log_id": 1}, headers=_ORIGIN)
-
-    assert r.status_code == 503
-    assert calls == [admin_ask.get_embedder], "get_embedder must be called through asyncio.to_thread"
-
-
-def test_promote_holds_no_connection_while_the_embedder_loads(monkeypatch):
-    conn = _PromoteConn({"agency_id": 1, "signature_hash": "abc"})
-    client, pool = _client(conn)
-    monkeypatch.setattr(admin_ask, "csrf_guard", lambda _request: None)
-    held: list[int] = []
-
-    class _UnavailableEmbedder:
-        available = False
-
-    def _load():
-        held.append(pool.held)
-        return _UnavailableEmbedder()
-
-    monkeypatch.setattr(admin_ask, "get_embedder", _load)
-    r = client.post("/api/admin/ask/promote", json={"query_log_id": 1}, headers=_ORIGIN)
-    assert r.status_code == 503
-    assert held == [0]
-    assert pool.peak == 1

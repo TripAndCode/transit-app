@@ -756,54 +756,6 @@ def cmd_migrate(args):
     conn.close()
 
 
-def cmd_build_rag_index(args):
-    """Embed every (id, question) line from tests/ask_eval/golden_set.jsonl
-    into rag_chunks for the named agency (or every agency in `agencies` if
-    --all-agencies is set). Idempotent via content_hash."""
-    import asyncio
-    from pathlib import Path
-
-    import asyncpg
-
-    from pipeline.query.rag_index import build_index
-
-    golden = Path(__file__).resolve().parent / "tests" / "ask_eval" / "golden_set.jsonl"
-    if not golden.exists():
-        raise SystemExit(f"golden set not found: {golden}")
-
-    async def run():
-        """Async body executed via asyncio.run()."""
-        _log_target()
-        pool = await asyncpg.create_pool(DATABASE_URL)
-        # try/finally so the pool closes on the early exits too — the guard
-        # below and the missing-argument check both leave before the loop.
-        try:
-            async with pool.acquire() as conn:
-                await guard_async_conn(conn)
-            if args.all_agencies:
-                async with pool.acquire() as conn:
-                    rows = await conn.fetch(
-                        "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
-                    )
-                ids = [(r["agency_id"], r["agency_name"]) for r in rows]
-            else:
-                if args.agency_id is None:
-                    raise SystemExit("--agency-id or --all-agencies required")
-                ids = [(args.agency_id, f"agency {args.agency_id}")]
-
-            for aid, name in ids:
-                async with pool.acquire() as conn:
-                    counts = await build_index(conn, aid, golden)
-                logger.info(
-                    f"  {aid:>3} {name}: "
-                    f"inserted={counts['inserted']} updated={counts['updated']} skipped={counts['skipped']}"
-                )
-        finally:
-            await pool.close()
-
-    asyncio.run(run())
-
-
 def cmd_prune_query_log(args):
     """Delete ask_query_log rows older than the retention window (default 90 days)."""
     import asyncio
@@ -1060,10 +1012,6 @@ def main():
         help="Allow rolling back a down migration marked `-- DESTRUCTIVE` (see db/migrations/README.md)",
     )
 
-    p_rag = sub.add_parser("build_rag_index", help="Embed golden_set.jsonl into rag_chunks")
-    p_rag.add_argument("--agency-id", type=int, default=None)
-    p_rag.add_argument("--all-agencies", action="store_true")
-
     p_prune = sub.add_parser("prune_query_log", help="Delete ask_query_log rows older than N days")
     p_prune.add_argument("--days", type=int, default=QUERY_LOG_RETENTION_DAYS)
 
@@ -1125,8 +1073,6 @@ def main():
         cmd_refresh_static(args)
     elif args.command == "migrate":
         cmd_migrate(args)
-    elif args.command == "build_rag_index":
-        cmd_build_rag_index(args)
     elif args.command == "prune_query_log":
         cmd_prune_query_log(args)
     elif args.command == "prune-pipeline-runs":

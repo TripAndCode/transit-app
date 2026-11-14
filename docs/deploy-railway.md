@@ -193,17 +193,6 @@ curl -fsS https://<your>.up.railway.app/health      # → 200
 Open the domain in a browser — SPA loads. Tabs are empty until data lands
 (next step), and Ask works once `GEMINI_API_KEY`/`OPENAI_API_KEY` is valid.
 
-> **Image spec — the Ask-tab embedder is not in this image.** `sentence-
-> transformers` (and its transitive `torch`/`transformers`/`scikit-learn`/
-> `scipy`) live in poetry's optional `embeddings` group, which the
-> Dockerfile's `--only main` deliberately skips — several GB, unused until a
-> RAG index actually exists. `pipeline.query.embeddings.Embedder`'s import is
-> wrapped in try/except; every caller already falls through to the LLM-only
-> path when it's unavailable, so Ask still works (Stages 1 and 3), just
-> without Stage 2's embedding-nearest-neighbor lookup. To restore it for a
-> given deploy, add the group to the Dockerfile's `poetry install` line and
-> a build-time step that bakes the model into the image.
-
 ---
 
 ## 3. Load data
@@ -257,17 +246,6 @@ agency's configured source; to load a zip you already have instead:
 
 ```bash
 railway run --service app python gtfs_pipeline.py load_static <zip-or-dir> --agency-id <id>
-```
-
-Build the Ask router's RAG index once (optional — Ask degrades gracefully
-without it, falling through to the LLM). `app`'s own image excludes the
-`embeddings` poetry group (see the Image spec note above), so this needs a
-one-off install first — still via `railway run --service app` so the
-command runs inside the private network that `db`/`clickhouse` are only
-reachable from:
-
-```bash
-railway run --service app sh -c "pip install --no-cache-dir sentence-transformers && python gtfs_pipeline.py build_rag_index --agency-id 1"
 ```
 
 ---
@@ -526,6 +504,5 @@ Skip entirely if it's only demo data.
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
 | `POST /internal/cron/ingest` returns 401 / 503 | 401: the caller's `X-Cron-Secret` header doesn't match `CRON_SECRET` in the `app` Variables. 503: `CRON_SECRET` is unset on `app`. |
-| Out of memory at boot | Not the embedder by default — it's excluded from this image (see the Image spec note above). If you've added the `embeddings` poetry group and a bake step yourself, that's the likely cause: the e5-small embedder (torch) is heavy (~1–2 GB resident once loaded). Bump the app service's memory, or drop the group back out. |
 | Slow first boot / `/health` timeout after a redeploy | Check the deploy's `PUBLISH_IMAGE`/`CREATE_CONTAINER` timing first — a large image takes real time to pull onto the runtime host before the process even starts, independent of anything the app itself does. |
 | Nobody can sign in (Google/GitHub OAuth down) | Sign in at `/login` with the break-glass `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` account, turn `login_required` off on `/admin/flags`, and turn it back on once OAuth recovers. Keep those two variables set in production for exactly this: once any admin has set a `login_required` override, the `LOGIN_REQUIRED` env var alone cannot turn the gate off. |

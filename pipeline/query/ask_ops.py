@@ -8,9 +8,9 @@ whether it succeeded (``success``: bool). It has no ``route``, ``status``,
 identity, and ``pipeline/query/query_log.py``'s INSERT column list for the
 full set that exists. The admin surface's "route" and "status" columns are
 derived here from ``router_stage``/``success`` rather than stored directly,
-using AGENTS.md's architecture naming (rules → embedding nearest-neighbour →
-RAG LLM) so the UI can speak "rules / nn / rag" without the DB needing a
-redundant column.
+using the display routes "rules / nn / rag" so the DB needs no redundant
+column. ``embedding`` is a retired stage: only historic rows carry it, and it
+keeps its display route so they stay readable.
 """
 
 from __future__ import annotations

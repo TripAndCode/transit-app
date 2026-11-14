@@ -2201,11 +2201,6 @@
         "miss": "Cache miss",
         "bypass": "Bypassed"
       },
-      "promote_action": "Promote",
-      "promote_success": "Promoted.",
-      "promote_already": "Already promoted.",
-      "promote_not_eligible": "Not eligible for promotion.",
-      "promote_error": "Couldn't promote — try again.",
       "empty": "No queries found for this filter.",
       "pagination": {
         "prev": "Previous",

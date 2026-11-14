@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
@@ -8,8 +7,6 @@ import i18n from "../../i18n";
 import { formatDateTime } from "../../utils/format";
 import type { useAdminAskEval, useAdminAskFunnel, useAdminAskQueries } from "../../api/admin";
 import { AdminAskOpsPage } from "./AdminAskOpsPage";
-
-const promoteMutateAsync = vi.fn().mockResolvedValue({ promoted: true, reason: null, chunk_id: "cache_abc" });
 
 type QueriesReturn = ReturnType<typeof useAdminAskQueries>;
 type FunnelReturn = ReturnType<typeof useAdminAskFunnel>;
@@ -33,7 +30,6 @@ vi.mock("../../api/admin", () => ({
     return funnelReturn;
   },
   useAdminAskEval: () => evalReturn,
-  usePromoteAskQuery: () => ({ mutateAsync: promoteMutateAsync, isPending: false }),
 }));
 
 function wrapAt(ui: React.ReactElement, path: string) {
@@ -62,12 +58,9 @@ const baseRow = {
   cache_outcome: "miss",
   numeric_guard_triggered: false,
   created_at: "2026-09-14T03:00:00Z",
-  promotable: true,
 };
 
 beforeEach(() => {
-  promoteMutateAsync.mockReset();
-  promoteMutateAsync.mockResolvedValue({ promoted: true, reason: null, chunk_id: "cache_abc" });
   queriesReturn = {
     data: { rows: [baseRow], next_cursor: null },
     isLoading: false,
@@ -105,63 +98,6 @@ describe("AdminAskOpsPage", () => {
     };
     wrap(<AdminAskOpsPage />);
     expect(screen.queryByText(/数値ガード|Numeric guard/)).toBeNull();
-  });
-
-  it("shows the promote action only for promotable (rag) rows", () => {
-    queriesReturn = {
-      data: {
-        rows: [
-          baseRow,
-          { ...baseRow, id: 2, route: "rules" as const, promotable: false, question: "Second question" },
-        ],
-        next_cursor: null,
-      },
-      isLoading: false,
-      error: null,
-    };
-    wrap(<AdminAskOpsPage />);
-    const promoteButtons = screen.getAllByRole("button", { name: /promote/i });
-    expect(promoteButtons.length).toBe(1);
-  });
-
-  it("calls the promote mutation when the action is clicked", async () => {
-    const user = userEvent.setup();
-    wrap(<AdminAskOpsPage />);
-    const button = screen.getByRole("button", { name: /promote/i });
-    await user.click(button);
-    expect(promoteMutateAsync).toHaveBeenCalledWith(1);
-  });
-
-  it("marks only the row whose promotion is in flight as pending", async () => {
-    // One slow embedding must not hold every other row's promote hostage.
-    const inFlight = new Map<number, () => void>();
-    promoteMutateAsync.mockImplementation(
-      (id: number) =>
-        new Promise((resolve) => {
-          inFlight.set(id, () => resolve({ promoted: true, reason: null, chunk_id: `cache_${id}` }));
-        }),
-    );
-    queriesReturn = {
-      data: { rows: [baseRow, { ...baseRow, id: 2, question: "Second question" }], next_cursor: null },
-      isLoading: false,
-      error: null,
-    };
-    const user = userEvent.setup();
-    wrap(<AdminAskOpsPage />);
-    const promoteIn = (row: number) =>
-      within(screen.getAllByRole("row")[row]).getByRole("button", { name: /promote/i });
-
-    await user.click(promoteIn(1));
-    expect(promoteIn(1)).toBeDisabled();
-    expect(promoteIn(2)).toBeEnabled();
-
-    await user.click(promoteIn(2));
-    expect(promoteMutateAsync).toHaveBeenCalledWith(2);
-    await act(async () => inFlight.get(1)!());
-    expect(promoteIn(1)).toBeEnabled();
-    expect(promoteIn(2)).toBeDisabled();
-    await act(async () => inFlight.get(2)!());
-    expect(promoteIn(2)).toBeEnabled();
   });
 
   it("renders the route funnel counts", () => {

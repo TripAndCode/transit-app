@@ -2201,11 +2201,6 @@
         "miss": "キャッシュミス",
         "bypass": "バイパス"
       },
-      "promote_action": "昇格",
-      "promote_success": "昇格しました。",
-      "promote_already": "すでに昇格済みです。",
-      "promote_not_eligible": "昇格対象ではありません。",
-      "promote_error": "昇格に失敗しました。もう一度お試しください。",
       "empty": "この条件に一致する質問はありません。",
       "pagination": {
         "prev": "前へ",

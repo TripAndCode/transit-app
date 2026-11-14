@@ -3,7 +3,7 @@
 route_stats answers a single route with per-weekday average delay and sample
 counts only; no Ask tool returns a share of departures more than five minutes
 late. The capabilities examples, the describe_data metric list and the golden
-set, whose rows Stage 2 replays verbatim, must not promise either figure.
+set the eval replays must not promise either figure.
 """
 
 import json

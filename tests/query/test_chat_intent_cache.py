@@ -67,7 +67,7 @@ async def pool_with_agency(apply_schema):
 
 @pytest.mark.asyncio
 async def test_cache_miss_writes_cache_row(pool_with_agency, monkeypatch):
-    """First time a question reaches Stage 3 → cache row written with hit_count=1."""
+    """First time a question reaches the LLM stage → cache row written with hit_count=1."""
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
     fake = _FakeClient(_sig_message(tool="capabilities", args={}))

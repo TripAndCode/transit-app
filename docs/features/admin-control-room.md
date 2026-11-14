@@ -348,13 +348,7 @@ Route: `/admin/ask`, backed by `AdminAskOpsPage`.
 Endpoints:
 - `GET /api/admin/ask/queries` — paged query log.
 - `GET /api/admin/ask/funnel` — stage/success counts.
-- `POST /api/admin/ask/promote` — promote one Stage-3 ("rag") query's
-  cached intent into the RAG index ahead of the scheduled batch job's own
-  hit-count/quiet-days gate. The suggestion it publishes is that query's own
-  question text, the one the admin reviewed.
 - `GET /api/admin/ask/eval` — latest local eval artifact, or `null` when
   nothing has produced one yet.
 
-Tables: reads `ask_query_log`; `promote` additionally reads/writes
-`ask_intent_cache` and `rag_chunks` (via `pipeline.query.intent_promotion`)
-and records an `admin_audit` entry.
+Tables: reads `ask_query_log`.

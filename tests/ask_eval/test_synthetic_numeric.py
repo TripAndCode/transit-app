@@ -32,12 +32,10 @@ the ML embedder unless a test is explicitly slow" guidance; this test is the
 explicitly-slow, explicitly-live exception, same tier as ``test_baseline.py``.
 
 The synthetic route codes (``SYN_UNIFORM`` / ``SYN_SPIKE`` / ``SYN_NULLMIX``)
-don't match any Stage-1 rule regex in ``pipeline/query/router.py`` (those
+don't match any rule regex in ``pipeline/query/router.py`` (those
 rules match generic dataset questions — route lists, date ranges, rankings —
-never a specific route code + "average delay"), and the throwaway agency
-never gets a RAG index built, so Stage 2 (embedding nearest-neighbour) never
-fires either (no ``rag_chunks`` rows to match against). Every question below
-is therefore guaranteed to reach Stage 3 (the real LLM call) with the
+never a specific route code + "average delay"). Every question below
+is therefore guaranteed to reach the LLM stage (the real LLM call) with the
 misleading history below attached, not silently resolved by a deterministic
 rule that would make this pass without ever exercising the model.
 
