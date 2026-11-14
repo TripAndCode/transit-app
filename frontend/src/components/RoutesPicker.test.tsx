@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import * as hooks from "../api/hooks";
@@ -95,6 +96,62 @@ describe("RoutesPicker brand lines", () => {
     const checkbox = screen.getByRole("checkbox", { name: "めいぷる～ぷ" });
     expect(checkbox.parentElement).toHaveTextContent(/^めいぷる～ぷ/);
     expect(checkbox.parentElement).not.toHaveTextContent("j1");
+  });
+});
+
+function renderTrayPicker(initial: string[], onSubmit = vi.fn()) {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({
+    data: [
+      { route_id: "C12(1)", route_short_name: "C12", route_long_name: "Loop", route_code: "C12a", trip_headsigns: [] },
+      { route_id: "C12(2)", route_short_name: "C12", route_long_name: "Loop", route_code: "C12b", trip_headsigns: [] },
+    ],
+    isPending: false,
+    refetch: vi.fn(),
+  } as never);
+  function Wrapper() {
+    const [selected, setSelected] = useState(initial);
+    return <RoutesPicker selected={selected} onChange={setSelected} tray onSubmit={onSubmit} />;
+  }
+  renderWithProviders(
+    <MemoryRouter initialEntries={["/agencies/1/routes"]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/routes" element={<Wrapper />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  return onSubmit;
+}
+
+describe("RoutesPicker tray", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows a muted line when nothing is picked, and no Clear button", () => {
+    renderTrayPicker([]);
+    expect(screen.getByText("Nothing picked: all routes")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+  });
+
+  it("shows each picked route as a removable chip, and removing one keeps the rest", async () => {
+    renderTrayPicker(["C12a", "C12b"]);
+    expect(screen.queryByText("Nothing picked: all routes")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Remove route C12 Loop (C12a)" }));
+    expect(screen.queryByRole("button", { name: "Remove route C12 Loop (C12a)" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove route C12 Loop (C12b)" })).toBeInTheDocument();
+  });
+
+  it("clears every pick at once", async () => {
+    renderTrayPicker(["C12a", "C12b"]);
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByText("Nothing picked: all routes")).toBeInTheDocument();
+  });
+
+  it("submits on a clean Enter in the search field, not one still composing kana", () => {
+    const onSubmit = renderTrayPicker([]);
+    const search = screen.getByLabelText("Search routes");
+    fireEvent.keyDown(search, { key: "Enter", keyCode: 229, isComposing: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -21,6 +21,7 @@ import { readScopePinned, writeScopePinned } from "./scopePin";
 import {
   isScopeConditionOff,
   periodDays,
+  routeTokenPlates,
   scopeTokens,
   sentenceParts,
   tokenChanged,
@@ -65,6 +66,7 @@ function removesOpen(open: ConditionKey | null, patch: ScopePatch): boolean {
 
 function Token({
   token,
+  badge,
   hint,
   on,
   off,
@@ -77,6 +79,9 @@ function Token({
   summary,
 }: {
   token: ScopeToken & { key: ConditionKey };
+  /** A purely decorative lead-in before the token's own label text (the
+   *  routes token's plate stack); never changes what the label says. */
+  badge?: ReactNode;
   hint: string | null;
   on: boolean;
   off: boolean;
@@ -100,6 +105,13 @@ function Token({
     if (next == null) return;
     onClose();
   }
+  // Unlike Escape or an outside click, an explicit Cancel/Apply inside the
+  // popover leaves nothing else to take focus, so it returns to the token
+  // the same way Escape does.
+  function closeAndFocus() {
+    onClose();
+    ref.current?.focus();
+  }
   return (
     <span className="scope-token-wrap" onBlur={onBlur}>
       <button
@@ -112,6 +124,7 @@ function Token({
         aria-describedby={off ? describedBy : undefined}
         onClick={onToggle}
       >
+        {badge}
         <span className="scope-token__label">{token.label}</span>
         {hint != null && (
           <>
@@ -122,7 +135,7 @@ function Token({
       </button>
       {open && (
         <ScopePopover label={t(`scope.popover.${token.key}`)} onClose={onClose} returnFocusTo={ref}>
-          <Control scope={scope} update={update} summary={summary} />
+          <Control scope={scope} update={update} summary={summary} close={closeAndFocus} />
         </ScopePopover>
       )}
     </span>
@@ -130,8 +143,9 @@ function Token({
 }
 
 /** The scope as one sentence. Each condition is a chip that opens its own
- *  control; changes apply at once, and a chip changed from the default is
- *  marked. A set condition the screen's data did not use
+ *  control. A single-choice control applies each change at once; the routes
+ *  control stages its picks and commits them only on Apply. A chip changed
+ *  from the default is marked. A set condition the screen's data did not use
  *  (`applied[field] === false`) renders struck through instead; an absent
  *  `applied` means every condition was used. The saved views and the pin go
  *  on the page heading's row when the page has a ScopePageHeader, and beside
@@ -154,6 +168,7 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
     agencyName,
     routeLabel: names.format,
     routeGroup: (code: string) => names.data.get(code),
+    routePlate: (code: string) => names.parts.get(code)?.plate ?? null,
   };
   const tokens = scopeTokens(scope, phrases);
   // The data's last day, which ends the default period, arrives with the
@@ -193,10 +208,27 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
     }
     const key = tok.key;
     const token = { ...tok, key };
+    let badge: ReactNode;
+    if (key === "routes") {
+      const { plates, more } = routeTokenPlates(scope.routes, phrases);
+      if (plates.length > 0) {
+        badge = (
+          <span className="scope-token__plates" aria-hidden="true">
+            {plates.map((text, i) => (
+              <span key={i} className="route-label__plate scope-token__plate">
+                {text}
+              </span>
+            ))}
+            {more > 0 && <span className="route-label__plate scope-token__plate scope-token__plate--more">+{more}</span>}
+          </span>
+        );
+      }
+    }
     return (
       <span key={key} className="scope-nowrap">
         <Token
           token={token}
+          badge={badge}
           hint={key === "period" ? t("scope.period_days", { count: periodDays(scope) }) : null}
           on={tokenChanged(key, scope, resetPeriod)}
           off={isOff(token)}

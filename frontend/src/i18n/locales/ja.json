@@ -778,7 +778,13 @@
       "show_more": "さらに表示 (残り{{count}}件)",
       "empty_title": "ルートが登録されていません。",
       "empty_hint": "初回データ取り込み中の場合は数分後に再度お試しください。",
-      "search_label": "路線を検索"
+      "search_label": "路線を検索",
+      "tray_empty": "選択なし：全路線が対象",
+      "tray_remove": "{{route}}を解除",
+      "apply_hint": "Enterで適用・Escでキャンセル",
+      "apply_all": "全路線を表示",
+      "apply_count_one": "適用 · {{count}}路線",
+      "apply_count_other": "適用 · {{count}}路線"
     }
   },
   "operations": {

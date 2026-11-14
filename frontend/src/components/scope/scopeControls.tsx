@@ -19,6 +19,11 @@ export type ControlProps = {
   update: (patch: ScopePatch) => void;
   /** The controls' data, while it is loaded; every control works without it. */
   summary?: ScopeSummary;
+  /** Closes the popover this control renders in. Only the routes control
+   *  uses it -- every other control applies each change at once and has
+   *  nothing of its own to close. Absent for a control rendered pinned in
+   *  the scope strip, which has no popover to close. */
+  close?: () => void;
 };
 
 const PERIOD_PRESETS = [7, 14, 30] as const;
@@ -187,19 +192,58 @@ export function TimeControl({ scope, update }: ControlProps) {
   );
 }
 
-export function RoutesControl({ scope, update, summary }: ControlProps) {
+function sameRoutes(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = new Set(a);
+  return b.every((code) => sa.has(code));
+}
+
+/** A draft of the picked routes, committed only on Apply -- unlike every
+ *  other control here, which writes the scope on each change. Remounted
+ *  under a key of the committed routes, so a change made outside this
+ *  control (a reset, or the pinned strip and an open popover sharing one
+ *  scope) starts the draft over without a synchronising effect. */
+function RoutesDraft({ scope, update, summary, close }: ControlProps) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<string[]>(() => scope.routes);
   const delays = summary ? new Map(summary.routes.map((r) => [r.route_code, r])) : undefined;
+  const unchanged = sameRoutes(draft, scope.routes);
+  function commit() {
+    update({ routes: draft.length > 0 ? draft : null });
+    close?.();
+  }
+  function cancel() {
+    setDraft(scope.routes);
+    close?.();
+  }
+  const applyLabel =
+    draft.length === 0 ? t("filters.routes.apply_all") : t("filters.routes.apply_count", { count: draft.length });
   return (
-    <div className="scope-control">
+    <div className="scope-control routes-control">
       <RoutesPicker
-        selected={scope.routes}
-        onChange={(routes) => update({ routes: routes.length > 0 ? routes : null })}
+        selected={draft}
+        onChange={setDraft}
         delays={delays}
         renderDelay={(minutes) => <DelayBar minutes={minutes} />}
+        tray
+        onSubmit={commit}
       />
       <WholeDayNote scope={scope} update={update} summary={summary} />
+      <div className="routes-control__foot">
+        <span className="routes-control__hint">{t("filters.routes.apply_hint")}</span>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={cancel}>
+          {t("common.cancel")}
+        </button>
+        <button type="button" className="btn btn--primary btn--sm routes-control__apply" disabled={unchanged} onClick={commit}>
+          {applyLabel}
+        </button>
+      </div>
     </div>
   );
+}
+
+export function RoutesControl(props: ControlProps) {
+  return <RoutesDraft key={props.scope.routes.join(",")} {...props} />;
 }
 
 /** The summary comes from daily aggregates, which have no hour of day; say

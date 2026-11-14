@@ -6,9 +6,39 @@ import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { AgencyDataEndProvider } from "../../api/AgencyDataEndProvider";
 import * as hooks from "../../api/hooks";
-import { useScope } from "../../api/scope";
+import { SCOPE_EXTRAS_NONE, useScope, type Scope } from "../../api/scope";
 import type { ScopeSummary } from "../../api/types";
 import { DaysControl, EarlyControl, PeriodControl, RoutesControl, TimeControl, ToleranceControl, type ControlProps } from "./scopeControls";
+
+const BASE_SCOPE: Scope = {
+  ...SCOPE_EXTRAS_NONE,
+  from: "2026-09-01",
+  to: "2026-09-28",
+  dow: "all",
+  time_band: "all",
+  service: "all",
+  routes: [],
+};
+
+const TWO_ROUTES = [
+  { route_id: "r101", route_short_name: "1", route_long_name: "Coast", route_code: "101", trip_headsigns: [] },
+  { route_id: "r102", route_short_name: "2", route_long_name: "Hill", route_code: "102", trip_headsigns: [] },
+];
+
+/** Mounts RoutesControl directly on a given scope and update spy, bypassing
+ *  useScope/the router -- so a test can assert on `update`'s call count and
+ *  arguments precisely, which an integration mount through the URL cannot. */
+function directMount(scope: Scope, update = vi.fn(), close?: () => void) {
+  vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: TWO_ROUTES, isPending: false } as never);
+  renderWithProviders(
+    <MemoryRouter initialEntries={["/agencies/1/time"]}>
+      <Routes>
+        <Route path="/agencies/:agencyId/time" element={<RoutesControl scope={scope} update={update} close={close} />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  return update;
+}
 
 function Probe() {
   const [params] = useSearchParams();
@@ -368,12 +398,70 @@ describe("scope controls", () => {
       expect(screen.getByRole("textbox", { name: "Search routes" })).toBeInTheDocument();
     });
 
-    it("adds a route and clears the filter with the last one", async () => {
+    it("stages a tick without writing the scope, and only Apply writes it", async () => {
       mount(RoutesControl);
       await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
-      expect(params().get("routes")).toBe("101");
-      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
       expect(params().has("routes")).toBe(false);
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 1 route" }));
+      expect(params().get("routes")).toBe("101");
+    });
+
+    it("commits an empty draft as no filter at all, offered as showing all routes", async () => {
+      mount(RoutesControl, "?routes=101");
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      const apply = screen.getByRole("button", { name: "Show all routes" });
+      expect(apply).toBeEnabled();
+      await userEvent.click(apply);
+      expect(params().has("routes")).toBe(false);
+    });
+
+    it("commits the whole draft in exactly one update call, not one per tick", async () => {
+      const update = directMount({ ...BASE_SCOPE, routes: [] });
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: /^2 ?Hill$/ }));
+      expect(update).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 2 routes" }));
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith({ routes: ["101", "102"] });
+    });
+
+    it("disables Apply while the draft matches what is picked, including the same set reordered", async () => {
+      directMount({ ...BASE_SCOPE, routes: ["101", "102"] });
+      const apply = () => screen.getByRole("button", { name: /^Apply/ });
+      expect(apply()).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ })); // untick 101
+      expect(apply()).toBeEnabled();
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ })); // re-tick, now ["102", "101"]
+      expect(apply()).toBeDisabled();
+    });
+
+    it("discards the draft on Cancel, with no update call", async () => {
+      const update = directMount({ ...BASE_SCOPE, routes: [] });
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it("closes through the close prop on Cancel", async () => {
+      const close = vi.fn();
+      directMount({ ...BASE_SCOPE, routes: [] }, vi.fn(), close);
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes through the close prop on Apply", async () => {
+      const close = vi.fn();
+      directMount({ ...BASE_SCOPE, routes: [] }, vi.fn(), close);
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      await userEvent.click(screen.getByRole("button", { name: "Apply · 1 route" }));
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    it("applies the draft on a clean Enter in the search field", async () => {
+      const update = directMount({ ...BASE_SCOPE, routes: [] });
+      await userEvent.click(screen.getByRole("button", { name: /^1 ?Coast$/ }));
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Search routes" }), { key: "Enter" });
+      expect(update).toHaveBeenCalledWith({ routes: ["101"] });
     });
   });
 });

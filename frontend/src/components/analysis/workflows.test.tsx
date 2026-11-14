@@ -108,20 +108,23 @@ it("keeps pattern and period in exported observations and saved analysis", async
 });
 it("changing keito scopes both report queries and CSV to the selected code", async () => {
   // Driven through the scope sentence: the routes condition opens the route
-  // picker, and each pick applies at once.
+  // picker, ticks stage a draft, and Apply commits it.
   show("reports");
   const user = setupUser();
   await user.click(screen.getByRole("button", { name: "1 Coast" }));
+  let dialog = screen.getByRole("dialog", { name: "Routes" });
   // The picker labels routes by plate and line name, not code: "1 Coast" is
   // 101 and "9 Coast" is 999. The space is optional because
   // dom-accessibility-api trims each inline element's own text, dropping the
   // space between the plate and the line name, where browsers keep it.
-  const picker = screen.getByRole("textbox", { name: "Search routes" }).parentElement!;
-  await user.click(within(picker).getByRole("button", { name: /^1 ?Coast$/ }));   // drop the initial 101
+  await user.click(within(dialog).getByRole("button", { name: /^1 ?Coast$/ })); // drop the initial 101
+  await user.click(within(dialog).getByRole("button", { name: "Show all routes" }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual([]);
-  await user.click(within(picker).getByRole("button", { name: /^9 ?Coast$/ }));
+  await user.click(screen.getByRole("button", { name: "all routes" }));
+  dialog = screen.getByRole("dialog", { name: "Routes" });
+  await user.click(within(dialog).getByRole("button", { name: /^9 ?Coast$/ }));
+  await user.click(within(dialog).getByRole("button", { name: "Apply · 1 route" }));
   expect(vi.mocked(useReport).mock.calls.at(-1)?.[2].routes).toEqual(["999"]);
-  await user.keyboard("{Escape}");
   await user.click(screen.getByRole("button", { name: "Export" }));
   await user.click(screen.getByRole("menuitem", { name: "Download CSV" }));
   // The mocked ranking data itself never changes (it's a fixed fixture), so
