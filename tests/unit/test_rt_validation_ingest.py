@@ -10,6 +10,7 @@ from datetime import date
 import pytest
 
 from pipeline import rt_validation_ingest as ingest
+from pipeline.ml_forecast_ingest import list_etags
 from pipeline.rt_validation_ingest import ValidationReadError, ingest_validation, load_validation
 from scripts import rt_validate_sample as rv
 
@@ -84,6 +85,15 @@ def _broken(**over):
         pytest.param(_key(), _broken(rules=[_E022, _E022]), id="rule-listed-twice"),
         pytest.param(_key(), _broken(rules=[{"rule_id": "E022"}]), id="rule-missing-fields"),
         pytest.param(_key(), _broken(runtime_sec=float("nan")), id="non-finite-number"),
+        # Each of these would pass as JSON but fail the upsert, rolling back
+        # every other summary of the batch with it.
+        pytest.param(_key(), _broken(status="no_archive", reason={"why": "x"}, rules=[]), id="reason-an-object"),
+        pytest.param(_key(), _broken(status="no_archive", reason=["x"], rules=[]), id="reason-a-list"),
+        pytest.param(_key(), _broken(files_given=2**31, files_validated=0, rules=[]), id="files-given-past-int"),
+        pytest.param(_key(), _broken(files_given=2**31, files_validated=2**31, rules=[]), id="validated-past-int"),
+        pytest.param(_key(), _broken(rules=[{**_E022, "title": "a\x00b"}]), id="nul-in-a-rule-title"),
+        pytest.param(_key(), _broken(status="no_archive", reason="a\x00", rules=[]), id="nul-in-the-reason"),
+        pytest.param(_key(), _broken(**{"note\x00": 1}), id="nul-in-a-key"),
     ],
 )
 def test_a_summary_that_cannot_be_trusted_is_refused(key, body):
@@ -121,9 +131,14 @@ class _FakeS3:
         return {"Body": _Body()}
 
 
+def test_a_count_at_the_columns_limit_is_still_a_count():
+    body = _broken(files_given=2**31 - 1, files_validated=2**31 - 1, rules=[])
+    assert ingest.parse_summary(_key(), body).files_given == 2**31 - 1
+
+
 def test_every_page_of_the_prefix_is_listed_with_its_etag():
     objects = {_key(day=date(2026, 11, d)): b"{}" for d in range(1, 6)}
-    listed = ingest.list_summaries(_FakeS3(objects), "transit-ml")
+    listed = list_etags(_FakeS3(objects), "transit-ml", ingest.PREFIX)
     assert sorted(listed) == sorted(objects)
     assert listed[_key(day=date(2026, 11, 1))] == f'"{_key(day=date(2026, 11, 1))}"'
 

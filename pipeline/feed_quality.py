@@ -73,8 +73,8 @@ The figures:
   (:func:`validator_figures`). A day with no summary was not validated, and
   neither was one whose validator could not run: neither is a day of zero
   findings. The counts are recorded, never graded. ``validator_ingested_at``
-  records when the newest summary the row counts last changed, so a summary
-  that arrives after its month was built rebuilds that month
+  is the latest ``ingested_at`` of any summary the row counts, so a summary
+  that arrives or changes after its month was built rebuilds that month
   (:func:`validation_moved`).
 
 A figure the feed or the app cannot supply is ``None`` beside a
@@ -284,8 +284,8 @@ VALIDATION_SQL = """
     ORDER BY service_date
 """
 
-# Per month, the summaries a window ending no later than *last* counts and
-# when the newest of them last changed: the stamp a built row records as its
+# Per month, the summaries a window ending no later than *last* counts and the
+# latest ingested_at among them: the stamp a built row records as its
 # validator_ok_days + validator_failed_days and validator_ingested_at.
 VALIDATION_STAMP_SQL = """
     SELECT date_trunc('month', service_date)::date, COUNT(*), MAX(ingested_at)
@@ -480,7 +480,7 @@ def validator_figures(days: Iterable[ValidationDay]) -> dict[str, Any]:
         "validator_ok_days": len(ok),
         "validator_failed_days": len(days) - len(ok),
         "validator_files_validated": sum(day.files_validated for day in ok) if validated else None,
-        "validator_rules": {rule_id: rules[rule_id] for rule_id in sorted(rules)} if validated else None,
+        "validator_rules": rules if validated else None,
         "validator_missing": None if validated else "not_validated",
         "validator_ingested_at": max((day.ingested_at for day in days), default=None),
     }

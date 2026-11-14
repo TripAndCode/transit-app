@@ -1981,9 +1981,9 @@
       "quality_validator_value": "{{ok, number}} of {{days, number}} days validated",
       "quality_validator_detail": "{{polls, number}} polls, one sampled hour a day",
       "quality_validator_failed": "could not run on {{failed, number}} days",
-      "quality_validator_rule": "{{rule}} {{title}}: {{occurrences, number}} in {{polls, number}} polls on {{days, number}} days",
       "quality_validator_none": "no rule fired",
-      "quality_validator_note": "MobilityData's GTFS-RT validator. Its counts are recorded, not graded: a shared vendor platform fires some rules on every feed it serves."
+      "quality_validator_note": "MobilityData's GTFS-RT validator. Its counts are recorded, not graded: a shared vendor platform fires some rules on every feed it serves. Rule names are the validator's own English wording.",
+      "quality_validator_rule_counts": "{{occurrences, number}} in {{polls, number}} polls on {{days, number}} days"
     },
     "architecture": {
       "title": "Architecture",

@@ -5,11 +5,14 @@ and service date.
 
 Every run lists the prefix and fetches only the keys whose ETag differs from
 the one stored beside their row, so the growing history is not downloaded
-again on each sweep, and a re-published summary replaces its row. A document
-that cannot be trusted, or that names an agency the database does not hold, is
-skipped by name rather than failing the batch. The counts are stored as the
-validator reported them and are never graded: the shared vendor platform fires
-some rules on every feed it serves.
+again on each sweep, and a re-published summary replaces its row. A key whose
+name is not a summary's, or names an agency the database does not hold, is
+skipped before it is fetched; a document that cannot be trusted is skipped
+after. A skipped key stores nothing, so the next run tries it again: an agency
+added later picks up its history that way. Each run logs one line counting its
+skipped keys by reason. The counts are stored as the validator reported them
+and are never graded: the shared vendor platform fires some rules on every
+feed it serves.
 
 No `ml` dependency group needed: this runs inside the production API process.
 """
@@ -19,9 +22,12 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, NamedTuple
+
+from pipeline.ml_forecast_ingest import list_etags
 
 _log = logging.getLogger(__name__)
 
@@ -30,6 +36,8 @@ STATUSES = ("ok", "no_archive", "no_timetable", "validator_failed")
 PREFIX = "validation/"
 _KEY = re.compile(r"validation/(\d+)/(\d{8})\.json")
 _RULE_FIELDS = ("rule_id", "severity", "title", "occurrences", "files_with_rule")
+# The INT columns files_given and files_validated are stored in.
+_MAX_COUNT = 2**31 - 1
 
 _UPSERT = """
     INSERT INTO rt_validation_daily
@@ -38,8 +46,10 @@ _UPSERT = """
     ON CONFLICT (agency_id, service_date) DO UPDATE SET
         status = EXCLUDED.status, reason = EXCLUDED.reason, files_given = EXCLUDED.files_given,
         files_validated = EXCLUDED.files_validated, summary = EXCLUDED.summary, etag = EXCLUDED.etag,
-        ingested_at = CASE WHEN rt_validation_daily.summary IS DISTINCT FROM EXCLUDED.summary
-                           THEN now() ELSE rt_validation_daily.ingested_at END
+        ingested_at = CASE
+            WHEN (rt_validation_daily.status, rt_validation_daily.files_validated, rt_validation_daily.summary->'rules')
+                 IS DISTINCT FROM (EXCLUDED.status, EXCLUDED.files_validated, EXCLUDED.summary->'rules')
+            THEN now() ELSE rt_validation_daily.ingested_at END
     WHERE (rt_validation_daily.summary, rt_validation_daily.etag) IS DISTINCT FROM (EXCLUDED.summary, EXCLUDED.etag)
     RETURNING agency_id
 """
@@ -56,8 +66,8 @@ class ValidationWriteError(Exception):
 
 @dataclass(frozen=True)
 class ValidationIngest:
-    """``fetched`` counts the keys whose ETag was new or changed, ``upserted``
-    the rows inserted or changed, ``skipped`` the keys refused."""
+    """``fetched`` counts the summaries downloaded, ``upserted`` the rows
+    inserted or changed, ``skipped`` the keys refused."""
 
     listed: int
     fetched: int
@@ -87,6 +97,17 @@ def _count(value: Any, name: str, ceiling: int | None = None) -> int:
     return value
 
 
+def _has_nul(value: Any) -> bool:
+    """Whether any text in *value*, keys included, holds U+0000, which JSONB refuses."""
+    if isinstance(value, str):
+        return "\x00" in value
+    if isinstance(value, dict):
+        return any(_has_nul(key) or _has_nul(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_has_nul(item) for item in value)
+    return False
+
+
 def _check_rules(rules: Any, files_validated: int) -> None:
     if not isinstance(rules, list):
         raise TypeError("rules is not a list")
@@ -110,8 +131,12 @@ def parse_summary(key: str, body: bytes) -> SummaryRow:
     the ones its key files it under, a status outside STATUSES, a reason
     stated other than exactly when the status is not ok, rule counts on a
     summary that is not ok, a count that is not one, or a non-finite number
-    anywhere."""
+    anywhere. So does a document the upsert would refuse, which would roll
+    back every other summary of its batch: a reason that is not text, a file
+    count past its INT column, or a U+0000 anywhere."""
     document = json.loads(body)
+    if _has_nul(document):
+        raise ValueError("the document holds U+0000")
     if document.get("schema") != SCHEMA:
         raise ValueError(f"schema {document.get('schema')!r} is not {SCHEMA}")
     agency_id = document["agency_id"]
@@ -123,9 +148,11 @@ def parse_summary(key: str, body: bytes) -> SummaryRow:
     status, reason = document["status"], document["reason"]
     if status not in STATUSES:
         raise ValueError(f"unknown status {status!r}")
+    if reason is not None and not isinstance(reason, str):
+        raise TypeError(f"reason {reason!r} is not text")
     if (reason is None) != (status == "ok"):
         raise ValueError("a reason is stated exactly when the status is not ok")
-    files_given = _count(document["files_given"], "files_given")
+    files_given = _count(document["files_given"], "files_given", _MAX_COUNT)
     files_validated = _count(document["files_validated"], "files_validated", files_given)
     rules = document["rules"]
     _check_rules(rules, files_validated)
@@ -142,21 +169,6 @@ def parse_summary(key: str, body: bytes) -> SummaryRow:
     )
 
 
-def list_summaries(s3_client: Any, bucket: str) -> dict[str, str]:
-    """Each key under PREFIX and its ETag, paging through the whole prefix."""
-    found: dict[str, str] = {}
-    token: str | None = None
-    while True:
-        kwargs: dict[str, Any] = {"Bucket": bucket, "Prefix": PREFIX}
-        if token:
-            kwargs["ContinuationToken"] = token
-        response = s3_client.list_objects_v2(**kwargs)
-        found.update((obj["Key"], obj["ETag"]) for obj in response.get("Contents", []))
-        if not response.get("IsTruncated"):
-            return found
-        token = response.get("NextContinuationToken")
-
-
 def _stored(conn: Any) -> tuple[dict[str, str], set[int]]:
     with conn.cursor() as cur:
         cur.execute("SELECT agency_id, service_date, etag FROM rt_validation_daily")
@@ -168,12 +180,12 @@ def _stored(conn: Any) -> tuple[dict[str, str], set[int]]:
 
 def load_validation(conn: Any, s3_client: Any, bucket: str) -> ValidationIngest:
     """Upsert every summary whose ETag is new or changed, in one transaction.
-    A summary whose document is unchanged keeps its ``ingested_at``, so that
-    column records when its counts last changed, which the scorecard's
-    rebuild compares (pipeline.feed_quality). The caller's connection must
+    The whole document is stored, but ``ingested_at`` moves only when what
+    the scorecard reads of it changes (status, polls validated, rules), since
+    the scorecard's rebuild compares it (pipeline.feed_quality). The caller's connection must
     not be in autocommit, or a failed batch is not undone."""
     try:
-        listed = list_summaries(s3_client, bucket)
+        listed = list_etags(s3_client, bucket, PREFIX)
     except Exception as exc:
         raise ValidationReadError(str(exc)) from exc
     try:
@@ -187,26 +199,36 @@ def load_validation(conn: Any, s3_client: Any, bucket: str) -> ValidationIngest:
     due = sorted(key for key, etag in listed.items() if etags.get(key) != etag)
     rows: list[tuple[Any, ...]] = []
     skipped: list[str] = []
+    reasons: Counter[str] = Counter()
+
+    def skip(key: str, reason: str, detail: object = "") -> None:
+        _log.debug("rt_validation_ingest: skipped %s: %s %s", key, reason, detail)
+        skipped.append(key)
+        reasons[reason] += 1
+
+    fetched = 0
     for key in due:
-        if not _KEY.fullmatch(key):
-            _log.warning("rt_validation_ingest: skipped %s: not a summary key", key)
-            skipped.append(key)
+        match = _KEY.fullmatch(key)
+        if not match:
+            skip(key, "not a summary key")
+            continue
+        if int(match.group(1)) not in agencies:
+            skip(key, "agency not in this database")
             continue
         try:
             body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
         except Exception as exc:
             raise ValidationReadError(f"{key}: {exc}") from exc
+        fetched += 1
         try:
-            row = parse_summary(key, body)
+            rows.append((*parse_summary(key, body), listed[key]))
         except Exception as exc:
-            _log.warning("rt_validation_ingest: skipped %s: %s", key, exc)
-            skipped.append(key)
-            continue
-        if row.agency_id not in agencies:
-            _log.warning("rt_validation_ingest: skipped %s: agency %s is not in this database", key, row.agency_id)
-            skipped.append(key)
-            continue
-        rows.append((*row, listed[key]))
+            skip(key, "untrusted", exc)
+    if reasons:
+        _log.warning(
+            "rt_validation_ingest: skipped %s",
+            ", ".join(f"{count} {reason}" for reason, count in sorted(reasons.items())),
+        )
 
     try:
         from psycopg2.extras import execute_values
@@ -224,7 +246,7 @@ def load_validation(conn: Any, s3_client: Any, bucket: str) -> ValidationIngest:
         except Exception:
             _log.debug("rt_validation_ingest: rollback failed", exc_info=True)
         raise ValidationWriteError(str(exc)) from exc
-    return ValidationIngest(listed=len(listed), fetched=len(due), upserted=len(changed), skipped=tuple(skipped))
+    return ValidationIngest(listed=len(listed), fetched=fetched, upserted=len(changed), skipped=tuple(skipped))
 
 
 def ingest_validation(conn: Any, s3_client: Any, bucket: str) -> int:

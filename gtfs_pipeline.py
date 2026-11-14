@@ -990,10 +990,9 @@ def cmd_ingest_ml(args):
         logger.info("ingest_ml: no validator summary has been published yet")
     else:
         logger.info(
-            f"ingest_ml: upserted {validation.upserted} validator summary(ies) of {validation.fetched} new or changed"
+            f"ingest_ml: upserted {validation.upserted} validator summary(ies) of {validation.fetched} fetched, "
+            f"{len(validation.skipped)} skipped"
         )
-    if validation.skipped:
-        logger.warning(f"ingest_ml: skipped unreadable or unknown validator summaries: {', '.join(validation.skipped)}")
 
 
 def main():

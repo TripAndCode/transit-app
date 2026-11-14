@@ -175,12 +175,16 @@ describe("FeedQualityTrend", () => {
       "28 of 30 days validated 1,624 polls, one sampled hour a day",
     );
     expect(screen.getByText("could not run on 2 days")).toBeInTheDocument();
-    const rules = screen.getAllByRole("listitem").map((li) => li.textContent);
-    expect(rules).toEqual([
-      "E022 Times are not increasing: 3,360 in 1,624 polls on 28 days",
-      "W001 Timestamps should be populated: 40 in 40 polls on 3 days",
+    const rules = screen.getAllByRole("listitem");
+    expect(rules.map((li) => li.textContent)).toEqual([
+      "E022 Times are not increasing, 3,360 in 1,624 polls on 28 days",
+      "W001 Timestamps should be populated, 40 in 40 polls on 3 days",
     ]);
+    // The vendor's wording stays English in either locale, marked as such.
+    const title = within(rules[0]).getByText("Times are not increasing");
+    expect(title.getAttribute("lang")).toBe("en");
     expect(screen.getByText(/recorded, not graded/)).toBeInTheDocument();
+    expect(screen.getByText(/Rule names are the validator's own English wording/)).toBeInTheDocument();
   });
 
   it("reads a month with no validated day as not validated, never as no findings", async () => {
@@ -228,6 +232,9 @@ describe("FeedQualityTrend", () => {
     expect(screen.getByRole("table", { name: "直近6か月" })).toBeInTheDocument();
     expect(screen.getByText("基準に届かない項目：便の充足率、65秒を超えた取得")).toBeInTheDocument();
     expect(screen.getByText("30 日中 28 日を検証")).toBeInTheDocument();
+    expect(screen.getAllByRole("listitem")[0].textContent).toBe(
+      "E022 Times are not increasing、28 日の取得 1,624 回で 3,360 件",
+    );
     await i18n.changeLanguage("en");
   });
 });

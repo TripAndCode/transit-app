@@ -117,9 +117,9 @@ function ValidatorFigure({ m }: { m: AgencyFeedQualityMonth }) {
           <ul style={{ ...small, margin: 0, paddingLeft: 16 }}>
             {rules.map(([rule, r]) => (
               <li key={rule}>
-                {t("admin.agency_diag.quality_validator_rule", {
-                  rule,
-                  title: r.title,
+                {rule} <span lang="en">{r.title}</span>
+                {t("admin.agency_diag.quality_list_separator")}
+                {t("admin.agency_diag.quality_validator_rule_counts", {
                   occurrences: r.occurrences,
                   polls: r.files_with_rule,
                   days: r.days,

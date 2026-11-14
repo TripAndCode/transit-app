@@ -141,12 +141,12 @@ def test_says_no_live_scorecard_is_published_rather_than_zero(caplog):
     assert "no live scorecard has been published yet" in caplog.text
 
 
-def test_reports_the_validator_summaries_it_ingested_and_names_the_skipped(caplog):
+def test_reports_the_validator_summaries_it_ingested_and_counts_the_skipped(caplog):
+    """The ingest itself logs why keys were skipped, one line per run."""
     validation = ValidationIngest(listed=30, fetched=3, upserted=2, skipped=("validation/99/20261110.json",))
     with caplog.at_level(logging.INFO):
         _run(load_result=ForecastIngest(prefix=None, rows=0), validation_result=validation)
-    assert "upserted 2 validator summary(ies) of 3 new or changed" in caplog.text
-    assert "validation/99/20261110.json" in caplog.text
+    assert "upserted 2 validator summary(ies) of 3 fetched, 1 skipped" in caplog.text
 
 
 def test_says_no_validator_summary_is_published_rather_than_zero(caplog):

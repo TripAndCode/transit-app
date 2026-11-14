@@ -124,7 +124,7 @@ as one a migration adds to the static tables, reaches a timetable whose
 source has not changed. The page's buttons have no such option.
 
 Tables read: `agencies`, `agg_meta`, `agg_route_daily`, `pipeline_runs`,
-`rt_field_coverage_probes`, `agg_feed_health`, `feed_quality_monthly`, `rt_validation_daily`, `static_trips`,
+`rt_field_coverage_probes`, `agg_feed_health`, `feed_quality_monthly`, `static_trips`,
 `static_calendar`, `static_calendar_dates`, `agg_static_version_summary`,
 `agency_weather_stations`, `route_performance_standards`,
 `ridership_weights`. The two editors write `route_performance_standards`
