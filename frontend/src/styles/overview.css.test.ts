@@ -173,6 +173,75 @@ describe("overview.css route lists line their names up on one column", () => {
   });
 });
 
+describe("overview.css phone layout (BP.sm)", () => {
+  const heroPhone = ruleBody(
+    css.slice(css.indexOf("Kept after the hero's base rules")),
+    "@media (max-width: 640px) {",
+  );
+  const checkPhone = ruleBody(
+    css.slice(css.indexOf("/* ---------- Mobile ---------- */")),
+    "@media (max-width: 640px) {",
+  );
+
+  it("shrinks the page title under the page's own wrapper, not the shared header class six tabs share", () => {
+    expect(decl(ruleBody(css, ".ov-page-head .ui-page-header__title {"), "font-size")).toBe("var(--text-xl)");
+  });
+
+  it("keeps the feed line inside the column the sparkline fades under, matching the reference beside it", () => {
+    const mask = decl(ruleBody(css, ".ov-hero-figure > svg {"), "mask-image") ?? "";
+    const faded = mask.match(/rgb\(0 0 0 \/ 20%\) (\d+px)/)?.[1];
+    expect(faded).toBeDefined();
+    expect(decl(ruleBody(css, ".ov-hero-feed {"), "max-width")).toBe(faded);
+  });
+
+  it("gives the sparkline top headroom at the phone breakpoint without moving its bottom edge", () => {
+    const rule = ruleBody(heroPhone, ".ov-hero-sparkline {");
+    expect(decl(rule, "top")).toBe("8px");
+    expect(decl(rule, "height")).toBe("calc(100% - 8px)");
+  });
+
+  it("stacks a fact row's label over its value at the phone breakpoint, the chevron spanning both", () => {
+    expect(decl(ruleBody(heroPhone, ".ov-hero-fact {"), "grid-template-columns")).toBe("minmax(0, 1fr) 14px");
+    expect(decl(ruleBody(heroPhone, ".ov-hero-fact-label {"), "grid-row")).toBe("1");
+    expect(decl(ruleBody(heroPhone, ".ov-hero-fact-value {"), "grid-row")).toBe("2");
+    const go = ruleBody(heroPhone, ".ov-hero-fact-go {");
+    expect(decl(go, "grid-row")).toBe("1 / span 2");
+    expect(decl(go, "align-self")).toBe("center");
+  });
+
+  it("rearranges a check row into a card at the phone breakpoint, the ends and the change on lines of their own", () => {
+    // On the list, not the row, so the rows stay its subgrids and the names
+    // still line up from card to card.
+    expect(decl(ruleBody(checkPhone, ".ov-check-list {"), "grid-template-columns")).toBe(
+      "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
+    );
+    expect(decl(ruleBody(checkPhone, ".ov-check-row {"), "grid-template-columns")).toBeNull();
+    const track = ruleBody(checkPhone, ".ov-check-row .ov-check-track {");
+    expect(decl(track, "grid-column")).toBe("plate / arrow");
+    // The desktop rule's inline-start margin would indent the bar off the badge's edge.
+    expect(decl(track, "margin-inline-start")).toBe("0");
+    const arrow = ruleBody(checkPhone, ".ov-check-row .ov-check-arrow {");
+    expect(decl(arrow, "grid-row")).toBe("1");
+    // The value is right-aligned in its box, so without this the figure touches the chevron.
+    expect(decl(arrow, "margin-inline-start")).toBe("8px");
+    expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-value {"), "grid-column")).toBe("value");
+    const change = ruleBody(checkPhone, ".ov-check-row .ov-check-change {");
+    expect(decl(change, "grid-column")).toBe("name / arrow");
+    expect(decl(change, "grid-row")).toBe("4");
+    const ends = ruleBody(
+      checkPhone,
+      ".ov-check-row .route-label.route-label--plate-column > .route-label__ends {",
+    );
+    expect(decl(ends, "grid-row")).toBe("3");
+  });
+
+  it("puts a service-day label on its own line on a phone, so the bars get the width their scale needs", () => {
+    expect(decl(ruleBody(checkPhone, ".ov-svc-list {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto");
+    expect(decl(ruleBody(checkPhone, ".ov-svc-label,\n  .ov-svc-meta {"), "grid-column")).toBe("1 / -1");
+    expect(decl(ruleBody(checkPhone, ".ov-svc-scale {"), "grid-column")).toBe("1");
+  });
+});
+
 describe("overview.css route lists without subgrid", () => {
   // The build's browser floor (Vite's default target) predates subgrid in
   // Chromium, where the row would otherwise collapse to one stacked column.
@@ -194,6 +263,13 @@ describe("overview.css route lists without subgrid", () => {
     expect(decl(ruleBody(phone, ".ov-pareto-label {"), "grid-column")).toBe("1 / -1");
     expect(decl(ruleBody(phone, ".ov-pareto-track {"), "grid-column")).toBe("1");
     expect(decl(ruleBody(phone, ".ov-pareto-pct {"), "grid-column")).toBe("2");
+  });
+
+  it("names a phone check card's columns on the row itself, where the list's do not reach", () => {
+    const phone = ruleBody(fallback, "@media (max-width: 640px) {");
+    expect(decl(ruleBody(phone, ".ov-check-row {"), "grid-template-columns")).toBe(
+      "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
+    );
   });
 
   it("comes after the phone rules it overrides", () => {

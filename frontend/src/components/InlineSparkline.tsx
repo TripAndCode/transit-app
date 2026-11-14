@@ -11,6 +11,10 @@ type Props = {
   forceAccent?: boolean;
   showEndDot?: boolean;
   style?: CSSProperties;
+  /** For a caller that needs a phone-width override on the box this draws
+   *  into: a breakpoint can't reach an inline `style`, which always wins the
+   *  cascade over a stylesheet rule short of `!important`. */
+  className?: string;
   /** Draws a dashed horizontal reference line at this value, in the series'
    *  own units. The y-scale spans the series min..max, which on its own says
    *  nothing about how large the swing actually is -- a reference the reader
@@ -45,6 +49,7 @@ export function InlineSparkline({
   forceAccent = false,
   showEndDot = true,
   style,
+  className,
   baseline,
   preserveAspectRatio,
   drawOn = true,
@@ -105,6 +110,7 @@ export function InlineSparkline({
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio={preserveAspectRatio}
+      className={className}
       style={{ display: "inline-block", verticalAlign: "-2px", ...style }}
       role="img"
       aria-hidden
