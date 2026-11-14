@@ -39,6 +39,18 @@ and reproduces it keeps what it had, and is reported. --apply then exits 1, and
 goes on exiting 1 on every rerun until each such content is resolved, by its zip
 restored or otherwise.
 
+--calendars keeps instead the calendar (pipeline.static_archive.archive_calendar)
+of each name the map holds whose calendar the archive does not keep, at the
+name's content: one archived before calendars were kept. A replaced timetable's
+calendar cannot be read from Postgres again, so the name's kept zip is loaded
+into the scratch, as for --headways, and its calendar is kept only when the zip
+reproduces the mapped content; a zip whose span is not the one recorded, or
+that cannot be read, is not loaded. It writes only the calendar archive, and
+reads Postgres's target only to check the agency; a name with no kept zip is
+reported and keeps none, and --apply exits 1 when a zip it loads does not give
+its calendar. Days planned by a timetable whose calendar is kept can then have
+their stop events filled (scripts/fill_planned_stop_events.py).
+
 The target is the environment's DATABASE_URL and CLICKHOUSE_*, as for every
 pipeline command. The scratch is --scratch-database-url: a throwaway Postgres,
 already migrated (make migrate DATABASE_URL=<scratch>), that holds no other
@@ -486,32 +498,160 @@ def _headways(args, ch, target_conn, scratch_conn) -> int:
     return 0
 
 
+@dataclass(frozen=True)
+class Uncalendared:
+    """A mapped name of the agency whose calendar the archive does not keep at
+    its content, with its kept zip, or None, and why that zip is not loaded."""
+
+    stem: str
+    content: str
+    zip: Path | None
+    unloadable: str | None = None
+
+
+def _plan_calendars(ch, agency_id: int, static_dir: Path) -> list[Uncalendared]:
+    """List the agency's mapped names by whether their calendar is kept, to be
+    archived, or without a kept zip that can be loaded; those not kept."""
+    join = static_archive.schedule_join(ch, agency_id, None)
+    mapped = dict(zip(join.stems, join.hashes, strict=True))
+    kept = static_archive.calendar_versions(ch, agency_id)
+    recorded = static_archive.spans(ch, agency_id)
+    found = []
+    for stem, content in sorted(mapped.items()):
+        if (stem, content) in kept:
+            continue
+        path = static_dir / str(agency_id) / f"{stem}.zip"
+        if not path.is_file():
+            found.append(Uncalendared(stem, content, None))
+            continue
+        found.append(Uncalendared(stem, content, path, _unloadable(path, recorded.get(stem))))
+    chosen = sum(1 for name in found if name.zip is not None and name.unloadable is None)
+    without = sum(1 for name in found if name.zip is None)
+    print(
+        f"agency {agency_id}: {len(mapped)} mapped name(s): {chosen} to archive, {len(mapped) - len(found)} kept, "
+        f"{without} without a kept zip, {len(found) - chosen - without} whose kept zip cannot be loaded"
+    )
+    for name in found:
+        if name.zip is None:
+            print(f"  no kept zip {name.content}: {name.stem}; no calendar archived")
+        elif name.unloadable:
+            print(f"  {name.zip}: {name.unloadable}; not loaded")
+        else:
+            print(f"  archive {name.content}: {name.stem}, from {name.zip}")
+    return found
+
+
+def _calendar_in_scratch(scratch_conn, ch, ch_write, agency_id: int, name: Uncalendared) -> str | None:
+    """Load *name*'s zip into the scratch and keep its calendar in the archive
+    through *ch_write*; why it was not kept, or None once it is."""
+    assert name.zip is not None
+    parts = _load_scratch(scratch_conn, ch, agency_id, name.zip)
+    try:
+        if static_archive.content_hash(parts) != name.content:
+            return f"does not reproduce {name.content}"
+        if not static_archive.archive_calendar(scratch_conn, ch_write, agency_id, name.content, parts):
+            return "its timetable changed while its calendar was read"
+    finally:
+        scratch_conn.rollback()
+    if (name.stem, name.content) not in static_archive.calendar_versions(ch, agency_id):
+        return "its timetable has no calendar"
+    return None
+
+
+def _calendars(args, ch, target_conn, scratch_conn) -> int:
+    """List, or with --apply keep, the calendars of each agency's mapped names
+    the archive lacks; 1 when --apply loads a zip that does not give one."""
+    _check_identity(target_conn, scratch_conn)
+    if args.agency is not None:
+        agencies = [args.agency]
+    else:
+        agencies = sorted({mapping.agency_id for mapping in static_archive.latest_mappings(ch)})
+    rows: dict[int, tuple] = {}
+    chosen: dict[int, list[Uncalendared]] = {}
+    for agency in agencies:
+        row = _agency_row(target_conn, scratch_conn, agency)
+        if row is None:
+            if args.agency is not None:
+                raise Refusal(f"agency {agency} is not in the target database")
+            print(f"agency {agency}: not in the target database; skipped")
+            continue
+        rows[agency] = row
+        found = _plan_calendars(ch, agency, args.static_dir)
+        chosen[agency] = [name for name in found if name.zip is not None and name.unloadable is None]
+    total = sum(map(len, chosen.values()))
+    if not total:
+        print("nothing to archive")
+        return 0
+    if not args.apply:
+        print(f"dry run: {total} calendar(s) would be archived; --apply archives them")
+        return 0
+    try:
+        static_archive.require_mirror(scratch_conn)
+    except RuntimeError as why:
+        raise Refusal(f"the scratch database: {why}") from why
+    scratch_conn.rollback()
+    ch_write = get_client()
+    failed = 0
+    try:
+        for agency, names in chosen.items():
+            if not names:
+                continue
+            _ensure_agency(scratch_conn, agency, rows[agency])
+            for name in names:
+                try:
+                    failure = _calendar_in_scratch(scratch_conn, ch, ch_write, agency, name)
+                except Exception as error:
+                    _rollback(scratch_conn)
+                    failure = f"could not load it: {error}"
+                if failure:
+                    failed += 1
+                    print(f"  {name.zip}: {failure}; no calendar archived")
+                else:
+                    print(f"archived {name.stem}'s calendar as {name.content}")
+    finally:
+        ch_write.close()
+    if failed:
+        print(f"{failed} calendar(s) not archived", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--agency", type=int, metavar="ID", help="the agency (with --headways: every one mapped)")
+    parser.add_argument(
+        "--agency", type=int, metavar="ID", help="the agency (with --headways or --calendars: every one mapped)"
+    )
     parser.add_argument("--scratch-database-url", required=True, help="a throwaway, migrated Postgres to load into")
     parser.add_argument(
         "--static-dir", type=Path, default=Path(DEFAULT_STATIC_DEST), help="where the static fetcher keeps the zips"
     )
     parser.add_argument(
-        "--apply", action="store_true", help="archive and map the candidates, or re-record them (default: list them)"
+        "--apply",
+        action="store_true",
+        help="archive and map the candidates, re-record them, or keep their calendars (default: list them)",
     )
     parser.add_argument("--every-zip", action="store_true", help="also take kept zips whose name no row carries")
     parser.add_argument(
         "--headways", action="store_true", help="re-record the kept headways of archived timetables instead"
     )
+    parser.add_argument(
+        "--calendars", action="store_true", help="keep the calendars of archived timetables that lack one instead"
+    )
     args = parser.parse_args(argv)
-    if args.headways and args.every_zip:
-        parser.error("--every-zip does not apply to --headways")
-    if not args.headways and args.agency is None:
-        parser.error("--agency is required without --headways")
+    if args.headways and args.calendars:
+        parser.error("--headways and --calendars are separate runs")
+    if (args.headways or args.calendars) and args.every_zip:
+        parser.error("--every-zip applies to neither --headways nor --calendars")
+    if not (args.headways or args.calendars) and args.agency is None:
+        parser.error("--agency is required without --headways or --calendars")
     url = os.environ.get("DATABASE_URL")
     try:
         if not url:
             raise Refusal("DATABASE_URL is not set")
         # The dry run only reads, and its sessions say so; --headways never
-        # writes to ClickHouse, so its session says so under --apply too.
-        if args.apply and not args.headways:
+        # writes to ClickHouse, so its session says so under --apply too, and
+        # --calendars writes only the calendar, through a client of its own.
+        if args.apply and not (args.headways or args.calendars):
             ch = get_client()
         else:
             ch = clickhouse_connect.get_client(**ch_conn_kwargs(), settings={"readonly": 1})
@@ -523,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.headways:
                 return _headways(args, ch, target_conn, scratch_conn)
+            if args.calendars:
+                return _calendars(args, ch, target_conn, scratch_conn)
             row = _check_scratch(target_conn, scratch_conn, args.agency)
             stems = _stems_in_updates(ch, args.agency)
             if args.every_zip:

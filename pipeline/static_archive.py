@@ -5,8 +5,9 @@ analyze joins a day's rows to the timetable in force on their service date
 none is known to be, and either may no longer be loaded. So each timetable is
 kept here before it is replaced (load_static) and again by analyze while it is
 loaded (a backstop for one loaded before this existed): its stop times, and
-its schedule as ingest stamps a poll matching each stop time. Content, not the
-version name, is the key: a reload under a new name with the same content
+its schedule as ingest stamps a poll matching each stop time, and under each
+name its calendar, which says the days its trips run (archive_calendar).
+Content, not the version name, is the key: a reload under a new name with the same content
 stores nothing new, and the version map says which content each name carried.
 The days each name covers are kept beside the map, as its span. Postgres
 mirrors the map, each name at its latest content (MIRROR), for the definition
@@ -34,6 +35,7 @@ ARCHIVE = "static_stop_times_archive"
 SCHEDULE = "static_schedule_archive"
 VERSION_MAP = "static_version_map"
 SPANS = "static_version_spans"
+CALENDAR = "static_calendar_archive"
 # The Postgres mirror of VERSION_MAP (migration 0097).
 MIRROR = "static_version_contents"
 _BATCH = 50_000
@@ -88,7 +90,7 @@ def require_tables(ch) -> None:
     names = {
         row[0] for row in ch.query("SELECT name FROM system.tables WHERE database = currentDatabase()").result_rows
     }
-    missing = [table for table in (ARCHIVE, SCHEDULE, VERSION_MAP, SPANS) if table not in names]
+    missing = [table for table in (ARCHIVE, SCHEDULE, VERSION_MAP, SPANS, CALENDAR) if table not in names]
     if missing:
         raise RuntimeError(f"ClickHouse has no {', '.join(missing)}; run `make ch-bootstrap`")
 
@@ -173,9 +175,9 @@ def is_archived(ch, agency_id: int, key: str) -> bool:
 
 def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None, mirror_conn=None) -> str | None:
     """Archive the agency's loaded timetable unless its content is already kept,
-    map its version name to that content, mirror the name's mapping into
-    Postgres, record the name's span unless one is recorded, and return the
-    content's key.
+    keep its calendar unless kept (archive_calendar), map its version name to
+    that content, mirror the name's mapping into Postgres, record the name's
+    span unless one is recorded, and return the content's key.
 
     None when no stop times are loaded, or when the timetable changed while it
     was being copied (a concurrent load_static committed): nothing is swapped
@@ -196,6 +198,10 @@ def archive_loaded(conn, ch, agency_id: int, parts: list[str] | None = None, mir
     for kept, count in ((_STOP_TIMES, expected), (_SCHEDULE, None)):
         if not _holds(ch, kept.table, agency_id, key) and not _copy(conn, ch, agency_id, key, parts, kept, count):
             return None
+    # Before the map row, so a mapped name normally has its calendar; one that
+    # lacks it (a process stopped in between) gains it on the next call.
+    if not archive_calendar(conn, ch, agency_id, key, parts):
+        return None
     _map(conn, ch, agency_id, key, parts, conn if mirror_conn is None else mirror_conn)
     _record_loaded_span(conn, ch, agency_id)
     return key
@@ -236,6 +242,147 @@ def _copy(conn, ch, agency_id: int, key: str, parts: list[str], kept: _Kept, exp
         return True
     finally:
         ch.command(f"DROP TABLE IF EXISTS {work} SYNC")
+
+
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+_CALENDAR_COLUMNS = [
+    "agency_id",
+    "static_version_id",
+    "content_hash",
+    "kind",
+    "service_id",
+    *_WEEKDAYS,
+    "start_date",
+    "end_date",
+    "date",
+    "exception_type",
+]
+
+# The loaded name and its calendar files' rows, read in one statement so they
+# describe one timetable.
+_LOADED_CALENDAR_ROWS_SQL = f"""
+    WITH loaded AS (SELECT max(static_version_id) AS stem FROM static_trips WHERE agency_id = %(agency)s)
+    SELECT (SELECT stem FROM loaded), 'calendar', service_id, {", ".join(_WEEKDAYS)}, start_date, end_date,
+           NULL::text, NULL::int
+    FROM static_calendar WHERE agency_id = %(agency)s
+    UNION ALL
+    SELECT (SELECT stem FROM loaded), 'calendar_dates', service_id, {", ".join(["false"] * len(_WEEKDAYS))},
+           NULL::date, NULL::date, date, exception_type
+    FROM static_calendar_dates WHERE agency_id = %(agency)s
+"""
+
+
+class ArchivedCalendar(NamedTuple):
+    """A timetable's calendar as the loader stored it: ``static_calendar``'s
+    rows (service_id, the weekday flags Monday first, start_date, end_date) by
+    service, and ``static_calendar_dates``' (service_id, the feed's raw date
+    text, exception_type) by service and date."""
+
+    calendar: list[tuple]
+    calendar_dates: list[tuple]
+
+
+def _calendar_held(ch, agency_id: int, stem: str, key: str) -> bool:
+    rows = ch.query(
+        f"SELECT count() FROM {CALENDAR} WHERE agency_id = {{agency:Int32}} "
+        "AND static_version_id = {stem:String} AND content_hash = {key:String}",
+        parameters={"agency": agency_id, "stem": stem, "key": key},
+    ).result_rows
+    return bool(rows and rows[0][0])
+
+
+def archive_calendar(conn, ch, agency_id: int, key: str, parts: list[str]) -> bool:
+    """Keep the loaded timetable's calendar under its version name and *key*
+    unless it is kept already. False, keeping nothing, when the timetable no
+    longer matches *parts* once its calendar is read. A timetable with no name
+    or no calendar rows keeps none: it plans no day.
+
+    Keyed by the name as well as the content, which covers trips and stop
+    times but not the calendar: a reissue that only moves the calendar keeps
+    its content under a new name, and each name plans the days of its own.
+    The rows go in one insert, a single block, so a kept calendar is whole.
+    """
+    with conn.cursor() as cur:
+        cur.execute(_LOADED_CALENDAR_ROWS_SQL, {"agency": agency_id})
+        rows = cur.fetchall()
+    if not rows or rows[0][0] is None:
+        return True
+    stem = rows[0][0]
+    if _calendar_held(ch, agency_id, stem, key):
+        return True
+    # A load replaces the name, the calendar and the content in one commit.
+    if static_parts(agency_id, conn, True) != parts:
+        logger.warning(f"  timetable archive: agency {agency_id}'s timetable changed while reading its calendar")
+        return False
+    # Dates as ISO text: a feed's open end, 9999-12-31, is past Date32.
+    ch.insert(
+        CALENDAR,
+        [
+            (
+                agency_id,
+                stem,
+                key,
+                kind,
+                service_id,
+                *flags,
+                None if start is None else start.isoformat(),
+                None if end is None else end.isoformat(),
+                day,
+                exception_type,
+            )
+            for _stem, kind, service_id, *flags, start, end, day, exception_type in rows
+        ],
+        column_names=_CALENDAR_COLUMNS,
+    )
+    logger.info(f"  timetable archive: agency {agency_id} {stem}'s calendar kept ({len(rows):,} rows)")
+    return True
+
+
+def archived_calendar(ch, agency_id: int, stem: str, content: str) -> ArchivedCalendar | None:
+    """The calendar kept for the agency's version *stem* at *content*, or None when none is."""
+    rows = ch.query(
+        f"SELECT DISTINCT kind, service_id, {', '.join(_WEEKDAYS)}, start_date, end_date, date, exception_type "
+        f"FROM {CALENDAR} WHERE agency_id = {{agency:Int32}} AND static_version_id = {{stem:String}} "
+        "AND content_hash = {content:String}",
+        parameters={"agency": agency_id, "stem": stem, "content": content},
+    ).result_rows
+    if not rows:
+        return None
+    calendar = sorted(
+        (service_id, *flags, date.fromisoformat(start), date.fromisoformat(end))
+        for kind, service_id, *flags, start, end, _day, _exception in rows
+        if kind == "calendar"
+    )
+    calendar_dates = sorted(
+        (
+            (service_id, day, exception)
+            for kind, service_id, *_flags, _start, _end, day, exception in rows
+            if kind != "calendar"
+        ),
+        key=lambda row: (row[0], row[1]),
+    )
+    return ArchivedCalendar(calendar, calendar_dates)
+
+
+def calendar_versions(ch, agency_id: int) -> set[tuple[str, str]]:
+    """Each (version name, content) of the agency whose calendar is kept."""
+    rows = ch.query(
+        f"SELECT DISTINCT static_version_id, content_hash FROM {CALENDAR} WHERE agency_id = {{agency:Int32}}",
+        parameters={"agency": agency_id},
+    ).result_rows
+    return {(stem, content) for stem, content in rows}
+
+
+def service_trips(ch, agency_id: int, content: str) -> list[tuple[str, str | None, int]]:
+    """Each trip of the agency's *content* with a stop time, as (trip_id,
+    service_id, stop times): read from its kept schedule, which holds exactly
+    the stop times whose trip the timetable has."""
+    rows = ch.query(
+        f"SELECT trip_id, any(service_type), toInt64(count()) FROM {SCHEDULE} "
+        "WHERE agency_id = {agency:Int32} AND content_hash = {content:String} GROUP BY trip_id",
+        parameters={"agency": agency_id, "content": content},
+    ).result_rows
+    return [(trip_id, service_id, stops) for trip_id, service_id, stops in rows]
 
 
 _SCHEDULED_SQL = f"SELECT DISTINCT content_hash FROM {SCHEDULE} WHERE agency_id = {{agency:Int32}}"
