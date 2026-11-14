@@ -72,7 +72,7 @@ async def retired_route_codes(conn, agency_id: int, ctx: RangeCtx) -> frozenset[
     return await _retired_between(conn, agency_id, ctx.from_date, ctx.to_date)
 
 
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _retired_between(conn, agency_id: int, from_date: date, to_date: date) -> frozenset[str]:
     rows = await conn.fetch(
         "SELECT route_code, max(date) AS last_seen FROM agg_route_daily "
@@ -88,7 +88,7 @@ async def _retired_between(conn, agency_id: int, from_date: date, to_date: date)
     )
 
 
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def retired_among(conn, agency_id: int, codes: frozenset[str], last_day: date) -> frozenset[str]:
     """The ``codes``, each observed at some point, that the current timetable
     lacks and that went unobserved over the :data:`RECENT_DAYS` through
@@ -143,7 +143,7 @@ async def zero_delay_route_codes(conn, agency_id: int, ctx: RangeCtx) -> frozens
     return await _zero_delay_between(conn, agency_id, ctx.from_date, ctx.to_date)
 
 
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _zero_delay_between(conn, agency_id: int, from_date: date, to_date: date) -> frozenset[str]:
     # Every observation in the histogram bucket 0 opens, which holds no early
     # departure, and a sum of 0 leave only exact zeros. The sum alone would

@@ -1433,7 +1433,7 @@ def _change(avg_min: float | None, against: float | None) -> tuple[float | None,
 
 
 @perf.timed("reports.overview")
-@async_lru_cache(maxsize=64, ttl_seconds=300)
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def compute_overview_summary(
     agency_id: int,
     ctx: RangeCtx,

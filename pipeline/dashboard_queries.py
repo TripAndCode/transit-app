@@ -69,7 +69,7 @@ async def _route_labels(conn, agency_id: int, route_codes: list[str]) -> dict[st
 
 
 @perf.timed("dashboard.heatmap")
-@async_lru_cache(maxsize=32, ttl_seconds=300)
+@async_lru_cache(maxsize=32, ttl_seconds=300, agency_arg="agency_id")
 async def delay_heatmap(
     conn: asyncpg.Connection,
     *,
@@ -229,7 +229,7 @@ async def _anomalies_series_from_agg(
 
 
 @perf.timed("dashboard.anomalies")
-@async_lru_cache(maxsize=32, ttl_seconds=300)
+@async_lru_cache(maxsize=32, ttl_seconds=300, agency_arg="agency_id")
 async def anomaly_timeline(
     conn: asyncpg.Connection,
     *,
@@ -342,7 +342,7 @@ async def _movers_from_agg(
 
 
 @perf.timed("dashboard.movers")
-@async_lru_cache(maxsize=32, ttl_seconds=300)
+@async_lru_cache(maxsize=32, ttl_seconds=300, agency_arg="agency_id")
 async def movers(
     conn: asyncpg.Connection,
     *,
