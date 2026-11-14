@@ -261,9 +261,8 @@ async def test_a_question_asked_with_history_writes_no_cache_row(pool_with_agenc
 @pytest.mark.asyncio
 async def test_a_question_asked_with_history_leaves_a_matching_row_untouched(pool_with_agency, monkeypatch):
     """A history-resolved signature that matches an existing row still reads
-    it, but must not relabel it with this question's text: the text pre-hit,
-    /ask/suggest and promotion all treat last_question as what the row's args
-    answer."""
+    it, but must not relabel it with this question's text: the text pre-hit
+    and promotion both treat last_question as what the row's args answer."""
     pool, agency_id = pool_with_agency
     monkeypatch.setenv("ASK_INTENT_CACHE_ENABLED", "true")
     await _seed_cache_row(pool, agency_id, "どんな指標がある？", "describe_data", {"kind": "metrics"})
