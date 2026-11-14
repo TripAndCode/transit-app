@@ -21,6 +21,10 @@ the number that was handed out.
   are public even while `login_required` is on. The id is 128 random bits
   (`secrets.token_urlsafe(16)`), and nothing lists ids to a non-admin. A
   malformed, unknown or deleted id gets the same 404 from both.
+  The read also carries the agency's `capability_tier`, derived when read and
+  never stored (`pipeline/reports/capability.py`; null for an agency no longer
+  on record), because a signed-out reader can't reach the agency catalogue and
+  the page words a basic agency's missing figures by its tier.
 - **Admins** list and delete them through `/api/admin/snapshots`
   ([admin-control-room.md](admin-control-room.md#snapshots)). Each create and
   delete is in the audit log.

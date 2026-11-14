@@ -299,6 +299,8 @@ export type BoardFreshnessDay = {
 type BoardFreshnessRow = {
   agency_id: number;
   agency_name: string;
+  /** The realtime feed's host; rows arrive grouped by it, an unknown host last. */
+  upstream_host: string | null;
   days: BoardFreshnessDay[];
 };
 

@@ -18,7 +18,7 @@ function row(over: Partial<NetworkAgencyRow>): NetworkAgencyRow {
     samples: 100, raw_samples: 1000, clamp_count: 5, clamp_pct: 0.5, is_stale: false,
     data_from: "2026-04-01", data_to: "2026-04-02",
     planned_trips: 120, executed_trips: 114, service_delivered_pct: 95,
-    covered_days: 7, window_days: 7, delivered_missing: null,
+    covered_days: 7, window_days: 7, delivered_missing: null, capability_tier: "full",
     observed_trips: 110, coverage_planned_trips: 120, coverage_pct: 91.7,
     comparable: true, comparable_reason: null,
     has_ridership_weights: false, weighted_on_time_pct: null,
@@ -280,6 +280,40 @@ describe("NetworkTab", () => {
     expect(card("Quiet")).toHaveTextContent("Service delivered % — (this feed doesn't report cancellations)");
     expect(card("Quiet")).toHaveTextContent("Planned trips 1,000");
     expect(card("Quiet")).not.toHaveTextContent("Vehicle-km delivered %");
+  });
+
+  it("labels a basic-tier agency by its tier and states the tier, not a pipeline reason, for figures its feed can't support", () => {
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden" }),
+          row({
+            agency_id: 2, agency_name: "Aomori", capability_tier: "basic",
+            service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_cannot_report",
+            comparable: false, comparable_reason: "coverage_unknown",
+            ci_low: null, ci_high: null, observed_trips: null, coverage_planned_trips: null, coverage_pct: null,
+          }),
+          row({
+            agency_id: 3, agency_name: "Refuted", capability_tier: "basic",
+            service_delivered_pct: null, executed_trips: null, delivered_missing: "feed_unverified",
+          }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const card = (name: string) => screen.getByText(name).closest(".network-row");
+    for (const name of ["Aomori", "Refuted"]) {
+      expect(card(name)).toHaveTextContent("Basic data: on-time only");
+      expect(card(name)).toHaveTextContent("Service delivered % not part of basic data");
+      expect(card(name)).not.toHaveTextContent("cancellations");
+    }
+    expect(card("Aomori")).toHaveTextContent("Observation coverage not part of basic data");
+    expect(card("Aomori")).not.toHaveTextContent("Observation coverage —");
+    expect(card("Aomori")).toHaveTextContent("Basic data: on-time only, so observation coverage can't be measured");
+    expect(card("Aomori")).not.toHaveTextContent("can't be matched to the timetable");
+    expect(card("Hiroden")).not.toHaveTextContent("Basic data");
   });
 
   it("shows vehicle-km delivered % where it is computed, says why where only it is missing, and never calls vehicle-km itself unavailable", () => {

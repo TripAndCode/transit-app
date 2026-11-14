@@ -12,7 +12,7 @@ const HIROSHIMA_FEED = "https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updat
 const AOMORI_FEED = "https://aomoricitybus.com/TripUpdate.pb";
 
 function agency(over: Partial<Agency>): Agency {
-  return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, ...over };
+  return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "full", ...over };
 }
 
 /** A signed-out guest on a deployment with sign-in available but not
@@ -160,8 +160,8 @@ describe("OnboardingGate", () => {
 
   it("names the newest data day once, above the cards, instead of on each card", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "First", latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 2, agency_name: "Second", latest_data_date: "2026-10-22" }),
+      agency({ agency_id: 1, agency_name: "First", latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 2, agency_name: "Second", latest_data_date: "2026-10-22", capability_tier: "full" }),
       agency({ agency_id: 3, agency_name: "Never collected" }),
     ]);
     renderGate();
@@ -173,9 +173,9 @@ describe("OnboardingGate", () => {
 
   it("notes only the agency whose data stopped well behind the others", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14" }),
-      agency({ agency_id: 2, agency_name: "Current", latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 3, agency_name: "A day late", latest_data_date: "2026-10-22" }),
+      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14", capability_tier: "full" }),
+      agency({ agency_id: 2, agency_name: "Current", latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 3, agency_name: "A day late", latest_data_date: "2026-10-22", capability_tier: "full" }),
     ]);
     renderGate();
     expect(screen.getByRole("button", { name: /^Stopped/ })).toHaveTextContent("No updates after Oct 14");
@@ -188,9 +188,9 @@ describe("OnboardingGate", () => {
 
   it("keeps the stopped note when a search leaves only that agency", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14" }),
+      agency({ agency_id: 1, agency_name: "Stopped", latest_data_date: "2026-10-14", capability_tier: "full" }),
       ...Array.from({ length: 8 }, (_, i) =>
-        agency({ agency_id: i + 2, agency_name: `Agency ${i + 2}`, latest_data_date: "2026-10-23" }),
+        agency({ agency_id: i + 2, agency_name: `Agency ${i + 2}`, latest_data_date: "2026-10-23", capability_tier: "full" }),
       ),
     ]);
     renderGate();
@@ -200,9 +200,9 @@ describe("OnboardingGate", () => {
 
   it("groups the agencies by prefecture, with how many each holds", () => {
     mockAgencies([
-      agency({ agency_id: 1, agency_name: "Aomori City Bus", feed_url: AOMORI_FEED, latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 8, agency_name: "Hiroden", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23" }),
-      agency({ agency_id: 9, agency_name: "Hiroshima Bus", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23" }),
+      agency({ agency_id: 1, agency_name: "Aomori City Bus", feed_url: AOMORI_FEED, latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 8, agency_name: "Hiroden", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23", capability_tier: "full" }),
+      agency({ agency_id: 9, agency_name: "Hiroshima Bus", feed_url: HIROSHIMA_FEED, latest_data_date: "2026-10-23", capability_tier: "full" }),
     ]);
     renderGate();
     const groups = screen.getAllByRole("heading", { level: 2 });
@@ -224,8 +224,8 @@ describe("OnboardingGate", () => {
   it("lists the agencies with data first, then by name", () => {
     mockAgencies([
       agency({ agency_id: 1, agency_name: "Empty one" }),
-      agency({ agency_id: 2, agency_name: "Full two", latest_data_date: "2026-10-03" }),
-      agency({ agency_id: 3, agency_name: "Full one", latest_data_date: "2026-10-03" }),
+      agency({ agency_id: 2, agency_name: "Full two", latest_data_date: "2026-10-03", capability_tier: "full" }),
+      agency({ agency_id: 3, agency_name: "Full one", latest_data_date: "2026-10-03", capability_tier: "full" }),
     ]);
     renderGate();
     const names = screen.getAllByRole("button").map((b) => b.textContent ?? "").filter((n) => /one|two/.test(n));

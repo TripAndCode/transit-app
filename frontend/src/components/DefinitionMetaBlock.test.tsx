@@ -1,8 +1,9 @@
-import { afterEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
+import * as hooks from "../api/hooks";
 import type { DefinitionMeta, FeedQuality, SourceMix, TimetableVersion } from "../api/types";
 
 const LEGACY: DefinitionMeta = {
@@ -30,7 +31,11 @@ const ONE_AGENCY: TimetableVersion[] = [
 const BUILT_AT = "2026-11-05T15:30:00Z";
 
 describe("DefinitionMetaBlock", () => {
+  beforeEach(() => {
+    vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
+  });
   afterEach(async () => {
+    vi.restoreAllMocks();
     await i18n.changeLanguage("en");
   });
 
@@ -350,6 +355,46 @@ describe("DefinitionMetaBlock", () => {
     expect(block).not.toHaveTextContent("0.0%");
     await i18n.changeLanguage("ja");
     expect(block).toHaveTextContent(`フィード品質（事業者全体）：観測カバー率 —（${ja}）、異常値 —（期間内の集計済みの観測なし）。`);
+  });
+
+  describe("a basic-tier agency's unmatched coverage", () => {
+    const UNMATCHED: FeedQuality = {
+      ...QUALITY,
+      coverage_pct: null,
+      observed_trips: null,
+      coverage_planned_trips: null,
+      coverage_missing: "unmatched",
+    };
+    const basicAgency = { agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: null };
+
+    it("is stated as outside its tier, by the catalogue's tier", () => {
+      vi.spyOn(hooks, "useAgencies").mockReturnValue({
+        data: [{ ...basicAgency, capability_tier: "basic" }],
+        isPending: false,
+      } as never);
+      renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, feed_quality: [UNMATCHED] }} />);
+      const block = screen.getByTestId("definition-meta");
+      expect(block).toHaveTextContent("Feed quality for the whole agency: Observation coverage not part of basic data.");
+      expect(block).not.toHaveTextContent("can't be matched to the timetable");
+    });
+
+    it("is stated as outside its tier by a tier the page passes, without the catalogue", () => {
+      const catalogue = vi.spyOn(hooks, "useAgencies");
+      renderWithProviders(
+        <DefinitionMetaBlock definition={{ ...LEGACY, feed_quality: [UNMATCHED] }} tiers={new Map([[1, "basic"]])} />,
+      );
+      expect(screen.getByTestId("definition-meta")).toHaveTextContent("Observation coverage not part of basic data");
+      expect(catalogue).not.toHaveBeenCalled();
+    });
+
+    it("gives no cause while the tier is still loading", () => {
+      vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
+      renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, feed_quality: [UNMATCHED] }} />);
+      const block = screen.getByTestId("definition-meta");
+      expect(block).toHaveTextContent("Observation coverage —");
+      expect(block).not.toHaveTextContent("can't be matched to the timetable");
+      expect(block).not.toHaveTextContent("basic data");
+    });
   });
 
   it("lists each agency's figures under its name when the figures span several", () => {

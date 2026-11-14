@@ -11,6 +11,7 @@ from api.deps import get_ch, get_conn
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import scope_applied
+from pipeline.reports.capability import CapabilityTier
 from pipeline.reports.comparability import (
     BOARD_ON_TIME_DEFINITION,
     MAX_CI_HALF_WIDTH_PP,
@@ -62,6 +63,9 @@ class NetworkAgencyRow(BaseModel):
     # Why service_delivered_pct is None, or None beside a rate; see
     # pipeline.reports.service_delivered.DeliveredMissing.
     delivered_missing: DeliveredMissing | None
+    # pipeline.reports.capability: "basic" when the feed cannot support the
+    # timetable-joined figures, which the board then attributes to the tier.
+    capability_tier: CapabilityTier
     # observed_trips of coverage_planned_trips over the planned days through
     # NetworkSummary.coverage_through, uncapped; see
     # pipeline.reports.comparability.assess and docs/features/network-tab.md.

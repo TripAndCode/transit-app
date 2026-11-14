@@ -10,8 +10,8 @@ import { rememberScreenScope } from "../api/screenScope";
 import { blockStorage } from "../test/blockStorage";
 
 const agencies: Agency[] = [
-  { agency_id: 1, agency_name: "Hokuriku Transit", feed_url: "", static_url: null, latest_data_date: null },
-  { agency_id: 2, agency_name: "Kaga Bay Bus", feed_url: "", static_url: null, latest_data_date: null },
+  { agency_id: 1, agency_name: "Hokuriku Transit", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "full" },
+  { agency_id: 2, agency_name: "Kaga Bay Bus", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "full" },
 ];
 
 const routes: ApiRoute[] = [

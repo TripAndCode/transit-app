@@ -48,10 +48,11 @@ const BOARD: AdminBoard = {
     },
   ],
   freshness: [
-    { agency_id: 1, agency_name: "Hokuriku", days: days(Array(14).fill("fresh")) },
+    { agency_id: 1, agency_name: "Hokuriku", upstream_host: "feeds.example.jp", days: days(Array(14).fill("fresh")) },
     {
       agency_id: 2,
       agency_name: "Toyama Bayline",
+      upstream_host: "feeds.example.jp",
       days: days([...Array(11).fill("fresh"), "stale", "missing", "missing"]),
     },
   ],
@@ -236,6 +237,29 @@ describe("AdminBoardPage", () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[1]).getByText("Toyama Bayline")).toBeInTheDocument();
     expect(within(rows[1]).getAllByTestId("freshness-cell")).toHaveLength(14);
+  });
+
+  it("groups the heatmap by upstream host, so one host's outage reads as one incident", () => {
+    const out = days([...Array(13).fill("fresh"), "missing"]);
+    mockQuery = {
+      ...mockQuery,
+      data: {
+        ...BOARD,
+        freshness: [
+          { agency_id: 8, agency_name: "Hiroden", upstream_host: "ajt.mcapps.jp", days: out },
+          { agency_id: 9, agency_name: "Geiyo", upstream_host: "ajt.mcapps.jp", days: out },
+          { agency_id: 1, agency_name: "Aomori", upstream_host: "aomori.example.jp", days: days([...Array(13).fill("fresh"), "missing"]) },
+          { agency_id: 3, agency_name: "Unlisted", upstream_host: null, days: days(Array(14).fill("fresh")) },
+        ],
+      },
+    };
+    wrap(<AdminBoardPage />);
+    const shared = screen.getByRole("group", { name: "ajt.mcapps.jp · 2 agencies" });
+    expect(within(shared).getAllByTestId("freshness-row").map((r) => r.textContent)).toEqual(["Hiroden", "Geiyo"]);
+    expect(within(shared).getByText("No data from any of them on 2026-09-19")).toBeInTheDocument();
+    const single = screen.getByRole("group", { name: "aomori.example.jp · 1 agency" });
+    expect(within(single).queryByText(/No data from any of them/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("group", { name: "Feed host unknown · 1 agency" })).getByText("Unlisted")).toBeInTheDocument();
   });
 
   it("distinguishes the three cell states and puts the day's detail in its tooltip", () => {

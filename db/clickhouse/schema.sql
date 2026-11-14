@@ -23,11 +23,15 @@ CREATE TABLE IF NOT EXISTS updates (
     -- too instead of the ingest strategy having to drop them. NULL when
     -- departure_time itself didn't parse as a time at all (empty/malformed).
     scheduled_sec  Nullable(Int32),
-    -- RT-sourced fields confirmed present in at least one currently-configured
-    -- agency's feed (see pipeline/strategies/*.py's parse_feed docstrings for
-    -- which agencies populate which of these) -- absent for any agency whose
-    -- feed doesn't send the underlying protobuf field, and unread by any
-    -- agg_*/dashboard consumer today.
+    -- RT-sourced optional fields, written only by ingest strategies that can
+    -- carry them (pipeline.strategies.static_join.RT_INGEST_STRATEGIES) and
+    -- NULL for any feed that doesn't send the underlying protobuf field.
+    -- Service delivered, dwell/running time, headway quality and schedule
+    -- realism read them, each trusting an agency's rows only once that
+    -- agency's own feed holds a live verdict in Postgres
+    -- rt_field_coverage_probes (static_join.rt_field_coverage_confirmed). An
+    -- agency whose feed can't carry them is shown at the basic capability
+    -- tier (pipeline.reports.capability.capability_tier).
     stop_id                    LowCardinality(Nullable(String)),
     arr_delay                  Nullable(Int32),
     schedule_relationship_trip Nullable(UInt8),

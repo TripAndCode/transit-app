@@ -13,7 +13,7 @@ import { delayRampVar } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
 import { delayAxisMax, delayAxisShare } from "../components/charts/delayAxis";
 import { byAgencyName, hasStopped } from "../components/agencyDirectory";
-import { unrankedReason } from "../components/comparabilityReason";
+import { coverageOutsideTier, unrankedReason } from "../components/comparabilityReason";
 import { fixedTenth, fmtPct, formatDate, formatDateRange, formatNumber, roundTenth } from "../utils/format";
 import { useFlipRows } from "../hooks/useFlipRows";
 import { useCappedList } from "../hooks/useCappedList";
@@ -148,10 +148,13 @@ function AgencyRow({
             window: a.window_days,
           })
         : t("network.planned_trips", { count: formatNumber(a.planned_trips) });
+  const basic = a.capability_tier === "basic";
   const delivered =
     a.service_delivered_pct != null
       ? `${fixedTenth(a.service_delivered_pct)}%`
-      : a.delivered_missing != null
+      : basic
+        ? t("capability.basic.figure")
+        : a.delivered_missing != null
         ? t("network.delivered_value_missing", { reason: t(`network.delivered_missing.${a.delivered_missing}`) })
         : "—";
   const reason = unrankedReason(a, limits, t);
@@ -162,7 +165,9 @@ function AgencyRow({
           observed: formatNumber(a.observed_trips),
           planned: formatNumber(a.coverage_planned_trips),
         })
-      : t("network.observed_coverage_missing");
+      : coverageOutsideTier(a)
+        ? `${t("network.col_observed_coverage")} ${t("capability.basic.figure")}`
+        : t("network.observed_coverage_missing");
   // The interval describes the plain on-time rate, never the weighted one.
   const interval =
     !weightedView && a.on_time_pct != null && a.ci_low != null && a.ci_high != null
@@ -184,6 +189,7 @@ function AgencyRow({
             {t("network.viewing_badge")}
           </span>
         )}
+        {basic && <span className="network-row__sub">{t("capability.basic.label")}</span>}
         {coverage != null && <span className="network-row__sub">{coverage}</span>}
         {stopped && a.data_to != null && newest != null && (
           <span className="network-row__sub network-row__stopped">
