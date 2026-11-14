@@ -117,33 +117,17 @@ body:has(.login-shell),
   margin-top: 20px;
 }
 
+/* Layout on top of the shared .btn family: full width in the narrow card,
+   a consistent tap height, and a touch more gap than .btn's default for the
+   provider mark plus label. The provider buttons carry only aria-disabled,
+   never the native disabled, so pointer-events is what blocks a second click
+   while a redirect is pending; the muted colours come from .btn[aria-disabled]. */
 .login-card__btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
+  width: 100%;
   height: 44px;
-  border-radius: var(--radius-lg);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  transition: box-shadow var(--transition), background var(--transition), border-color var(--transition);
-  cursor: pointer;
-  user-select: none;
+  gap: 10px;
 }
-.login-card__btn[aria-disabled="true"] { pointer-events: none; opacity: 0.7; }
-.login-card__btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-
-/* Every identity provider wears the same button, so none reads as the
-   recommended one. */
-.login-card__btn--provider {
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  border: 1px solid var(--border-subtle);
-}
-.login-card__btn--provider:hover {
-  border-color: var(--text-tertiary);
-  box-shadow: var(--el-2);
-}
+.login-card__btn[aria-disabled="true"] { pointer-events: none; }
 
 .login-card__spinner {
   width: 18px;
@@ -209,13 +193,13 @@ body:has(.login-shell),
   outline-offset: 1px;
 }
 
+/* The local submit sits in a flex column that already gaps its fields, so
+   this adds the extra separation from the field above it; the config-error
+   Retry button has no such container, so this is its only spacing from the
+   subtitle above it. */
 .login-card__btn--local {
-  background: var(--accent);
-  color: var(--on-accent);
-  border: 1px solid var(--accent);
   margin-top: 4px;
 }
-.login-card__btn--local:hover { opacity: 0.92; }
 
 .login-card__guest {
   margin: 16px 0 0;
