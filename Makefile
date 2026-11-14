@@ -90,6 +90,10 @@ doctor:
 	@n=$$(grep -cE '^(CLICKHOUSE_USER|CLICKHOUSE_PASSWORD|CLICKHOUSE_DATABASE)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
 		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
 		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi
+	@n=$$(grep -cE '^OBJECT_STORE_(ENDPOINT|BUCKET|ACCESS_KEY_ID|SECRET_ACCESS_KEY)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
+		if [ "$$n" = "4" ]; then echo "  R2 env: all 4 set (\`make catch-up-from-r2 SEED_DAYS=3\` plans filling an empty DB)"; \
+		elif [ "$$n" = "0" ]; then echo "  R2 env: none set (no real data; ask the owner for a read-only key)"; \
+		else echo "  R2 env: PARTIAL ($$n/4) — \`make catch-up-from-r2\` will fail"; fi
 	@echo "── db ──"
 	@running=$$(docker compose ps --services --filter status=running 2>/dev/null); \
 		echo "$$running" | grep -qx db && echo "  db: running" || echo "  db NOT running — \`make db\`"; \
@@ -260,10 +264,12 @@ sync-r2:
 # Prints the plan only, reading the databases and listing R2. APPLY=1 runs it
 # (after a typed confirmation), ANALYZE=1 analyzes afterwards, and ALLOW_GAPS=1
 # passes a day R2 has no archive for and loads a timetable after days with no rows.
+# SEED_DAYS=3 starts each agency with no rows 3 days back, which is how a fresh
+# database gets real data: `make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1`.
 # Narrow it with AGENCY="8 53", not AGENCY_ID: a local .env that sets AGENCY_ID
 # would otherwise narrow every run, and a partial catch-up reads like a whole one.
 catch-up-from-r2:
-	DATABASE_URL=$(db_url) poetry run python scripts/catch_up_from_r2.py $(foreach a,$(AGENCY),--agency-id $(a)) $(if $(APPLY),--apply,) $(if $(ANALYZE),--analyze,) $(if $(ALLOW_GAPS),--allow-gaps,)
+	DATABASE_URL=$(db_url) poetry run python scripts/catch_up_from_r2.py $(foreach a,$(AGENCY),--agency-id $(a)) $(if $(APPLY),--apply,) $(if $(ANALYZE),--analyze,) $(if $(ALLOW_GAPS),--allow-gaps,) $(if $(SEED_DAYS),--seed-days $(SEED_DAYS),)
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 # Usage: make ingest FOLDER=./raw_archives
