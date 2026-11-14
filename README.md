@@ -52,7 +52,17 @@ returns to `:5173` instead of `:8000`.
 
 ## Load Data
 
-The bootstrap database is empty. Choose one path:
+The bootstrap database is empty. With a read-only R2 key (the four
+`OBJECT_STORE_*` variables in `.env`; `make doctor` reports them), fill it with
+the last few days of real data:
+
+```bash
+make catch-up-from-r2 SEED_DAYS=3                     # the plan: days, timetable loads, download size
+make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1   # ingest them and build the aggregates
+```
+
+`AGENCY="1 9"` narrows it to some agencies. Without an R2 key, choose one of
+these:
 
 ```bash
 # Fallback: load each agency's timetable, sample the current agency feeds into
@@ -216,7 +226,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze` | Rebuild one agency's changed dates (`FULL=1`: every date) |
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline (`SINCE=YYYYMMDD` fetches only that day's RT archives and later; per-agency layout only) |
-| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `AGENCY="8 53"` narrows it) |
+| `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `SEED_DAYS=3` starts an agency with no rows 3 JST days back, `AGENCY="8 53"` narrows it) |
 | `make check-aggs` | Detect stale aggregate tables |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |

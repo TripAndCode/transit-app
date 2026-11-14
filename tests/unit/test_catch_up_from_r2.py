@@ -441,6 +441,23 @@ def test_a_seed_replaces_an_older_timetable_loaded_by_hand_before_any_row():
     ]
 
 
+def test_a_seed_replaces_an_undated_timetable_loaded_by_hand_before_any_row():
+    """An undated name cannot show it is in force on the seed's first day."""
+    plan = cu.plan_agency(
+        _state(loaded="hiroden_static", newest_row=None),
+        _archives(8, _days("20261020", "20261031")),
+        _timetables(8, ["20261014"]),
+        today=TODAY,
+        seed_from=date(2026, 10, 30),
+    )
+
+    assert plan.refusal is None
+    assert _shape(plan) == [
+        ("seed", "gtfs_static_20261014.zip"),
+        ("ingest", "20261030", None, ["20261030", "20261031"]),
+    ]
+
+
 def test_a_seed_is_refused_when_a_timetable_from_after_its_first_day_is_loaded():
     plan = cu.plan_agency(
         _state(loaded="gtfs_static_20261031", newest_row=None),
@@ -453,6 +470,39 @@ def test_a_seed_is_refused_when_a_timetable_from_after_its_first_day_is_loaded()
     assert plan.steps == []
     assert plan.refusal is not None
     assert "--seed-days 1 or fewer" in plan.refusal
+
+
+def test_a_seed_under_a_timetable_from_today_is_not_told_to_seed_zero_days():
+    plan = cu.plan_agency(
+        _state(loaded="gtfs_static_20261101", newest_row=None),
+        _archives(8, _days("20261020", "20261031")),
+        _timetables(8, ["20261014", "20261101"]),
+        today=TODAY,
+        seed_from=date(2026, 10, 31),
+    )
+
+    assert plan.steps == []
+    assert plan.refusal is not None
+    assert "--seed-days" not in plan.refusal
+    assert "gtfs_static_20261014.zip" in plan.refusal
+
+
+def test_a_seed_load_refuses_once_updates_holds_rows_for_the_agency(monkeypatch):
+    """Planned against an empty `updates`: rows written since, by a live poll
+    or another run, make the plan stale."""
+    monkeypatch.setattr(cu, "loaded_version", lambda conn, agency_id: None)
+    monkeypatch.setattr(
+        cu, "newest_row", lambda ch, agency_id, today: (datetime(2026, 10, 30, 3, tzinfo=timezone.utc), "x.pb")
+    )
+
+    class _Conn:
+        def commit(self) -> None:
+            pass
+
+    step = cu.LoadStep(_timetables(8, ["20261014"])[0], seed=True)
+    now = datetime(2026, 11, 1, 3, tzinfo=timezone.utc)
+    with pytest.raises(cu.Refusal, match="gained rows"):
+        cu._load_step(step, _empty(), _Conn(), None, None, None, now, None, False)
 
 
 def test_a_seed_for_an_agency_that_reads_no_timetable_still_loads_one_for_its_stops():

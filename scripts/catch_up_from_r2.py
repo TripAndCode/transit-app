@@ -83,7 +83,9 @@ would sit ahead of the next run's open day. The run stops before that load
 unless --allow-gaps takes those days as empty (an outage, or days the agency ran
 no service); an agency whose ingest reads no timetable is not checked. Loaded
 that way, the timetable is still ahead of the open day until a day from its
-own on holds rows, and a run before then is refused with the way back. Files download into the local layout `make fetch`
+own on holds rows, and a run before then is refused with the way back. A
+seed's load runs before any ingest, so it checks instead that `updates` still
+holds no row for the agency. Files download into the local layout `make fetch`
 uses (raw_archives/<id>/, raw_archives_static/<id>/), and each ingest step
 reads its own temporary directory of links to just its archives, never the
 whole local history. It stops at the first failure. A rerun is safe: ingested
@@ -328,16 +330,18 @@ def plan_agency(
     states the rules; a refused plan has no steps."""
     plan = AgencyPlan(state)
     first = state.open_day
-    seeding = first is None and seed_from is not None
+    seeding = False
     seed: RemoteFile | None = None
-    if state.open_day is None and seed_from is not None:
+    if first is None and seed_from is not None:
+        seeding = True
         first = seed_from
         in_force = _in_force(timetables, seed_from)
         current = version_day(state.loaded_version) if state.has_timetable else None
         # A timetable already loaded stays only when it is in force on the
-        # seed's first day: the seed load is the one load that runs before any
-        # row exists, so a later load cannot replace an older one in time.
-        if in_force is not None and (not state.has_timetable or (current is not None and current < in_force.day)):
+        # seed's first day, which an undated one cannot show: the seed load is
+        # the one load that runs before any row exists, so a later load cannot
+        # replace an older one in time.
+        if in_force is not None and (not state.has_timetable or current is None or current < in_force.day):
             seed = in_force
 
     if seeding and state.requires_timetable and not state.has_timetable and seed is None:
@@ -383,10 +387,12 @@ def plan_agency(
         )
     if loaded_day is not None and loaded_day > first:
         if state.requires_timetable and seeding:
+            fewer = (today - loaded_day).days
+            shorter = f"Use --seed-days {fewer} or fewer, or load" if fewer >= 1 else "Load"
             plan.refusal = (
                 f"{state.loaded_version} is loaded, in force from {loaded_day}, after the seed's first day {first}. "
-                f"Use --seed-days {(today - loaded_day).days} or fewer, or load the one in force on {first}"
-                f"{_in_force_hint(timetables, first)} with gtfs_pipeline.py load_static, then rerun"
+                f"{shorter} the one in force on {first}{_in_force_hint(timetables, first)} with gtfs_pipeline.py "
+                "load_static, then rerun"
             )
             return plan
         if state.requires_timetable:
