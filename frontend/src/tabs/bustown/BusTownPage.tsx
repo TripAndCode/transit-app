@@ -22,6 +22,7 @@ import { DelayBandLegend } from "../../components/analysis/StopChart";
 import { formatDate, formatMinutes } from "../../utils/format";
 import { useBusTownReplay, type BusTownReplay } from "./useBusTownReplay";
 import { useBusTownPlayback } from "./useBusTownPlayback";
+import { BusTownHourStrip } from "./BusTownHourStrip";
 import { boundsFromPoints, formatServiceClock, onTimeCount, positionsAt, scrubberStartHour, slowestRoute } from "./busTownModel";
 import "../../styles/scrubber.css";
 import "./busTown.css";
@@ -138,7 +139,12 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
         {() => (
           <div className="bus-town-layout">
             <div className="bus-town-stage">
-              <canvas ref={playback.canvasRef} className="bus-town-canvas" role="img" aria-label={t("busTown.canvas_aria")} />
+              <div className="bus-town-canvas-frame">
+                <canvas ref={playback.canvasRef} className="bus-town-canvas" role="img" aria-label={t("busTown.canvas_aria")} />
+                <span className="bus-town-clock num" aria-hidden="true">
+                  {formatServiceClock(playhead)}
+                </span>
+              </div>
               <div className="bus-town-controls">
                 <button
                   type="button"
@@ -149,19 +155,26 @@ function BusTownPageForAgency({ agencyId }: { agencyId: number | null }) {
                 >
                   {playback.playing ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}
                 </button>
-                <input
-                  type="range"
-                  className="scrub-input"
-                  min={replay.minSec}
-                  max={replay.maxSec}
-                  step={60}
-                  value={playhead}
-                  aria-label={t("busTown.scrubber_aria")}
-                  onChange={(event) => playback.seek(Number(event.target.value))}
-                />
-                <span className="bus-town-clock num" aria-hidden="true">
-                  {formatServiceClock(playhead)}
-                </span>
+                <div className="bus-town-scrub">
+                  <input
+                    type="range"
+                    className="scrub-input"
+                    min={replay.minSec}
+                    max={replay.maxSec}
+                    step={60}
+                    value={playhead}
+                    aria-label={t("busTown.scrubber_aria")}
+                    aria-valuetext={formatServiceClock(playhead)}
+                    onChange={(event) => playback.seek(Number(event.target.value))}
+                  />
+                  <BusTownHourStrip
+                    hours={replay.departuresByHour}
+                    startHour={replay.minSec / 3600}
+                    endHour={replay.maxSec / 3600}
+                    playheadSec={playhead}
+                    t={t}
+                  />
+                </div>
                 <SpeedPills speed={speed} onChange={setSpeed} t={t} />
               </div>
               <div className="bus-town-legend">

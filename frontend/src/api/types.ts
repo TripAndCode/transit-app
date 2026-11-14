@@ -1310,6 +1310,8 @@ export type ReplayTrip = {
   delay: number[];
 };
 
+export type ReplayHour = { hour: number; departures: number };
+
 /** `GET /api/agencies/{agency_id}/replay`: one agency's buses over a bounded
  *  window of one past service day. */
 export type ReplayResponse = {
@@ -1321,6 +1323,11 @@ export type ReplayResponse = {
   to_hour: number | null;
   /** Up to the agency's last 14 service days with observations, newest first. */
   available_dates: string[];
+  /** Observed departures per service-day hour across the whole day, not just
+   *  this window; hours past midnight run on as 24, 25, … Ascending by hour,
+   *  only hours with departures; empty when the day has no hourly aggregate
+   *  yet. */
+  departures_by_hour: ReplayHour[];
   stops: ReplayStops;
   routes: ReplayRoute[];
   trips: ReplayTrip[];

@@ -14,6 +14,7 @@ function makeModel(durationSec: number, tripCount = 1): BusTownModel {
     from_hour: 4,
     to_hour: 7,
     available_dates: ["2026-01-05"],
+    departures_by_hour: [],
     stops: { id: ["a", "b"], lat: [35.0, 35.1], lon: [139.0, 139.1] },
     routes: [],
     trips: Array.from({ length: tripCount }, (_, i) => ({

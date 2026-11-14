@@ -35,7 +35,7 @@ describe("busTown.css scrubber scope", () => {
     const selectors = allSelectors(css);
     // Pins that the walker actually found rules, including one nested inside
     // the phone @media block, rather than passing on an empty list.
-    expect(selectors).toContain(".bus-town-controls .scrub-input");
+    expect(selectors).toContain(".bus-town-controls .bus-town-scrub");
     expect(selectors).toContain(".bus-town-page .ui-page-header__title");
     const unscoped = selectors.filter(
       (selector) => /\.scrub-input\b/.test(selector) && !selector.startsWith(".bus-town-controls "),
@@ -43,8 +43,28 @@ describe("busTown.css scrubber scope", () => {
     expect(unscoped).toEqual([]);
   });
 
-  it("scopes the scrubber rule to Bus Town's own controls", () => {
-    expect(decl(ruleBody(css, ".bus-town-controls .scrub-input {"), "flex")).toBe("1 1 160px");
+  it("matches the slider's height to the play button's and draws the rail on its track", () => {
+    const outsidePhone = css.slice(0, css.indexOf(PHONE_MEDIA));
+    const slider = ruleBody(outsidePhone, ".bus-town-controls .scrub-input {");
+    expect(decl(slider, "height")).toBe(decl(ruleBody(outsidePhone, ".bus-town-play-button {"), "height"));
+    expect(decl(slider, "border")).toBe("0");
+    const track = ruleBody(css, ".bus-town-controls .scrub-input::-webkit-slider-runnable-track {");
+    expect(decl(track, "background")).toBe("var(--border-subtle)");
+    const phone = ruleBody(css, PHONE_MEDIA);
+    expect(decl(ruleBody(phone, ".bus-town-controls .scrub-input {"), "height")).toBe(
+      decl(ruleBody(phone, ".bus-town-play-button {"), "height"),
+    );
+  });
+
+  it("scopes the scrubber's former flex share to its new column wrapper", () => {
+    expect(decl(ruleBody(css, ".bus-town-controls .bus-town-scrub {"), "flex")).toBe("1 1 160px");
+  });
+});
+
+describe("busTown.css canvas overlay", () => {
+  it("positions the clock overlay inside a relatively-positioned frame", () => {
+    expect(decl(ruleBody(css, ".bus-town-canvas-frame {"), "position")).toBe("relative");
+    expect(decl(ruleBody(css, ".bus-town-clock {"), "position")).toBe("absolute");
   });
 });
 

@@ -17,6 +17,7 @@ const SAMPLE_WINDOW: ReplayResponse = {
   from_hour: 4,
   to_hour: 7,
   available_dates: ["2026-01-05", "2026-01-04"],
+  departures_by_hour: [],
   stops: { id: ["s1", "s2"], lat: [35.0, 35.1], lon: [139.0, 139.1] },
   routes: [{ code: "R1", name: "Red Line", color: null }],
   trips: [{ trip_id: "t1", route_code: "R1", stop_idx: [0, 1], t: [4 * 3600, 4 * 3600 + 600], delay: [30, 400] }],
@@ -30,6 +31,11 @@ function nonEmptyReplay(overrides: Partial<BusTownReplay> = {}): BusTownReplay {
     loaded: true,
     date: "2026-01-05",
     availableDates: ["2026-01-05", "2026-01-04"],
+    departuresByHour: [
+      { hour: 4, departures: 2 },
+      { hour: 5, departures: 5 },
+      { hour: 6, departures: 1 },
+    ],
     originHour: 4,
     minSec: 4 * 3600,
     maxSec: 28 * 3600,
@@ -50,6 +56,7 @@ function emptyReplay(overrides: Partial<BusTownReplay> = {}): BusTownReplay {
     loaded: true,
     date: "2026-01-05",
     availableDates: ["2026-01-05"],
+    departuresByHour: [],
     originHour: 4,
     minSec: 4 * 3600,
     maxSec: 28 * 3600,
@@ -132,6 +139,31 @@ describe("BusTownPage", () => {
     renderBusTown();
     fireEvent.change(screen.getByRole("slider", { name: /scrub/i }), { target: { value: String(5 * 3600) } });
     expect(playback.seek).toHaveBeenCalledWith(5 * 3600);
+  });
+
+  it("gives the scrubber a spoken value matching the hidden clock overlay", () => {
+    setup(nonEmptyReplay());
+    renderBusTown();
+    expect(screen.getByRole("slider", { name: /scrub/i })).toHaveAttribute("aria-valuetext", "04:00");
+  });
+
+  it("floats the clock readout inside the canvas's own frame", () => {
+    setup(nonEmptyReplay());
+    renderBusTown();
+    expect(document.querySelector(".bus-town-canvas-frame .bus-town-clock")).toBeInTheDocument();
+    expect(document.querySelector(".bus-town-canvas-frame .bus-town-clock")).toHaveTextContent("04:00");
+  });
+
+  it("shows the busiest-hour strip under the scrubber once the day's hourly totals arrive", () => {
+    setup(nonEmptyReplay());
+    renderBusTown();
+    expect(screen.getByText("Busiest hour: 05:00")).toBeInTheDocument();
+  });
+
+  it("shows no hour strip for a day with no hourly aggregate yet", () => {
+    setup(nonEmptyReplay({ departuresByHour: [] }));
+    renderBusTown();
+    expect(screen.queryByText(/Busiest hour/)).not.toBeInTheDocument();
   });
 
   it("lists every available day in the day picker", () => {

@@ -128,6 +128,14 @@ async def _seed_agg_route_daily(pool, agency_id, day=_DAY, route_code="R1"):
     )
 
 
+async def _seed_agg_hour_daily(pool, agency_id, rows):
+    await pool.executemany(
+        "INSERT INTO agg_hour_daily (agency_id, date, hour, avg_min, samples, sum_delay_sec) "
+        "VALUES ($1, $2, $3, 1, $4, 60)",
+        [(agency_id, day, hour, samples) for day, hour, samples in rows],
+    )
+
+
 @pytest.mark.asyncio
 async def test_replay_unknown_agency_is_denied(replay_client):
     client, _agency_id, _ch = replay_client
@@ -202,6 +210,33 @@ async def test_replay_empty_window_still_names_the_day_and_window(replay_app, re
     assert body["trips"] == []
     assert body["date"] == _DAY.isoformat()
     assert (body["from_hour"], body["to_hour"]) == (14, 17)
+
+
+@pytest.mark.asyncio
+async def test_replay_counts_the_whole_days_departures_by_service_hour(replay_app, replay_client):
+    app, agency_id, ch_client = replay_app
+    client, _, _ = replay_client
+    await _seed_agg_route_daily(app.state.pool, agency_id)
+    # A feed writes a departure after midnight as 00:10 or as 24:10: both are
+    # the service day's hour 24. The cutover hour itself stays put, and
+    # another day's hours stay out.
+    await _seed_agg_hour_daily(
+        app.state.pool,
+        agency_id,
+        [(_DAY, 4, 6), (_DAY, 8, 4), (_DAY, 0, 2), (_DAY, 24, 3), (_DAY, 3, 1), (date(2026, 6, 8), 9, 10)],
+    )
+    ch_client.insert("updates", [_row(agency_id, "T1", 1, 8 * 3600 + 300, 30)], column_names=_UPDATE_COLUMNS)
+    expected = [
+        {"hour": 4, "departures": 6},
+        {"hour": 8, "departures": 4},
+        {"hour": 24, "departures": 5},
+        {"hour": 27, "departures": 1},
+    ]
+    # The second window holds no trips, and still carries the whole day.
+    for window in ("from_hour=8&to_hour=11", "from_hour=14&to_hour=17"):
+        resp = await client.get(f"/api/agencies/{agency_id}/replay?date={_DAY.isoformat()}&{window}")
+        assert resp.status_code == 200
+        assert resp.json()["departures_by_hour"] == expected
 
 
 @pytest.mark.asyncio
@@ -311,3 +346,4 @@ async def test_replay_empty_when_no_data(replay_client):
     assert body["date"] is None
     assert body["trips"] == []
     assert body["available_dates"] == []
+    assert body["departures_by_hour"] == []

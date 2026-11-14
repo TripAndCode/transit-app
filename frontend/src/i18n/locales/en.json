@@ -2476,6 +2476,7 @@
     "how_it_works_body": "Each bus glides in a straight line between the stops it was actually seen at, coloured by how late it was there. The map is schematic, not to scale.",
     "empty_title": "No buses ran that we can replay",
     "empty_hint": "Try a different day.",
-    "estimate_note": "Positions between stops are estimated."
+    "estimate_note": "Positions between stops are estimated.",
+    "busiest_hour": "Busiest hour: {{time}}"
   }
 }

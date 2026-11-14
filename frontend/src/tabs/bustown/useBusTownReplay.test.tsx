@@ -16,6 +16,7 @@ function replayWindow(fromHour: number): ReplayResponse {
     from_hour: fromHour,
     to_hour: fromHour + 3,
     available_dates: ["2026-01-05"],
+    departures_by_hour: [],
     stops: { id: ["a", "b"], lat: [35.0, 35.1], lon: [139.0, 139.1] },
     routes: [{ code: "R1", name: "Route 1", color: null }],
     trips: [{ trip_id: `t${fromHour}`, route_code: "R1", stop_idx: [0, 1], t: [fromHour * 3600, fromHour * 3600 + 600], delay: [0, 60] }],
@@ -87,5 +88,36 @@ describe("useBusTownReplay", () => {
     expect(result.current.playhead).toBe(4 * 3600);
     const covering = client.getQueryCache().find({ queryKey: ["bus-town-replay", AGENCY, day.date, 4, 7], exact: true });
     expect(covering?.getObserversCount()).toBeGreaterThan(0);
+  });
+
+  it("exposes the picked day's own hourly totals", () => {
+    const client = seededClient();
+    const day = client.getQueryData<ReplayResponse>(["bus-town-replay", AGENCY, null, null, null])!;
+    client.setQueryData(["bus-town-replay", AGENCY, null, null, null], { ...day, departures_by_hour: [{ hour: 4, departures: 9 }] });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useBusTownReplay(AGENCY, null, PLAYHEAD, SPEED), { wrapper });
+
+    expect(result.current.departuresByHour).toEqual([{ hour: 4, departures: 9 }]);
+  });
+
+  it("never falls back to the default day's hourly totals for a picked day that hasn't loaded yet, unlike availableDates", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const defaultDay = { ...replayWindow(4), departures_by_hour: [{ hour: 4, departures: 9 }] };
+    client.setQueryData(["bus-town-replay", AGENCY, null, null, null], defaultDay);
+    // "2026-01-06" is deliberately left uncached, so dayQuery.data is
+    // undefined for it — the one state where availableDates still falls
+    // back to the default day's query but departuresByHour must not.
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useBusTownReplay(AGENCY, "2026-01-06", PLAYHEAD, SPEED), { wrapper });
+
+    expect(result.current.loaded).toBe(false);
+    expect(result.current.availableDates).toEqual(defaultDay.available_dates);
+    expect(result.current.departuresByHour).toEqual([]);
   });
 });
