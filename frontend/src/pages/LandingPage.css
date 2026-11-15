@@ -2,7 +2,7 @@
    chart and map here is a static fixture (see ./landing/welcomeSample.ts),
    never a live read, and stays visibly labelled as such. The hero stage and
    Bus Town panel are the one permanently-dark surface on the page: their
-   colors are fixed hex values that do not change with the app's theme.
+   colors are fixed values that do not follow the app's theme.
    Everything else here is pulled straight from global.css tokens. */
 
 .landing-shell {

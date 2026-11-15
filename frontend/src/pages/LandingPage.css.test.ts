@@ -10,12 +10,9 @@ function stripComments(text: string): string {
   return text.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-/** Finds the one `@media (prefers-reduced-motion: no-preference)` block by
- *  scanning brace depth from its opening `{`, rather than matching a regex
- *  up to the next top-level `\n}\n` -- that regex is greedy and runs past
- *  any intervening block (e.g. a later `@media (max-width)` block) to
- *  whichever closing brace it reaches last in the file, silently absorbing
- *  unrelated rules into "inside the reduced-motion block". */
+/** Returns exactly the `@media (prefers-reduced-motion: no-preference)` block,
+ *  found by brace depth from its opening `{`, so a block that follows it (such
+ *  as the later `@media (max-width)` query) is never counted as inside it. */
 function findReducedMotionBlock(source: string): { start: number; end: number; body: string } {
   const markerIndex = source.indexOf(REDUCED_MOTION_MARKER);
   if (markerIndex === -1) throw new Error(`no "${REDUCED_MOTION_MARKER}" block found`);
@@ -60,13 +57,18 @@ describe("LandingPage.css motion", () => {
     }
   });
 
+  it("isolates the reduced-motion block from the phone-width block that follows it", () => {
+    expect(strippedCss).toMatch(/\.landing-header__cta\s*\{\s*display:\s*none/);
+    expect(reducedMotionBody()).not.toContain(".landing-header__cta");
+  });
+
   it("the pause toggle's freeze rule works whether or not motion is already reduced, so it stays outside the media query", () => {
     expect(outsideReducedMotion()).toMatch(/\.landing-shell\.is-paused[^{]*\{[^}]*animation-play-state:\s*paused/);
   });
 });
 
 describe("LandingPage.css tokens", () => {
-  it("never hardcodes the delay-severity ramp's hex values directly; it reuses the registered --d1..--d4 tokens", () => {
+  it("never hardcodes the delay-severity ramp's hex values directly; it reuses the --delay-ok..--delay-severe tokens", () => {
     for (const hex of ["#2EA87A", "#C99A2E", "#D4622A", "#A8391F"]) {
       expect(css).not.toContain(hex);
       expect(css.toLowerCase()).not.toContain(`%23${hex.slice(1).toLowerCase()}`);

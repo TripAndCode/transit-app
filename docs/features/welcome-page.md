@@ -3,8 +3,7 @@
 Public landing page, rendered outside `<App />` and outside `RequireAuth`
 (`frontend/src/main.tsx`) so a signed-out visitor can reach it. One CTA
 decision (`frontend/src/pages/landing/useCtaKind.ts`) drives both the header
-button and the hero's primary CTA, the way in this visitor has. Below 720px
-the header hides its copy, since the hero's sits in the first screen:
+button and the hero's primary CTA, the way in this visitor has:
 
 - **Signed in:** "Open the dashboard" (`/`).
 - **Signed out, and `GET /api/config` says `login_required` is off:** "View
@@ -13,6 +12,9 @@ the header hides its copy, since the hero's sits in the first screen:
   links to `/login`, and the note is left out when no provider is configured.
 - **Signed out otherwise** (sign-in required, or the config not loaded yet):
   "Sign in" (`/login`). `/` would only bounce such a visitor back here.
+
+Below 720px the header hides its copy of the CTA, since the hero's sits in the
+first screen.
 
 Signed-in users still reach the page.
 
