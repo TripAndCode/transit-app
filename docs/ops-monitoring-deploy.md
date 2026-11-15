@@ -283,6 +283,15 @@ Before the prune is switched on in production, each of these must hold:
   once `updates_pruned_months` has rows.
 - An export spanning the floor records that its figures before the floor keep
   the method they were built under.
+- The floor never splits a month that is copied or purged whole. The Postgres
+  copy of a ClickHouse aggregate deletes and re-copies the floor's whole month,
+  so a floor after the 1st can lose final rows dated before it in that month.
+- A stale ledger on the first day after the month the new floor freezes holds
+  the drop too: a reading captured early that day files under the frozen
+  month's last day.
+- An agency that analyze never visits (soft-deleted, or rows with no
+  `agencies` row) gets an explicit operator-decision hold, rather than an
+  "analyze it first" hold that nothing ever clears.
 
 To turn it on in production:
 
@@ -291,7 +300,8 @@ To turn it on in production:
    floor, so the next analyze purges the aggregates of the rows it removed.
 2. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
    `analyze_all` in the daily ingest job (`docs/deploy-railway.md`, step 5).
-   With the switch off, that line drops nothing.
+   The job leaves it out until every condition above holds, so the switch
+   alone never arms a drop.
 3. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
    writes nothing, whatever the switch says. It lists each month past the
    horizon: the ones it would drop, with the floor each sets, and the ones it

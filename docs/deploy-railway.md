@@ -291,11 +291,10 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
    done
    python gtfs_pipeline.py analyze_all
-   python gtfs_pipeline.py prune-updates
    ```
-   `prune-updates` drops nothing unless `updates_prune_enabled` is on. The
-   retention table (`docs/ops-monitoring-deploy.md`, "Data retention") says
-   what it drops and how to turn it on.
+   `python gtfs_pipeline.py prune-updates` joins this job, after `analyze_all`, only once
+   every prerequisite in `docs/ops-monitoring-deploy.md` ("Data retention")
+   holds. It drops nothing unless `updates_prune_enabled` is on as well.
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
    creds, and `AGENCY_IDS` (see `.env.example`).
