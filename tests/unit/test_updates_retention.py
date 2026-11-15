@@ -8,8 +8,8 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from pipeline import flags, retention
-from pipeline.retention import UpdatesPartition, floor_after, partition_span, plan_updates_prune
-from pipeline.service_day import service_day_start_utc
+from pipeline.retention import UpdatesPartition, floor_after, frozen_before, partition_span, plan_updates_prune
+from pipeline.service_day import FILING_REACH_HOURS, service_day_start_utc
 
 UTC = timezone.utc
 
@@ -48,22 +48,44 @@ def test_the_cutoff_is_the_horizon_before_now():
     assert retention.updates_cutoff(now, 400) == now - timedelta(days=400)
 
 
-def test_the_floor_after_a_month_skips_the_day_it_cut_and_the_day_after():
+def test_the_floor_after_a_month_is_the_day_after_the_one_it_cut():
     """2025-02-01 00:00 UTC is 09:00 JST, inside service day 2025-02-01, which
-    loses its first hours. 2025-02-02 is whole, but a stop event filed under it
-    can come from rows captured on 2025-02-01, so the first date analyze may
-    still rebuild is 2025-02-03."""
-    assert floor_after(datetime(2025, 2, 1, tzinfo=UTC)) == date(2025, 2, 3)
+    loses its first hours. Every row a stop event of 2025-02-02 is filed from
+    is captured from its span less the filing reach, 2025-02-02 00:00 JST."""
+    assert floor_after(datetime(2025, 2, 1, tzinfo=UTC)) == date(2025, 2, 2)
 
 
-def test_a_cut_exactly_at_a_service_days_start_leaves_that_day_whole():
+def test_the_floor_follows_the_filing_reach_before_a_service_days_start():
+    reach = timedelta(hours=FILING_REACH_HOURS)
     start = service_day_start_utc(date(2025, 2, 10))
+    assert floor_after(start - reach) == date(2025, 2, 10)
+    assert floor_after(start - reach + timedelta(microseconds=1)) == date(2025, 2, 11)
     assert floor_after(start) == date(2025, 2, 11)
-    assert floor_after(start + timedelta(microseconds=1)) == date(2025, 2, 12)
 
 
-def _plan(partitions, *, cutoff=datetime(2026, 1, 1, tzinfo=UTC), floors=None, ledgers=None, live=None):
-    return plan_updates_prune(partitions, cutoff=cutoff, floors=floors or {}, ledgers=ledgers or {}, live=live or {})
+@pytest.mark.parametrize(
+    "floor, frozen",
+    [
+        (date(2025, 2, 2), date(2025, 3, 1)),
+        (date(2025, 12, 31), date(2026, 1, 1)),
+        (date(2025, 3, 1), date(2025, 3, 1)),
+    ],
+)
+def test_the_scorecard_month_holding_the_floor_is_frozen_with_it(floor, frozen):
+    assert frozen_before(floor) == frozen
+
+
+def _plan(
+    partitions, *, cutoff=datetime(2026, 1, 1, tzinfo=UTC), floors=None, ledgers=None, live=None, disagreeing=None
+):
+    return plan_updates_prune(
+        partitions,
+        cutoff=cutoff,
+        floors=floors or {},
+        ledgers=ledgers or {},
+        live=live or {},
+        disagreeing=disagreeing,
+    )
 
 
 def test_only_months_that_end_by_the_cutoff_are_candidates():
@@ -76,7 +98,7 @@ def test_only_months_that_end_by_the_cutoff_are_candidates():
     )
     assert [v.partition.partition_id for v in verdicts] == ["202501", "202502"]
     assert all(v.held_by is None for v in verdicts)
-    assert [v.floor for v in verdicts] == [date(2025, 2, 3), date(2025, 3, 3)]
+    assert [v.floor for v in verdicts] == [date(2025, 2, 2), date(2025, 3, 2)]
 
 
 def test_a_month_ending_a_second_past_the_cutoff_stays():
@@ -95,7 +117,9 @@ def test_a_month_whose_dates_are_all_aggregated_is_dropped_however_recent_the_le
 
 def test_an_agency_with_no_aggregates_holds_every_month_it_has_rows_in():
     verdicts = _plan([_partition("202501", 3)], live={3: _counts(date(2025, 1, 1), date(2025, 2, 2))})
-    assert verdicts[0].held_by == "agency 3 has 32 service date(s) without aggregates, from 2025-01-01"
+    assert (
+        verdicts[0].held_by == "agency 3 has 32 service date(s) without aggregates, from 2025-01-01; analyze it first"
+    )
 
 
 def test_a_month_holding_service_dates_the_ledger_lacks_is_held():
@@ -108,9 +132,9 @@ def test_a_month_holding_service_dates_the_ledger_lacks_is_held():
     assert "agency 1" in verdicts[0].held_by and "2025-01-20" in verdicts[0].held_by
 
 
-def test_a_lacking_date_below_the_agencys_floor_still_holds_its_month():
+def test_a_lacking_date_below_the_agencys_floor_holds_its_month_for_an_operator():
     """Rows backfilled under an agency's floor are never aggregated, so they
-    are not dropped unseen either."""
+    are not dropped unseen either, and no analyze will clear them."""
     live = {date(2024, 6, 10): (3, 3)}
     verdicts = _plan(
         [_partition("202406", 1)],
@@ -119,35 +143,37 @@ def test_a_lacking_date_below_the_agencys_floor_still_holds_its_month():
         live={1: live},
     )
     assert "2024-06-10" in verdicts[0].held_by
+    assert "analyze never builds them" in verdicts[0].held_by and "operator" in verdicts[0].held_by
 
 
 @pytest.mark.parametrize(
     "stale_day",
     [
         date(2025, 1, 15),  # inside the month
-        date(2025, 2, 2),  # past the month, but below the floor the drop sets
+        date(2025, 2, 1),  # past the month, below the floor the drop sets
+        date(2025, 2, 20),  # past that floor, in the scorecard month frozen with it
     ],
 )
-def test_a_date_below_the_new_floor_whose_ledger_no_longer_matches_holds_the_month(stale_day):
-    live = _counts(date(2024, 12, 31), date(2025, 2, 10))
+def test_a_date_the_drop_freezes_whose_ledger_no_longer_matches_holds_the_month(stale_day):
+    live = _counts(date(2024, 12, 31), date(2025, 3, 10))
     ledger = {**live, stale_day: (4, 4)}
     verdicts = _plan([_partition("202501", 1)], ledgers={1: ledger}, live={1: live})
     assert verdicts[0].held_by is not None
     assert stale_day.isoformat() in verdicts[0].held_by
 
 
-def test_a_stale_date_at_or_past_the_new_floor_does_not_hold_the_month():
-    live = _counts(date(2024, 12, 31), date(2025, 2, 10))
-    ledger = {**live, date(2025, 2, 3): (4, 4)}
+def test_a_stale_date_past_the_month_the_new_floor_freezes_does_not_hold_the_month():
+    live = _counts(date(2024, 12, 31), date(2025, 3, 10))
+    ledger = {**live, date(2025, 3, 1): (4, 4)}
     assert _plan([_partition("202501", 1)], ledgers={1: ledger}, live={1: live})[0].held_by is None
 
 
 def test_dates_below_the_agencys_current_floor_are_final_and_not_compared():
     """The day an earlier drop cut short reads fewer rows than its ledger,
     by design; it must not hold every later month."""
-    floor = date(2025, 2, 3)
-    live = {**_counts(date(2025, 2, 1), date(2025, 3, 3)), date(2025, 2, 1): (1, 1)}
-    ledger = _counts(date(2024, 12, 1), date(2025, 3, 3))
+    floor = date(2025, 2, 2)
+    live = {**_counts(date(2025, 2, 1), date(2025, 3, 31)), date(2025, 2, 1): (1, 1)}
+    ledger = _counts(date(2024, 12, 1), date(2025, 3, 31))
     verdicts = _plan([_partition("202502", 1)], floors={1: floor}, ledgers={1: ledger}, live={1: live})
     assert verdicts[0].held_by is None
 
@@ -169,6 +195,14 @@ def test_a_month_held_for_a_lacking_date_holds_every_later_month_of_that_agency(
     ledger = {day: counts for day, counts in live.items() if day != date(2025, 1, 20)}
     verdicts = _plan([_partition("202501", 1), _partition("202502", 1)], ledgers={1: ledger}, live={1: live})
     assert [v.held_by is not None for v in verdicts] == [True, True]
+
+
+def test_an_agency_whose_stores_disagree_holds_its_months():
+    """analyze repairs a disagreement only from the floor on, so a month it
+    would freeze waits until the stores agree."""
+    held = _counts(date(2024, 12, 31), date(2025, 3, 1))
+    verdicts = _plan([_partition("202501", 1)], ledgers={1: held}, live={1: held}, disagreeing={1: ["agg_route_daily"]})
+    assert verdicts[0].held_by is not None and "agg_route_daily" in verdicts[0].held_by
 
 
 # The prune itself, with the stores replaced: what it reads, writes and drops.
@@ -199,6 +233,7 @@ def stores(monkeypatch):
     monkeypatch.setattr(retention, "retention_floors", lambda conn, ids: {})
     monkeypatch.setattr(retention, "read_ledgers", lambda conn, bounds: {1: held, 2: held})
     monkeypatch.setattr(retention, "read_held_counts", lambda ch, agency_id, before, after: held)
+    monkeypatch.setattr(retention, "read_disagreements", lambda conn, ch, agency_id, floor: [])
     monkeypatch.setattr(
         retention.refiled,
         "rows_rewritten",
@@ -281,12 +316,12 @@ def test_a_prune_locks_records_every_floor_then_writes_off_and_drops_each_month_
         ("agency lock", 1),
         ("agency lock", 2),
         ("run", "retention"),
-        ("record", [date(2024, 2, 3), date(2024, 3, 3)]),
-        # Only the month's own service dates, a day either side.
-        ("rows_rewritten", [1, 2], date(2023, 12, 31), date(2024, 2, 2)),
+        ("record", [date(2024, 2, 2), date(2024, 3, 2)]),
+        # Only the service dates the month's rows can be filed under.
+        ("rows_rewritten", [1, 2], date(2024, 1, 1), date(2024, 2, 1)),
         ("command", "ALTER TABLE updates DROP PARTITION ID '202401'"),
         ("dropped", "202401"),
-        ("rows_rewritten", [2], date(2024, 1, 31), date(2024, 3, 2)),
+        ("rows_rewritten", [2], date(2024, 2, 1), date(2024, 3, 1)),
         ("command", "ALTER TABLE updates DROP PARTITION ID '202402'"),
         ("dropped", "202402"),
         ("run closed", "ok", 12),

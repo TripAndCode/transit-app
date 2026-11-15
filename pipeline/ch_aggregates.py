@@ -160,17 +160,27 @@ def days_where(days: list[date]) -> tuple[str, dict]:
     """A predicate selecting the `updates` rows filed under one of *days*.
 
     With ranges on the stored instant, one per run of consecutive days, for
-    the reason `month_where` gives.
+    the reason `month_where` gives. A single run, such as every date from a
+    retention floor on, tests the filed date against its two ends rather
+    than looking each row up in the list.
     """
+    runs = _runs(days)
+    if not runs:
+        return "0", {}
     clauses: list[str] = []
-    params: dict = {"filed_days": sorted(set(days))}
-    for i, (first, last) in enumerate(_runs(days)):
+    params: dict = {}
+    for i, (first, last) in enumerate(runs):
         clauses.append(
             f"(u.captured_at >= {{day_start_{i}:DateTime64}} AND u.captured_at < {{day_end_{i}:DateTime64}})"
         )
         params[f"day_start_{i}"], params[f"day_end_{i}"] = filed_capture_span(first, last)
-    if not clauses:
-        return "0", {}
+    if len(runs) == 1:
+        params["filed_first"], params["filed_last"] = runs[0]
+        return (
+            f"{clauses[0]} AND {static_archive.FILED_DATE_SQL} BETWEEN {{filed_first:Date}} AND {{filed_last:Date}}",
+            params,
+        )
+    params["filed_days"] = sorted(set(days))
     return f"({' OR '.join(clauses)}) AND has({{filed_days:Array(Date)}}, {static_archive.FILED_DATE_SQL})", params
 
 
@@ -1054,12 +1064,17 @@ def drop_work_tables(ch, agency_id: int) -> None:
         ch.command(f"DROP TABLE IF EXISTS {name} SYNC")
 
 
-def _agency_rows(projection: str, table: str, agency_id: int, months: list[int] | None) -> tuple[str, dict]:
+def _agency_rows(
+    projection: str, table: str, agency_id: int, months: list[int] | None, since: date | None = None
+) -> tuple[str, dict]:
     sql = f"SELECT {projection} FROM {_checked(table)} WHERE agency_id = {{agency_id:Int32}}"
     params: dict = {"agency_id": agency_id}
     if months is not None:
         sql += " AND toYYYYMM(date) IN {months:Array(UInt32)}"
         params["months"] = months
+    if since is not None:
+        sql += " AND date >= {since:Date}"
+        params["since"] = since
     return sql, params
 
 
@@ -1076,12 +1091,12 @@ def store_figures(table: str) -> _Figures:
     return _ALL_SPECS[_checked(table)].figures
 
 
-def totals(ch, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
+def totals(ch, table: str, agency_id: int, months: list[int] | None, since: date | None = None) -> tuple[int, int, int]:
     """(rows, and store_figures(table)'s ClickHouse figures) for the agency over
-    *months*, or all of them when None: what a store check compares with *table*'s
-    Postgres copy."""
+    *months*, or all of them when None, and only from *since* on when given:
+    what a store check compares with *table*'s Postgres copy."""
     (first, _), (second, _) = store_figures(table)
-    sql, params = _agency_rows(f"count(), {first}, {second}", table, agency_id, months)
+    sql, params = _agency_rows(f"count(), {first}, {second}", table, agency_id, months, since)
     count, one, two = ch.query(sql, parameters=params).result_rows[0]
     return int(count), int(one or 0), int(two or 0)
 

@@ -110,8 +110,8 @@ def test_a_month_past_the_horizon_whose_dates_are_aggregated_is_dropped(pg_conn,
     assert result.dropped == ["202301"]
     assert _partitions(ch_client) == [p for p in before if p != "202301"]
     assert _runs(pg_conn) == [("retention", "ok", 2)]
-    assert _recorded(pg_conn) == [("202301", [seeded], date(2023, 2, 3), 2, True)]
-    assert retention_floor(pg_conn, seeded) == date(2023, 2, 3)
+    assert _recorded(pg_conn) == [("202301", [seeded], date(2023, 2, 2), 2, True)]
+    assert retention_floor(pg_conn, seeded) == date(2023, 2, 2)
     # Only the dropped month's dates are written off, not the recent one.
     assert _written_off(ch_client, seeded) == [_OLD_DAY]
 
@@ -125,7 +125,7 @@ def test_a_month_with_dates_the_ledger_lacks_is_held(pg_conn, ch_client, seeded,
 
     assert result.dropped == []
     assert [(v.partition.partition_id, v.held_by) for v in result.verdicts] == [
-        ("202301", f"agency {seeded} has 1 service date(s) without aggregates, from 2023-01-15")
+        ("202301", f"agency {seeded} has 1 service date(s) without aggregates, from 2023-01-15; analyze it first")
     ]
     assert _partitions(ch_client) == before
     assert _runs(pg_conn) == [("retention", "unchanged", 0)]

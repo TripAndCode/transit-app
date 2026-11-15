@@ -184,6 +184,14 @@ def filed_capture_span(first: date, last: date) -> tuple[datetime, datetime]:
     return service_day_start_utc(first) - reach, service_day_start_utc(last + timedelta(days=1)) + reach
 
 
+def filed_dates_reached(start: datetime, end: datetime) -> tuple[date, date]:
+    """The inverse of :func:`filed_capture_span`: the earliest service date a
+    reading captured at or after *start* can be filed under, and the latest a
+    reading captured before *end* can."""
+    reach = timedelta(hours=FILING_REACH_HOURS)
+    return service_date_of(start - reach), service_date_of(end - timedelta(microseconds=1) + reach)
+
+
 def service_day_seconds(hour: int, minute: int, second: int = 0) -> int:
     """Seconds since the start of the service day for a wall-clock time.
 

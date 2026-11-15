@@ -196,12 +196,12 @@ def _lock_or_skip_agency(conn, cmd: str, kind: str, agency_id: int | None = None
 def _lock_or_exit(conn, cmd: str, kind: str) -> None:
     """Exit(1) if another ingest/analyze process holds the lock.
 
-    For `analyze_all` and `ingest_live` -- the whole-fleet commands that no
-    shell script loops over (docs/deploy-railway.md calls each exactly once,
-    after -- not inside -- the per-agency `ingest` loop), so the abort-risk
-    that justifies skipping in _lock_or_skip_agency doesn't apply here. Both
-    fail loudly instead: a whole-fleet run that silently did nothing would
-    read as a clean run.
+    For `analyze_all`, `ingest_live` and `prune-updates` -- the whole-fleet
+    commands that no shell script loops over (docs/deploy-railway.md calls
+    each exactly once, after -- not inside -- the per-agency `ingest` loop),
+    so the abort-risk that justifies skipping in _lock_or_skip_agency doesn't
+    apply here. They fail loudly instead: a whole-fleet run that silently did
+    nothing would read as a clean run.
     """
     got, lock_wait_ms = try_lock_ingest_analyze_timed(conn)
     if got:

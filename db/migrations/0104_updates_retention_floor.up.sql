@@ -8,9 +8,7 @@ ALTER TABLE pipeline_runs ADD CONSTRAINT pipeline_runs_kind_check
 -- One row per `updates` month the prune drops, written and committed before
 -- the drop, so a run that dies mid-way leaves a row with dropped_at NULL.
 -- retention_floor is the first service date analyze may still purge or
--- rebuild for each agency in agency_ids (pipeline.retention.retention_floor):
--- the aggregates of every earlier date are final, since `updates` no longer
--- holds all of their rows.
+-- rebuild for each agency in agency_ids (pipeline.retention.retention_floor).
 CREATE TABLE IF NOT EXISTS updates_pruned_months (
     id BIGSERIAL PRIMARY KEY,
     partition_id TEXT NOT NULL CHECK (partition_id ~ '^[0-9]{4}(0[1-9]|1[0-2])$'),

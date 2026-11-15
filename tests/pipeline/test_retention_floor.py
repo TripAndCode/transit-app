@@ -6,16 +6,16 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from pipeline import ch_aggregates, feed_quality, flags
+from pipeline import agg_registry, ch_aggregates, feed_quality, flags
 from pipeline.analyze import _AGG_TABLES_ORDERED, _INCREMENTAL_AGG_TABLES, analyze, mark_for_full_rebuild
 from pipeline.clickhouse import insert_updates
 from pipeline.retention import prune_updates, retention_floor
 from tests.pipeline.ch_agg_helpers import ch_rows, seed_schedule, update_row
 
 # The prune runs as of mid-March 2025 with a 30-day horizon, so only the
-# January partition is past it. Dropping it sets the floor at 2025-02-03.
+# January partition is past it. Dropping it sets the floor at 2025-02-02.
 _NOW = datetime(2025, 3, 15, tzinfo=timezone.utc)
-_FLOOR = date(2025, 2, 3)
+_FLOOR = date(2025, 2, 2)
 _DATED = sorted(_INCREMENTAL_AGG_TABLES)
 _UNSEEDED = {"agg_route_headway_daily", "agg_schedule_revision_daily", "agg_service_delivered_daily"}
 
@@ -139,3 +139,74 @@ def test_without_a_recorded_drop_analyze_purges_dates_whose_rows_are_gone(pg_con
     analyze(agency_id, pg_conn, ch_client)
     assert retention_floor(pg_conn, agency_id) is None
     assert all(day >= date(2025, 2, 1) for day in _dates(pg_conn, agency_id, "agg_route_daily"))
+
+
+def _built_at(pg_conn, agency_id) -> dict:
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT table_name, built_at FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        return dict(cur.fetchall())
+
+
+def _record_whole_builds(monkeypatch) -> list:
+    calls: list = []
+    real = ch_aggregates.build_whole_history
+
+    def build_whole_history(ch, agency_id, tables, *args, **kwargs):
+        calls.append(sorted(tables))
+        return real(ch, agency_id, tables, *args, **kwargs)
+
+    monkeypatch.setattr(ch_aggregates, "build_whole_history", build_whole_history)
+    return calls
+
+
+def test_a_run_after_a_prune_with_nothing_new_rebuilds_nothing(pg_conn, ch_client, agency_id, pruned, monkeypatch):
+    """The dropped dates' ledger rows no longer match `updates`, which must
+    not read as a change: report caches key on built_at."""
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    before = _built_at(pg_conn, agency_id)
+    whole_builds = _record_whole_builds(monkeypatch)
+    analyze(agency_id, pg_conn, ch_client)
+    assert whole_builds == []
+    assert _built_at(pg_conn, agency_id) == before
+    whole = [name for name, table in agg_registry.TABLES.items() if table.kind is agg_registry.Kind.WHOLE]
+    assert whole and all(name in before for name in whole)
+
+
+def _delete_route_daily_row(pg_conn, agency_id, *, below_floor: bool) -> None:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM agg_route_daily WHERE ctid = (SELECT ctid FROM agg_route_daily WHERE agency_id = %s "
+            f"AND date {'<' if below_floor else '>='} %s ORDER BY date LIMIT 1)",
+            (agency_id, _FLOOR.replace(day=1) if below_floor else _FLOOR),
+        )
+        assert cur.rowcount == 1
+    pg_conn.commit()
+
+
+def test_a_store_disagreement_below_the_floors_month_is_final(pg_conn, ch_client, agency_id, pruned):
+    """A rebuild repairs only from the floor on, so the comparison that
+    decides one starts at the floor's month: a gap below it is not chased on
+    every run."""
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    _delete_route_daily_row(pg_conn, agency_id, below_floor=True)
+    before = _built_at(pg_conn, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _built_at(pg_conn, agency_id) == before
+
+
+def test_a_store_disagreement_from_the_floor_on_is_repaired(pg_conn, ch_client, agency_id, pruned):
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    _delete_route_daily_row(pg_conn, agency_id, below_floor=False)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _changed(pruned, _snapshot(pg_conn, ch_client, agency_id)) == []
+
+
+def test_the_prune_holds_an_agency_whose_stores_disagree(pg_conn, ch_client, agency_id, pruned):
+    _delete_route_daily_row(pg_conn, agency_id, below_floor=True)
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    assert result.dropped == []
+    assert "agg_route_daily" in result.verdicts[0].held_by
+    assert retention_floor(pg_conn, agency_id) is None

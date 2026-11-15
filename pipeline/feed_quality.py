@@ -430,9 +430,9 @@ def plan_months(
     built (:func:`validation_moved`). A stored month outside the agency's
     months goes.
 
-    A month that begins before *floor*, the agency's retention floor
-    (pipeline.retention.retention_floor), is final whatever else holds: its
-    window reads `updates` rows that are gone.
+    A month that begins before *floor*, the agency's retention floor, is
+    final whatever else holds (pipeline.retention.retention_floor): its
+    window reads `updates` rows from before it.
     """
     purge, build = _plan_months(scope, spans, stored, validation_moved)
     if floor is None:

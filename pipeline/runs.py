@@ -1,9 +1,10 @@
 """One row per pipeline job, so the control board can show what actually ran.
 
-``pipeline_runs`` records ingest, promotion, analyze, weather, static-load,
-RT coverage-probe and retention-prune jobs from both entry points -- the CLI (``gtfs_pipeline.py``)
-and the cron fallback endpoint -- including the jobs that never did any work
-because another process held the ingest/analyze advisory lock. A run that
+``pipeline_runs`` records ingest, promotion, analyze, weather, static-load
+and RT coverage-probe jobs from both entry points -- the CLI
+(``gtfs_pipeline.py``) and the cron fallback endpoint -- and the `updates`
+retention prune, which only the CLI runs. It records the jobs that never did
+any work because another process held the ingest/analyze advisory lock too. A run that
 was skipped is the most interesting row on the board: it is the only
 evidence that a scheduled job was displaced, and nothing else in the system
 keeps it.
