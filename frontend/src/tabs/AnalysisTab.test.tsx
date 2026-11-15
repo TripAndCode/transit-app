@@ -63,7 +63,6 @@ function mockSupportHooks() {
   // The agency catalogue answered without a tier for this agency, unless a test set one.
   if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
-  vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
 }
 
 function renderAnalysis(
@@ -1355,10 +1354,9 @@ describe("AnalysisTab delay record", () => {
     expect(summary.closest("details")).toContainElement(screen.getByRole("alert"));
   });
 
-  it("prints a report without the list, the insights or the staff list", () => {
+  it("prints a report without the list or the staff list", () => {
     const print = ruleBody(readFileSync(resolve(__dirname, "./analysisTab.css"), "utf8"), "@media print");
     expect(decl(ruleBody(print, ".analysis-report-list"), "display")).toBe("none !important");
-    expect(decl(ruleBody(print, ".analysis-insights"), "display")).toBe("none !important");
     expect(decl(ruleBody(print, ".cert-staff"), "display")).toBe("none");
   });
 });

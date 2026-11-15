@@ -96,8 +96,7 @@ def annotate_on_time_pct_confidence(rows: list[tuple]) -> list[tuple]:
     live fallback (``pct`` a percentage 0..100, ``samples`` the route's
     observation count). Returns a NEW list of 6-tuples; the input rows and
     ``compute_on_time``'s own contract are untouched, so callers that read
-    its raw rows (e.g. ``pipeline.reports.suggest``'s fallback) are
-    unaffected -- this is a display-layer annotation only.
+    its raw rows are unaffected -- this is a display-layer annotation only.
 
     ``successes`` is back-derived from the already-rounded percentage
     (``round(pct/100 * samples)``) rather than re-read from an exact count
