@@ -19,9 +19,12 @@ Two lock domains, distinguished by what the caller is about to write:
    Held by promotion (pipeline/promote.py) around its copy from
    `updates_live` into `updates`, by analyze() for the whole of its own
    run, and by `gtfs_pipeline.py restamp_archive --apply` for every agency
-   it moves, under domain 1, across its rewrite of the whole table. The
-   realtime writers (collector push, `ingest_live`) write `updates_live`,
-   which analyze never reads, and take no per-agency key.
+   it moves, under domain 1, across its rewrite of the whole table, and by
+   `gtfs_pipeline.py prune-updates` (pipeline.retention.prune_updates) for
+   every agency with rows in a month it may drop, under domain 1, from
+   reading the agencies' ledgers until its last drop. The realtime writers
+   (collector push, `ingest_live`) write `updates_live`, which analyze never
+   reads, and take no per-agency key.
    This is analyze's own exclusion against promotion's copy landing
    mid-run, independent of whether a caller also holds domain 1. Current
    callers hold both: the cron sweep takes domain 1 once around its whole
@@ -162,10 +165,10 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
 
     Waiting cannot deadlock. Promotion and analyze take one agency's key at
     a time, never nesting, while holding at most INGEST_ANALYZE_LOCK_KEY's
-    single-argument lock, which no holder of this key waits on. The restamp is
-    the one holder of several keys: it takes them in ascending agency_id while
-    holding that single-argument lock, so no other holder of a key can be
-    running and no cycle can form. A load_static that remaps a timetable
+    single-argument lock, which no holder of this key waits on. The restamp
+    and the `updates` prune are the holders of several keys: each takes them
+    in ascending agency_id while holding that single-argument lock, so no
+    other holder of several keys can be running and no cycle can form. A load_static that remaps a timetable
     version name takes one agency's key to clear its archive-joined tables'
     states (pipeline.static_archive), holding no other lock and no open
     transaction, so it only waits out that agency's analyze.

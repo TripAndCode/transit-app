@@ -9,9 +9,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# A swap of a whole table, or a mutation or lightweight delete of `updates`.
+# A swap of a whole table, or a mutation, partition drop or lightweight delete of `updates`.
 _REWRITE = re.compile(
-    r"EXCHANGE\s+TABLES|ALTER\s+TABLE\s+\{?\w*updates\w*\}?\s+(?:UPDATE|DELETE)|DELETE\s+FROM\s+\{?\w*updates\w*\}?\b",
+    r"EXCHANGE\s+TABLES|ALTER\s+TABLE\s+\{?\w*updates\w*\}?\s+(?:UPDATE|DELETE|DROP\s+PARTITION)"
+    r"|DELETE\s+FROM\s+\{?\w*updates\w*\}?\b",
     re.IGNORECASE,
 )
 
@@ -34,6 +35,9 @@ def test_the_pattern_finds_each_kind_of_rewrite():
         "ALTER TABLE updates DELETE WHERE 1",
         "ALTER TABLE {UPDATES_TABLE} UPDATE x = 1 WHERE 1",
         "DELETE FROM updates WHERE agency_id = 1",
+        "ALTER TABLE updates DROP PARTITION ID '202401'",
+        "ALTER TABLE {UPDATES_TABLE} DROP PARTITION 202401",
     ):
         assert _REWRITE.search(sql), sql
     assert not _REWRITE.search("ALTER TABLE updates MODIFY SETTING allow_nullable_key = 1")
+    assert not _REWRITE.search("ALTER TABLE {table} DROP PARTITION {partition}")

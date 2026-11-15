@@ -314,6 +314,7 @@ def test_registry_covers_every_known_gated_env_var():
         "PERF_DEBUG_ENABLED",
         "LOGIN_REQUIRED",
         "ML_FORECAST_ENABLED",
+        "UPDATES_PRUNE_ENABLED",
     }
     assert {d.env_var for d in flags.REGISTRY} == expected
 
@@ -359,6 +360,7 @@ def test_registry_env_defaults_match_prior_hardcoded_defaults():
         "perf_debug_enabled": False,
         "login_required": True,
         "ml_forecast": False,
+        "updates_prune_enabled": False,
     }
     assert {d.key: d.env_default for d in flags.REGISTRY} == expected_defaults
 

@@ -297,6 +297,47 @@ def test_a_stored_month_outside_the_observed_months_is_purged_not_built():
     assert (purge, build) == ([date(2026, 8, 1)], [])
 
 
+_FLOORED = {
+    date(2026, 8, 1): (date(2026, 8, 31), date(2026, 8, 31)),
+    date(2026, 9, 1): (date(2026, 9, 30), date(2026, 9, 30)),
+    _OCT: (date(2026, 10, 31), date(2026, 10, 31)),
+}
+
+
+def test_a_full_rebuild_leaves_every_month_beginning_before_the_floor():
+    """September begins before a floor on the 3rd: its window reads rows of
+    the 1st and 2nd that are gone."""
+    assert plan_months(None, _FLOORED, _FLOORED, floor=date(2026, 9, 3)) == ([_OCT], [_OCT])
+
+
+def test_a_floor_on_a_months_first_day_leaves_that_month_rebuildable():
+    assert plan_months(None, _FLOORED, _FLOORED, floor=date(2026, 9, 1)) == (
+        [date(2026, 9, 1), _OCT],
+        [date(2026, 9, 1), _OCT],
+    )
+
+
+@pytest.mark.parametrize(
+    "why",
+    ["changed date", "window moved", "validation moved", "stored outside the months"],
+)
+def test_nothing_reaches_a_month_before_the_floor(why):
+    stored = dict(_FLOORED)
+    spans = dict(_FLOORED)
+    scope: list[date] = []
+    moved: list[date] = []
+    if why == "changed date":
+        scope = [date(2026, 8, 14)]
+    elif why == "window moved":
+        spans[date(2026, 8, 1)] = (date(2026, 8, 30), date(2026, 8, 31))
+    elif why == "validation moved":
+        moved = [date(2026, 8, 1)]
+    else:
+        del spans[date(2026, 8, 1)]
+    assert plan_months(scope, spans, stored, moved)[0] == [date(2026, 8, 1)]
+    assert plan_months(scope, spans, stored, moved, floor=date(2026, 9, 3)) == ([], [])
+
+
 def test_an_agency_with_no_closed_observed_day_builds_nothing():
     assert month_windows(None, date(2026, 11, 8)) == {}
     assert month_windows(date(2026, 11, 9), date(2026, 11, 8)) == {}
