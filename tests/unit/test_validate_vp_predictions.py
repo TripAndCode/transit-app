@@ -494,7 +494,11 @@ def test_off_the_grid_the_figures_stay_within_a_second_of_the_oracles(tmp_path):
     assert coverage["kept_after_passage"] == negative
 
 
-def test_a_stop_event_with_no_vehicle_is_counted_but_not_measured(tmp_path):
+def test_a_stop_event_with_no_vehicle_is_counted_but_not_measured(tmp_path, capsys):
+    """With the VehiclePositions tar gone, each stop event lacks a track, and
+    the missing archives are stated beside the figures: the run's 07:00 JST
+    polls sit in the UTC day before, so the service day's own UTC day has
+    neither tar either."""
     scenario = _on_grid()
     root = tmp_path / "r2"
     _archive(scenario, root, 8, 20)
@@ -505,6 +509,13 @@ def test_a_stop_event_with_no_vehicle_is_counted_but_not_measured(tmp_path):
     assert summary["coverage"]["with_passage"] == 0
     assert summary["coverage"]["trip_without_track"] == 10
     assert summary["figures"]["overall"]["n"] == 0
+    assert summary["days"][0]["missing_archives"] == [
+        "rt/8/20260601.tar.gz",
+        "vp/8/20260531.tar.gz",
+        "vp/8/20260601.tar.gz",
+    ]
+    assert "Missing archives: 3" in (tmp_path / "out" / "8" / "20260601_20260601.md").read_text()
+    assert "3 archives missing" in capsys.readouterr().out
 
 
 def test_a_run_with_nothing_to_compare_exits_one(tmp_path):

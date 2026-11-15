@@ -779,6 +779,10 @@ def _trip_update_polls(paths: Iterable[Path]) -> Iterator[tuple[str, datetime, b
             yield file_name, datetime.fromisoformat(archive_captured_at(payload, day, pb_name)), payload
 
 
+def _missing_archives(summary: dict[str, Any]) -> int:
+    return sum(len(day["missing_archives"]) for day in summary["days"])
+
+
 def markdown(summary: dict[str, Any]) -> str:
     c = summary["coverage"]
     share = f"{100 * c['with_passage'] / c['stop_events']:.1f}%" if c["stop_events"] else "n/a"
@@ -786,7 +790,8 @@ def markdown(summary: dict[str, Any]) -> str:
         f"# Agency {summary['agency_id']}: kept prediction vs observed passage, {summary['from']} to {summary['to']}",
         "",
         f"Stop events with a reconstructed passage: {c['with_passage']} of {c['stop_events']} ({share}). "
-        f"Kept reading captured after the passage: {c['kept_after_passage']}.",
+        f"Kept reading captured after the passage: {c['kept_after_passage']}. "
+        f"Missing archives: {_missing_archives(summary)} (listed per day in the JSON).",
         "",
         "Error = kept delay - observed delay (positive: the feed reported the bus later than it left).",
         "",
@@ -882,7 +887,8 @@ def main(argv: Sequence[str] | None = None, *, run: Run = default_run, capture: 
     overall, coverage = summary["figures"]["overall"], summary["coverage"]
     print(
         f"agency {args.agency} {args.first}..{args.last}: {coverage['with_passage']}/{coverage['stop_events']} "
-        f"stop events measured, MAE {overall['mae_sec']} s, bias {overall['bias_sec']} s -> {stem}.json"
+        f"stop events measured, MAE {overall['mae_sec']} s, bias {overall['bias_sec']} s, "
+        f"{_missing_archives(summary)} archives missing -> {stem}.json"
     )
     return 0 if overall["n"] else 1
 
