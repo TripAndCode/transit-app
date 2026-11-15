@@ -106,6 +106,7 @@ def test_a_month_past_the_horizon_whose_dates_are_aggregated_is_dropped(pg_conn,
 
     result = _prune(pg_conn, ch_client)
 
+    assert [v.partition.partition_id for v in result.verdicts] == ["202301"]
     assert result.dropped == ["202301"]
     assert _partitions(ch_client) == [p for p in before if p != "202301"]
     assert _runs(pg_conn) == [("retention", "ok", 2)]
