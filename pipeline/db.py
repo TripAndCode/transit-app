@@ -16,7 +16,7 @@ import psycopg2
 
 from pipeline import static_archive
 from pipeline.clickhouse import STOP_SKIPPED, TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE, UPDATES_TABLE
-from pipeline.service_day import departure_lag, departure_lag_ch, filed_date_ch, service_day_offset_ch
+from pipeline.service_day import departure_lag, departure_lag_ch, service_day_offset_ch
 
 # The database the API and the pipeline CLI connect to when DATABASE_URL is
 # unset or empty. The test session vets this same value against the dev ports, so a
@@ -545,58 +545,6 @@ def hms_to_sec_sql(column: str) -> str:
         f"+ split_part({text}, ':', 2)::int * 60 "
         f"+ COALESCE(NULLIF(split_part({text}, ':', 3), ''), '0')::int "
         f"ELSE NULL END"
-    )
-
-
-def build_prediction_accuracy_ch_sql(*, extra_where: str = "") -> str:
-    """Return the SQL body that gathers EVERY raw observation per stop event
-    (not just the latest one `build_dedup_ch_sql` resolves to), for
-    `pipeline.prediction_accuracy`'s early-vs-final delay-estimate error
-    metric.
-
-    Same grouping key, same `agency_id`/plausibility-clamp/withdrawal/timeliness `WHERE`
-    (`stop_event_filter_ch`), and the same final-value resolution
-    (`latest_departure_ch`) as `build_dedup_ch_sql`, so the two queries can
-    never silently disagree about which row is "the final observation" for a
-    stop event, or about a stop event whose latest poll withdrew its
-    departure, which has none to judge predictions against -- but this query
-    ALSO projects `groupArray(tuple(u.captured_at, u.dep_delay))` over the
-    departure readings, the raw per-observation history
-    `pipeline.prediction_accuracy.compute_stop_event_errors` needs to compare
-    early readings against that final value.
-
-    `u.scheduled_time IS NOT NULL` drops stop events with no scheduled
-    instant to measure lead time from -- an extended-hour or unmatched row is
-    stored with a NULL `scheduled_time` -- so `pipeline.prediction_accuracy`
-    never has to parse one.
-
-    `HAVING` drops every stop event with no final departure, and every one
-    whose departure was observed exactly once: a singleton has no EARLY
-    observation to compare against its own (only) final one, so it can never
-    contribute to this metric and would just be dead weight in the result set
-    (and in `groupArray`'s per-row memory).
-
-    Column order/count in the SELECT list is exactly `route_code,
-    service_type, scheduled_time, trip_id, date, stop_sequence,
-    final_dep_delay, observations` -- `pipeline.prediction_accuracy.
-    rows_to_lead_bucket_stats` consumes the result by tuple position.
-
-    See `build_dedup_ch_sql`'s own docstring for the rationale behind the
-    service date a stop event is filed under, the `{agency_id:UInt16}` parameter binding,
-    and qualifying every base-table column reference with the `u.` alias
-    (all identical here, not repeated).
-    """
-    departure = f"NOT {withdrawn_ch()}"
-    where = f"u.scheduled_time IS NOT NULL AND {stop_event_filter_ch(extra_where)}"
-    return (
-        "SELECT u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        f"{filed_date_ch('u.')} AS date, u.stop_sequence, "
-        f"{latest_departure_ch()} AS final_dep_delay, "
-        f"groupArrayIf(tuple(u.captured_at, u.dep_delay), {departure}) AS observations "
-        f"FROM updates AS u WHERE {where} "
-        "GROUP BY u.route_code, u.service_type, u.scheduled_time, u.trip_id, "
-        f"{filed_date_ch('u.')}, u.stop_sequence "
-        f"HAVING final_dep_delay IS NOT NULL AND countIf({departure}) > 1"
     )
 
 

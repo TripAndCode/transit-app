@@ -238,10 +238,10 @@ the latest reading per trip-stop-day", ``DELAY_ANALYSIS.md``'s dedup). So:
   positive: a feed that reports a run later than it left overstates its
   delay. Its lead time is its true departure instant less the capture
   instant of the poll whose reading it took, negative for a reading
-  captured after the run left. The lead runs to the true departure, not,
-  as in ``pipeline.prediction_accuracy``, to the reading's own predicted
-  one, since the truth is what a passage observed from vehicle positions
-  stands for.
+  captured after the run left. The lead runs to the true departure, not
+  to the reading's own predicted one, since the truth is what a passage
+  observed from vehicle positions stands for
+  (``scripts/validate_vp_predictions.py``).
 - Over a set of departures, the mean absolute error and the bias, the
   mean error. By lead time, each group holds the leads from a multiple of
   a width to the next multiple, that one excluded, so a negative lead
