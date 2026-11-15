@@ -101,6 +101,200 @@ async def test_chat_with_tools_survives_non_dict_arguments(
 
 
 @pytest.mark.asyncio
+async def test_history_injected_into_prompt(monkeypatch):
+    """When history is supplied, prior turns appear in the prompt messages."""
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
+            captured["messages"] = messages
+            return SimpleNamespace(content="ok", tool_calls=None), None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    history = [{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}]
+    await chat.chat_with_tools("次の50件", ctx, conn=None, agency_id=1, history=history)
+
+    blob = " ".join(m["content"] for m in captured["messages"])
+    assert "停留所はいくつ？" in blob
+    assert "describe_data" in blob
+
+
+@pytest.mark.asyncio
+async def test_force_tool_call_sets_tool_choice_required(monkeypatch):
+    """A recognized pagination follow-up must force a tool call.
+
+    Turn 2 of a two-turn conversation ("停留所はいくつ？" then "次の50件"
+    with turn 1 in history) has to call ``describe_data`` again, but
+    ``tool_choice="auto"`` lets the model decline and return ``tool_call:
+    None`` even though the system prompt documents that exact rewrite.
+    ``api/routers/ask.py`` passes
+    ``force_tool_call=is_follow_up(question)`` through to here; this pins
+    that ``force_tool_call=True`` maps to ``tool_choice="required"`` (and
+    that the default stays ``"auto"`` so every other question shape is
+    unaffected).
+    """
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    captured = {}
+
+    class _FakeClient:
+        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
+            captured["tool_choice"] = tool_choice
+            return SimpleNamespace(content="ok", tool_calls=None), None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    history = [{"question": "停留所はいくつ？", "tool": "describe_data", "args": {"kind": "stops"}}]
+
+    await chat.chat_with_tools("次の50件", ctx, conn=None, agency_id=1, history=history, force_tool_call=True)
+    assert captured["tool_choice"] == "required"
+
+    await chat.chat_with_tools("次の50件", ctx, conn=None, agency_id=1, history=history, force_tool_call=False)
+    assert captured["tool_choice"] == "auto"
+
+
+@pytest.mark.asyncio
+async def test_empty_history_matches_no_history(monkeypatch):
+    """history=[] must produce the same messages as history=None."""
+    from types import SimpleNamespace
+
+    from pipeline.query import chat
+
+    seen = []
+
+    class _FakeClient:
+        def chat_completions(self, *, messages, **k):
+            seen.append([m["content"] for m in messages])
+            return SimpleNamespace(content="ok", tool_calls=None), None
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from datetime import date
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    await chat.chat_with_tools("質問", ctx, conn=None, agency_id=1, history=None)
+    await chat.chat_with_tools("質問", ctx, conn=None, agency_id=1, history=[])
+    assert seen[0] == seen[1]
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_success_flag(monkeypatch):
+    """chat_with_tools includes a success bool: tool-result kind!=empty → True; service-unreachable → False."""
+    from pipeline.query import chat
+
+    # Service unreachable (client returns None) → success False
+    class _DownClient:
+        def chat_completions(self, **k):
+            return None, "connection"
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _DownClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1)
+    assert out["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_rate_limited(monkeypatch):
+    """Quota exhaustion (429) shows the steer-to-free-questions message, not the generic one."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            return None, "rate_limit"
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert "上限" in out["answer"]
+    assert out["answer"] != chat._chat_str("service_unreachable", "ja")
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_connection(monkeypatch):
+    """A transient/connection exhaustion keeps the existing generic message."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            return None, "connection"
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert out["answer"] == chat._chat_str("service_unreachable", "ja")
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_no_providers(monkeypatch):
+    """Zero configured providers shows the unconfigured message."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            return None, "no_providers"
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale="ja")
+    assert out["success"] is False
+    assert out["answer"] == chat._chat_str("llm_unconfigured", "ja")
+
+
+@pytest.mark.asyncio
+async def test_degradation_message_not_approved(monkeypatch):
+    """llm_approved=False shows the admin-approval message, in both locales,
+    without ever reaching the provider client."""
+    from pipeline.query import chat
+
+    class _FakeClient:
+        def chat_completions(self, **k):
+            raise AssertionError("the LLM provider must not be reached when llm_approved=False")
+
+    monkeypatch.setattr(chat, "_get_client", lambda: _FakeClient())
+
+    from api.range import RangeCtx
+
+    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
+    for locale in ("ja", "en"):
+        out = await chat.chat_with_tools("q", ctx, conn=None, agency_id=1, locale=locale, llm_approved=False)
+        assert out["success"] is False
+        assert out["answer"] == chat._chat_str("llm_not_approved", locale)
+
+
+@pytest.mark.asyncio
 async def test_history_block_scopes_use_to_explicit_references(monkeypatch):
     """The history block must tell the model not to answer an unrelated
     question from stale prior-turn data.

@@ -1032,15 +1032,3 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
   });
 }
 
-type AskEvalResult = { generated_at: string | null; score: number | null } | null;
-
-/** Latest local weekly eval result, or null when none has been produced yet
- * (rendered as "not run" rather than an error — see the backend endpoint's
- * docstring for why null is the common case today). */
-export function useAdminAskEval() {
-  return useQuery({
-    queryKey: ["adminAskEval"],
-    queryFn: ({ signal }) => apiGet<AskEvalResult>("/api/admin/ask/eval", { signal }),
-    staleTime: 60_000,
-  });
-}

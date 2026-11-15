@@ -101,7 +101,7 @@ def test_dockerfile_python_minor_matches_ci():
     Matched to the minor, not just the major: 3.12 and 3.14 are as different
     to a C extension as two majors are anywhere else.
 
-    Every workflow pin is checked, not only ci.yml's: the nightly and Ask-eval
+    Every workflow pin is checked, not only ci.yml's: the workflow
     jobs run the same code, and a base-image bump that touches only the
     Dockerfile would otherwise leave them on the old interpreter unnoticed. A
     pin this guard cannot read, such as a matrix list or an expression, fails

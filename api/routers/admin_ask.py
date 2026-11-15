@@ -1,5 +1,4 @@
-"""Admin Ask-ops endpoints: query log, route funnel, and the latest local
-weekly eval result.
+"""Admin Ask-ops endpoints: query log and route funnel.
 
 ``ask_query_log`` has no identity column (deliberately — see
 ``db/migrations/0013_ask_query_log.up.sql``) and no ``latency_ms`` or
@@ -13,12 +12,11 @@ on instead of matching columns that don't exist.
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from api.deps import get_conn
 from api.range import DEFAULT_RANGE_DAYS, jst_today
@@ -27,7 +25,6 @@ from pipeline.query.ask_ops import (
     build_funnel,
     derive_route,
     derive_status,
-    find_latest_eval_result,
     route_to_stage,
     status_to_success,
 )
@@ -217,40 +214,3 @@ async def ask_funnel(
         by_route=[AskFunnelRoute(route=r.route, count=r.count, success_count=r.success_count) for r in funnel.by_route],
         total=funnel.total,
     )
-
-
-class AskEvalResult(BaseModel):
-    """Latest local ask-eval artifact contents.
-
-    ``extra="allow"``: no producer writes this file yet (see
-    ``find_latest_eval_result``'s docstring), so its eventual shape isn't
-    fixed. ``score``/``generated_at`` are named because they're the obvious
-    fields a golden-set eval run would report; anything else round-trips
-    through unvalidated.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    generated_at: str | None = None
-    score: float | None = None
-
-
-# ── Weekly eval result ────────────────────────────────────────────────────
-#
-# .cache/ is already gitignored (see .gitignore's ops-status-collector
-# entry) for exactly this kind of local-only, non-repo runtime artifact.
-
-_EVAL_CACHE_DIR = Path(__file__).resolve().parents[2] / ".cache"
-
-
-@router.get("/eval", response_model=AskEvalResult | None)
-async def ask_eval_latest(_admin: User = Depends(require_admin)) -> AskEvalResult | None:
-    """Latest local ask-eval artifact under .cache/ask-eval-*.json, or null.
-
-    Nothing currently writes this file (see
-    pipeline.query.ask_ops.find_latest_eval_result's docstring) — this
-    always returns null today, and the admin page renders that as "not run
-    yet" rather than a fabricated result.
-    """
-    data = find_latest_eval_result(_EVAL_CACHE_DIR)
-    return None if data is None else AskEvalResult.model_validate(data)

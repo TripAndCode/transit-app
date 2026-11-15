@@ -104,9 +104,8 @@ def test_every_prune_builder_lives_in_pipeline_retention():
     assert gtfs_pipeline.prune_admin_audit_sql is retention.prune_admin_audit_sql
 
 
-def test_intent_cache_prune_keeps_promoted_rows():
-    """A promoted row is where its rag_chunks suggestion resolves its tool and
-    args, so it outlives the question window."""
+def test_intent_cache_prune_exempts_rows_with_promoted_at():
+    """A row with `promoted_at` set outlives the question window."""
     from pipeline import retention
 
     assert retention.prune_intent_cache_sql(90) == (

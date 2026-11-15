@@ -460,7 +460,7 @@ async def chat_with_tools(
     client = _get_client()
     # The operator's kill switch, checked inside _call_llm before any provider
     # or BYOK key is touched. The rules stage (resolved by
-    # the caller before this function runs), the intent-cache pre-hit's
+    # the caller before this function runs) and the intent-cache pre-hit's
     # undated rows never call _call_llm, so they keep
     # answering while it is off. A dated pre-hit row is nulled out by the
     # _carries_dates check below regardless of this flag, so it falls through
@@ -549,7 +549,7 @@ async def chat_with_tools(
     # phrasing, but generic anaphora ("その路線は？") also needs the prior
     # turn and doesn't match it. That means this block is just as often
     # attached ahead of a genuinely NEW, unrelated question that merely
-    # failed to get a confident rules/embedding match, which risks the model
+    # matched no rule, which risks the model
     # answering from the attached (unrelated) history text instead of
     # recognizing that the current question needs a fresh tool call. The
     # trailing guard line below makes the scope of "use history" explicit

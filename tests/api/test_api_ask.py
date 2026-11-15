@@ -807,7 +807,7 @@ def _recording_chat(captured: dict):
 @pytest.mark.asyncio
 async def test_a_reference_back_with_history_skips_the_router(ask_client, monkeypatch):
     """A question like "その路線は？" names no route of its own, so a stateless
-    rule or embedding match would answer about whichever route its stored args
+    rule match would answer about whichever route its stored args
     name; with history attached it goes to the LLM, which sees the route it
     refers to."""
     client, agency_id = ask_client

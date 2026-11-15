@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import {
-  useAdminAskEval,
   useAdminAskFunnel,
   useAdminAskQueries,
   type AskQueryLogRow,
@@ -143,7 +142,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
 }
 
 /** Admin: Ask operations — query log, route funnel,
- * kill-switch pointer, and the latest weekly eval result. */
+ * and the kill-switch pointer. */
 export function AdminAskOpsPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -162,7 +161,6 @@ export function AdminAskOpsPage() {
     from: filters.from,
     to: filters.to,
   });
-  const { data: evalResult, error: evalError, refetch: refetchEval } = useAdminAskEval();
 
   const maxCount = Math.max(1, ...(funnel?.by_route.map((r) => r.count) ?? [1]));
 
@@ -255,36 +253,6 @@ export function AdminAskOpsPage() {
         <Link to="/admin/flags" style={{ fontSize: 13 }}>
           {t("admin.ask_ops.kill_switch.flags_link")}
         </Link>
-      </section>
-
-      <section
-        style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
-      >
-        <h2 style={{ fontSize: 15, marginBottom: 8 }}>{t("admin.ask_ops.eval.title")}</h2>
-        {evalResult === undefined ? (
-          // "Not run" is a statement about the eval job; a query that is still
-          // loading or failed says nothing about it.
-          evalError != null ? (
-            <ErrorBanner error={evalError} onRetry={() => refetchEval()} />
-          ) : (
-            <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
-          )
-        ) : evalResult ? (
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            {evalResult.score !== null && (
-              <span style={{ marginRight: 16 }}>
-                {t("admin.ask_ops.eval.score_label")}: {evalResult.score}
-              </span>
-            )}
-            {evalResult.generated_at !== null && (
-              <span>
-                {t("admin.ask_ops.eval.generated_at_label")}: {formatDateTime(evalResult.generated_at)}
-              </span>
-            )}
-          </div>
-        ) : (
-          <StatusChip tone="neutral">{t("admin.ask_ops.eval.not_run")}</StatusChip>
-        )}
       </section>
 
       <AskQueryTable key={filterKey} filters={filters} />

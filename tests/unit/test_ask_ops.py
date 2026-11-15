@@ -9,7 +9,6 @@ from pipeline.query.ask_ops import (
     build_funnel,
     derive_route,
     derive_status,
-    find_latest_eval_result,
     route_to_stage,
     status_to_success,
 )
@@ -83,24 +82,3 @@ def test_build_funnel_merges_duplicate_router_stage_rows():
     funnel = build_funnel(raw)
     by_route = {r.route: r for r in funnel.by_route}
     assert by_route["rules"].count == 7
-
-
-def test_find_latest_eval_result_none_when_dir_missing(tmp_path):
-    assert find_latest_eval_result(tmp_path / "does-not-exist") is None
-
-
-def test_find_latest_eval_result_none_when_no_matching_files(tmp_path):
-    (tmp_path / "unrelated.json").write_text("{}", encoding="utf-8")
-    assert find_latest_eval_result(tmp_path) is None
-
-
-def test_find_latest_eval_result_reads_lexicographically_latest(tmp_path):
-    (tmp_path / "ask-eval-2026-09-07.json").write_text('{"score": 0.5}', encoding="utf-8")
-    (tmp_path / "ask-eval-2026-09-14.json").write_text('{"score": 0.9}', encoding="utf-8")
-    result = find_latest_eval_result(tmp_path)
-    assert result == {"score": 0.9}
-
-
-def test_find_latest_eval_result_none_on_malformed_json(tmp_path):
-    (tmp_path / "ask-eval-2026-09-14.json").write_text("not json", encoding="utf-8")
-    assert find_latest_eval_result(tmp_path) is None

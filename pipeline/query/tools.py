@@ -1487,7 +1487,7 @@ _HANDLERS.update(META_HANDLERS)
 
 
 # Free-text arguments matched against stored route and stop names. dispatch
-# NFKC-folds them as router._match_rules folds the question, so "１０２１" or
+# NFKC-folds them as router.match_rules folds the question, so "１０２１" or
 # "Ａ１" reaches the resolvers and the SQL as "1021" or "A1".
 _FREE_TEXT_ARGS = frozenset({"route", "filter_substring"})
 

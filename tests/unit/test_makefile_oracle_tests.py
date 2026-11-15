@@ -109,7 +109,7 @@ def test_nightly_workflow_references_oracle_tests():
     assert "make oracle-tests" in text, "nightly-extended.yml does not run `make oracle-tests`"
     assert re.search(r"^\s*schedule:\s*$", text, re.MULTILINE), "nightly-extended.yml has no schedule trigger"
     assert "workflow_dispatch" in text
-    assert "RUN_SLOW" in text and "RUN_I18N_SCAN" in text and "RUN_DASHBOARD_E2E_SCAN" in text
+    assert "RUN_I18N_SCAN" in text and "RUN_DASHBOARD_E2E_SCAN" in text
     assert "RUN_CH_INTEGRATION" in text
     assert "permissions:" in text and "contents: read" in text
     assert "timeout-minutes: 60" in text

@@ -3,8 +3,7 @@ name = "transit-delay-app"
 version = "0.1.0"
 description = "Transit delay analysis platform for Japanese GTFS-JP agencies"
 authors = []
-# Poetry 2 records each locked package's environment markers; 1.x ignores
-# them. CI and the Dockerfile pin an exact version inside this range
+# CI and the Dockerfile pin an exact version inside this range
 # (tests/unit/test_poetry_pins.py keeps them in step).
 requires-poetry = ">=2.5,<3"
 packages = [
@@ -60,8 +59,6 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "--strict-markers"
 markers = [
-    "requires_llm_key: tests that need a configured live LLM provider key and the dev API reachable (off by default)",
-    "slow: Test downloads/loads ~120MB ML models; gated by RUN_SLOW=1",
     "anyio: async test driven by anyio's pytest plugin instead of pytest-asyncio's auto mode",
 ]
 

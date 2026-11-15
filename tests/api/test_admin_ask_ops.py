@@ -1,6 +1,4 @@
-"""Tests for GET /api/admin/ask/* — admin Ask-ops query log, funnel, and
-eval-result endpoints.
-"""
+"""Tests for GET /api/admin/ask/* — the admin Ask-ops query log and funnel."""
 
 from __future__ import annotations
 
@@ -11,7 +9,6 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
-from api.routers import admin_ask as admin_ask_mod
 from tests.conftest import _test_pool
 from tests.fixtures.users import seed_session
 
@@ -224,32 +221,6 @@ async def test_both_date_bounds_are_jst_days_whatever_the_process_zone(ask_ops_c
         monkeypatch.undo()
         time.tzset()
         await jst_pool.close()
-
-
-@pytest.mark.asyncio
-async def test_eval_requires_admin(ask_ops_client):
-    c, *_ = ask_ops_client
-    resp = await c.get("/api/admin/ask/eval")
-    assert resp.status_code in (401, 403)
-
-
-@pytest.mark.asyncio
-async def test_eval_returns_null_when_no_artifact(ask_ops_client, monkeypatch, tmp_path):
-    monkeypatch.setattr(admin_ask_mod, "_EVAL_CACHE_DIR", tmp_path / "no-such-dir")
-    c, sid, *_ = ask_ops_client
-    resp = await c.get("/api/admin/ask/eval", cookies={"sid": sid})
-    assert resp.status_code == 200
-    assert resp.json() is None
-
-
-@pytest.mark.asyncio
-async def test_eval_returns_latest_artifact_when_present(ask_ops_client, monkeypatch, tmp_path):
-    (tmp_path / "ask-eval-2026-09-14.json").write_text('{"score": 0.87}', encoding="utf-8")
-    monkeypatch.setattr(admin_ask_mod, "_EVAL_CACHE_DIR", tmp_path)
-    c, sid, *_ = ask_ops_client
-    resp = await c.get("/api/admin/ask/eval", cookies={"sid": sid})
-    assert resp.status_code == 200
-    assert resp.json()["score"] == 0.87
 
 
 @pytest.mark.asyncio

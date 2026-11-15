@@ -15,10 +15,7 @@ keeps its display route so they stay readable.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
 # router_stage (DB value) -> display route, in pipeline order.
 _STAGE_TO_ROUTE = {
@@ -107,27 +104,3 @@ def build_funnel(raw_counts: list[tuple[str, bool, int]]) -> AskFunnel:
     routes = list(ROUTE_ORDER) + [r for r in totals if r not in ROUTE_ORDER]
     by_route = tuple(FunnelRouteCount(route=r, count=totals[r], success_count=successes.get(r, 0)) for r in routes)
     return AskFunnel(by_route=by_route, total=sum(totals.values()))
-
-
-def find_latest_eval_result(cache_dir: Path, pattern: str = "ask-eval-*.json") -> dict[str, Any] | None:
-    """Read the newest local ask-eval artifact under ``cache_dir`` matching
-    ``pattern`` (lexicographic order == chronological order for an
-    ISO-date-prefixed filename), or ``None`` when none exists or the latest
-    one isn't valid JSON.
-
-    No current producer writes this file: ``scripts/ask_eval.py`` reports
-    pass/fail via its exit code only, not a persisted JSON artifact under
-    this path. This read path returns ``None`` until a producer writes here,
-    which the admin UI renders as "not run yet" rather than fabricating a
-    result.
-    """
-    if not cache_dir.is_dir():
-        return None
-    candidates = sorted(cache_dir.glob(pattern))
-    if not candidates:
-        return None
-    try:
-        data = json.loads(candidates[-1].read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None

@@ -28,7 +28,6 @@ class Rule:
 class RouterDecision:
     tool: str
     args: dict[str, Any]
-    score: float
     matched_pattern: str | None
 
 
@@ -363,7 +362,6 @@ def match_rules(question: str) -> RouterDecision | None:
             return RouterDecision(
                 tool=rule.tool,
                 args=args,
-                score=1.0,
                 matched_pattern=rule.name,
             )
     return None

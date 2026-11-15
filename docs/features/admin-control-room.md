@@ -355,7 +355,5 @@ Route: `/admin/ask`, backed by `AdminAskOpsPage`.
 Endpoints:
 - `GET /api/admin/ask/queries` — paged query log.
 - `GET /api/admin/ask/funnel` — stage/success counts.
-- `GET /api/admin/ask/eval` — latest local eval artifact, or `null` when
-  nothing has produced one yet.
 
 Tables: reads `ask_query_log`.

@@ -2192,7 +2192,7 @@
       "route": {
         "rules": "ルール",
         "nn": "埋め込み(NN)",
-        "rag": "RAG(LLM)",
+        "rag": "LLM",
         "no_history": "履歴なし"
       },
       "status": {
@@ -2228,12 +2228,6 @@
         "title": "キルスイッチ",
         "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED でルーターとクエリログを制御します。",
         "flags_link": "Feature flags で管理"
-      },
-      "eval": {
-        "title": "週次評価",
-        "not_run": "未実行",
-        "score_label": "スコア",
-        "generated_at_label": "時点"
       },
       "table_label": "Ask クエリログ"
     }

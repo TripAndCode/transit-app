@@ -19,8 +19,8 @@ const TOOL_ALIASES: Record<string, string> = {
   on_time: "on_time_rate",
 };
 
-// Tools already labeled for the guided builder UI (ask.routers.ask.py's
-// `_BUILD_TOOL_META`) -- reused rather than re-translated.
+// Tools whose labels the card templates already carry -- reused rather than
+// re-translated.
 const BUILD_LABEL_TOOLS = new Set([
   "top_n",
   "time_series",

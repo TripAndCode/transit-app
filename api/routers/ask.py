@@ -84,7 +84,7 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     """Response schema for ``POST /ask``.
 
-    Phase ② fields (``signature_hash``, ``confidence``, ``canonical_args``,
+    The intent-cache fields (``signature_hash``, ``confidence``, ``canonical_args``,
     ``cache_outcome``) are populated only when the ``ask_intent_cache_enabled``
     flag is on (``pipeline.flags``: a DB override, else ``ASK_INTENT_CACHE_ENABLED``)
     and the request went through the LLM path.  They are ``None`` on the
@@ -190,7 +190,7 @@ async def ask(
 
     # Follow-up phrasing ("もっと", "次の50件", a bare "降順") with NO prior
     # result to continue: short-circuit to a gentle prompt. Otherwise the
-    # question falls to the open LLM with no examples, which hallucinates a
+    # question falls to the open LLM, which hallucinates a
     # page the user never asked for (e.g. describe_data(routes, offset=100)).
     # needs_previous_turn() lets through the ones a first turn can answer: a
     # refinement that names its own subject, or one a rule answers.

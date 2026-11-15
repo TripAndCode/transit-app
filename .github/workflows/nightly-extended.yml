@@ -1,8 +1,7 @@
 name: Nightly extended
 
-# Runs suites `ci.yml` deliberately skips on every push/PR because they're
-# either slow (RUN_SLOW's ~120MB model download) or need a real browser
-# (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN). It also re-runs the Oracle-collector
+# Runs suites `ci.yml` deliberately skips on every push/PR because they
+# need a real browser (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN). It also re-runs the Oracle-collector
 # bash suites under oracle_cloud/v3/tests/, which `ci.yml` already runs on
 # every pull request and every push to `main` -- kept here too to catch drift
 # in the runner's own bash/coreutils between pushes, not to recheck code that
@@ -132,7 +131,6 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
-          RUN_SLOW: 1
           RUN_I18N_SCAN: 1
           RUN_DASHBOARD_E2E_SCAN: 1
 
@@ -144,7 +142,7 @@ jobs:
       - name: Fail if the gated tests are still skipped
         run: |
           if grep -E "^SKIPPED .*(i18n_coverage_test|dashboard_synthetic_display_test)" pytest-extended.log; then
-            echo "::error::a RUN_SLOW/RUN_I18N_SCAN/RUN_DASHBOARD_E2E_SCAN test was skipped instead of run" >&2
+            echo "::error::a RUN_I18N_SCAN/RUN_DASHBOARD_E2E_SCAN test was skipped instead of run" >&2
             exit 1
           fi
 

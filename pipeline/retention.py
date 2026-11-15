@@ -56,8 +56,9 @@ def prune_query_log_sql(days: int) -> str:
 
 
 def prune_intent_cache_sql(days: int) -> str:
-    """DELETE text for the `ask_intent_cache` retention prune. A promoted row
-    stays: its `rag_chunks` suggestion resolves its tool and args from it."""
+    """DELETE text for the `ask_intent_cache` retention prune. A row with
+    `promoted_at` set is exempt. Nothing reads or sets `promoted_at` now, so the
+    exemption matches no row until the owner decides what becomes of the column."""
     cutoff = f"now() - INTERVAL '{int(days)} days'"
     return f"DELETE FROM ask_intent_cache WHERE last_used_at < {cutoff} AND promoted_at IS NULL"
 
