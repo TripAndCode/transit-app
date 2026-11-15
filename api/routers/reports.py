@@ -622,6 +622,13 @@ async def get_headway_quality(
     server-side by classification, not by a ranking/threshold the caller
     chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
+    return await render_headway_quality(agency_id, ctx, conn)
+
+
+async def render_headway_quality(agency_id: int, ctx: RangeCtx, conn: asyncpg.Connection) -> HeadwayQualityResponse:
+    """``GET /headway_quality``'s whole computation, for a caller that holds
+    the request's scope already: a Routes table snapshot stores exactly what
+    the panel beside the table was served."""
     report = await compute_headway_quality_report(agency_id, ctx, conn)
     return HeadwayQualityResponse(
         rows=[HeadwayQualityRow(**r) for r in report.rows],
@@ -767,8 +774,8 @@ async def render_performance_standards(
     early: EarlyTolerance = None,
 ) -> PerformanceStandardsResponse:
     """``GET /performance_standards``'s whole computation, for a caller that
-    resolved the request's parameters itself: a route page's snapshot stores
-    exactly what the page's targets were served. Each argument means what the
+    resolved the request's parameters itself: a snapshot stores exactly what
+    the panel was served. Each argument means what the
     endpoint's parameter of the same name means."""
     early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
     standards = await read_standards(conn, agency_id, route)

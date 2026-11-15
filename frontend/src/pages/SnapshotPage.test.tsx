@@ -589,3 +589,56 @@ describe("SnapshotPage, a route's page", () => {
     expect(screen.queryByRole("button", { name: "Other direction" })).toBeNull();
   });
 });
+
+const HEADWAY = {
+  rows: [{ route_code: "42", ewt_sec: 120, cov: 0.5, long_gap_rate: 0.1, samples: 80 }],
+  ctx: CTX,
+  scope_applied: {},
+};
+
+describe("SnapshotPage, a Routes table's side panels", () => {
+  afterEach(async () => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    await i18n.changeLanguage("en");
+  });
+
+  function withPanels(): Snapshot {
+    return snapshot({
+      payloads: {
+        ...snapshot().payloads,
+        headway: HEADWAY,
+        standards: { ja: routePage("ja").standards, en: routePage("en").standards },
+      } as Snapshot["payloads"],
+    });
+  }
+
+  it("draws the stored panels beside the table and asks no live endpoint for them", async () => {
+    const fetchMock = stubFetch(200, withPanels());
+    renderPage();
+    expect(await screen.findByText("A simulation, as stored")).toBeInTheDocument();
+    const headway = screen.getByText("Headway quality").closest("div")!;
+    expect(within(headway).getByText("+2 min")).toBeInTheDocument();
+    expect(within(headway).getByText("80")).toBeInTheDocument();
+    expect(screen.getByText("Minimum performance standard")).toBeInTheDocument();
+    expect(screen.queryByText(/before they were stored/)).toBeNull();
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
+  });
+
+  it("follows the reader's language with the language's own stored targets", async () => {
+    await i18n.changeLanguage("ja");
+    stubFetch(200, withPanels());
+    renderPage();
+    expect(await screen.findByText("試算です（保存時）")).toBeInTheDocument(); // i18n-ignore: fixture prose
+  });
+
+  it("renders an older snapshot without the panels, saying they were not stored", async () => {
+    const fetchMock = stubFetch(200, snapshot());
+    renderPage();
+    expect(await screen.findByText(/before they were stored/)).toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.queryByText("Headway quality")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
