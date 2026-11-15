@@ -225,6 +225,18 @@ def test_without_a_floor_the_same_up_applies(agg_purge):
     assert _applied_purge(conn)
 
 
+def test_without_a_floor_no_migration_is_classified(agg_purge, tmp_path, monkeypatch):
+    """Every deploy runs migrate up; one with no floor reads no file text."""
+
+    def classified(*args, **kwargs):
+        raise AssertionError("classified a migration on a database without a floor")
+
+    monkeypatch.setattr(migrate_module, "data_losing_tables", classified)
+    migrate_up(_FakeConn(applied={"0001"}, floor=False))
+    _write_migration(tmp_path, "0003", "DROP TABLE IF EXISTS agg_route_band_daily;\n")
+    migrate_down(None, _FakeConn(applied={"0003"}, floor=False))
+
+
 def test_a_named_version_applies_on_a_floor(agg_purge):
     conn = _FakeConn(applied={"0001"}, floor=True)
     migrate_up(conn, allow_destructive={"0002"})

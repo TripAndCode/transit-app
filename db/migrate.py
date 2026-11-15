@@ -165,8 +165,11 @@ _TABLE = rf"{_NAME}(?:\s*\.\s*{_NAME})?"
 _TABLES = rf"{_TABLE}(?:\s*,\s*{_TABLE})*"
 # An ALTER TABLE subcommand: the first after the table name, or one after a
 # comma. A keyword inside a subcommand (ALTER COLUMN c DROP DEFAULT, ALTER
-# COLUMN c ADD GENERATED ...) starts none.
-_ALTER_SUBCOMMAND = rf"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s+(?:[^,]*,\s*)*?"
+# COLUMN c ADD GENERATED ...) starts none. The skipped subcommands are
+# possessive, so each comma and the whitespace around it splits the text one
+# way only: a statement that matches nowhere is given up in time linear in its
+# subcommands, not exponential.
+_ALTER_SUBCOMMAND = rf"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s++(?:[^,]*+,\s*+)*?"
 # A DROP subcommand followed by none of these drops a column, with or without
 # the COLUMN keyword.
 _KEPT_ON_ALTER_DROP = r"(?:CONSTRAINT|DEFAULT|NOT|EXPRESSION|IDENTITY)\b"
@@ -318,9 +321,11 @@ def _up_migration_path(version: str) -> pathlib.Path:
 
 def _losing_on_a_floor(paths: Iterable[pathlib.Path], conn) -> dict[str, list[str]]:
     """Each of *paths* that loses data on *conn*'s database once it has a
-    retention floor, with the tables it loses it from; nothing without one."""
-    losing = {p.name: t for p in paths if (t := data_losing_tables(p.read_text(), retention_floor=True))}
-    return losing if losing and retention_floor_exists(conn) else {}
+    retention floor, with the tables it loses it from; nothing without one,
+    which is read first, so a database without a floor classifies nothing."""
+    if not retention_floor_exists(conn):
+        return {}
+    return {p.name: t for p in paths if (t := data_losing_tables(p.read_text(), retention_floor=True))}
 
 
 def _run_up(version: str, conn) -> None:

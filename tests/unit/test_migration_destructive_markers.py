@@ -6,11 +6,15 @@ names it."""
 
 from __future__ import annotations
 
+import signal
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from db.migrate import _MIGRATIONS_DIR, data_losing_tables, is_destructive_down
+from db.migrate import _MIGRATIONS_DIR, data_losing_tables, is_destructive_down, rebuildable_agg_tables
 
 
 def test_classifier_counts_tables_columns_and_rows_but_not_indexes_or_rebuildable_aggs():
@@ -187,3 +191,56 @@ def test_a_data_losing_down_migration_carries_the_marker(path: Path):
     lost = data_losing_tables(sql)
     if lost:
         assert is_destructive_down(sql), f"{path.name} loses data in {lost} but has no `-- DESTRUCTIVE` line"
+
+
+# Classifying one statement is linear in its length: migrate up classifies
+# every pending migration on each deploy. A pattern that backtracks
+# exponentially on a statement it does not match runs for hours instead.
+_CLASSIFY_SECONDS = 0.5
+
+
+class _TooSlow(Exception):
+    pass
+
+
+@contextmanager
+def _within(seconds: float) -> Iterator[None]:
+    """Fail, rather than hang, once *seconds* pass."""
+
+    def _expired(signum, frame):
+        raise _TooSlow(f"still classifying after {seconds}s")
+
+    previous = signal.signal(signal.SIGALRM, _expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@pytest.fixture(scope="module")
+def _rebuildable_loaded():
+    """The rebuildable set imports analyze once; that is not classification."""
+    rebuildable_agg_tables()
+
+
+@pytest.mark.parametrize("path", UP_FILES + DOWN_FILES, ids=lambda p: p.name)
+def test_every_migration_classifies_in_linear_time(path: Path, _rebuildable_loaded):
+    sql = path.read_text()
+    start = time.monotonic()
+    with _within(_CLASSIFY_SECONDS * 4):
+        data_losing_tables(sql)
+        data_losing_tables(sql, retention_floor=True)
+    assert time.monotonic() - start < _CLASSIFY_SECONDS
+
+
+def test_an_alter_of_many_subcommands_that_lose_nothing_classifies_in_linear_time(_rebuildable_loaded):
+    sql = (
+        "ALTER TABLE agg_route_daily\n"
+        + ",\n".join(f"    ADD CONSTRAINT c{i} CHECK (samples >= {i})" for i in range(30))
+        + ";"
+    )
+    with _within(_CLASSIFY_SECONDS):
+        assert data_losing_tables(sql) == []
+        assert data_losing_tables(sql, retention_floor=True) == []
