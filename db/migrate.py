@@ -42,12 +42,7 @@ def rebuildable_agg_tables() -> frozenset[str]:
     set and its agg_meta bookkeeping, plus agg_route_dow and agg_stop_seq,
     which analyze built until they were retired. Any other `agg_*` table, such
     as one analyze only upserts or one an ingest fills, holds rows no rebuild
-    restores.
-
-    A rebuild restores these in full only while no agency has a retention
-    floor (:func:`retention_floor_exists`): analyze never rebuilds a date
-    before one, so from the first drop on they lose data as any other table
-    does (:func:`data_losing_tables`).
+    restores. :func:`data_losing_tables` says when these lose data too.
 
     Imported lazily: the API's health poll imports this module, and must not
     pull in analyze with it.
@@ -152,21 +147,25 @@ def _top_level_statements(sql: str) -> list[str]:
 _NAME = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)'
 _TABLE = rf"{_NAME}(?:\s*\.\s*{_NAME})?"
 _TABLES = rf"{_TABLE}(?:\s*,\s*{_TABLE})*"
-# In ALTER TABLE, a DROP followed by none of these drops a column, with or
-# without the COLUMN keyword.
+# An ALTER TABLE subcommand: the first after the table name, or one after a
+# comma. A keyword inside a subcommand (ALTER COLUMN c DROP DEFAULT, ALTER
+# COLUMN c ADD GENERATED ...) starts none.
+_ALTER_SUBCOMMAND = rf"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s+(?:[^,]*,\s*)*?"
+# A DROP subcommand followed by none of these drops a column, with or without
+# the COLUMN keyword.
 _KEPT_ON_ALTER_DROP = r"(?:CONSTRAINT|DEFAULT|NOT|EXPRESSION|IDENTITY)\b"
 _DATA_LOSS = re.compile(
     rf"^\s*(?:DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<drop>{_TABLES})"
     rf"|DELETE\s+FROM\s+(?:ONLY\s+)?(?P<delete>{_TABLE})"
     rf"|TRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?(?P<truncate>{_TABLES})"
-    rf"|ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s.*?\bDROP\s+(?!{_KEPT_ON_ALTER_DROP}))",
-    re.IGNORECASE | re.DOTALL,
+    rf"|{_ALTER_SUBCOMMAND}DROP\b(?!\s*{_KEPT_ON_ALTER_DROP}))",
+    re.IGNORECASE,
 )
-# In ALTER TABLE, an ADD followed by none of these adds a column.
+# An ADD subcommand followed by none of these adds a column.
 _KEPT_ON_ALTER_ADD = r"(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE)\b"
-_ADDS_COLUMN = re.compile(
-    rf"^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s.*?\bADD\s+(?!{_KEPT_ON_ALTER_ADD})",
-    re.IGNORECASE | re.DOTALL,
+_ADDS_COLUMN = re.compile(rf"^\s*{_ALTER_SUBCOMMAND}ADD\b(?!\s*{_KEPT_ON_ALTER_ADD})", re.IGNORECASE)
+_CREATES_TABLE = re.compile(
+    rf"^\s*CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<create>{_TABLE})", re.IGNORECASE
 )
 
 
@@ -187,11 +186,12 @@ def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
 
     The rebuildable aggregates (`rebuildable_agg_tables`) are exempt while no
     agency has a retention floor, since an analyze rebuild then restores every
-    row of theirs. With *retention_floor* (`retention_floor_exists`), the rows
-    before the floor are restored by nothing, so they count like any other
-    table, and so does a column added to one: analyze fills it only from the
-    floor on. The down markers are judged without a floor, as a migration file
-    is written once for every database.
+    row of theirs. With *retention_floor* (`retention_floor_exists`), analyze
+    never rebuilds a date before the floor, so from the first `updates` drop
+    on their rows there are restored by nothing: they count like any other
+    table, and so does a column added to one, or one created anew, since
+    analyze fills it only from the floor on. The down markers are judged
+    without a floor, as a migration file is written once for every database.
 
     A plain analyze-all rebuilds an incremental aggregate only for the dates
     its ledger or its table fingerprint marks, so a migration that deletes
@@ -200,7 +200,8 @@ def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
 
     Scope: DROP TABLE, DELETE FROM, TRUNCATE, and ALTER TABLE ... DROP [COLUMN]
     statements, read past comments, string literals and dollar-quoted bodies,
-    and with a floor ALTER TABLE ... ADD [COLUMN] on a rebuildable aggregate.
+    and with a floor ALTER TABLE ... ADD [COLUMN] on, or CREATE TABLE of, a
+    rebuildable aggregate.
     An UPDATE is not counted: a backfill in a reviewed migration rewrites
     values on purpose. Not detected: statements inside a DO block or a function
     body, a data-modifying WITH ... DELETE, MERGE ... DELETE, a narrowing ALTER
@@ -215,8 +216,9 @@ def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
         if m := _DATA_LOSS.match(statement):
             group = m.group("drop") or m.group("delete") or m.group("truncate") or m.group("alter")
             tables.extend(name for name in _table_names(group) if retention_floor or name.lower() not in rebuildable)
-        elif retention_floor and (m := _ADDS_COLUMN.match(statement)):
-            tables.extend(name for name in _table_names(m.group("alter")) if name.lower() in rebuildable)
+        elif retention_floor and (m := _ADDS_COLUMN.match(statement) or _CREATES_TABLE.match(statement)):
+            group = m.groupdict().get("alter") or m.group("create")
+            tables.extend(name for name in _table_names(group) if name.lower() in rebuildable)
     return tables
 
 

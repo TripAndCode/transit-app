@@ -103,11 +103,20 @@ def test_classifier_counts_column_drops_but_not_other_alters_fk_actions_or_updat
         "DROP TABLE agg_route_daily;",
         "ALTER TABLE agg_route_daily ADD COLUMN early_samples INT NOT NULL DEFAULT 0;",
         "ALTER TABLE IF EXISTS ONLY public.agg_route_daily ADD early_samples INT;",
+        "ALTER TABLE agg_route_daily  DROP  late_samples;",
+        "ALTER TABLE agg_route_daily\n    DROP COLUMN late_samples;",
+        "ALTER TABLE agg_route_daily  ADD  early_samples INT;",
+        "ALTER TABLE agg_route_daily\n    ADD COLUMN early_samples INT;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples SET NOT NULL, ADD COLUMN early_samples INT;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples TYPE numeric(10, 2), DROP late_samples;",
+        "CREATE TABLE agg_route_daily (agency_id INT);",
+        "CREATE TABLE IF NOT EXISTS public.agg_route_daily (agency_id INT);",
     ],
 )
 def test_a_retention_floor_makes_a_rebuildable_aggregate_lose_data(sql):
     """Below the floor analyze rebuilds nothing, so a rebuildable aggregate's
-    rows there, or a column analyze would fill, are restored by nothing."""
+    rows there, or a column or a table analyze would fill, are restored by
+    nothing."""
     assert data_losing_tables(sql) == []
     assert data_losing_tables(sql, retention_floor=True) == ["agg_route_daily"]
 
@@ -123,9 +132,21 @@ def test_a_retention_floor_makes_a_rebuildable_aggregate_lose_data(sql):
         "CREATE INDEX idx_agg_route_daily_x ON agg_route_daily (date);",
         "ALTER TABLE users ADD COLUMN nickname TEXT;",
         "UPDATE agg_route_daily SET samples = 0 WHERE samples IS NULL;",
+        "ALTER TABLE agg_route_daily ADD  CONSTRAINT c CHECK (samples >= 0);",
+        "ALTER TABLE agg_route_daily ADD\n    CONSTRAINT c CHECK (samples >= 0);",
+        "ALTER TABLE agg_route_daily DROP  CONSTRAINT c;",
+        "ALTER TABLE agg_route_daily DROP\n    CONSTRAINT c;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples DROP DEFAULT;",
+        "ALTER TABLE users DROP  CONSTRAINT users_pkey;",
+        "ALTER TABLE users\n    DROP CONSTRAINT users_pkey;",
+        "ALTER TABLE users ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;",
+        "ALTER TABLE users ALTER COLUMN email DROP NOT NULL;",
+        "CREATE TABLE users_archive (user_id INT);",
     ],
 )
 def test_a_retention_floor_leaves_constraints_indexes_and_other_tables_columns_alone(sql):
+    assert data_losing_tables(sql) == []
     assert data_losing_tables(sql, retention_floor=True) == []
 
 
