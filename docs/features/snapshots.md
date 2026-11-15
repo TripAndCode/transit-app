@@ -50,6 +50,18 @@ One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
   - `routes`: the agency's route catalogue (`GET /api/{agency_id}/routes`), so
     the rows keep the labels they had.
   - `credit`: the open-data credit for the agency's feed, per language.
+  - A Routes table also stores the panels beside it, each asked what the live
+    screen asks (the scope and its on-time tolerance, never the table's own
+    options):
+    - `headway`: headway quality (`GET /api/{agency_id}/headway_quality`),
+      only when the table is sorted by on-time, which is the one sort the
+      screen shows it under. It is written in no language, so it is stored
+      once.
+    - `standards`: the agency's performance standards
+      (`GET /api/{agency_id}/performance_standards`), once per language,
+      since the targets' disclaimer is the server's prose. Everything but
+      that disclaimer must match between the languages, or the create answers
+      409.
   - A route's page stores, in place of `report`, the responses its panels
     read, each asked what the live page asks:
     - `route_lists`: the agency's route lists over the scope without its
@@ -74,7 +86,8 @@ One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
   `title` (up to 200 characters) and `note` (up to 2000).
 
 The server computes every payload itself, through the same function the
-screen's endpoint runs (`api.routers.reports.render_report`, and for a route's
+screen's endpoint runs (`api.routers.reports.render_report`, for a Routes table also
+`render_headway_quality` and `render_performance_standards`, and for a route's
 page also `render_performance_standards`, `api.routers.map.render_route_shape`
 and `api.routers.overview.render_overview_summary`); a create request names
 only the screen, the agency and the query, and any other field is refused. A
@@ -95,9 +108,16 @@ states its observation floor and the routes it left out, as disabled toggles.
 Route rows are not links, since a route's live page would show today's
 figures.
 
-Only the screen's own report is frozen. The panels the Routes screen shows
-beside its table (headway quality, the agency's performance standards) come
-from endpoints of their own and are not part of a snapshot.
+A Routes table's snapshot also freezes the two panels the screen draws
+beside its table, which come from endpoints of their own (see
+[What is stored](#what-is-stored)): headway quality, drawn under the on-time
+sort as the live screen does, and the agency's performance standards. They are
+drawn by the live panels' own views (`HeadwayQualityView`,
+`PerformanceStandardView`) from the stored responses, in the reader's language,
+and never ask a live endpoint. A snapshot taken before they were stored has
+neither; it draws the table and says in one line that those panels are not part
+of it, as a route's page says of its map. The council report has no such
+panels, and stores none.
 
 ### A route's page
 
@@ -222,6 +242,8 @@ figures, while a route's page is several responses, not all of them reports.
     share, each against its threshold). A note's values count only where
     the note is printed. The prose is written from those fields and is not
     compared.
+  - The Routes table's side panels (headway quality, performance standards)
+    are drawn as stored and never compared.
   - Equal figures show nothing extra; a figure missing on one side counts as
     moved.
 - **Both sides named.** Above the figures, each side's method version, build

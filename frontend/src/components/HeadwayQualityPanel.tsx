@@ -13,8 +13,9 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useHeadwayQuality } from "../api/hooks";
-import { useRouteNames } from "../api/useRouteNames";
-import { useCapabilityTier } from "../api/useCapabilityTier";
+import { useRouteNames, type RouteNames } from "../api/useRouteNames";
+import { useCapabilityTier, type TierState } from "../api/useCapabilityTier";
+import type { HeadwayQualityResponse } from "../api/types";
 import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
@@ -36,10 +37,33 @@ function fmtCov(v: number | null): string {
 }
 
 export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
-  const { t } = useTranslation();
   const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);
   const tier = useCapabilityTier(aid);
+  return (
+    <HeadwayQualityView data={data} isLoading={isLoading} error={error} onRetry={() => void refetch()} routeNames={routeNames} tier={tier} />
+  );
+}
+
+/** The panel from its response, fetched by the live screen or stored by a
+ *  snapshot, with the route labels and the agency's capability tier its
+ *  wording reads. */
+export function HeadwayQualityView({
+  data,
+  isLoading = false,
+  error = null,
+  onRetry,
+  routeNames,
+  tier,
+}: {
+  data: HeadwayQualityResponse | undefined;
+  isLoading?: boolean;
+  error?: Error | null;
+  onRetry?: () => void;
+  routeNames: RouteNames;
+  tier: TierState;
+}) {
+  const { t } = useTranslation();
   const notShown = data ? headwayNotShown(t, data, tier) : null;
 
   return (
@@ -47,7 +71,7 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
       <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>{t("reports.headway_quality.title")}</h3>
       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>{t("reports.headway_quality.subtitle")}</p>
       {isLoading && <Skeleton height={80} />}
-      {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
+      {error && <ErrorBanner error={error} onRetry={onRetry} />}
       {data && data.rows.length === 0 && (
         <p style={{ margin: 0, fontSize: 13, color: "var(--text-secondary)" }}>
           {notShown?.text ??

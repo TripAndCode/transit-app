@@ -622,6 +622,13 @@ async def get_headway_quality(
     server-side by classification, not by a ranking/threshold the caller
     chose) — a dedicated endpoint, like ``/forecast/overview`` below.
     """
+    return await render_headway_quality(agency_id, ctx, conn)
+
+
+async def render_headway_quality(agency_id: int, ctx: RangeCtx, conn: asyncpg.Connection) -> HeadwayQualityResponse:
+    """``GET /headway_quality``'s whole computation, for a caller that holds
+    the request's scope already: a Routes table snapshot stores exactly what
+    the panel beside the table was served."""
     report = await compute_headway_quality_report(agency_id, ctx, conn)
     return HeadwayQualityResponse(
         rows=[HeadwayQualityRow(**r) for r in report.rows],

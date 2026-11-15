@@ -1598,6 +1598,9 @@
     },
     "route_page": {
       "not_frozen": "Not part of this snapshot: the map, the day's trips and the comparison with the previous period. They read live data, so the snapshot leaves them out."
+    },
+    "route_table": {
+      "panels_not_frozen": "Not part of this snapshot: the panels the Routes screen shows beside its table (the agency's performance standards, and headway quality under the on-time sort). This snapshot was taken before they were stored."
     }
   },
   "insight_panel": {

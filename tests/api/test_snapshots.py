@@ -708,3 +708,110 @@ async def test_today_is_not_computed_for_a_route_page(route_page_client, aconn, 
     resp = await client.get(f"/api/snapshots/{created.json()['snapshot_id']}/today")
     assert resp.status_code == 200
     assert resp.json() == {"report": None, "unavailable": "not_computable"}
+
+
+_TABLE_OPTIONS = ("sort", "order", "include_sparse", "include_retired", "include_zero_delay", "limit", "preset")
+_PANEL_QUERIES = {
+    "default": {"from": DAY, "to": DAY, "sort": "on_time"},
+    "scoped": {"from": DAY, "to": DAY, "sort": "on_time", "dow": "weekday", "late": "120", "include_sparse": "1"},
+}
+
+
+async def _live_table_panels(client, agency_id, query, locale):
+    """What the Routes screen's two side panels fetch for ``query``: its scope,
+    never the table's own options."""
+    scope = urlencode({k: v for k, v in query.items() if k not in _TABLE_OPTIONS})
+    headers = {"Accept-Language": locale}
+    headway = await client.get(f"/api/{agency_id}/headway_quality?{scope}", headers=headers)
+    standards = await client.get(f"/api/{agency_id}/performance_standards?{scope}", headers=headers)
+    for resp in (headway, standards):
+        assert resp.status_code == 200, resp.text
+    return headway.json(), standards.json()
+
+
+@pytest.fixture
+async def with_standard(reports_client):  # noqa: F811
+    client, agency_id, pool = reports_client
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO route_performance_standards "
+            "(agency_id, route_code, metric_type, threshold_value, bonus_malus_rate) "
+            "VALUES ($1, 'A', 'on_time_pct', 80, 0.01)",
+            agency_id,
+        )
+    yield client, agency_id, pool
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE route_performance_standards CASCADE")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(_PANEL_QUERIES))
+async def test_a_route_table_snapshot_freezes_the_panels_beside_the_table(with_standard, aconn, case):
+    """The standards are stored per language and the headway panel once, each
+    the response the live panel's own request gets for the screen's scope, all
+    but the moment it was served. Once the agency's targets are removed the
+    live panel is empty, and the stored one is as it was."""
+    client, agency_id, pool = with_standard
+    query = _PANEL_QUERIES[case]
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    live = {locale: await _live_table_panels(client, agency_id, query, locale) for locale in ("ja", "en")}
+    assert live["ja"][1]["rows"]
+
+    created = await _create(client, sid, agency_id, "route_table", query=query)
+    assert created.status_code == 201, created.text
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM route_performance_standards WHERE agency_id = $1", agency_id)
+    assert (await _live_table_panels(client, agency_id, query, "ja"))[1]["rows"] == []
+
+    payloads = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]
+    assert payloads["headway"] == live["ja"][0] == live["en"][0]
+    assert set(payloads["standards"]) == {"ja", "en"}
+    for locale, (_, standards) in live.items():
+        assert payloads["standards"][locale] == standards
+    assert payloads["standards"]["ja"]["disclaimer"] != payloads["standards"]["en"]["disclaimer"]
+
+
+@pytest.mark.asyncio
+async def test_the_headway_panel_is_stored_only_where_the_screen_shows_it(with_standard, aconn):
+    """The live screen draws headway quality beside the on-time sort alone."""
+    client, agency_id, pool = with_standard
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    created = await _create(client, sid, agency_id, "route_table", query={"from": DAY, "to": DAY, "sort": "avg"})
+    assert created.status_code == 201, created.text
+    payloads = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]
+    assert "headway" not in payloads
+    assert set(payloads["standards"]) == {"ja", "en"}
+
+
+@pytest.mark.asyncio
+async def test_a_council_report_snapshot_stores_no_panels(reports_client, aconn):  # noqa: F811
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    created = await _create(client, sid, agency_id, "council_report")
+    payloads = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]
+    assert not {"headway", "standards"} & set(payloads)
+
+
+@pytest.mark.asyncio
+async def test_route_table_locales_that_disagree_on_a_target_store_nothing(with_standard, aconn, monkeypatch):
+    import api.routers.snapshots as snapshots
+
+    client, agency_id, pool = with_standard
+    await _seed(pool, agency_id, _BEFORE)
+    real = snapshots.render_performance_standards
+
+    async def moved_between_locales(*args, **kwargs):
+        rendered = await real(*args, **kwargs)
+        if kwargs["locale"] == "en":
+            row = rendered.rows[0].model_copy(update={"actual_value": 1.0})
+            return rendered.model_copy(update={"rows": [row]})
+        return rendered
+
+    monkeypatch.setattr(snapshots, "render_performance_standards", moved_between_locales)
+    sid = (await seed_session(aconn, role="admin")).sid
+    resp = await _create(client, sid, agency_id, "route_table", query={"from": DAY, "to": DAY})
+    assert resp.status_code == 409
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
