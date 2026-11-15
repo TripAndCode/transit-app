@@ -21,9 +21,9 @@ QUERY_LOG_RETENTION_DAYS = 90
 #: api/admin_runs.py); a run this far back has no viewer left to show it to.
 PIPELINE_RUNS_RETENTION_DAYS = 90
 
-#: Matches the deploy's own 400-day data-retention horizon (RETENTION_DAYS in
-#: docs/deploy-railway.md), so the audit trail never outlives the operational
-#: data it explains changes to.
+#: Production `updates`' target horizon in the retention table
+#: (docs/ops-monitoring-deploy.md), so the audit trail never outlives the
+#: operational data it explains changes to.
 ADMIN_AUDIT_RETENTION_DAYS = 400
 
 

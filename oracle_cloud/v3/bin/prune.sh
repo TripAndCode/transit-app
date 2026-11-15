@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Enforce the rolling retention window.
+# Enforce the rolling retention window on the collector's local spool. The
+# horizons are the retention table in docs/ops-monitoring-deploy.md.
 #   RT and VP tarballs: delete rt/ and vp/ *.tar.gz older than RETENTION_DAYS
 #                 (default 90).
 #   Static zips:  delete gtfs_static_*.zip older than STATIC_RETENTION_DAYS
