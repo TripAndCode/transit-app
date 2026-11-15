@@ -250,8 +250,8 @@ class OverviewSummary(BaseModel):
 
     ``movers`` is None, like the headline's baseline, when the window before
     the period could not be read: a time-band request whose ClickHouse grain
-    passed the client's row cap or its time budget
-    (``compute_overview_summary``).
+    passed the client's row cap or its time budget, or whose window before
+    reaches before the agency's retention floor (``compute_overview_summary``).
     """
 
     headline: Headline

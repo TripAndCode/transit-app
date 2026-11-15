@@ -22,6 +22,7 @@ where analyze stops rebuilding the aggregates of the days it dropped.
 
 import logging
 import re
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from datetime import date, datetime, timedelta, timezone
@@ -30,7 +31,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from pipeline import refiled
 from pipeline import runs as pipeline_runs
 from pipeline.agg_sql import EARLIEST_CAPTURE, LEDGER_COUNTS_CH_SQL
-from pipeline.clickhouse import UPDATES_TABLE
+from pipeline.clickhouse import LIVE_READ_MAX_EXECUTION_SECONDS, UPDATES_TABLE
 from pipeline.flags import get_flag_state
 from pipeline.locks import agency_ingest_lock
 from pipeline.service_day import filed_capture_span, filed_dates_reached, service_day_start_utc
@@ -180,18 +181,32 @@ def floor_after(dropped_before: datetime) -> date:
     return _month_start_on_or_after(filed_dates_reached(dropped_before, dropped_before)[1] + timedelta(days=1))
 
 
+# The newest floor recorded for each agency of a list, bound as {ids}.
+_FLOORS_SQL = (
+    f"SELECT agency_id, max(retention_floor) FROM {PRUNED_TABLE}, unnest(agency_ids) AS agency_id "
+    "WHERE agency_id = ANY({ids}) GROUP BY agency_id"
+)
+
+
 def retention_floors(conn, agency_ids: Iterable[int]) -> dict[int, date]:
     """retention_floor of each of *agency_ids* that has one."""
     ids = sorted(set(agency_ids))
     if not ids:
         return {}
     with conn.cursor() as cur:
-        cur.execute(
-            f"SELECT agency_id, max(retention_floor) FROM {PRUNED_TABLE}, unnest(agency_ids) AS agency_id "
-            "WHERE agency_id = ANY(%s) GROUP BY agency_id",
-            (ids,),
-        )
+        cur.execute(_FLOORS_SQL.format(ids="%s"), (ids,))
         return {agency_id: _month_start_on_or_after(floor) for agency_id, floor in cur.fetchall()}
+
+
+async def retention_floor_async(conn, agency_id: int) -> date | None:
+    """retention_floor on an asyncpg connection, read fresh on every call. A
+    database not yet migrated to record drops has had none, so it has no
+    floor; the table is looked up first, since a statement naming a missing
+    one fails before it runs, and inside a transaction would abort it."""
+    if not await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", PRUNED_TABLE):
+        return None
+    row = await conn.fetchrow(_FLOORS_SQL.format(ids="$1::int[]"), [agency_id])
+    return None if row is None else _month_start_on_or_after(row[1])
 
 
 def retention_floor(conn, agency_id: int) -> date | None:
@@ -530,6 +545,7 @@ def prune_updates(
     days: int = UPDATES_RETENTION_DAYS,
     dry_run: bool = False,
     now: datetime | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> PruneResult:
     """Drop the `updates` partitions plan_updates_prune clears, as one
     `retention` run in pipeline_runs.
@@ -542,7 +558,9 @@ def prune_updates(
     that lock, so it sees the floor before a drop with every row of it, or
     the floor after.
 
-    Every drop is recorded first (_record_drops), then each partition in turn
+    Every drop is recorded first (_record_drops), and the run then *sleep*s
+    for LIVE_READ_DRAIN_SECONDS, so no live read that checked the old floor is
+    still scanning; then each partition in turn
     has its refiled dates written off, goes, and is stamped dropped, so a
     failure part-way leaves the months it reached on record and their rows on
     the run.
@@ -563,10 +581,17 @@ def prune_updates(
         verdicts = _verdicts(conn, ch, candidates, cutoff, now)
         if dry_run:
             return PruneResult(enabled, verdicts, [])
-        return PruneResult(True, verdicts, _drop(conn, ch, [v for v in verdicts if v.held_by is None]))
+        return PruneResult(True, verdicts, _drop(conn, ch, [v for v in verdicts if v.held_by is None], sleep=sleep))
 
 
-def _drop(conn, ch, droppable: list[PartitionVerdict]) -> list[str]:
+#: How long a drop waits once its floors are committed. A live read checks the
+#: floor before it scans (pipeline.live_filing.require_retained), so one that
+#: passed just before the commit may still be scanning; any such read has
+#: finished, or run out its time budget, by then.
+LIVE_READ_DRAIN_SECONDS = LIVE_READ_MAX_EXECUTION_SECONDS + 5
+
+
+def _drop(conn, ch, droppable: list[PartitionVerdict], *, sleep: Callable[[float], None]) -> list[str]:
     dropped: list[str] = []
     with pipeline_runs.record_run(conn, "retention") as run:
         run.rows = 0
@@ -574,6 +599,7 @@ def _drop(conn, ch, droppable: list[PartitionVerdict]) -> list[str]:
             run.status = "unchanged"
             return dropped
         _record_drops(conn, run.run_id, droppable)
+        sleep(LIVE_READ_DRAIN_SECONDS)
         for verdict in droppable:
             partition = verdict.partition
             partition_span(partition.partition_id)  # the id is interpolated into DDL

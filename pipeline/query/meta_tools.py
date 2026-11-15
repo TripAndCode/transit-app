@@ -15,13 +15,14 @@ all DB queries are scoped to the request's ``agency_id``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from api.range import RangeCtx
 from api.sqlutil import escape_like
 from pipeline.query.results import ToolResult
 from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
+from pipeline.retention import retention_floor_async
 from pipeline.service_day import service_date_ch, service_date_of
 
 VALID_KINDS = (
@@ -60,6 +61,19 @@ def _name_contains(column: str, n: int) -> str:
 def _contains_pattern(substring: str) -> str:
     """``substring`` as a LIKE pattern that matches it literally anywhere."""
     return f"%{escape_like(substring)}%"
+
+
+async def _retained_span(conn, agency_id: int) -> tuple[date | None, date | None]:
+    """The agency's retention floor (pipeline.retention.retention_floor) and
+    the first date its aggregates hold, or (None, None) without a floor.
+    Below the floor `updates` no longer holds every row, so its earliest
+    reading is no longer where the data starts; the aggregates keep every
+    date."""
+    floor = await retention_floor_async(conn, agency_id)
+    if floor is None:
+        return None, None
+    first = await conn.fetchval("SELECT MIN(date) FROM agg_route_daily WHERE agency_id = $1", agency_id)
+    return floor, first
 
 
 async def describe_data(
@@ -310,19 +324,26 @@ async def describe_data(
             ("distinct_days", str(days)),
             ("total_rows", str(rows_n)),
         ]
-        return ToolResult(
-            kind="kv",
-            # Service days, as every date in this app is (pipeline.service_day):
-            # a 00:30 JST capture still belongs to the previous day, and a
-            # 06:00 JST capture is the previous UTC day.
-            summary=_summary(
-                "mt_date_range_summary",
+        # Service days, as every date in this app is (pipeline.service_day):
+        # a 00:30 JST capture still belongs to the previous day, and a
+        # 06:00 JST capture is the previous UTC day.
+        first_date = service_date_of(first_obs)
+        floor, first_aggregated = await _retained_span(conn, agency_id)
+        if floor is None:
+            summary = _summary(
+                "mt_date_range_summary", locale, first_date=first_date, last_date=service_date_of(last_obs)
+            )
+        else:
+            first_date = min(first_date, first_aggregated or first_date)
+            pairs += [("first_aggregated_date", first_date.isoformat()), ("raw_readings_kept_from", floor.isoformat())]
+            summary = _summary(
+                "mt_date_range_summary_floor",
                 locale,
-                first_date=service_date_of(first_obs),
+                first_date=first_date,
                 last_date=service_date_of(last_obs),
-            ),
-            pairs=pairs,
-        )
+                floor=floor,
+            )
+        return ToolResult(kind="kv", summary=summary, pairs=pairs)
 
     if kind == "agencies":
         # Tenant isolation: the caller only ever sees its own agency. The
@@ -477,6 +498,7 @@ async def describe_data(
         obs_last = last_result.result_rows[0][0] if last_result.result_rows else None
         obs_first = _as_utc(obs_first)
         obs_last = _as_utc(obs_last)
+        floor, first_aggregated = await _retained_span(conn, agency_id)
         pairs = [
             ("routes", str(route_count)),
             ("stops", str(stop_count)),
@@ -490,6 +512,9 @@ async def describe_data(
                 obs_last.isoformat() if obs_last else "—",
             ),
         ]
+        if floor is not None:
+            first_date = first_aggregated or floor
+            pairs += [("first_aggregated_date", first_date.isoformat()), ("raw_readings_kept_from", floor.isoformat())]
         return ToolResult(
             kind="kv",
             summary=_summary("mt_overview_summary", locale),

@@ -13,6 +13,7 @@ import clickhouse_connect
 
 from pipeline.cache import cache_briefly
 from pipeline.clickhouse import (
+    LIVE_READ_MAX_EXECUTION_SECONDS,
     LIVE_SOURCED,
     LIVE_TABLE,
     NEWEST_FILED_DATE_BEFORE_SQL,
@@ -55,7 +56,7 @@ async def get_ch_client():
     return await clickhouse_connect.get_async_client(
         **ch_conn_kwargs(),
         settings={
-            "max_execution_time": 30,
+            "max_execution_time": LIVE_READ_MAX_EXECUTION_SECONDS,
             "max_result_rows": 200_000,
             "result_overflow_mode": "throw",
             # The one join this client runs is a filed read's schedule archive

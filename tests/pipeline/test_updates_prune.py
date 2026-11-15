@@ -107,7 +107,7 @@ def _written_off(ch_client, agency_id) -> list[date]:
 
 
 def _prune(pg_conn, ch_client, **kwargs):
-    return prune_updates(pg_conn, ch_client, acquire=lambda: None, **kwargs)
+    return prune_updates(pg_conn, ch_client, acquire=lambda: None, sleep=lambda seconds: None, **kwargs)
 
 
 def test_a_month_past_the_horizon_whose_dates_are_aggregated_is_dropped(pg_conn, ch_client, seeded, monkeypatch):

@@ -39,8 +39,8 @@ import asyncpg
 import clickhouse_connect
 
 from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
-from api.retention_guard import RangeNotRetained
 from pipeline import perf
+from pipeline.live_filing import RangeNotRetained
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
@@ -231,12 +231,12 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("query_timeout", "en"): "This took too long to count. Try a shorter period or fewer routes.",
     ("range_not_retained", "ja"): (
-        "{floor} より前の生の観測データは保存期間を過ぎたため、この条件では集計できません。"
-        "{floor} 以降の期間を選んでください。それより前の期間は集計済みのレポートで確認できます。"
+        "{floor} より前の詳細な観測データは保存期間を過ぎているため、この表示では扱えません。"
+        "{floor} 以降の期間を選んでください。それより前の期間は日ごとの集計によるレポートで確認できます。"
     ),
     ("range_not_retained", "en"): (
-        "Raw readings before {floor} are no longer retained, so this view can't cover that period. "
-        "Choose a period from {floor} on; the aggregated reports still cover the earlier dates."
+        "Detailed readings before {floor} are no longer kept, so this view can't cover that period. "
+        "Choose a period from {floor} on; the reports built from daily totals still cover the earlier dates."
     ),
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
@@ -295,6 +295,13 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("mt_no_observations", "en"): "no observations.",
     ("mt_date_range_summary", "ja"): "観測期間: {first_date} 〜 {last_date}",
     ("mt_date_range_summary", "en"): "observation window: {first_date} – {last_date}",
+    (
+        "mt_date_range_summary_floor",
+        "ja",
+    ): "観測期間: {first_date} 〜 {last_date}（詳細な観測データは {floor} 以降を保存）",
+    ("mt_date_range_summary_floor", "en"): (
+        "observation window: {first_date} – {last_date} (detailed readings kept from {floor})"
+    ),
     ("mt_agencies_summary", "ja"): "登録されているエージェンシー: {n} 社",
     ("mt_agencies_summary", "en"): "registered agencies: {n}",
     ("mt_sample_counts_no_data", "ja"): "選択期間 ({from_date}〜{to_date}) にサンプルデータがありません。",

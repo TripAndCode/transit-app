@@ -98,8 +98,12 @@ def _changed(before: dict, after: dict) -> list[str]:
     return [table for table in before if before[table] != after[table]]
 
 
+def _no_wait(seconds: float) -> None:
+    pass
+
+
 def _prune(pg_conn, ch_client) -> list[str]:
-    return prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW).dropped
+    return prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW, sleep=_no_wait).dropped
 
 
 def test_the_prune_sets_the_floor_past_the_month_it_drops(pg_conn, ch_client, agency_id, pruned):
@@ -226,7 +230,7 @@ def test_a_store_disagreement_from_the_floor_on_is_repaired(pg_conn, ch_client, 
 
 def test_the_prune_holds_an_agency_whose_stores_disagree(pg_conn, ch_client, agency_id, pruned):
     _delete_route_daily_row(pg_conn, agency_id, below_floor=True)
-    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW, sleep=_no_wait)
     assert result.dropped == []
     assert "agg_route_daily" in result.verdicts[0].held_by
     assert retention_floor(pg_conn, agency_id) is None
@@ -236,7 +240,7 @@ def test_the_prune_holds_a_stale_date_the_new_floor_freezes(pg_conn, ch_client, 
     """The floor lands on 2025-03-01, so a February date analyze has not
     caught up with holds the drop, although `updates` keeps its rows."""
     insert_updates(ch_client, agency_id, [update_row(datetime(2025, 2, 20, 8, 0), "d", 30)])
-    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW, sleep=_no_wait)
     assert result.dropped == []
     assert "2025-02-20" in result.verdicts[0].held_by
 
@@ -328,7 +332,7 @@ def test_the_prune_holds_an_agency_with_a_table_awaiting_a_new_fingerprint(pg_co
             (agency_id,),
         )
     pg_conn.commit()
-    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW, sleep=_no_wait)
     assert result.dropped == []
     assert "agg_stop_daily" in result.verdicts[0].held_by
 
@@ -387,6 +391,6 @@ def test_the_prune_holds_a_reading_on_the_new_floor_date_analyze_has_not_seen(pg
         agency_id,
         [update_row(captured, "c", 40, scheduled_time="03:50:00", scheduled_sec=scheduled_sec)],
     )
-    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW, sleep=_no_wait)
     assert result.dropped == []
     assert "2025-03-01" in result.verdicts[0].held_by

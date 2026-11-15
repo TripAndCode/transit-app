@@ -38,7 +38,7 @@ export function isQueryTooSlow(err: unknown): boolean {
 
 /** Machine `code` on the 422 the API answers when a view that scans raw readings
  * is asked for a period starting before the agency's retention floor, which it
- * names in `floor`. Mirrors api/retention_guard.py::RANGE_NOT_RETAINED_CODE. */
+ * names in `floor`. Mirrors pipeline/live_filing.py::RANGE_NOT_RETAINED_CODE. */
 const RANGE_NOT_RETAINED_CODE = "range_not_retained";
 
 /** The retention floor (YYYY-MM-DD) a request was refused for starting before,

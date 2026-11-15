@@ -38,7 +38,7 @@ from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.query_timeout import clickhouse_error_handler
-from api.retention_guard import RangeNotRetained, range_not_retained_handler
+from api.range_not_retained import range_not_retained_handler
 from api.routers.admin import router as admin_router
 from api.routers.admin_agencies import router as admin_agencies_router
 from api.routers.admin_ask import router as admin_ask_router
@@ -67,6 +67,7 @@ from api.sso import SSO_ENV as _AUTH_ENV
 from api.sso import sso_status as auth_status
 from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.flags import aflag, flag
+from pipeline.live_filing import RangeNotRetained
 from pipeline.query.llm_client import llm_available
 from pipeline.runs import reap_abandoned_runs_best_effort
 
