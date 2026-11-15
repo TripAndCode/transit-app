@@ -101,8 +101,11 @@ def test_cancellation_reaches_descendants_and_is_not_a_pass(tmp_path: Path):
     child_code = (
         "import signal, subprocess, sys; "
         f"child = subprocess.Popen([sys.executable, '-c', {grandchild_code!r}]); "
-        "signal.signal(signal.SIGTERM, lambda *_: (child.wait(timeout=5), sys.exit(0))); "
-        "child.wait()"
+        # The handler only absorbs the signal: the descendant gets it from the
+        # process group too, and waiting on it again from inside a handler
+        # while the main thread is in child.wait() never returns on 3.15.
+        "signal.signal(signal.SIGTERM, lambda *_: None); "
+        "sys.exit(child.wait())"
     )
     with subprocess.Popen(
         [sys.executable, str(SCRIPT), "--cwd", str(tmp_path), "--", sys.executable, "-c", child_code],
