@@ -251,7 +251,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make ask-eval` | Check the Ask gold set's stored signatures still match canonicalization (no database; pytest runs it too) |
 | `make prune-query-log` | Delete `ask_query_log` rows older than 90 days (the API also runs this daily) |
 | `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
-| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon; the API also runs this daily) |
+| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (production `updates`' target horizon, once analyze honours a retention floor; the API also runs this daily) |
 | `make prune-personal-data` | Delete usage counts and login history older than 25 months, and expired sessions (the API also runs this daily) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
@@ -382,7 +382,7 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   reads, when it differs from its built-in default path. Unset
   on a host where that path doesn't exist and the board's `github` tile
   reads `unknown` rather than a real status.
-- `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
+- `OBJECT_STORE_*`, `AGENCY_IDS`: scheduled archive ingest.
 
 ### Feature kill switches
 
