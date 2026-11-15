@@ -12,7 +12,7 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.15"
+python = ">=3.11,<3.16"
 psycopg2-binary = ">=2.9"
 openai = ">=1.50"
 slowapi = ">=0.1"

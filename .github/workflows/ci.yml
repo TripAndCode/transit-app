@@ -183,7 +183,7 @@ jobs:
 
       - uses: ./.github/actions/setup-backend
         with:
-          python-version: "3.14"
+          python-version: "3.15"
 
       - name: Lint and format check
         run: |
@@ -229,7 +229,7 @@ jobs:
 
       - uses: ./.github/actions/setup-backend
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           groups: ml
 
       - name: Start Postgres from db/Dockerfile
@@ -354,7 +354,7 @@ jobs:
 
       - uses: ./.github/actions/setup-backend
         with:
-          python-version: "3.14"
+          python-version: "3.15"
 
       - uses: actions/download-artifact@v8
         with:

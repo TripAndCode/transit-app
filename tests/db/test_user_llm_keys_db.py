@@ -1,3 +1,4 @@
+import base64
 import os
 
 os.environ.setdefault("LLM_KEY_ENCRYPTION_KEY", "zJj1v3nq7v3rj0aWq2p8m9s4b6d5f7h9k1n3q5s7u9w=")
@@ -55,8 +56,11 @@ async def test_get_degrades_gracefully_on_undecryptable_key(aconn, user_id):
     # key, and confirm the caller sees "no key configured" rather than a
     # crash.
     fernet = Fernet(os.environ["LLM_KEY_ENCRYPTION_KEY"].encode())
-    bogus = bytearray(fernet.encrypt(b"unrelated-payload"))
-    bogus[-1] ^= 0xFF
+    # Flip a byte of the decoded token, inside its HMAC. Flipping a byte of the
+    # base64 text can hit the padding, which a lenient decoder simply drops.
+    raw = bytearray(base64.urlsafe_b64decode(fernet.encrypt(b"unrelated-payload")))
+    raw[-1] ^= 0xFF
+    bogus = bytearray(base64.urlsafe_b64encode(bytes(raw)))
     await aconn.execute(
         "UPDATE user_llm_keys SET encrypted_key = $1 WHERE user_id = $2",
         bytes(bogus),
