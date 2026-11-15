@@ -534,7 +534,7 @@
       "fact_late_routes_period": "Observed {{min}}+ times, {{range}}",
       "sparkline_baseline": "{{range}} average {{value}} min",
       "feed_status_live": "Reporting live",
-      "feed_status_quiet": "Feed quiet for {{duration}}",
+      "feed_status_quiet": "No reports for {{duration}}",
       "feed_status_none": "No reports yet",
       "feed_status_last": "Last report {{time}}",
       "on_time_pointer": "On-time % is on <routes>Routes</routes> and on each route's page."
@@ -893,7 +893,7 @@
   "operations": {
     "all_routes": "All routes",
     "last_updated": "Last updated {{when}}",
-    "feed_quiet": "Feed quiet for {{duration}} · last report {{time}}",
+    "feed_quiet": "No reports for {{duration}} · last report {{time}}",
     "quiet_for": {
       "minutes": "{{n}} min",
       "hours": "{{n}} h",
@@ -970,7 +970,7 @@
       "before_first_title": "The first trip leaves at {{time}}",
       "before_first_hint": "The timetable has no trips before the first departure.",
       "stale_title": "No new reports since {{time}} ({{duration}})",
-      "stale_hint": "The operator's feed may have stopped.",
+      "stale_hint": "Either the operator's feed has stopped or our collection is behind.",
       "none_title": "No live reports received yet",
       "none_hint": "Vehicles appear here once the operator's feed starts reporting.",
       "show_last_reported": "Show last reported positions"
@@ -995,7 +995,8 @@
       "error": "Couldn't load this day's observations",
       "toggle_on": "Play the day",
       "toggle_off": "Back to current observations"
-    }
+    },
+    "refresh_busy": "Another data update is running; try again once it finishes"
   },
   "map": {
     "style": {

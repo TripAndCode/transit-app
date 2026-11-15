@@ -13,22 +13,16 @@ import asyncpg
 
 from pipeline.query.intent import IntentSignature
 
-_ALLOWED_ACTIONS = frozenset({"confirmed", "edited"})
-
 # Mirror the cap in ``query_log.py`` so a 3000-char adversarial question can't
 # pollute the autocomplete chip surface.
 _MAX_QUESTION_CHARS = 1000
 
 
-async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) -> dict[str, Any] | None:
-    """Return the cache row (as a dict) or None when the hash isn't cached."""
-    row = await conn.fetchrow(
-        "SELECT signature_hash, tool, args, confidence, hit_count, last_question, "
-        "last_user_action, promoted_at, agency_id, created_at, last_used_at "
-        "FROM ask_intent_cache WHERE signature_hash = $1 AND agency_id = $2",
-        signature_hash,
-        agency_id,
-    )
+_COLUMNS = "signature_hash, tool, args, confidence, hit_count, last_question, agency_id, created_at, last_used_at"
+
+
+async def _fetch(conn: asyncpg.Connection, where: str, *params: Any) -> dict[str, Any] | None:
+    row = await conn.fetchrow(f"SELECT {_COLUMNS} FROM ask_intent_cache WHERE {where}", *params)
     if row is None:
         return None
     out = dict(row)
@@ -36,6 +30,11 @@ async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) 
     if isinstance(out.get("args"), str):
         out["args"] = json.loads(out["args"])
     return out
+
+
+async def lookup(conn: asyncpg.Connection, signature_hash: str, agency_id: int) -> dict[str, Any] | None:
+    """Return the cache row (as a dict) or None when the hash isn't cached."""
+    return await _fetch(conn, "signature_hash = $1 AND agency_id = $2", signature_hash, agency_id)
 
 
 async def lookup_by_question(conn: asyncpg.Connection, question: str, agency_id: int) -> dict[str, Any] | None:
@@ -46,20 +45,9 @@ async def lookup_by_question(conn: asyncpg.Connection, question: str, agency_id:
     Paraphrase matching (different text, same canonical intent) is handled by
     the downstream sig-hash lookup after an LLM call.
     """
-    row = await conn.fetchrow(
-        "SELECT signature_hash, tool, args, confidence, hit_count, last_question, "
-        "last_user_action, promoted_at, agency_id, created_at, last_used_at "
-        "FROM ask_intent_cache WHERE last_question = $1 AND agency_id = $2 "
-        "ORDER BY last_used_at DESC LIMIT 1",
-        question,
-        agency_id,
+    return await _fetch(
+        conn, "last_question = $1 AND agency_id = $2 ORDER BY last_used_at DESC LIMIT 1", question, agency_id
     )
-    if row is None:
-        return None
-    out = dict(row)
-    if isinstance(out.get("args"), str):
-        out["args"] = json.loads(out["args"])
-    return out
 
 
 async def upsert(
@@ -89,21 +77,4 @@ async def upsert(
         float(signature.confidence),
         question[:_MAX_QUESTION_CHARS],
         agency_id,
-    )
-
-
-async def update_user_action(
-    conn: asyncpg.Connection,
-    signature_hash: str,
-    agency_id: int,
-    action: str,
-) -> None:
-    """Record the user's verdict on a previously-cached interpretation."""
-    if action not in _ALLOWED_ACTIONS:
-        raise ValueError(f"action must be one of {sorted(_ALLOWED_ACTIONS)}; got {action!r}")
-    await conn.execute(
-        "UPDATE ask_intent_cache SET last_user_action = $3 WHERE signature_hash = $1 AND agency_id = $2",
-        signature_hash,
-        agency_id,
-        action,
     )

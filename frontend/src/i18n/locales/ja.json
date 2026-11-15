@@ -534,7 +534,7 @@
       "fact_late_routes_period": "{{range}}に{{min}}回以上観測",
       "sparkline_baseline": "{{range}}の平均 {{value}}分",
       "feed_status_live": "受信中",
-      "feed_status_quiet": "フィード停止 {{duration}}",
+      "feed_status_quiet": "受信なし {{duration}}",
       "feed_status_none": "まだ受信していません",
       "feed_status_last": "最終報告 {{time}}",
       "on_time_pointer": "定時率は「<routes>路線</routes>」タブと各路線のページで確認できます。"
@@ -893,7 +893,7 @@
   "operations": {
     "all_routes": "すべての路線",
     "last_updated": "最終更新 {{when}}",
-    "feed_quiet": "フィード停止 {{duration}} · 最終報告 {{time}}",
+    "feed_quiet": "受信なし {{duration}} · 最終報告 {{time}}",
     "quiet_for": {
       "minutes": "{{n}}分",
       "hours": "{{n}}時間",
@@ -970,7 +970,7 @@
       "before_first_title": "始発は {{time}} です",
       "before_first_hint": "時刻表では、始発まで走る便はありません。",
       "stale_title": "{{time}}から新しい運行情報が届いていません（{{duration}}）",
-      "stale_hint": "事業者の配信が止まっている可能性があります。",
+      "stale_hint": "事業者の配信が止まったか、こちらの収集が遅れている可能性があります。",
       "none_title": "まだ運行情報を受信していません",
       "none_hint": "事業者の配信から報告が届くと、ここに車両が表示されます。",
       "show_last_reported": "最終報告時点の位置を表示"
@@ -995,7 +995,8 @@
       "error": "この日の観測データを読み込めませんでした",
       "toggle_on": "1日の動きを再生",
       "toggle_off": "現在の運行に戻る"
-    }
+    },
+    "refresh_busy": "別のデータ更新が実行中です。終わってからもう一度お試しください"
   },
   "map": {
     "style": {

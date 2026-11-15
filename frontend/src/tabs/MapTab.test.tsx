@@ -363,7 +363,7 @@ describe("MapTab when no trip is reporting", () => {
     const time = formatDateTime(LAST_REPORT, { timeStyle: "short", timeZone: "Asia/Tokyo" });
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent(`No new reports since ${time} JST (11 min)`);
-    expect(empty).toHaveTextContent("The operator's feed may have stopped.");
+    expect(empty).toHaveTextContent("Either the operator's feed has stopped or our collection is behind.");
     expect(empty).not.toHaveTextContent("late at night");
     expect(empty).not.toHaveTextContent("No vehicles are reporting right now");
   });
@@ -387,7 +387,7 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent("No vehicles are reporting right now");
     expect(empty).toHaveTextContent("late at night");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(tileValue("Observed")).toBe("0");
   });
 
@@ -400,7 +400,7 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent("No vehicles are reporting right now");
     expect(empty).not.toHaveTextContent("late at night");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(tileValue("Observed")).toBe("0");
   });
 
@@ -429,7 +429,7 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent(`Today's service has ended (last trip arrived ${jstTime(HOURS_25.hours!.last_arrival_at)})`);
     expect(empty).toHaveTextContent("The timetable has no trips until the next first departure.");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(within(empty).queryByRole("button", { name: "Show last reported positions" })).toBeNull();
     expect(tileValue("Observed")).toBe("0");
   });
@@ -443,17 +443,17 @@ describe("MapTab when no trip is reporting", () => {
     const empty = emptyOverlay()!;
     expect(empty).toHaveTextContent(`The first trip leaves at ${jstTime(HOURS_25.hours!.first_departure_at)}`);
     expect(empty).toHaveTextContent("The timetable has no trips before the first departure.");
-    expect(empty).not.toHaveTextContent("may have stopped");
+    expect(empty).not.toHaveTextContent("our collection is behind");
     expect(tileValue("Observed")).toBe("0");
   });
 
-  it("still says the feed may have stopped when it goes quiet during service hours", () => {
+  it("still says there is no recent report when it goes quiet during service hours", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(DAYTIME));
     mockLive(LAST_REPORT);
     mockHours(HOURS_25);
     renderMap();
-    expect(emptyOverlay()).toHaveTextContent("The operator's feed may have stopped.");
+    expect(emptyOverlay()).toHaveTextContent("Either the operator's feed has stopped or our collection is behind.");
     expect(tileValue("Observed")).toBe("—");
   });
 
@@ -518,7 +518,7 @@ describe("MapTab when no trip is reporting", () => {
     mockSummary("2026-10-22T12:59:00Z");
     renderMap();
     const time = formatReportTime("2026-10-22T12:59:00Z");
-    expect(screen.getByText(`Feed quiet for 2 days · last report ${time}`)).toBeInTheDocument();
+    expect(screen.getByText(`No reports for 2 days · last report ${time}`)).toBeInTheDocument();
     expect(emptyOverlay()).toHaveTextContent(`No new reports since ${time} (2 days)`);
     expect(tileValue("Observed")).toBe("—");
   });
@@ -570,7 +570,7 @@ describe("MapTab when no trip is reporting", () => {
     mockLive("2026-10-03T12:41:00Z");
     renderMap();
     const time = formatDateTime("2026-10-03T12:41:00Z", { timeStyle: "short", timeZone: "Asia/Tokyo" });
-    const status = screen.getByText(`Feed quiet for 43 min · last report ${time} JST`);
+    const status = screen.getByText(`No reports for 43 min · last report ${time} JST`);
     expect(status.closest(".ops-freshness")).toHaveClass("ops-freshness--stale");
   });
 
@@ -596,7 +596,7 @@ describe("MapTab when no trip is reporting", () => {
     vi.setSystemTime(new Date("2026-10-03T13:24:00Z"));
     mockLive("2026-09-29T00:59:00Z");
     renderMap();
-    expect(screen.getByText(`Feed quiet for 4 days · last report ${formatDateTime("2026-09-29T00:59:00Z", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tokyo" })} JST`)).toBeInTheDocument();
+    expect(screen.getByText(`No reports for 4 days · last report ${formatDateTime("2026-09-29T00:59:00Z", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Tokyo" })} JST`)).toBeInTheDocument();
   });
 
   it("marks a quiet feed in amber, not alarm red", () => {
@@ -810,6 +810,22 @@ describe("MapTab delayed-trips cap", () => {
     renderMap();
     await userEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
     expect(await screen.findByText(message)).toBeInTheDocument();
+  });
+
+  it("tells a busy refresh to retry once the other update finishes", async () => {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    vi.spyOn(client, "apiPost").mockRejectedValue(new client.ApiError(409, ""));
+    renderMap();
+    await userEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
+    expect(await screen.findByText("Another data update is running; try again once it finishes")).toBeInTheDocument();
   });
 });
 
