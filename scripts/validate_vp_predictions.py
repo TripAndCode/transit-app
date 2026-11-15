@@ -15,10 +15,11 @@ VehiclePositions for.
 ``vp/<id>/<YYYYMMDD>.tar.gz`` (``YYYYMMDD/VehiclePosition_HHMMSS.pb``), each
 the polls of one UTC day named in UTC, and
 ``static/<id>/gtfs_static_<YYYYMMDD>.zip``. Every capture filed under service
-date D is in the archives of the UTC days D-1 and D. Each TripUpdates archive
-is read once; each poll is joined to the newest timetable dated on or before
-its capture's service day, as ingest joins it to the one loaded then, and the
-stops of D are placed with the timetable for D. ``--fetch`` first downloads
+date D is in the TripUpdates archives of the UTC days D-1 to D+1 and the
+VehiclePositions archives of D-1 and D (``_archive_days``). Each TripUpdates
+archive is read once; each poll is joined to the newest timetable dated on
+or before its capture's service day, as ingest joins it to the one loaded
+then, and the stops of D are placed with the timetable for D. ``--fetch`` first downloads
 whichever of those R2 holds and the mirror lacks.
 
 **The kept reading** of a stop event, keyed by trip, filed service date and
@@ -37,27 +38,31 @@ live pushes instead, its capture instants are the collector's fetch times,
 and which days those are is not in the archives.
 
 **The observed passage** comes from the trip's vehicle track: its positions
-for that trip and service date, resent fixes and GPS jumps dropped. The
-stops are matched in stop_sequence order, each searched for only after the
-previous stop's passage and inside a window around its schedule shifted by
-the delay last observed on the trip, so a later lap or a stop beside the
-road out are not taken for it. Until the trip's first passage the window
-closes where the track first passes a later stop that lies clear of this
-one, so a track that starts after the bus left its first stop does not take
-a loop's return to that place for it. A stop's visit is the first run of
-track segments within PASSAGE_RADIUS_M of it; of the segments nearest the
-stop (DWELL_TOLERANCE_M), the last gives the departure and, at the trip's
-final stop, the first gives the arrival, so a bus idling at its first stop
-departs when it pulls out and one laying over at its last arrives when it
-gets there. The instant is interpolated on that segment, linearly along it,
-except where a fix shows the bus standing at the stop: then the bus is taken
-to cover the stretch from the stop to its next fix at the speed it is next
-seen moving (to its arrival, from its previous fix at the speed it was last
-seen moving), which places a departure from a dwell between two polls rather
-than at the last fix at the stop. No segment spanning more than
-MAX_BRACKET_GAP_SEC is interpolated. A bus last seen standing at a stop has
-no departure from it, and a track that ends still short of the final stop,
-by more than DWELL_TOLERANCE_M, has no arrival.
+for that trip and service date, resent fixes and GPS jumps dropped. Each
+visit to a stop, a run of track segments within PASSAGE_RADIUS_M of it, is a
+candidate passage. Of the segments nearest the stop (DWELL_TOLERANCE_M), the
+last gives the departure and, at the trip's final stop, the first gives the
+arrival, so a bus idling at its first stop departs when it pulls out and one
+laying over at its last arrives when it gets there. The instant is
+interpolated on that segment, linearly along it, except where a fix shows
+the bus standing at the stop: then the bus is taken to cover the stretch
+from the stop to its next fix at the speed it is next seen moving (to its
+arrival, from its previous fix at the speed it was last seen moving), which
+places a departure from a dwell between two polls rather than at the last
+fix at the stop. No segment spanning more than MAX_BRACKET_GAP_SEC is
+interpolated. A visit whose bus is last seen standing at the stop gives no
+departure, one that ends still short of the final stop gives no arrival,
+and a candidate more than MAX_PLAUSIBLE_DELAY_SEC off schedule is dropped.
+The stops are then aligned with the track as a whole (``passages_explained``):
+at most one candidate per stop, instants increasing along stop_sequence,
+the delay moving by at most MAX_DELAY_CHANGE_SEC, plus DELAY_DRIFT_SHARE of
+the scheduled time, between matched stops, as
+many stops as possible, ties broken towards the steadiest delay. A loop's
+return to its first stop, a deadhead past the stops, or the road out past a
+stop served on the way back each lose, since taking them forfeits the stops
+between. A stop with no passage is counted by why: no visit, no visit
+showing the bus leave (arrive), only implausible ones, or none the
+alignment could take.
 
 **The comparison** per stop event with both: error = kept delay - observed
 delay, positive when the feed reported the bus later than it left; lead =
@@ -67,7 +72,7 @@ bias and the 90th percentile of the absolute error overall, by lead
 (LEAD_WIDTH_SEC groups, open beyond ±LEAD_CAP_SEC), by service-day hour of
 the scheduled departure and by timepoint ("unknown" where stop_times.txt has
 no timepoint column), plus coverage: how many kept stop events had a
-passage, and why the rest did not.
+passage, and why the rest did not (``no_passage_*``).
 
 Output: ``<out>/<id>/<FROM>_<TO>.json`` and a Markdown table beside it as
 ``.md``. The run exits 1 when no stop event could be compared.
@@ -120,7 +125,7 @@ from pipeline.service_day import (  # noqa: E402
     service_day_moment_utc,
     service_day_offset,
 )
-from pipeline.strategies._pb import _dec, _fields, archive_captured_at, decode_feed_timestamp  # noqa: E402
+from pipeline.strategies._pb import _dec, _fields, _uint16, archive_captured_at, decode_feed_timestamp  # noqa: E402
 from pipeline.strategies._time import parse_departure_time  # noqa: E402
 from pipeline.strategies.static_join import (  # noqa: E402
     cancellation_withdrawals,
@@ -148,13 +153,20 @@ DWELL_TOLERANCE_M = 15.0
 # longer one a bus can dwell, queue or detour between the two, so a straight
 # line between them no longer times when it passed.
 MAX_BRACKET_GAP_SEC = 90
-# How far from its schedule, shifted by the delay observed at the trip's
-# previous passage, a stop's visit may start. A delay rarely moves by
-# minutes between adjacent stops, while a figure-eight or a later lap comes
-# back past the same place much later. Before the trip's first passage the
-# window runs from this much early to MAX_PLAUSIBLE_DELAY_SEC late, the
-# app's own clamp.
-TRACK_WINDOW_SEC = 900
+# How far the observed delay may move from one matched stop to the next:
+# MAX_DELAY_CHANGE_SEC, plus DELAY_DRIFT_SHARE of the scheduled time between
+# them. A delay rarely moves by many minutes between neighbouring stops, but
+# over a long stretch, such as the next lap of a circulator, a bus can fall
+# behind by a share of the time it was scheduled to take; a figure-eight or a
+# later lap past the same place is further off still. A passage itself must
+# lie within MAX_PLAUSIBLE_DELAY_SEC of its schedule, the app's own clamp.
+MAX_DELAY_CHANGE_SEC = 900
+DELAY_DRIFT_SHARE = 0.5
+# The grid that finds the segments near a stop: any cell larger than the
+# radius works; the slack covers a flat map drawn from the track's first fix
+# rather than centred on each stop.
+_GRID_CELL_M = 250.0
+_GRID_SLACK_M = 20.0
 # Faster than any bus: a fix implying more is a GPS jump and is dropped.
 MAX_SPEED_MPS = 40.0
 # Below this a segment is a bus creeping or standing, too slow to time the
@@ -305,45 +317,46 @@ def _approach(track: Sequence[Fix], j: int, stop: StopPoint, min_fraction: float
     return _Approach(j, fraction, math.hypot(ax + fraction * dx, ay + fraction * dy))
 
 
-def _visit(
-    track: Sequence[Fix], stop: StopPoint, cursor: int, floor: float, lo: datetime, hi: datetime
-) -> list[_Approach]:
-    """The first run of consecutive usable segments within PASSAGE_RADIUS_M of
-    *stop*, from segment *cursor* (past fraction *floor* of it) on, its first
-    segment overlapping [*lo*, *hi*]. A dwell may run on past *hi*."""
-    run: list[_Approach] = []
-    for j in range(cursor, len(track) - 1):
-        usable = _usable(track, j)
-        if run:
-            approach = _approach(track, j, stop, 0.0) if usable else None
-            if approach is None or approach.distance > PASSAGE_RADIUS_M:
-                break
-            run.append(approach)
-            continue
-        if track[j].at > hi:
-            break
-        if not usable or track[j + 1].at < lo:
-            continue
-        approach = _approach(track, j, stop, floor if j == cursor else 0.0)
-        if approach.distance <= PASSAGE_RADIUS_M:
-            run.append(approach)
-    return run
-
-
-def _first_pass_of_later_stop(
-    track: Sequence[Fix], stop: StopPoint, later: Sequence[StopPoint], until: datetime
-) -> datetime | None:
-    """When the track first comes within PASSAGE_RADIUS_M of one of *later*
-    lying clear of *stop* (more than twice the radius from it), by *until*.
-    A later stop at the same place, a loop's terminus or the next bay, says
-    nothing about whether the bus has left this one."""
-    clear = [s for s in later if _distance(s, stop) > 2 * PASSAGE_RADIUS_M]
+def _segments_near(track: Sequence[Fix], stops: Sequence[StopPoint]) -> list[list[int]]:
+    """For each stop, the usable segments that could come within
+    PASSAGE_RADIUS_M of it, in track order: those whose bounding box, widened
+    by the radius, covers the stop's grid cell. A coarse grid keeps the search
+    linear in the track and the stops rather than their product."""
+    origin = track[0]
+    points = [_xy(f.lat, f.lon, origin.lat, origin.lon) for f in track]
+    pad = PASSAGE_RADIUS_M + _GRID_SLACK_M
+    grid: dict[tuple[int, int], list[int]] = defaultdict(list)
     for j in range(len(track) - 1):
-        if track[j].at > until:
-            return None
-        if _usable(track, j) and any(_approach(track, j, s, 0.0).distance <= PASSAGE_RADIUS_M for s in clear):
-            return track[j].at
-    return None
+        if not _usable(track, j):
+            continue
+        (ax, ay), (bx, by) = points[j], points[j + 1]
+        for cx in range(
+            math.floor((min(ax, bx) - pad) / _GRID_CELL_M), math.floor((max(ax, bx) + pad) / _GRID_CELL_M) + 1
+        ):
+            for cy in range(
+                math.floor((min(ay, by) - pad) / _GRID_CELL_M), math.floor((max(ay, by) + pad) / _GRID_CELL_M) + 1
+            ):
+                grid[(cx, cy)].append(j)
+    near = []
+    for stop in stops:
+        x, y = _xy(stop.lat, stop.lon, origin.lat, origin.lon)
+        near.append(grid.get((math.floor(x / _GRID_CELL_M), math.floor(y / _GRID_CELL_M)), []))
+    return near
+
+
+def _visits(track: Sequence[Fix], stop: StopPoint, segments: Sequence[int]) -> list[list[_Approach]]:
+    """Every visit of *stop*: each run of consecutive usable segments within
+    PASSAGE_RADIUS_M of it, in track order."""
+    visits: list[list[_Approach]] = []
+    for j in segments:
+        approach = _approach(track, j, stop, 0.0)
+        if approach.distance > PASSAGE_RADIUS_M:
+            continue
+        if visits and visits[-1][-1].segment == j - 1:
+            visits[-1].append(approach)
+        else:
+            visits.append([approach])
+    return visits
 
 
 def _nearest(visit: Sequence[_Approach]) -> tuple[list[_Approach], float]:
@@ -391,30 +404,102 @@ def _arrival(track: Sequence[Fix], visit: Sequence[_Approach], stop: StopPoint) 
     return first, a.at + timedelta(seconds=offset)
 
 
-def passages(track: Sequence[Fix], stops: Sequence[StopPoint]) -> dict[int, datetime]:
-    """The observed passage of each of *stops* (in stop_sequence order) that
-    the time-ordered *track* shows, by stop_sequence: the departure, or the
-    arrival at a ``final`` stop. See the module docstring for the rule."""
-    found: dict[int, datetime] = {}
-    cursor, floor = 0, 0.0
-    shift: float | None = None
+@dataclass(frozen=True, slots=True)
+class _Candidate:
+    stop: int
+    at: datetime
+    segment: int
+    fraction: float
+
+
+def _candidates(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tuple[list[list[_Candidate]], dict[int, str]]:
+    """Each stop's candidate passages, one per visit the departure (arrival)
+    rules time, within MAX_PLAUSIBLE_DELAY_SEC of its schedule; and, for a
+    stop with none, why: ``no_visit``, ``unseen`` (no visit shows the bus
+    leaving, or arriving) or ``implausible``."""
+    out: list[list[_Candidate]] = []
+    why: dict[int, str] = {}
+    near = _segments_near(track, stops)
     for i, stop in enumerate(stops):
-        if shift is None:
-            lo = stop.scheduled - timedelta(seconds=TRACK_WINDOW_SEC)
-            hi = stop.scheduled + timedelta(seconds=MAX_PLAUSIBLE_DELAY_SEC)
-            hi = _first_pass_of_later_stop(track, stop, stops[i + 1 :], hi) or hi
-        else:
-            expected = stop.scheduled + timedelta(seconds=shift)
-            lo, hi = expected - timedelta(seconds=TRACK_WINDOW_SEC), expected + timedelta(seconds=TRACK_WINDOW_SEC)
-        visit = _visit(track, stop, cursor, floor, lo, hi)
-        passed = (_arrival if stop.final else _departure)(track, visit, stop) if visit else None
-        if passed is None:
-            continue
-        chosen, at = passed
-        found[stop.stop_sequence] = at
-        cursor, floor = chosen.segment, chosen.fraction
-        shift = _seconds(stop.scheduled, at)
-    return found
+        visits = _visits(track, stop, near[i])
+        timed = [p for v in visits if (p := (_arrival if stop.final else _departure)(track, v, stop)) is not None]
+        plausible = [
+            _Candidate(i, at, chosen.segment, chosen.fraction)
+            for chosen, at in timed
+            if abs(_seconds(stop.scheduled, at)) <= MAX_PLAUSIBLE_DELAY_SEC
+        ]
+        out.append(plausible)
+        if not plausible:
+            why[stop.stop_sequence] = "implausible" if timed else ("unseen" if visits else "no_visit")
+    return out, why
+
+
+def _after(
+    track: Sequence[Fix], stop: StopPoint, c: _Candidate, prev: _Candidate, prev_at: datetime
+) -> datetime | None:
+    """The instant *c* gives *stop* when the stop before it in the chain was
+    passed at *prev_at* by candidate *prev*, or None if it cannot follow. A
+    stop mapped just behind the one before it on the same segment, still
+    within the radius of where that one was passed, is passed with it."""
+    if c.at > prev_at:
+        return c.at
+    if c.segment == prev.segment and _approach(track, c.segment, stop, prev.fraction).distance <= PASSAGE_RADIUS_M:
+        return prev_at
+    return None
+
+
+def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tuple[dict[int, datetime], dict[int, str]]:
+    """The observed passage of each of *stops* (in stop_sequence order) that
+    the time-ordered *track* shows, by stop_sequence, and why each other stop
+    has none (see :func:`_candidates`; ``out_of_order`` for a stop whose
+    candidates no consistent sequence takes).
+
+    At most one candidate is taken per stop, with instants increasing along
+    stop_sequence and the delay moving by at most MAX_DELAY_CHANGE_SEC plus
+    DELAY_DRIFT_SHARE of the scheduled time from one taken stop to the next.
+    Of such sequences the longest is taken, ties broken by the smallest sum
+    of the first delay's size and each change of delay along it: a loop's return to its first stop, a deadhead past the
+    stops, or the road out past a stop served on the way back would each
+    forfeit the stops between."""
+    if len(track) < 2:
+        return {}, {stop.stop_sequence: "no_visit" for stop in stops}
+    candidates, why = _candidates(track, stops)
+    flat = [c for per_stop in candidates for c in per_stop]
+    # (stops taken, cost, previous index in flat or -1, this stop's instant)
+    best: list[tuple[int, float, int, datetime]] = []
+    for i, c in enumerate(flat):
+        stop = stops[c.stop]
+        choice = (1, abs(_seconds(stop.scheduled, c.at)), -1, c.at)
+        for p in range(i):
+            prev = flat[p]
+            if prev.stop >= c.stop:
+                continue
+            taken, cost, _before, prev_at = best[p]
+            at = _after(track, stop, c, prev, prev_at)
+            if at is None:
+                continue
+            change = abs(_seconds(stop.scheduled, at) - _seconds(stops[prev.stop].scheduled, prev_at))
+            stretch = _seconds(stops[prev.stop].scheduled, stop.scheduled)
+            if change > MAX_DELAY_CHANGE_SEC + DELAY_DRIFT_SHARE * abs(stretch):
+                continue
+            option = (taken + 1, cost + change, p, at)
+            if (option[0], -option[1]) > (choice[0], -choice[1]):
+                choice = option
+        best.append(choice)
+    found: dict[int, datetime] = {}
+    end = max(range(len(flat)), key=lambda k: (best[k][0], -best[k][1]), default=-1)
+    while end >= 0:
+        found[stops[flat[end].stop].stop_sequence] = best[end][3]
+        end = best[end][2]
+    for stop in stops:
+        if stop.stop_sequence not in found and stop.stop_sequence not in why:
+            why[stop.stop_sequence] = "out_of_order"
+    return found, why
+
+
+def passages(track: Sequence[Fix], stops: Sequence[StopPoint]) -> dict[int, datetime]:
+    """:func:`passages_explained` without the reasons."""
+    return passages_explained(track, stops)[0]
 
 
 def _float32(value: Any) -> float | None:
@@ -501,10 +586,14 @@ def _too_fast(a: Sighting, b: Sighting) -> bool:
 
 
 def _drop_jumps(fixes: Sequence[Sighting], stats: Counter[str]) -> list[Sighting]:
-    """*fixes* without GPS jumps. The track starts at the first fix the next
-    one agrees with, so a wild first fix does not throw out the true ones
-    after it; each later fix is then judged against the last one kept."""
-    start = next((i for i, (a, b) in enumerate(pairwise(fixes)) if not _too_fast(a, b)), len(fixes) - 1)
+    """*fixes* without GPS jumps. The track starts at the first fix that one
+    of the next two agrees with, so neither a wild first fix nor a wild
+    second one throws out the true fixes around it; each later fix is then
+    judged against the last one kept."""
+    start = next(
+        (i for i in range(len(fixes) - 1) if any(not _too_fast(fixes[i], b) for b in fixes[i + 1 : i + 3])),
+        len(fixes) - 1,
+    )
     stats["gps_jumps_dropped"] += start
     kept = [fixes[start]]
     for s in fixes[start + 1 :]:
@@ -523,12 +612,20 @@ def trip_tracks(
     (``filed_date_of``). A fix resent by later polls is kept once, and GPS
     jumps are dropped. Where several vehicles, or pieces split by
     TRACK_SPLIT_GAP_SEC, land on one trip-day, the one with most fixes is
-    kept. Trips not in *first_departures* are ignored."""
+    kept. Trips not in *first_departures* are ignored. The stats count, over
+    the tracks kept, the gaps between fixes and those too long to interpolate
+    across (MAX_BRACKET_GAP_SEC)."""
     by_vehicle: dict[tuple[str, str], dict[datetime, Sighting]] = defaultdict(dict)
     for s in sightings:
         if s.trip_id in first_departures:
             by_vehicle[(s.trip_id, s.vehicle_id)].setdefault(s.at, s)
-    stats: Counter[str] = Counter(gps_jumps_dropped=0, trip_days_with_several_tracks=0, start_date_disagreements=0)
+    stats: Counter[str] = Counter(
+        gps_jumps_dropped=0,
+        trip_days_with_several_tracks=0,
+        start_date_disagreements=0,
+        fix_gaps=0,
+        fix_gaps_over_bracket=0,
+    )
     candidates: dict[tuple[str, date], list[list[Fix]]] = defaultdict(list)
     for (trip_id, _vehicle), fixes in by_vehicle.items():
         ordered = sorted(fixes.values(), key=lambda s: s.at)
@@ -547,7 +644,10 @@ def trip_tracks(
     for key, options in candidates.items():
         if len(options) > 1:
             stats["trip_days_with_several_tracks"] += 1
-        tracks[key] = max(options, key=len)
+        tracks[key] = track = max(options, key=len)
+        gaps = [_seconds(a.at, b.at) for a, b in pairwise(track)]
+        stats["fix_gaps"] += len(gaps)
+        stats["fix_gaps_over_bracket"] += sum(1 for g in gaps if g > MAX_BRACKET_GAP_SEC)
     return tracks, stats
 
 
@@ -586,7 +686,9 @@ def merge_readings(
             reports: list[tuple[int, int | None, bool]]
             if is_stopless_cancellation(trip):
                 stop_times: list[tuple[int, str | None, str | None]] = [
-                    (st.stop_sequence, st.stop_id, st.departure_time) for st in timetable.trips.get(trip.trip_id, ())
+                    (st.stop_sequence, st.stop_id, st.departure_time)
+                    for st in timetable.trips.get(trip.trip_id, ())
+                    if _uint16(st.stop_sequence) is not None
                 ]
                 reports = [(seq, None, True) for seq, _stop, _dep in cancellation_withdrawals(stop_times, captured_at)]
             else:
@@ -667,7 +769,7 @@ def compare(
     """The measured events of *service_date* and its coverage counts."""
     coverage: Counter[str] = Counter()
     events: list[Event] = []
-    found: dict[str, dict[int, datetime]] = {}
+    found: dict[str, tuple[dict[int, datetime], dict[int, str]]] = {}
     for (trip_id, stop_sequence), reading in sorted(kept.items()):
         if reading.dep_delay is None:
             coverage["withdrawn"] += 1
@@ -686,10 +788,12 @@ def compare(
             coverage["stop_without_geometry"] += 1
             continue
         if trip_id not in found:
-            found[trip_id] = passages(track, _stop_points(service_date, timetable, stop_times))
-        passed = found[trip_id].get(stop_sequence)
+            found[trip_id] = passages_explained(track, _stop_points(service_date, timetable, stop_times))
+        trip_passages, why = found[trip_id]
+        passed = trip_passages.get(stop_sequence)
         if passed is None:
             coverage["no_passage"] += 1
+            coverage[f"no_passage_{why[stop_sequence]}"] += 1
             continue
         coverage["with_passage"] += 1
         scheduled = _scheduled_instant(service_date, stop_time.scheduled_sec)
@@ -783,9 +887,14 @@ def _service_dates(first: date, last: date) -> list[date]:
     return [first + timedelta(days=i) for i in range((last - first).days + 1)]
 
 
-def _archive_days(service_date: date) -> tuple[date, date]:
-    """The UTC days whose archives hold every capture filed under *service_date*."""
-    return service_date - timedelta(days=1), service_date
+def _archive_days(kind: str, service_date: date) -> tuple[date, ...]:
+    """The UTC days whose *kind* archives hold every capture filed under
+    *service_date*. A TripUpdates poll whose feed header is unusable is
+    stamped from its name read as JST (``archive_captured_at``), nine hours
+    early, so a poll of UTC day D+1 can file under D. A vehicle position is
+    timed by its own fix, which UTC days D-1 and D hold."""
+    days = (service_date - timedelta(days=1), service_date)
+    return (*days, service_date + timedelta(days=1)) if kind == "rt" else days
 
 
 def _timetable_for(names: Iterable[str], service_date: date) -> str | None:
@@ -801,9 +910,11 @@ def _trip_update_polls(path: Path) -> Iterator[Poll]:
 
 
 def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, Any]:
-    """Read the TripUpdates archives of the UTC days *first* - 1 to *last* in
-    order, each once. Service date D is complete once UTC day D is read, so
-    it is then measured against its tracks and its kept readings dropped."""
+    """Read the TripUpdates archives of the UTC days *first* - 1 to *last* + 1
+    in order, each once. Service date D is complete once UTC day D+1 is read
+    (``_archive_days``), so it is then measured against its tracks and its
+    kept readings dropped. A reading filed under a date already measured is
+    counted as ``readings_after_measurement`` rather than lost silently."""
     static_dir = root / "static" / str(agency_id)
     static_names = sorted(p.name for p in static_dir.glob("gtfs_static_*.zip")) if static_dir.is_dir() else []
     loaded: dict[str, Timetable] = {}
@@ -822,15 +933,18 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
     coverage: Counter[str] = Counter()
     track_stats: Counter[str] = Counter()
     days = []
-    for utc_day in [first - timedelta(days=1), *_service_dates(first, last)]:
+    measured: set[date] = set()
+    utc_days = [first - timedelta(days=1), *_service_dates(first, last), last + timedelta(days=1)]
+    for utc_day in utc_days:
         if archive("rt", utc_day).exists():
             merge_readings(kept, _trip_update_polls(archive("rt", utc_day)), timetable_on, first, last)
-        if utc_day < first:
+        service_date = utc_day - timedelta(days=1)
+        if service_date < first:
             continue
-        service_date = utc_day
+        measured.add(service_date)
         day_kept = kept.pop(service_date, {})
         timetable = timetable_on(service_date)
-        paths = [archive(kind, d) for kind in ("rt", "vp") for d in _archive_days(service_date)]
+        paths = [archive(kind, d) for kind in ("rt", "vp") for d in _archive_days(kind, service_date)]
         day: dict[str, Any] = {
             "service_date": service_date.isoformat(),
             "timetable": _timetable_for(static_names, service_date),
@@ -845,7 +959,7 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
         }
         sightings = (
             s
-            for d in _archive_days(service_date)
+            for d in _archive_days("vp", service_date)
             if archive("vp", d).exists()
             for _name, polled_at, payload in _archive_polls(archive("vp", d), "VehiclePosition")
             for s in decode_vehicle_positions(payload, polled_at)
@@ -856,6 +970,7 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
         day.update(stop_events=day_coverage["stop_events"], with_passage=day_coverage["with_passage"])
         events.extend(day_events)
         coverage.update(day_coverage)
+    coverage["readings_after_measurement"] = sum(len(kept[d]) for d in kept if d in measured)
     coverage_keys = (
         "stop_events",
         "with_passage",
@@ -863,8 +978,13 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
         "trip_without_track",
         "stop_without_geometry",
         "no_passage",
+        "no_passage_no_visit",
+        "no_passage_unseen",
+        "no_passage_implausible",
+        "no_passage_out_of_order",
         "kept_after_passage",
         "withdrawn",
+        "readings_after_measurement",
     )
     return {
         "schema": SCHEMA,
@@ -875,7 +995,8 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
             "passage_radius_m": PASSAGE_RADIUS_M,
             "dwell_tolerance_m": DWELL_TOLERANCE_M,
             "max_bracket_gap_sec": MAX_BRACKET_GAP_SEC,
-            "track_window_sec": TRACK_WINDOW_SEC,
+            "max_delay_change_sec": MAX_DELAY_CHANGE_SEC,
+            "delay_drift_share": DELAY_DRIFT_SHARE,
             "max_speed_mps": MAX_SPEED_MPS,
             "min_moving_speed_mps": MIN_MOVING_SPEED_MPS,
             "track_split_gap_sec": TRACK_SPLIT_GAP_SEC,
@@ -952,7 +1073,7 @@ def fetch_archives(agency_id: int, first: date, last: date, root: Path, *, run: 
     for kind in ("rt", "vp"):
         held = set(listed(f"{kind}/{agency_id}/"))
         for service_date in _service_dates(first, last):
-            wanted |= {f"{kind}/{agency_id}/{d:%Y%m%d}.tar.gz" for d in _archive_days(service_date)} & held
+            wanted |= {f"{kind}/{agency_id}/{d:%Y%m%d}.tar.gz" for d in _archive_days(kind, service_date)} & held
     statics = {PurePosixPath(k).name: k for k in listed(f"static/{agency_id}/")}
     for service_date in _service_dates(first, last):
         name = _timetable_for(statics, service_date)

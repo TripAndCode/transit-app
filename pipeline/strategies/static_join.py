@@ -648,8 +648,7 @@ def parse_feed(
         route, svc, static_version_id = cancelled_trips.get(trip_id, (None, None, None))
         route_code = rt_route_id or route
         trip_stops = cancelled_stops.get(trip_id, [])
-        stops = _stops_to_come(trip_stops, captured)
-        if not stops:
+        if not _stops_to_come(trip_stops, captured):
             rows.append(
                 (
                     *(file_name, captured_at, trip_id, svc, None, route_code, TRIP_LEVEL_STOP_SEQUENCE),
@@ -657,7 +656,7 @@ def parse_feed(
                     static_version_id,
                 )
             )
-        for stop_seq, stop_id, departure_time in _filed_under_trips_day(stops, trip_stops, captured):
+        for stop_seq, stop_id, departure_time in cancellation_withdrawals(trip_stops, captured):
             row, status = _stored_row(
                 *(file_name, captured_at, trip_id, svc, departure_time, route_code, stop_seq, None, stop_id, None),
                 *(TRIP_CANCELED, None, feed_timestamp, static_version_id),
@@ -762,7 +761,7 @@ def is_stopless_cancellation(trip_update: TripUpdate) -> bool:
     )
 
 
-def cancellation_withdrawals(trip_stops: list[_StopTime], captured: datetime) -> list[_StopTime]:
+def cancellation_withdrawals(trip_stops: list[_StopTime], captured: datetime | None) -> list[_StopTime]:
     """The stops of *trip_stops* (the trip's timetable, in stop_sequence
     order) that a stopless cancellation captured at *captured* withdraws, as
     ``parse_feed`` stores them: those still to come

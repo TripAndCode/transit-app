@@ -239,6 +239,113 @@ def test_a_bus_reaching_the_last_stop_without_standing_there_is_timed_along_the_
     )
 
 
+_FOUR = [_stop(1, 0, at=0), _stop(2, 300, at=30), _stop(3, 600, at=60), _stop(4, 900, at=90, final=True)]
+
+
+def _deadhead_then_trip(dead_start: int) -> list[vv.Fix]:
+    """Running empty back along the route, on the far side of the road, from
+    beyond stop 4 to the terminal, standing there, then the trip at 10 m/s
+    from 0 s."""
+    dead = [_fix(t, 1200 - 10 * (t - dead_start), -10) for t in range(dead_start, dead_start + 121, 20)]
+    idle = [_fix(t, 0, -5) for t in range(dead_start + 140, 1, 20)]
+    return dead + idle + [_fix(t, 10 * t) for t in range(20, 121, 20)]
+
+
+@pytest.mark.parametrize("dead_start", [-300, -2400])
+def test_a_deadhead_past_the_stops_before_the_trip_is_not_taken_for_it(dead_start):
+    """Five and forty minutes before departure the bus passed stops 4, 3 and 2
+    in reverse; taking those passes would forfeit the stops between."""
+    assert _secs(vv.passages(_deadhead_then_trip(dead_start), _FOUR)) == pytest.approx(
+        {1: 0.0, 2: 30.0, 3: 60.0, 4: 90.0}, abs=0.05
+    )
+
+
+def _out_and_back(t: int) -> float:
+    return 10 * t if t <= 100 else 1000 - 10 * (t - 100)
+
+
+_OUT_AND_BACK = [
+    _stop(1, 0, at=0),
+    _stop(2, 500, at=50),
+    _stop(3, 1000, at=100),
+    _stop(4, 150, 15, at=185),
+    _stop(5, 0, 15, at=200, final=True),
+]
+
+
+def test_an_out_and_back_serves_the_stop_across_the_road_on_the_way_back():
+    track = [_fix(t, _out_and_back(t)) for t in range(0, 221, 20)]
+    assert _secs(vv.passages(track, _OUT_AND_BACK)) == pytest.approx({1: 0.0, 2: 50.0, 3: 100.0, 4: 185.0, 5: 200.0})
+
+
+def test_a_late_start_states_why_each_stop_it_cannot_time_has_no_passage():
+    """The track starts 100 m out, so the first stop is seen only on the way
+    back, after stops it must precede; the turn at 1000 m falls between two
+    fixes that stand 100 m short of it."""
+    track = [_fix(t, _out_and_back(t)) for t in range(10, 221, 20)]
+    found, why = vv.passages_explained(track, _OUT_AND_BACK)
+    assert _secs(found) == pytest.approx({2: 50.0, 4: 185.0, 5: 200.0})
+    assert why == {1: "out_of_order", 3: "no_visit"}
+
+
+def test_a_stop_seen_only_hours_off_schedule_or_never_seen_leaving_states_why():
+    track = [_fix(t, 10 * t) for t in range(0, 101, 20)] + [_fix(9000 + t, 1500 + 10 * t) for t in range(0, 41, 20)]
+    track += [_fix(9060, 1900), _fix(9080, 1900)]
+    stops = [_stop(1, 0, at=0), _stop(2, 500, at=50), _stop(3, 1600, at=160), _stop(4, 1900, at=190)]
+    found, why = vv.passages_explained(track, stops)
+    assert set(found) == {1, 2}
+    assert why == {3: "implausible", 4: "unseen"}
+
+
+def test_of_two_passes_of_a_stop_the_one_that_keeps_the_delay_steady_is_taken():
+    """The bus passes stop 2's place at 30 s on its way into a spur and serves
+    it at 90 s on the way out, on time; both sequences match all three stops."""
+
+    def at(t: int) -> tuple[float, float]:
+        if t <= 30:
+            return 10 * t, 0
+        if t <= 60:
+            return 300, 10 * (t - 30)
+        if t <= 90:
+            return 300, 300 - 10 * (t - 60)
+        return 300 + 10 * (t - 90), 0
+
+    track = [_fix(t, *at(t)) for t in range(0, 151, 10)]
+    stops = [_stop(1, 0, at=0), _stop(2, 300, at=90), _stop(3, 900, at=150, final=True)]
+    assert _secs(vv.passages(track, stops)) == pytest.approx({1: 0.0, 2: 90.0, 3: 150.0})
+
+
+def test_a_circulator_falling_behind_lap_by_lap_keeps_each_lap_on_its_own_pass():
+    """One trip_id runs a 1 km out-and-back loop twice, laps scheduled 30
+    minutes apart. The bus runs 9 minutes late on the first lap and 25 on the
+    second: the delay grows by more than a neighbouring-stop change across
+    the long gap between the laps, which the second lap's own passes, not the
+    first stops matched to later passes, account for. The first lap's last
+    stop, where its fixes stop, is never seen left."""
+    stops = [
+        _stop(1, 0, at=0),
+        _stop(2, 1000, at=100),
+        _stop(3, 0, at=200),
+        _stop(4, 1000, at=1800 + 100),
+        _stop(5, 0, at=1800 + 200, final=True),
+    ]
+
+    def lap(start: int) -> list[vv.Fix]:
+        return [_fix(start + t, 10 * t if t <= 100 else 2000 - 10 * t) for t in range(0, 201, 20)]
+
+    track = lap(540) + lap(1800 + 1500)[1:]
+    assert _secs(vv.passages(track, stops)) == pytest.approx({1: 540.0, 2: 640.0, 4: 3400.0, 5: 3500.0})
+
+
+def test_one_pass_by_a_place_two_stops_share_is_the_passage_of_only_one():
+    """A loop's first and last stops share a place, and the track passes it
+    once, without stopping, at 240 s: the last stop's schedule fits it, the
+    first stop's does not, and one pass cannot be both."""
+    track = [_fix(t, 10 * (t - 240)) for t in range(200, 281, 20)]
+    stops = [_stop(1, 0, at=0), _stop(2, 0, at=240, final=True)]
+    assert _secs(vv.passages(track, stops)) == pytest.approx({2: 240.0})
+
+
 def test_a_stop_the_track_misses_is_not_matched_to_a_later_lap():
     """The fixes stop at 180 s and resume at 600 s, so no usable segment comes
     near stop 3 at 1900 m. The track returns past that place 50 minutes on.
@@ -258,9 +365,10 @@ def test_a_stop_the_track_misses_is_not_matched_to_a_later_lap():
 
 
 def test_a_revisit_far_from_the_expected_time_is_no_passage():
-    """The bus passes stop 2 at 90 s and stop 3's place only at 100 + the
-    track window + 5 minutes, after a gap in which it ran elsewhere."""
-    late = 100 + vv.TRACK_WINDOW_SEC + 300
+    """The bus passes stop 2 at 90 s, on time, and stop 3's place only 20
+    minutes late, after a gap in which it ran elsewhere: further from the
+    delay at stop 2 than a delay moves between neighbouring stops."""
+    late = 100 + vv.MAX_DELAY_CHANGE_SEC + 300
     track = [_fix(t, 10 * t) for t in range(0, 101, 20)] + [_fix(late + t, 1900 + 10 * t) for t in range(0, 41, 20)]
     stops = [_stop(1, 0, at=0), _stop(2, 900, at=90), _stop(3, 2000, at=200, final=True)]
     assert set(vv.passages(track, stops)) == {1, 2}
@@ -298,12 +406,14 @@ def test_tracks_drop_resent_fixes_and_gps_jumps_and_split_a_trip_id_by_day():
         s(d1 + timedelta(seconds=60), 600),
         s(d2, 0),
         s(d2 + timedelta(seconds=20), 200),
+        s(d2 + timedelta(seconds=200), 1000),
     ]
     tracks, stats = vv.trip_tracks(sightings, {"T1": first_departure})
     assert sorted(tracks) == [("T1", day1), ("T1", day2)]
     assert [round(f.at.timestamp() - d1.timestamp()) for f in tracks[("T1", day1)]] == [0, 20, 60]
-    assert len(tracks[("T1", day2)]) == 2
+    assert len(tracks[("T1", day2)]) == 3
     assert stats["gps_jumps_dropped"] == 1
+    assert (stats["fix_gaps"], stats["fix_gaps_over_bracket"]) == (4, 1)
 
 
 def test_a_wild_first_fix_is_dropped_rather_than_every_true_fix_after_it():
@@ -312,6 +422,15 @@ def test_a_wild_first_fix_is_dropped_rather_than_every_true_fix_after_it():
     sightings += [vv.Sighting("T1", "V1", None, at + timedelta(seconds=20 * i), *_ll(200 * i, 0)) for i in (1, 2, 3)]
     tracks, stats = vv.trip_tracks(sightings, {"T1": 9 * 3600})
     assert [round((f.at - at).total_seconds()) for f in tracks[("T1", date(2026, 11, 20))]] == [20, 40, 60]
+    assert stats["gps_jumps_dropped"] == 1
+
+
+def test_a_wild_second_fix_does_not_drop_the_true_first_one():
+    at = datetime(2026, 11, 20, 0, 0, tzinfo=UTC)
+    east = [0, 5000, 400, 600]
+    sightings = [vv.Sighting("T1", "V1", None, at + timedelta(seconds=20 * i), *_ll(e, 0)) for i, e in enumerate(east)]
+    tracks, stats = vv.trip_tracks(sightings, {"T1": 9 * 3600})
+    assert [round((f.at - at).total_seconds()) for f in tracks[("T1", date(2026, 11, 20))]] == [0, 40, 60]
     assert stats["gps_jumps_dropped"] == 1
 
 
@@ -405,10 +524,21 @@ def test_a_tie_on_capture_breaks_on_the_file_name_and_other_days_are_left_out():
 def test_a_cancellation_listing_no_stop_withdraws_the_stops_still_to_come_as_ingest_stores_it():
     """Predicted at 09:00 for 09:02, 09:10 and 09:15; at 09:05 the trip is
     reported CANCELED with no stop. Stop 1 was due before the cancellation and
-    keeps its reading; stops 2 and 3 are withdrawn. A CANCELED report that
-    lists its stops withdraws exactly those."""
+    keeps its reading; stops 2 and 3 are withdrawn. A stop_sequence no stored
+    row can hold is skipped, as ingest skips it. A CANCELED report that lists
+    its stops withdraws exactly those."""
     day = date(2026, 11, 20)
-    table = _timetable(("T1", [(1, "S1", 9 * 3600 + 120), (2, "S2", 9 * 3600 + 600), (3, "S3", 9 * 3600 + 900)]))
+    table = _timetable(
+        (
+            "T1",
+            [
+                (1, "S1", 9 * 3600 + 120),
+                (2, "S2", 9 * 3600 + 600),
+                (3, "S3", 9 * 3600 + 900),
+                (70000, "S4", 9 * 3600 + 960),
+            ],
+        )
+    )
     predicted = _tu_poll(T0, trip_update("T1", *(stop_time_update(i, departure_delay=60) for i in (1, 2, 3))))
     stopless = _tu_poll(T0 + timedelta(minutes=5), trip_update("T1", schedule_relationship=3))
     kept = vv.kept_readings([predicted, stopless], table, day)
@@ -603,8 +733,8 @@ def test_off_the_grid_the_figures_stay_within_a_second_of_the_oracles(tmp_path):
 def test_a_stop_event_with_no_vehicle_is_counted_but_not_measured(tmp_path, capsys):
     """With the VehiclePositions tar gone, each stop event lacks a track, and
     the missing archives are stated beside the figures: the run's 07:00 JST
-    polls sit in the UTC day before, so the service day's own UTC day has
-    neither tar either."""
+    polls sit in the UTC day before, so neither the service day's own UTC day
+    nor, for TripUpdates, the next has a tar."""
     scenario = _on_grid()
     root = tmp_path / "r2"
     _archive(scenario, root, 8, 20)
@@ -617,16 +747,54 @@ def test_a_stop_event_with_no_vehicle_is_counted_but_not_measured(tmp_path, caps
     assert summary["figures"]["overall"]["n"] == 0
     assert summary["days"][0]["missing_archives"] == [
         "rt/8/20260601.tar.gz",
+        "rt/8/20260602.tar.gz",
         "vp/8/20260531.tar.gz",
         "vp/8/20260601.tar.gz",
     ]
-    assert "Missing archives: 3" in (tmp_path / "out" / "8" / "20260601_20260601.md").read_text()
-    assert "3 archives missing" in capsys.readouterr().out
+    assert "Missing archives: 4" in (tmp_path / "out" / "8" / "20260601_20260601.md").read_text()
+    assert "4 archives missing" in capsys.readouterr().out
 
 
 def test_an_archive_two_service_dates_need_is_missing_once(tmp_path):
     summary = {"days": [{"missing_archives": ["rt/8/20260601.tar.gz"]}, {"missing_archives": ["rt/8/20260601.tar.gz"]}]}
     assert vv.missing_archives(summary) == ["rt/8/20260601.tar.gz"]
+
+
+@pytest.mark.parametrize("header", [None, int(datetime(2026, 11, 19, 16, 0, tzinfo=UTC).timestamp())])
+def test_a_poll_stamped_from_its_name_files_under_the_day_before_its_archive(tmp_path, header):
+    """A poll of UTC 11-20 01:00 with no usable header is stamped from its
+    name read as JST, 01:00 on 11-20, which is service date 11-19: the run
+    reads archive 11-20 before measuring 11-19."""
+    root = tmp_path / "r2"
+    (root / "static" / "9").mkdir(parents=True)
+    _gtfs_zip(
+        root / "static" / "9" / "gtfs_static_20261101.zip",
+        "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT1,01:30:00,01:30:00,A,1\n",
+    )
+    feed = trip_update_feed(trip_update("T1", stop_time_update(1, departure_delay=30)), timestamp=header)
+    _tar(root / "rt" / "9" / "20261120.tar.gz", {"20261120/TripUpdate_010000.pb": feed})
+    for last in (date(2026, 11, 19), date(2026, 11, 20)):
+        coverage = vv.validate(9, date(2026, 11, 19), last, root)["coverage"]
+        assert (coverage["stop_events"], coverage["readings_after_measurement"]) == (1, 0)
+
+
+def test_a_reading_for_a_date_already_measured_is_counted_not_lost(tmp_path, monkeypatch):
+    """Archive 06-03 is read after 06-01 was measured; a reading it filed
+    under 06-01 is counted rather than dropped."""
+    real = vv.merge_readings
+    late = vv.Reading(datetime(2026, 11, 20, tzinfo=UTC), "late.pb", 0)
+
+    def merge_then_late(kept, polls, timetable_on, first, last):
+        real(kept, polls, timetable_on, first, last)
+        kept.setdefault(date(2026, 6, 1), {})[("X", 1)] = late
+
+    root = tmp_path / "r2"
+    _archive(_on_grid(), root, 8, 20)
+    for day in ("20260602", "20260603"):
+        _tar(root / "rt" / "8" / f"{day}.tar.gz", {})
+    monkeypatch.setattr(vv, "merge_readings", merge_then_late)
+    coverage = vv.validate(8, DAY, DAY + timedelta(days=1), root)["coverage"]
+    assert coverage["readings_after_measurement"] == 1
 
 
 def test_a_run_with_nothing_to_compare_exits_one(tmp_path):
@@ -662,7 +830,12 @@ def test_fetch_downloads_only_the_archives_the_dates_need_and_never_shows_the_en
     (root / "rt" / "8").mkdir(parents=True)
     (root / "rt" / "8" / "20260601.tar.gz").write_bytes(b"")
     vv.fetch_archives(8, date(2026, 6, 1), date(2026, 6, 1), root, run=run, capture=capture)
-    assert sorted(fetched) == ["rt/8/20260531.tar.gz", "static/8/gtfs_static_20260520.zip", "vp/8/20260531.tar.gz"]
+    assert sorted(fetched) == [
+        "rt/8/20260531.tar.gz",
+        "rt/8/20260602.tar.gz",
+        "static/8/gtfs_static_20260520.zip",
+        "vp/8/20260531.tar.gz",
+    ]
     err = capsys.readouterr().err
     assert "vp/8/20260531.tar.gz" in err and "exit 1" in err
     assert "endpoint.invalid" not in err
