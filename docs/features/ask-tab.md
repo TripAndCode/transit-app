@@ -186,11 +186,11 @@ committed). A follow-up writes a `followup` row naming the tool of the result
 it used (NULL when that answer came from no tool), with `latency_ms` of the
 model call and the numeric-guard verdict in `numeric_guard_triggered`. The
 `question` column is empty on every notebook row: the follow-up's text stays in
-the user's own conversation and is not copied into a row that must not point
-back at them. Arguments, thread ids and users are never stored. The write
+the user's own conversation. Notebook rows carry no user id, conversation id,
+arguments or text. The write
 follows the request's transaction and swallows its own failure, so logging
 cannot fail a card or lose a follow-up's answer. The admin Ask ops page reports these as per-tool
-counts over 30 days.
+counts over the trailing `DEFAULT_RANGE_DAYS` JST days.
 
 **Follow-up path** (LLM-grounded, kill-switch gated):
 `FollowupChipsRow` → `useFollowup` →

@@ -364,7 +364,7 @@ async def _log_usage_pooled(
     like any other bookkeeping failure."""
     try:
         if await aflag("ask_query_log_enabled"):
-            async with pool.acquire() as conn:
+            async with pool.acquire(timeout=1.0) as conn:
                 await _write_usage(conn, agency_id, stage, tool, success, latency_ms, numeric_guard_triggered)
     except Exception as exc:
         _log.warning("ask usage log failed (%s) -- ignored", exc.__class__.__name__)
@@ -424,8 +424,9 @@ async def append_message_endpoint(
     # User message + card in one transaction. Without it, a concurrent DELETE of
     # this conversation would FK-cascade-delete the user_msg row mid-flight,
     # producing a 500 instead of a clean 404.
-    # None: no dispatch to record. A card that ran and returned a result is
-    # recorded as a success only once its thread's transaction has committed.
+    # None until a dispatch starts: a failed user-message write is not a
+    # dispatch. A returned result counts as a success only once the thread's
+    # transaction has committed.
     outcome: bool | None = None
     latency_ms = 0
     try:
@@ -451,8 +452,7 @@ async def append_message_endpoint(
                 raise
             latency_ms = _elapsed_ms(started)
             dispatched = _card_succeeded(card)
-            if not dispatched:
-                outcome = False
+            outcome = False
             assistant_msg = await _conv.append_message(conn, conversation_id, role="assistant", **card)
         if dispatched:
             outcome = True
@@ -720,44 +720,50 @@ async def followup_endpoint(
     latency_ms = _elapsed_ms(started)
     answer, err, guard = result
     if err is not None:
-        await _log_usage_pooled(
-            request.app.state.pool,
-            agency_id,
-            FOLLOWUP,
-            ctx_msg.get("tool"),
-            False,
-            latency_ms,
-            numeric_guard_triggered=guard,
-        )
+        # Input the model never saw says nothing about follow-up usage.
+        if err not in ("empty", "too_long"):
+            await _log_usage_pooled(
+                request.app.state.pool,
+                agency_id,
+                FOLLOWUP,
+                ctx_msg.get("tool"),
+                False,
+                latency_ms,
+                numeric_guard_triggered=guard,
+            )
         _raise_for_followup_error(err)
 
     # Append both messages atomically so a mid-flight cancel doesn't leave
     # a dangling user message in the thread.
     async with request.app.state.pool.acquire() as conn:
-        async with conn.transaction():
-            user_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="user",
-                tool=None,
-                args=None,
-                signature_hash=None,
-                result=None,
-                rendered_summary=body.question,
+        committed = False
+        try:
+            async with conn.transaction():
+                user_msg = await _conv.append_message(
+                    conn,
+                    conversation_id,
+                    role="user",
+                    tool=None,
+                    args=None,
+                    signature_hash=None,
+                    result=None,
+                    rendered_summary=body.question,
+                )
+                assistant_msg = await _conv.append_message(
+                    conn,
+                    conversation_id,
+                    role="assistant",
+                    tool=None,
+                    args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
+                    signature_hash=None,
+                    result=None,
+                    rendered_summary=answer,
+                )
+            committed = True
+        finally:
+            await _log_usage(
+                conn, agency_id, FOLLOWUP, ctx_msg.get("tool"), committed, latency_ms, numeric_guard_triggered=guard
             )
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=None,
-                args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
-                signature_hash=None,
-                result=None,
-                rendered_summary=answer,
-            )
-        await _log_usage(
-            conn, agency_id, FOLLOWUP, ctx_msg.get("tool"), True, latency_ms, numeric_guard_triggered=guard
-        )
     return {"user": user_msg, "assistant": assistant_msg}
 
 

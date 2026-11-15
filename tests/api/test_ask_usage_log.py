@@ -205,7 +205,7 @@ async def test_the_kill_switch_stops_card_logging(usage, monkeypatch):
     assert await _rows(pool) == []
 
 
-async def _followup(app, agency, uid, pool, monkeypatch, result):
+async def _followup(app, agency, uid, pool, monkeypatch, result, *, fail_thread_write=False):
     import api.routers.conversations as conv_router
 
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
@@ -228,6 +228,12 @@ async def _followup(app, agency, uid, pool, monkeypatch, result):
             result={"ok": True},
             rendered_summary="prior",
         )
+    if fail_thread_write:
+
+        async def failing_append(conn, conversation_id, **kw):
+            raise RuntimeError("write failed")
+
+        monkeypatch.setattr(conv_router._conv, "append_message", failing_append)
     async with _authed_optional_client(app, uid) as c:
         return await c.post(
             f"/api/{agency}/conversations/{conv_id}/followup",
@@ -302,7 +308,7 @@ async def test_card_latency_covers_the_dispatch_only(usage, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_card_whose_thread_write_fails_is_not_logged_as_a_success(usage, monkeypatch):
+async def test_a_card_whose_thread_write_fails_is_logged_as_a_failure(usage, monkeypatch):
     import api.routers.conversations as conv_router
 
     app, agency, uid, pool = usage
@@ -322,7 +328,8 @@ async def test_a_card_whose_thread_write_fails_is_not_logged_as_a_success(usage,
                 json={"tool": "describe_data", "args": {}},
                 headers=_CSRF,
             )
-    assert await _rows(pool) == []
+    [row] = await _rows(pool)
+    assert (row["router_stage"], row["success"]) == ("card_signed_in", False)
 
 
 @pytest.mark.asyncio
@@ -344,3 +351,38 @@ async def test_a_failed_user_message_write_logs_no_dispatch(usage, monkeypatch):
                 headers=_CSRF,
             )
     assert await _rows(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_a_followup_whose_thread_write_fails_is_logged_as_a_failure(usage, monkeypatch):
+    app, agency, uid, pool = usage
+    with pytest.raises(RuntimeError, match="write failed"):
+        await _followup(
+            app, agency, uid, pool, monkeypatch, FollowupResult("the answer", None, False), fail_thread_write=True
+        )
+    [row] = await _rows(pool)
+    assert (row["router_stage"], row["success"]) == ("followup", False)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("error", "status"), [("empty", 400), ("too_long", 400)])
+async def test_followup_input_errors_the_model_never_saw_are_not_logged(usage, monkeypatch, error, status):
+    app, agency, uid, pool = usage
+    r = await _followup(app, agency, uid, pool, monkeypatch, FollowupResult("", error))
+    assert r.status_code == status
+    assert await _rows(pool) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "status"),
+    [(FollowupResult("the answer", None, False), 200), (FollowupResult("", "provider_unavailable"), 502)],
+)
+async def test_a_failing_log_write_does_not_break_a_followup(broken_log, monkeypatch, result, status):
+    app, agency, uid, pool = broken_log
+    r = await _followup(app, agency, uid, pool, monkeypatch, result)
+    assert r.status_code == status, r.text
+    if status == 200:
+        body = r.json()
+        assert body["user"]["rendered_summary"] == "what about X?"
+        assert body["assistant"]["rendered_summary"] == "the answer"

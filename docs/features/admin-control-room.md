@@ -367,7 +367,8 @@ Endpoints:
   covers card names no handler answers to and follow-ups on an answer that came
   from no tool.
 
-Tables: reads `ask_query_log`. Notebook rows hold no identity and no question text; whether a card ran
-signed in or out is the only fact kept about its caller, and a follow-up row
-carries only its context tool, latency and numeric-guard verdict. They fall under the table's 90-day
+Tables: reads `ask_query_log`. Notebook rows carry no user id, conversation id,
+arguments or text; whether a card ran signed in or out is the only fact kept
+about its caller, and a follow-up row carries only its context tool, latency and
+numeric-guard verdict. They fall under the table's 90-day
 retention (`pipeline/retention.py`).
