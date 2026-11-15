@@ -43,7 +43,7 @@ async def test_rows_past_retention_go_and_recent_rows_stay(aconn):
 
 
 @pytest.mark.asyncio
-async def test_intent_cache_questions_past_retention_go_unless_promoted(aconn, aagency_id):
+async def test_intent_cache_questions_past_retention_go_promoted_or_not(aconn, aagency_id):
     now = datetime.now(timezone.utc)
     rows = {
         "a" * 16: (now - timedelta(days=120), None),
@@ -68,7 +68,7 @@ async def test_intent_cache_questions_past_retention_go_unless_promoted(aconn, a
         await pool.close()
 
     kept = await aconn.fetch("SELECT signature_hash FROM ask_intent_cache ORDER BY signature_hash")
-    assert [r["signature_hash"] for r in kept] == ["b" * 16, "c" * 16]
+    assert [r["signature_hash"] for r in kept] == ["b" * 16]
 
 
 @pytest.mark.asyncio
