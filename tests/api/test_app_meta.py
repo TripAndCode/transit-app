@@ -17,7 +17,14 @@ async def test_config_exposes_both_auth_switches(client):
     resp = await client.get("/api/config")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"auth_enabled", "local_admin_enabled", "login_required", "feedback_url", "llm_enabled"}
+    assert set(body) == {
+        "auth_enabled",
+        "local_admin_enabled",
+        "login_required",
+        "feedback_url",
+        "llm_enabled",
+        "weather_enabled",
+    }
     assert isinstance(body["login_required"], bool)
     assert isinstance(body["auth_enabled"], bool)
     assert isinstance(body["local_admin_enabled"], bool)
@@ -80,3 +87,16 @@ async def test_config_reports_llm_disabled_when_the_operator_kill_switch_is_off(
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setenv("ASK_LLM_ENABLED", "false")
     assert (await client.get("/api/config")).json()["llm_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_config_reports_the_weather_flag_as_the_registry_resolves_it(client, monkeypatch):
+    """Why mounts the weather panel only when its flag is on, so the value must
+    follow the flag registry (env here, override in production)."""
+    from pipeline import flags
+
+    for raw, expected in (("true", True), ("false", False)):
+        monkeypatch.setenv("WEATHER_INGEST_ENABLED", raw)
+        flags.invalidate()
+        assert (await client.get("/api/config")).json()["weather_enabled"] is expected
+    flags.invalidate()

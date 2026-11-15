@@ -31,6 +31,14 @@ def test_complete_pattern_preserves_missing_and_weights_observations():
     assert rows[0][3] == rows[2][3]  # loop visit remains distinct
 
 
+def test_an_unnamed_stop_stays_null_and_the_label_never_falls_back_to_its_id():
+    schedule = [dict(stop("a", 1, "S1"), stop_name=None), stop("a", 2, "S2")]
+    rows = assemble_patterns([("a", 1, 60, 1)], schedule)
+    assert rows[0][4] is None
+    assert rows[0][3] == "S1"
+    assert rows[0][1] == "— → S2 (2)"
+
+
 def test_different_order_route_or_pattern_never_merges():
     schedule = [
         stop("a", 1, "A"),
@@ -74,6 +82,7 @@ async def test_query_is_scoped_and_does_not_require_coordinates():
     assert "toDayOfWeek" in ch.query.call_args.args[0]
     assert conn.fetch.call_args.args[1] == 9
     assert "lat" not in conn.fetch.call_args.args[0]
+    assert "COALESCE" not in conn.fetch.call_args.args[0]
 
 
 @pytest.mark.asyncio

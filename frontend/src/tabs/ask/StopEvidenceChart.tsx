@@ -4,6 +4,7 @@ import type { ConvMessage } from "../../api/types";
 import { conditionsLabel, provenancePath, toolLabel } from "./provenance";
 import type { StopEvidence, StopFocus } from "./stopEvidence";
 import { StopNavigator } from "./StopNavigator";
+import { useIsAdmin } from "../../api/useIsAdmin";
 import { Tooltip } from "../../components/Tooltip";
 import { formatNumber } from "../../utils/format";
 import { useTopmostEscape } from "../../hooks/useFocusTrap";
@@ -23,6 +24,7 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
   message?: ConvMessage;
 }) {
   const { t } = useTranslation();
+  const isAdmin = useIsAdmin();
   const path = message ? provenancePath(message) : null;
   const label = message ? toolLabel(message.tool, t) : null;
   const route = typeof (message?.args?.route ?? message?.args?.route_code) === "string"
@@ -153,7 +155,7 @@ export function StopEvidenceChart({ messageId, points, onFocus, complete = false
             <p>{t("ask.evidence.samples", { count: selected.samples })}</p>
             <details><summary>{t("ask.evidence.values")}</summary>
               <dl><dt>{t("ask.evidence.sequence")}</dt><dd>{selected.sequence}</dd>
-              {selected.stopId && <><dt>{t("ask.evidence.stop_id")}</dt><dd>{selected.stopId}</dd></>}</dl>
+              {isAdmin && selected.stopId && <><dt>{t("ask.evidence.stop_id")}</dt><dd>{selected.stopId}</dd></>}</dl>
             </details>
         </aside>}
       </div>

@@ -1236,6 +1236,8 @@ summary::-webkit-details-marker { display: none; }
   .app-shell { display: block !important; height: auto !important; }
   .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
   main { overflow: visible !important; }
+  /* An admin's raw ids are working text, not part of the paper. */
+  .scope-id { display: none !important; }
   .focus-page { color: black; }
   .focus-page svg { break-inside: avoid; }
   /* A printed page cannot scroll, so a chart shrinks to it instead of

@@ -406,6 +406,7 @@ class ClientConfig(BaseModel):
     login_required: bool
     feedback_url: str | None
     llm_enabled: bool
+    weather_enabled: bool
 
 
 # The SPA renders the feedback address as a link, so only these schemes leave the API
@@ -432,7 +433,10 @@ async def config():
     visitors to sign in while ``login_required`` says the API refuses them, and
     link to the deployment's feedback address when it has one. ``llm_enabled`` is
     False when no LLM provider is usable or the operator's kill switch is off, so
-    the SPA hides LLM-only affordances instead of offering ones that cannot answer."""
+    the SPA hides LLM-only affordances instead of offering ones that cannot answer.
+    ``weather_enabled`` carries the one feature flag a screen must know before it
+    fetches: with it off, Why mounts no weather panel and requests nothing. Only
+    UI-gating flags are published here."""
     enabled, _ = auth_status()
     return {
         "auth_enabled": enabled,
@@ -440,6 +444,7 @@ async def config():
         "login_required": await enforcement_active(),
         "feedback_url": feedback_url(),
         "llm_enabled": llm_available() and await aflag("ask_llm_enabled"),
+        "weather_enabled": await aflag("weather_ingest_enabled"),
     }
 
 
