@@ -86,9 +86,25 @@ describe("scopeTokens", () => {
     expect(tokens("ja").map((tok) => tok.key)).not.toContain("service");
     expect(labels("ja", { service: "平日", stop: "S1", dir: 0 }).slice(5, 8)).toEqual([
       "service=平日ダイヤ",
-      "stop=停留所 S1",
-      "dir=方向 0",
+      "stop=選択した停留所",
+      "dir=片方向",
     ]);
+  });
+
+  it("names the stop from the static GTFS and shows no id to a reader", () => {
+    const t = i18n.getFixedT("en");
+    const scope = { ...base, stop: "S1", dir: 0 as const };
+    const phrases = { t, agencyName: "A", routeLabel: (c: string) => c, stopName: (id: string) => (id === "S1" ? "Central Station" : undefined) };
+    const read = (ctx: object) => scopeTokens(scope, { ...phrases, ...ctx }).filter((tok) => tok.key === "stop" || tok.key === "dir").map((tok) => tok.label);
+    expect(read({})).toEqual(["Central Station", "one direction"]);
+    expect(read({ stopName: () => undefined })).toEqual(["selected stop", "one direction"]);
+  });
+
+  it("keeps the ids for an admin as secondary text after the words", () => {
+    const t = i18n.getFixedT("en");
+    const phrases = { t, agencyName: "A", routeLabel: (c: string) => c, showIds: true, stopName: () => "Central Station" };
+    const labelsOf = scopeTokens({ ...base, stop: "S1", dir: 1 }, phrases).filter((tok) => tok.key === "stop" || tok.key === "dir").map((tok) => tok.label);
+    expect(labelsOf).toEqual(["Central Station (S1)", "one direction (1)"]);
   });
 
   it("adds the early tolerance only when set, after direction and before the late tolerance", () => {

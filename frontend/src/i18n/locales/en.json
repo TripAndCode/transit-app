@@ -939,7 +939,6 @@
       "eyebrow": "SELECT DIRECTION AND TRIP",
       "trip_count": "{{count}} trips",
       "direction_label": "Direction",
-      "direction_number": "Direction {{direction}}",
       "unknown_direction": "Direction unknown",
       "departure": "{{time}} departure",
       "reported": "Last report {{when}}",
@@ -957,7 +956,9 @@
       "chart_label": "Delay progression by stop",
       "growth": "{{delay}} increase at {{stop}}",
       "recovery": "{{delay}} min recovered at {{stop}}",
-      "none_reporting": "Trips appear here as soon as they report."
+      "none_reporting": "Trips appear here as soon as they report.",
+      "direction_unnamed": "Direction {{letter}}",
+      "direction_unnamed_admin": "Direction {{letter}} (direction_id {{id}})"
     },
     "queue": {
       "location_unavailable": "Stop location unavailable"
@@ -1506,7 +1507,8 @@
       "feed_unsupported": "Arrival times and related records can't be taken from this agency's feed, so this can't be shown.",
       "probe_refuted": "The last check ({{date}}) found that this agency's feed doesn't send the fields this needs, so it isn't shown.",
       "probe_expired": "The check of this feed's arrival times and related data has expired, so this isn't shown until it is re-checked (last checked {{date}}).",
-      "never_probed": "Whether this agency's feed sends arrival times and related data hasn't been checked yet, so this isn't shown."
+      "never_probed": "Whether this agency's feed sends arrival times and related data hasn't been checked yet, so this isn't shown.",
+      "reader_unavailable": "This can't be shown for this agency's feed right now."
     },
     "status": {
       "unsupported": "Not supported",
@@ -1514,7 +1516,8 @@
       "unchecked": "Not checked",
       "not_set": "Not set up",
       "not_applicable": "Not applicable",
-      "no_observations": "No observations"
+      "no_observations": "No observations",
+      "unavailable": "Not available"
     },
     "why": {
       "not_shown_title": "Analyses not shown"
@@ -2436,8 +2439,6 @@
     "hours": "{{from}}:00–{{to}}:59",
     "hour_single": "{{h}}:00–{{h}}:59",
     "service": "{{value}} timetable",
-    "stop": "stop {{id}}",
-    "dir": "direction {{dir}}",
     "duration_min": "{{n}}\u00a0min",
     "duration_sec": "{{n}}\u00a0s",
     "tolerance_min": "within {{n}} min",
@@ -2494,7 +2495,10 @@
       "tolerance": "On-time tolerance"
     },
     "unapplied_note": "Not used on this screen: {{list}}",
-    "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]"
+    "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]",
+    "stop_unnamed": "selected stop",
+    "dir_unnamed": "one direction",
+    "with_id": "{{label}} ({{id}})"
   },
   "print": {
     "generated_at": "Generated {{time}}",

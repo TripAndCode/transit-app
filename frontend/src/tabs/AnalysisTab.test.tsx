@@ -10,6 +10,7 @@ import * as client from "../api/client";
 import { ApiError } from "../api/client";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
+import * as config from "../api/config";
 import * as snapshots from "../api/snapshots";
 import { AnalysisTab } from "./AnalysisTab";
 import { PrintFootProvider, PrintFrame } from "../components/PrintFrame";
@@ -26,6 +27,10 @@ beforeEach(() => {
   const loading = { data: undefined, isLoading: true, error: null, refetch: vi.fn() } as never;
   vi.spyOn(hooks, "useWeatherDelay").mockReturnValue(loading);
   vi.spyOn(hooks, "useHeadwayQuality").mockReturnValue(loading);
+  // Weather is flag-gated and the probe wording is admin-only; the tests below
+  // read the full-featured screen unless one says otherwise.
+  vi.spyOn(config, "useFeatureOn").mockReturnValue(true);
+  vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
 });
 
 const DEFINITION: DefinitionMeta = {

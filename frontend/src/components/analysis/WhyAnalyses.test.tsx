@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import * as hooks from "../../api/hooks";
+import * as config from "../../api/config";
+import * as isAdmin from "../../api/useIsAdmin";
 import type { DwellRunPayload, HeadwayQualityResponse, WeatherDelayResponse } from "../../api/types";
 import { WhyAnalyses } from "./WhyAnalyses";
 
@@ -68,7 +70,14 @@ function unavailableDwell(reason: DwellRunPayload["unavailable_reason"], lastChe
   return { available: false, time_band_supported: true, routes: [], unavailable_reason: reason, last_checked: lastChecked };
 }
 
-function show(payload: DwellRunPayload, weather: WeatherDelayResponse, headway: HeadwayQualityResponse) {
+function show(
+  payload: DwellRunPayload,
+  weather: WeatherDelayResponse,
+  headway: HeadwayQualityResponse,
+  { admin = true, weatherOn = true }: { admin?: boolean; weatherOn?: boolean } = {},
+) {
+  vi.spyOn(config, "useFeatureOn").mockReturnValue(weatherOn);
+  vi.spyOn(isAdmin, "useIsAdmin").mockReturnValue(admin);
   // The agency catalogue answered without a tier for this agency, unless a test set one.
   if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
@@ -198,5 +207,52 @@ describe("WhyAnalyses", () => {
         "The last check (Sep 11, 2026) found that this agency's feed doesn't send the fields this needs, so it isn't shown.",
       ),
     ).toBeInTheDocument();
+  });
+
+  describe("for a reader who is not an admin", () => {
+    const READER = { admin: false };
+    const UNAVAILABLE = "This can't be shown for this agency's feed right now.";
+
+    it("words a lapsed or never-run check as one neutral line, with no probe state, date or re-check", () => {
+      show(unavailableDwell(EXPIRED, "2026-09-11"), NO_STATION, { rows: [], ctx: CTX, unavailable_reason: "never_probed", last_checked: null }, READER);
+
+      for (const name of ["Dwell/running time", "Headway quality"]) {
+        expect(within(row(name)).getByText("Not available")).toBeInTheDocument();
+        expect(within(row(name)).getByText(UNAVAILABLE)).toBeInTheDocument();
+      }
+      expect(screen.queryByText("Needs re-check")).not.toBeInTheDocument();
+      expect(screen.queryByText("Not checked")).not.toBeInTheDocument();
+      expect(screen.queryByText(/re-checked|checked yet|last checked/)).not.toBeInTheDocument();
+    });
+
+    it("keeps the feed fact for an unsupported feed but not the check's date for a refuted one", () => {
+      show(unavailableDwell("probe_refuted", "2026-09-11"), WEATHER, HEADWAY, READER);
+      expect(within(row("Dwell/running time")).getByText("Not available")).toBeInTheDocument();
+      expect(
+        within(row("Dwell/running time")).getByText(
+          "Arrival times and related records can't be taken from this agency's feed, so this can't be shown.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Sep 11, 2026/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("when the weather flag is off", () => {
+    it("mounts no weather panel and lists no weather gap, even for a payload that has data", () => {
+      show(DWELL, WEATHER, HEADWAY, { weatherOn: false });
+      expect(screen.queryByText("Station: Example Station")).not.toBeInTheDocument();
+      expect(screen.queryByText("Rain vs. dry average delay")).not.toBeInTheDocument();
+      expect(vi.mocked(hooks.useWeatherDelay)).toHaveBeenCalledWith(1, expect.anything(), false);
+    });
+
+    it("lists no weather gap for a payload that would have been one", () => {
+      show(DWELL, NO_STATION, HEADWAY, { weatherOn: false });
+      expect(screen.queryByRole("region", { name: "Analyses not shown" })).not.toBeInTheDocument();
+    });
+
+    it("mounts the panel when the flag is on", () => {
+      show(DWELL, WEATHER, HEADWAY, { weatherOn: true });
+      expect(screen.getByText("Station: Example Station")).toBeInTheDocument();
+    });
   });
 });

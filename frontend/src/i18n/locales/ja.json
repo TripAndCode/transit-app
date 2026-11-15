@@ -939,7 +939,6 @@
       "eyebrow": "方面・便を選択",
       "trip_count": "{{count}}便",
       "direction_label": "方面",
-      "direction_number": "方向 {{direction}}",
       "unknown_direction": "方面不明",
       "departure": "{{time}}発",
       "reported": "最新報告 {{when}}",
@@ -957,7 +956,9 @@
       "chart_label": "停留所ごとの遅延推移",
       "growth": "{{stop}}で {{delay}}拡大",
       "recovery": "{{stop}}で {{delay}}分回復",
-      "none_reporting": "走行中の便が報告し始めると、ここに表示されます。"
+      "none_reporting": "走行中の便が報告し始めると、ここに表示されます。",
+      "direction_unnamed": "方向{{letter}}",
+      "direction_unnamed_admin": "方向{{letter}}（direction_id {{id}}）"
     },
     "queue": {
       "location_unavailable": "停留所位置を解決できません"
@@ -1506,7 +1507,8 @@
       "feed_unsupported": "この事業者のフィードからは到着時刻などの記録を取り込めないため、表示できません。",
       "probe_refuted": "最終確認（{{date}}）で、この事業者のフィードがこの分析に必要な項目を送っていないと分かったため、表示していません。",
       "probe_expired": "到着時刻などのデータの確認期限が切れているため、再確認が済むまで表示していません（最終確認：{{date}}）。",
-      "never_probed": "この事業者のフィードが到着時刻などを送っているかをまだ確認していないため、表示していません。"
+      "never_probed": "この事業者のフィードが到着時刻などを送っているかをまだ確認していないため、表示していません。",
+      "reader_unavailable": "この事業者のフィードでは、現在この分析を表示できません。"
     },
     "status": {
       "unsupported": "非対応",
@@ -1514,7 +1516,8 @@
       "unchecked": "未確認",
       "not_set": "未設定",
       "not_applicable": "対象外",
-      "no_observations": "観測なし"
+      "no_observations": "観測なし",
+      "unavailable": "表示できません"
     },
     "why": {
       "not_shown_title": "表示できない分析"
@@ -2436,8 +2439,6 @@
     "hours": "{{from}}時〜{{to}}時台",
     "hour_single": "{{h}}時台",
     "service": "{{value}}ダイヤ",
-    "stop": "停留所 {{id}}",
-    "dir": "方向 {{dir}}",
     "duration_min": "{{n}}分",
     "duration_sec": "{{n}}秒",
     "tolerance_min": "{{n}}分以内",
@@ -2494,7 +2495,10 @@
       "tolerance": "定時の幅"
     },
     "unapplied_note": "この画面では使いません：{{list}}",
-    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る"
+    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
+    "stop_unnamed": "選択した停留所",
+    "dir_unnamed": "片方向",
+    "with_id": "{{label}}（{{id}}）"
   },
   "print": {
     "generated_at": "作成日時 {{time}}",

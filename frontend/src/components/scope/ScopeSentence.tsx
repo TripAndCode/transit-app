@@ -14,6 +14,7 @@ import {
 import { useAgencyId } from "../../api/useAgencyId";
 import type { ScopeSummary } from "../../api/types";
 import { useRouteNames } from "../../api/useRouteNames";
+import { usePlaceLabels } from "../../api/usePlaceLabels";
 import { PresetMenu } from "../PresetMenu";
 import { CONTROLS } from "./controlForToken";
 import { ScopePopover } from "./ScopePopover";
@@ -159,6 +160,7 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
   const dataEnd = use(DataEndContext);
   const slot = useScopeActionsSlot();
   const names = useRouteNames(id);
+  const place = usePlaceLabels(id, scope.stop);
   const [openKey, setOpenKey] = useState<ConditionKey | null>(null);
   const [pinned, setPinned] = useState(readScopePinned);
   const sectionRef = useRef<HTMLElement>(null);
@@ -170,6 +172,7 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
     routeLabel: names.format,
     routeGroup: (code: string) => names.data.get(code),
     routePlate: (code: string) => names.parts.get(code)?.plate ?? null,
+    ...place,
   };
   const tokens = scopeTokens(scope, phrases);
   // The data's last day, which ends the default period, arrives with the

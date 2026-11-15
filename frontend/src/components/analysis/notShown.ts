@@ -29,15 +29,30 @@ const COVERAGE_TEXT = {
   never_probed: "reports.coverage.never_probed",
 } as const satisfies Record<CoverageGapReason, string>;
 
+/** What a reader is told in place of a probe state: the check's schedule is
+ *  the operator's business, so a reader gets either the fact about the feed
+ *  or one neutral line that claims nothing about any check. */
+const READER_STATUS = "reports.status.unavailable";
+const READER_TEXT = {
+  feed_unsupported: "reports.coverage.feed_unsupported",
+  probe_refuted: "reports.coverage.feed_unsupported",
+  probe_expired: "reports.coverage.reader_unavailable",
+  never_probed: "reports.coverage.reader_unavailable",
+} as const satisfies Record<CoverageGapReason, string>;
+
 /** A basic-tier feed can't support any analysis the coverage gate guards,
  *  so its tier is the true cause, whatever state the gate reports. Until
  *  the tier is known no cause is stated, so a pipeline reason never shows
- *  for a moment before the tier replaces it. */
+ *  for a moment before the tier replaces it. Past the tier, only an admin
+ *  is shown the probe state itself (its status, its check date); the
+ *  analysis is not shown to a reader either way, so the gap keeps its
+ *  place and only its wording changes. */
 function coverageNotShown(
   t: TFunction,
   reason: CoverageGapReason,
   lastChecked: string | null | undefined,
   tier: TierState,
+  isAdmin: boolean,
 ): NotShown {
   if (tier === "basic") {
     return { status: t("capability.basic.status"), text: t("capability.basic.reason") };
@@ -45,6 +60,7 @@ function coverageNotShown(
   if (tier === "loading") {
     return { status: t("capability.loading.status"), text: t("capability.loading.text") };
   }
+  if (!isAdmin) return { status: t(READER_STATUS), text: t(READER_TEXT[reason]) };
   return {
     status: t(COVERAGE_STATUS[reason]),
     text: t(COVERAGE_TEXT[reason], { date: lastChecked ? formatDate(lastChecked) : "" }),
@@ -60,6 +76,7 @@ export function dwellNotShown(
   t: TFunction,
   payload: DwellRunPayload | undefined,
   tier: TierState,
+  isAdmin: boolean,
 ): NotShown | null {
   const reason = payload?.unavailable_reason;
   if (payload?.available) {
@@ -72,6 +89,7 @@ export function dwellNotShown(
     reason == null || reason === "no_paired_samples" ? "never_probed" : reason,
     payload?.last_checked,
     tier,
+    isAdmin,
   );
 }
 
@@ -82,13 +100,14 @@ export function headwayNotShown(
   t: TFunction,
   data: HeadwayQualityResponse,
   tier: TierState,
+  isAdmin: boolean,
 ): NotShown | null {
   const reason = data.unavailable_reason;
   if (data.rows.length > 0 || reason == null) return null;
   if (reason === "no_high_frequency_routes") {
     return { status: t("reports.status.not_applicable"), text: t("reports.headway_quality.no_high_frequency_routes") };
   }
-  return coverageNotShown(t, reason, data.last_checked, tier);
+  return coverageNotShown(t, reason, data.last_checked, tier, isAdmin);
 }
 
 /** The rain comparison can't be shown at all without a weather station. A

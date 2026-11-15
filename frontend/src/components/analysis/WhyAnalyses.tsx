@@ -8,6 +8,8 @@ import { useId } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useHeadwayQuality, useWeatherDelay } from "../../api/hooks";
+import { useFeatureOn } from "../../api/config";
+import { useIsAdmin } from "../../api/useIsAdmin";
 import { scopeToQueryString, useScope } from "../../api/scope";
 import type { DwellRunPayload } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
@@ -31,12 +33,14 @@ type NotShownItem = NotShown & { key: string; name: string };
 export function WhyAnalyses({ aid, payload }: { aid: number; payload: DwellRunPayload | undefined }) {
   const { t } = useTranslation();
   const [ctx] = useScope();
-  const weather = useWeatherDelay(aid, ctx, true);
+  const isAdmin = useIsAdmin();
+  const weatherOn = useFeatureOn("weather_enabled");
+  const weather = useWeatherDelay(aid, ctx, weatherOn);
   const headway = useHeadwayQuality(aid, ctx, true);
   const tier = useCapabilityTier(aid);
-  const dwellGap = dwellNotShown(t, payload, tier);
-  const weatherGap = weather.data ? weatherNotShown(t, weather.data) : null;
-  const headwayGap = headway.data ? headwayNotShown(t, headway.data, tier) : null;
+  const dwellGap = dwellNotShown(t, payload, tier, isAdmin);
+  const weatherGap = weatherOn && weather.data ? weatherNotShown(t, weather.data) : null;
+  const headwayGap = headway.data ? headwayNotShown(t, headway.data, tier, isAdmin) : null;
   const notShown = [
     dwellGap && { key: "dwell_run", name: reportLabel(t, "dwell_run"), ...dwellGap },
     weatherGap && { key: "weather", name: t("reports.weather_delay.title"), ...weatherGap },
@@ -46,7 +50,7 @@ export function WhyAnalyses({ aid, payload }: { aid: number; payload: DwellRunPa
   return (
     <>
       {!dwellGap && <DwellRunBlock payload={payload} />}
-      {!weatherGap && <WeatherDelayPanel aid={aid} ctx={ctx} />}
+      {weatherOn && !weatherGap && <WeatherDelayPanel aid={aid} ctx={ctx} />}
       {!headwayGap && <HeadwayQualityPanel aid={aid} ctx={ctx} />}
       {notShown.length > 0 && <NotShownList items={notShown} aid={aid} offerElsewhere={dwellGap != null} />}
     </>

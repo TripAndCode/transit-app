@@ -113,7 +113,13 @@ What the user sees/does:
   partial and awaits the daily re-probe) or `never_probed`, with the JST day
   of the last probe in `last_checked`. A time-band filter this decomposition
   can't serve (`time_band_supported: false`) gets its own `EmptyState`;
-  neither state is ever drawn as a misleading zero. `/headway_quality`
+  neither state is ever drawn as a misleading zero. Only an admin is shown the
+  probe state itself (its status chip and check date); a reader gets
+  "Not available" and one neutral line, and `feed_unsupported` /
+  `probe_refuted` read as the feed fact without the date. Why's rain panel and
+  the ML forecast mark mount only while `GET /api/config` reports
+  `weather_enabled` / `ml_forecast_enabled`; until it answers, or while the
+  flag is off, they neither mount nor fetch. `/headway_quality`
   carries the same two fields, and names `no_high_frequency_routes` ahead of
   any coverage reason when no timetable in force over the period classes a
   route high-frequency (the loaded one standing in where those are unknown).

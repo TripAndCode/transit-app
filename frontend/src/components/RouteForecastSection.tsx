@@ -48,6 +48,7 @@ import {
   type ForecastOverviewWorst,
 } from "../api/types";
 import { WEEK } from "../utils/week";
+import { useFeatureOn } from "../api/config";
 import "./RouteForecastSection.css";
 
 type Tip = { x: number; y: number; text: string } | null;
@@ -613,6 +614,11 @@ function RoutePicker({
  *  seasonal baseline; rendered once per view, never per cell. The model
  *  evaluation page is an admin page, so only an admin gets the link to it. */
 function MlForecastChip({ aid }: { aid: number }) {
+  const mlOn = useFeatureOn("ml_forecast_enabled");
+  return mlOn ? <MlForecastChipBody aid={aid} /> : null;
+}
+
+function MlForecastChipBody({ aid }: { aid: number }) {
   const { t } = useTranslation();
   const isAdmin = useIsAdmin();
   return (

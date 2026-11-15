@@ -5,6 +5,7 @@ import { useAgencies } from "../api/hooks";
 import { useScope } from "../api/scope";
 import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
+import { usePlaceLabels } from "../api/usePlaceLabels";
 import { formatDateTime } from "../utils/format";
 import { PrintFootSlotContext } from "./printFootSlot";
 import { scopeTitle } from "./scope/scopePhrases";
@@ -49,10 +50,11 @@ export function PrintFrame() {
   const agencyName = useAgencies().data?.find((a) => a.agency_id === agencyId)?.agency_name ?? "";
   const [scope] = useScope();
   const names = useRouteNames(agencyId);
+  const { stopName } = usePlaceLabels(agencyId, scope.stop);
   const printedAt = usePrintedAt();
   if (agencyId == null) return null;
 
-  const conditions = scopeTitle(scope, { t, agencyName, routeLabel: names.format });
+  const conditions = scopeTitle(scope, { t, agencyName, routeLabel: names.format, stopName });
   const named = scope.routes.length > 0 && scope.routes.length <= MAX_NAMED_ROUTES;
   return (
     <div className="print-frame" data-testid="print-frame">

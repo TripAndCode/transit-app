@@ -23,6 +23,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import { SHARED_TABLE, th, td } from "./tableStyles";
 import { formatNumber, fmtRatioPct } from "../utils/format";
 import { DAY_TYPE_KEY } from "./dayTypeKey";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { headwayNotShown } from "./analysis/notShown";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
@@ -40,8 +41,9 @@ export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
   const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);
   const tier = useCapabilityTier(aid);
+  const isAdmin = useIsAdmin();
   return (
-    <HeadwayQualityView data={data} isLoading={isLoading} error={error} onRetry={() => void refetch()} routeNames={routeNames} tier={tier} />
+    <HeadwayQualityView isAdmin={isAdmin} data={data} isLoading={isLoading} error={error} onRetry={() => void refetch()} routeNames={routeNames} tier={tier} />
   );
 }
 
@@ -55,6 +57,7 @@ export function HeadwayQualityView({
   onRetry,
   routeNames,
   tier,
+  isAdmin = false,
 }: {
   data: HeadwayQualityResponse | undefined;
   isLoading?: boolean;
@@ -62,9 +65,11 @@ export function HeadwayQualityView({
   onRetry?: () => void;
   routeNames: RouteNames;
   tier: TierState;
+  /** Whether the viewer may see the probe state; a stored snapshot is read by anyone, so it is off there. */
+  isAdmin?: boolean;
 }) {
   const { t } = useTranslation();
-  const notShown = data ? headwayNotShown(t, data, tier) : null;
+  const notShown = data ? headwayNotShown(t, data, tier, isAdmin) : null;
 
   return (
     <div style={{ marginTop: 20, background: "var(--bg-surface)", border: "1px solid var(--border-soft)", borderRadius: "var(--radius)", padding: 16 }}>
