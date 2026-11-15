@@ -73,7 +73,7 @@ describe("AskTab layout", () => {
   it("renders the question composer above the landing cards when there are no messages", () => {
     const { container } = renderAskTab();
     const dock = container.querySelector(".ask-tool-menu");
-    const landing = screen.getByText(new RegExp("^Pick a ready-made investigation$"));
+    const landing = screen.getByText(new RegExp("^Pick a ready-made analysis$"));
     expect(dock).toBeInTheDocument();
     // DOCUMENT_POSITION_FOLLOWING (4) on dock.compareDocumentPosition(landing)
     // means the landing follows the dock in the DOM, so the dock comes first
@@ -207,9 +207,9 @@ describe("AskTab investigations", () => {
     return renderAskTab("/agencies/5/ask?conversation=t1");
   }
 
-  it("says an opened investigation has no questions yet, instead of looking unopened", () => {
+  it("says an opened investigation has no steps yet, instead of looking unopened", () => {
     openInvestigation([]);
-    expect(screen.getByText("This investigation has no steps yet. Pick an investigation card to start.")).toBeInTheDocument();
+    expect(screen.getByText("This investigation has no steps yet. Pick an analysis card to start.")).toBeInTheDocument();
   });
 
   it("offers to start an analysis, not another one, before the first", () => {
@@ -307,7 +307,7 @@ describe("AskTab dispatch failures", () => {
   });
 
   function firstInstantCard() {
-    const landing = screen.getByText("Pick a ready-made investigation").parentElement!.parentElement!;
+    const landing = screen.getByText("Pick a ready-made analysis").parentElement!.parentElement!;
     const card = landing.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0];
     expect(card).toBeDefined();
     return card;
@@ -388,7 +388,7 @@ describe("AskTab unsaved filter edits", () => {
   }
 
   function firstInstantCard() {
-    const landing = screen.getByText("Pick a ready-made investigation").parentElement!.parentElement!;
+    const landing = screen.getByText("Pick a ready-made analysis").parentElement!.parentElement!;
     return landing.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0];
   }
 

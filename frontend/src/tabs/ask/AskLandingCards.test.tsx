@@ -138,10 +138,10 @@ describe("AskLandingCards", () => {
     expect(screen.getByText(/least on-time routes$/)).toBeInTheDocument();
   });
 
-  it("heads the page as a choice among ready-made investigations, since it has no box to type one into", () => {
+  it("heads the page as a choice among ready-made analyses, since it has no box to type one into", () => {
     setup();
-    expect(screen.getByText("Pick a ready-made investigation")).toBeInTheDocument();
-    expect(i18n.getFixedT("ja")("ask.landing.header_title")).toBe("用意された調査から選んで調べる");
+    expect(screen.getByText("Pick a ready-made analysis")).toBeInTheDocument();
+    expect(i18n.getFixedT("ja")("ask.landing.header_title")).toBe("用意された分析から選ぶ");
   });
 
   it("describes the on-time card's answer in the order the card asks for, least on time first", () => {

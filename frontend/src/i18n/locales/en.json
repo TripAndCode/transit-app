@@ -164,7 +164,7 @@
       },
       "ask": {
         "title": "The notebook, with evidence",
-        "body": "The same evidence view the investigation notebook shows for each result — not a screenshot. Select a stop below to see it."
+        "body": "The same evidence view the notebook shows for each result — not a screenshot. Select a stop below to see it."
       },
       "sample_caption": "Sample data · fictional {{route}}"
     }
@@ -185,7 +185,7 @@
     },
     "ask": {
       "title": "Search and open the notebook",
-      "body": "Find routes, reports and screens from here. The same field opens the investigation notebook, which holds ready-made investigations of delay as tables and charts."
+      "body": "Find routes, reports and screens from here. The same field opens the notebook, which holds ready-made analyses of delay as tables and charts."
     }
   },
   "forecast": {
@@ -999,13 +999,13 @@
       "saved_result_notice": "Previously returned results — opening a step does not fetch new data. The filters above apply to your next analysis, not necessarily this result.",
       "full_log": "Full conversation",
       "new_analysis_first": "Start an analysis",
-      "no_questions": "This investigation has no steps yet. Pick an investigation card to start."
+      "no_questions": "This investigation has no steps yet. Pick an analysis card to start."
     },
     "thinking": "Thinking...",
     "dock": {
       "run": "Run",
-      "chip_strip_aria": "Investigation picker",
-      "chip_strip_idle_hint": "Click to pick an investigation",
+      "chip_strip_aria": "Analysis picker",
+      "chip_strip_idle_hint": "Click to pick an analysis",
       "required_marker": "*",
       "running": "Running..."
     },
@@ -1180,10 +1180,10 @@
       }
     },
     "landing": {
-      "header_title": "Pick a ready-made investigation",
+      "header_title": "Pick a ready-made analysis",
       "header_subtitle": "Pick a route or stop and see the result right away",
       "cards_title": "Run at once",
-      "pills_title": "More investigations"
+      "pills_title": "More analyses"
     }
   },
   "reports": {
@@ -2263,7 +2263,7 @@
     "nav_why_sublabel": "What the data can and can't explain",
     "nav_compare_sublabel": "Weekdays against weekends and holidays, and agencies against each other",
     "nav_reports_sublabel": "Documents to hand to someone",
-    "nav_ask_sublabel": "Investigation notebook: ready-made investigations, saved and exportable",
+    "nav_ask_sublabel": "Ready-made analyses, saved and exportable",
     "group": {
       "recent": "Recent",
       "nav": "Go to",

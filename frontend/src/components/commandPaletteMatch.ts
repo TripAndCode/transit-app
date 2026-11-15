@@ -12,7 +12,12 @@ import { searchKey } from "../utils/searchText";
 export type Searchable = {
   label: string;
   sublabel?: string;
+  /** Search-only aliases, never shown: a match scores below any label or
+   *  sublabel match. */
+  keywords?: readonly string[];
 };
+
+const KEYWORD_PENALTY = 150;
 
 /**
  * Score `target` against `query` (already trimmed, expected non-empty), or
@@ -43,9 +48,12 @@ function scoreKey(q: string, target: string): number | null {
 function bestScore(item: Searchable, queryKey: string): number | null {
   const labelScore = scoreKey(queryKey, item.label);
   const subScore = item.sublabel ? scoreKey(queryKey, item.sublabel) : null;
-  if (labelScore == null) return subScore;
-  if (subScore == null) return labelScore;
-  return Math.max(labelScore, subScore);
+  let best = labelScore == null ? subScore : subScore == null ? labelScore : Math.max(labelScore, subScore);
+  for (const keyword of item.keywords ?? []) {
+    const s = scoreKey(queryKey, keyword);
+    if (s != null && (best == null || s - KEYWORD_PENALTY > best)) best = s - KEYWORD_PENALTY;
+  }
+  return best;
 }
 
 /**

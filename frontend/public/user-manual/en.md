@@ -18,7 +18,7 @@ The screenshots were taken with real data from Aomori City Bus (青森市バス)
 8. [Compare — side by side](#8-compare--side-by-side)
 9. [Live — the trips running now](#9-live--the-trips-running-now)
 10. [Reports — documents to hand on](#10-reports--documents-to-hand-on)
-11. [Notebook — ready-made investigations](#11-notebook--ready-made-investigations)
+11. [Notebook — ready-made analyses](#11-notebook--ready-made-analyses)
 12. [Model evaluation — how the forecast model is checked](#12-model-evaluation--how-the-forecast-model-is-checked)
 13. [Glossary](#13-glossary)
 
@@ -61,7 +61,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Compare** | Weekdays against weekends and holidays route by route, and agencies against each other |
 | **Live** | The trips running now |
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
-| **Notebook** | Ready-made investigations of delay, run as tables and charts, saved as threads you can export |
+| **Notebook** | Ready-made analyses of delay, run as tables and charts, saved as investigations you can export |
 
 Under **Other** are **Help** (this manual) and **About this app**, plus **Send feedback** when this site offers a way to send it; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
 
@@ -399,34 +399,34 @@ For staff, “Late departures (delay at each trip's first recorded stop)” open
 
 ---
 
-## 11. Notebook — ready-made investigations
+## 11. Notebook — ready-made analyses
 
-The investigation notebook holds ready-made investigations of delay. Each one is a card that runs a fixed analysis and shows a table or chart, so you do not have to find the right report first. Each result is kept as a step in a saved thread, with exports and the evidence behind it. You pick a card; you do not type a question. Open it with **Notebook** in the sidebar, below the screens.
+The investigation notebook holds ready-made analyses of delay. Each one is a card that runs a fixed analysis and shows a table or chart, so you do not have to find the right report first. Each result is kept as a step in a saved thread, with exports and the evidence behind it. You pick a card; you do not type a question. Open it with **Notebook** in the sidebar, below the screens.
 
 ![Notebook](./12-ask-landing.en.png)
 
-### 11-1. Running an investigation
+### 11-1. Running an analysis
 
-- The bar at the top shows the period and routes your investigations will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
+- The bar at the top shows the period and routes your analyses will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
 - Under “Run at once”, a card runs immediately: “5 most delayed routes” or “5 least on-time routes”.
-- Under “More investigations”, each one needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
-- After the first result, open **Start another analysis** at the bottom to see every investigation. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes investigation.
+- Under “More analyses”, each one needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
+- After the first result, open **Start another analysis** at the bottom to see every analysis. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes analysis.
 
 ### 11-2. Reading the result
 
 ![Notebook result](./13-ask-answer.en.png)
 
-- The investigation heads the result, with the table or chart under it.
+- The analysis name heads the result, with the table or chart under it.
 - “Where this result comes from” names the route, the conditions and how the figures were made. A “SQL only” badge means they were computed directly from the data; “LLM” marks a summary written by a language model from a result already fetched.
-- Buttons under the answer suggest next steps, such as “View morning peak only”, “View on the map”, “Compare with two weeks ago” and “Save as PNG”.
+- Buttons under the result suggest next steps, such as “View morning peak only”, “View on the map”, “Compare with two weeks ago” and “Save as PNG”.
 - “Download result (JSON)”, and a CSV for each table, save the result.
-- Each investigation you run becomes a step of the thread. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
+- Each analysis you run becomes a step of the investigation. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
 
 ### 11-3. Optional: a follow-up question in your own words
 
 The notebook works without this. Where it is available to your account, a box under the latest result, “Ask about this result...”, takes a follow-up question in your own words. Press the send button (the paper-plane icon) for an answer grounded in the result on screen. As the note under the box says, the AI runs only when you send, and it answers from the stored result without fetching new data. For a stop-by-stop answer, select a stop first.
 
-The box is for digging into the result already on screen; to start a new ranking, use an investigation card instead. If an answer cannot be produced, a message says why — the question is too long, traffic is high, or the connection dropped — so shorten the question, wait a moment, or try again.
+The box is for digging into the result already on screen; to start a new ranking, use an analysis card instead. If an answer cannot be produced, a message says why — the question is too long, traffic is high, or the connection dropped — so shorten the question, wait a moment, or try again.
 
 When the box is not shown, free-text follow-ups are not available to your account. The investigation cards still work, because they are computed directly from the data.
 
@@ -434,7 +434,7 @@ When the box is not shown, free-text follow-ups are not available to your accoun
 
 “Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Without signing in, investigations are kept only in the browser where you ran them.
 
-If you are not sure which report to open, picking an investigation in the Notebook is often the quickest way in.
+If you are not sure which report to open, picking an analysis in the Notebook is often the quickest way in.
 
 ---
 

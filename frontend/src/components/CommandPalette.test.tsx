@@ -92,6 +92,14 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/pulse");
   });
 
+  it("still finds the notebook by its former name, typed as 'ask'", async () => {
+    const user = userEvent.setup();
+    renderPalette();
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "ask");
+    expect(screen.getByText("Notebook")).toBeInTheDocument();
+  });
+
   it("shows no-results copy when nothing matches", async () => {
     const user = userEvent.setup();
     renderPalette();

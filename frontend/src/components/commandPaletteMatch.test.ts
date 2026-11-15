@@ -43,6 +43,15 @@ describe("filterItems", () => {
     { label: "42 金沢港〜夕日寺", sublabel: "route_code 42" },
   ];
 
+  it("matches a search-only keyword, ranked below a label match", () => {
+    const list = [
+      { label: "Notebook", keywords: ["ask"] },
+      { label: "Task list" },
+    ];
+    expect(filterItems(list, "ask").map((i) => i.label)).toEqual(["Task list", "Notebook"]);
+    expect(filterItems([list[0]], "zzz")).toEqual([]);
+  });
+
   it("returns every item, unchanged order, for an empty query", () => {
     expect(filterItems(items, "")).toEqual(items);
     expect(filterItems(items, "   ")).toEqual(items);
