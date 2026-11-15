@@ -244,27 +244,19 @@ has. Turning the prune's switch off stops further drops but keeps every floor,
 so the aggregates of the months already dropped stay.
 
 `prune-updates` drops a UTC month of `updates` only when the whole month is
-older than the horizon and, for every agency with rows in it:
+older than the horizon and every agency with rows in it has its dates there
+aggregated and current; a dropped month raises those agencies' floors to just
+past it. `pipeline.retention.plan_updates_prune` states the rules and why each
+holds. A held month names the agency and date that hold it, and holds that
+agency's later months too. A catch-up backfill older than the horizon holds
+its month until analyze has aggregated it.
 
-- every service date its rows in the month are captured on is in its ledger,
-  so no date is left without aggregates. A catch-up backfill older than the
-  horizon holds its month until analyze has aggregated it;
-- every date from its current floor up to the floor the drop sets has the same
-  counts in its ledger as in `updates`, so no stale aggregate is frozen.
-
-A drop sets the floor to the first service date that is whole and whose day
-before is whole too. The day before counts because a stop event can be filed
-under the day after its capture. A month held for one date holds every later
-month of the same agency too. Before each drop, the prune writes off the
-dropped month's refiled dates, and a day either side
-(`pipeline.refiled.rows_rewritten`).
-
-Each run holds the ingest/analyze lock and each affected agency's `updates`
-lock. It records every month it will drop before dropping any, which raises the
-floors. It then drops them one by one and stamps each `dropped_at`. A run that
-fails part-way leaves a `retention` row in `pipeline_runs` with the rows
-dropped so far. The months it did not reach stay in `updates_pruned_months`
-with `dropped_at` empty; their floor stands, and the next run drops them.
+A run that fails part-way leaves a `retention` row in `pipeline_runs` with the
+rows dropped so far. The months it did not reach stay in
+`updates_pruned_months` with `dropped_at` empty. Their floor stands, and the
+next run drops them under a new row. So an empty `dropped_at` means only that
+the run which wrote the row did not confirm the drop; ClickHouse's
+`system.parts` says whether `updates` still holds the month.
 
 To turn it on in production:
 
@@ -282,8 +274,8 @@ To turn it on in production:
    first.
 4. Turn on `updates_prune_enabled` from `/admin/flags`, or set
    `UPDATES_PRUNE_ENABLED=true` on the job that runs the command.
-5. After the first run, check its `retention` row on the board, and that each
-   month in `updates_pruned_months` has `dropped_at` set.
+5. After the first run, check its `retention` row on the board, and that the
+   run's rows in `updates_pruned_months` have `dropped_at` set.
 
 A dropped month's rows come back only by a replay from R2. Its aggregates need
 none.

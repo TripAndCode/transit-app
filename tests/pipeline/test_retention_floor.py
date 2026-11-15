@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from pipeline import ch_aggregates, feed_quality, flags
-from pipeline.analyze import _AGG_TABLES_ORDERED, analyze, mark_for_full_rebuild
+from pipeline.analyze import _AGG_TABLES_ORDERED, _INCREMENTAL_AGG_TABLES, analyze, mark_for_full_rebuild
 from pipeline.clickhouse import insert_updates
 from pipeline.retention import prune_updates, retention_floor
 from tests.pipeline.ch_agg_helpers import ch_rows, seed_schedule, update_row
@@ -16,12 +16,19 @@ from tests.pipeline.ch_agg_helpers import ch_rows, seed_schedule, update_row
 # January partition is past it. Dropping it sets the floor at 2025-02-03.
 _NOW = datetime(2025, 3, 15, tzinfo=timezone.utc)
 _FLOOR = date(2025, 2, 3)
+_DATED = sorted(_INCREMENTAL_AGG_TABLES)
+_UNSEEDED = {"agg_route_headway_daily", "agg_schedule_revision_daily", "agg_service_delivered_daily"}
 
 
-@pytest.fixture
-def pruned(pg_conn, ch_client, agency_id, monkeypatch):
+@pytest.fixture(params=[None, "static_join"])
+def pruned(request, pg_conn, ch_client, agency_id, monkeypatch):
     """An agency analyzed over January, the start of February and March,
-    and the agency's every aggregate row as that analyze left them."""
+    and the agency's every aggregate row as that analyze left them. Under
+    static_join, the builders only that ingest gets run too, and its rows
+    are read filed under the timetable in force."""
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE agencies SET ingest_strategy = %s WHERE agency_id = %s", (request.param, agency_id))
+    pg_conn.commit()
     seed_schedule(pg_conn, agency_id, ["a", "b", "c", "d"])
     insert_updates(
         ch_client,
@@ -40,10 +47,29 @@ def pruned(pg_conn, ch_client, agency_id, monkeypatch):
     )
     analyze(agency_id, pg_conn, ch_client)
     before = _snapshot(pg_conn, ch_client, agency_id)
-    assert any(day < _FLOOR for day in _dates(pg_conn, agency_id, "agg_route_daily")), "nothing below the floor"
+    empty = {table for table, rows in _below_floor(pg_conn, ch_client, agency_id).items() if not rows}
+    # The rest would pass vacuously: these rows need a richer timetable than
+    # seed_schedule's, or static_join for the dwell runs.
+    assert empty == _UNSEEDED | ({"agg_route_daily_dwell_run"} if request.param is None else set())
     monkeypatch.setenv("UPDATES_PRUNE_ENABLED", "true")
     flags.reset_cache()
     return before
+
+
+def _below_floor(pg_conn, ch_client, agency_id) -> dict[str, int]:
+    """How many rows each dated aggregate holds before the floor, the scorecard by month."""
+    counts = {}
+    with pg_conn.cursor() as cur:
+        for table in (*_DATED, feed_quality.TABLE):
+            column = "month" if table == feed_quality.TABLE else "date"
+            cur.execute(f"SELECT count(*) FROM {table} WHERE agency_id = %s AND {column} < %s", (agency_id, _FLOOR))
+            counts[table] = cur.fetchone()[0]
+    for table in ch_aggregates.MONTHLY_TABLES:
+        counts[f"clickhouse {table}"] = ch_client.query(
+            f"SELECT count() FROM {table} WHERE agency_id = {{a:Int32}} AND date < {{floor:Date}}",
+            parameters={"a": agency_id, "floor": _FLOOR},
+        ).result_rows[0][0]
+    return counts
 
 
 def _dates(pg_conn, agency_id, table) -> list[date]:
