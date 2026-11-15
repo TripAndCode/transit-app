@@ -14,16 +14,16 @@ from pipeline.service_day import filed_date_of
 from tests.pipeline.ch_agg_helpers import JST, ch_rows, seed_schedule, update_row
 
 # The prune runs as of mid-March 2025 with a 30-day horizon, so only the
-# January partition is past it. Dropping it sets the floor at 2025-02-02.
+# January partition is past it. Dropping it sets the floor at 2025-03-01.
 _NOW = datetime(2025, 3, 15, tzinfo=timezone.utc)
-_FLOOR = date(2025, 2, 2)
+_FLOOR = date(2025, 3, 1)
 _DATED = sorted(_INCREMENTAL_AGG_TABLES)
 _UNSEEDED = {"agg_route_headway_daily", "agg_schedule_revision_daily", "agg_service_delivered_daily"}
 
 
 @pytest.fixture(params=[None, "static_join"])
 def pruned(request, pg_conn, ch_client, agency_id, monkeypatch):
-    """An agency analyzed over January, the start of February and March,
+    """An agency analyzed over January, February and March,
     and the agency's every aggregate row as that analyze left them. Under
     static_join, the builders only that ingest gets run too, and its rows
     are read filed under the timetable in force."""
@@ -44,6 +44,8 @@ def pruned(request, pg_conn, ch_client, agency_id, monkeypatch):
             update_row(datetime(2025, 2, 1, 12, 0), "c", 45, scheduled_time="12:00:00"),
             update_row(datetime(2025, 2, 2, 9, 0), "c", 50, scheduled_time="09:00:00"),
             update_row(datetime(2025, 2, 5, 8, 0), "d", 15),
+            update_row(datetime(2025, 2, 28, 8, 0), "b", 20, route_code="R2"),
+            update_row(datetime(2025, 3, 1, 9, 0), "c", 55, scheduled_time="09:00:00"),
             update_row(datetime(2025, 3, 10, 8, 0), "a", 75),
         ],
     )
@@ -120,17 +122,33 @@ def test_a_dropped_months_aggregates_survive_a_full_rebuild(pg_conn, ch_client, 
     assert _changed(pruned, _snapshot(pg_conn, ch_client, agency_id)) == []
 
 
-def test_a_full_rebuild_still_rebuilds_the_dates_from_the_floor_on(pg_conn, ch_client, agency_id, pruned):
-    _prune(pg_conn, ch_client)
-    insert_updates(ch_client, agency_id, [update_row(datetime(2025, 2, 5, 8, 30), "d", 600)])
-    mark_for_full_rebuild(pg_conn, [agency_id])
-    analyze(agency_id, pg_conn, ch_client)
+def _ledger_from(pg_conn, agency_id, first: date) -> list[tuple]:
     with pg_conn.cursor() as cur:
         cur.execute(
             "SELECT date, total_rows FROM agg_feed_health WHERE agency_id = %s AND date >= %s ORDER BY date",
-            (agency_id, _FLOOR),
+            (agency_id, first),
         )
-        assert cur.fetchall() == [(_FLOOR, 1), (date(2025, 2, 5), 2), (date(2025, 3, 10), 1)]
+        return cur.fetchall()
+
+
+def test_a_full_rebuild_still_rebuilds_the_dates_from_the_floor_on(pg_conn, ch_client, agency_id, pruned):
+    _prune(pg_conn, ch_client)
+    insert_updates(ch_client, agency_id, [update_row(datetime(2025, 3, 10, 8, 30), "a", 600)])
+    mark_for_full_rebuild(pg_conn, [agency_id])
+    analyze(agency_id, pg_conn, ch_client)
+    assert _ledger_from(pg_conn, agency_id, _FLOOR) == [(_FLOOR, 1), (date(2025, 3, 10), 2)]
+
+
+def test_a_date_past_the_dropped_rows_but_below_the_floor_is_final(pg_conn, ch_client, agency_id, pruned):
+    """`updates` still holds every row of 2025-02-05, yet the floor rounds up
+    to the next month's first, so a row landing there is never aggregated."""
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    before = _final_rows(pg_conn, ch_client, agency_id)
+    insert_updates(ch_client, agency_id, [update_row(datetime(2025, 2, 5, 8, 30), "d", 600)])
+    mark_for_full_rebuild(pg_conn, [agency_id])
+    analyze(agency_id, pg_conn, ch_client)
+    assert _changed(before, _final_rows(pg_conn, ch_client, agency_id)) == []
 
 
 def test_without_a_recorded_drop_analyze_purges_dates_whose_rows_are_gone(pg_conn, ch_client, agency_id, pruned):
@@ -180,16 +198,16 @@ def _delete_route_daily_row(pg_conn, agency_id, *, below_floor: bool) -> None:
         cur.execute(
             "DELETE FROM agg_route_daily WHERE ctid = (SELECT ctid FROM agg_route_daily WHERE agency_id = %s "
             f"AND date {'<' if below_floor else '>='} %s ORDER BY date LIMIT 1)",
-            (agency_id, _FLOOR.replace(day=1) if below_floor else _FLOOR),
+            (agency_id, _FLOOR),
         )
         assert cur.rowcount == 1
     pg_conn.commit()
 
 
-def test_a_store_disagreement_below_the_floors_month_is_final(pg_conn, ch_client, agency_id, pruned):
+def test_a_store_disagreement_below_the_floor_is_final(pg_conn, ch_client, agency_id, pruned):
     """A rebuild repairs only from the floor on, so the comparison that
-    decides one starts at the floor's month: a gap below it is not chased on
-    every run."""
+    decides one starts at the floor: a gap below it is not chased on every
+    run."""
     _prune(pg_conn, ch_client)
     analyze(agency_id, pg_conn, ch_client)
     _delete_route_daily_row(pg_conn, agency_id, below_floor=True)
@@ -214,9 +232,9 @@ def test_the_prune_holds_an_agency_whose_stores_disagree(pg_conn, ch_client, age
     assert retention_floor(pg_conn, agency_id) is None
 
 
-def test_the_prune_holds_a_stale_date_in_the_scorecard_month_the_floor_freezes(pg_conn, ch_client, agency_id, pruned):
-    """The floor lands on 2025-02-02, which freezes February's scorecard row,
-    so a February date analyze has not caught up with holds the drop."""
+def test_the_prune_holds_a_stale_date_the_new_floor_freezes(pg_conn, ch_client, agency_id, pruned):
+    """The floor lands on 2025-03-01, so a February date analyze has not
+    caught up with holds the drop, although `updates` keeps its rows."""
     insert_updates(ch_client, agency_id, [update_row(datetime(2025, 2, 20, 8, 0), "d", 30)])
     result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
     assert result.dropped == []
@@ -263,7 +281,7 @@ def test_a_reading_on_the_floor_date_filed_under_the_day_before_leaves_that_day_
     _prune(pg_conn, ch_client)
     analyze(agency_id, pg_conn, ch_client)
     before = _final_rows(pg_conn, ch_client, agency_id)
-    captured = datetime(2025, 2, 2, 7, 30)
+    captured = datetime(2025, 3, 1, 7, 30)
     scheduled_sec = 3 * 3600 + 50 * 60
     assert filed_date_of(captured.replace(tzinfo=JST), scheduled_sec) == _FLOOR - timedelta(days=1)
     insert_updates(
@@ -285,15 +303,15 @@ def test_a_floor_date_that_lost_rows_leaves_the_day_before_final(pg_conn, ch_cli
         "AND captured_at >= {start:DateTime64} AND captured_at < {end:DateTime64}",
         parameters={
             "agency_id": agency_id,
-            "start": datetime(2025, 2, 2, 4, 0, tzinfo=JST).astimezone(timezone.utc),
-            "end": datetime(2025, 2, 3, 4, 0, tzinfo=JST).astimezone(timezone.utc),
+            "start": datetime(2025, 3, 1, 4, 0, tzinfo=JST).astimezone(timezone.utc),
+            "end": datetime(2025, 3, 2, 4, 0, tzinfo=JST).astimezone(timezone.utc),
         },
     )
     remaining = ch_client.query(
         "SELECT count() FROM updates WHERE agency_id = {agency_id:UInt16} AND trip_id = 'c'",
         parameters={"agency_id": agency_id},
     ).result_rows[0][0]
-    assert remaining == 1  # 2025-02-01's later reading; its earlier one went with January
+    assert remaining == 2  # 2025-02-01's later reading and 2025-02-02's; its earlier one went with January
     analyze(agency_id, pg_conn, ch_client)
     assert _changed(before, _final_rows(pg_conn, ch_client, agency_id)) == []
     with pg_conn.cursor() as cur:
@@ -313,3 +331,62 @@ def test_the_prune_holds_an_agency_with_a_table_awaiting_a_new_fingerprint(pg_co
     result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
     assert result.dropped == []
     assert "agg_stop_daily" in result.verdicts[0].held_by
+
+
+def _pg_route_daily(pg_conn, agency_id, condition: str, day: date) -> list:
+    with pg_conn.cursor() as cur:
+        cur.execute(f"SELECT * FROM agg_route_daily WHERE agency_id = %s AND date {condition} %s", (agency_id, day))
+        return sorted(map(repr, cur.fetchall()))
+
+
+def _delete_ch_route_daily(ch_client, agency_id, day: date | None = None) -> None:
+    """The agency's ClickHouse agg_route_daily rows, of *day* alone when given."""
+    if day is None:
+        ch_client.command("DELETE FROM agg_route_daily WHERE agency_id = {a:Int32}", parameters={"a": agency_id})
+    else:
+        ch_client.command(
+            "DELETE FROM agg_route_daily WHERE agency_id = {a:Int32} AND date = {day:Date}",
+            parameters={"a": agency_id, "day": day},
+        )
+
+
+def test_postgres_keeps_final_rows_clickhouse_lost_in_the_month_before_the_floor(pg_conn, ch_client, agency_id, pruned):
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    before = _pg_route_daily(pg_conn, agency_id, "=", date(2025, 2, 1))
+    assert before
+    _delete_ch_route_daily(ch_client, agency_id, date(2025, 2, 1))
+    mark_for_full_rebuild(pg_conn, [agency_id])
+    analyze(agency_id, pg_conn, ch_client)
+    assert _pg_route_daily(pg_conn, agency_id, "=", date(2025, 2, 1)) == before
+
+
+def test_a_table_clickhouse_rebuilds_from_the_floor_leaves_its_final_postgres_rows(
+    pg_conn, ch_client, agency_id, pruned
+):
+    """As after the table moves to ClickHouse once a floor exists: only the
+    rows from the floor on come back, and Postgres keeps every final one."""
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    final = _pg_route_daily(pg_conn, agency_id, "<", date(2025, 3, 1))
+    rebuilt = _pg_route_daily(pg_conn, agency_id, ">=", date(2025, 3, 1))
+    assert final and rebuilt
+    _delete_ch_route_daily(ch_client, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _pg_route_daily(pg_conn, agency_id, "<", date(2025, 3, 1)) == final
+    assert _pg_route_daily(pg_conn, agency_id, ">=", date(2025, 3, 1)) == rebuilt
+
+
+def test_the_prune_holds_a_reading_on_the_new_floor_date_analyze_has_not_seen(pg_conn, ch_client, agency_id, pruned):
+    """Captured early on 2025-03-01, it files under 2025-02-28, which the drop freezes."""
+    captured = datetime(2025, 3, 1, 7, 30)
+    scheduled_sec = 3 * 3600 + 50 * 60
+    assert filed_date_of(captured.replace(tzinfo=JST), scheduled_sec) == date(2025, 2, 28)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [update_row(captured, "c", 40, scheduled_time="03:50:00", scheduled_sec=scheduled_sec)],
+    )
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    assert result.dropped == []
+    assert "2025-03-01" in result.verdicts[0].held_by
