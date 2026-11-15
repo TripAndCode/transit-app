@@ -18,14 +18,14 @@ PERIOD_ROWS = {
         f"| セッション | 最長{SESSION_TTL_DAYS}日 |",
         f"| ログインの記録 | {PERSONAL_DATA_RETENTION_MONTHS}か月 |",
         f"| 日ごとの利用回数 | {PERSONAL_DATA_RETENTION_MONTHS}か月 |",
-        f"| アカウントと結びつけない「質問」画面の質問文 | {QUERY_LOG_RETENTION_DAYS}日 |",
+        f"| アカウントと結びつけない質問文 | {QUERY_LOG_RETENTION_DAYS}日 |",
         f"| 管理者の操作記録（あなたのアカウントに対する操作を含む） | {ADMIN_AUDIT_RETENTION_DAYS}日 |",
     ],
     "en": [
         f"| Sessions | Up to {SESSION_TTL_DAYS} days |",
         f"| Sign-in history | {PERSONAL_DATA_RETENTION_MONTHS} months |",
         f"| Daily usage counts | {PERSONAL_DATA_RETENTION_MONTHS} months |",
-        f"| Ask questions not linked to your account | {QUERY_LOG_RETENTION_DAYS} days |",
+        f"| Questions not linked to your account | {QUERY_LOG_RETENTION_DAYS} days |",
         f"| The admin action log (including actions on your account) | {ADMIN_AUDIT_RETENTION_DAYS} days |",
     ],
 }
