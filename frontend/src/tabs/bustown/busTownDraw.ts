@@ -1,4 +1,4 @@
-import { isHexColor } from "../../pages/landing/heroMapMath";
+import { isHexColor } from "../../utils/color";
 import { delayColor, DELAY_THRESHOLDS } from "../../styles/tokens";
 import type { BusTownBus, Projection, StopPair, StopPoint } from "./busTownModel";
 

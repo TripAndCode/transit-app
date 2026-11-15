@@ -256,13 +256,7 @@ describe("run against real locale files (temp copies)", () => {
     const ja = JSON.parse(originalJa);
 
     run(["--locales-dir", dir, "scope.duration_min", en.scope.duration_min, ja.scope.duration_min]);
-    run([
-      "--locales-dir",
-      dir,
-      "landing.hero_map.kpi.delayed",
-      en.landing.hero_map.kpi.delayed,
-      ja.landing.hero_map.kpi.delayed,
-    ]);
+    run(["--locales-dir", dir, "scope.duration_sec", en.scope.duration_sec, ja.scope.duration_sec]);
 
     expect(readFileSync(join(dir, "en.json"), "utf8")).toBe(originalEn);
     expect(readFileSync(join(dir, "ja.json"), "utf8")).toBe(originalJa);
