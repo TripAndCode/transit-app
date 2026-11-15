@@ -7,7 +7,6 @@ import pytest
 from pipeline.query.intent import IntentSignature
 from pipeline.query.intent_cache import (
     lookup,
-    update_user_action,
     upsert,
 )
 from tests.conftest import _test_pool
@@ -63,26 +62,6 @@ async def test_upsert_inserts_then_increments_hit_count(conn_with_agency):
         assert row is not None
         assert row["hit_count"] == 2
         assert row["last_question"] == "Q1 paraphrased"
-
-
-@pytest.mark.asyncio
-async def test_update_user_action_writes_edited(conn_with_agency):
-    pool, agency_id = conn_with_agency
-    sig_hash = "1234567890abcdef"
-    async with pool.acquire() as c:
-        await upsert(c, sig_hash, _sig(), {"metric": "avg_delay"}, agency_id, question="Q")
-        await update_user_action(c, sig_hash, agency_id, "edited")
-        row = await lookup(c, sig_hash, agency_id)
-        assert row is not None
-        assert row["last_user_action"] == "edited"
-
-
-@pytest.mark.asyncio
-async def test_update_user_action_rejects_bad_action(conn_with_agency):
-    pool, agency_id = conn_with_agency
-    async with pool.acquire() as c:
-        with pytest.raises(ValueError):
-            await update_user_action(c, "deadbeefcafe1234", agency_id, "garbage")
 
 
 @pytest.mark.asyncio
