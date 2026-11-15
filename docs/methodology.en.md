@@ -240,7 +240,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | Transfers and total travel time | Out of scope | Passengers are not the Service's primary users. Connection reliability at feeder hubs is considered separately |
 | Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
 | Data coverage | Partial | The Hiroshima Bus Association's thirteen operators and Aomori City Bus. 中国バス and 井笠バスカンパニー, on the association's list, are not ingested |
-| Timetable slack and holding | Partial | Only an analysis on the Ask screen, against the current timetable. No aggregate and no route-page panel |
+| Timetable slack and holding | Partial | Only an analysis on the Notebook screen, against the current timetable. No aggregate and no route-page panel |
 | Supply: planned trips, vehicle-km, timetable changes | Partial | Planned trips and vehicle-km per timetable version, and the change dates, exist. Only the current version is shown, with no comparison of which routes lost trips between versions. Vehicle-km delivered is approximated from the trip ratio |
 | Contracts and incentives | Partial | Per-route standards (on-time rate, EWT, service delivered, vehicle-km delivered) with an achievement and bonus/deduction simulation. Service-delivered and vehicle-km standards are judged on the route's own service delivered |
 
@@ -284,7 +284,7 @@ The stamp appears in the places below. The CSV preambles and the footnotes also 
 - in the screens' "How this is calculated" block;
 - on snapshot pages.
 
-CSVs a screen builds on the spot from its export menu or "CSV" button (the route page's stops, the Reports screen's period summary, Live and Ask) and chart images carry neither the stamp nor the credit. Quote figures from a stamped export or a snapshot.
+CSVs a screen builds on the spot from its export menu or "CSV" button (the route page's stops, the Reports screen's period summary, Live and the Notebook) and chart images carry neither the stamp nor the credit. Quote figures from a stamped export or a snapshot.
 
 ## Snapshots
 

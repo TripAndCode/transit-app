@@ -65,7 +65,7 @@ describe("LandingPage", () => {
       expect(screen.getByRole("link", { name: "ダッシュボードを見る（ログイン不要）" })).toHaveAttribute("href", "/");
       const hero = container.querySelector(".landing-hero__content")!;
       expect(hero.textContent).not.toMatch(/最新報告停留所|リアルタイム × 時刻表/);
-      expect(hero.textContent).toContain("ログインすると、保存したビューと「質問」画面の調査をアカウントに残せます");
+      expect(hero.textContent).toContain("ログインすると、保存したビューと「調査ノート」の調査をアカウントに残せます");
     } finally {
       await i18n.changeLanguage("en");
     }
@@ -75,7 +75,7 @@ describe("LandingPage", () => {
     renderLanding();
     expect(screen.getByRole("link", { name: "View the dashboard (no sign-in needed)" })).toHaveAttribute("href", "/");
     const note = screen.getByText(/to keep your saved views/);
-    expect(note).toHaveTextContent("Sign in to keep your saved views and Ask investigations with your account.");
+    expect(note).toHaveTextContent("Sign in to keep your saved views and notebook investigations with your account.");
     expect(within(note).getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 
@@ -141,7 +141,7 @@ describe("LandingPage", () => {
     // The three narrative section headings.
     expect(screen.getByRole("heading", { name: "Delay builds along a route" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Every day, compared" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Ask, get evidence" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "The notebook, with evidence" })).toBeTruthy();
     // Real components, not a mocked shell -- see ScrollNarrative.test.tsx for
     // the full per-section assertions.
     expect(screen.getByRole("group", { name: "Delay by stop" })).toBeTruthy();

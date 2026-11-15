@@ -1,6 +1,13 @@
-# Ask tab
+# Notebook (the Ask tab)
 
-Chat-first, deterministic-by-default Q&A over an agency's delay data. See
+The investigation notebook (English "Notebook" in the nav, 調査ノート everywhere in
+Japanese, which has no short form): ready-made, deterministic analyses of an agency's
+delay data, run from cards and kept as saved investigations (threads), with exports and
+per-stop evidence. It does not promise free-text question answering; an optional LLM
+follow-up exists, gated by its kill switch, `llm_enabled` and per-user approval (see
+"Who may reach the LLM"), and is never the headline. A card is an analysis; the saved
+thread is an investigation. User-facing copy says "notebook"; routes, components, endpoints, i18n keys
+(`ask.*`, `nav.ask`) and tables keep the `ask` name. See
 `README.md` ▸ "Data Flow" (the Ask-tab bullet) for the architecture summary
 this doc expands on with file-level detail.
 
@@ -12,22 +19,22 @@ this doc expands on with file-level detail.
   (`frontend/src/main.tsx`), and `frontend/src/components/OnboardingGate.tsx`
   redirects a fresh/remembered agency selection to
   `/agencies/{id}/pulse`.
-  Reach the Ask tab from the rail's Ask link, the command palette's "Ask"
+  Reach the notebook from the rail's Notebook link, the command palette's "Notebook"
   entry, or the `g q` chord.
-- Entry points: Ask is not one of the seven destinations in
+- Entry points: the notebook is not one of the seven destinations in
   `SIDEBAR_NAV_ITEMS`; the rail shows it as a separate dashed link below
   them (`frontend/src/components/Sidebar.tsx`), labelled by its name alone,
   with no 「乗換」 (transfer) tag, which would read as a journey planner. The top bar
   (`frontend/src/components/TopBar.tsx`) above every agency screen carries
   a search field (`topbar.ask_placeholder`) that opens the command palette
-  (also ⌘K); the palette's "Go to" group lists Ask after the rail
+  (also ⌘K); the palette's "Go to" group lists the notebook after the rail
   destinations (`GO_TO_TARGETS` in
   `frontend/src/components/paletteNavTargets.ts`, `nav.ask` i18n key —
-  "Ask" / "質問"). That field carries `data-tour="ask-nav"`, the first-run
+  "Notebook" / "調査ノート"). That field carries `data-tour="ask-nav"`, the first-run
   tour's third step (placed "bottom"); the bar's right side holds the data-freshness
   chip (`frontend/src/components/DataFreshness.tsx`): the agency's
   `latest_data_date` and the newest live reading, with a panel that spells
-  both out (`topbar.freshness.*`). On a phone, Ask is also one of the bottom tabs in
+  both out (`topbar.freshness.*`). On a phone, the notebook is also one of the bottom tabs in
   `frontend/src/components/Sidebar.tsx`, beside Pulse, Routes, Live and
   More.
 - Top-level component: `frontend/src/tabs/AskTab.tsx` — owns thread
@@ -38,8 +45,7 @@ this doc expands on with file-level detail.
 What the user sees/does:
 
 - **Empty thread (landing state)** —
-  `frontend/src/tabs/ask/AskLandingCards.tsx`, headed 「よくある質問から選んで
-  調べる」 / "Pick a common question to look into": the page has no box to
+  `frontend/src/tabs/ask/AskLandingCards.tsx`, headed 「用意された分析から選ぶ」 / "Pick a ready-made analysis": the page has no box to
   type a question into, only the cards below. Each instant card's example
   answer describes the answer its default settings give (the on-time card
   lists the least on-time routes first). `buildCardTemplates()`
@@ -324,7 +330,7 @@ so it is a separate mechanism to build, not a knob to turn on.
    `make analyze` for the agency.
 3. Open the app — the default route lands on Pulse
    (`/agencies/{id}/pulse`; a fresh/remembered agency selection redirects
-   there too). Click the top bar's search field (or press ⌘K), choose "Ask",
+   there too). Click the top bar's search field (or press ⌘K), choose "Notebook",
    and expect `/agencies/{id}/ask`; pressing `g` then `q` goes there directly.
 4. On the empty-thread landing view, click an instant card (e.g.
    "Top-N delays") — expect an immediate assistant bubble with a ranked

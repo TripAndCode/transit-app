@@ -7,7 +7,7 @@ has one CTA, the way in this visitor has:
 - **Signed in:** "Open the dashboard" (`/`).
 - **Signed out, and `GET /api/config` says `login_required` is off:** "View
   the dashboard (no sign-in needed)" (`/`), with a note that signing in keeps
-  saved views and Ask investigations with the account. The note's "Sign in"
+  saved views and notebook investigations with the account. The note's "Sign in"
   links to `/login`, and the note is left out when no provider is configured.
 - **Signed out otherwise** (sign-in required, or the config not loaded yet):
   "Sign in" (`/login`). `/` would only bounce such a visitor back here.

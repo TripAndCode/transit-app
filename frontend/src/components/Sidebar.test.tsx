@@ -77,9 +77,9 @@ describe("Sidebar", () => {
   });
 
   describe("each screen keeps its own filters", () => {
-    it("keeps a visible Ask entry below the destinations, without the current screen's filters", () => {
+    it("keeps a visible Notebook entry below the destinations, without the current screen's filters", () => {
       renderSidebar("/agencies/8/live?from=2026-06-01&to=2026-06-07");
-      expect(screen.getByRole("link", { name: "Ask" })).toHaveAttribute("href", "/agencies/8/ask");
+      expect(screen.getByRole("link", { name: "Notebook" })).toHaveAttribute("href", "/agencies/8/ask");
     });
 
     it("points Live, the screen on show, at its own current filters", () => {
@@ -497,9 +497,9 @@ describe("Sidebar", () => {
       expect(screen.getByRole("link", { name: "Pulse" })).toBeTruthy();
     });
 
-    it("names Ask by its label alone, with no transfer tag that reads as a journey planner", () => {
+    it("names Notebook by its label alone, with no transfer tag that reads as a journey planner", () => {
       renderSidebar();
-      expect(screen.getByRole("link", { name: "Ask" })).not.toHaveTextContent("Transfer");
+      expect(screen.getByRole("link", { name: "Notebook" })).not.toHaveTextContent("Transfer");
       expect(screen.queryByText("Transfer")).toBeNull();
     });
 
@@ -561,10 +561,10 @@ describe("Sidebar", () => {
       vi.restoreAllMocks();
     });
 
-    it("renders Pulse, Routes, Live and Ask as tabs, leaving the rest to the More sheet", () => {
+    it("renders Pulse, Routes, Live and Notebook as tabs, leaving the rest to the More sheet", () => {
       renderSidebar();
       const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Pulse", "Routes", "Live", "Ask"]);
+      expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Pulse", "Routes", "Live", "Notebook"]);
     });
 
     it("marks the active tab", () => {
