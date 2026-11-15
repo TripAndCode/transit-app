@@ -38,13 +38,16 @@ def is_destructive_down(sql: str) -> bool:
 
 @functools.cache
 def rebuildable_agg_tables() -> frozenset[str]:
-    """Aggregates a later analyze run rebuilds in full from source data: its
-    rebuild set and its agg_meta bookkeeping, plus agg_route_dow and
-    agg_stop_seq, which analyze built until they were retired. Any other
-    `agg_*` table, such as one analyze only upserts or one an ingest fills,
-    holds rows no rebuild restores. In full only while no agency has a
-    retention floor (pipeline.retention.retention_floor): analyze never
-    rebuilds a date before one, so the rows there are restored by nothing.
+    """Aggregates a later analyze run rebuilds from source data: its rebuild
+    set and its agg_meta bookkeeping, plus agg_route_dow and agg_stop_seq,
+    which analyze built until they were retired. Any other `agg_*` table, such
+    as one analyze only upserts or one an ingest fills, holds rows no rebuild
+    restores.
+
+    A rebuild restores these in full only while no agency has a retention
+    floor (:func:`retention_floor_exists`): analyze never rebuilds a date
+    before one, so from the first drop on they lose data as any other table
+    does (:func:`data_losing_tables`).
 
     Imported lazily: the API's health poll imports this module, and must not
     pull in analyze with it.
@@ -52,6 +55,22 @@ def rebuildable_agg_tables() -> frozenset[str]:
     from pipeline.analyze import _AGG_TABLES_ORDERED
 
     return frozenset(_AGG_TABLES_ORDERED) | {"agg_meta", "agg_route_dow", "agg_stop_seq"}
+
+
+def retention_floor_exists(conn) -> bool:
+    """Whether any agency has a retention floor: the `updates` prune has
+    recorded a drop (pipeline.retention.retention_floor). A database without
+    the table that records drops has had none. Read-only."""
+    from pipeline.retention import PRUNED_TABLE
+
+    with conn.cursor() as cur:
+        # A separate statement: Postgres resolves a missing relation while
+        # parsing, so it cannot be guarded inside the query that reads it.
+        cur.execute("SELECT to_regclass(%s)", (PRUNED_TABLE,))
+        if cur.fetchone()[0] is None:
+            return False
+        cur.execute(f"SELECT EXISTS (SELECT 1 FROM {PRUNED_TABLE})")
+        return bool(cur.fetchone()[0])
 
 
 _SPECIAL = re.compile(r"""--|/\*|['";$]""")
@@ -143,6 +162,12 @@ _DATA_LOSS = re.compile(
     rf"|ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s.*?\bDROP\s+(?!{_KEPT_ON_ALTER_DROP}))",
     re.IGNORECASE | re.DOTALL,
 )
+# In ALTER TABLE, an ADD followed by none of these adds a column.
+_KEPT_ON_ALTER_ADD = r"(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE)\b"
+_ADDS_COLUMN = re.compile(
+    rf"^\s*ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s.*?\bADD\s+(?!{_KEPT_ON_ALTER_ADD})",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _table_names(group: str) -> list[str]:
@@ -152,22 +177,30 @@ def _table_names(group: str) -> list[str]:
     return [re.findall(_NAME, name)[-1].strip('"') for name in names]
 
 
-def data_losing_tables(sql: str) -> list[str]:
-    """Tables outside `rebuildable_agg_tables()` that a top-level statement in
-    *sql* drops, drops a column from, or deletes or truncates rows of.
+def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
+    """Tables that a top-level statement in *sql* loses data from: it drops
+    them, drops a column from them, or deletes or truncates their rows.
 
     A down migration it flags must carry the `-- DESTRUCTIVE` marker
     (tests/unit/test_migration_destructive_markers.py), and a pending up
     migration it flags stops scripts/dev_upgrade.py until the owner names it.
-    The rebuildable aggregates are exempt in both directions: their rows derive
-    from source data, and an analyze rebuild restores them, as long as no
-    agency has a retention floor, below which nothing restores them. A plain
-    analyze-all rebuilds an incremental aggregate only for the dates its
-    ledger or its table fingerprint marks, so a migration that deletes such
-    rows also bumps that table's registry version, or the rebuild needs FULL=1.
+
+    The rebuildable aggregates (`rebuildable_agg_tables`) are exempt while no
+    agency has a retention floor, since an analyze rebuild then restores every
+    row of theirs. With *retention_floor* (`retention_floor_exists`), the rows
+    before the floor are restored by nothing, so they count like any other
+    table, and so does a column added to one: analyze fills it only from the
+    floor on. The down markers are judged without a floor, as a migration file
+    is written once for every database.
+
+    A plain analyze-all rebuilds an incremental aggregate only for the dates
+    its ledger or its table fingerprint marks, so a migration that deletes
+    such rows also bumps that table's registry version, or the rebuild needs
+    FULL=1.
 
     Scope: DROP TABLE, DELETE FROM, TRUNCATE, and ALTER TABLE ... DROP [COLUMN]
-    statements, read past comments, string literals and dollar-quoted bodies.
+    statements, read past comments, string literals and dollar-quoted bodies,
+    and with a floor ALTER TABLE ... ADD [COLUMN] on a rebuildable aggregate.
     An UPDATE is not counted: a backfill in a reviewed migration rewrites
     values on purpose. Not detected: statements inside a DO block or a function
     body, a data-modifying WITH ... DELETE, MERGE ... DELETE, a narrowing ALTER
@@ -179,11 +212,11 @@ def data_losing_tables(sql: str) -> list[str]:
     rebuildable = rebuildable_agg_tables()
     tables: list[str] = []
     for statement in _top_level_statements(sql):
-        m = _DATA_LOSS.match(statement)
-        if not m:
-            continue
-        group = m.group("drop") or m.group("delete") or m.group("truncate") or m.group("alter")
-        tables.extend(name for name in _table_names(group) if name.lower() not in rebuildable)
+        if m := _DATA_LOSS.match(statement):
+            group = m.group("drop") or m.group("delete") or m.group("truncate") or m.group("alter")
+            tables.extend(name for name in _table_names(group) if retention_floor or name.lower() not in rebuildable)
+        elif retention_floor and (m := _ADDS_COLUMN.match(statement)):
+            tables.extend(name for name in _table_names(m.group("alter")) if name.lower() in rebuildable)
     return tables
 
 

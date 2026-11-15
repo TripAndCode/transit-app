@@ -93,6 +93,46 @@ def test_classifier_counts_column_drops_but_not_other_alters_fk_actions_or_updat
     assert data_losing_tables(sql) == lost
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM agg_route_daily WHERE date < '2025-01-01';",
+        "TRUNCATE agg_route_daily;",
+        "ALTER TABLE agg_route_daily DROP COLUMN late_samples;",
+        "ALTER TABLE agg_route_daily DROP late_samples;",
+        "DROP TABLE agg_route_daily;",
+        "ALTER TABLE agg_route_daily ADD COLUMN early_samples INT NOT NULL DEFAULT 0;",
+        "ALTER TABLE IF EXISTS ONLY public.agg_route_daily ADD early_samples INT;",
+    ],
+)
+def test_a_retention_floor_makes_a_rebuildable_aggregate_lose_data(sql):
+    """Below the floor analyze rebuilds nothing, so a rebuildable aggregate's
+    rows there, or a column analyze would fill, are restored by nothing."""
+    assert data_losing_tables(sql) == []
+    assert data_losing_tables(sql, retention_floor=True) == ["agg_route_daily"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER TABLE agg_route_daily ADD CONSTRAINT c CHECK (samples >= 0);",
+        "ALTER TABLE agg_route_daily ADD PRIMARY KEY (agency_id, date);",
+        "ALTER TABLE agg_route_daily ADD UNIQUE (agency_id, date);",
+        "ALTER TABLE agg_route_daily ADD FOREIGN KEY (agency_id) REFERENCES agencies;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples SET DEFAULT 0;",
+        "CREATE INDEX idx_agg_route_daily_x ON agg_route_daily (date);",
+        "ALTER TABLE users ADD COLUMN nickname TEXT;",
+        "UPDATE agg_route_daily SET samples = 0 WHERE samples IS NULL;",
+    ],
+)
+def test_a_retention_floor_leaves_constraints_indexes_and_other_tables_columns_alone(sql):
+    assert data_losing_tables(sql, retention_floor=True) == []
+
+
+def test_a_retention_floor_keeps_the_tables_already_counted():
+    assert data_losing_tables("DROP TABLE users, agg_meta;", retention_floor=True) == ["users", "agg_meta"]
+
+
 UP_FILES = sorted(_MIGRATIONS_DIR.glob("*.up.sql"))
 
 

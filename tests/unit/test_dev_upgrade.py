@@ -152,8 +152,39 @@ def test_only_pending_up_migrations_that_lose_data_are_reported(tmp_path):
     (tmp_path / "0005_rebuildable.up.sql").write_text(
         "DROP TABLE IF EXISTS agg_route_dow; DELETE FROM agg_route_daily;"
     )
-    found = dev_upgrade.destructive_pending(["0001", "0002", "0004", "0005"], tmp_path)
+    found = dev_upgrade.destructive_pending(["0001", "0002", "0004", "0005"], tmp_path, retention_floor=False)
     assert found == {"0002_drop": ["users"]}
+
+
+def test_with_a_retention_floor_the_rebuildable_aggregates_lose_data_too(tmp_path):
+    (tmp_path / "0001_add.up.sql").write_text("ALTER TABLE t ADD COLUMN c INT;")
+    (tmp_path / "0005_rebuildable.up.sql").write_text(
+        "DROP TABLE IF EXISTS agg_route_dow; DELETE FROM agg_route_daily;"
+    )
+    (tmp_path / "0006_new_agg_column.up.sql").write_text("ALTER TABLE agg_route_daily ADD COLUMN c INT;")
+    found = dev_upgrade.destructive_pending(["0001", "0005", "0006"], tmp_path, retention_floor=True)
+    assert found == {
+        "0005_rebuildable": ["agg_route_dow", "agg_route_daily"],
+        "0006_new_agg_column": ["agg_route_daily"],
+    }
+
+
+def test_a_retention_floor_on_dev_stops_a_run_whose_migration_only_rebuilds_an_aggregate(monkeypatch, capsys, tmp_path):
+    (tmp_path / "0099_purge.up.sql").write_text("DELETE FROM agg_route_daily;")
+    real = dev_upgrade.destructive_pending
+    monkeypatch.setattr(
+        dev_upgrade,
+        "destructive_pending",
+        lambda pending, *, retention_floor: real(pending, tmp_path, retention_floor=retention_floor),
+    )
+    monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
+    monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], True))
+    ran = []
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    assert dev_upgrade.main([]) == 3
+    assert ran == []
+    assert "0099_purge" in capsys.readouterr().err
 
 
 def test_the_database_url_is_read_as_the_makefile_reads_it(tmp_path):
@@ -183,8 +214,10 @@ def test_no_database_url_is_refused(tmp_path):
 def test_a_pending_migration_that_changes_rows_stops_a_real_run_before_any_step(monkeypatch, capsys):
     monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
-    monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: ["0099"])
-    monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending: {"0099_drop": ["users"]})
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], False))
+    monkeypatch.setattr(
+        dev_upgrade, "destructive_pending", lambda pending, *, retention_floor: {"0099_drop": ["users"]}
+    )
     ran = []
     monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
     assert dev_upgrade.main([]) == 3
@@ -195,8 +228,10 @@ def test_a_pending_migration_that_changes_rows_stops_a_real_run_before_any_step(
 def test_the_owner_naming_the_version_lets_it_run(monkeypatch, tmp_path):
     monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
-    monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: ["0099"])
-    monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending: {"0099_drop": ["users"]})
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], False))
+    monkeypatch.setattr(
+        dev_upgrade, "destructive_pending", lambda pending, *, retention_floor: {"0099_drop": ["users"]}
+    )
     monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: contextlib.nullcontext())
     monkeypatch.setattr(dev_upgrade, "LOG_DIR", tmp_path)
     ran = []
@@ -208,7 +243,7 @@ def test_the_owner_naming_the_version_lets_it_run(monkeypatch, tmp_path):
 def test_check_writes_nothing(monkeypatch, capsys):
     monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
-    monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: [])
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState([], False))
     ran = []
     monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
     assert dev_upgrade.main(["--check"]) == 0
@@ -219,7 +254,7 @@ def test_check_writes_nothing(monkeypatch, capsys):
 def test_a_resumed_run_starts_at_its_step(monkeypatch, tmp_path):
     monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
-    monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: [])
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState([], False))
     monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: contextlib.nullcontext())
     monkeypatch.setattr(dev_upgrade, "LOG_DIR", tmp_path)
     ran = []
@@ -232,8 +267,8 @@ def test_a_resumed_run_starts_at_its_step(monkeypatch, tmp_path):
 def test_a_resumed_run_with_pending_migrations_is_refused(monkeypatch, capsys, destructive):
     monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
-    monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: ["0099"])
-    monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending: destructive)
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], False))
+    monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending, *, retention_floor: destructive)
     ran = []
     monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
     assert dev_upgrade.main(["--start", "2", "--allow-destructive-up", "0099"]) == 3
@@ -244,8 +279,8 @@ def test_a_resumed_run_with_pending_migrations_is_refused(monkeypatch, capsys, d
 def test_check_reports_that_a_resumed_run_with_pending_migrations_refuses(monkeypatch, capsys):
     monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
-    monkeypatch.setattr(dev_upgrade, "pending_versions", lambda url: ["0099"])
-    monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending: {})
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], False))
+    monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending, *, retention_floor: {})
     ran = []
     monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
     assert dev_upgrade.main(["--check", "--start", "2"]) == 0

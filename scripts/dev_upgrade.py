@@ -14,9 +14,11 @@ data:
 A pending up migration that `db.migrate.data_losing_tables` flags, one that
 drops a table or column or deletes or truncates rows outside the aggregates
 analyze rebuilds from source, stops the run before anything is written, until the
-owner names that version with --allow-destructive-up. A backfill UPDATE does
-not stop it. That function's docstring lists the shapes it does not detect;
-catching those is the migration's review.
+owner names that version with --allow-destructive-up. Once dev has a retention
+floor (`db.migrate.retention_floor_exists`), those aggregates count too, and so
+does a column added to one. A backfill UPDATE does not stop it. That function's
+docstring lists the shapes it does not detect; catching those is the
+migration's review.
 
 --check prints the preconditions, the pending migrations and the plan, and
 writes nothing. --start N resumes at step N once the earlier steps succeeded.
@@ -40,11 +42,12 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Iterator, Mapping
+from typing import NamedTuple
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from db.migrate import data_losing_tables, pending_migrations  # noqa: E402  (sys.path injection above)
+from db.migrate import data_losing_tables, pending_migrations, retention_floor_exists  # noqa: E402  (sys.path injection above)
 
 MIGRATIONS = REPO / "db" / "migrations"
 LOG_DIR = pathlib.Path.home() / ".cache" / "transit-app"
@@ -103,13 +106,15 @@ def upgrade_lock(repo: pathlib.Path = REPO) -> Iterator[pathlib.Path]:
         lock.rmdir()
 
 
-def destructive_pending(pending: list[str], migrations: pathlib.Path = MIGRATIONS) -> dict[str, list[str]]:
+def destructive_pending(
+    pending: list[str], migrations: pathlib.Path = MIGRATIONS, *, retention_floor: bool
+) -> dict[str, list[str]]:
     """Each pending version whose up migration loses data, with the tables it
-    loses it from."""
+    loses it from, on a database with or without a *retention_floor*."""
     found = {}
     for version in pending:
         for path in sorted(migrations.glob(f"{version}_*.up.sql")):
-            if tables := data_losing_tables(path.read_text()):
+            if tables := data_losing_tables(path.read_text(), retention_floor=retention_floor):
                 found[path.stem.removesuffix(".up")] = tables
     return found
 
@@ -129,13 +134,18 @@ def dev_database_url(repo: pathlib.Path = REPO) -> str:
     return url
 
 
-def pending_versions(url: str) -> list[str]:
+class MigrationState(NamedTuple):
+    pending: list[str]
+    retention_floor: bool  # db.migrate.retention_floor_exists
+
+
+def migration_state(url: str) -> MigrationState:
     import psycopg2
 
     conn = psycopg2.connect(url)
     try:
         conn.set_session(readonly=True)
-        return pending_migrations(conn)
+        return MigrationState(pending_migrations(conn), retention_floor_exists(conn))
     finally:
         conn.close()
 
@@ -198,9 +208,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         check_checkout()
-        pending = pending_versions(dev_database_url())
-        destructive = destructive_pending(pending)
+        pending, retention_floor = migration_state(dev_database_url())
+        destructive = destructive_pending(pending, retention_floor=retention_floor)
         print(f"pending migrations: {', '.join(pending) or 'none'}")
+        if retention_floor:
+            print("a retention floor exists: the rebuildable aggregates count as losing data")
         for name, tables in destructive.items():
             print(f"loses data in {', '.join(tables)}: {name}")
         plan = STEPS[args.start - 1 :]
