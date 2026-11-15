@@ -265,7 +265,9 @@ def rows_rewritten(ch, agency_ids: Iterable[int] | None, dates: Iterable[date] |
     when *agency_ids* is None), before `updates` rows of theirs filed under
     those dates are rewritten in place: such a rewrite can leave a date's
     rows and version names as many as before, which valid_builds would not
-    see. Their next full analyze writes them again."""
+    see. Their next full analyze writes them again, but for any date before
+    the agency's retention floor, which no run rewrites
+    (pipeline.retention.retention_floor)."""
     if agency_ids is None:
         rows = ch.query(f"SELECT DISTINCT agency_id FROM {FILED_DATES}").result_rows
         agency_ids = [row[0] for row in rows]

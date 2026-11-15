@@ -12,8 +12,8 @@ The ledger's blind spot (see `_dates_needing_rebuild`) is recovered only by a
 deliberate full rebuild (`analyze --full`).
 
 No run, full or incremental, purges or rebuilds a date before the agency's
-retention floor (`pipeline.retention.retention_floor`, which says why): `_plan`
-leaves those dates out of every scope, and `_above_floor` bounds a full rebuild.
+retention floor (`pipeline.retention.retention_floor`, which says why).
+`_above_floor` is the one place that enforces it, on every scope a run builds.
 
 The tables in `pipeline.ch_aggregates.COPIED_TABLES` are computed and stored in
 ClickHouse: the date-keyed ones rebuilt in whole months, the whole-history ones
@@ -634,9 +634,12 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None =
     calls :func:`mark_for_full_rebuild` first.
 
     With a retention floor (:func:`pipeline.retention.retention_floor`), only
-    the dates from it on are compared. Every earlier date is final, and a
-    date's rows lost to the prune were captured before the floor's span, so
-    no date from the floor on was filed from them.
+    the dates from it on are compared, and none before it is returned. The
+    rows the prune dropped were captured before the floor's filed span, so
+    no date from the floor on was filed from them. The other direction is
+    still open: a change on the floor date itself lends to the day before it
+    (:func:`_dates_filed_from`), a final date, which is why the result is
+    clamped as well, and why _above_floor clamps every scope again.
     """
     # The Postgres read comes first, so a run with no ledger at all never pays
     # for a full-history remote scan to be told so. A first run is exactly the
@@ -657,7 +660,8 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None =
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
-    return sorted(stale | _dates_filed_from(agency_id, ch_client, stale, stored, live_counts))
+    changed = stale | _dates_filed_from(agency_id, ch_client, stale, stored, live_counts)
+    return sorted(day for day in changed if floor is None or day >= floor)
 
 
 def _dates_filed_from(agency_id: int, ch_client, stale: set, stored: dict, live_counts: dict) -> set:
@@ -1152,6 +1156,12 @@ def _stores_agree(table: str, agency_id: int, conn, ch_client, floor: date | Non
 
 
 def _reference_agrees(internal: str, agency_id: int, conn, ch_client) -> bool:
+    """Whether *internal*'s figure matches its REFERENCES table's, over the
+    agency's whole history. A retention floor needs no narrower comparison:
+    no run rebuilds or drops a month of an internal table before the floor's
+    (`swap` touches only the months a run rebuilds), and the prune holds an
+    agency whose figures disagree (store_disagreements), so a difference found
+    here lies from the floor on, where recounting from the floor repairs it."""
     reference, _, pg_expression = ch_aggregates.REFERENCES[internal]
     with _step(f"{internal}: compare stores"):
         with conn.cursor() as cur:
@@ -1173,6 +1183,33 @@ def store_disagreements(agency_id: int, conn, ch_client, floor: date | None) -> 
     return tables + [
         internal for internal in ch_aggregates.REFERENCES if not _reference_agrees(internal, agency_id, conn, ch_client)
     ]
+
+
+class Unapplied(NamedTuple):
+    """What a run of analyze would still apply to the agency's built dates."""
+
+    tables: list[str]  # those whose recorded fingerprint is not the one a run would build under now
+    moved: list  # the built dates whose version in force moved since (_dates_in_force_moved)
+
+
+def unapplied(agency_id: int, conn, ch_client) -> Unapplied:
+    """The timetable and builder changes the agency's aggregates do not
+    reflect yet, read as _plan reads them, without archiving anything."""
+    has_static = _static_loaded(conn, agency_id)
+    with conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        row = cur.fetchone()
+        ingest_strategy = row[0] if row else None
+        cur.execute("SELECT table_name, fingerprint FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        stored = dict(cur.fetchall())
+    current = table_fingerprints(ingest_strategy, has_static, _static_parts(agency_id, conn, has_static))
+    tables = sorted(name for name, fingerprint in current.items() if stored.get(name) != fingerprint)
+    moved: list = []
+    if ingest_strategy in VERSION_STAMPING_STRATEGIES:
+        # The versions in force do not depend on the loaded timetable's key.
+        join = static_archive.schedule_join(ch_client, agency_id, None, by_service_date=True)
+        moved = _dates_in_force_moved(agency_id, conn, join)
+    return Unapplied(tables, moved)
 
 
 def _pg_totals(
@@ -1419,11 +1456,13 @@ def _above_floor(
     scopes: dict[str, list | None],
     ch_scopes: dict[str, list | None],
 ) -> tuple[dict[str, list | None], dict[str, list | None]]:
-    """*scopes* and *ch_scopes* with each dated table rebuilt in full (None)
-    taking every date from *floor* to the newest the agency holds instead,
-    so its purge and build both stop at the floor. _plan already leaves
-    earlier dates out of the dated scopes. The whole-history tables keep
-    theirs: they are finalized from the internal tables, whose months before
+    """*scopes* and *ch_scopes* with no date before *floor* in any dated
+    table's scope, the internal tables' included. A dated table rebuilt in full
+    (None) takes every date from the floor to the newest the agency holds
+    instead, so its purge and build both stop at the floor. Every scope a run
+    builds passes through here, so this, not where a scope's dates came from,
+    keeps the dates before the floor final. The whole-history tables keep their
+    scopes: they are finalized from the internal tables, whose months before
     the floor stand. The scorecard applies the floor to its own months
     (feed_quality.rebuild)."""
 
@@ -1437,7 +1476,11 @@ def _above_floor(
             every = [floor + timedelta(days=i) for i in range((newest - floor).days + 1)]
 
     def floored(name: str, scope: list | None) -> list | None:
-        return list(every) if scope is None and dated(name) else scope
+        if not dated(name):
+            return scope
+        if scope is None:
+            return list(every)
+        return [day for day in scope if day >= floor]
 
     logger.info(f"  retention floor {floor.isoformat()}: earlier dates are final (pipeline.retention.retention_floor)")
     return (

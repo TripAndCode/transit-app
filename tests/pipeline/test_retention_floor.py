@@ -2,15 +2,16 @@
 stands, once the prune has dropped the `updates` months beneath it, and
 behaves as before while no month has been dropped."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from pipeline import agg_registry, ch_aggregates, feed_quality, flags
+from pipeline import agg_registry, ch_aggregates, feed_quality, flags, refiled
 from pipeline.analyze import _AGG_TABLES_ORDERED, _INCREMENTAL_AGG_TABLES, analyze, mark_for_full_rebuild
 from pipeline.clickhouse import insert_updates
 from pipeline.retention import prune_updates, retention_floor
-from tests.pipeline.ch_agg_helpers import ch_rows, seed_schedule, update_row
+from pipeline.service_day import filed_date_of
+from tests.pipeline.ch_agg_helpers import JST, ch_rows, seed_schedule, update_row
 
 # The prune runs as of mid-March 2025 with a 30-day horizon, so only the
 # January partition is past it. Dropping it sets the floor at 2025-02-02.
@@ -41,6 +42,7 @@ def pruned(request, pg_conn, ch_client, agency_id, monkeypatch):
             # (09:00 JST): its first reading goes with January.
             update_row(datetime(2025, 2, 1, 8, 0), "c", 90),
             update_row(datetime(2025, 2, 1, 12, 0), "c", 45, scheduled_time="12:00:00"),
+            update_row(datetime(2025, 2, 2, 9, 0), "c", 50, scheduled_time="09:00:00"),
             update_row(datetime(2025, 2, 5, 8, 0), "d", 15),
             update_row(datetime(2025, 3, 10, 8, 0), "a", 75),
         ],
@@ -128,7 +130,7 @@ def test_a_full_rebuild_still_rebuilds_the_dates_from_the_floor_on(pg_conn, ch_c
             "SELECT date, total_rows FROM agg_feed_health WHERE agency_id = %s AND date >= %s ORDER BY date",
             (agency_id, _FLOOR),
         )
-        assert cur.fetchall() == [(date(2025, 2, 5), 2), (date(2025, 3, 10), 1)]
+        assert cur.fetchall() == [(_FLOOR, 1), (date(2025, 2, 5), 2), (date(2025, 3, 10), 1)]
 
 
 def test_without_a_recorded_drop_analyze_purges_dates_whose_rows_are_gone(pg_conn, ch_client, agency_id, pruned):
@@ -233,3 +235,81 @@ def test_dates_another_version_moved_to_below_the_floor_stay_final(pg_conn, ch_c
     monkeypatch.setattr(analyze_module, "_dates_in_force_moved", lambda *args: [date(2025, 1, 10)])
     analyze(agency_id, pg_conn, ch_client)
     assert _changed(pruned, _snapshot(pg_conn, ch_client, agency_id)) == []
+
+
+def _final_rows(pg_conn, ch_client, agency_id) -> dict[str, list]:
+    """Every row of the agency dated before the floor, in both stores, with
+    its refiled writes and the scorecard months that begin before it."""
+    rows: dict[str, list] = {}
+    with pg_conn.cursor() as cur:
+        for table in (*_DATED, feed_quality.TABLE):
+            column = "month" if table == feed_quality.TABLE else "date"
+            cur.execute(f"SELECT * FROM {table} WHERE agency_id = %s AND {column} < %s", (agency_id, _FLOOR))
+            rows[table] = sorted(map(repr, cur.fetchall()))
+    for table in ch_aggregates.MONTHLY_TABLES:
+        sql, params = ch_aggregates.rows_sql(table, agency_id, None)
+        result = ch_client.query(f"{sql} AND date < {{floor:Date}}", parameters={**params, "floor": _FLOOR})
+        rows[f"clickhouse {table}"] = sorted(map(repr, result.result_rows))
+    written = refiled.written(ch_client, agency_id)
+    rows["refiled writes"] = sorted(repr((day, kept)) for day, kept in written.items() if day < _FLOOR)
+    return rows
+
+
+def test_a_reading_on_the_floor_date_filed_under_the_day_before_leaves_that_day_final(
+    pg_conn, ch_client, agency_id, pruned
+):
+    """A stop event the floor date's rows file under the day before marks that
+    day changed; it is final all the same."""
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    before = _final_rows(pg_conn, ch_client, agency_id)
+    captured = datetime(2025, 2, 2, 7, 30)
+    scheduled_sec = 3 * 3600 + 50 * 60
+    assert filed_date_of(captured.replace(tzinfo=JST), scheduled_sec) == _FLOOR - timedelta(days=1)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [update_row(captured, "c", 40, scheduled_time="03:50:00", scheduled_sec=scheduled_sec)],
+    )
+    analyze(agency_id, pg_conn, ch_client)
+    assert _changed(before, _final_rows(pg_conn, ch_client, agency_id)) == []
+
+
+def test_a_floor_date_that_lost_rows_leaves_the_day_before_final(pg_conn, ch_client, agency_id, pruned):
+    """A date that lost rows marks both its neighbours changed."""
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    before = _final_rows(pg_conn, ch_client, agency_id)
+    ch_client.command(
+        "DELETE FROM updates WHERE agency_id = {agency_id:UInt16} AND trip_id = 'c' "
+        "AND captured_at >= {start:DateTime64} AND captured_at < {end:DateTime64}",
+        parameters={
+            "agency_id": agency_id,
+            "start": datetime(2025, 2, 2, 4, 0, tzinfo=JST).astimezone(timezone.utc),
+            "end": datetime(2025, 2, 3, 4, 0, tzinfo=JST).astimezone(timezone.utc),
+        },
+    )
+    remaining = ch_client.query(
+        "SELECT count() FROM updates WHERE agency_id = {agency_id:UInt16} AND trip_id = 'c'",
+        parameters={"agency_id": agency_id},
+    ).result_rows[0][0]
+    assert remaining == 1  # 2025-02-01's later reading; its earlier one went with January
+    analyze(agency_id, pg_conn, ch_client)
+    assert _changed(before, _final_rows(pg_conn, ch_client, agency_id)) == []
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM agg_feed_health WHERE agency_id = %s AND date = %s", (agency_id, _FLOOR))
+        assert cur.fetchone()[0] == 0
+
+
+def test_the_prune_holds_an_agency_with_a_table_awaiting_a_new_fingerprint(pg_conn, ch_client, agency_id, pruned):
+    """A timetable loaded since the last analyze rebuilds only from the floor
+    on, so the drop waits for that analyze."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_table_state SET fingerprint = 'before' WHERE agency_id = %s AND table_name = 'agg_stop_daily'",
+            (agency_id,),
+        )
+    pg_conn.commit()
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    assert result.dropped == []
+    assert "agg_stop_daily" in result.verdicts[0].held_by

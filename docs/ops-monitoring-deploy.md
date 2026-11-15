@@ -192,7 +192,7 @@ enforcer together.
 | R2 `static/<id>/` (GTFS static zips) | 3,650 days; each agency's current timetable is always kept | `prune-r2.sh` | `R2_STATIC_RETENTION_DAYS` |
 | R2 `vp/<id>/` (VehiclePositions archives) | 180 days | `prune-r2.sh` | `R2_VP_RETENTION_DAYS` |
 | Collector spool on Oracle (local copies of the above) | RT and VP 90 days, static 365 days; most files go sooner, once R2 confirms its copy | `oracle_cloud/v3/bin/prune.sh`, `spool-cleanup.sh` | `RETENTION_DAYS`, `STATIC_RETENTION_DAYS` |
-| ClickHouse `updates`, production | every day while the prune is off (the default). With it on, 400 days, dropped in whole UTC months, and never a month whose dates are not all aggregated (below) | `gtfs_pipeline.py prune-updates` (`pipeline/retention.py`) | `--days` (default `UPDATES_RETENTION_DAYS`); switch `updates_prune_enabled` |
+| ClickHouse `updates`, production | every day while the prune is off (the default). With it on, 400 days, dropped in whole UTC months, and never a month whose dates are not all aggregated (below) | `gtfs_pipeline.py prune-updates` (`pipeline/retention.py`) | `--days` (default 400, constant `UPDATES_RETENTION_DAYS`); switch `updates_prune_enabled` |
 | ClickHouse `updates_live` | 3 days | the table's TTL (`db/clickhouse/schema.sql`) | none |
 | ClickHouse `updates_filed` (refiled rows) | follows `updates`: the dates it still holds | `pipeline/refiled.py`: whatever rewrites `updates` rows writes the affected dates off first (`rows_rewritten`), and their rows go at the agency's next analyze | none |
 | ClickHouse `updates_filed_dates` | indefinite; one small row per write or write-off of a date | nothing | none |
@@ -253,10 +253,19 @@ so the aggregates of the months already dropped stay.
 `prune-updates` drops a UTC month of `updates` only when the whole month is
 past the horizon and every agency with rows in it clears the holds
 `pipeline.retention.plan_updates_prune` states. A drop raises those agencies'
-floors to just past the month. The dry run names what holds each month. Most
-holds clear once that agency is analyzed. A hold for dates without aggregates
-below an agency's floor never clears that way: analyze never builds there, so
-an operator decides whether to keep those rows or delete them.
+floors to just past the month. The dry run names what holds each month, and
+for which agency:
+
+- service dates in the month without aggregates;
+- dates up to the end of the scorecard month the new floor freezes whose
+  ledger no longer matches `updates`;
+- ClickHouse aggregates that disagree with their Postgres copies;
+- a timetable or builder change analyze has not applied yet, or a date whose
+  version in force moved since it was built.
+
+Each clears once that agency is analyzed, except dates without aggregates
+below an agency's floor: analyze never builds there, so an operator decides
+whether to keep those rows or delete them.
 
 A run that fails part-way leaves a `retention` row in `pipeline_runs` with the
 rows dropped so far. The months it did not reach stay in

@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from pipeline import flags, retention
+from pipeline.analyze import Unapplied
 from pipeline.retention import UpdatesPartition, floor_after, frozen_before, partition_span, plan_updates_prune
 from pipeline.service_day import FILING_REACH_HOURS, service_day_start_utc
 
@@ -76,7 +77,14 @@ def test_the_scorecard_month_holding_the_floor_is_frozen_with_it(floor, frozen):
 
 
 def _plan(
-    partitions, *, cutoff=datetime(2026, 1, 1, tzinfo=UTC), floors=None, ledgers=None, live=None, disagreeing=None
+    partitions,
+    *,
+    cutoff=datetime(2026, 1, 1, tzinfo=UTC),
+    floors=None,
+    ledgers=None,
+    live=None,
+    disagreeing=None,
+    unapplied=None,
 ):
     return plan_updates_prune(
         partitions,
@@ -85,6 +93,7 @@ def _plan(
         ledgers=ledgers or {},
         live=live or {},
         disagreeing=disagreeing,
+        unapplied=unapplied,
     )
 
 
@@ -205,6 +214,38 @@ def test_an_agency_whose_stores_disagree_holds_its_months():
     assert verdicts[0].held_by is not None and "agg_route_daily" in verdicts[0].held_by
 
 
+def test_an_agency_with_a_table_awaiting_a_new_fingerprint_holds_its_months():
+    held = _counts(date(2024, 12, 31), date(2025, 3, 1))
+    verdicts = _plan(
+        [_partition("202501", 1)],
+        ledgers={1: held},
+        live={1: held},
+        unapplied={1: Unapplied(["agg_stop_daily"], [])},
+    )
+    assert "agg_stop_daily" in verdicts[0].held_by
+
+
+@pytest.mark.parametrize(
+    "moved, holds",
+    [
+        (date(2025, 2, 20), True),  # below the bound the drop freezes
+        (date(2025, 1, 5), True),
+        (date(2025, 3, 1), False),  # past it, still rebuildable after the drop
+        (date(2024, 12, 1), False),  # below the current floor, final already
+    ],
+)
+def test_a_date_whose_version_in_force_moved_holds_the_months_that_would_freeze_it(moved, holds):
+    held = _counts(date(2024, 12, 31), date(2025, 3, 1))
+    verdicts = _plan(
+        [_partition("202501", 1)],
+        floors={1: date(2024, 12, 2)},
+        ledgers={1: held},
+        live={1: held},
+        unapplied={1: Unapplied([], [moved])},
+    )
+    assert (verdicts[0].held_by is not None) is holds
+
+
 # The prune itself, with the stores replaced: what it reads, writes and drops.
 
 
@@ -234,6 +275,7 @@ def stores(monkeypatch):
     monkeypatch.setattr(retention, "read_ledgers", lambda conn, bounds: {1: held, 2: held})
     monkeypatch.setattr(retention, "read_held_counts", lambda ch, agency_id, before, after: held)
     monkeypatch.setattr(retention, "read_disagreements", lambda conn, ch, agency_id, floor: [])
+    monkeypatch.setattr(retention, "read_unapplied", lambda conn, ch, agency_id: Unapplied([], []))
     monkeypatch.setattr(
         retention.refiled,
         "rows_rewritten",

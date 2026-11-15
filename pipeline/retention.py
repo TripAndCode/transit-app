@@ -25,7 +25,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from datetime import date, datetime, timedelta, timezone
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from pipeline import refiled
 from pipeline import runs as pipeline_runs
@@ -34,6 +34,9 @@ from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.flags import get_flag_state
 from pipeline.locks import agency_ingest_lock
 from pipeline.service_day import filed_dates_reached, service_day_start_utc
+
+if TYPE_CHECKING:
+    from pipeline.analyze import Unapplied
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +221,7 @@ def plan_updates_prune(
     ledgers: Mapping[int, Mapping[date, Counts]],
     live: Mapping[int, Mapping[date, Counts]],
     disagreeing: Mapping[int, Sequence[str]] | None = None,
+    unapplied: Mapping[int, "Unapplied"] | None = None,
 ) -> list[PartitionVerdict]:
     """A verdict for each partition whose rows are all past *cutoff*.
 
@@ -237,7 +241,12 @@ def plan_updates_prune(
       month of their rows is gone their counts differ by design;
     - its ClickHouse aggregates add up to their Postgres copies from its
       current floor's month on (*disagreeing* names those that do not):
-      analyze repairs a disagreement only from the floor on.
+      analyze repairs a disagreement only from the floor on;
+    - analyze has applied every timetable and builder change to it
+      (*unapplied*, pipeline.analyze.unapplied): no table waits on a new
+      fingerprint, and no date from its current floor up to frozen_before the
+      new one waits on a moved version in force. Frozen first, such a date
+      would keep the old timetable for good.
 
     *live* must hold, per agency, the counts of every date before
     frozen_before the newest floor its partitions set, from its current floor
@@ -262,6 +271,7 @@ def plan_updates_prune(
                 ledgers.get(agency_id, {}),
                 live.get(agency_id, {}),
                 (disagreeing or {}).get(agency_id, ()),
+                (unapplied or {}).get(agency_id),
             )
             if held_by is not None:
                 break
@@ -278,6 +288,7 @@ def _held_by(
     ledger: Mapping[date, Counts],
     live: Mapping[date, Counts],
     disagreeing: Sequence[str],
+    pending: "Unapplied | None",
 ) -> str | None:
     lacking = sorted(
         day
@@ -313,6 +324,18 @@ def _held_by(
         return (
             f"agency {agency_id}'s ClickHouse aggregates disagree with their Postgres copies "
             f"({', '.join(disagreeing)}); analyze it first"
+        )
+    if pending is not None and pending.tables:
+        return (
+            f"agency {agency_id}'s {', '.join(pending.tables)} wait on a timetable or builder change; analyze it first"
+        )
+    moved = (
+        sorted(day for day in pending.moved if day < bound and (current is None or day >= current)) if pending else []
+    )
+    if moved:
+        return (
+            f"agency {agency_id} has {len(moved)} date(s) whose version in force moved since they were built, "
+            f"from {moved[0].isoformat()}; analyze it first"
         )
     return None
 
@@ -361,6 +384,13 @@ def read_held_counts(ch, agency_id: int, before: datetime, after: datetime | Non
     return {day: (int(raw), int(total)) for day, raw, total in rows}
 
 
+def read_unapplied(conn, ch, agency_id: int) -> "Unapplied":
+    """What analyze has yet to apply to the agency (pipeline.analyze.unapplied)."""
+    from pipeline.analyze import unapplied
+
+    return unapplied(agency_id, conn, ch)
+
+
 def read_disagreements(conn, ch, agency_id: int, floor: date | None) -> list[str]:
     """The ClickHouse aggregates of the agency that do not add up to their
     Postgres copies from *floor*'s month on (pipeline.analyze.store_disagreements)."""
@@ -383,13 +413,21 @@ def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime) ->
     ledgers = read_ledgers(conn, bounds)
     live = {}
     disagreeing = {}
+    pending = {}
     for agency_id, bound in bounds.items():
         current = floors.get(agency_id)
         after = None if current is None else min(oldest[agency_id], service_day_start_utc(current))
         live[agency_id] = read_held_counts(ch, agency_id, service_day_start_utc(bound), after)
         disagreeing[agency_id] = read_disagreements(conn, ch, agency_id, current)
+        pending[agency_id] = read_unapplied(conn, ch, agency_id)
     return plan_updates_prune(
-        candidates, cutoff=cutoff, floors=floors, ledgers=ledgers, live=live, disagreeing=disagreeing
+        candidates,
+        cutoff=cutoff,
+        floors=floors,
+        ledgers=ledgers,
+        live=live,
+        disagreeing=disagreeing,
+        unapplied=pending,
     )
 
 

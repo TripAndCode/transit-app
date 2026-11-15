@@ -53,7 +53,19 @@ def seeded(pg_conn, ch_client, agency_id):
 
 
 def _ledger(pg_conn, agency_id, day: date, rows: int) -> None:
+    """A ledger row for *day*, with every table recorded as built under the
+    fingerprints a run would build under now, as after an analyze."""
+    from pipeline.analyze import table_fingerprints
+
     with pg_conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        (strategy,) = cur.fetchone()
+        for name, fingerprint in table_fingerprints(strategy, False, []).items():
+            cur.execute(
+                "INSERT INTO agg_table_state (agency_id, table_name, fingerprint) VALUES (%s, %s, %s) "
+                "ON CONFLICT DO NOTHING",
+                (agency_id, name, fingerprint),
+            )
         cur.execute(
             "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count, total_rows) "
             "VALUES (%s, %s, %s, 0, %s)",
