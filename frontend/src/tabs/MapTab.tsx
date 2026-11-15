@@ -23,7 +23,7 @@ import type { LiveTrip, ServiceHoursResponse } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
-import { ApiError, apiPost } from "../api/client";
+import { ApiError, apiPost, rangeNotRetainedFloor } from "../api/client";
 import { hhmm, quietFor } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { EM_DASH, FILTER_SEPARATOR, formatJstTime, formatReportTime } from "../utils/format";
@@ -731,6 +731,9 @@ export function MapTab() {
           onRetry={() => { void Promise.all([liveQuery.refetch(), summaryQuery.refetch()]); }}
         />
       )}
+      {/* The route overlay draws nothing on any other failure; only a period
+          before the retention floor would otherwise read as a route with no data. */}
+      {rangeNotRetainedFloor(shapeQuery.error) != null && <ErrorBanner error={shapeQuery.error} />}
 
       <div className="ops-workspace" style={{ "--ops-queue-width": `${queueWidth}px` } as CSSProperties}>
         <section className="ops-map" aria-label={t("operations.map.aria_label")}>

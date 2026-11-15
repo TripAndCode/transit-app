@@ -90,6 +90,14 @@ async def test_the_overview_under_a_time_band_refuses_a_range_before_the_floor(c
 
 
 @pytest.mark.asyncio
+async def test_the_overview_under_a_time_band_refuses_a_period_starting_at_the_floor(client, dropped):
+    """Its baseline is the same width immediately before the period, read
+    from the same live grain, so it reaches before the floor."""
+    resp = await client.get(f"/api/{dropped}/overview/summary?from={FLOOR}&to={FLOOR}&time_band=morning", headers=EN)
+    _assert_not_retained(resp)
+
+
+@pytest.mark.asyncio
 async def test_the_overview_hour_profiles_under_a_routes_filter_refuse_a_range_before_the_floor(
     client, dropped, pg_conn
 ):
