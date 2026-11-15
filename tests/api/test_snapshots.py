@@ -708,3 +708,131 @@ async def test_today_is_not_computed_for_a_route_page(route_page_client, aconn, 
     resp = await client.get(f"/api/snapshots/{created.json()['snapshot_id']}/today")
     assert resp.status_code == 200
     assert resp.json() == {"report": None, "unavailable": "not_computable"}
+
+
+_TABLE_OPTIONS = ("sort", "order", "include_sparse", "include_retired", "include_zero_delay", "limit", "preset")
+_PANEL_QUERIES = {
+    "default": {"from": DAY, "to": DAY, "sort": "on_time"},
+    "scoped": {"from": DAY, "to": DAY, "sort": "on_time", "dow": "weekday", "late": "120", "include_sparse": "1"},
+    "service": {"from": DAY, "to": DAY, "sort": "on_time", "service": "平日"},
+}
+
+
+async def _live_table_panels(client, agency_id, query, locale):
+    """What the Routes screen's two side panels fetch for ``query``: its scope,
+    never the table's own options."""
+    scope = urlencode({k: v for k, v in query.items() if k not in _TABLE_OPTIONS})
+    headers = {"Accept-Language": locale}
+    headway = await client.get(f"/api/{agency_id}/headway_quality?{scope}", headers=headers)
+    standards = await client.get(f"/api/{agency_id}/performance_standards?{scope}", headers=headers)
+    for resp in (headway, standards):
+        assert resp.status_code == 200, resp.text
+    return headway.json(), standards.json()
+
+
+@pytest.fixture
+async def with_standard(reports_client):  # noqa: F811
+    """``reports_client`` with a target on route A and a high-frequency route
+    whose headway panel has a row."""
+    from tests.conftest import confirm_rt_field_coverage
+
+    client, agency_id, pool = reports_client
+    day = date.fromisoformat(DAY)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO route_performance_standards "
+            "(agency_id, route_code, metric_type, threshold_value, bonus_malus_rate) "
+            "VALUES ($1, 'A', 'on_time_pct', 80, 0.01)",
+            agency_id,
+        )
+        await conn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+        await conn.execute(
+            "INSERT INTO agg_route_headway "
+            "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, is_high_frequency) "
+            "VALUES ($1, 'A', 480.0, 10, true)",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO agg_route_headway_daily "
+            "(agency_id, route_code, date, actual_headway_median_sec, actual_samples, actual_headway_sum_sec, "
+            " actual_headway_sumsq_sec2, long_gap_count, scheduled_headway_median_sec, is_high_frequency, "
+            " scheduled_headway_sum_sec, scheduled_headway_sumsq_sec2) "
+            "VALUES ($1, 'A', $2, 480.0, 2, 960.0, 813600.0, 1, 480.0, true, 4800.0, 2304000.0)",
+            agency_id,
+            day,
+        )
+    await confirm_rt_field_coverage(pool, agency_id)
+    yield client, agency_id, pool
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE route_performance_standards, agg_route_headway, agg_route_headway_daily CASCADE")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", sorted(_PANEL_QUERIES))
+async def test_a_route_table_snapshot_freezes_the_panels_beside_the_table(with_standard, aconn, case):
+    """The standards are stored per language and the headway panel once, each
+    the response the live panel's own request gets for the screen's scope, all
+    but the moment it was served. Once the agency's targets are removed the
+    live panel is empty, and the stored one is as it was."""
+    client, agency_id, pool = with_standard
+    query = _PANEL_QUERIES[case]
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    live = {locale: await _live_table_panels(client, agency_id, query, locale) for locale in ("ja", "en")}
+    assert live["ja"][0]["rows"]
+    assert live["ja"][1]["rows"]
+
+    created = await _create(client, sid, agency_id, "route_table", query=query)
+    assert created.status_code == 201, created.text
+    async with pool.acquire() as conn:
+        await conn.execute("DELETE FROM route_performance_standards WHERE agency_id = $1", agency_id)
+        await conn.execute("DELETE FROM agg_route_headway_daily WHERE agency_id = $1", agency_id)
+    moved_headway, moved_standards = await _live_table_panels(client, agency_id, query, "ja")
+    assert moved_headway["rows"] == []
+    assert moved_standards["rows"] == []
+
+    payloads = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]
+    assert payloads["headway"] == live["ja"][0] == live["en"][0]
+    assert payloads["headway"]["rows"]
+    assert set(payloads["standards"]) == {"ja", "en"}
+    for locale, (_, standards) in live.items():
+        assert payloads["standards"][locale] == standards
+    assert payloads["standards"]["ja"]["disclaimer"] != payloads["standards"]["en"]["disclaimer"]
+
+
+@pytest.mark.asyncio
+async def test_the_headway_panel_is_stored_only_where_the_screen_shows_it(with_standard, aconn):
+    """The live screen draws headway quality beside the on-time sort alone."""
+    client, agency_id, pool = with_standard
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    created = await _create(client, sid, agency_id, "route_table", query={"from": DAY, "to": DAY, "sort": "avg"})
+    assert created.status_code == 201, created.text
+    payloads = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]
+    assert "headway" not in payloads
+    assert set(payloads["standards"]) == {"ja", "en"}
+
+
+@pytest.mark.asyncio
+async def test_a_council_report_snapshot_stores_no_panels(reports_client, aconn):  # noqa: F811
+    client, agency_id, pool = reports_client
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    created = await _create(client, sid, agency_id, "council_report")
+    payloads = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]
+    assert not {"headway", "standards"} & set(payloads)
+
+
+@pytest.mark.asyncio
+async def test_route_table_standards_differ_between_languages_only_in_the_disclaimer(with_standard, aconn):
+    client, agency_id, pool = with_standard
+    await _seed(pool, agency_id, _BEFORE)
+    sid = (await seed_session(aconn, role="admin")).sid
+    created = await _create(client, sid, agency_id, "route_table", query={"from": DAY, "to": DAY})
+    assert created.status_code == 201, created.text
+    standards = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]["standards"]
+    assert standards["ja"]["rows"]
+    assert standards["ja"]["disclaimer"] != standards["en"]["disclaimer"]
+    assert {k: v for k, v in standards["ja"].items() if k != "disclaimer"} == {
+        k: v for k, v in standards["en"].items() if k != "disclaimer"
+    }

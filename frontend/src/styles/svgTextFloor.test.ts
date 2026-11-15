@@ -84,12 +84,4 @@ describe("SVG text floor", () => {
     expect(src(f)).toMatch(/minWidth:\s*VIEW_WIDTH/);
     for (const [text, size] of fontSizes(src(f))) expect(size, `${f}: ${text}`).toBeGreaterThanOrEqual(12);
   });
-
-  it("the landing page's stop chart keeps a floor at every width that fits its desktop figure", () => {
-    const css = src("pages/landing/ScrollNarrative.css").replace(/@media[^{]*\{(?:[^{}]*\{[^}]*\})*[^{}]*\}/g, "");
-    const floor = Number(css.match(/\.landing-narrative-section__figure \.focus-chart\s*\{[^}]*min-width:\s*(\d+)px/)![1]);
-    expect(floor).toBeGreaterThanOrEqual(700);
-    // The desktop figure's inner width, so a desktop visit never scrolls.
-    expect(floor).toBeLessThanOrEqual(760);
-  });
 });

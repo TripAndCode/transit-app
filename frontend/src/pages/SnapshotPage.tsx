@@ -6,10 +6,12 @@ import { ApiError } from "../api/client";
 import { classifyError } from "../api/errorClass";
 import { JST_TZ, parseScope, toJstISO, type Scope } from "../api/scope";
 import { useSnapshot, useSnapshotToday, type Snapshot, type SnapshotToday } from "../api/snapshots";
-import type { DefinitionMeta, ReportResponse } from "../api/types";
+import type { DefinitionMeta, HeadwayQualityResponse, PerformanceStandardsResponse, ReportResponse } from "../api/types";
 import type { TierState } from "../api/useCapabilityTier";
 import { buildRouteNames, type RouteNames } from "../api/useRouteNames";
 import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionMetaBlock";
+import { HeadwayQualityView } from "../components/HeadwayQualityPanel";
+import { PerformanceStandardView } from "../components/PerformanceStandardPanel";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LanguageToggle } from "../components/LanguageToggle";
@@ -183,6 +185,9 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
           names={names}
           params={snapshot.params}
           tiers={tiers}
+          tier={tier}
+          headway={snapshot.payloads.headway}
+          standards={snapshot.payloads.standards?.[locale] ?? snapshot.payloads.standards?.ja ?? snapshot.payloads.standards?.en}
           comparison={comparison?.report_type === "route_table" ? comparison : undefined}
         />
       ) : report?.report_type === "council_summary" ? (
@@ -329,18 +334,26 @@ function screenTitle(screen: string, t: TFunction): string {
 
 /** The Routes table as the live screen draws it, in the sort it was in,
  *  with no control to change what was stored; compared with today, its rows
- *  carry their marks and the routes only today lists follow them. */
+ *  carry their marks and the routes only today lists follow them. The panels
+ *  beside it are drawn from their stored responses; a snapshot taken before
+ *  they were stored has none, and says so rather than reading live data. */
 function RouteTableSnapshot({
   report,
   names,
   params,
   comparison,
   tiers,
+  tier,
+  headway,
+  standards,
 }: {
   report: RouteTableReport;
   names: RouteNames;
   params: Record<string, unknown>;
   tiers: ReadonlyMap<number, TierState>;
+  tier: TierState;
+  headway: HeadwayQualityResponse | undefined;
+  standards: PerformanceStandardsResponse | undefined;
   comparison?: Extract<Comparison, { report_type: "route_table" }>;
 }) {
   const { t } = useTranslation();
@@ -379,6 +392,12 @@ function RouteTableSnapshot({
         </>
       ) : (
         <EmptyState title={t("reports.no_data.title")} />
+      )}
+      {headway && <HeadwayQualityView data={headway} routeNames={names} tier={tier} />}
+      {standards ? (
+        <PerformanceStandardView data={standards} routeNames={names} tier={tier} />
+      ) : (
+        <p className="snapshot-page__note snapshot-route__absent">{t("snapshot.route_table.panels_not_frozen")}</p>
       )}
     </section>
   );

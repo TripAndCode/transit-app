@@ -22,6 +22,8 @@ method's, never the query's.
 A route's page is not one report but the responses its panels read: the
 agency's route lists and overview its standing comes from, the route's
 performance targets and its delay by stop, each from its endpoint's own code.
+The Routes table's snapshot likewise stores the two panels the screen shows
+beside the table, headway quality and the agency's performance standards.
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ from api.routers.overview import render_overview_summary
 from api.routers.reports import (
     REPORT_ROWS_MAX,
     ReportResponse,
+    render_headway_quality,
     render_performance_standards,
     render_report,
     scope_early,
@@ -56,7 +59,7 @@ from api.routers.reports import (
 from api.routers.static import fetch_static_routes
 from api.security import User, csrf_guard, require_admin
 from pipeline.data_sources import credit_line
-from pipeline.reports import ROUTE_TABLE_SORTS
+from pipeline.reports import ROUTE_TABLE_SORTS, simulation_disclaimer
 from pipeline.reports.capability import CapabilityTier, capability_tiers
 from pipeline.reports.rankings import EARLY_ANY
 
@@ -213,7 +216,11 @@ class SnapshotOut(BaseModel):
     ``payloads`` holds ``report`` (the screen endpoint's response per locale,
     each with its ``definition``), ``routes`` (the agency's route catalogue,
     ``GET /api/{agency_id}/routes``'s rows) and ``credit`` (the open-data
-    credit per locale, None where no source covers the feed). A route page
+    credit per locale, None where no source covers the feed). A Routes table
+    adds ``standards`` (the agency's performance standards per locale) and,
+    under the on-time sort, ``headway`` (headway quality, stored once), the
+    panels the screen shows beside it; one taken before they were stored has
+    neither. A route page
     holds, in place of ``report``, ``route_lists`` (the agency's ``ranking``,
     ``on_time`` and ``worst_5min`` lists, without their prose) and
     ``concentration`` (the agency overview's), each written in no language
@@ -260,7 +267,7 @@ def _route_page_figures(page: dict[str, Any]) -> dict[str, Any]:
     reader's language."""
     shape = page["shape"]
     return {
-        "standards": {k: v for k, v in page["standards"].items() if k != "disclaimer"},
+        "standards": _standards_figures(page["standards"]),
         "shape": {
             **shape,
             "stops": _unnamed(shape["stops"], "stop_name"),
@@ -268,6 +275,12 @@ def _route_page_figures(page: dict[str, Any]) -> dict[str, Any]:
             "variants": _unnamed(shape["variants"], "first_stop_name", "last_stop_name"),
         },
     }
+
+
+def _standards_figures(standards: dict[str, Any]) -> dict[str, Any]:
+    """A performance-standards response without its disclaimer, which is
+    written in the reader's language."""
+    return {k: v for k, v in standards.items() if k != "disclaimer"}
 
 
 def _disagree(figures: list[dict[str, Any]]) -> bool:
@@ -383,6 +396,18 @@ async def create_snapshot(
         if _disagree([_figures(report) for report in reports.values()]):
             raise HTTPException(status_code=409, detail=_LOCALES_DISAGREE)
         screen_payloads = {"report": reports}
+        if body.screen == "route_table":
+            screen_payloads.update(
+                await _route_table_panels(
+                    q,
+                    agency_id=body.agency_id,
+                    scope=scope,
+                    ctx=ctx,
+                    sort=reports[SUPPORTED_LOCALES[0]]["sort"],
+                    conn=conn,
+                    ch=ch,
+                )
+            )
         method_version = next(iter(reports.values()))["definition"]["method_version"]
         params = {"report_type": report_type, **params}
 
@@ -496,6 +521,45 @@ async def _route_page_payloads(
         "concentration": overview.model_dump(mode="json", by_alias=True)["concentration"],
         "route_page": pages,
     }
+
+
+async def _route_table_panels(
+    q: SnapshotQuery,
+    *,
+    agency_id: int,
+    scope: RangeCtx,
+    ctx: RangeCtx,
+    sort: str | None,
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+) -> dict[str, Any]:
+    """The panels the Routes screen draws beside its table, each computed by
+    its endpoint's own code and asked what the screen asks it (the scope and
+    its on-time tolerance, never the table's options):
+
+    - ``headway`` (``HeadwayQualityPanel``), only where the table is sorted
+      by on-time, as the screen shows it. It is written in no language, so it
+      is stored once, asked the unresolved ``scope`` as its endpoint is;
+    - ``standards`` (``PerformanceStandardPanel``) per language. The
+      language changes only the targets' disclaimer, so the figures are
+      computed once and the other languages' disclaimers written beside
+      them."""
+    early = scope_early(q.early)
+    panels: dict[str, Any] = {}
+    if sort == "on_time":
+        headway = await render_headway_quality(agency_id, scope, conn)
+        panels["headway"] = headway.model_dump(mode="json", by_alias=True)
+    rendered = await render_performance_standards(
+        agency_id, ctx, conn, ch, locale=SUPPORTED_LOCALES[0], preset=q.preset, late=q.late, early=early
+    )
+    standards = {
+        locale: rendered.model_copy(update={"disclaimer": simulation_disclaimer(locale)}).model_dump(
+            mode="json", by_alias=True
+        )
+        for locale in SUPPORTED_LOCALES
+    }
+    panels["standards"] = standards
+    return panels
 
 
 @admin_router.get("", response_model=list[SnapshotSummary])

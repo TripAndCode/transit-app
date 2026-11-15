@@ -82,91 +82,193 @@
   },
   "landing": {
     "hero": {
-      "title_question": "Did the buses run as planned?",
-      "title_scope": "Route by route, hour by hour.",
-      "subtitle": "Check how late each route ran over a period, from the operators' own open data, with the definition and the amount of data behind every figure. Today's trips are there too.",
       "open_dashboard": "Open the dashboard",
       "view_dashboard": "View the dashboard (no sign-in needed)",
-      "login_note": "<login>Sign in</login> to keep your saved views and notebook investigations with your account."
+      "login_note": "<login>Sign in</login> to keep your saved views and notebook investigations with your account.",
+      "live_badge": "Watching every public bus feed in Japan, minute by minute",
+      "title": "Did that bus run on schedule?",
+      "lead": "We collect every public GTFS-RT (real-time operations) feed in Japan every minute and match it trip by trip against the published timetable — a third-party record that doesn't depend on any contract with the operator.",
+      "check_public_data": "Public data only",
+      "check_published_formula": "Definitions and formulas, published",
+      "check_unobserved_flagged": "Unobserved trips are flagged, not hidden",
+      "secondary_cta": "See the nationwide feeds"
     },
-    "hero_map": {
-      "screens": {
-        "live": "Current observations",
-        "period": "Period overview"
+    "nav": {
+      "aria_label": "Main",
+      "councils": "For councils",
+      "feeds": "Nationwide feeds",
+      "method": "How we calculate"
+    },
+    "status": {
+      "aria_label": "Current observation status",
+      "updated_at": "As of {{datetime}}",
+      "cadence": "Updated every minute",
+      "feeds_label": "Feeds monitored",
+      "feeds_value": "{{feeds}} feeds · {{cities}} cities",
+      "buses_label": "Buses tracked today",
+      "buses_value": "{{count}}",
+      "ontime_label": "Nationwide on-time rate",
+      "ontime_value": "{{pct}}% · under {{seconds}}s late"
+    },
+    "sample_tag": "Sample data",
+    "stage": {
+      "map_alt": "A dotted map of Japan. Each dot colors an observed city by its on-time rate.",
+      "title": "Nationwide GTFS-RT observatory",
+      "subtitle": "Observatory · {{feeds}} feeds · {{cities}} cities",
+      "legend_title": "On-time rate",
+      "legend_band_high": "85% or more",
+      "legend_band_mid": "75–85%",
+      "legend_band_low": "65–75%",
+      "legend_band_poor": "Under 65%",
+      "legend_offline": "Feed offline",
+      "cities": {
+        "sapporo": "Sapporo",
+        "aomori": "Aomori",
+        "sendai": "Sendai",
+        "nagoya": "Nagoya",
+        "hiroshima": "Hiroshima",
+        "fukuoka": "Fukuoka",
+        "naha": "Naha"
       },
-      "captions": {
-        "live": "Current observations",
-        "trip": "Open a Route 12 trip",
-        "playback": "Play the day",
-        "overview": "Period overview"
+      "okinawa_inset": "Okinawa"
+    },
+    "doors": {
+      "councils": {
+        "who": "Municipalities & regional transit councils",
+        "title": "Audit report",
+        "body": "Were subsidized and contracted routes operated as planned? We put each route's confirmation rate and on-time rate into the shape of a quarterly council packet.",
+        "cta": "See a sample report →"
       },
+      "operators": {
+        "who": "Bus operators & data teams",
+        "title": "Data quality",
+        "body": "Every GTFS-RT feed graded A through F each month on freshness and coverage, so you can see which routes and hours are going missing.",
+        "cta": "See the nationwide feed grades →",
+        "chip_monthly": "Monthly grades",
+        "chip_gaps": "Where data is missing"
+      },
+      "everyone": {
+        "who": "Anyone, no account needed",
+        "body": "Watch a real day in a real city, played back bus by moving bus. Delay spreading through the morning and evening rush shows up in color, at a glance.",
+        "cta": "Open {{name}} →",
+        "chip_no_signup": "No sign-up",
+        "chip_mobile": "Works on phones"
+      },
+      "eyebrow": "WHO IT'S FOR",
+      "heading": "Same data, three seats at the table."
+    },
+    "chips": {
+      "pdf": "PDF",
+      "csv": "CSV",
+      "print": "Print"
+    },
+    "observatory": {
+      "eyebrow": "OBSERVATORY · Nationwide GTFS-RT watch",
+      "heading": "Grading Japan's real-time bus feeds, every month.",
+      "lead": "We watch every public real-time bus feed we can find. No contract with the operator required. Each month we grade every one, A through F, on freshness and coverage.",
+      "shown_count": "Showing {{shown}} of {{total}} feeds",
+      "table_aria": "Feed status by city",
+      "col_city": "City",
+      "col_freshness": "Feed freshness (median)",
+      "col_ontime": "On-time rate",
+      "col_grade": "Monthly grade",
+      "col_updated": "Last update",
+      "coverage_label": "{{pct}}% coverage",
+      "no_data": "Not enough data",
+      "offline": "Offline",
+      "ago_seconds": "{{n}}s ago",
+      "ago_minutes": "{{n}} min ago",
+      "footnote": "On-time rate is the share of trips that departed less than {{seconds}} seconds behind schedule. The monthly grade scores the feed itself — a separate measure from how well the buses actually ran.",
+      "rows": {
+        "aomori": "Aomori",
+        "sendai": "Sendai",
+        "toyama": "Toyama",
+        "gifu": "Gifu",
+        "kyoto": "Kyoto",
+        "hiroshima": "Hiroshima",
+        "matsuyama": "Matsuyama",
+        "naha": "Naha"
+      },
+      "see_all_link": "See all {{total}} feeds",
+      "feed_count_one": "{{count}} feed",
+      "feed_count_other": "{{count}} feeds"
+    },
+    "councils": {
+      "eyebrow": "FOR COUNCILS",
+      "heading": "A report your council packet can use as-is.",
+      "lead": "We sum up whether subsidized and contracted routes ran as planned, in a third party's own numbers. The source, the definitions and the timetable version are footnoted automatically.",
+      "check_rates": "Per-route confirmation rate, on-time rate and observation coverage",
+      "check_unobserved": "Unobserved trips listed separately, not hidden in the average",
+      "check_print": "A4 portrait, readable even printed in black and white",
+      "disclaimer": "This sample uses fictional council data."
+    },
+    "report": {
+      "aria_label": "Sample quarterly report",
+      "badge": "Sample",
+      "addressee": "To: [City] Regional Transit Council",
+      "title": "Operating performance of subsidized routes",
+      "period": "FY{{year}} Q{{quarter}} ({{from}}–{{to}}) · {{routes}} routes covered",
+      "kpi_confirmed_label": "Confirmation rate",
+      "kpi_confirmed_sub": "{{confirmed}} of {{total}} trips",
+      "kpi_ontime_label": "On-time rate",
+      "kpi_ontime_sub": "Under {{seconds}}s late",
+      "kpi_coverage_label": "Observation coverage",
+      "kpi_coverage_sub": "Unobserved trips in Table A",
+      "route_bars_heading": "On-time rate by route",
+      "target_note": "┆ Council target {{pct}}%",
       "routes": {
-        "rapid": "Rapid",
-        "local": "Local",
-        "bus5": "Route 5",
-        "bus12": "Route 12",
-        "bus7": "Route 7",
-        "bus3": "Route 3"
+        "loop": "City Loop Line",
+        "north": "North Estate Line",
+        "eastwest": "East-West Line",
+        "south": "South Line",
+        "mountain": "Mountain District Line"
       },
-      "stops": {
-        "konan": "Konan",
-        "shiyakusho": "City Hall",
-        "central": "Central Sta.",
-        "honmachi": "Honmachi",
-        "higashidai": "Higashidai",
-        "minatomachi": "Minatomachi",
-        "toshokan": "Library",
-        "kitamachi": "Kitamachi"
-      },
-      "queue_title": "Trips to check",
-      "kpi": {
-        "observed": "Observed",
-        "delayed": "5+\u00a0min late",
-        "on_time": "On-time rate"
-      },
-      "legend": {
-        "under": "< {{minutes}} min",
-        "over": "{{minutes}}+ min",
-        "disclosure": "Last reported stop, not GPS"
-      },
-      "trip_heading": "Route 12 · to Kitamachi",
-      "trip_chart_title": "Delay progression by stop",
-      "trip_note": "Grew from Central Sta. to Honmachi",
-      "refresh": "Updated  08:12:30",
-      "playback": "Play the day",
-      "playback_speed": "1×",
-      "hourly_title": "Worst hour of day",
-      "peak": "peak",
-      "overview_average": "Network avg delay",
-      "overview_change": "▼ {{minutes}}  vs previous period",
-      "overview_delayed_routes": "Routes delayed",
-      "routes_to_check": "Routes to check now",
-      "sample_notice": "Sample data · fictional city",
-      "delay_short": "+{{minutes}} min",
-      "minutes": "{{minutes}} min",
-      "hour_of_day": "{{hour}}:00",
-      "clock": "{{hour}}:00",
-      "minute_unit": "min",
-      "playback_control": {
-        "playing": "Pause",
-        "paused": "Play",
-        "ended": "Play again"
-      }
+      "below_target": "{{routes}} missed the target (lighter bar)",
+      "footnote": "Source: GTFS-RT published by each operator (collected every minute), matched against the GTFS timetable (the {{timetableDate}} edition), compiled independently by this service. On-time means under {{seconds}}s behind schedule (definition v{{version}}). The {{unobserved}} unobserved trips are excluded from the denominator and listed in Table A.",
+      "generated_line": "Generated {{date}} · Recalculation ID {{id}}",
+      "page_indicator": "{{page}} / {{total}}"
     },
-    "narrative": {
-      "route": {
-        "title": "Delay builds along a route",
-        "body": "The same stop-by-stop chart as each route's page, with example data — watch how a route's delay compounds stop after stop against a calmer week-earlier comparison."
-      },
-      "trend": {
-        "title": "Every day, compared",
-        "body": "The same daily trend chart from Reports, with example days — a rough day still shows clearly against the trailing average around it."
-      },
-      "ask": {
-        "title": "The notebook, with evidence",
-        "body": "The same evidence view the notebook shows for each result — not a screenshot. Select a stop below to see it."
-      },
-      "sample_caption": "Sample data · fictional {{route}}"
+    "method": {
+      "eyebrow": "HOW WE KNOW",
+      "heading": "Every number's origin, shown in full.",
+      "lead": "Collect, compare, publish — the same three steps, and the same definitions, everywhere in Japan.",
+      "step1_label": "01 · Collect",
+      "step1_title": "Collect",
+      "step1_body": "We fetch public GTFS-RT every minute and keep whatever arrives as-is. A minute we couldn't fetch is recorded too, not skipped over.",
+      "step1_gap_caption": "{{minutes}} min gap (gray)",
+      "step2_label": "02 · Compare",
+      "step2_title": "Compare",
+      "step2_body": "We compare the time each trip actually passed a stop against the GTFS timetable's scheduled time, stop by stop.",
+      "step2_scheduled": "Scheduled",
+      "step2_observed": "Observed",
+      "step2_difference": "Difference",
+      "step2_delta": "+{{delta}} · slightly late",
+      "step3_label": "03 · Publish",
+      "step3_title": "Publish",
+      "step3_body": "We publish the definitions, the formulas and the timetable version. Anyone who recalculates gets the same number.",
+      "step3_formula_ontime": "On-time = under {{seconds}}s late",
+      "step3_formula_coverage": "Coverage = observed trips ÷ scheduled trips",
+      "step3_definition_version": "Definition v{{version}} · revised {{date}}",
+      "honesty_title": "What we don't hide",
+      "honesty_coverage": "Observation coverage, always shown alongside",
+      "honesty_unobserved_stops": "{{n}} unobserved stops, listed too",
+      "honesty_gaps": "Gaps in collection, shown in gray",
+      "honesty_changelog": "Definition change history, published"
+    },
+    "bustown": {
+      "eyebrow": "BUS TOWN",
+      "heading": "Watch a city's whole day, bus by moving bus.",
+      "body": "The record of buses that actually ran, played back on the route map. Green is on time; yellow to orange is late. Watch the colors shift through rush hour.",
+      "map_alt": "A sample playback of buses moving across a city's route map",
+      "caption": "{{city}} · playing back {{date}}",
+      "cta": "Open {{name}}"
+    },
+    "pause_toggle": {
+      "label": "Pause animations"
+    },
+    "footer": {
+      "disclaimer": "This service independently aggregates data each operator publishes; it is not an operator's official information. Every figure on this page is a sample.",
+      "copyright": "© {{year}} {{name}}"
     }
   },
   "tour": {
@@ -1598,6 +1700,9 @@
     },
     "route_page": {
       "not_frozen": "Not part of this snapshot: the map, the day's trips and the comparison with the previous period. They read live data, so the snapshot leaves them out."
+    },
+    "route_table": {
+      "panels_not_frozen": "Not part of this snapshot: the panels the Routes screen shows beside its table (the agency's performance standards, and headway quality under the on-time sort). This snapshot was taken before they were stored."
     }
   },
   "insight_panel": {

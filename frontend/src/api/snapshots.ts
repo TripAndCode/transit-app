@@ -3,6 +3,7 @@ import { apiGet, apiPost } from "./client";
 import { useLocalizedQuery } from "./hooks";
 import type {
   CapabilityTier,
+  HeadwayQualityResponse,
   OverviewConcentration,
   PerformanceStandardsResponse,
   ReportFigures,
@@ -51,6 +52,13 @@ export type Snapshot = {
      *  language and so stored once. */
     route_page?: Partial<Record<Locale, RoutePagePayload>>;
     route_lists?: RouteListsPayload;
+    /** A Routes table's side panels, which the screen asks for beside its
+     *  table: headway quality once (written in no language, stored only
+     *  under the on-time sort, where the screen shows it) and the agency's
+     *  performance standards per language. A snapshot taken before they were
+     *  stored has neither. */
+    headway?: HeadwayQualityResponse;
+    standards?: Partial<Record<Locale, PerformanceStandardsResponse>>;
     concentration?: OverviewConcentration;
     routes?: Route[];
     credit?: Partial<Record<Locale, string | null>>;
