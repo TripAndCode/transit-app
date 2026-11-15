@@ -180,12 +180,16 @@ the same kill switch: `router_stage` is `card_signed_in`
 (`POST .../conversations/{cid}/messages`) or `card_signed_out`
 (`POST .../ask/card`), `tool` is the canonical handler name (an unknown or
 aliased client name resolves to the handler's, or NULL), `success` is false for
-an empty or failed dispatch, and `latency_ms` is the dispatch's wall time. A
-follow-up writes a `followup` row naming the tool of the result it used. The
-`question` column is empty for cards and holds the follow-up's own text, as
-`/ask` rows hold theirs; arguments, thread ids and users are never stored. The
-write follows the request's transaction and swallows its own failure, so
-logging cannot fail a card. The admin Ask ops page reports these as per-tool
+an empty or failed dispatch, and `latency_ms` is the dispatch's own wall time
+(a signed-in card counts as a success only once its thread's transaction has
+committed). A follow-up writes a `followup` row naming the tool of the result
+it used (NULL when that answer came from no tool), with `latency_ms` of the
+model call and the numeric-guard verdict in `numeric_guard_triggered`. The
+`question` column is empty on every notebook row: the follow-up's text stays in
+the user's own conversation and is not copied into a row that must not point
+back at them. Arguments, thread ids and users are never stored. The write
+follows the request's transaction and swallows its own failure, so logging
+cannot fail a card or lose a follow-up's answer. The admin Ask ops page reports these as per-tool
 counts over 30 days.
 
 **Follow-up path** (LLM-grounded, kill-switch gated):

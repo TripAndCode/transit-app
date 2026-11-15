@@ -57,7 +57,8 @@ function FunnelBar({
 }
 
 /** Notebook usage: how often each tool's card ran signed in and signed out,
- * and how often a follow-up used it as context, over the last 30 days. */
+ * and how often a follow-up used it as context, over the window the server
+ * reports. */
 function ToolUsageSection() {
   const { t } = useTranslation();
   const { data, error, refetch } = useAdminAskToolUsage();
@@ -76,12 +77,21 @@ function ToolUsageSection() {
       header: t("admin.ask_ops.tools.col.latency"),
       render: (row) => row.avg_latency_ms ?? "—",
     },
+    {
+      key: "followup_latency",
+      header: t("admin.ask_ops.tools.col.followup_latency"),
+      render: (row) => row.avg_followup_latency_ms ?? "—",
+    },
   ];
   return (
     <section
       style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
     >
-      <h2 style={{ fontSize: 15, marginBottom: 4 }}>{t("admin.ask_ops.tools.title")}</h2>
+      <h2 style={{ fontSize: 15, marginBottom: 4 }}>
+        {data != null
+          ? t("admin.ask_ops.tools.title", { from: data.from_date, to: data.to_date })
+          : t("admin.ask_ops.tools.title_loading")}
+      </h2>
       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
         {t("admin.ask_ops.tools.note")}
       </p>

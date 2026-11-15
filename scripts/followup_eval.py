@@ -124,13 +124,14 @@ async def _ask(question: str, locale: str, context: dict) -> tuple[str, str | No
     """Call ``answer_followup`` for one probe; ``context_args`` is irrelevant to grading."""
     from pipeline.query.followup import answer_followup
 
-    return await answer_followup(
+    result = await answer_followup(
         question=question,
         context_tool=context.get("kind"),
         context_args={},
         context_result=context,
         locale=locale,
     )
+    return result.answer, result.error
 
 
 async def main() -> int:

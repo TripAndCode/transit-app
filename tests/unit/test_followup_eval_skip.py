@@ -59,9 +59,9 @@ def test_runs_the_probes_when_an_allowed_provider_has_a_key(monkeypatch: pytest.
     """The skip must not swallow a usable provider: the gate then really probes it."""
     calls: list[object] = []
 
-    async def _recording(**kwargs: object) -> tuple[str, None]:
+    async def _recording(**kwargs: object) -> followup.FollowupResult:
         calls.append(kwargs)
-        return "", None
+        return followup.FollowupResult("", None)
 
     monkeypatch.delenv("ASK_FOLLOWUP_PROVIDERS", raising=False)
     monkeypatch.setattr(llm_client, "get_client", lambda: _client_with("gemini"))

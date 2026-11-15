@@ -94,7 +94,9 @@ async def list_ask_queries(
 ) -> AskQueryLogPage:
     """List ask_query_log rows newest-first, with route/status/agency/date
     filters and id-keyset pagination (stable under concurrent inserts,
-    unlike offset paging).
+    unlike offset paging). Without a `route`, notebook card and follow-up
+    rows are left out, as the funnel leaves them out; pass one of their routes
+    to list them.
 
     `question` is the caller's raw, unredacted Ask input. It is
     Internal-classified and retained 90 days by `prune-query-log`."""
@@ -109,6 +111,10 @@ async def list_ask_queries(
             raise HTTPException(400, f"unknown route {route!r}")
         args.append(stage)
         where.append(f"l.router_stage = ${len(args)}")
+    else:
+        # Notebook rows are asked for by name, as the funnel leaves them out.
+        args.append(list(NOTEBOOK_STAGES))
+        where.append(f"l.router_stage <> ALL(${len(args)}::text[])")
     if status is not None:
         success = status_to_success(status)
         if success is None:
@@ -228,7 +234,9 @@ async def ask_funnel(
 class AskToolUsage(BaseModel):
     """Notebook usage of one tool: how many card dispatches signed in and
     signed out, how many follow-ups named it as their context, how many of
-    all of those failed, and the mean latency over the rows that measured one."""
+    all of those failed, and the mean latency of its card dispatches. The
+    tool is NULL for a card name no handler answers to and for a follow-up on
+    an answer that came from no tool."""
 
     tool: str | None
     signed_in: int
@@ -236,6 +244,7 @@ class AskToolUsage(BaseModel):
     followups: int
     failed: int
     avg_latency_ms: int | None
+    avg_followup_latency_ms: int | None
 
 
 class AskToolUsageOut(BaseModel):
@@ -255,7 +264,7 @@ async def ask_tool_usage(
     """Per-tool counts of notebook card dispatches (signed in and signed out)
     and follow-ups: the notebook's usage signal.
 
-    Defaults to the trailing `DEFAULT_RANGE_DAYS` JST days (30), ending today.
+    Defaults to the trailing `DEFAULT_RANGE_DAYS` JST days, ending today.
     Reads only the notebook stages of ``ask_query_log``, which holds no
     identity, and is bounded by that table's 90-day retention."""
     if to_date is None:
@@ -276,7 +285,8 @@ async def ask_tool_usage(
                count(*) FILTER (WHERE router_stage = '{CARD_SIGNED_OUT}') AS signed_out,
                count(*) FILTER (WHERE router_stage = '{FOLLOWUP}') AS followups,
                count(*) FILTER (WHERE NOT success) AS failed,
-               round(avg(latency_ms))::int AS avg_latency_ms
+               round(avg(latency_ms) FILTER (WHERE router_stage <> '{FOLLOWUP}'))::int AS avg_latency_ms,
+               round(avg(latency_ms) FILTER (WHERE router_stage = '{FOLLOWUP}'))::int AS avg_followup_latency_ms
         FROM ask_query_log
         WHERE {" AND ".join(where)}
         GROUP BY tool
@@ -295,6 +305,7 @@ async def ask_tool_usage(
                 followups=r["followups"],
                 failed=r["failed"],
                 avg_latency_ms=r["avg_latency_ms"],
+                avg_followup_latency_ms=r["avg_followup_latency_ms"],
             )
             for r in rows
         ],

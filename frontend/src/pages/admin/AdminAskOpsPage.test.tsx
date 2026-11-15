@@ -66,8 +66,8 @@ beforeEach(() => {
       from_date: "2026-10-17",
       to_date: "2026-11-15",
       tools: [
-        { tool: "top_n", signed_in: 7, signed_out: 3, followups: 2, failed: 1, avg_latency_ms: 142 },
-        { tool: null, signed_in: 0, signed_out: 1, followups: 0, failed: 1, avg_latency_ms: null },
+        { tool: "top_n", signed_in: 7, signed_out: 3, followups: 2, failed: 1, avg_latency_ms: 142, avg_followup_latency_ms: 2500 },
+        { tool: null, signed_in: 0, signed_out: 1, followups: 0, failed: 1, avg_latency_ms: null, avg_followup_latency_ms: null },
       ],
     },
     error: null,
@@ -198,8 +198,14 @@ describe("AdminAskOpsPage", () => {
     wrap(<AdminAskOpsPage />);
     const table = screen.getByRole("grid", { name: i18n.t("admin.ask_ops.tools.table_label") });
     const row = within(table).getByText("top_n").closest("tr") as HTMLElement;
-    expect(within(row).getAllByRole("gridcell").map((c) => c.textContent)).toEqual(["top_n", "7", "3", "2", "1", "142"]);
+    expect(within(row).getAllByRole("gridcell").map((c) => c.textContent)).toEqual(["top_n", "7", "3", "2", "1", "142", "2500"]);
     expect(within(table).getByText(i18n.t("admin.ask_ops.tools.unknown_tool"))).toBeTruthy();
+  });
+
+  it("titles the usage table with the window the server reports, not a fixed length", () => {
+    wrap(<AdminAskOpsPage />);
+    expect(screen.getByRole("heading", { name: /2026-10-17.*2026-11-15/ })).toBeTruthy();
+    expect(screen.queryByText(/30/)).toBeNull();
   });
 
   it("shows an error, not an empty usage table, when the usage query failed", () => {

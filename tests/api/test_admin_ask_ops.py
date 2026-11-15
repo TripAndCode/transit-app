@@ -265,7 +265,7 @@ async def test_tools_counts_notebook_paths_per_tool_for_the_last_30_days(ask_ops
     await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", latency_ms=100)
     await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", success=False, latency_ms=300)
     await _insert_notebook_log(pool, agency_id, "card_signed_out", "top_n", latency_ms=200)
-    await _insert_notebook_log(pool, agency_id, "followup", "top_n", latency_ms=None)
+    await _insert_notebook_log(pool, agency_id, "followup", "top_n", latency_ms=9000)
     await _insert_notebook_log(pool, agency_id, "card_signed_out", "time_series")
     await _insert_notebook_log(pool, agency_id, "card_signed_out", None, success=False)
     # Outside the window, and not a notebook path: neither is counted.
@@ -282,6 +282,7 @@ async def test_tools_counts_notebook_paths_per_tool_for_the_last_30_days(ask_ops
         "followups": 1,
         "failed": 1,
         "avg_latency_ms": 200,
+        "avg_followup_latency_ms": 9000,
     }
     assert by_tool["time_series"]["signed_out"] == 1
     assert by_tool[None]["failed"] == 1
@@ -297,6 +298,15 @@ async def test_funnel_leaves_out_notebook_dispatches(ask_ops_client):
     body = (await c.get("/api/admin/ask/funnel", cookies={"sid": sid})).json()
     assert body["total"] == 1
     assert [r["route"] for r in body["by_route"]] == ["rules", "nn", "rag", "no_history"]
+
+
+@pytest.mark.asyncio
+async def test_queries_leave_out_notebook_rows_unless_their_route_is_asked_for(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_log(pool, agency_id, router_stage="rules")
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "top_n")
+    rows = (await c.get("/api/admin/ask/queries", cookies={"sid": sid})).json()["rows"]
+    assert [r["route"] for r in rows] == ["rules"]
 
 
 @pytest.mark.asyncio

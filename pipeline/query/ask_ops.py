@@ -26,7 +26,8 @@ CARD_SIGNED_IN = "card_signed_in"
 CARD_SIGNED_OUT = "card_signed_out"
 FOLLOWUP = "followup"
 
-# router_stage (DB value) -> display route, in pipeline order.
+# router_stage (DB value) -> display route: router stages in pipeline order,
+# then the notebook paths.
 _STAGE_TO_ROUTE = {
     "rules": "rules",
     "embedding": "nn",

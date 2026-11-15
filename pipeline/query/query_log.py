@@ -34,14 +34,15 @@ async def log_query(
     LLM stage; they are NULL otherwise.
 
     ``numeric_guard_triggered`` is the column for a post-generation
-    numeric-guard verdict, and no path that writes this log produces one: a
-    dispatched tool's answer is rendered from grounded data, and the Stage-3
-    plain-text reply has nothing to trace a number back to (see
-    ``pipeline.query.chat._text_reply``). So every row records NULL ("no
-    verdict"), which must stay distinct from FALSE ("ran, answer was clean").
+    numeric-guard verdict. Only a conversation follow-up produces one (see
+    ``pipeline.query.followup.answer_followup``): a dispatched tool's answer is
+    rendered from grounded data, and the Stage-3 plain-text reply has nothing
+    to trace a number back to (see ``pipeline.query.chat._text_reply``), so
+    every other row records NULL ("no verdict"), which must stay distinct from
+    FALSE ("ran, answer was clean").
 
-    ``latency_ms`` is measured only for notebook card dispatches and
-    follow-ups; other rows leave it NULL.
+    ``latency_ms`` is measured only for notebook card dispatches (the
+    dispatch itself) and follow-ups (the model call); other rows leave it NULL.
 
     The write is its own statement. A caller inside a transaction must log
     after it ends: a failed INSERT aborts the transaction it runs in, and

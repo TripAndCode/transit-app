@@ -2234,7 +2234,7 @@
       },
       "table_label": "Ask query log",
       "tools": {
-        "title": "Notebook usage by tool, last 30 days",
+        "title": "Notebook usage by tool, {{from}} to {{to}}",
         "note": "Card runs and follow-ups from the investigation notebook. No user is recorded.",
         "empty": "No notebook activity in this window.",
         "table_label": "Notebook usage by tool",
@@ -2244,9 +2244,11 @@
           "signed_out": "Signed out",
           "followups": "Follow-ups",
           "failed": "Failed",
-          "latency": "Avg latency (ms)"
+          "latency": "Card latency (ms)",
+          "followup_latency": "Follow-up latency (ms)"
         },
-        "unknown_tool": "Unknown tool"
+        "unknown_tool": "No matching tool (unrecognised card name, or follow-up on an answer from no tool)",
+        "title_loading": "Notebook usage by tool"
       }
     }
   },

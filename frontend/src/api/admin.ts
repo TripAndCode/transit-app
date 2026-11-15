@@ -1026,9 +1026,10 @@ export type AskToolUsage = {
   followups: number;
   failed: number;
   avg_latency_ms: number | null;
+  avg_followup_latency_ms: number | null;
 };
 
-/** Notebook card runs and follow-ups per tool over the trailing 30 days. */
+/** Notebook card runs and follow-ups per tool over the response's window. */
 export function useAdminAskToolUsage() {
   return useQuery({
     queryKey: ["adminAskToolUsage"],

@@ -8,6 +8,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.query.followup import FollowupResult
 from tests.api.test_conversations import (  # noqa: F401  (conv_app is a fixture)
     _CSRF,
     _authed_client,
@@ -19,7 +20,8 @@ from tests.api.test_conversations import (  # noqa: F401  (conv_app is a fixture
 async def _rows(pool) -> list:
     async with pool.acquire() as c:
         return await c.fetch(
-            "SELECT agency_id, question, router_stage, tool, success, latency_ms FROM ask_query_log ORDER BY id"
+            "SELECT agency_id, question, router_stage, tool, success, latency_ms, numeric_guard_triggered "
+            "FROM ask_query_log ORDER BY id"
         )
 
 
@@ -237,18 +239,108 @@ async def _followup(app, agency, uid, pool, monkeypatch, result):
 @pytest.mark.asyncio
 async def test_followup_is_logged_with_its_context_tool(usage, monkeypatch):
     app, agency, uid, pool = usage
-    r = await _followup(app, agency, uid, pool, monkeypatch, ("the answer", None))
+    r = await _followup(app, agency, uid, pool, monkeypatch, FollowupResult("the answer", None, False))
     assert r.status_code == 200, r.text
     [row] = await _rows(pool)
     assert (row["router_stage"], row["tool"], row["success"]) == ("followup", "describe_data", True)
-    assert row["question"] == "what about X?"
+    assert row["question"] == ""
     assert row["latency_ms"] is not None
+    assert row["numeric_guard_triggered"] is False
 
 
 @pytest.mark.asyncio
 async def test_a_failed_followup_is_logged_as_a_failure(usage, monkeypatch):
     app, agency, uid, pool = usage
-    r = await _followup(app, agency, uid, pool, monkeypatch, ("", "provider_unavailable"))
+    r = await _followup(app, agency, uid, pool, monkeypatch, FollowupResult("", "provider_unavailable"))
     assert r.status_code == 502
     [row] = await _rows(pool)
-    assert (row["router_stage"], row["success"]) == ("followup", False)
+    assert (row["router_stage"], row["success"], row["question"]) == ("followup", False, "")
+    assert row["numeric_guard_triggered"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_replaced_followup_answer_records_the_guard_verdict(usage, monkeypatch):
+    app, agency, uid, pool = usage
+    r = await _followup(app, agency, uid, pool, monkeypatch, FollowupResult("fallback", None, True))
+    assert r.status_code == 200, r.text
+    [row] = await _rows(pool)
+    assert row["numeric_guard_triggered"] is True
+
+
+@pytest.mark.asyncio
+async def test_the_kill_switch_stops_followup_logging(usage, monkeypatch):
+    from pipeline import flags
+
+    app, agency, uid, pool = usage
+    monkeypatch.setenv("ASK_QUERY_LOG_ENABLED", "false")
+    flags.invalidate()
+    await _followup(app, agency, uid, pool, monkeypatch, FollowupResult("", "provider_unavailable"))
+    r = await _followup(app, agency, uid, pool, monkeypatch, FollowupResult("ok", None, False))
+    assert r.status_code == 200
+    assert await _rows(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_card_latency_covers_the_dispatch_only(usage, monkeypatch):
+    import asyncio
+
+    import api.routers.conversations as conv_router
+    from pipeline.query.results import ToolResult
+
+    app, agency, uid, pool = usage
+
+    async def slow_dispatch(tool, args, ctx, conn, agency_id, locale="ja", ch=None):
+        await asyncio.sleep(0.2)
+        return ToolResult(kind="kv", summary="ok")
+
+    monkeypatch.setattr(conv_router, "dispatch", slow_dispatch)
+    await _signed_in_card(app, agency, uid)
+    await _signed_out_card(app, agency)
+    rows = await _rows(pool)
+    assert len(rows) == 2
+    assert all(200 <= r["latency_ms"] < 1000 for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_a_card_whose_thread_write_fails_is_not_logged_as_a_success(usage, monkeypatch):
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, pool = usage
+    real_append = conv_router._conv.append_message
+
+    async def failing_assistant_append(conn, conversation_id, *, role, **kw):
+        if role == "assistant":
+            raise RuntimeError("write failed")
+        return await real_append(conn, conversation_id, role=role, **kw)
+
+    monkeypatch.setattr(conv_router._conv, "append_message", failing_assistant_append)
+    async with _authed_client(app, uid) as c:
+        conv_id = await _new_conversation(c, agency)
+        with pytest.raises(RuntimeError, match="write failed"):
+            await c.post(
+                f"/api/{agency}/conversations/{conv_id}/messages",
+                json={"tool": "describe_data", "args": {}},
+                headers=_CSRF,
+            )
+    assert await _rows(pool) == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_user_message_write_logs_no_dispatch(usage, monkeypatch):
+    import api.routers.conversations as conv_router
+
+    app, agency, uid, pool = usage
+
+    async def failing_append(conn, conversation_id, **kw):
+        raise RuntimeError("write failed")
+
+    monkeypatch.setattr(conv_router._conv, "append_message", failing_append)
+    async with _authed_client(app, uid) as c:
+        conv_id = await _new_conversation(c, agency)
+        with pytest.raises(RuntimeError, match="write failed"):
+            await c.post(
+                f"/api/{agency}/conversations/{conv_id}/messages",
+                json={"tool": "describe_data", "args": {}},
+                headers=_CSRF,
+            )
+    assert await _rows(pool) == []
