@@ -60,9 +60,9 @@ def test_days_where_ranges_once_per_run_of_consecutive_days():
 def test_days_where_tests_one_run_of_consecutive_days_against_its_ends():
     days = [date(2026, 9, 1) + timedelta(days=i) for i in range(400)]
     sql, params = ch_aggregates.days_where(days)
-    assert f"{static_archive.FILED_DATE_SQL} BETWEEN {{filed_first:Date}} AND {{filed_last:Date}}" in sql
+    assert f"{static_archive.FILED_DATE_SQL} BETWEEN {{run_first:Date}} AND {{run_last:Date}}" in sql
     assert "has(" not in sql
-    assert (params["filed_first"], params["filed_last"]) == (days[0], days[-1])
+    assert (params["run_first"], params["run_last"]) == (days[0], days[-1])
     assert (params["day_start_0"], params["day_end_0"]) == filed_capture_span(days[0], days[-1])
     assert "day_start_1" not in params
 

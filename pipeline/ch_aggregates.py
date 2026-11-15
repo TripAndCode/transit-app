@@ -175,9 +175,9 @@ def days_where(days: list[date]) -> tuple[str, dict]:
         )
         params[f"day_start_{i}"], params[f"day_end_{i}"] = filed_capture_span(first, last)
     if len(runs) == 1:
-        params["filed_first"], params["filed_last"] = runs[0]
+        params["run_first"], params["run_last"] = runs[0]
         return (
-            f"{clauses[0]} AND {static_archive.FILED_DATE_SQL} BETWEEN {{filed_first:Date}} AND {{filed_last:Date}}",
+            f"{clauses[0]} AND {static_archive.FILED_DATE_SQL} BETWEEN {{run_first:Date}} AND {{run_last:Date}}",
             params,
         )
     params["filed_days"] = sorted(set(days))
