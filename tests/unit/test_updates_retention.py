@@ -112,23 +112,34 @@ def test_a_month_ending_a_second_past_the_cutoff_stays():
 
 
 @pytest.mark.parametrize(
-    "now, today",
+    "now",
     [
-        (datetime(2025, 2, 2, 12, tzinfo=UTC), date(2025, 2, 2)),
-        (datetime(2025, 2, 28, 18, tzinfo=UTC), date(2025, 2, 28)),  # 03:00 JST, before the cutover
+        datetime(2025, 2, 2, 12, tzinfo=UTC),
+        datetime(2025, 2, 28, 18, tzinfo=UTC),  # 03:00 JST, service date 2025-02-28
+        datetime(2025, 2, 28, 20, tzinfo=UTC),  # 05:00 JST, service date 2025-03-01, the floor
     ],
 )
-def test_a_month_whose_floor_would_be_after_today_is_held(now, today):
-    """With a horizon of a day, dropping January would freeze February's dates
-    before their rows arrive."""
+def test_a_month_whose_floor_would_be_after_today_is_held(now):
+    """With a horizon of a day, dropping January would freeze dates whose
+    readings have yet to arrive, up to the last that files under 2025-02-28:
+    captured before 08:00 JST on 2025-03-01, the cutover plus the filing reach."""
     held = _counts(date(2024, 12, 31), date(2025, 3, 1))
     verdicts = _plan(
         [_partition("202501", 1)], cutoff=retention.updates_cutoff(now, 1), now=now, ledgers={1: held}, live={1: held}
     )
     assert [v.held_by for v in verdicts] == [
-        f"its floor 2025-03-01 would be after today's service date {today.isoformat()}; "
-        "analyze could never build the dates in between"
+        "readings that file under the day before its floor 2025-03-01 are still arriving "
+        "until 2025-02-28T23:00:00+00:00"
     ]
+
+
+def test_a_month_is_dropped_once_the_day_before_its_floor_can_file_no_more_readings():
+    now = datetime(2025, 2, 28, 23, tzinfo=UTC)  # 08:00 JST on 2025-03-01
+    held = _counts(date(2024, 12, 31), date(2025, 3, 1))
+    verdicts = _plan(
+        [_partition("202501", 1)], cutoff=retention.updates_cutoff(now, 1), now=now, ledgers={1: held}, live={1: held}
+    )
+    assert [(v.floor, v.held_by) for v in verdicts] == [(date(2025, 3, 1), None)]
 
 
 def test_a_month_whose_floor_is_today_is_dropped():

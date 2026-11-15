@@ -256,8 +256,15 @@ past the horizon and every agency with rows in it clears the holds
 `pipeline.retention.plan_updates_prune` states. A drop raises those agencies'
 floors to the first day of the month after the next one: dropping January
 sets the floor at March 1st. February's aggregates are then final while
-`updates` still holds its rows. The dry run names what holds each month, and
-for which agency:
+`updates` still holds its rows. The dry run names what holds each month. One
+hold applies to the month as a whole and names no agency:
+
+- readings that file under the day before the new floor can still arrive.
+  That day's readings keep arriving until 08:00 JST on the floor date, and
+  only a short `--days` horizon reaches such a month. This hold clears as
+  time passes; analyzing does not clear it.
+
+The others each name the agency that holds the month:
 
 - an agency that `analyze_all` never visits, because it is soft-deleted or
   has no `agencies` row;
@@ -268,8 +275,8 @@ for which agency:
 - a timetable or builder change analyze has not applied yet, or a date whose
   version in force moved since it was built.
 
-Each clears once that agency is analyzed, except two, where an operator
-decides whether to keep the agency's rows or delete them: an agency
+Each of these clears once that agency is analyzed, except two, where an
+operator decides whether to keep the agency's rows or delete them: an agency
 `analyze_all` never visits, and dates without aggregates below an agency's
 floor, where analyze never builds.
 

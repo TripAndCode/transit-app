@@ -33,7 +33,7 @@ from pipeline.agg_sql import EARLIEST_CAPTURE, LEDGER_COUNTS_CH_SQL
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.flags import get_flag_state
 from pipeline.locks import agency_ingest_lock
-from pipeline.service_day import filed_dates_reached, service_date_of, service_day_start_utc
+from pipeline.service_day import filed_capture_span, filed_dates_reached, service_day_start_utc
 
 if TYPE_CHECKING:
     from pipeline.analyze import Unapplied
@@ -235,10 +235,11 @@ def plan_updates_prune(
 
     Dropping one raises the retention floor of each agency with rows in it to
     floor_after the partition's end, and analyze then treats every date below
-    that floor as final. So a partition is held while that floor is after the
-    service date of *now*: analyze could never build the dates between them,
-    whose rows have yet to arrive. A short horizon (`--days`) reaches such a
-    month. Otherwise it is held unless, for each such agency:
+    that floor as final. So a partition is held while, at *now*, readings
+    that file under the day before that floor can still be captured
+    (service_day.filed_capture_span): analyze would never aggregate them. A
+    short horizon (`--days`) reaches such a month. Otherwise it is held
+    unless, for each such agency:
 
     - analyze_all visits it: it has an agencies row (*soft_deleted*, keyed by
       the ids that have one) that is not soft-deleted. No analyze clears a
@@ -270,7 +271,6 @@ def plan_updates_prune(
     every later month of that agency wait too, since that date lies below
     their floors as well.
     """
-    today = service_date_of(now)
     verdicts = []
     for partition in partitions:
         start, end = partition_span(partition.partition_id)
@@ -278,10 +278,11 @@ def plan_updates_prune(
             continue
         floor = floor_after(end)
         held_by = None
-        if floor > today:
+        arriving_until = filed_capture_span(floor - timedelta(days=1), floor - timedelta(days=1))[1]
+        if now < arriving_until:
             held_by = (
-                f"its floor {floor.isoformat()} would be after today's service date {today.isoformat()}; "
-                "analyze could never build the dates in between"
+                f"readings that file under the day before its floor {floor.isoformat()} are still arriving "
+                f"until {arriving_until.isoformat()}"
             )
         else:
             for agency_id in sorted(partition.agency_ids):
