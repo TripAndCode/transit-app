@@ -339,11 +339,15 @@ def _pg_route_daily(pg_conn, agency_id, condition: str, day: date) -> list:
         return sorted(map(repr, cur.fetchall()))
 
 
-def _delete_ch_route_daily(ch_client, agency_id, condition: str = "") -> None:
-    ch_client.command(
-        f"DELETE FROM agg_route_daily WHERE agency_id = {{a:Int32}} {condition}",
-        parameters={"a": agency_id, "day": date(2025, 2, 1)},
-    )
+def _delete_ch_route_daily(ch_client, agency_id, day: date | None = None) -> None:
+    """The agency's ClickHouse agg_route_daily rows, of *day* alone when given."""
+    if day is None:
+        ch_client.command("DELETE FROM agg_route_daily WHERE agency_id = {a:Int32}", parameters={"a": agency_id})
+    else:
+        ch_client.command(
+            "DELETE FROM agg_route_daily WHERE agency_id = {a:Int32} AND date = {day:Date}",
+            parameters={"a": agency_id, "day": day},
+        )
 
 
 def test_postgres_keeps_final_rows_clickhouse_lost_in_the_month_before_the_floor(pg_conn, ch_client, agency_id, pruned):
@@ -351,7 +355,8 @@ def test_postgres_keeps_final_rows_clickhouse_lost_in_the_month_before_the_floor
     analyze(agency_id, pg_conn, ch_client)
     before = _pg_route_daily(pg_conn, agency_id, "=", date(2025, 2, 1))
     assert before
-    _delete_ch_route_daily(ch_client, agency_id, "AND date = {day:Date}")
+    _delete_ch_route_daily(ch_client, agency_id, date(2025, 2, 1))
+    mark_for_full_rebuild(pg_conn, [agency_id])
     analyze(agency_id, pg_conn, ch_client)
     assert _pg_route_daily(pg_conn, agency_id, "=", date(2025, 2, 1)) == before
 

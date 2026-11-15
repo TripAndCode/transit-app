@@ -33,7 +33,7 @@ from pipeline.agg_sql import EARLIEST_CAPTURE, LEDGER_COUNTS_CH_SQL
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.flags import get_flag_state
 from pipeline.locks import agency_ingest_lock
-from pipeline.service_day import filed_dates_reached, service_day_start_utc
+from pipeline.service_day import filed_dates_reached, service_date_of, service_day_start_utc
 
 if TYPE_CHECKING:
     from pipeline.analyze import Unapplied
@@ -210,7 +210,8 @@ def retention_floor(conn, agency_id: int) -> date | None:
     while `updates` still holds their rows. The floor date's own rows can
     still file a stop event under the day before it, which is final, so the
     prune requires that date to be current as well (plan_updates_prune).
-    The rounding is applied here, on read, to whatever floor a drop recorded.
+    floor_after rounds the floor a drop records, and retention_floors rounds
+    whatever floor it reads back.
 
     Read from the drops prune_updates records rather than from its switch:
     turning the switch off stops further drops, and must not let the next
@@ -222,6 +223,7 @@ def plan_updates_prune(
     partitions: Iterable[UpdatesPartition],
     *,
     cutoff: datetime,
+    now: datetime,
     soft_deleted: Mapping[int, bool],
     floors: Mapping[int, date],
     ledgers: Mapping[int, Mapping[date, Counts]],
@@ -233,7 +235,10 @@ def plan_updates_prune(
 
     Dropping one raises the retention floor of each agency with rows in it to
     floor_after the partition's end, and analyze then treats every date below
-    that floor as final. So a partition is held unless, for each such agency:
+    that floor as final. So a partition is held while that floor is after the
+    service date of *now*: analyze could never build the dates between them,
+    whose rows have yet to arrive. A short horizon (`--days`) reaches such a
+    month. Otherwise it is held unless, for each such agency:
 
     - analyze_all visits it: it has an agencies row (*soft_deleted*, keyed by
       the ids that have one) that is not soft-deleted. No analyze clears a
@@ -265,6 +270,7 @@ def plan_updates_prune(
     every later month of that agency wait too, since that date lies below
     their floors as well.
     """
+    today = service_date_of(now)
     verdicts = []
     for partition in partitions:
         start, end = partition_span(partition.partition_id)
@@ -272,21 +278,27 @@ def plan_updates_prune(
             continue
         floor = floor_after(end)
         held_by = None
-        for agency_id in sorted(partition.agency_ids):
-            held_by = _held_by(
-                agency_id,
-                soft_deleted.get(agency_id),
-                start,
-                end,
-                floor,
-                floors.get(agency_id),
-                ledgers.get(agency_id, {}),
-                live.get(agency_id, {}),
-                (disagreeing or {}).get(agency_id, ()),
-                (unapplied or {}).get(agency_id),
+        if floor > today:
+            held_by = (
+                f"its floor {floor.isoformat()} would be after today's service date {today.isoformat()}; "
+                "analyze could never build the dates in between"
             )
-            if held_by is not None:
-                break
+        else:
+            for agency_id in sorted(partition.agency_ids):
+                held_by = _held_by(
+                    agency_id,
+                    soft_deleted.get(agency_id),
+                    start,
+                    end,
+                    floor,
+                    floors.get(agency_id),
+                    ledgers.get(agency_id, {}),
+                    live.get(agency_id, {}),
+                    (disagreeing or {}).get(agency_id, ()),
+                    (unapplied or {}).get(agency_id),
+                )
+                if held_by is not None:
+                    break
         verdicts.append(PartitionVerdict(partition, floor, held_by))
     return verdicts
 
@@ -423,13 +435,13 @@ def read_unapplied(conn, ch, agency_id: int) -> "Unapplied":
 
 def read_disagreements(conn, ch, agency_id: int, floor: date | None) -> list[str]:
     """The ClickHouse aggregates of the agency that do not add up to their
-    Postgres copies from *floor*'s month on (pipeline.analyze.store_disagreements)."""
+    Postgres copies from *floor* on (pipeline.analyze.store_disagreements)."""
     from pipeline.analyze import store_disagreements
 
     return store_disagreements(agency_id, conn, ch, floor)
 
 
-def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime) -> list[PartitionVerdict]:
+def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime, now: datetime) -> list[PartitionVerdict]:
     """plan_updates_prune over *candidates*, with the counts it needs read from both stores."""
     agency_ids = {agency_id for partition in candidates for agency_id in partition.agency_ids}
     floors = retention_floors(conn, agency_ids)
@@ -455,6 +467,7 @@ def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime) ->
     return plan_updates_prune(
         candidates,
         cutoff=cutoff,
+        now=now,
         soft_deleted=soft_deleted,
         floors=floors,
         ledgers=ledgers,
@@ -539,13 +552,14 @@ def prune_updates(
         return PruneResult(False, [], [])
     if not dry_run:
         acquire()
-    cutoff = updates_cutoff(now or datetime.now(timezone.utc), days)
+    now = now or datetime.now(timezone.utc)
+    cutoff = updates_cutoff(now, days)
     candidates = read_candidates(ch, cutoff)
     with ExitStack() as held:
         if not dry_run:
             for agency_id in sorted({a for partition in candidates for a in partition.agency_ids}):
                 held.enter_context(agency_ingest_lock(conn, agency_id))
-        verdicts = _verdicts(conn, ch, candidates, cutoff)
+        verdicts = _verdicts(conn, ch, candidates, cutoff, now)
         if dry_run:
             return PruneResult(enabled, verdicts, [])
         return PruneResult(True, verdicts, _drop(conn, ch, [v for v in verdicts if v.held_by is None]))

@@ -69,6 +69,7 @@ def _plan(
     partitions,
     *,
     cutoff=datetime(2026, 1, 1, tzinfo=UTC),
+    now=datetime(2026, 6, 1, tzinfo=UTC),
     soft_deleted=None,
     floors=None,
     ledgers=None,
@@ -81,6 +82,7 @@ def _plan(
     return plan_updates_prune(
         partitions,
         cutoff=cutoff,
+        now=now,
         soft_deleted=dict.fromkeys(every, False) if soft_deleted is None else soft_deleted,
         floors=floors or {},
         ledgers=ledgers or {},
@@ -107,6 +109,35 @@ def test_a_month_ending_a_second_past_the_cutoff_stays():
     held = _counts(date(2025, 1, 1), date(2025, 3, 31))
     cutoff = datetime(2025, 2, 28, 23, 59, 59, tzinfo=UTC)
     assert _plan([_partition("202502", 1)], cutoff=cutoff, ledgers={1: held}, live={1: held}) == []
+
+
+@pytest.mark.parametrize(
+    "now, today",
+    [
+        (datetime(2025, 2, 2, 12, tzinfo=UTC), date(2025, 2, 2)),
+        (datetime(2025, 2, 28, 18, tzinfo=UTC), date(2025, 2, 28)),  # 03:00 JST, before the cutover
+    ],
+)
+def test_a_month_whose_floor_would_be_after_today_is_held(now, today):
+    """With a horizon of a day, dropping January would freeze February's dates
+    before their rows arrive."""
+    held = _counts(date(2024, 12, 31), date(2025, 3, 1))
+    verdicts = _plan(
+        [_partition("202501", 1)], cutoff=retention.updates_cutoff(now, 1), now=now, ledgers={1: held}, live={1: held}
+    )
+    assert [v.held_by for v in verdicts] == [
+        f"its floor 2025-03-01 would be after today's service date {today.isoformat()}; "
+        "analyze could never build the dates in between"
+    ]
+
+
+def test_a_month_whose_floor_is_today_is_dropped():
+    now = datetime(2025, 3, 1, 12, tzinfo=UTC)  # 21:00 JST, service date 2025-03-01
+    held = _counts(date(2024, 12, 31), date(2025, 3, 1))
+    verdicts = _plan(
+        [_partition("202501", 1)], cutoff=retention.updates_cutoff(now, 1), now=now, ledgers={1: held}, live={1: held}
+    )
+    assert [(v.floor, v.held_by) for v in verdicts] == [(date(2025, 3, 1), None)]
 
 
 def test_a_month_whose_dates_are_all_aggregated_is_dropped_however_recent_the_ledger():
