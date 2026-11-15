@@ -42,15 +42,15 @@ async def _answer(monkeypatch, reply: str, *, question: str = "一番遅い路�
     ],
 )
 async def test_an_answer_quoting_the_context_passes(monkeypatch, reply):
-    assert await _answer(monkeypatch, reply) == (reply, None)
+    assert await _answer(monkeypatch, reply) == (reply, None, False)
 
 
 async def test_an_answer_may_repeat_the_questions_own_numbers(monkeypatch):
     reply = "上位2路線は22171と16071です。"
-    assert await _answer(monkeypatch, reply, question="上位2路線は？") == (reply, None)
+    assert await _answer(monkeypatch, reply, question="上位2路線は？") == (reply, None, False)
 
 
 @pytest.mark.parametrize("locale", ["ja", "en"])
 async def test_an_answer_with_a_number_the_context_lacks_is_replaced(monkeypatch, locale):
-    answer, err = await _answer(monkeypatch, "22171は平均9.8分遅れています。", locale=locale)
-    assert (answer, err) == (_summary("numeric_guard_fallback", lang=locale), None)
+    answer, err, guard = await _answer(monkeypatch, "22171は平均9.8分遅れています。", locale=locale)
+    assert (answer, err, guard) == (_summary("numeric_guard_fallback", lang=locale), None, True)

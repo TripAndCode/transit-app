@@ -1499,6 +1499,23 @@ def _fold_free_text_args(arguments: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Card-alias tools sent by the frontend map to canonical handler names, so
+# the short card names (on_time / trend / cmp_service) dispatch live.
+_TOOL_ALIASES: dict[str, str] = {
+    "on_time": "on_time_rate",
+    "trend": "time_series",
+    "cmp_service": "compare_segments",
+}
+
+
+def canonical_tool_name(tool_name: str) -> str | None:
+    """The handler name a client-supplied *tool_name* dispatches to, or None
+    when no handler answers to it. Lets a caller record a tool without
+    storing arbitrary client text or splitting one tool across its aliases."""
+    resolved = _TOOL_ALIASES.get(tool_name, tool_name)
+    return resolved if resolved in _HANDLERS else None
+
+
 async def dispatch(
     tool_name: str,
     arguments: dict[str, Any],
@@ -1523,14 +1540,6 @@ async def dispatch(
     exercise those specific paths don't need to construct a client; real
     request-serving callers always pass the real one.
     """
-    # Card-alias tools sent by the frontend map to canonical handler
-    # names. Keep aliases explicit here so the eval gold file can use the short
-    # card names (on_time / trend / cmp_service) and live dispatch still works.
-    _TOOL_ALIASES: dict[str, str] = {
-        "on_time": "on_time_rate",
-        "trend": "time_series",
-        "cmp_service": "compare_segments",
-    }
     tool_name = _TOOL_ALIASES.get(tool_name, tool_name)
 
     # Validated against the allowlist BEFORE any perf label is created from

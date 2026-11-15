@@ -24,7 +24,7 @@ async def test_followup_calls_the_provider_off_the_event_loop(monkeypatch):
 
     monkeypatch.setattr(followup, "get_client", lambda: _Client())
 
-    answer, err = await followup.answer_followup(
+    answer, err, _guard = await followup.answer_followup(
         question="一番遅い路線は？",
         context_tool="top_n",
         context_args={},
