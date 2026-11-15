@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Last updated: October 28, 2026
+Last updated: November 16, 2026
 
 Delay Dashboard (“the Service”) is run by TripAndCode, an individual. This page explains what information about you the Service handles and how. The Japanese version of this policy is the authoritative one.
 
@@ -18,9 +18,9 @@ Delay Dashboard (“the Service”) is run by TripAndCode, an individual. This p
 | Sign-in history (time, method, IP address, browser type) | When you sign in and out | To investigate misuse and keep the Service secure |
 | Sessions (IP address, browser type, last used) | While you use the Service | To keep you signed in, and to let you sign out other devices |
 | Daily usage counts (requests and errors per screen or API route, and the transit operator you were viewing) | While you use the Service | To understand usage, manage load, and plan pricing |
-| Saved views and Ask investigations | When you save them | To provide those features |
-| Ask questions, not linked to your account | When you use Ask | To improve answers. A question the operator adopts as a suggested question, including ones adopted automatically because they are asked often, may also be shown, as a suggestion, to other users viewing the same transit operator |
-| An LLM API key you register | When you register it | To use your key for Ask. It is stored encrypted |
+| Saved views and investigations recorded in the Notebook | When you save them | To provide those features |
+| Questions, not linked to your account | When you ask a question in the Notebook or through the API | To improve answers |
+| An LLM API key you register | When you register it | To use your key when an LLM answers a free-text question. It is stored encrypted |
 | Names and dates of API keys issued to you | When the operator issues them | To provide the API |
 
 The Service shows no ads and uses no analytics tools. It sets only two cookies: one that keeps you signed in, and a temporary one used only during sign-in. Display settings, saved analyses and My routes stay in your browser and are not stored on our servers.
@@ -29,13 +29,12 @@ The Service shows no ads and uses no analytics tools. It sets only two cookies: 
 
 | Information | Period |
 |---|---|
-| Your account, saved views, Ask investigations, a registered LLM API key | Until you delete them |
+| Your account, saved views, investigations recorded in the Notebook, a registered LLM API key | Until you delete them |
 | API keys issued to you, including revoked ones | Until you delete your account |
 | Sessions | Up to 30 days |
 | Sign-in history | 25 months |
 | Daily usage counts | 25 months |
-| Ask questions not linked to your account | 90 days |
-| Ask questions the operator adopts as suggested questions, including ones adopted automatically because they are asked often | While they are used as suggestions |
+| Questions not linked to your account | 90 days |
 | The admin action log (including actions on your account) | 400 days |
 
 Records past their period are deleted automatically every day.
@@ -46,14 +45,14 @@ Except where the law requires it, we don't give your personal information to thi
 
 - **Servers and database:** the Service is not currently offered to the public. Before it is, this page will name the provider and the country it is based in.
 - **Google LLC and GitHub, Inc.:** sign-in (only the one you choose).
-- **Google LLC (Gemini API) and OpenAI, L.L.C.:** when an Ask question reaches the stage answered by an LLM, we send the question and the aggregate data needed to answer it. If you registered your own API key, it goes to that key's provider.
+- **Google LLC (Gemini API) and OpenAI, L.L.C.:** when an LLM answers a question, including a question about a result in the Notebook, we send the question and the aggregate data needed to answer it. If you registered your own API key, a free-text question goes to that key's provider.
 
 The sign-in and LLM providers are all based in the United States. You can read about the United States' personal-information protection system in the Personal Information Protection Commission's survey of foreign systems (「外国における個人情報の保護に関する制度等の調査」).
 
 ## What you can do
 
 - **Download your data:** from your account page, download the data the Service holds about you as JSON. It includes invitations addressed to you or that you redeemed, and the time and kind of each admin action you have taken and, where recorded, its IP address and browser type. The rest of the admin action log, including actions on your account, isn't included; request its disclosure through the contact above.
-- **Delete your account:** from your account page, delete your account. Everything in the tables above that concerns you is removed immediately. Your email address and name in the admin action log are masked. Only Ask questions not linked to your account remain, until their 90 days pass. A question the operator adopts as a suggested question, including one adopted automatically because it is asked often, remains while it is used as one.
+- **Delete your account:** from your account page, delete your account. Everything in the tables above that concerns you is removed immediately. Your email address and name in the admin action log are masked. Only questions not linked to your account remain, until their 90 days pass.
 - **Other requests:** requests for disclosure, correction, suspension of use and the like go to the contact above.
 
 ## How we keep it safe
