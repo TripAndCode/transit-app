@@ -18,6 +18,7 @@ from pipeline.retention import (
     PERSONAL_DATA_RETENTION_MONTHS,
     PIPELINE_RUNS_RETENTION_DAYS,
     QUERY_LOG_RETENTION_DAYS,
+    UPDATES_RETENTION_DAYS,
     personal_data_prune_sql,
     prune_admin_audit_sql,
     prune_pipeline_runs_sql,
@@ -893,6 +894,36 @@ def cmd_prune_personal_data(args):
     asyncio.run(run())
 
 
+def cmd_prune_updates(args):
+    """Drop the ClickHouse `updates` months past the horizon that no aggregate
+    still reaches (pipeline.retention.prune_updates). Drops only while
+    updates_prune_enabled is on; ``--dry-run`` lists what a run would drop
+    and what it keeps, whatever the switch says."""
+    from pipeline.clickhouse import get_client
+    from pipeline.retention import prune_updates, updates_prune_enabled
+
+    conn = _get_conn()
+    try:
+        if not args.dry_run and updates_prune_enabled():
+            _lock_or_exit(conn, "prune-updates", "retention")
+        result = prune_updates(conn, get_client(), days=int(args.days), dry_run=args.dry_run)
+    finally:
+        conn.close()
+    if not args.dry_run and not result.enabled:
+        return
+    drop = "would drop" if args.dry_run else "dropped"
+    for verdict in result.verdicts:
+        partition = verdict.partition
+        if verdict.held_by is None:
+            logger.info(
+                f"prune_updates: {drop} {partition.partition_id} ({partition.rows} rows, {partition.bytes} bytes)"
+            )
+        else:
+            logger.info(f"prune_updates: keeping {partition.partition_id}: {verdict.held_by}")
+    if not result.verdicts:
+        logger.info(f"prune_updates: no partition is past the {int(args.days)}-day horizon")
+
+
 def cmd_ingest_weather(args):
     """Fetch observed daily weather for every configured representative station."""
     from pipeline.weather import PUBLICATION_WINDOW_DAYS, ingest_weather
@@ -1094,6 +1125,16 @@ def main():
     )
     p_prune_personal.add_argument("--months", type=int, default=PERSONAL_DATA_RETENTION_MONTHS)
 
+    p_prune_updates = sub.add_parser(
+        "prune-updates",
+        help="Drop ClickHouse `updates` months past the horizon that no aggregate still reaches "
+        "(off unless updates_prune_enabled is on)",
+    )
+    p_prune_updates.add_argument("--days", type=int, default=UPDATES_RETENTION_DAYS)
+    p_prune_updates.add_argument(
+        "--dry-run", action="store_true", help="List what a run would drop and keep; write nothing"
+    )
+
     p_weather = sub.add_parser(
         "ingest_weather",
         help="Fetch observed daily weather for each agency's representative station",
@@ -1151,6 +1192,8 @@ def main():
         cmd_prune_admin_audit(args)
     elif args.command == "prune-personal-data":
         cmd_prune_personal_data(args)
+    elif args.command == "prune-updates":
+        cmd_prune_updates(args)
     elif args.command == "ingest_weather":
         cmd_ingest_weather(args)
     elif args.command == "ingest_ml":

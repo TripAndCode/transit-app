@@ -125,6 +125,7 @@ DESTRUCTIVE_SUBCOMMANDS = {
     "prune-admin-audit": {"pg"},
     "prune-personal-data": {"pg"},
     "prune-pipeline-runs": {"pg"},
+    "prune-updates": {"pg", "ch"},
     "prune_query_log": {"pg"},
     "refresh-static": {"pg"},
     "reprobe_rt_coverage": {"pg"},

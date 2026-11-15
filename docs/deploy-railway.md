@@ -282,9 +282,11 @@ railway run --service app sh -c "pip install --no-cache-dir sentence-transformer
 > ~$0.015/GB-mo with a free tier that likely covers early use. Alternative:
 > **Backblaze B2** (cheapest storage + egress-free to Cloudflare) if you end up
 > retaining many months of raw archives. Avoid plain AWS S3 here (egress cost)
-> and Wasabi (90-day minimum-storage charge fights the daily prune). **Set a
-> bucket lifecycle rule** to expire old zips (mirror the DB's 400-day prune) so
-> storage doesn't grow forever.
+> and Wasabi (90-day minimum-storage charge fights the daily prune). **Set no
+> bucket lifecycle rule.** The bucket is the only complete history: the VPS ML
+> replica replays it, and a lost `updates` day is rebuilt from it.
+> `oracle_cloud/v3/bin/prune-r2.sh` bounds it at the horizons in the retention
+> table (`docs/ops-monitoring-deploy.md`, "Data retention").
 
 Production ingest runs **inside the project**, on the private network, so the
 DB stays private (step 1). Add a third service that runs once a day and exits:
@@ -311,20 +313,13 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
    done
    python gtfs_pipeline.py analyze_all
-   # retention: aggregates are materialized, so old raw rows can go. analyze
-   # rebuilds every date whose rows changed, the ones deleted here included,
-   # so history == this window (reports max range is 365d).
-   # `updates` lives in ClickHouse, not Postgres — DELETE is a mutation there.
-   python -c "
-   from pipeline.clickhouse import get_client
-   import os
-   days = int(os.environ.get('RETENTION_DAYS', 400))
-   get_client().command(f'ALTER TABLE updates DELETE WHERE captured_at < now() - INTERVAL {days} DAY')
-   "
+   # Drops nothing unless updates_prune_enabled is on; the retention table in
+   # docs/ops-monitoring-deploy.md says what it may drop.
+   python gtfs_pipeline.py prune-updates
    ```
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
-   creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
+   creds, and `AGENCY_IDS` (see `.env.example`).
 
 > **This job writes closed JST days only, and never a day the live path
 > already promoted.** An archive is named for a UTC day, so it runs to 09:00
