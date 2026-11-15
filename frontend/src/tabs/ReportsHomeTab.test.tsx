@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -96,11 +96,16 @@ describe("ReportsHomeTab", () => {
       trendResponse(),
       rankingResponse([["101", "平日", 2, 1, 3, 12345] as RankingRow, ["102", "平日", 1, 1, 2, 400] as RankingRow]),
     );
+    localStorage.removeItem("transit.showStatistics");
     renderTab("/agencies/1/reports?service=平日");
     expect(screen.getAllByRole("link", { name: "Open analysis →" })).toHaveLength(2);
-    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
     expect(screen.queryByRole("cell", { name: "Weekday" })).toBeNull();
+    // The observation count is a statistic, shown on request.
+    expect(screen.queryByRole("cell", { name: "12,345" })).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
+    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
+    localStorage.removeItem("transit.showStatistics");
   });
 
   it("shows how the figures are made as its own disclosure, not nested in another", () => {

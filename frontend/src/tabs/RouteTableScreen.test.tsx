@@ -89,6 +89,23 @@ const csvHref = () => screen.getByRole("link", { name: /CSV/ }).getAttribute("hr
 describe("RouteTableScreen", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("hides the observation count until statistics are asked for, and remembers the choice", async () => {
+    localStorage.removeItem("transit.showStatistics");
+    setup("/agencies/9/routes");
+    const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers()).not.toContain("Samples");
+    const toggle = screen.getByRole("checkbox", { name: "Show statistics" });
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    expect(headers()).toContain("Samples");
+    cleanup();
+    setup("/agencies/9/routes");
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeChecked();
+    expect(headers()).toContain("Samples");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
+    expect(localStorage.getItem("transit.showStatistics")).toBe("0");
+  });
+
   it("opens on every route sorted by average delay, worst first, fifty at a time", () => {
     const { useReport, options } = setup("/agencies/1/routes");
     expect(useReport.mock.calls.at(-1)?.[1]).toBe("route_table");

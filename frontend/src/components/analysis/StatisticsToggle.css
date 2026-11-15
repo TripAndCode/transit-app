@@ -1,0 +1,8 @@
+.statistics-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}

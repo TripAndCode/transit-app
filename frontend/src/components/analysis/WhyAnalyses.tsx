@@ -30,7 +30,17 @@ import { reportLabel } from "./reportGroups";
 
 type NotShownItem = NotShown & { key: string; name: string };
 
-export function WhyAnalyses({ aid, payload }: { aid: number; payload: DwellRunPayload | undefined }) {
+export function WhyAnalyses({
+  aid,
+  payload,
+  showStatistics,
+}: {
+  aid: number;
+  payload: DwellRunPayload | undefined;
+  /** Whether the dwell and running table shows its medians, 90th
+   *  percentiles and observation counts beside the averages. */
+  showStatistics: boolean;
+}) {
   const { t } = useTranslation();
   const [ctx] = useScope();
   const isAdmin = useIsAdmin();
@@ -49,7 +59,7 @@ export function WhyAnalyses({ aid, payload }: { aid: number; payload: DwellRunPa
 
   return (
     <>
-      {!dwellGap && <DwellRunBlock payload={payload} />}
+      {!dwellGap && <DwellRunBlock payload={payload} showStatistics={showStatistics} />}
       {weatherOn && !weatherGap && <WeatherDelayPanel aid={aid} ctx={ctx} />}
       {!headwayGap && <HeadwayQualityPanel aid={aid} ctx={ctx} />}
       {notShown.length > 0 && <NotShownList items={notShown} aid={aid} offerElsewhere={dwellGap != null} />}
@@ -97,7 +107,7 @@ function NotShownList({ items, aid, offerElsewhere }: { items: NotShownItem[]; a
   );
 }
 
-function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
+function DwellRunBlock({ payload, showStatistics }: { payload: DwellRunPayload | undefined; showStatistics: boolean }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const routeNames = useRouteNames(id);
@@ -138,13 +148,21 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
             <th style={th({ width: 40 })}>#</th>
             <th style={th()}>{t("common.route")}</th>
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_avg")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p90")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_samples")}</th>
+            {showStatistics && (
+              <>
+                <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p50")}</th>
+                <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_p90")}</th>
+                <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.dwell_samples")}</th>
+              </>
+            )}
             <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_avg")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p50")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p90")}</th>
-            <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_samples")}</th>
+            {showStatistics && (
+              <>
+                <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p50")}</th>
+                <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_p90")}</th>
+                <th style={{ ...th(), textAlign: "right" }}>{t("reports.dwell_run.col.run_samples")}</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -153,13 +171,21 @@ function DwellRunBlock({ payload }: { payload: DwellRunPayload | undefined }) {
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
               <td style={td({ align: "right" })}>{fmtSec(r.dwell_avg_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.dwell_p90_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSamples(r.dwell_samples)}</td>
+              {showStatistics && (
+                <>
+                  <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>
+                  <td style={td({ align: "right" })}>{fmtSec(r.dwell_p90_sec)}</td>
+                  <td style={td({ align: "right" })}>{fmtSamples(r.dwell_samples)}</td>
+                </>
+              )}
               <td style={td({ align: "right" })}>{fmtSec(r.run_avg_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.run_p50_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSec(r.run_p90_sec)}</td>
-              <td style={td({ align: "right" })}>{fmtSamples(r.run_samples)}</td>
+              {showStatistics && (
+                <>
+                  <td style={td({ align: "right" })}>{fmtSec(r.run_p50_sec)}</td>
+                  <td style={td({ align: "right" })}>{fmtSec(r.run_p90_sec)}</td>
+                  <td style={td({ align: "right" })}>{fmtSamples(r.run_samples)}</td>
+                </>
+              )}
             </tr>
           ))}
         </tbody>

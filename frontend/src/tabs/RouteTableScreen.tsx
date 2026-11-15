@@ -20,6 +20,8 @@ import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionM
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { CsvLink } from "../components/analysis/CsvLink";
+import { StatisticsToggle } from "../components/analysis/StatisticsToggle";
+import { useShowStatistics } from "../api/statisticsPref";
 import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 import { RouteReferenceLegend } from "../components/analysis/RouteReference";
 import { onTimeReferenceMark } from "../components/analysis/routeReferenceText";
@@ -58,6 +60,7 @@ export function RouteTableScreen() {
   const id = useAgencyId();
   const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
+  const [showStatistics] = useShowStatistics();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const isAdmin = useIsAdmin();
   const view = routeTableView(searchParams);
@@ -165,6 +168,7 @@ export function RouteTableScreen() {
               kept={kept}
               onChange={(reason, on) => setTableParams({ [reason]: on ? "1" : null })}
             />
+            <StatisticsToggle />
           </div>
         )}
         {report.error && <ErrorBanner error={report.error} onRetry={() => report.refetch()} />}
@@ -185,6 +189,7 @@ export function RouteTableScreen() {
                 sortDirection={routeTableSortDirection(shown)}
                 earlyDepartureSec={data.definition.early_departure_sec}
                 cellMarks={reference ? { 2: (row) => onTimeReferenceMark(reference, row, t) } : undefined}
+                showStatistics={showStatistics}
               />
               {data.rows_total != null && data.rows_total > data.rows.length && (
                 <RowsShown

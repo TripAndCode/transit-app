@@ -44,6 +44,8 @@ import { certificateDayScope } from "../components/analysis/certificateDayScope"
 import { pickReport } from "../routes/destinations";
 import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
 import { CsvLink } from "../components/analysis/CsvLink";
+import { StatisticsToggle } from "../components/analysis/StatisticsToggle";
+import { useShowStatistics } from "../api/statisticsPref";
 import { ExportMenu } from "../components/ExportMenu";
 import type { SnapshotSpec } from "../api/snapshots";
 
@@ -79,6 +81,10 @@ function rankingOptions(reportType: string | null | undefined, kept: KeptRoutes)
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
  *  report is the one `pickReport` resolves from the `report` param. */
+/** The reports whose tables carry statistics-only columns, behind the
+ *  statistics toggle. */
+const STATISTICS_REPORTS: ReadonlySet<string> = new Set(["dow_weekday", "dow_weekend", "dwell_run"]);
+
 export function AnalysisTab({
   reportTypes,
   defaultReport,
@@ -93,6 +99,7 @@ export function AnalysisTab({
   const tier = useCapabilityTier(id);
   const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
+  const [showStatistics] = useShowStatistics();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   function selectReport(type: string) {
     setSearchParams((prev) => {
@@ -234,6 +241,7 @@ export function AnalysisTab({
               {councilSnapshot && <ExportMenu csv={null} showPrint={false} snapshot={councilSnapshot} />}
             </div>
             <ReportMeta data={detail.data} />
+            {STATISTICS_REPORTS.has(detail.data.report_type) && <StatisticsToggle />}
             {detail.data.retired_rows != null && detail.data.retired_rows > 0 && (
               <LeftOutToggle
                 reason="retired"
@@ -253,7 +261,7 @@ export function AnalysisTab({
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
-              id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} />
+              id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} showStatistics={showStatistics} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
               // Figures held over from another scope while this one loads
               // are not what the screen's query names, so their print
@@ -272,7 +280,7 @@ export function AnalysisTab({
                 )}
               </>
             ) : detail.data.rows.length > 0 ? (
-              <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />
+              <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} showStatistics={showStatistics} />
             ) : (
               <EmptyState
                 title={t("reports.no_data.title")}

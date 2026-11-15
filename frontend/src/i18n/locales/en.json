@@ -1662,7 +1662,8 @@
       "reading_note": "The delay is the last departure delay the real-time data reported for this stop.",
       "unmatched_note": "This trip couldn't be matched to the timetable for this day, so its stop names and start time can't be shown.",
       "late_list_basis": "This list picks late trips by their delay at the first stop the real-time data recorded for each. The delay at the stop a passenger boarded is found with the steps above."
-    }
+    },
+    "statistics_toggle": "Show statistics"
   },
   "routeTable": {
     "title": "Delays by route",

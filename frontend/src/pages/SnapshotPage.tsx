@@ -22,6 +22,8 @@ import { SkeletonTable } from "../components/Skeleton";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
 import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 import { reportLabel } from "../components/analysis/reportGroups";
+import { StatisticsToggle } from "../components/analysis/StatisticsToggle";
+import { useShowStatistics } from "../api/statisticsPref";
 import { isScopeConditionOff, scopeTokens } from "../components/scope/scopePhrases";
 import type { CouncilTile } from "../components/analysis/councilTiles";
 import {
@@ -363,6 +365,7 @@ function RouteTableSnapshot({
   const view: RouteTableView = { sort: report.sort ?? "avg", order: report.order ?? "worst" };
   const early = report.definition.early_departure_sec;
   const kept = { retired: params.include_retired === true, zero_delay: params.include_zero_delay === true };
+  const [showStatistics] = useShowStatistics();
   return (
     <section>
       <DefinitionMetaBlock definition={report.definition} tiers={tiers} />
@@ -371,6 +374,7 @@ function RouteTableSnapshot({
           <SparseToggle checked={params.include_sparse === true} floor={report.reliable_min_samples} />
         )}
         <LeftOutLine counts={{ retired: report.retired_rows, zero_delay: report.zero_delay_rows }} kept={kept} />
+        <StatisticsToggle />
       </div>
       {report.rows.length > 0 ? (
         <>
@@ -383,6 +387,7 @@ function RouteTableSnapshot({
             sortDirection={routeTableSortDirection(view)}
             earlyDepartureSec={early}
             names={names}
+            showStatistics={showStatistics}
           />
           {report.rows_total != null && report.rows_total > report.rows.length && (
             <RowsShown shown={report.rows.length} total={report.rows_total} />

@@ -62,6 +62,9 @@ type Schema = {
   /** The cell is the row's observation count; under the report's floor it
    *  carries the few-data badge. */
   samples?: true;
+  /** A statistic about the row's figures rather than a figure of its own:
+   *  shown only while the reader asks for statistics. */
+  stat?: true;
   /** The cell is an early-departure rate. Its header names the threshold
    *  the rate counts past, so the column shows only where the caller gives
    *  that threshold. */
@@ -83,7 +86,7 @@ const ROUTE_COL: Schema = { index: 0, labelKey: "common.route", align: "left", r
 const DOW_COLS: Schema[] = [
   ROUTE_COL,
   { index: 3, labelKey: "reports.col.avg", align: "right", bar: "delay", severeMarker: true, unit: "min", format: fmtMinutes },
-  { index: 4, labelKey: "reports.col.samples", align: "right", format: (v, t) => fmtNum(v, t) },
+  { index: 4, labelKey: "reports.col.samples", align: "right", stat: true, format: (v, t) => fmtNum(v, t) },
 ];
 
 const SCHEMAS: Record<string, Schema[]> = {
@@ -111,7 +114,7 @@ const SCHEMAS: Record<string, Schema[]> = {
     { index: 6, labelKey: "reports.col.early_share", align: "right", early: true, format: (v, t) => fmtPct(v, t) },
     { index: 3, labelKey: "reports.col.over_5min_share", align: "right", bar: "pct", format: (v, t) => fmtPct(v, t), sort: "late5_share" },
     { index: 4, labelKey: "reports.col.over_5min_count", align: "right", bar: "raw", format: (v, t) => fmtNum(v, t), sort: "late5_count" },
-    { index: 5, labelKey: "reports.col.samples", align: "right", samples: true, format: (v, t) => fmtNum(v, t) },
+    { index: 5, labelKey: "reports.col.samples", align: "right", samples: true, stat: true, format: (v, t) => fmtNum(v, t) },
   ],
   compare_ranking: [
     ROUTE_COL,
@@ -226,6 +229,9 @@ type Props = {
    *  the Routes table's comparison of a route's on-time rate with the
    *  route's own reference. */
   cellMarks?: Readonly<Record<number, (row: unknown[]) => Caveat | undefined>>;
+  /** Whether the statistics-only columns show. Every column shows unless a
+   *  caller says otherwise. */
+  showStatistics?: boolean;
 };
 
 /** A mark after a figure: a muted caveat, or with `tone: "reference"` a
@@ -243,11 +249,23 @@ function TableWithAgencyNames(props: Props) {
   return <Table {...props} names={names} />;
 }
 
-function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepartureSec, names, marks, cellMarks }: Props & { names: RouteNames }) {
+function Table({
+  reportType,
+  rows,
+  minSamples,
+  sortBy,
+  sortDirection,
+  earlyDepartureSec,
+  names,
+  marks,
+  cellMarks,
+  showStatistics = true,
+}: Props & { names: RouteNames }) {
   const { t } = useTranslation();
   const id = useAgencyId();
   const { search } = useLocation();
-  const schema = SCHEMAS[reportType]?.filter((c) => !c.early || earlyDepartureSec != null);
+  const fullSchema = SCHEMAS[reportType]?.filter((c) => !c.early || earlyDepartureSec != null);
+  const schema = fullSchema?.filter((c) => showStatistics || !c.stat);
   // The visible row last clicked to travel; by row, not route, since a route
   // can fill several rows (a delay certificate lists each departure).
   const [travelling, setTravelling] = useState<number | null>(null);
@@ -268,9 +286,14 @@ function Table({ reportType, rows, minSamples, sortBy, sortDirection, earlyDepar
   const basis = sortBy == null ? undefined : schema.find((c) => c.sort === sortBy);
   const barred = (c: Schema) => c.bar != null && (basis == null || c === basis);
   const serviceNote = schema.some((c) => c.service) && <ServiceNote />;
+  // The few-data badge warns against trusting a row's figures, so it stays
+  // in view with the observation count hidden: on the sorted figure, else
+  // the first figure.
+  const samplesCol = fullSchema?.find((c) => c.samples);
+  const thinHost = schema.find((c) => c.samples) ?? basis ?? schema.find((c) => !c.route);
   const caveatsOf = (c: Schema, row: unknown[]): Caveat[] => {
     const own = c.caveat?.(row, t);
-    const thin = c.samples && minSamples != null && Number(row[c.index]) < minSamples;
+    const thin = c === thinHost && samplesCol != null && minSamples != null && Number(row[samplesCol.index]) < minSamples;
     const caller = cellMarks?.[c.index]?.(row);
     return [...(own ? [own] : []), ...(thin ? [{ mark: t("reports.confidence_low_mark") }] : []), ...(caller ? [caller] : [])];
   };

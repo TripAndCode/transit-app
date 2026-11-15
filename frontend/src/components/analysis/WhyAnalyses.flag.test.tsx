@@ -41,7 +41,7 @@ function serve(weatherEnabled: boolean | "never") {
 
 function mount() {
   const router = createMemoryRouter(
-    [{ path: "/agencies/:agencyId/why", element: <WhyAnalyses aid={1} payload={DWELL} /> }],
+    [{ path: "/agencies/:agencyId/why", element: <WhyAnalyses aid={1} payload={DWELL} showStatistics={false} /> }],
     { initialEntries: ["/agencies/1/why?from=2026-09-01&to=2026-09-07"] },
   );
   renderWithProviders(<RouterProvider router={router} />);
