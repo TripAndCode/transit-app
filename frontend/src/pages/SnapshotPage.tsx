@@ -8,6 +8,7 @@ import { JST_TZ, parseScope, toJstISO, type Scope } from "../api/scope";
 import { useSnapshot, useSnapshotToday, type Snapshot, type SnapshotToday } from "../api/snapshots";
 import type { DefinitionMeta, HeadwayQualityResponse, PerformanceStandardsResponse, ReportResponse } from "../api/types";
 import type { TierState } from "../api/useCapabilityTier";
+import { useStopNames } from "../api/usePlaceLabels";
 import { buildRouteNames, type RouteNames } from "../api/useRouteNames";
 import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionMetaBlock";
 import { HeadwayQualityView } from "../components/HeadwayQualityPanel";
@@ -223,8 +224,10 @@ function storedRoute(params: Record<string, unknown>): string | null {
 function ScopeStatement({ snapshot, report, names }: { snapshot: Snapshot; report: ReportResponse | undefined; names: RouteNames }) {
   const { t } = useTranslation();
   const scope = storedScope(snapshot.params, report);
+  const { stopName } = useStopNames(snapshot.agency_id, scope.stop != null);
   const tokens = scopeTokens(scope, {
     t,
+    stopName,
     agencyName: snapshot.agency_name,
     routeLabel: names.format,
     routeGroup: (code) => names.data.get(code),

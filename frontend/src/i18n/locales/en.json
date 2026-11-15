@@ -1081,7 +1081,8 @@
         "llm": "LLM-generated summary (grounded only in the already-fetched result)"
       },
       "row_count_one": "{{count}} row",
-      "row_count_other": "{{count}} rows"
+      "row_count_other": "{{count}} rows",
+      "stop_unnamed": "Unnamed stop"
     },
     "workspace": {
       "investigations": "Your investigations",
@@ -2162,7 +2163,7 @@
         "askHistoryEnabled": "Ask: conversation history",
         "askIntentCacheEnabled": "Ask: intent cache",
         "askQueryLogEnabled": "Ask: query log",
-        "weatherIngestEnabled": "Weather: observed-data ingest",
+        "weatherIngestEnabled": "Weather: observed-data ingest, and the rain panel on Why",
         "openapiDocsEnabled": "API: OpenAPI docs",
         "perfDebugEnabled": "API: perf debug surface",
         "loginRequired": "Access: sign-in required",
@@ -2497,7 +2498,7 @@
     "unapplied_note": "Not used on this screen: {{list}}",
     "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]",
     "stop_unnamed": "selected stop",
-    "dir_unnamed": "one direction",
+    "dir_unnamed": "Direction {{letter}}",
     "id_tag": "({{id}})"
   },
   "print": {

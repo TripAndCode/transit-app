@@ -27,4 +27,17 @@ describe("directionOptions", () => {
   it("says a trip with neither headsign nor direction is unknown", () => {
     expect(directionOptions([trip({})], t, false).map((d) => d.label)).toEqual(["Direction unknown"]);
   });
+
+  it("names a direction carrying two headsigns by the commoner, or the earlier trip's on a tie, in any row order", () => {
+    const rows = [
+      trip({ trip_id: "a", direction_id: 0, headsign: "Harbour", scheduled_time: "09:00" }),
+      trip({ trip_id: "b", direction_id: 0, headsign: "Station", scheduled_time: "08:00" }),
+      trip({ trip_id: "c", direction_id: 0, headsign: "Harbour", scheduled_time: "10:00" }),
+    ];
+    expect(directionOptions(rows, t, false)[0].label).toBe("Harbour");
+    expect(directionOptions([...rows].reverse(), t, false)[0].label).toBe("Harbour");
+    const tie = rows.slice(0, 2);
+    expect(directionOptions(tie, t, false)[0].label).toBe("Station");
+    expect(directionOptions([...tie].reverse(), t, false)[0].label).toBe("Station");
+  });
 });

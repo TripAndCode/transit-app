@@ -404,6 +404,9 @@ value when neither an override nor the env var is set.
 | `ml_forecast` | `ML_FORECAST_ENABLED` | off |
 | `updates_prune_enabled` | `UPDATES_PRUNE_ENABLED` | off |
 
+`weather_ingest_enabled` gates the weather ingest and also the rain panel on
+Why: with it off the panel is not mounted and `/weather_delay` is not requested.
+
 `openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json`;
 `.env.example` turns it on for local dev.
 

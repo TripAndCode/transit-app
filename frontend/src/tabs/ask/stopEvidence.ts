@@ -1,3 +1,4 @@
+import i18n from "../../i18n";
 import type { ConvMessage } from "../../api/types";
 
 export type StopEvidence = { sequence: number; name: string; minutes: number | null; samples: number;
@@ -17,8 +18,8 @@ export function stopEvidence(message: ConvMessage): StopEvidence[] | null {
   const seen = new Set<string>();
   for (const [rowIndex, row] of result.rows.entries()) {
     if (!Array.isArray(row)) return null;
-    const [sequence, name, minutes, samples] = indices.map((index) => row[index]);
-    if (!Number.isInteger(sequence) || sequence < 0 || typeof name !== "string" ||
+    const [sequence, rawName, minutes, samples] = indices.map((index) => row[index]);
+    if (!Number.isInteger(sequence) || sequence < 0 || (typeof rawName !== "string" && rawName !== null) ||
       !Number.isInteger(samples) || samples < 0) return null;
     if (minutes === null ? !complete || samples !== 0 : typeof minutes !== "number" || !Number.isFinite(minutes)) return null;
     const patternId = row[patternIdIdx];
@@ -26,6 +27,7 @@ export function stopEvidence(message: ConvMessage): StopEvidence[] | null {
     const stopId = row[stopIdIdx];
     if (complete && (typeof patternId !== "string" || !patternId || typeof patternName !== "string" ||
       typeof stopId !== "string" || !stopId || (minutes !== null && samples === 0))) return null;
+    const name = rawName ?? i18n.t("ask.evidence.stop_unnamed");
     const dedupeKey = complete ? `${patternId}:${sequence}` : `${sequence}`;
     if (seen.has(dedupeKey)) return null;
     seen.add(dedupeKey);

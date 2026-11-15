@@ -1081,7 +1081,8 @@
         "llm": "生成AIによる要約（既存の取得結果のみを参照）"
       },
       "row_count_one": "{{count}}行",
-      "row_count_other": "{{count}}行"
+      "row_count_other": "{{count}}行",
+      "stop_unnamed": "名称未設定の停留所"
     },
     "workspace": {
       "investigations": "これまでの調査",
@@ -2162,7 +2163,7 @@
         "askHistoryEnabled": "Ask: 会話履歴",
         "askIntentCacheEnabled": "Ask: インテントキャッシュ",
         "askQueryLogEnabled": "Ask: クエリログ",
-        "weatherIngestEnabled": "気象: 観測データ取り込み",
+        "weatherIngestEnabled": "気象: 観測データ取り込みと、要因画面の降雨パネル",
         "openapiDocsEnabled": "API: OpenAPI ドキュメント",
         "perfDebugEnabled": "API: パフォーマンスデバッグ面",
         "loginRequired": "アクセス: ログイン必須",
@@ -2497,7 +2498,7 @@
     "unapplied_note": "この画面では使いません：{{list}}",
     "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
     "stop_unnamed": "選択した停留所",
-    "dir_unnamed": "選択した方向",
+    "dir_unnamed": "方面{{letter}}",
     "id_tag": "（{{id}}）"
   },
   "print": {

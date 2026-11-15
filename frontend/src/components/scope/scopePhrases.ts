@@ -1,6 +1,7 @@
 import { DEFAULT_WINDOW, EARLY_ANY, type OnTimeWindow } from "../../api/onTimeDefault";
 import type { Scope } from "../../api/scope";
 import { dowValueLabel, serviceValueLabel, timeBandValueLabel, translationT, type LabelT } from "../../utils/filterValueLabels";
+import { directionLetter } from "../../utils/directionLetter";
 import { roundTenth } from "../../utils/format";
 
 /** The `scope_applied` keys an endpoint reports, one per URL scope param. */
@@ -137,7 +138,7 @@ function stopParts(id: string, { t, stopName, showIds }: PlaceCtx): { label: str
 /** No endpoint pairs a GTFS direction_id with a name across routes, so a
  *  reader gets a neutral phrase; an admin also gets the id as a tag. */
 function dirParts(dir: 0 | 1, { t, showIds }: PlaceCtx): { label: string; idTag?: string } {
-  const label = translationT(t, "scope.dir_unnamed");
+  const label = translationT(t, "scope.dir_unnamed", { letter: directionLetter(dir) });
   return showIds ? { label, idTag: translationT(t, "scope.id_tag", { id: `direction_id ${dir}` }) } : { label };
 }
 

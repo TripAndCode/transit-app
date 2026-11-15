@@ -1,13 +1,27 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import { StopEvidenceChart } from "./StopEvidenceChart";
+import * as isAdmin from "../../api/useIsAdmin";
 import type { StopEvidence } from "./stopEvidence";
 
 const points: StopEvidence[] = Array.from({ length: 64 }, (_, index) => ({
   sequence: index + 1, name: `Stop ${index + 1}`, stopId: `s${index + 1}`, patternId: "p",
   minutes: index === 60 ? null : index % 5, samples: index === 60 ? 0 : 8, rowIndex: index,
 }));
+
+describe("stop navigator search by stop id", () => {
+  afterEach(() => vi.restoreAllMocks());
+  it.each([
+    [true, "Stop 61 · #61"],
+    [false, null],
+  ])("for admin=%s", (admin, hit) => {
+    vi.spyOn(isAdmin, "useIsAdmin").mockReturnValue(admin);
+    renderWithProviders(<StopEvidenceChart complete messageId={9} points={points} />);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "s61" } });
+    expect(screen.queryByRole("button", { name: "Stop 61 · #61" }) !== null).toBe(hit !== null);
+  });
+});
 
 describe("stop navigator", () => {
   it("bounds the main plot, pans locally and keeps the full pattern count", () => {

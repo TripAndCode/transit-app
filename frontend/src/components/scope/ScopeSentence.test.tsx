@@ -168,7 +168,7 @@ describe("ScopeSentence", () => {
   it("lists the optional conditions in the order the words give them", () => {
     mount("?from=2026-09-01&to=2026-09-30&service=%E5%B9%B3%E6%97%A5&stop=S1&dir=0&early=60");
     expect(region().textContent).toContain(
-      "all hours, Weekday timetable, selected stop, one direction, early by up to 1 min, counting on-time",
+      "all hours, Weekday timetable, selected stop, Direction A, early by up to 1 min, counting on-time",
     );
   });
 

@@ -927,6 +927,7 @@ export function usePatchFeatureFlag() {
       apiPatch<FeatureFlag>(`/api/admin/flags/${key}`, { value, reason }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminFlags"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
 }
@@ -940,6 +941,7 @@ export function useClearFeatureFlag() {
     mutationFn: ({ key }: { key: string }) => apiDelete<FeatureFlag>(`/api/admin/flags/${key}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminFlags"] });
+      qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
 }

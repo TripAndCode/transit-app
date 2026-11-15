@@ -4,11 +4,8 @@ import { useIsAdmin } from "./useIsAdmin";
 
 type StopsResponse = { rows: { stop_id: string; stop_name: string | null }[] };
 
-/** The stop and direction wording of a scope sentence: stop names from the
- *  static GTFS, fetched only while the scope names a stop, and whether ids
- *  may follow a name as secondary text, which only an admin sees. */
-export function usePlaceLabels(agencyId: number | null, needsNames: boolean) {
-  const isAdmin = useIsAdmin();
+/** Stop names from the static GTFS, fetched only while a stop is named. */
+export function useStopNames(agencyId: number | null, needsNames: boolean) {
   const names = useQuery({
     queryKey: ["stop-names", agencyId],
     queryFn: ({ signal }) =>
@@ -20,8 +17,14 @@ export function usePlaceLabels(agencyId: number | null, needsNames: boolean) {
   });
   return {
     stopName: (id: string) => names.data?.get(id),
-    showIds: isAdmin,
     /** Whether the names query has answered (or failed), or none was wanted. */
     settled: !needsNames || agencyId == null || !names.isPending,
   };
+}
+
+/** The stop and direction wording of a scope sentence: the stop names, and
+ *  whether ids may follow a name as secondary text, which only an admin sees. */
+export function usePlaceLabels(agencyId: number | null, needsNames: boolean) {
+  const isAdmin = useIsAdmin();
+  return { ...useStopNames(agencyId, needsNames), showIds: isAdmin };
 }

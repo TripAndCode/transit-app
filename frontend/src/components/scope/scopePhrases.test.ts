@@ -87,7 +87,7 @@ describe("scopeTokens", () => {
     expect(labels("ja", { service: "平日", stop: "S1", dir: 0 }).slice(5, 8)).toEqual([
       "service=平日ダイヤ",
       "stop=選択した停留所",
-      "dir=選択した方向",
+      "dir=方面A",
     ]);
   });
 
@@ -96,8 +96,8 @@ describe("scopeTokens", () => {
     const scope = { ...base, stop: "S1", dir: 0 as const };
     const phrases = { t, agencyName: "A", routeLabel: (c: string) => c, stopName: (id: string) => (id === "S1" ? "Central Station" : undefined) };
     const read = (ctx: object) => scopeTokens(scope, { ...phrases, ...ctx }).filter((tok) => tok.key === "stop" || tok.key === "dir").map((tok) => tok.label);
-    expect(read({})).toEqual(["Central Station", "one direction"]);
-    expect(read({ stopName: () => undefined })).toEqual(["selected stop", "one direction"]);
+    expect(read({})).toEqual(["Central Station", "Direction A"]);
+    expect(read({ stopName: () => undefined })).toEqual(["selected stop", "Direction A"]);
   });
 
   it("keeps the ids for an admin as secondary text after the words", () => {
@@ -106,7 +106,7 @@ describe("scopeTokens", () => {
     const placed = scopeTokens({ ...base, stop: "S1", dir: 1 }, phrases).filter((tok) => tok.key === "stop" || tok.key === "dir");
     expect(placed.map((tok) => [tok.label, tok.idTag])).toEqual([
       ["Central Station", "(S1)"],
-      ["one direction", "(direction_id 1)"],
+      ["Direction B", "(direction_id 1)"],
     ]);
     expect(scopeTitle({ ...base, stop: "S1" }, phrases)).not.toContain("S1");
   });
