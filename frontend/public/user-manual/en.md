@@ -18,7 +18,7 @@ The screenshots were taken with real data from Aomori City Bus (青森市バス)
 8. [Compare — side by side](#8-compare--side-by-side)
 9. [Live — the trips running now](#9-live--the-trips-running-now)
 10. [Reports — documents to hand on](#10-reports--documents-to-hand-on)
-11. [Ask — questions with ready answers](#11-ask--questions-with-ready-answers)
+11. [Notebook — ready-made investigations](#11-notebook--ready-made-investigations)
 12. [Model evaluation — how the forecast model is checked](#12-model-evaluation--how-the-forecast-model-is-checked)
 13. [Glossary](#13-glossary)
 
@@ -61,7 +61,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Compare** | Weekdays against weekends and holidays route by route, and agencies against each other |
 | **Live** | The trips running now |
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
-| **Ask** | Ready-made questions, answered as tables and charts |
+| **Notebook** | Ready-made investigations of delay, run as tables and charts, saved as threads you can export |
 
 Under **Other** are **Help** (this manual) and **About this app**, plus **Send feedback** when this site offers a way to send it; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
 
@@ -79,7 +79,7 @@ Next to it, “Analyzed through …” shows the last service day the reports in
 
 ### On a phone
 
-On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Ask** and **More**. **More** holds the agency menu, the other screens, Help and the account menu; an administrator also sees Model evaluation there.
+On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **Routes**, **Live**, **Notebook** and **More**. **More** holds the agency menu, the other screens, Help and the account menu; an administrator also sees Model evaluation there.
 
 ### Notices at the top
 
@@ -123,7 +123,7 @@ A condition the screen does not use is struck through, and a line under the sent
 
 Each screen keeps its own conditions while this browser tab stays open, so changing the period on **Routes** does not change it on **Time**. The conditions are also part of the page address, so a copied link opens the same view.
 
-Live, Ask, a route’s page and the agency comparison have their own filters, described in their sections.
+Live, the notebook, a route’s page and the agency comparison have their own filters, described in their sections.
 
 ---
 
@@ -344,7 +344,7 @@ The first time you open Live, a three-step tour points out the filters, the trip
 
 Three tabs along the top: **Period summary**, **Saved analyses** and **Council report & delay record**.
 
-A printed page (“Print / Save as PDF”) ends with its data source: who publishes the agency’s data, with the URLs of the data and of its licence. A CSV that opens with notes (a report’s **Download CSV**, and each table’s CSV in **Ask**) carries the same credit as its last note. A CSV whose first row is the table (the period summary, a route’s page, **Live**) has no credit added, so it still loads straight into a spreadsheet or another tool.
+A printed page (“Print / Save as PDF”) ends with its data source: who publishes the agency’s data, with the URLs of the data and of its licence. A CSV that opens with notes (a report’s **Download CSV**, and each table’s CSV in the **Notebook**) carries the same credit as its last note. A CSV whose first row is the table (the period summary, a route’s page, **Live**) has no credit added, so it still loads straight into a spreadsheet or another tool.
 
 ### 10-1. Period summary
 
@@ -399,42 +399,42 @@ For staff, “Late departures (delay at each trip's first recorded stop)” open
 
 ---
 
-## 11. Ask — questions with ready answers
+## 11. Notebook — ready-made investigations
 
-Ask answers common questions about delay with a table or chart, so you do not have to find the right report first. Open it with **Ask** in the sidebar, below the screens.
+The investigation notebook holds ready-made investigations of delay. Each one is a card that runs a fixed analysis and shows a table or chart, so you do not have to find the right report first. Each result is kept as a step in a saved thread, with exports and the evidence behind it. You pick a card; you do not type a question. Open it with **Notebook** in the sidebar, below the screens.
 
-![Ask](./12-ask-landing.en.png)
+![Notebook](./12-ask-landing.en.png)
 
-### 11-1. Asking a question
+### 11-1. Running an investigation
 
-- The bar at the top shows the period and routes your questions will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
-- Under “You can ask things like”, a card runs at once: “5 most delayed routes” or “5 least on-time routes”.
-- Under “More questions”, each question needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
-- After the first answer, open **Start another analysis** at the bottom to see every question. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes question.
+- The bar at the top shows the period and routes your investigations will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
+- Under “Run at once”, a card runs immediately: “5 most delayed routes” or “5 least on-time routes”.
+- Under “More investigations”, each one needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
+- After the first result, open **Start another analysis** at the bottom to see every investigation. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes investigation.
 
-### 11-2. Reading the answer
+### 11-2. Reading the result
 
-![Ask answer](./13-ask-answer.en.png)
+![Notebook result](./13-ask-answer.en.png)
 
-- The question heads the answer, with the table or chart under it.
-- “Where this answer comes from” names the route, the conditions and how the figures were made. A “SQL only” badge means they were computed directly from the data; “LLM” marks a summary written by a language model from a result already fetched.
+- The investigation heads the result, with the table or chart under it.
+- “Where this result comes from” names the route, the conditions and how the figures were made. A “SQL only” badge means they were computed directly from the data; “LLM” marks a summary written by a language model from a result already fetched.
 - Buttons under the answer suggest next steps, such as “View morning peak only”, “View on the map”, “Compare with two weeks ago” and “Save as PNG”.
-- “Download result (JSON)”, and a CSV for each table, save the answer.
-- Each question becomes a step of the investigation. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
+- “Download result (JSON)”, and a CSV for each table, save the result.
+- Each investigation you run becomes a step of the thread. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
 
-### 11-3. Asking about the result in your own words
+### 11-3. Optional: a follow-up question in your own words
 
-Where it is available to your account, a box under the latest answer, “Ask about this result...”, takes a question in your own words. Press the send button (the paper-plane icon) for an answer grounded in the result on screen. As the note under the box says, the AI runs only when you send, and it answers from the stored result without fetching new data. For a stop-by-stop answer, select a stop first.
+The notebook works without this. Where it is available to your account, a box under the latest result, “Ask about this result...”, takes a follow-up question in your own words. Press the send button (the paper-plane icon) for an answer grounded in the result on screen. As the note under the box says, the AI runs only when you send, and it answers from the stored result without fetching new data. For a stop-by-stop answer, select a stop first.
 
-The box is for digging into the result already on screen; to start a new ranking, use a question card instead. If an answer cannot be produced, a message says why — the question is too long, traffic is high, or the connection dropped — so shorten the question, wait a moment, or try again.
+The box is for digging into the result already on screen; to start a new ranking, use an investigation card instead. If an answer cannot be produced, a message says why — the question is too long, traffic is high, or the connection dropped — so shorten the question, wait a moment, or try again.
 
-When the box is not shown, free-text questions are not available to your account. The question cards still work, because they are computed directly from the data.
+When the box is not shown, free-text follow-ups are not available to your account. The investigation cards still work, because they are computed directly from the data.
 
 ### 11-4. Your investigations
 
-“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Without signing in, investigations are kept only in the browser where you asked them.
+“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Without signing in, investigations are kept only in the browser where you ran them.
 
-If you are not sure which report to open, picking a question on Ask is often the quickest way in.
+If you are not sure which report to open, picking an investigation in the Notebook is often the quickest way in.
 
 ---
 
@@ -472,7 +472,7 @@ What the words on the screens and in this manual mean.
 
 - **Average delay**: the mean of the readings’ departure delays, in minutes. Early departures stay in the mean as negative delays.
 - **Early departure**: a reading that left before its scheduled time; its delay is negative.
-- **On time** and **On-time %**: a reading is on time when it left no later than the on-time tolerance and no earlier than the early tolerance. By default that is the industry standard, from 1 minute early to 5 minutes late. “Count early departures as on time” counts every early departure, and with 1 minute that is the legacy definition. On-time % is the share of readings that were on time. In **Ask**, a question that names how late counts, such as “on-time rate within 5 min”, counts every early departure as on time.
+- **On time** and **On-time %**: a reading is on time when it left no later than the on-time tolerance and no earlier than the early tolerance. By default that is the industry standard, from 1 minute early to 5 minutes late. “Count early departures as on time” counts every early departure, and with 1 minute that is the legacy definition. On-time % is the share of readings that were on time. In the **Notebook**, an investigation that names how late counts, such as “on-time rate within 5 min”, counts every early departure as on time.
 - **Early-departure rate**: the share of readings that left more than 1 minute early, or more than the early tolerance when one is set. It is counted whether or not early departures count as on time.
 - **Over 5 min**: a reading whose departure delay is more than 5 minutes (300 seconds), whatever the on-time tolerance. “Share over 5 min” is their share of the samples, and “Over 5 min (count)” is how many there were.
 - **Live’s “On-time rate” and “More than 5 min late”**: Live takes the latest report of each trip reporting now. The “On-time rate” is the share of those trips that were on time, under the same on-time window as the other screens (by default 1 minute early to 5 minutes late). On-time % on the other screens counts every reading in a period, while Live counts only the trips reporting now, so the two count different things. “More than 5 min late” is the number of trips later than the on-time window allows, and the time in its name follows the window’s late edge. A trip exactly 5 minutes late is on time, so under the default window it is counted the same way as “Over 5 min” on the other screens. A trip that left earlier than the early tolerance counts as neither late nor on time, and the note under the figures says how many there are.

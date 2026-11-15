@@ -163,11 +163,11 @@ describe("CommandPalette", () => {
     });
   });
 
-  it("opens the shortcut sheet on '?' and lists the go-to chords for every destination plus Ask", () => {
+  it("opens the shortcut sheet on '?' and lists the go-to chords for every destination plus Notebook", () => {
     renderPalette();
     fireEvent.keyDown(document, { key: "?" });
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    for (const name of ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports", "Ask"]) {
+    for (const name of ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports", "Notebook"]) {
       expect(within(dialog).getByText(`Go to ${name}`)).toBeInTheDocument();
     }
     expect(within(dialog).getByText("Show this shortcut list")).toBeInTheDocument();

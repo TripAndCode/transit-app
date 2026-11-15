@@ -138,10 +138,10 @@ describe("AskLandingCards", () => {
     expect(screen.getByText(/least on-time routes$/)).toBeInTheDocument();
   });
 
-  it("heads the page as a choice among common questions, since it has no box to type one into", () => {
+  it("heads the page as a choice among ready-made investigations, since it has no box to type one into", () => {
     setup();
-    expect(screen.getByText("Pick a common question to look into")).toBeInTheDocument();
-    expect(i18n.getFixedT("ja")("ask.landing.header_title")).toBe("よくある質問から選んで調べる");
+    expect(screen.getByText("Pick a ready-made investigation")).toBeInTheDocument();
+    expect(i18n.getFixedT("ja")("ask.landing.header_title")).toBe("用意された調査から選んで調べる");
   });
 
   it("describes the on-time card's answer in the order the card asks for, least on time first", () => {

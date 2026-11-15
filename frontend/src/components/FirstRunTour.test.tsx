@@ -115,7 +115,7 @@ describe("FirstRunTour", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByText("Inspect what's running now")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("Search and ask")).toBeTruthy();
+    expect(screen.getByText("Search and open the notebook")).toBeTruthy();
 
     expect(readTourSeen()).toBe("unseen");
     await user.click(screen.getByRole("button", { name: "Got it" }));
