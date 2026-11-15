@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { RoutesToCheckList } from "./RoutesToCheckList";
@@ -69,6 +70,15 @@ function renderList(rs: OverviewTopDelayedRoute[], bandCounts?: OverviewBandCoun
 describe("RoutesToCheckList", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("defines the list in a hint on its heading, reachable without leaving the page", async () => {
+    renderList(routes());
+    const heading = document.querySelector<HTMLElement>(".ov-check-section-hd")!;
+    await userEvent.click(within(heading).getByRole("button", { name: "Hint" }));
+    const popover = screen.getByRole("dialog", { name: "Routes to check" });
+    expect(popover).toHaveTextContent("among the routes observed 100 or more times");
+    expect(popover).toHaveTextContent("same number of days just before the period");
   });
 
   it("heads each severity band with a sentence that counts its routes, worst band first, no empty bands", () => {

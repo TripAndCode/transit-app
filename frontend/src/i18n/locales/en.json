@@ -638,7 +638,30 @@
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split by day of week into weekdays (Mon–Fri) and weekends (Sat–Sun); a public holiday counts as its day of week. Compare commute peaks against weekend patterns.",
     "service_split_explainer": "Average delay by day type (weekdays, Saturdays, and Sundays & holidays; or weekdays and weekends & holidays) across the selected range. Each day's type is the timetable the agency's schedule ran that day. A day type with too few days or observations is marked “Not enough data” and left out of the comparison. The daily series below shows whether a gap is persistent or a one-off.",
     "never_collected": "We haven't collected any data for {{agency}} yet.",
-    "choose_another_agency": "Choose another agency"
+    "choose_another_agency": "Choose another agency",
+    "definition": {
+      "more": "More in the user manual",
+      "avg_delay": {
+        "title": "Average delay",
+        "body": "The mean of every departure delay in the period, in minutes: how late each bus left each stop against its timetable. Early departures stay in the mean as negative delays."
+      },
+      "peak_hour": {
+        "title": "Heaviest hour",
+        "body": "The hour of the day whose departures had the highest average delay over the period, under the conditions above. Click the row to see every hour."
+      },
+      "concentration": {
+        "title": "Share of delay",
+        "body": "Of all the minutes departures left late in the period, the share these routes account for. Early departures count as zero. The higher the share, the more the delay sits with a few routes."
+      },
+      "late_routes": {
+        "title": "Routes averaging late",
+        "body": "How many routes averaged at least {{min}} min late over the period, out of the routes observed {{floor}} or more times. A route observed fewer times is left out, since a handful of trips can swing its average."
+      },
+      "routes_to_check": {
+        "title": "Routes to check",
+        "body": "The most delayed routes in the period, grouped by their average delay, among the routes observed {{floor}} or more times. Each row's change compares it with the same number of days just before the period. Click a route to open its page."
+      }
+    }
   },
   "markdownMermaid": {
     "diagram_fallback_label": "Diagram"
@@ -757,7 +780,11 @@
     "hint_cta": "View Help",
     "hint_dismiss_aria": "Dismiss help hint",
     "search_result_count_one": "{{count}} section found",
-    "search_result_count_other": "{{count}} sections found"
+    "search_result_count_other": "{{count}} sections found",
+    "anchor": {
+      "pulse": "4-pulse--the-period-at-a-glance",
+      "delay_figures": "13-2-delay-figures"
+    }
   },
   "account": {
     "admin_link": "Admin",

@@ -12,6 +12,7 @@ import { windowDays } from "./overview/storySentence";
 import { RouteLabel } from "./RouteLabel";
 import { DelayScaleLegend } from "./charts/DelayScaleLegend";
 import { BAND_BOUNDS, groupBySeverityBand } from "./routesToCheckBands";
+import { MetricDefinition } from "./overview/MetricDefinition";
 import type { OverviewBandCounts, OverviewTopDelayedRoute } from "../api/types";
 
 type Props = {
@@ -82,7 +83,14 @@ export function RoutesToCheckList({ routes, bandCounts, routeCount, minSamples, 
 
   return (
     <div ref={listRef}>
-      <p className="ov-check-section-hd">{t("overview.routes_to_check.title", { count: days, range })}</p>
+      <p className="ov-check-section-hd">
+        {t("overview.routes_to_check.title", { count: days, range })}{" "}
+        <MetricDefinition
+          title={t("overview.definition.routes_to_check.title")}
+          body={t("overview.definition.routes_to_check.body", { floor: minSamples })}
+          manual="pulse"
+        />
+      </p>
       {routeCount > 0 && (
         <p className="ov-check-scope">
           {t("overview.routes_to_check.scope", { count: routeCount, min: minSamples })}
