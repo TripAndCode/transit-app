@@ -1,20 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { formatDateTime } from "../../utils/format";
-import type { useAdminAskFunnel, useAdminAskQueries } from "../../api/admin";
+import type { useAdminAskFunnel, useAdminAskQueries, useAdminAskToolUsage } from "../../api/admin";
 import { AdminAskOpsPage } from "./AdminAskOpsPage";
 
 type QueriesReturn = ReturnType<typeof useAdminAskQueries>;
 type FunnelReturn = ReturnType<typeof useAdminAskFunnel>;
+type ToolUsageReturn = ReturnType<typeof useAdminAskToolUsage>;
 
 /** Only the fields the page reads; the rest of react-query's result object
  *  is irrelevant to these tests, so the mocks are partial. */
 let queriesReturn: Partial<QueriesReturn>;
 let funnelReturn: Partial<FunnelReturn>;
+let toolUsageReturn: Partial<ToolUsageReturn>;
 let lastQueriesArgs: Parameters<typeof useAdminAskQueries>[0] | undefined;
 let lastFunnelArgs: Parameters<typeof useAdminAskFunnel>[0] | undefined;
 
@@ -27,6 +29,7 @@ vi.mock("../../api/admin", () => ({
     lastFunnelArgs = params;
     return funnelReturn;
   },
+  useAdminAskToolUsage: () => toolUsageReturn,
 }));
 
 function wrapAt(ui: React.ReactElement, path: string) {
@@ -58,6 +61,17 @@ const baseRow = {
 };
 
 beforeEach(() => {
+  toolUsageReturn = {
+    data: {
+      from_date: "2026-10-17",
+      to_date: "2026-11-15",
+      tools: [
+        { tool: "top_n", signed_in: 7, signed_out: 3, followups: 2, failed: 1, avg_latency_ms: 142 },
+        { tool: null, signed_in: 0, signed_out: 1, followups: 0, failed: 1, avg_latency_ms: null },
+      ],
+    },
+    error: null,
+  };
   queriesReturn = {
     data: { rows: [baseRow], next_cursor: null },
     isLoading: false,
@@ -178,5 +192,28 @@ describe("AdminAskOpsPage", () => {
     wrap(<AdminAskOpsPage />);
     const link = screen.getByRole("link", { name: /feature flags/i });
     expect(link.getAttribute("href")).toBe("/admin/flags");
+  });
+
+  it("shows per-tool notebook counts split signed in and signed out", () => {
+    wrap(<AdminAskOpsPage />);
+    const table = screen.getByRole("grid", { name: i18n.t("admin.ask_ops.tools.table_label") });
+    const row = within(table).getByText("top_n").closest("tr") as HTMLElement;
+    expect(within(row).getAllByRole("gridcell").map((c) => c.textContent)).toEqual(["top_n", "7", "3", "2", "1", "142"]);
+    expect(within(table).getByText(i18n.t("admin.ask_ops.tools.unknown_tool"))).toBeTruthy();
+  });
+
+  it("shows an error, not an empty usage table, when the usage query failed", () => {
+    toolUsageReturn = { data: undefined, error: new Error("boom") };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.queryByText(i18n.t("admin.ask_ops.tools.empty"))).toBeNull();
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
+  it("offers the notebook routes in the route filter", () => {
+    wrap(<AdminAskOpsPage />);
+    const select = screen.getByLabelText(i18n.t("admin.ask_ops.col.route")) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(
+      expect.arrayContaining(["card_signed_in", "card_signed_out", "followup"]),
+    );
   });
 });

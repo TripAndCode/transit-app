@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import asyncpg
@@ -17,13 +18,16 @@ from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, clamp_range_ctx
 from api.security import User, csrf_guard, require_llm_approved
+from pipeline.flags import aflag
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
+from pipeline.query.ask_ops import CARD_SIGNED_IN, CARD_SIGNED_OUT, FOLLOWUP
 from pipeline.query.chat import _chat_str, ch_failure_str
 from pipeline.query.followup_context import select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
-from pipeline.query.tools import dispatch, render_tool_result
+from pipeline.query.query_log import log_query
+from pipeline.query.tools import canonical_tool_name, dispatch, render_tool_result
 from pipeline.reports.definition import DefinitionMeta
 
 _log = logging.getLogger(__name__)
@@ -296,6 +300,44 @@ async def migrate_anon_endpoint(
     return {"inserted": inserted}
 
 
+async def _log_usage(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    stage: str,
+    tool: str | None,
+    success: bool,
+    started: float,
+    *,
+    question: str = "",
+) -> None:
+    """Record one notebook dispatch or follow-up in ``ask_query_log``.
+
+    Never raises: bookkeeping must not change a response. The row stores the
+    canonical tool name only (never client text, never a card's arguments),
+    and an empty question unless the caller passes the user's own free text.
+    Call it outside any transaction of the request, since a failed INSERT
+    aborts the transaction it runs in."""
+    try:
+        if not await aflag("ask_query_log_enabled"):
+            return
+        await log_query(
+            conn,
+            agency_id,
+            question,
+            stage,
+            canonical_tool_name(tool) if tool is not None else None,
+            success,
+            latency_ms=round((time.monotonic() - started) * 1000),
+        )
+    except Exception as exc:
+        _log.warning("ask usage log failed (%s) -- ignored", exc.__class__.__name__)
+
+
+def _card_succeeded(card: dict[str, Any]) -> bool:
+    result = card["result"]
+    return result is not None and result["kind"] != "empty"
+
+
 @router.post("/conversations/{conversation_id}/messages", response_model=None)
 @limiter.limit(tier_limit)
 async def append_message_endpoint(
@@ -345,21 +387,27 @@ async def append_message_endpoint(
     # User message + card in one transaction. Without it, a concurrent DELETE of
     # this conversation would FK-cascade-delete the user_msg row mid-flight,
     # producing a 500 instead of a clean 404.
-    async with conn.transaction():
-        user_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="user",
-            tool=None,
-            args=None,
-            signature_hash=None,
-            result=None,
-            rendered_summary=user_summary,
-        )
-        card = await _run_card(
-            conn, resolved_tool, resolved_args, ctx_obj, agency_id, locale, ch, cache_question=user_summary
-        )
-        assistant_msg = await _conv.append_message(conn, conversation_id, role="assistant", **card)
+    started = time.monotonic()
+    dispatched = False
+    try:
+        async with conn.transaction():
+            user_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="user",
+                tool=None,
+                args=None,
+                signature_hash=None,
+                result=None,
+                rendered_summary=user_summary,
+            )
+            card = await _run_card(
+                conn, resolved_tool, resolved_args, ctx_obj, agency_id, locale, ch, cache_question=user_summary
+            )
+            dispatched = _card_succeeded(card)
+            assistant_msg = await _conv.append_message(conn, conversation_id, role="assistant", **card)
+    finally:
+        await _log_usage(conn, agency_id, CARD_SIGNED_IN, resolved_tool, dispatched, started)
     return {"user": user_msg, "assistant": assistant_msg}
 
 
@@ -518,9 +566,14 @@ async def run_card_endpoint(
     *filter_ctx* exactly as a stored thread's filters scope its cards."""
     csrf_guard(request)
     ctx_obj = _ctx_from_stored_filters(body.filter_ctx)
-    return CardAnswer(
-        **await _run_card(conn, body.tool, body.args, ctx_obj, agency_id, locale, ch, cache_question=None)
-    )
+    started = time.monotonic()
+    dispatched = False
+    try:
+        card = await _run_card(conn, body.tool, body.args, ctx_obj, agency_id, locale, ch, cache_question=None)
+        dispatched = _card_succeeded(card)
+    finally:
+        await _log_usage(conn, agency_id, CARD_SIGNED_OUT, body.tool, dispatched, started)
+    return CardAnswer(**card)
 
 
 # ─── LLM follow-up (kill-switch gated) ────────────────────────────────────────
@@ -604,6 +657,7 @@ async def followup_endpoint(
     if ctx_msg.get("role") != "assistant":
         raise HTTPException(status_code=400, detail="context must be an assistant message")
 
+    started = time.monotonic()
     answer, err = await _followup.answer_followup(
         question=body.question,
         context_tool=ctx_msg.get("tool"),
@@ -612,6 +666,8 @@ async def followup_endpoint(
         locale=locale,
         llm_approved=user.llm_approved,
     )
+    async with request.app.state.pool.acquire() as conn:
+        await _log_usage(conn, agency_id, FOLLOWUP, ctx_msg.get("tool"), err is None, started, question=body.question)
     _raise_for_followup_error(err)
 
     # Append both messages atomically so a mid-flight cancel doesn't leave

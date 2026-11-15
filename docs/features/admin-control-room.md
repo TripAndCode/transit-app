@@ -354,6 +354,15 @@ Route: `/admin/ask`, backed by `AdminAskOpsPage`.
 
 Endpoints:
 - `GET /api/admin/ask/queries` — paged query log.
-- `GET /api/admin/ask/funnel` — stage/success counts.
+- `GET /api/admin/ask/funnel` — stage/success counts for the router; notebook
+  card dispatches and follow-ups are not part of it.
+- `GET /api/admin/ask/tools` — the notebook's usage signal: per tool, the card
+  dispatches signed in and signed out, the follow-ups that used its result as
+  context, the failures among them and the mean latency, over the trailing 30
+  JST days (`from`/`to`/`agency_id` narrow it). The page shows it above the
+  query log; the log's route filter also lists `card_signed_in`,
+  `card_signed_out` and `followup`.
 
-Tables: reads `ask_query_log`.
+Tables: reads `ask_query_log`. Those rows hold no identity (signed in or out is
+the only fact kept about the caller) and fall under the table's 90-day
+retention (`pipeline/retention.py`).

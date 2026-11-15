@@ -974,11 +974,12 @@ export function useTriggerRun() {
 // nn (retired embedding stage; historic rows only) -> rag (LLM)), not a
 // transit route/line. `no_history` is
 // the router's own early-exit case (a follow-up with nothing to continue).
+// The card routes and `followup` are the notebook paths that skip the router.
 // There is no "user" field and `providers` below is always null because
-// ask_query_log carries neither identity nor a per-query provider/latency
-// column (api.routers.admin_ask).
+// ask_query_log carries neither identity nor a per-query provider column
+// (api.routers.admin_ask).
 
-export type AskRoute = "rules" | "nn" | "rag" | "no_history";
+export type AskRoute = "rules" | "nn" | "rag" | "no_history" | "card_signed_in" | "card_signed_out" | "followup";
 type AskStatus = "ok" | "error";
 
 export type AskQueryLogRow = {
@@ -1015,6 +1016,24 @@ export function useAdminAskQueries(params: {
     queryKey: ["adminAskQueries", params],
     queryFn: ({ signal }) => apiGet<AskQueryLogPage>(`/api/admin/ask/queries?${qs}`, { signal }),
     placeholderData: keepPreviousData,
+  });
+}
+
+export type AskToolUsage = {
+  tool: string | null;
+  signed_in: number;
+  signed_out: number;
+  followups: number;
+  failed: number;
+  avg_latency_ms: number | null;
+};
+
+/** Notebook card runs and follow-ups per tool over the trailing 30 days. */
+export function useAdminAskToolUsage() {
+  return useQuery({
+    queryKey: ["adminAskToolUsage"],
+    queryFn: ({ signal }) =>
+      apiGet<{ from_date: string; to_date: string; tools: AskToolUsage[] }>("/api/admin/ask/tools", { signal }),
   });
 }
 

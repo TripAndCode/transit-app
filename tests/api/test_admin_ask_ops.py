@@ -236,3 +236,75 @@ async def test_the_api_session_settings_survive_a_connection_going_back_to_the_p
                 assert await conn.fetchval("SHOW statement_timeout") == "30s"
     finally:
         await pool.close()
+
+
+async def _insert_notebook_log(pool, agency_id, stage, tool, success=True, latency_ms=100, age_days=0):
+    async with pool.acquire() as c:
+        await c.execute(
+            "INSERT INTO ask_query_log (agency_id, question, router_stage, tool, success, latency_ms, created_at) "
+            "VALUES ($1, '', $2, $3, $4, $5, now() - $6 * INTERVAL '1 day')",
+            agency_id,
+            stage,
+            tool,
+            success,
+            latency_ms,
+            age_days,
+        )
+
+
+@pytest.mark.asyncio
+async def test_tools_requires_admin(ask_ops_client):
+    c, *_ = ask_ops_client
+    resp = await c.get("/api/admin/ask/tools")
+    assert resp.status_code in (401, 403)
+
+
+@pytest.mark.asyncio
+async def test_tools_counts_notebook_paths_per_tool_for_the_last_30_days(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", latency_ms=100)
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", success=False, latency_ms=300)
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "top_n", latency_ms=200)
+    await _insert_notebook_log(pool, agency_id, "followup", "top_n", latency_ms=None)
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "time_series")
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", None, success=False)
+    # Outside the window, and not a notebook path: neither is counted.
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n", age_days=45)
+    await _insert_log(pool, agency_id, router_stage="rules", tool="top_n")
+
+    resp = await c.get("/api/admin/ask/tools", cookies={"sid": sid})
+    assert resp.status_code == 200
+    by_tool = {t["tool"]: t for t in resp.json()["tools"]}
+    assert by_tool["top_n"] == {
+        "tool": "top_n",
+        "signed_in": 2,
+        "signed_out": 1,
+        "followups": 1,
+        "failed": 1,
+        "avg_latency_ms": 200,
+    }
+    assert by_tool["time_series"]["signed_out"] == 1
+    assert by_tool[None]["failed"] == 1
+    assert resp.json()["tools"][0]["tool"] == "top_n"
+
+
+@pytest.mark.asyncio
+async def test_funnel_leaves_out_notebook_dispatches(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_log(pool, agency_id, router_stage="rules")
+    await _insert_notebook_log(pool, agency_id, "card_signed_in", "top_n")
+    await _insert_notebook_log(pool, agency_id, "followup", "top_n")
+    body = (await c.get("/api/admin/ask/funnel", cookies={"sid": sid})).json()
+    assert body["total"] == 1
+    assert [r["route"] for r in body["by_route"]] == ["rules", "nn", "rag", "no_history"]
+
+
+@pytest.mark.asyncio
+async def test_queries_filter_by_notebook_route(ask_ops_client):
+    c, sid, _uid, agency_id, pool = ask_ops_client
+    await _insert_log(pool, agency_id, router_stage="rules")
+    await _insert_notebook_log(pool, agency_id, "card_signed_out", "top_n")
+    rows = (await c.get("/api/admin/ask/queries", params={"route": "card_signed_out"}, cookies={"sid": sid})).json()[
+        "rows"
+    ]
+    assert [(r["route"], r["tool"]) for r in rows] == [("card_signed_out", "top_n")]

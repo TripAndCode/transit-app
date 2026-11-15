@@ -6,7 +6,9 @@ import { ErrorBanner } from "../../components/ErrorBanner";
 import {
   useAdminAskFunnel,
   useAdminAskQueries,
+  useAdminAskToolUsage,
   type AskQueryLogRow,
+  type AskToolUsage,
   type AskRoute,
 } from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
@@ -14,6 +16,7 @@ import { AdminButton, StatusChip } from "./adminControls";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 const ROUTE_ORDER: readonly AskRoute[] = ["rules", "nn", "rag", "no_history"];
+const FILTER_ROUTES: readonly AskRoute[] = [...ROUTE_ORDER, "card_signed_in", "card_signed_out", "followup"];
 const CACHE_OUTCOMES = new Set(["hit", "miss", "bypass"]);
 
 type AskFilters = { route?: string; status?: string; from?: string; to?: string };
@@ -53,6 +56,53 @@ function FunnelBar({
   );
 }
 
+/** Notebook usage: how often each tool's card ran signed in and signed out,
+ * and how often a follow-up used it as context, over the last 30 days. */
+function ToolUsageSection() {
+  const { t } = useTranslation();
+  const { data, error, refetch } = useAdminAskToolUsage();
+  const columns: DataTableColumn<AskToolUsage>[] = [
+    {
+      key: "tool",
+      header: t("admin.ask_ops.tools.col.tool"),
+      render: (row) => row.tool ?? t("admin.ask_ops.tools.unknown_tool"),
+    },
+    { key: "signed_in", header: t("admin.ask_ops.tools.col.signed_in"), render: (row) => row.signed_in },
+    { key: "signed_out", header: t("admin.ask_ops.tools.col.signed_out"), render: (row) => row.signed_out },
+    { key: "followups", header: t("admin.ask_ops.tools.col.followups"), render: (row) => row.followups },
+    { key: "failed", header: t("admin.ask_ops.tools.col.failed"), render: (row) => row.failed },
+    {
+      key: "latency",
+      header: t("admin.ask_ops.tools.col.latency"),
+      render: (row) => row.avg_latency_ms ?? "—",
+    },
+  ];
+  return (
+    <section
+      style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
+    >
+      <h2 style={{ fontSize: 15, marginBottom: 4 }}>{t("admin.ask_ops.tools.title")}</h2>
+      <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
+        {t("admin.ask_ops.tools.note")}
+      </p>
+      {error != null && <ErrorBanner error={error} onRetry={() => refetch()} />}
+      {data == null && error == null && (
+        <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
+      )}
+      {data != null && (
+        <DataTable
+          caption={t("admin.ask_ops.tools.table_label")}
+          rows={data.tools}
+          columns={columns}
+          rowKey={(row) => row.tool ?? ""}
+          emptyLabel={t("admin.ask_ops.tools.empty")}
+          settled
+        />
+      )}
+    </section>
+  );
+}
+
 /** Owns cursor-stack pagination for one fixed filter set. Remounted (via a
  * `key` on the filter values) whenever a filter changes, which resets
  * pagination back to the first page without a synchronization effect. */
@@ -75,7 +125,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
           title={row.question}
           style={{ display: "block", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
-          {row.question}
+          {row.question || "—"}
         </span>
       ),
     },
@@ -182,7 +232,7 @@ export function AdminAskOpsPage() {
           onChange={(e) => setFilter("route", e.target.value)}
         >
           <option value="">{t("admin.ask_ops.filter.route_all")}</option>
-          {ROUTE_ORDER.map((r) => (
+          {FILTER_ROUTES.map((r) => (
             <option key={r} value={r}>
               {t(`admin.ask_ops.route.${r}`)}
             </option>
@@ -242,6 +292,8 @@ export function AdminAskOpsPage() {
           {t("admin.ask_ops.funnel.providers_not_tracked")}
         </p>
       </section>
+
+      <ToolUsageSection />
 
       <section
         style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}

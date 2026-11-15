@@ -175,6 +175,19 @@ renders it with the reports' `DefinitionMetaBlock`.
 5. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
    log_query()` unless `ASK_QUERY_LOG_ENABLED=false`.
 
+**Usage log.** Each notebook card dispatch writes one `ask_query_log` row, on
+the same kill switch: `router_stage` is `card_signed_in`
+(`POST .../conversations/{cid}/messages`) or `card_signed_out`
+(`POST .../ask/card`), `tool` is the canonical handler name (an unknown or
+aliased client name resolves to the handler's, or NULL), `success` is false for
+an empty or failed dispatch, and `latency_ms` is the dispatch's wall time. A
+follow-up writes a `followup` row naming the tool of the result it used. The
+`question` column is empty for cards and holds the follow-up's own text, as
+`/ask` rows hold theirs; arguments, thread ids and users are never stored. The
+write follows the request's transaction and swallows its own failure, so
+logging cannot fail a card. The admin Ask ops page reports these as per-tool
+counts over 30 days.
+
 **Follow-up path** (LLM-grounded, kill-switch gated):
 `FollowupChipsRow` → `useFollowup` →
 `POST /api/{agency_id}/conversations/{cid}/followup`
@@ -257,7 +270,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `followup.py` | LLM-grounded follow-up answerer (`ASK_FOLLOWUP_ENABLED` kill switch) |
 | `labels.py` | `dow_label`/time-band display helpers |
 | `meta_tools.py` | `describe_data`-style meta tools merged into the handler map |
-| `query_log.py` | `ask_query_log` writer, gated by `ASK_QUERY_LOG_ENABLED` |
+| `query_log.py` | `ask_query_log` writer (router, card and follow-up rows), gated by `ASK_QUERY_LOG_ENABLED` |
 
 ## How to verify manually
 
