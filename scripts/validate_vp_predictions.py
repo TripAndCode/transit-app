@@ -5,60 +5,78 @@ Every delay the app reports is the operator's prediction, the latest timely
 reading the feed sent for a stop event (``pipeline.db.build_dedup_ch_sql``),
 not an observation. This measures how far that kept value is from when the
 bus actually left, offline, from the collector's R2 archives alone: no
-database is read or written.
+database is read or written. It reads TripUpdates as the static_join
+strategy does (``pipeline.strategies.static_join.decode_trip_updates``), the
+strategy of the Hiroshima feeds (agencies 8 to 10) the collector also polls
+VehiclePositions for.
 
 **Inputs** sit under ``--archives`` as R2 lays them out:
 ``rt/<id>/<YYYYMMDD>.tar.gz`` (``YYYYMMDD/TripUpdate_HHMMSS.pb``),
 ``vp/<id>/<YYYYMMDD>.tar.gz`` (``YYYYMMDD/VehiclePosition_HHMMSS.pb``), each
 the polls of one UTC day named in UTC, and
-``static/<id>/gtfs_static_<YYYYMMDD>.zip``. Service date D is read from the
-UTC days D-1 and D, which hold every capture filed under it, against the
-newest timetable dated on or before D. ``--fetch`` first downloads whichever
-of those R2 holds and the mirror lacks.
+``static/<id>/gtfs_static_<YYYYMMDD>.zip``. Every capture filed under service
+date D is in the archives of the UTC days D-1 and D. Each TripUpdates archive
+is read once; each poll is joined to the newest timetable dated on or before
+its capture's service day, as ingest joins it to the one loaded then, and the
+stops of D are placed with the timetable for D. ``--fetch`` first downloads
+whichever of those R2 holds and the mirror lacks.
 
 **The kept reading** of a stop event, keyed by trip, filed service date and
-stop_sequence, is chosen as the app chooses it: of the readings that are
-timely (``pipeline.db.timely_reading``) and either carry a delay inside the
-plausibility clamp or withdraw the departure (trip CANCELED, stop SKIPPED),
-the latest by capture instant then file name. A stop event whose kept reading
-withdraws its departure has no departure to measure. The capture instant is
-the one archive ingest stamps (``archive_captured_at``).
+stop_sequence, is the one the app keeps, and not the last reading before the
+passage: the validation is of the values the product reports. Of the
+readings that are timely (``pipeline.db.timely_reading``) and either carry a
+delay inside the plausibility clamp or withdraw the departure (trip CANCELED,
+stop SKIPPED), it is the latest by capture instant then file name. A trip
+CANCELED without listing a stop withdraws each stop still to come, as
+ingest's ``parse_feed`` stores it (``cancellation_withdrawals``); a stop
+already left keeps its reading. A stop event whose kept reading withdraws
+its departure has no departure to measure. The capture instant is the one
+archive ingest stamps (``archive_captured_at``), so the pick matches the app
+on days it ingested from the archive. On a day the app holds the collector's
+live pushes instead, its capture instants are the collector's fetch times,
+and which days those are is not in the archives.
 
 **The observed passage** comes from the trip's vehicle track: its positions
 for that trip and service date, resent fixes and GPS jumps dropped. The
 stops are matched in stop_sequence order, each searched for only after the
 previous stop's passage and inside a window around its schedule shifted by
-the delay last observed on the trip, so a loop's return past its first stop,
-a later lap, or a stop beside the road out are not taken for it. A stop's
-visit is the first run of track segments that come within PASSAGE_RADIUS_M
-of it; of the segments nearest the stop (DWELL_TOLERANCE_M), the last gives
-the departure and, at the trip's final stop, the first gives the arrival, so
-a bus idling at its first stop departs when it pulls out and one laying over
-at its last arrives when it gets there. The instant is interpolated on that
-segment: the vehicle is taken to cover the stretch from the stop to its next
-fix at the speed it is next seen moving (to its arrival, from its previous
-fix at the speed it was last seen moving), which places a departure from a
-dwell between two polls rather than at the last fix at the stop. No segment
-spanning more than MAX_BRACKET_GAP_SEC is interpolated. A bus last seen
-standing at a stop has no departure from it, and a track that ends still
-short of the final stop, by more than DWELL_TOLERANCE_M, has no arrival.
+the delay last observed on the trip, so a later lap or a stop beside the
+road out are not taken for it. Until the trip's first passage the window
+closes where the track first passes a later stop that lies clear of this
+one, so a track that starts after the bus left its first stop does not take
+a loop's return to that place for it. A stop's visit is the first run of
+track segments within PASSAGE_RADIUS_M of it; of the segments nearest the
+stop (DWELL_TOLERANCE_M), the last gives the departure and, at the trip's
+final stop, the first gives the arrival, so a bus idling at its first stop
+departs when it pulls out and one laying over at its last arrives when it
+gets there. The instant is interpolated on that segment, linearly along it,
+except where a fix shows the bus standing at the stop: then the bus is taken
+to cover the stretch from the stop to its next fix at the speed it is next
+seen moving (to its arrival, from its previous fix at the speed it was last
+seen moving), which places a departure from a dwell between two polls rather
+than at the last fix at the stop. No segment spanning more than
+MAX_BRACKET_GAP_SEC is interpolated. A bus last seen standing at a stop has
+no departure from it, and a track that ends still short of the final stop,
+by more than DWELL_TOLERANCE_M, has no arrival.
 
 **The comparison** per stop event with both: error = kept delay - observed
 delay, positive when the feed reported the bus later than it left; lead =
 passage - capture of the kept reading, negative when that reading came after
-the bus had left. The summary gives MAE, bias and the 90th percentile of the
-absolute error overall, by lead (LEAD_WIDTH_SEC groups, open beyond
-±LEAD_CAP_SEC), by service-day hour of the scheduled departure and by
-timepoint ("unknown" where stop_times.txt has no timepoint column), plus
-coverage: how many kept stop events had a passage, and why the rest did not.
+the bus had left (counted as ``kept_after_passage``). The summary gives MAE,
+bias and the 90th percentile of the absolute error overall, by lead
+(LEAD_WIDTH_SEC groups, open beyond ±LEAD_CAP_SEC), by service-day hour of
+the scheduled departure and by timepoint ("unknown" where stop_times.txt has
+no timepoint column), plus coverage: how many kept stop events had a
+passage, and why the rest did not.
 
 Output: ``<out>/<id>/<FROM>_<TO>.json`` and a Markdown table beside it as
 ``.md``. The run exits 1 when no stop event could be compared.
 
 Credentials (``--fetch`` only): the transit-archives pair in
 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, with OBJECT_STORE_BUCKET and
-OBJECT_STORE_ENDPOINT, as ``scripts/rt_validate_sample.py`` reads them. A
-failed download is reported by key and exit status only.
+OBJECT_STORE_ENDPOINT, as ``scripts/rt_validate_sample.py`` reads them. The
+aws CLI's own output is captured and dropped; a failed download is reported
+by its key and exit status.
 
 Usage:
     python scripts/validate_vp_predictions.py --agency ID --from YYYY-MM-DD
@@ -81,24 +99,37 @@ import tarfile
 import zipfile
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from itertools import pairwise
 from pathlib import Path, PurePosixPath
 from typing import Any
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ml.r2 import default_capture, default_run, download_file, list_keys  # noqa: E402  (sys.path injection above)
+from ml.r2 import default_capture, download_file, list_keys  # noqa: E402  (sys.path injection above)
 from pipeline.clickhouse import STOP_SKIPPED, TRIP_CANCELED  # noqa: E402
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, timely_reading  # noqa: E402
-from pipeline.service_day import filed_date_of, service_day_moment_utc, service_day_offset  # noqa: E402
+from pipeline.service_day import (  # noqa: E402
+    FILING_REACH_HOURS,
+    SERVICE_DAY_CUTOVER_HOURS,
+    filed_date_of,
+    service_date_of,
+    service_day_moment_utc,
+    service_day_offset,
+)
 from pipeline.strategies._pb import _dec, _fields, archive_captured_at, decode_feed_timestamp  # noqa: E402
 from pipeline.strategies._time import parse_departure_time  # noqa: E402
-from pipeline.strategies.static_join import _decode_trip_updates  # noqa: E402
+from pipeline.strategies.static_join import (  # noqa: E402
+    cancellation_withdrawals,
+    decode_trip_updates,
+    is_stopless_cancellation,
+)
 
 SCHEMA = 1
+_JST = ZoneInfo("Asia/Tokyo")
 
 # Mean Earth radius times pi/180. Distances are taken on a flat map centred
 # on each stop, exact enough over the few hundred metres a passage spans.
@@ -113,14 +144,14 @@ PASSAGE_RADIUS_M = 50.0
 # Segments within this much of the nearest approach count as standing at the
 # stop: the scatter of fixes from a bus that is not moving.
 DWELL_TOLERANCE_M = 15.0
-# The longest pair of consecutive fixes a passage is interpolated between:
-# four missed 20 s polls. Over a longer gap the bus may have stopped, turned
-# or queued anywhere, so no instant inside it is believable.
+# The longest gap between two fixes a passage is interpolated across. In a
+# longer one a bus can dwell, queue or detour between the two, so a straight
+# line between them no longer times when it passed.
 MAX_BRACKET_GAP_SEC = 90
 # How far from its schedule, shifted by the delay observed at the trip's
 # previous passage, a stop's visit may start. A delay rarely moves by
-# minutes between adjacent stops, while a loop or a figure-eight comes back
-# past the same place a lap later. Before the trip's first passage the
+# minutes between adjacent stops, while a figure-eight or a later lap comes
+# back past the same place much later. Before the trip's first passage the
 # window runs from this much early to MAX_PLAUSIBLE_DELAY_SEC late, the
 # app's own clamp.
 TRACK_WINDOW_SEC = 900
@@ -133,28 +164,28 @@ MIN_MOVING_SPEED_MPS = 1.0
 # runs on different days, while a single run never pauses this long.
 TRACK_SPLIT_GAP_SEC = 3 * 3600
 
-# Lead-time groups. The feeds are polled every 20-30 s, so a minute holds
-# the last poll or two before a passage; past ten minutes the groups are
+# Lead-time groups. A minute holds the last poll or two before a passage at
+# the cadence the feeds are polled at; past ten minutes the groups are
 # pooled, since few kept readings are that old.
 LEAD_WIDTH_SEC = 60
 LEAD_CAP_SEC = 600
 
 _MEMBER = re.compile(r"^(?P<day>\d{8})/(?P<kind>TripUpdate|VehiclePosition)_(?P<clock>\d{6})\.pb$")
-_RT_OR_VP_KEY = re.compile(r"^(?P<kind>rt|vp)/(?P<agency>\d+)/(?P<day>\d{8})\.tar\.gz$")
 _STATIC_NAME = re.compile(r"^gtfs_static_(?P<day>\d{8})\.zip$")
 
 Run = Callable[[Sequence[str]], None]
 Capture = Callable[[Sequence[str]], str]
+Poll = tuple[str, datetime, bytes]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Fix:
     at: datetime
     lat: float
     lon: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class StopPoint:
     """A stop of a trip to find the passage of. ``final`` marks the trip's
     last stop, whose passage is its arrival."""
@@ -166,7 +197,7 @@ class StopPoint:
     final: bool = False
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Sighting:
     trip_id: str
     vehicle_id: str
@@ -176,25 +207,35 @@ class Sighting:
     lon: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class StopTime:
-    """``scheduled_sec`` is the departure_time's raw seconds as ingest stores
-    them, None where the timetable gives none; ``timepoint`` is None where
-    the timetable has no timepoint column."""
+    """A timetable stop time. ``departure_time`` is the raw GTFS text and
+    ``scheduled_sec`` its seconds as ingest stores them, None where the
+    timetable gives none; ``timepoint`` is None where the timetable has no
+    timepoint column."""
 
     stop_sequence: int
     stop_id: str
-    scheduled_sec: int | None
+    departure_time: str | None
     timepoint: bool | None
+    scheduled_sec: int | None = field(init=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "scheduled_sec", parse_departure_time(self.departure_time)[2])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Timetable:
     stops: dict[str, tuple[float, float]]
     trips: dict[str, tuple[StopTime, ...]]
+    seconds: dict[str, dict[int, int | None]] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        seconds = {t: {st.stop_sequence: st.scheduled_sec for st in sts} for t, sts in self.trips.items()}
+        object.__setattr__(self, "seconds", seconds)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Reading:
     """A stop event's kept reading; ``dep_delay`` is None when it withdraws the departure."""
 
@@ -203,7 +244,7 @@ class Reading:
     dep_delay: int | None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Event:
     trip_id: str
     service_date: date
@@ -219,7 +260,7 @@ class Event:
         return self.predicted_delay_sec - self.observed_delay_sec
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Approach:
     segment: int
     fraction: float
@@ -233,7 +274,7 @@ def _xy(lat: float, lon: float, origin_lat: float, origin_lon: float) -> tuple[f
     )
 
 
-def _distance(a: Fix | StopPoint, b: Fix | StopPoint) -> float:
+def _distance(a: Fix | StopPoint | Sighting, b: Fix | StopPoint | Sighting) -> float:
     return math.hypot(*_xy(a.lat, a.lon, b.lat, b.lon))
 
 
@@ -289,54 +330,65 @@ def _visit(
     return run
 
 
-def _nearest(visit: Sequence[_Approach]) -> list[_Approach]:
-    closest = min(a.distance for a in visit)
-    return [a for a in visit if a.distance <= closest + DWELL_TOLERANCE_M]
+def _first_pass_of_later_stop(
+    track: Sequence[Fix], stop: StopPoint, later: Sequence[StopPoint], until: datetime
+) -> datetime | None:
+    """When the track first comes within PASSAGE_RADIUS_M of one of *later*
+    lying clear of *stop* (more than twice the radius from it), by *until*.
+    A later stop at the same place, a loop's terminus or the next bay, says
+    nothing about whether the bus has left this one."""
+    clear = [s for s in later if _distance(s, stop) > 2 * PASSAGE_RADIUS_M]
+    for j in range(len(track) - 1):
+        if track[j].at > until:
+            return None
+        if _usable(track, j) and any(_approach(track, j, s, 0.0).distance <= PASSAGE_RADIUS_M for s in clear):
+            return track[j].at
+    return None
 
 
-def _departure(track: Sequence[Fix], visit: Sequence[_Approach], stop: StopPoint) -> _Approach | None:
-    nearest = _nearest(visit)
+def _nearest(visit: Sequence[_Approach]) -> tuple[list[_Approach], float]:
+    """The visit's segments standing at the stop, and the distance that counts as there."""
+    there = min(a.distance for a in visit) + DWELL_TOLERANCE_M
+    return [a for a in visit if a.distance <= there], there
+
+
+def _offset(span: float, fraction: float, distance: float, speed: float | None, *, towards: bool) -> float:
+    """Seconds into a segment *span* seconds long at which the bus is at the
+    point *fraction* along it: linearly, or, given *speed*, timed back from
+    the segment's end (``towards`` False) or on from its start (True)."""
+    if speed is None:
+        offset = fraction * span
+    elif towards:
+        offset = fraction * distance / speed
+    else:
+        offset = span - (1 - fraction) * distance / speed
+    return min(span, max(0.0, offset))
+
+
+def _departure(track: Sequence[Fix], visit: Sequence[_Approach], stop: StopPoint) -> tuple[_Approach, datetime] | None:
+    nearest, there = _nearest(visit)
     last = nearest[-1]
-    b = track[last.segment + 1]
-    still_there = _distance(b, stop) <= min(x.distance for x in nearest) + DWELL_TOLERANCE_M
-    if still_there and not _usable(track, last.segment + 1):
-        return None
-    return last
-
-
-def _departure_instant(track: Sequence[Fix], last: _Approach) -> datetime:
     a, b = track[last.segment], track[last.segment + 1]
-    span = _seconds(a.at, b.at)
-    speed = _speed(track, last.segment + 1)
-    if speed is None:
-        offset = last.fraction * span
-    else:
-        offset = span - (1 - last.fraction) * _distance(a, b) / speed
-    return a.at + timedelta(seconds=min(span, max(0.0, offset)))
+    if _distance(b, stop) <= there and not _usable(track, last.segment + 1):
+        return None
+    dwelt = _distance(a, stop) <= there
+    speed = _speed(track, last.segment + 1) if dwelt else None
+    offset = _offset(_seconds(a.at, b.at), last.fraction, _distance(a, b), speed, towards=False)
+    return last, a.at + timedelta(seconds=offset)
 
 
-def _arrival(track: Sequence[Fix], visit: Sequence[_Approach], stop: StopPoint) -> _Approach | None:
-    nearest = _nearest(visit)
+def _arrival(track: Sequence[Fix], visit: Sequence[_Approach], stop: StopPoint) -> tuple[_Approach, datetime] | None:
+    nearest, there = _nearest(visit)
     first = nearest[0]
-    a = track[first.segment]
-    already_there = _distance(a, stop) <= min(x.distance for x in nearest) + DWELL_TOLERANCE_M
-    if already_there and not _usable(track, first.segment - 1):
-        return None
-    still_coming = first.fraction == 1.0 and first.distance > DWELL_TOLERANCE_M
-    if still_coming and not _usable(track, first.segment + 1):
-        return None
-    return first
-
-
-def _arrival_instant(track: Sequence[Fix], first: _Approach) -> datetime:
     a, b = track[first.segment], track[first.segment + 1]
-    span = _seconds(a.at, b.at)
-    speed = _speed(track, first.segment - 1)
-    if speed is None:
-        offset = first.fraction * span
-    else:
-        offset = first.fraction * _distance(a, b) / speed
-    return a.at + timedelta(seconds=min(span, max(0.0, offset)))
+    if _distance(a, stop) <= there and not _usable(track, first.segment - 1):
+        return None
+    if first.fraction == 1.0 and first.distance > DWELL_TOLERANCE_M and not _usable(track, first.segment + 1):
+        return None
+    stood = _distance(b, stop) <= there
+    speed = _speed(track, first.segment - 1) if stood else None
+    offset = _offset(_seconds(a.at, b.at), first.fraction, _distance(a, b), speed, towards=True)
+    return first, a.at + timedelta(seconds=offset)
 
 
 def passages(track: Sequence[Fix], stops: Sequence[StopPoint]) -> dict[int, datetime]:
@@ -346,20 +398,19 @@ def passages(track: Sequence[Fix], stops: Sequence[StopPoint]) -> dict[int, date
     found: dict[int, datetime] = {}
     cursor, floor = 0, 0.0
     shift: float | None = None
-    for stop in stops:
+    for i, stop in enumerate(stops):
         if shift is None:
             lo = stop.scheduled - timedelta(seconds=TRACK_WINDOW_SEC)
             hi = stop.scheduled + timedelta(seconds=MAX_PLAUSIBLE_DELAY_SEC)
+            hi = _first_pass_of_later_stop(track, stop, stops[i + 1 :], hi) or hi
         else:
             expected = stop.scheduled + timedelta(seconds=shift)
             lo, hi = expected - timedelta(seconds=TRACK_WINDOW_SEC), expected + timedelta(seconds=TRACK_WINDOW_SEC)
         visit = _visit(track, stop, cursor, floor, lo, hi)
-        if not visit:
+        passed = (_arrival if stop.final else _departure)(track, visit, stop) if visit else None
+        if passed is None:
             continue
-        chosen = (_arrival if stop.final else _departure)(track, visit, stop)
-        if chosen is None:
-            continue
-        at = (_arrival_instant if stop.final else _departure_instant)(track, chosen)
+        chosen, at = passed
         found[stop.stop_sequence] = at
         cursor, floor = chosen.segment, chosen.fraction
         shift = _seconds(stop.scheduled, at)
@@ -430,7 +481,7 @@ def member_instant(name: str, kind: str) -> datetime | None:
         return None
 
 
-def _archive_polls(path: Path, kind: str) -> Iterator[tuple[str, datetime, bytes]]:
+def _archive_polls(path: Path, kind: str) -> Iterator[Poll]:
     """``(file_name, instant named, payload)`` per poll of *kind* in the tar,
     file_name being ``YYYYMMDD/<kind>_HHMMSS.pb`` as ingest names it."""
     with tarfile.open(path, "r:gz") as tf:
@@ -445,12 +496,19 @@ def _archive_polls(path: Path, kind: str) -> Iterator[tuple[str, datetime, bytes
             yield f"{p.parent.name}/{p.name}", instant, source.read()
 
 
+def _too_fast(a: Sighting, b: Sighting) -> bool:
+    return _distance(a, b) / _seconds(a.at, b.at) > MAX_SPEED_MPS
+
+
 def _drop_jumps(fixes: Sequence[Sighting], stats: Counter[str]) -> list[Sighting]:
-    kept = [fixes[0]]
-    for s in fixes[1:]:
-        prev = kept[-1]
-        apart = math.hypot(*_xy(s.lat, s.lon, prev.lat, prev.lon))
-        if apart / _seconds(prev.at, s.at) > MAX_SPEED_MPS:
+    """*fixes* without GPS jumps. The track starts at the first fix the next
+    one agrees with, so a wild first fix does not throw out the true ones
+    after it; each later fix is then judged against the last one kept."""
+    start = next((i for i, (a, b) in enumerate(pairwise(fixes)) if not _too_fast(a, b)), len(fixes) - 1)
+    stats["gps_jumps_dropped"] += start
+    kept = [fixes[start]]
+    for s in fixes[start + 1 :]:
+        if _too_fast(kept[-1], s):
             stats["gps_jumps_dropped"] += 1
             continue
         kept.append(s)
@@ -493,32 +551,76 @@ def trip_tracks(
     return tracks, stats
 
 
-def kept_readings(
-    polls: Iterable[tuple[str, datetime, bytes]], timetable: Timetable, service_date: date
-) -> dict[tuple[str, int], Reading]:
-    """The kept reading of each stop event filed under *service_date*, by
-    ``(trip_id, stop_sequence)``, from ``(file_name, captured_at, payload)``
-    TripUpdate polls. See the module docstring for the rule."""
-    schedule = {trip_id: {st.stop_sequence: st.scheduled_sec for st in sts} for trip_id, sts in timetable.trips.items()}
-    kept: dict[tuple[str, int], Reading] = {}
+def _could_file_into(captured_at: datetime, first: date, last: date) -> bool:
+    """Whether any reading of a poll captured at *captured_at* can be filed
+    under a date from *first* to *last*: only a capture early in the JST day
+    can file under the day before or after its own (``filed_date_of``)."""
+    own = service_date_of(captured_at)
+    if captured_at.astimezone(_JST).hour >= SERVICE_DAY_CUTOVER_HOURS + FILING_REACH_HOURS:
+        return first <= own <= last
+    return first - timedelta(days=1) <= own <= last + timedelta(days=1)
+
+
+def merge_readings(
+    kept: dict[date, dict[tuple[str, int], Reading]],
+    polls: Iterable[Poll],
+    timetable_on: Callable[[date], Timetable | None],
+    first: date,
+    last: date,
+) -> None:
+    """Merge into *kept*, by filed date then ``(trip_id, stop_sequence)``, the
+    kept reading of each stop event filed from *first* to *last* among the
+    ``(file_name, captured_at, payload)`` TripUpdate *polls*, each joined to
+    ``timetable_on`` its capture's service day. The pick (see the module
+    docstring) is a running maximum, so polls may come in any order and over
+    several calls."""
     for file_name, captured_at, payload in polls:
-        for trip_id, _route, trip_status, updates in _decode_trip_updates(payload):
-            seconds = schedule.get(trip_id, {})
-            for stop_sequence, dep_delay, _stop_id, _arr_delay, stop_status in updates:
-                if stop_sequence is None:
-                    continue
-                withdrawn = trip_status == TRIP_CANCELED or stop_status == STOP_SKIPPED
+        if not _could_file_into(captured_at, first, last):
+            continue
+        timetable = timetable_on(service_date_of(captured_at))
+        if timetable is None:
+            continue
+        placed: dict[int | None, tuple[bool, date]] = {}
+        for trip in decode_trip_updates(payload):
+            seconds = timetable.seconds.get(trip.trip_id, {})
+            reports: list[tuple[int, int | None, bool]]
+            if is_stopless_cancellation(trip):
+                stop_times: list[tuple[int, str | None, str | None]] = [
+                    (st.stop_sequence, st.stop_id, st.departure_time) for st in timetable.trips.get(trip.trip_id, ())
+                ]
+                reports = [(seq, None, True) for seq, _stop, _dep in cancellation_withdrawals(stop_times, captured_at)]
+            else:
+                trip_withdrawn = trip.schedule_relationship == TRIP_CANCELED
+                reports = [
+                    (u.stop_sequence, u.dep_delay, trip_withdrawn or u.schedule_relationship == STOP_SKIPPED)
+                    for u in trip.stop_time_updates
+                    if u.stop_sequence is not None
+                ]
+            for stop_sequence, dep_delay, withdrawn in reports:
                 plausible = dep_delay is not None and -MAX_PLAUSIBLE_DELAY_SEC <= dep_delay <= MAX_PLAUSIBLE_DELAY_SEC
+                if not (plausible or withdrawn):
+                    continue
                 scheduled_sec = seconds.get(stop_sequence)
-                if not (plausible or withdrawn) or not timely_reading(captured_at, scheduled_sec):
+                if scheduled_sec not in placed:
+                    placed[scheduled_sec] = (
+                        timely_reading(captured_at, scheduled_sec),
+                        filed_date_of(captured_at, scheduled_sec),
+                    )
+                timely, filed = placed[scheduled_sec]
+                if not timely or not first <= filed <= last:
                     continue
-                if filed_date_of(captured_at, scheduled_sec) != service_date:
-                    continue
-                key = (trip_id, stop_sequence)
-                current = kept.get(key)
+                events = kept[filed] if filed in kept else kept.setdefault(filed, {})
+                key = (trip.trip_id, stop_sequence)
+                current = events.get(key)
                 if current is None or (captured_at, file_name) > (current.captured_at, current.file_name):
-                    kept[key] = Reading(captured_at, file_name, None if withdrawn else dep_delay)
-    return kept
+                    events[key] = Reading(captured_at, file_name, None if withdrawn else dep_delay)
+
+
+def kept_readings(polls: Iterable[Poll], timetable: Timetable, service_date: date) -> dict[tuple[str, int], Reading]:
+    """:func:`merge_readings` for one service date and one timetable."""
+    kept: dict[date, dict[tuple[str, int], Reading]] = {}
+    merge_readings(kept, polls, lambda _day: timetable, service_date, service_date)
+    return kept.get(service_date, {})
 
 
 def _zip_member(zf: zipfile.ZipFile, name: str) -> str | None:
@@ -527,36 +629,32 @@ def _zip_member(zf: zipfile.ZipFile, name: str) -> str | None:
     return found[0] if found else None
 
 
-def _csv_rows(zf: zipfile.ZipFile, name: str) -> tuple[list[str], list[dict[str, str]]]:
+def _csv_rows(zf: zipfile.ZipFile, name: str) -> Iterator[dict[str, str]]:
     member = _zip_member(zf, name)
     if member is None:
-        return [], []
+        return
     with zf.open(member) as raw:
-        reader = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig"))
-        rows = [{k.strip(): (v or "").strip() for k, v in row.items() if k} for row in reader]
-        return [f.strip() for f in reader.fieldnames or []], rows
+        for row in csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig")):
+            yield {k.strip(): (v or "").strip() for k, v in row.items() if k}
 
 
 def read_timetable(path: Path) -> Timetable:
-    with zipfile.ZipFile(path) as zf:
-        _fields_stops, stop_rows = _csv_rows(zf, "stops.txt")
-        columns, time_rows = _csv_rows(zf, "stop_times.txt")
     stops = {}
-    for row in stop_rows:
-        try:
-            stops[row["stop_id"]] = (float(row["stop_lat"]), float(row["stop_lon"]))
-        except (KeyError, ValueError):
-            continue
-    stated = "timepoint" in columns
     trips: dict[str, list[StopTime]] = defaultdict(list)
-    for row in time_rows:
-        try:
-            stop_sequence = int(row["stop_sequence"])
-        except (KeyError, ValueError):
-            continue
-        timepoint = (row.get("timepoint") != "0") if stated else None
-        scheduled_sec = parse_departure_time(row.get("departure_time") or None)[2]
-        trips[row.get("trip_id", "")].append(StopTime(stop_sequence, row.get("stop_id", ""), scheduled_sec, timepoint))
+    with zipfile.ZipFile(path) as zf:
+        for row in _csv_rows(zf, "stops.txt"):
+            try:
+                stops[row["stop_id"]] = (float(row["stop_lat"]), float(row["stop_lon"]))
+            except (KeyError, ValueError):
+                continue
+        for row in _csv_rows(zf, "stop_times.txt"):
+            try:
+                stop_sequence = int(row["stop_sequence"])
+            except (KeyError, ValueError):
+                continue
+            timepoint = (row["timepoint"] != "0") if "timepoint" in row else None
+            stop_time = StopTime(stop_sequence, row.get("stop_id", ""), row.get("departure_time") or None, timepoint)
+            trips[row.get("trip_id", "")].append(stop_time)
     return Timetable(stops, {t: tuple(sorted(sts, key=lambda st: st.stop_sequence)) for t, sts in trips.items()})
 
 
@@ -696,46 +794,65 @@ def _timetable_for(names: Iterable[str], service_date: date) -> str | None:
     return max(on_or_before)[1] if on_or_before else None
 
 
+def _trip_update_polls(path: Path) -> Iterator[Poll]:
+    for file_name, _named, payload in _archive_polls(path, "TripUpdate"):
+        day, pb_name = file_name.split("/", 1)
+        yield file_name, datetime.fromisoformat(archive_captured_at(payload, day, pb_name)), payload
+
+
 def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, Any]:
+    """Read the TripUpdates archives of the UTC days *first* - 1 to *last* in
+    order, each once. Service date D is complete once UTC day D is read, so
+    it is then measured against its tracks and its kept readings dropped."""
     static_dir = root / "static" / str(agency_id)
     static_names = sorted(p.name for p in static_dir.glob("gtfs_static_*.zip")) if static_dir.is_dir() else []
     loaded: dict[str, Timetable] = {}
+
+    def timetable_on(day: date) -> Timetable | None:
+        name = _timetable_for(static_names, day)
+        if name is not None and name not in loaded:
+            loaded[name] = read_timetable(static_dir / name)
+        return None if name is None else loaded[name]
+
+    def archive(kind: str, day: date) -> Path:
+        return root / kind / str(agency_id) / f"{day:%Y%m%d}.tar.gz"
+
+    kept: dict[date, dict[tuple[str, int], Reading]] = {}
     events: list[Event] = []
     coverage: Counter[str] = Counter()
     track_stats: Counter[str] = Counter()
     days = []
-    for service_date in _service_dates(first, last):
-        name = _timetable_for(static_names, service_date)
-        archives = {
-            kind: [root / kind / str(agency_id) / f"{d:%Y%m%d}.tar.gz" for d in _archive_days(service_date)]
-            for kind in ("rt", "vp")
-        }
+    for utc_day in [first - timedelta(days=1), *_service_dates(first, last)]:
+        if archive("rt", utc_day).exists():
+            merge_readings(kept, _trip_update_polls(archive("rt", utc_day)), timetable_on, first, last)
+        if utc_day < first:
+            continue
+        service_date = utc_day
+        day_kept = kept.pop(service_date, {})
+        timetable = timetable_on(service_date)
+        paths = [archive(kind, d) for kind in ("rt", "vp") for d in _archive_days(service_date)]
         day: dict[str, Any] = {
             "service_date": service_date.isoformat(),
-            "timetable": name,
-            "missing_archives": [str(p.relative_to(root)) for ps in archives.values() for p in ps if not p.exists()],
+            "timetable": _timetable_for(static_names, service_date),
+            "missing_archives": [str(p.relative_to(root)) for p in paths if not p.exists()],
         }
         days.append(day)
-        if name is None:
+        if timetable is None:
             continue
-        if name not in loaded:
-            loaded[name] = read_timetable(static_dir / name)
-        timetable = loaded[name]
         first_departures = {
             trip_id: next((st.scheduled_sec for st in sts if st.scheduled_sec is not None), None)
             for trip_id, sts in timetable.trips.items()
         }
-        sightings = [
+        sightings = (
             s
-            for path in archives["vp"]
-            if path.exists()
-            for _name, polled_at, payload in _archive_polls(path, "VehiclePosition")
+            for d in _archive_days(service_date)
+            if archive("vp", d).exists()
+            for _name, polled_at, payload in _archive_polls(archive("vp", d), "VehiclePosition")
             for s in decode_vehicle_positions(payload, polled_at)
-        ]
+        )
         tracks, stats = trip_tracks(sightings, first_departures)
         track_stats.update(stats)
-        kept = kept_readings(_trip_update_polls(archives["rt"]), timetable, service_date)
-        day_events, day_coverage = compare(service_date, timetable, kept, tracks)
+        day_events, day_coverage = compare(service_date, timetable, day_kept, tracks)
         day.update(stop_events=day_coverage["stop_events"], with_passage=day_coverage["with_passage"])
         events.extend(day_events)
         coverage.update(day_coverage)
@@ -760,6 +877,8 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
             "max_bracket_gap_sec": MAX_BRACKET_GAP_SEC,
             "track_window_sec": TRACK_WINDOW_SEC,
             "max_speed_mps": MAX_SPEED_MPS,
+            "min_moving_speed_mps": MIN_MOVING_SPEED_MPS,
+            "track_split_gap_sec": TRACK_SPLIT_GAP_SEC,
             "lead_width_sec": LEAD_WIDTH_SEC,
             "lead_cap_sec": LEAD_CAP_SEC,
         },
@@ -770,17 +889,9 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
     }
 
 
-def _trip_update_polls(paths: Iterable[Path]) -> Iterator[tuple[str, datetime, bytes]]:
-    for path in paths:
-        if not path.exists():
-            continue
-        for file_name, _named, payload in _archive_polls(path, "TripUpdate"):
-            day, pb_name = file_name.split("/", 1)
-            yield file_name, datetime.fromisoformat(archive_captured_at(payload, day, pb_name)), payload
-
-
-def _missing_archives(summary: dict[str, Any]) -> int:
-    return sum(len(day["missing_archives"]) for day in summary["days"])
+def missing_archives(summary: dict[str, Any]) -> list[str]:
+    """Every archive some service date of the run needed and the mirror lacked, once each."""
+    return sorted({path for day in summary["days"] for path in day["missing_archives"]})
 
 
 def markdown(summary: dict[str, Any]) -> str:
@@ -791,7 +902,7 @@ def markdown(summary: dict[str, Any]) -> str:
         "",
         f"Stop events with a reconstructed passage: {c['with_passage']} of {c['stop_events']} ({share}). "
         f"Kept reading captured after the passage: {c['kept_after_passage']}. "
-        f"Missing archives: {_missing_archives(summary)} (listed per day in the JSON).",
+        f"Missing archives: {len(missing_archives(summary))} (listed per day in the JSON).",
         "",
         "Error = kept delay - observed delay (positive: the feed reported the bus later than it left).",
         "",
@@ -818,6 +929,12 @@ def _required(name: str) -> str:
     if not value:
         raise SystemExit(f"{name} must be set, not empty, for --fetch")
     return value
+
+
+def quiet_run(cmd: Sequence[str]) -> None:
+    """Run *cmd*, dropping its output: the aws CLI's messages can name the
+    bucket's endpoint. A nonzero exit raises CalledProcessError."""
+    subprocess.run(list(cmd), check=True, capture_output=True)
 
 
 def fetch_archives(agency_id: int, first: date, last: date, root: Path, *, run: Run, capture: Capture) -> None:
@@ -851,7 +968,6 @@ def fetch_archives(agency_id: int, first: date, last: date, root: Path, *, run: 
             download_file(bucket, key, partial, endpoint, run=run)
             partial.replace(dest)
         except subprocess.CalledProcessError as exc:
-            # The command line carries the bucket's endpoint; the exit status is enough.
             sys.stderr.write(f"{key}: download failed (exit {exc.returncode})\n")
             partial.unlink(missing_ok=True)
 
@@ -875,7 +991,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return args
 
 
-def main(argv: Sequence[str] | None = None, *, run: Run = default_run, capture: Capture = default_capture) -> int:
+def main(argv: Sequence[str] | None = None, *, run: Run = quiet_run, capture: Capture = default_capture) -> int:
     args = _parse_args(argv)
     if args.fetch:
         fetch_archives(args.agency, args.first, args.last, args.archives, run=run, capture=capture)
@@ -888,7 +1004,7 @@ def main(argv: Sequence[str] | None = None, *, run: Run = default_run, capture: 
     print(
         f"agency {args.agency} {args.first}..{args.last}: {coverage['with_passage']}/{coverage['stop_events']} "
         f"stop events measured, MAE {overall['mae_sec']} s, bias {overall['bias_sec']} s, "
-        f"{_missing_archives(summary)} archives missing -> {stem}.json"
+        f"{len(missing_archives(summary))} archives missing -> {stem}.json"
     )
     return 0 if overall["n"] else 1
 

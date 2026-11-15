@@ -32,10 +32,10 @@ its expiry.
 """
 
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 from zoneinfo import ZoneInfo
 
 from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
@@ -57,6 +57,25 @@ _MISS_WARN_MIN_ROWS = 20
 
 # A stop time of a trip: its stop_sequence, stop_id and raw departure_time.
 _StopTime = tuple[int, str | None, str | None]
+
+
+class StopTimeUpdate(NamedTuple):
+    """One decoded StopTimeUpdate; see :func:`decode_trip_updates`."""
+
+    stop_sequence: int | None
+    dep_delay: int | None
+    stop_id: str | None
+    arr_delay: int | None
+    schedule_relationship: int | None
+
+
+class TripUpdate(NamedTuple):
+    """One decoded TripUpdate naming a trip; see :func:`decode_trip_updates`."""
+
+    trip_id: str
+    route_id: str | None
+    schedule_relationship: int | None
+    stop_time_updates: list[StopTimeUpdate]
 
 
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
@@ -369,11 +388,10 @@ async def invalidate_field_coverage_probes(conn, agency_id: int) -> int:
     return int(tag.rsplit(" ", 1)[-1])
 
 
-def _decode_trip_updates(pb_bytes: bytes):
-    """Yield (trip_id, rt_route_id, schedule_relationship_trip, stop_time_updates)
-    per TripUpdate naming a trip, each of its stop_time_updates as
-    (stop_sequence, dep_delay, stop_id, arr_delay, schedule_relationship_stop),
-    decoded as ``_decode_rows`` describes."""
+def decode_trip_updates(pb_bytes: bytes) -> Iterator[TripUpdate]:
+    """Yield each TripUpdate of the feed that names a trip, decoded as
+    ``_decode_rows`` describes. The one wire reading of a TripUpdates feed
+    for this strategy, which offline tools share with ingest."""
     try:
         top = _fields(pb_bytes)
     except Exception:
@@ -407,12 +425,12 @@ def _decode_trip_updates(pb_bytes: bytes):
             if 3 in stu:
                 dep = _fields(stu[3][0])
                 dep_delay = _int32(dep.get(1, [None])[0])
-            updates.append((stop_seq, dep_delay, stop_id, arr_delay, stu.get(5, [None])[0]))
-        yield trip_id, rt_route_id, sched_rel_trip, updates
+            updates.append(StopTimeUpdate(stop_seq, dep_delay, stop_id, arr_delay, stu.get(5, [None])[0]))
+        yield TripUpdate(trip_id, rt_route_id, sched_rel_trip, updates)
 
 
 def _stop_rows(trip_updates):
-    """``_decode_rows``' tuples of *trip_updates* (``_decode_trip_updates``)."""
+    """``_decode_rows``' tuples of *trip_updates* (``decode_trip_updates``)."""
     for trip_id, rt_route_id, sched_rel_trip, updates in trip_updates:
         for stop_seq, dep_delay, stop_id, arr_delay, sched_rel_stop in updates:
             yield (trip_id, rt_route_id, stop_seq, dep_delay, stop_id, arr_delay, sched_rel_trip, sched_rel_stop)
@@ -433,7 +451,7 @@ def _decode_rows(pb_bytes: bytes):
     ``_uint16``); ``field_coverage`` still counts such updates, and
     ``parse_feed`` drops them.
     """
-    yield from _stop_rows(_decode_trip_updates(pb_bytes))
+    yield from _stop_rows(decode_trip_updates(pb_bytes))
 
 
 def field_coverage(pb_bytes: bytes) -> dict:
@@ -510,7 +528,7 @@ def parse_feed(
     departure as its own scheduled_sec (``_last_departure``), so it is filed
     under its trip's day like the trip's stops.
     """
-    trip_updates = list(_decode_trip_updates(pb_bytes))
+    trip_updates = list(decode_trip_updates(pb_bytes))
     decoded = list(_stop_rows(trip_updates))
     raw_rows = [r for r in decoded if r[2] is not None]
     if len(raw_rows) < len(decoded):
@@ -518,11 +536,7 @@ def parse_feed(
             f"[static_join] agency={agency_id} {len(decoded) - len(raw_rows)} stop_time_updates "
             "had no usable stop_sequence (dropped)"
         )
-    cancelled = [
-        (trip_id, rt_route_id)
-        for trip_id, rt_route_id, sched_rel_trip, updates in trip_updates
-        if sched_rel_trip == TRIP_CANCELED and all(update[0] is None for update in updates)
-    ]
+    cancelled = [(tu.trip_id, tu.route_id) for tu in trip_updates if is_stopless_cancellation(tu)]
     if not raw_rows and not cancelled:
         return []
 
@@ -736,6 +750,25 @@ def _trip_day(seconds: list[int | None], captured: datetime) -> date:
     poll captured at *captured* sees it: the one its first departure is filed
     under (pipeline.service_day.filed_date_of)."""
     return filed_date_of(captured, next((sec for sec in seconds if sec is not None), None))
+
+
+def is_stopless_cancellation(trip_update: TripUpdate) -> bool:
+    """Whether *trip_update* cancels its trip without listing a stop it can
+    store: CANCELED, and no StopTimeUpdate with a usable stop_sequence.
+    ``parse_feed`` expands such a report into the withdrawals
+    :func:`cancellation_withdrawals` names."""
+    return trip_update.schedule_relationship == TRIP_CANCELED and all(
+        u.stop_sequence is None for u in trip_update.stop_time_updates
+    )
+
+
+def cancellation_withdrawals(trip_stops: list[_StopTime], captured: datetime) -> list[_StopTime]:
+    """The stops of *trip_stops* (the trip's timetable, in stop_sequence
+    order) that a stopless cancellation captured at *captured* withdraws, as
+    ``parse_feed`` stores them: those still to come
+    (:func:`_stops_to_come`) whose reading files under the trip's day
+    (:func:`_filed_under_trips_day`)."""
+    return _filed_under_trips_day(_stops_to_come(trip_stops, captured), trip_stops, captured)
 
 
 def _filed_under_trips_day(

@@ -14,6 +14,7 @@ import io
 import json
 import math
 import subprocess
+import sys
 import tarfile
 import zipfile
 from collections.abc import Sequence
@@ -152,6 +153,20 @@ def test_a_loop_passes_its_start_on_leaving_and_its_end_on_returning():
     assert _secs(vv.passages(track, stops)) == pytest.approx({1: 0.0, 2: 100.0, 3: 200.0})
 
 
+def test_a_loop_idling_long_at_its_terminus_departs_when_it_pulls_out():
+    """Twenty minutes at the terminal, which is also the loop's last stop,
+    before leaving at 0 s. A return to the same place says nothing about
+    whether the bus has left, so it does not close the first stop's window."""
+    idle = [_fix(t, 0) for t in range(-1200, 1, 20)]
+
+    def east(t: int) -> float:
+        return 10 * t if t <= 100 else 1000 - 10 * (t - 100)
+
+    track = idle + [_fix(t, east(t)) for t in range(20, 201, 20)]
+    stops = [_stop(1, 0, at=0), _stop(2, 1000, 5, at=100), _stop(3, 0, at=200, final=True)]
+    assert _secs(vv.passages(track, stops)) == pytest.approx({1: 0.0, 2: 100.0, 3: 200.0})
+
+
 def test_a_stop_is_passed_only_after_the_stop_before_it():
     """Stop 3 stands beside the road the bus takes out to stop 2, which it
     passes at 30 s on the way; the bus serves stop 3 on the way back, at 170 s."""
@@ -177,6 +192,51 @@ def test_a_stop_mapped_behind_the_one_before_it_is_not_passed_before_it():
     track = _line(0, 100, 20, lambda t: 10 * t)
     stops = [_stop(1, 0, at=0), _stop(2, 270, at=27), _stop(3, 230, at=28), _stop(4, 1000, at=100, final=True)]
     assert _secs(vv.passages(track, stops)) == pytest.approx({1: 0.0, 2: 27.0, 3: 27.0, 4: 100.0})
+
+
+def _lasso(t: int) -> tuple[float, float]:
+    """Out 1000 m east, 200 m north, back west and south to the start at
+    240 s, then on west: 10 m/s throughout."""
+    if t <= 100:
+        return 10 * t, 0
+    if t <= 120:
+        return 1000, 10 * (t - 100)
+    if t <= 220:
+        return 1000 - 10 * (t - 120), 200
+    if t <= 240:
+        return 0, 200 - 10 * (t - 220)
+    return -10 * (t - 240), 0
+
+
+def test_a_track_starting_after_the_first_stop_does_not_take_the_loops_return_for_it():
+    """The trip's positions begin at 20 s, 200 m out: the first stop was left
+    unseen. The bus comes back past it at 240 s as the loop's last stop."""
+    track = [_fix(t, *_lasso(t)) for t in range(20, 301, 20)]
+    stops = [_stop(1, 0, at=0), _stop(2, 1000, 100, at=110), _stop(3, 0, at=240, final=True)]
+    assert _secs(vv.passages(track, stops)) == pytest.approx({2: 110.0, 3: 240.0})
+
+
+def test_a_figure_eight_starting_late_does_not_take_its_crossing_for_the_first_stop():
+    track = [_fix(t, *_lasso(t)) for t in range(20, 301, 20)]
+    stops = [_stop(1, 0, at=0), _stop(2, 1000, 100, at=110), _stop(3, 0, at=240), _stop(4, -600, at=300, final=True)]
+    assert _secs(vv.passages(track, stops)) == pytest.approx({2: 110.0, 3: 240.0, 4: 300.0})
+
+
+def test_a_bus_passing_a_stop_without_stopping_is_timed_along_the_segment_whatever_it_does_next():
+    """At 10 m/s through the stop at 10 s, then slowing to 4 m/s. Timing the
+    stretch after the stop at the slower speed would put the passage at the
+    fix before it."""
+    track = [_fix(0, -100), _fix(20, 100), _fix(40, 180), _fix(60, 260), _fix(80, 1000)]
+    assert _secs(vv.passages(track, [_stop(1, 0, at=10), _stop(2, 1000, at=80, final=True)]))[1] == pytest.approx(10.0)
+
+
+def test_a_bus_reaching_the_last_stop_without_standing_there_is_timed_along_the_segment():
+    """Crawling at 1.5 m/s, then 10 m/s past the terminal at 30 s; timing the
+    approach at the crawl would put the arrival at the fix after it."""
+    track = [_fix(0, 0), _fix(20, 30), _fix(40, 230), _fix(60, 430)]
+    assert _secs(vv.passages(track, [_stop(1, -500, at=0), _stop(2, 130, at=30, final=True)])) == pytest.approx(
+        {2: 30.0}
+    )
 
 
 def test_a_stop_the_track_misses_is_not_matched_to_a_later_lap():
@@ -246,6 +306,15 @@ def test_tracks_drop_resent_fixes_and_gps_jumps_and_split_a_trip_id_by_day():
     assert stats["gps_jumps_dropped"] == 1
 
 
+def test_a_wild_first_fix_is_dropped_rather_than_every_true_fix_after_it():
+    at = datetime(2026, 11, 20, 0, 0, tzinfo=UTC)
+    sightings = [vv.Sighting("T1", "V1", None, at, *_ll(5000, 0))]
+    sightings += [vv.Sighting("T1", "V1", None, at + timedelta(seconds=20 * i), *_ll(200 * i, 0)) for i in (1, 2, 3)]
+    tracks, stats = vv.trip_tracks(sightings, {"T1": 9 * 3600})
+    assert [round((f.at - at).total_seconds()) for f in tracks[("T1", date(2026, 11, 20))]] == [20, 40, 60]
+    assert stats["gps_jumps_dropped"] == 1
+
+
 def test_a_trip_day_reported_by_two_vehicles_keeps_the_one_seen_most():
     at = datetime(2026, 11, 20, 0, 0, tzinfo=UTC)
     sightings = [vv.Sighting("T1", "A", None, at + timedelta(seconds=20 * i), *_ll(10 * i, 0)) for i in range(5)]
@@ -278,12 +347,16 @@ def test_an_archive_member_is_timed_by_its_utc_name():
     assert vv.member_instant("VehiclePosition_235940.pb", "VehiclePosition") is None
 
 
+def _clock(sec: int | None) -> str | None:
+    return None if sec is None else f"{sec // 3600:02d}:{sec // 60 % 60:02d}:{sec % 60:02d}"
+
+
 def _timetable(*trips: tuple[str, Sequence[tuple[int, str, int | None]]]) -> vv.Timetable:
     stops = {f"S{i}": _ll(100 * i, 0) for i in range(1, 6)}
     return vv.Timetable(
         stops=stops,
         trips={
-            trip_id: tuple(vv.StopTime(seq, stop_id, sec, None) for seq, stop_id, sec in rows)
+            trip_id: tuple(vv.StopTime(seq, stop_id, _clock(sec), None) for seq, stop_id, sec in rows)
             for trip_id, rows in trips
         },
     )
@@ -329,6 +402,38 @@ def test_a_tie_on_capture_breaks_on_the_file_name_and_other_days_are_left_out():
     assert vv.kept_readings(readings, table, day + timedelta(days=1)) == {}
 
 
+def test_a_cancellation_listing_no_stop_withdraws_the_stops_still_to_come_as_ingest_stores_it():
+    """Predicted at 09:00 for 09:02, 09:10 and 09:15; at 09:05 the trip is
+    reported CANCELED with no stop. Stop 1 was due before the cancellation and
+    keeps its reading; stops 2 and 3 are withdrawn. A CANCELED report that
+    lists its stops withdraws exactly those."""
+    day = date(2026, 11, 20)
+    table = _timetable(("T1", [(1, "S1", 9 * 3600 + 120), (2, "S2", 9 * 3600 + 600), (3, "S3", 9 * 3600 + 900)]))
+    predicted = _tu_poll(T0, trip_update("T1", *(stop_time_update(i, departure_delay=60) for i in (1, 2, 3))))
+    stopless = _tu_poll(T0 + timedelta(minutes=5), trip_update("T1", schedule_relationship=3))
+    kept = vv.kept_readings([predicted, stopless], table, day)
+    assert {k: r.dep_delay for k, r in kept.items()} == {("T1", 1): 60, ("T1", 2): None, ("T1", 3): None}
+    assert kept[("T1", 2)].captured_at == T0 + timedelta(minutes=5)
+    listing = _tu_poll(
+        T0 + timedelta(minutes=5), trip_update("T1", stop_time_update(3, departure_delay=60), schedule_relationship=3)
+    )
+    kept = vv.kept_readings([predicted, listing], table, day)
+    assert {k: r.dep_delay for k, r in kept.items()} == {("T1", 1): 60, ("T1", 2): 60, ("T1", 3): None}
+
+
+def test_a_reading_before_the_cutover_files_under_the_next_service_date():
+    """Captured at 03:55 JST on 11-20, still service date 11-19, for a 04:05
+    departure: the reading is 11-20's, and a run over 11-20 alone keeps it."""
+    table = _timetable(("T1", [(1, "S1", 4 * 3600 + 300)]))
+    captured = datetime(2026, 11, 19, 18, 55, tzinfo=UTC)
+    poll = _tu_poll(captured, trip_update("T1", stop_time_update(1, departure_delay=30)))
+    assert vv.kept_readings([poll], table, date(2026, 11, 20))[("T1", 1)].dep_delay == 30
+    assert vv.kept_readings([poll], table, date(2026, 11, 19)) == {}
+    held: dict = {}
+    vv.merge_readings(held, [poll], lambda _day: table, date(2026, 11, 19), date(2026, 11, 19))
+    assert held == {}
+
+
 def _gtfs_zip(path: Path, stop_times: str) -> Path:
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("stops.txt", "stop_id,stop_name,stop_lat,stop_lon\nA,A,34.1,132.1\nB,B,34.2,132.2\nC,C,,\n")
@@ -345,9 +450,9 @@ def test_the_timetable_reads_timepoints_only_where_the_feed_states_them(tmp_path
         )
     )
     assert stated.trips["T"] == (
-        vv.StopTime(1, "A", 7 * 3600, True),
+        vv.StopTime(1, "A", "07:00:00", True),
         vv.StopTime(2, "B", None, False),
-        vv.StopTime(3, "C", 25 * 3600 + 600, True),
+        vv.StopTime(3, "C", "25:10:00", True),
     )
     assert set(stated.stops) == {"A", "B"}
     unstated = vv.read_timetable(
@@ -356,7 +461,8 @@ def test_the_timetable_reads_timepoints_only_where_the_feed_states_them(tmp_path
             "trip_id,arrival_time,departure_time,stop_id,stop_sequence\nT,07:00:00,07:00:00,A,1\n",
         )
     )
-    assert unstated.trips["T"] == (vv.StopTime(1, "A", 7 * 3600, None),)
+    assert [st.scheduled_sec for st in stated.trips["T"]] == [7 * 3600, None, 25 * 3600 + 600]
+    assert unstated.trips["T"] == (vv.StopTime(1, "A", "07:00:00", None),)
 
 
 def _event(error: float, lead: float, sec: int = 9 * 3600, timepoint: bool | None = None) -> vv.Event:
@@ -518,6 +624,11 @@ def test_a_stop_event_with_no_vehicle_is_counted_but_not_measured(tmp_path, caps
     assert "3 archives missing" in capsys.readouterr().out
 
 
+def test_an_archive_two_service_dates_need_is_missing_once(tmp_path):
+    summary = {"days": [{"missing_archives": ["rt/8/20260601.tar.gz"]}, {"missing_archives": ["rt/8/20260601.tar.gz"]}]}
+    assert vv.missing_archives(summary) == ["rt/8/20260601.tar.gz"]
+
+
 def test_a_run_with_nothing_to_compare_exits_one(tmp_path):
     args = ["--agency", "8", "--from", "2026-06-01", "--to", "2026-06-01", "--archives", str(tmp_path / "r2")]
     assert vv.main([*args, "--out", str(tmp_path / "out")]) == 1
@@ -555,6 +666,18 @@ def test_fetch_downloads_only_the_archives_the_dates_need_and_never_shows_the_en
     err = capsys.readouterr().err
     assert "vp/8/20260531.tar.gz" in err and "exit 1" in err
     assert "endpoint.invalid" not in err
+
+
+def test_the_download_runner_drops_the_aws_clis_own_output(capfd):
+    noisy = [
+        sys.executable,
+        "-c",
+        "import sys; print('https://endpoint.invalid'); sys.stderr.write('endpoint.invalid'); sys.exit(3)",
+    ]
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        vv.quiet_run(noisy)
+    assert raised.value.returncode == 3
+    assert capfd.readouterr() == ("", "")
 
 
 def test_the_lead_buckets_floor_as_the_oracle_groups():
