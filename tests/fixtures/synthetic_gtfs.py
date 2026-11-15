@@ -20,9 +20,8 @@ This module provides two things:
    trips/stop_times) plus matching synthetic ``updates`` rows — along with
    an ``expected`` dict of hand-computed ``agg_*`` values. That dict is the
    single source of truth for "what the right answer is" for this pattern;
-   ``tests/pipeline/test_synthetic_agg_e2e.py``, the dashboard display
-   check (``tests/dashboard_synthetic_display_test.py``) and the live-LLM
-   numeric eval (``tests/ask_eval/test_synthetic_numeric.py``) all import it
+   ``tests/pipeline/test_synthetic_agg_e2e.py`` and the dashboard display
+   check (``tests/dashboard_synthetic_display_test.py``) both import it
    instead of each re-deriving their own expected numbers.
 
 Add new patterns as new functions returning ``SyntheticPattern`` — do not

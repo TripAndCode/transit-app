@@ -115,13 +115,11 @@ def find_latest_eval_result(cache_dir: Path, pattern: str = "ask-eval-*.json") -
     ISO-date-prefixed filename), or ``None`` when none exists or the latest
     one isn't valid JSON.
 
-    No current producer writes this file: ``scripts/ask_eval.py`` and the
-    weekly workflow (``.github/workflows/ask-eval-weekly.yml``) report
-    pass/fail via CI exit code and pytest output only, not a persisted JSON
-    artifact under this path. This read path is forward-compatible — once
-    either is extended to write here, the admin page picks it up with no
-    further change — and returns ``None`` until then, which the admin UI
-    renders as "not run yet" rather than fabricating a result.
+    No current producer writes this file: ``scripts/ask_eval.py`` reports
+    pass/fail via its exit code only, not a persisted JSON artifact under
+    this path. This read path returns ``None`` until a producer writes here,
+    which the admin UI renders as "not run yet" rather than fabricating a
+    result.
     """
     if not cache_dir.is_dir():
         return None

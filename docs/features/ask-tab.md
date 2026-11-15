@@ -283,12 +283,7 @@ so it is a separate mechanism to build, not a knob to turn on.
   out to `scripts/ask_eval.py`, which reads
   `tests/ask_eval/gold_questions.jsonl` and checks that each entry's
   expected args are unchanged by `canonicalize` (it never reads the
-  `question` text, so it is not routing coverage). Separately,
-  `tests/ask_eval/test_baseline.py` (opt-in via `RUN_LLM_EVAL=1` + a real
-  `GEMINI_API_KEY`, hits a running dev API) replays
-  `tests/ask_eval/golden_set.jsonl` against the live router and
-  scores tool-selection accuracy. These are two different JSONL files with
-  two different jobs — don't conflate them.
+  `question` text, so it is not routing coverage).
 - Most of these need both throwaway Postgres (`:5544`) and throwaway
   ClickHouse (`:8124`) — see `AGENTS.md` ▸ Tests for the
   `RUN_CH_INTEGRATION=1` block; omitting it silently skips

@@ -399,8 +399,6 @@ hooks:
 # Checks that every gold entry's stored signature survives canonicalization:
 # no database, router or LLM is involved. Regenerate the gold set after card
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
-# The scheduled Ask eval workflow, .github/workflows/ask-eval-weekly.yml, runs
-# tests/ask_eval/test_baseline.py instead.
 
 ask-eval:
 	poetry run python scripts/ask_eval.py
