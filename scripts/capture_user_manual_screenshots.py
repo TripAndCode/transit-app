@@ -8,9 +8,8 @@ indefinitely otherwise.
 Requires, in order:
   1. A production build served at --base (default http://localhost:8000,
      i.e. `cd frontend && npm run build && cd .. && make bake`, then a
-     running `make serve`/uvicorn backend). Dev builds can differ from what
-     an end user sees (`import.meta.env.DEV` branches), so capturing against
-     the dev server could document dev-only defaults as the real product.
+     running `make serve`/uvicorn backend), so the manual shows the bundle
+     a deployment actually serves.
   2. Agency 1 holding real data.
   3. `login_required` off for the run -- the manual is captured as a guest,
      matching how a first-time visitor actually sees it. Toggling that

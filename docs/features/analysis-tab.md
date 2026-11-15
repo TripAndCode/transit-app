@@ -63,7 +63,7 @@ What the user sees/does:
   screen owns; clicking sets `report={reportType}` on the current URL, keeping
   the filter query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
   explains what each report type means.
-- **Report body** (center column) — for most report types,
+- **Report body** (right column) — for most report types,
   `frontend/src/components/ReportTable.tsx` renders the rows, and the report
   heading carries a CSV download link. An empty result shows `EmptyState`
   naming the active filters, with recovery actions from
@@ -326,8 +326,8 @@ Rules the two sides share:
   (`frontend/src/api/screenScope.ts`). The record lives in sessionStorage, so
   a new tab opens every screen on its defaults, and it holds only the params
   a URL states outright, so the default period keeps rolling. Links whose
-  job is to carry the current scope elsewhere (Worth a look, saved views)
-  build their own query. The signed-out restore on a fresh visit
+  job is to carry the current scope elsewhere (saved views) build their own
+  query. The signed-out restore on a fresh visit
   (`anonymousFilterPersistence.ts`) is keyed per screen the same way.
 
 Every endpoint behind these screens returns `scope_applied`: one boolean per

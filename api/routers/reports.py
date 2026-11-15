@@ -1757,7 +1757,7 @@ async def render_report(
         # percentage) and `margin_pp` (that interval's half-width) as a
         # display-layer annotation — doesn't change compute_on_time's own
         # 5-tuple contract, so the Ask tools' columns are unaffected. See
-        # pipeline/stats.py.
+        # annotate_on_time_pct_confidence.
         rows = [(*r, on_time_pct_margin_pp(r[2], r[4])) for r in annotate_on_time_pct_confidence(listed(rated))]
         intent = {"query_type": "on_time", "sort_order": sort_order, "service": _service_label(ctx)}
         # The on-time list's CSV writes no reference, so it reads none.

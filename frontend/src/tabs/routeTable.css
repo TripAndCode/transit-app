@@ -1,7 +1,6 @@
 /* The Routes screen (RouteTableScreen.tsx): the table, which takes the body's full width. */
 .route-table-screen { display: flex; flex-direction: column; height: 100%; }
-.route-table-screen__body { display: flex; gap: 16px; flex: 1; min-height: 0; }
-.route-table-screen__main { flex: 1; min-width: 0; }
+.route-table-screen__body { flex: 1; min-height: 0; min-width: 0; }
 
 .route-table__head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
 .route-table__head h2 { margin: 0; }

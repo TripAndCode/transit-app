@@ -102,127 +102,125 @@ export function RouteTableScreen() {
   return (
     <div className="analysis-tab route-table-screen">
       <ScopeSentence applied={data?.scope_applied} />
-      <div className="analysis-body route-table-screen__body">
-        <div className="route-table-screen__main">
-          <div className="route-table__head">
-            <h2>{t("routeTable.title")}</h2>
-            {id != null && data && (
-              <CsvLink href={apiUrl(`/api/${id}/reports/route_table?${reportQueryString(ctx, options)}&format=csv`)} />
-            )}
-            {/* The table exports its own CSV and has no print view, so the
-                menu holds only the snapshot, which only an admin takes. */}
-            {isAdmin && id != null && (
-              <ExportMenu
-                csv={null}
-                showPrint={false}
-                snapshot={{ screen: "route_table", agencyId: id, query: reportQueryString(ctx, options) }}
+      <div className="route-table-screen__body">
+        <div className="route-table__head">
+          <h2>{t("routeTable.title")}</h2>
+          {id != null && data && (
+            <CsvLink href={apiUrl(`/api/${id}/reports/route_table?${reportQueryString(ctx, options)}&format=csv`)} />
+          )}
+          {/* The table exports its own CSV and has no print view, so the
+              menu holds only the snapshot, which only an admin takes. */}
+          {isAdmin && id != null && (
+            <ExportMenu
+              csv={null}
+              showPrint={false}
+              snapshot={{ screen: "route_table", agencyId: id, query: reportQueryString(ctx, options) }}
+            />
+          )}
+        </div>
+        {data?.ctx && (
+          <p className="route-table__window">
+            {t("routeTable.window", {
+              count: windowDays(data.ctx.from, data.ctx.to),
+              range: formatDateRange(data.ctx.from, data.ctx.to, { year: false }),
+            })}
+          </p>
+        )}
+        {reference && data && data.rows.length > 0 && (
+          <RouteReferenceLegend refs={reference} timeBand={data.ctx?.time_band ?? ctx.time_band} />
+        )}
+        {data?.definition && <DefinitionMetaBlock definition={data.definition} />}
+        <div className="route-table__controls">
+          <div className="route-table__seg" role="group" aria-label={t("routeTable.sort.label")}>
+            {ROUTE_TABLE_SORTS.map((sort) => (
+              <button key={sort} type="button" aria-pressed={view.sort === sort} onClick={() => setTableParams({ sort })}>
+                {t(ROUTE_TABLE_SORT_LABELS[sort])}
+              </button>
+            ))}
+          </div>
+          <div className="route-table__seg" role="group" aria-label={t("routeTable.order.label")}>
+            {ORDERS.map(([order, labelKey]) => (
+              <button
+                key={order}
+                type="button"
+                aria-pressed={view.order === order}
+                onClick={() => setTableParams({ order: order === "best" ? "best" : null })}
+              >
+                {t(labelKey)}
+              </button>
+            ))}
+          </div>
+        </div>
+        {data && (
+          <div className="route-table__coverage">
+            {data.reliable_min_samples != null && (
+              <SparseToggle
+                checked={includeSparse}
+                floor={data.reliable_min_samples}
+                onChange={(on) => setTableParams({ sparse: on ? "1" : null })}
               />
             )}
+            <LeftOutLine
+              counts={{ retired: data.retired_rows, zero_delay: data.zero_delay_rows }}
+              kept={kept}
+              onChange={(reason, on) => setTableParams({ [reason]: on ? "1" : null })}
+            />
           </div>
-          {data?.ctx && (
-            <p className="route-table__window">
-              {t("routeTable.window", {
-                count: windowDays(data.ctx.from, data.ctx.to),
-                range: formatDateRange(data.ctx.from, data.ctx.to, { year: false }),
-              })}
-            </p>
-          )}
-          {reference && data && data.rows.length > 0 && (
-            <RouteReferenceLegend refs={reference} timeBand={data.ctx?.time_band ?? ctx.time_band} />
-          )}
-          {data?.definition && <DefinitionMetaBlock definition={data.definition} />}
-          <div className="route-table__controls">
-            <div className="route-table__seg" role="group" aria-label={t("routeTable.sort.label")}>
-              {ROUTE_TABLE_SORTS.map((sort) => (
-                <button key={sort} type="button" aria-pressed={view.sort === sort} onClick={() => setTableParams({ sort })}>
-                  {t(ROUTE_TABLE_SORT_LABELS[sort])}
-                </button>
-              ))}
-            </div>
-            <div className="route-table__seg" role="group" aria-label={t("routeTable.order.label")}>
-              {ORDERS.map(([order, labelKey]) => (
-                <button
-                  key={order}
-                  type="button"
-                  aria-pressed={view.order === order}
-                  onClick={() => setTableParams({ order: order === "best" ? "best" : null })}
-                >
-                  {t(labelKey)}
-                </button>
-              ))}
-            </div>
-          </div>
-          {data && (
-            <div className="route-table__coverage">
-              {data.reliable_min_samples != null && (
-                <SparseToggle
-                  checked={includeSparse}
-                  floor={data.reliable_min_samples}
-                  onChange={(on) => setTableParams({ sparse: on ? "1" : null })}
+        )}
+        {report.error && <ErrorBanner error={report.error} onRetry={() => report.refetch()} />}
+        {report.isFetching && (
+          <>
+            {!data && <SkeletonTable rows={10} rowHeight={40} />}
+            <StillWorking scope={ctx} update={update} />
+          </>
+        )}
+        {data &&
+          (data.rows.length > 0 ? (
+            <div className="route-table__body" aria-busy={report.isFetching || undefined}>
+              <ReportTable
+                reportType="route_table"
+                rows={data.rows}
+                minSamples={data.reliable_min_samples}
+                sortBy={shown.sort}
+                sortDirection={routeTableSortDirection(shown)}
+                earlyDepartureSec={data.definition.early_departure_sec}
+                cellMarks={reference ? { 2: (row) => onTimeReferenceMark(reference, row, t) } : undefined}
+              />
+              {data.rows_total != null && data.rows_total > data.rows.length && (
+                <RowsShown
+                  shown={data.rows.length}
+                  total={data.rows_total}
+                  onShowAll={showAll ? undefined : () => setShowAll(true)}
                 />
               )}
-              <LeftOutLine
-                counts={{ retired: data.retired_rows, zero_delay: data.zero_delay_rows }}
-                kept={kept}
-                onChange={(reason, on) => setTableParams({ [reason]: on ? "1" : null })}
-              />
-            </div>
-          )}
-          {report.error && <ErrorBanner error={report.error} onRetry={() => report.refetch()} />}
-          {report.isFetching && (
-            <>
-              {!data && <SkeletonTable rows={10} rowHeight={40} />}
-              <StillWorking scope={ctx} update={update} />
-            </>
-          )}
-          {data &&
-            (data.rows.length > 0 ? (
-              <div className="route-table__body" aria-busy={report.isFetching || undefined}>
-                <ReportTable
-                  reportType="route_table"
-                  rows={data.rows}
-                  minSamples={data.reliable_min_samples}
-                  sortBy={shown.sort}
-                  sortDirection={routeTableSortDirection(shown)}
-                  earlyDepartureSec={data.definition.early_departure_sec}
-                  cellMarks={reference ? { 2: (row) => onTimeReferenceMark(reference, row, t) } : undefined}
-                />
-                {data.rows_total != null && data.rows_total > data.rows.length && (
-                  <RowsShown
-                    shown={data.rows.length}
-                    total={data.rows_total}
-                    onShowAll={showAll ? undefined : () => setShowAll(true)}
-                  />
+              <div className="route-table__notes">
+                <OnTimeDefinition definition={data.definition} />
+                {data.definition.early_departure_sec != null && (
+                  <p>{t("routeTable.early_note", { early: formatDuration(data.definition.early_departure_sec) })}</p>
                 )}
-                <div className="route-table__notes">
-                  <OnTimeDefinition definition={data.definition} />
-                  {data.definition.early_departure_sec != null && (
-                    <p>{t("routeTable.early_note", { early: formatDuration(data.definition.early_departure_sec) })}</p>
-                  )}
-                  <p>{t("routeTable.late5_note")}</p>
-                </div>
+                <p>{t("routeTable.late5_note")}</p>
               </div>
-            ) : (
-              <EmptyState
-                title={t("reports.no_data.title")}
-                hint={t("reports.no_data.hint")}
-                reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
-                recoveries={buildFilterCtxRecoveries({
-                  ctx,
-                  onClearRoutes: () => update({ routes: null }),
-                  onResetService: () => update({ service: "all" }),
-                  jumpToLatestData,
-                  t,
-                })}
-              />
-            ))}
-          {/* Headway quality is punctuality's evidence beside the on-time
-              sort. Every sort shows each route's on-time rate, so the
-              agency's targets follow the table under each; the panel renders
-              nothing when no standards are configured. */}
-          {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} />}
-          {id != null && <PerformanceStandardPanel aid={id} ctx={ctx} />}
-        </div>
+            </div>
+          ) : (
+            <EmptyState
+              title={t("reports.no_data.title")}
+              hint={t("reports.no_data.hint")}
+              reasons={buildFilterCtxReasons(ctx, t, routeNames.format)}
+              recoveries={buildFilterCtxRecoveries({
+                ctx,
+                onClearRoutes: () => update({ routes: null }),
+                onResetService: () => update({ service: "all" }),
+                jumpToLatestData,
+                t,
+              })}
+            />
+          ))}
+        {/* Headway quality is punctuality's evidence beside the on-time
+            sort. Every sort shows each route's on-time rate, so the
+            agency's targets follow the table under each; the panel renders
+            nothing when no standards are configured. */}
+        {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} />}
+        {id != null && <PerformanceStandardPanel aid={id} ctx={ctx} />}
       </div>
     </div>
   );
