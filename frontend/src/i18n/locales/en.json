@@ -1245,12 +1245,9 @@
       "edit": "Edit",
       "apply": "Apply",
       "label_date_range": "Date range",
-      "label_dow": "DOW",
+      "label_dow": "Day of week",
       "label_time_band": "Time band",
       "label_routes": "Routes",
-      "dow_all": "All",
-      "dow_weekday": "Weekdays only",
-      "dow_weekend": "Weekends only",
       "no_routes_selected": "No specific routes"
     },
     "card": {
@@ -1277,7 +1274,7 @@
         "service": {
           "all": "All",
           "weekday": "Weekday",
-          "weekend": "Weekend"
+          "weekend": "Weekend/holiday"
         }
       },
       "top_delay": {

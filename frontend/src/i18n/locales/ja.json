@@ -1248,9 +1248,6 @@
       "label_dow": "曜日",
       "label_time_band": "時間帯",
       "label_routes": "路線",
-      "dow_all": "すべて",
-      "dow_weekday": "平日のみ",
-      "dow_weekend": "土日のみ",
       "no_routes_selected": "路線指定なし"
     },
     "card": {
