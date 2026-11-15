@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prune-r2.sh: enforces a bounded (if generous) retention window on R2
+# prune-r2.sh: enforces a bounded retention window on R2
 # objects, keeping the current static target regardless of age, and refuses
 # to run unless sync-r2.sh's success marker is fresh -- mirroring prune.sh's
 # own local-disk safety gate but against R2.
@@ -15,8 +15,8 @@ export OBJECT_STORE_ACCESS_KEY_ID="AKIDTEST"
 export OBJECT_STORE_SECRET_ACCESS_KEY="secrettest"
 
 # "Old" relative to the 1-day retention used below and to local prune.sh's
-# 90-day default, but well inside prune-r2.sh's own multi-year defaults --
-# the default-retention test below depends on that.
+# 90-day default: inside prune-r2.sh's RT and static defaults, past its VP
+# default. The default-retention tests below depend on both.
 old_ts=$(date -u -v-400d +%Y-%m-%d\ %H:%M:%S 2>/dev/null || date -u -d "400 days ago" +%Y-%m-%d\ %H:%M:%S)
 # Younger than the 1-day retention used below, but still clearly not "now".
 new_ts=$(date -u -v-6H +%Y-%m-%d\ %H:%M:%S 2>/dev/null || date -u -d "6 hours ago" +%Y-%m-%d\ %H:%M:%S)
@@ -167,7 +167,7 @@ grep -q -- "--endpoint-url https://example.r2.cloudflarestorage.com" "$AWS_LOG" 
     || fail "delete calls missing --endpoint-url (would silently hit real AWS S3 instead of R2)"
 pass "old objects are pruned, young ones and the current static target survive"
 
-# Default (generous, multi-year) retention deletes nothing at all.
+# The RT and static defaults delete nothing here (no vp/ listing is seeded yet).
 touch "$COLLECTOR_BASE/.sync-r2.last-ok"
 : > "$AWS_LOG"
 ../bin/prune-r2.sh >/dev/null

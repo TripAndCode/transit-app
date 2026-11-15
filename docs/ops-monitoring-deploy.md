@@ -183,7 +183,7 @@ gh pr view <number> --json statusCheckRollup
 ## 9. Data retention
 
 This table is the one statement of how long each store keeps data. Every
-pruning script and setting below cites it. Change a horizon here and in its
+pruning script and env var below cites it. Change a horizon here and in its
 enforcer together.
 
 | Store | Horizon | Enforced by | Setting |
@@ -192,13 +192,13 @@ enforcer together.
 | R2 `static/<id>/` (GTFS static zips) | 3,650 days; each agency's current timetable is always kept | `prune-r2.sh` | `R2_STATIC_RETENTION_DAYS` |
 | R2 `vp/<id>/` (VehiclePositions archives) | 180 days | `prune-r2.sh` | `R2_VP_RETENTION_DAYS` |
 | Collector spool on Oracle (local copies of the above) | RT and VP 90 days, static 365 days; most files go sooner, once R2 confirms its copy | `oracle_cloud/v3/bin/prune.sh`, `spool-cleanup.sh` | `RETENTION_DAYS`, `STATIC_RETENTION_DAYS` |
-| ClickHouse `updates`, production | every day analyze still covers; target about 400 days once analyze honours a retention floor (#1670) | nothing prunes it yet (below) | none |
+| ClickHouse `updates`, production | every day analyze still covers; target about 400 days once analyze honours a retention floor | nothing prunes it yet (below) | none |
 | ClickHouse `updates_live` | 3 days | the table's TTL (`db/clickhouse/schema.sql`) | none |
 | ClickHouse `updates_filed` (refiled rows) | follows `updates`: the dates it still holds | `pipeline/refiled.py`: whatever rewrites `updates` rows writes the agencies' dates off first (`rows_rewritten`), and their rows go at the agency's next analyze | none |
-| ClickHouse `updates_filed_dates` | indefinite; one small row per date written | nothing | none |
+| ClickHouse `updates_filed_dates` | indefinite; one small row per write or write-off of a date | nothing | none |
 | ClickHouse `updates`, VPS ML replica | every day synced, until the disk needs room | trimmed by hand (`docs/features/ml-forecast.md`, "Trimming it") | none |
 | Postgres `agg_*`, except the one below | indefinite | nothing prunes them | none |
-| Postgres `agg_route_forecast_ml` (published ML forecasts) | 14 days past each service date | `pipeline/ml_forecast_ingest.py`, on each forecast ingest | `FORECAST_ML_RETENTION_DAYS` |
+| Postgres `agg_route_forecast_ml` (published ML forecasts) | 14 days past each service date | `pipeline/ml_forecast_ingest.py`, on each forecast ingest (constant `FORECAST_ML_RETENTION_DAYS`) | none |
 | ClickHouse aggregates (`pipeline.ch_aggregates.COPIED_TABLES` and `INTERNAL_TABLES`) | indefinite, as `agg_*` | nothing prunes them | none |
 
 The privacy policy's periods for personal data and logs are in
@@ -217,7 +217,7 @@ The privacy policy's periods for personal data and logs are in
   nothing, and they carry vehicle descriptors, so they are kept no longer than
   the validation needs.
 - **Production `updates`** keeps every day analyze still covers; the target is
-  about 400 days once analyze honours a retention floor (#1670). A report's
+  about 400 days once analyze honours a retention floor. A report's
   widest range is a year, plus a margin, older days can be rebuilt from R2, and
   the aggregates built from them are kept indefinitely.
 - **`agg_*` and the ClickHouse aggregates** are small and are what every page

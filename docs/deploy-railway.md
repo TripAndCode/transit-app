@@ -282,7 +282,7 @@ railway run --service app sh -c "pip install --no-cache-dir sentence-transformer
 > ~$0.015/GB-mo with a free tier that likely covers early use. Alternative:
 > **Backblaze B2** (cheapest storage + egress-free to Cloudflare) if you end up
 > retaining many months of raw archives. Avoid plain AWS S3 here (egress cost)
-> and Wasabi (90-day minimum-storage charge fights the daily prune). **Set no
+> and Wasabi (90-day minimum-storage charge). **Set no
 > bucket lifecycle rule.** The bucket is the only complete history: the VPS ML
 > replica replays it, and a lost `updates` day is rebuilt from it.
 > `oracle_cloud/v3/bin/prune-r2.sh` bounds it at the horizons in the retention

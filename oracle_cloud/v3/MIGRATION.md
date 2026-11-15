@@ -105,7 +105,7 @@ own exit status. `bin/prune-r2.sh` runs weekly (like `prune.sh`, gated on
 the same fresh-marker check) and enforces the R2 horizons in the retention
 table (`docs/ops-monitoring-deploy.md`, "Data retention"): years for RT and
 static, far longer than `prune.sh`'s local ones, and `R2_VP_RETENTION_DAYS`
-(180) for VehiclePositions. Both are wrapped by `cron-wrap.sh` like
+for VehiclePositions. Both are wrapped by `cron-wrap.sh` like
 `sync-r2.sh` and `prune.sh`, so a failure of either pages the same way.
 
 `bin/reconcile-r2.sh` runs weekly, right after `prune-r2.sh`, and covers what
@@ -313,7 +313,7 @@ What each job does with them:
   `vp/<id>/` on the RT thresholds.
 - `reconcile-r2.sh` and `prune-r2.sh` treat `vp/<id>/` as expected for any id
   in `agencies.tsv`, so ending the window never turns the archive into
-  orphans. `prune-r2.sh` prunes it at `R2_VP_RETENTION_DAYS` (180), the VP row
+  orphans. `prune-r2.sh` prunes it at `R2_VP_RETENTION_DAYS`, the VP row
   of the retention table in `docs/ops-monitoring-deploy.md`.
 - `storage-metrics.sh` reports `vp_object_count`/`vp_bytes` and counts them in
   `r2_bytes_total`. `status-snapshot.sh` leaves VP out.
