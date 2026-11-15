@@ -210,3 +210,26 @@ def test_the_prune_holds_an_agency_whose_stores_disagree(pg_conn, ch_client, age
     assert result.dropped == []
     assert "agg_route_daily" in result.verdicts[0].held_by
     assert retention_floor(pg_conn, agency_id) is None
+
+
+def test_the_prune_holds_a_stale_date_in_the_scorecard_month_the_floor_freezes(pg_conn, ch_client, agency_id, pruned):
+    """The floor lands on 2025-02-02, which freezes February's scorecard row,
+    so a February date analyze has not caught up with holds the drop."""
+    insert_updates(ch_client, agency_id, [update_row(datetime(2025, 2, 20, 8, 0), "d", 30)])
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    assert result.dropped == []
+    assert "2025-02-20" in result.verdicts[0].held_by
+
+
+def test_dates_another_version_moved_to_below_the_floor_stay_final(pg_conn, ch_client, agency_id, pruned, monkeypatch):
+    """A date whose version in force moved is rebuilt, but not below the floor."""
+    from pipeline import analyze as analyze_module
+
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        if cur.fetchone()[0] != "static_join":
+            pytest.skip("only a version-stamping ingest reads the versions in force")
+    _prune(pg_conn, ch_client)
+    monkeypatch.setattr(analyze_module, "_dates_in_force_moved", lambda *args: [date(2025, 1, 10)])
+    analyze(agency_id, pg_conn, ch_client)
+    assert _changed(pruned, _snapshot(pg_conn, ch_client, agency_id)) == []
