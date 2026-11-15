@@ -233,7 +233,7 @@ A service-delivered or vehicle-km target is judged on the route’s own service 
 
 ![On-time rate](./08-routes-ontime.en.png)
 
-Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often.
+Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often. It shows “Excess wait” and “Long-gap rate”; its “Spacing CoV” and “Samples” columns show with **Show statistics** ticked, here and on **Why**.
 
 ### 5-6. A route’s own page
 

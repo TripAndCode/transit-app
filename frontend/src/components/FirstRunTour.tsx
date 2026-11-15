@@ -56,7 +56,9 @@ const FIND_RETRY_MS = 250;
  * Three-step first-run coach mark over Pulse, anchored with the same
  * viewport-aware positioning `Tooltip` uses (`computeTooltipPosition`).
  * `onTime` is the on-time window the on-time step describes: the one the
- * Routes link beside its anchor carries over.
+ * Routes link beside its anchor carries over. `onLater` tells the owner the
+ * tour was put off for this visit, so a remount (a refetch replacing the
+ * figures it is mounted with) does not bring it back.
  * Persistence: "seen" is written only when a
  * visitor finishes the last step or explicitly dismisses the tour; "later"
  * closes it for this mount without writing, so it resumes on the next one.
@@ -65,7 +67,7 @@ const FIND_RETRY_MS = 250;
  * React state (the same trick `Tooltip.tsx` uses): a poll that hasn't found
  * anything new yet never re-renders this component.
  */
-export function FirstRunTour({ onTime }: { onTime: OnTimeWindow }) {
+export function FirstRunTour({ onTime, onLater }: { onTime: OnTimeWindow; onLater: () => void }) {
   const { t } = useTranslation();
   // "unavailable" as well as "seen": a store that cannot be read or written
   // can never remember a dismissal, so running the tour on every single
@@ -82,6 +84,7 @@ export function FirstRunTour({ onTime }: { onTime: OnTimeWindow }) {
   }
   function later() {
     setDismissed(true);
+    onLater();
   }
   function next() {
     if (stepIndex === STEPS.length - 1) {

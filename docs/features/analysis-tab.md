@@ -168,7 +168,9 @@ per route over the scope:
   `transit.showStatistics`, off by default) drives every table that has such
   columns: a `ReportTable` column marked `stat` (the Routes table's and the
   day-type reports' observations), `DwellRunBlock`'s medians, 90th percentiles
-  and counts, the period summary's counts and the snapshot page's table. While
+  and counts, headway quality's spacing CoV and gap count (on Routes, Why and
+  the snapshot page), the period summary's counts and the snapshot page's
+  table. The toggle itself is left off a printout. While
   the count is hidden the few-data badge moves onto the sorted figure (else
   the first figure), and the 「誤差大」 badge stays on the on-time cell either
   way, so a thin figure never reads as a solid one. CSV exports are built from

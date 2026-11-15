@@ -1,7 +1,5 @@
 import { readStorage, withStorage, writeStorage } from "../utils/safeStorage";
 
-// Pulse's meaning tour has its own key: a dismissal of an earlier tour,
-// which taught other things, says nothing about this one.
 const KEY = "transit.pulseTourSeen";
 
 /** "unavailable" is distinct from "unseen" so a caller can decline to act on

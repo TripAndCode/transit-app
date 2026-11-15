@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen } from "@testing-library/react";
+import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { HeadwayQualityPanel } from "./HeadwayQualityPanel";
 import * as hooks from "../api/hooks";
@@ -40,7 +41,7 @@ describe("HeadwayQualityPanel", () => {
         ctx: CTX,
       },
     });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
 
     expect(screen.getByText("Route 100")).toBeInTheDocument();
     expect(screen.getByText("Route 200")).toBeInTheDocument();
@@ -48,6 +49,20 @@ describe("HeadwayQualityPanel", () => {
     expect(screen.getByText("+3 min")).toBeInTheDocument();
     expect(screen.getByText("0.88")).toBeInTheDocument();
     expect(screen.getByText("50.0%")).toBeInTheDocument();
+  });
+
+  it("keeps the spacing's coefficient of variation and its gap count for readers asking for statistics", () => {
+    mockRoutes();
+    mockHeadwayQuality({
+      data: { rows: [{ route_code: "100", ewt_sec: 183.75, cov: 0.875, long_gap_rate: 0.5, samples: 2 }], ctx: CTX },
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics={false} />);
+    expect(screen.getByText("+3 min")).toBeInTheDocument();
+    expect(screen.getByText("50.0%")).toBeInTheDocument();
+    expect(screen.queryByText("0.88")).toBeNull();
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).not.toContain(i18n.t("reports.headway_quality.col.cov"));
+    expect(headers).not.toContain(i18n.t("reports.headway_quality.col.samples"));
   });
 
   it("names the timetable each route is compared on", () => {
@@ -61,7 +76,7 @@ describe("HeadwayQualityPanel", () => {
         ctx: CTX,
       },
     });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getAllByText("Weekdays")).toHaveLength(1);
     expect(screen.getByText(/days that run its main timetable/i)).toBeInTheDocument();
   });
@@ -75,14 +90,14 @@ describe("HeadwayQualityPanel", () => {
         ctx: CTX,
       },
     });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText(/2 more high-frequency routes/i)).toBeInTheDocument();
   });
 
   it("says why no route is shown when none runs its main timetable on the selected days", () => {
     mockRoutes();
     mockHeadwayQuality({ data: { rows: [], routes_off_timetable: 2, ctx: CTX } });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText(/none of them runs its main timetable/i)).toBeInTheDocument();
   });
 
@@ -95,14 +110,14 @@ describe("HeadwayQualityPanel", () => {
         ctx: CTX,
       },
     });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText("3 of the selected days ran under a timetable whose scheduled headways weren't kept, so they are left out.")).toBeInTheDocument();
   });
 
   it("says a day was left out for its timetable even when no route is shown", () => {
     mockRoutes();
     mockHeadwayQuality({ data: { rows: [], days_timetable_not_kept: 1, ctx: CTX } });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText("1 of the selected days ran under a timetable whose scheduled headways weren't kept, so it is left out.")).toBeInTheDocument();
   });
 
@@ -115,7 +130,7 @@ describe("HeadwayQualityPanel", () => {
         ctx: CTX,
       },
     });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(
       screen.getByText("2 of the selected days ran under a timetable whose scheduled wait wasn't kept, so excess wait isn't shown for the routes that include them."),
     ).toBeInTheDocument();
@@ -124,7 +139,7 @@ describe("HeadwayQualityPanel", () => {
   it("shows the empty state when there are zero high-frequency routes", () => {
     mockRoutes();
     mockHeadwayQuality({ data: { rows: [], ctx: CTX } });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText(/no high-frequency route/i)).toBeInTheDocument();
   });
 
@@ -134,7 +149,7 @@ describe("HeadwayQualityPanel", () => {
     mockHeadwayQuality({
       data: { rows: [], ctx: CTX, unavailable_reason: "probe_expired", last_checked: "2026-09-11" },
     });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText("This can't be shown for this agency's feed right now.")).toBeInTheDocument();
     expect(screen.queryByText(/re-checked|Sep 11, 2026/)).not.toBeInTheDocument();
   });
@@ -145,7 +160,7 @@ describe("HeadwayQualityPanel", () => {
     mockHeadwayQuality({
       data: { rows: [], ctx: CTX, unavailable_reason: "probe_expired", last_checked: "2026-09-11" },
     });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(
       screen.getByText(
         "The check of this feed's arrival times and related data has expired, so this isn't shown until it is re-checked (last checked Sep 11, 2026).",
@@ -160,7 +175,7 @@ describe("HeadwayQualityPanel", () => {
       data: [{ agency_id: 1, agency_name: "Aomori", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "basic" }],
     } as never);
     mockHeadwayQuality({ data: { rows: [], ctx: CTX, unavailable_reason: "probe_refuted", last_checked: "2026-09-11" } });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText(/carries basic data only/)).toBeInTheDocument();
     expect(screen.queryByText(/last check/)).not.toBeInTheDocument();
   });
@@ -169,7 +184,7 @@ describe("HeadwayQualityPanel", () => {
     mockRoutes();
     vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
     mockHeadwayQuality({ data: { rows: [], ctx: CTX, unavailable_reason: "feed_unsupported", last_checked: null } });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(screen.getByText("Loading what this agency's feed covers…")).toBeInTheDocument();
     expect(screen.queryByText(/can't be taken from this agency's feed/)).not.toBeInTheDocument();
     expect(screen.queryByText(/basic data/)).not.toBeInTheDocument();
@@ -178,7 +193,7 @@ describe("HeadwayQualityPanel", () => {
   it("says when the timetable has no high-frequency route at all", () => {
     mockRoutes();
     mockHeadwayQuality({ data: { rows: [], ctx: CTX, unavailable_reason: "no_high_frequency_routes", last_checked: null } });
-    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(
       screen.getByText("This agency's timetable has no high-frequency route (one scheduled every 12 minutes or more often)."),
     ).toBeInTheDocument();
@@ -188,7 +203,7 @@ describe("HeadwayQualityPanel", () => {
   it("shows a skeleton while loading", () => {
     mockRoutes();
     mockHeadwayQuality({ isLoading: true });
-    const { container } = renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    const { container } = renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics />);
     expect(container.querySelector(".skeleton")).toBeInTheDocument();
   });
 });

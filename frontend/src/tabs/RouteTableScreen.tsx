@@ -224,7 +224,7 @@ export function RouteTableScreen() {
             sort. Every sort shows each route's on-time rate, so the
             agency's targets follow the table under each; the panel renders
             nothing when no standards are configured. */}
-        {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} />}
+        {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} showStatistics={showStatistics} />}
         {id != null && <PerformanceStandardPanel aid={id} ctx={ctx} />}
       </div>
     </div>

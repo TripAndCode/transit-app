@@ -56,13 +56,16 @@ function renderOverview(
     data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
     isPending: false,
   } as never);
-  renderWithProviders(
+  // A fresh element each time: React skips re-rendering an identical one.
+  const tree = () => (
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/overview" element={<><OverviewTab /><SearchProbe /></>} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const { rerender } = renderWithProviders(tree());
+  return { rerender: () => rerender(tree()) };
 }
 
 describe("OverviewTab", () => {
@@ -320,6 +323,19 @@ describe("OverviewTab's first-visit tour", () => {
     cleanup();
     renderOverview(withData(), undefined, { tour: "stored" });
     expect(screen.getByText("3.2")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays put off for the visit after \"Later\", through a refetch that replaces the figures", async () => {
+    const { rerender } = renderOverview(withData(), undefined, { tour: "fresh" });
+    await userEvent.click(await screen.findByRole("button", { name: "Later" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: undefined, isPending: true, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(document.querySelector('[data-tour="pulse-delay"]')).toBeNull();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: withData(), isPending: false, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(document.querySelector('[data-tour="pulse-delay"]')).not.toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 

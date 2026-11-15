@@ -18,7 +18,7 @@ function renderTourWithAnchors(onTime = DEFAULT_WINDOW) {
         <div data-tour="pulse-delay">2.4 min</div>
         <p data-tour="pulse-on-time">On-time % is on Routes</p>
         <div data-tour="pulse-scope">Viewing all routes</div>
-        <FirstRunTour onTime={onTime} />
+        <FirstRunTour onTime={onTime} onLater={() => {}} />
       </div>
     </I18nextProvider>,
   );
@@ -28,7 +28,7 @@ function renderTourWithAnchors(onTime = DEFAULT_WINDOW) {
 function renderTourAlone() {
   return render(
     <I18nextProvider i18n={i18n}>
-      <FirstRunTour onTime={DEFAULT_WINDOW} />
+      <FirstRunTour onTime={DEFAULT_WINDOW} onLater={() => {}} />
     </I18nextProvider>,
   );
 }

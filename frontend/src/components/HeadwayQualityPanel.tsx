@@ -37,13 +37,13 @@ function fmtCov(v: number | null): string {
   return v == null ? "—" : v.toFixed(2);
 }
 
-export function HeadwayQualityPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
+export function HeadwayQualityPanel({ aid, ctx, showStatistics }: { aid: number; ctx: Scope; showStatistics: boolean }) {
   const routeNames = useRouteNames(aid);
   const { data, isLoading, error, refetch } = useHeadwayQuality(aid, ctx, true);
   const tier = useCapabilityTier(aid);
   const isAdmin = useIsAdmin();
   return (
-    <HeadwayQualityView isAdmin={isAdmin} data={data} isLoading={isLoading} error={error} onRetry={() => void refetch()} routeNames={routeNames} tier={tier} />
+    <HeadwayQualityView isAdmin={isAdmin} showStatistics={showStatistics} data={data} isLoading={isLoading} error={error} onRetry={() => void refetch()} routeNames={routeNames} tier={tier} />
   );
 }
 
@@ -58,6 +58,7 @@ export function HeadwayQualityView({
   routeNames,
   tier,
   isAdmin = false,
+  showStatistics,
 }: {
   data: HeadwayQualityResponse | undefined;
   isLoading?: boolean;
@@ -67,6 +68,9 @@ export function HeadwayQualityView({
   tier: TierState;
   /** Whether the viewer may see the probe state; a stored snapshot is read by anyone, so it is off there. */
   isAdmin?: boolean;
+  /** Whether the spacing's coefficient of variation and the count of gaps
+   *  behind it show beside the excess wait and the long-gap rate. */
+  showStatistics: boolean;
 }) {
   const { t } = useTranslation();
   const notShown = data ? headwayNotShown(t, data, tier, isAdmin) : null;
@@ -108,9 +112,9 @@ export function HeadwayQualityView({
               <tr style={{ background: "var(--bg-soft)" }}>
                 <th style={th({ align: "left" })}>{t("common.route")}</th>
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.ewt")}</th>
-                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>
+                {showStatistics && <th style={th({ align: "right" })}>{t("reports.headway_quality.col.cov")}</th>}
                 <th style={th({ align: "right" })}>{t("reports.headway_quality.col.long_gap_rate")}</th>
-                <th style={th({ align: "right" })}>{t("reports.headway_quality.col.samples")}</th>
+                {showStatistics && <th style={th({ align: "right" })}>{t("reports.headway_quality.col.samples")}</th>}
               </tr>
             </thead>
             <tbody>
@@ -123,9 +127,9 @@ export function HeadwayQualityView({
                     )}
                   </td>
                   <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
-                  <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>
+                  {showStatistics && <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>}
                   <td style={td({ align: "right" })}>{fmtRatioPct(r.long_gap_rate)}</td>
-                  <td style={td({ align: "right" })}>{formatNumber(r.samples)}</td>
+                  {showStatistics && <td style={td({ align: "right" })}>{formatNumber(r.samples)}</td>}
                 </tr>
               ))}
             </tbody>

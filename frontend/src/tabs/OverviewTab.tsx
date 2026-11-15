@@ -71,6 +71,7 @@ export function OverviewTab() {
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
+  const [tourLater, setTourLater] = useState(false);
   // Two string keys rather than one JSON-shaped one, consistent with the
   // route-analysis stop selection: `peak_dow` is only ever written alongside
   // `peak_hour`, so its presence/absence stays a plain empty-string default.
@@ -185,7 +186,7 @@ export function OverviewTab() {
             {/* Inside the figures' branch, so every step's anchor is on the
                 page whenever the tour is: an anchor that never appears would
                 leave its focus trap holding Tab on a page showing no tour. */}
-            <FirstRunTour onTime={scopeWindow(ctx)} />
+            {!tourLater && <FirstRunTour onTime={scopeWindow(ctx)} onLater={() => setTourLater(true)} />}
             <OverviewHeroRow
               headline={data.headline}
               severeCount={data.top_delayed.band_counts.severe.count}

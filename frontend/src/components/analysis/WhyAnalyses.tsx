@@ -37,8 +37,8 @@ export function WhyAnalyses({
 }: {
   aid: number;
   payload: DwellRunPayload | undefined;
-  /** Whether the dwell and running table shows its medians, 90th
-   *  percentiles and observation counts beside the averages. */
+  /** Whether the dwell and running table and headway quality show their
+   *  statistics-only columns. */
   showStatistics: boolean;
 }) {
   const { t } = useTranslation();
@@ -61,7 +61,7 @@ export function WhyAnalyses({
     <>
       {!dwellGap && <DwellRunBlock payload={payload} showStatistics={showStatistics} />}
       {weatherOn && !weatherGap && <WeatherDelayPanel aid={aid} ctx={ctx} />}
-      {!headwayGap && <HeadwayQualityPanel aid={aid} ctx={ctx} />}
+      {!headwayGap && <HeadwayQualityPanel aid={aid} ctx={ctx} showStatistics={showStatistics} />}
       {notShown.length > 0 && <NotShownList items={notShown} aid={aid} offerElsewhere={dwellGap != null} />}
     </>
   );

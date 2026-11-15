@@ -401,7 +401,7 @@ function RouteTableSnapshot({
       ) : (
         <EmptyState title={t("reports.no_data.title")} />
       )}
-      {headway && <HeadwayQualityView data={headway} routeNames={names} tier={tier} />}
+      {headway && <HeadwayQualityView data={headway} routeNames={names} tier={tier} showStatistics={showStatistics} />}
       {standards ? (
         <PerformanceStandardView data={standards} routeNames={names} tier={tier} />
       ) : (

@@ -6,3 +6,10 @@
   color: var(--text-secondary);
   font-size: var(--text-sm);
 }
+
+/* A setting for the screen, not part of the paper. */
+@media print {
+  .statistics-toggle {
+    display: none;
+  }
+}
