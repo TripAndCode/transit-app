@@ -158,11 +158,11 @@ def _serialize_context(
 
 _LABEL_TOKEN_SPLIT_RE = re.compile(r"[\s()（）→]+")
 _BARE_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
-# A name never matches part of a decimal: the "7" of "7.5" or "17.7" belongs
-# to a number the guard must read whole.
-_NOT_ALNUM_BEFORE = r"(?<![0-9A-Za-z])(?<!\d\.)"
-_NOT_ALNUM_AFTER = r"(?![0-9A-Za-z]|\.\d)"
-_NOT_DIGIT_BEFORE = r"(?<!\d)(?<!\d\.)"
+# A name never matches part of a number the guard reads whole, across a
+# decimal point or a thousands comma: the "7" of "7.5", "17.7" or "7,500".
+_NOT_ALNUM_BEFORE = r"(?<![0-9A-Za-z])(?<!\d[.,])"
+_NOT_ALNUM_AFTER = r"(?![0-9A-Za-z]|[.,]\d)"
+_NOT_DIGIT_BEFORE = r"(?<!\d)(?<!\d[.,])"
 # Only full-width digits and Latin letters fold: the numeric guard reads the
 # rest of the full-width forms (．, ％, ①) itself, and folding them changes
 # which numbers it sees.
@@ -174,7 +174,7 @@ _NAMING_PREFIX = r"(?:(?i:route|named|called|name is)|(?:名前|名称|路線名
 # What may follow a number a naming prefix introduces, so "route 7 trips"
 # stays a count while "Route 7 is" and 名前は7です name the route.
 _NAME_END = (
-    r"(?!\.?\d)(?=\s*(?:$|[,.;:!?、。(（)）」]|(?:is|was|has|had|runs|ran|averages)\b|['’]s\b|[はのがをでもと]))"
+    r"(?![.,]?\d)(?=\s*(?:$|[,.;:!?、。(（)）」]|(?:is|was|has|had|runs|ran|averages)\b|['’]s\b|[はのがをでもと]))"
 )
 _ROUTE_WORD_AFTER = r"(?=\s*(?:系統|番線|番(?!目)|号線|号))"
 _LABEL_GAP = r"[\s(（]*"
