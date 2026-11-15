@@ -277,17 +277,18 @@
     "done": "Got it",
     "later": "Later",
     "dismiss": "Dismiss this tour",
-    "filters": {
-      "title": "Narrow what you're looking at",
-      "body": "Filter by route or service pattern — everything below updates to match."
+    "delay": {
+      "title": "What a delay is here",
+      "body": "A delay is how many minutes after its timetable a bus left a stop, as the operator's own real-time feed reports it. Each departure from a stop counts once, and an early departure counts as a negative delay. The large figure is the average of those departures over the period."
     },
-    "map": {
-      "title": "Inspect what's running now",
-      "body": "Every observed trip is listed here — open one to see its live progress."
+    "on_time": {
+      "title": "What on time means",
+      "body": "A departure is on time when it leaves between {{early}} early and {{late}} late. Leaving earlier than that is not on time. This screen shows average delay; the on-time rate is on Routes and on each route's page.",
+      "body_any_early": "A departure is on time when it leaves no more than {{late}} late, and every early departure counts as on time too. This screen shows average delay; the on-time rate is on Routes and on each route's page."
     },
-    "ask": {
-      "title": "Search and open the notebook",
-      "body": "Find routes, reports and screens from here. The same field opens the notebook, which holds ready-made analyses of delay as tables and charts."
+    "scope": {
+      "title": "What this screen covers",
+      "body": "This sentence says which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any part marked ▼ to change it."
     }
   },
   "forecast": {

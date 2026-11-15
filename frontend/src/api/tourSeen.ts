@@ -1,6 +1,8 @@
 import { readStorage, withStorage, writeStorage } from "../utils/safeStorage";
 
-const KEY = "transit.tourSeen";
+// Pulse's meaning tour has its own key: a dismissal of an earlier tour,
+// which taught other things, says nothing about this one.
+const KEY = "transit.pulseTourSeen";
 
 /** "unavailable" is distinct from "unseen" so a caller can decline to act on
  *  an unreadable flag instead of treating it as a confirmed first visit --
@@ -18,7 +20,7 @@ type TourSeenState = "seen" | "unseen" | "unavailable";
 let writeConfirmedBroken = false;
 
 /** Read whether this browser has already finished or dismissed the
- *  first-run dashboard tour. `FirstRunTour` shows a fresh visitor's coach
+ *  first-run Pulse tour. `FirstRunTour` shows a fresh visitor's coach
  *  marks exactly once and never again once this is set. */
 export function readTourSeen(): TourSeenState {
   return withStorage<TourSeenState>(

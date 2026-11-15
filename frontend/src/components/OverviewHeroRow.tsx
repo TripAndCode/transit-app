@@ -189,7 +189,7 @@ export function OverviewHeroRow({
             })}
           </p>
         )}
-        <p className="ov-hero-pointer">
+        <p className="ov-hero-pointer" data-tour="pulse-on-time">
           <Trans
             t={t}
             i18nKey="overview.hero_row.on_time_pointer"
@@ -215,7 +215,7 @@ export function OverviewHeroRow({
           <div className="ov-hero-label">
             {t("overview.hero_row.avg_delay_label", { count: windowDays(headline.window_from, headline.window_to), range })}
           </div>
-          <div className="ov-kpi-value num">
+          <div className="ov-kpi-value num" data-tour="pulse-delay">
             {headline.avg_min != null ? fixedTenth(avgMinDisplay) : "—"}
             <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
           </div>

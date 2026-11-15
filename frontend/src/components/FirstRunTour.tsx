@@ -1,43 +1,62 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useMatch } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { computeTooltipPosition, type TooltipPlacement } from "./tooltipPosition";
 import { readTourSeen, writeTourSeen } from "../api/tourSeen";
+import type { OnTimeWindow } from "../api/onTimeDefault";
 import { coalesceToFrame } from "../utils/frameCoalesce";
+import { formatDuration } from "../utils/format";
 import "./FirstRunTour.css";
 
-/** `clear` names an element beside the anchor the panel must not cover: the
- *  panel is placed against the box holding both, whenever it is present. */
-type Step = { selector: string; clear?: string; placement: TooltipPlacement; titleKey: string; bodyKey: string };
+type Step = {
+  selector: string;
+  placement: TooltipPlacement;
+  titleKey: string;
+  body: (t: TFunction, onTime: OnTimeWindow) => string;
+};
 
+/** Meaning before controls: what one delay is, what on time means, and what
+ *  the screen counts. Each step anchors on a Pulse element marked
+ *  `data-tour`, all of which render together with the period's figures. */
 const STEPS: readonly Step[] = [
   {
-    selector: '[data-tour="filter-bar"]',
-    // The map legend hangs under the filter dock; below the dock alone is on top of it.
-    clear: '[data-tour="map-reference"]',
+    selector: '[data-tour="pulse-delay"]',
     placement: "bottom",
-    titleKey: "tour.filters.title",
-    bodyKey: "tour.filters.body",
+    titleKey: "tour.delay.title",
+    body: (t) => t("tour.delay.body"),
   },
-  { selector: '[data-tour="map-inspect"]', placement: "top", titleKey: "tour.map.title", bodyKey: "tour.map.body" },
-  { selector: '[data-tour="ask-nav"]', placement: "bottom", titleKey: "tour.ask.title", bodyKey: "tour.ask.body" },
+  {
+    selector: '[data-tour="pulse-on-time"]',
+    placement: "bottom",
+    titleKey: "tour.on_time.title",
+    body: (t, { early_sec, late_sec }) =>
+      early_sec == null
+        ? t("tour.on_time.body_any_early", { late: formatDuration(late_sec) })
+        : t("tour.on_time.body", { early: formatDuration(early_sec), late: formatDuration(late_sec) }),
+  },
+  {
+    selector: '[data-tour="pulse-scope"]',
+    placement: "bottom",
+    titleKey: "tour.scope.title",
+    body: (t) => t("tour.scope.body"),
+  },
 ];
 
 /** How often to re-check for the current step's target element while it
- *  hasn't appeared yet -- the dashboard's own data fetches finish
- *  asynchronously, so a step's anchor (the filter dock, the observed-trips
- *  panel) isn't guaranteed to exist the instant this component mounts or a
- *  step advances. The poll exists only to find the anchor: once found it is
+ *  hasn't appeared yet -- a refetch can replace the figures a step anchors
+ *  on, so an anchor isn't guaranteed to exist the instant this component
+ *  mounts or a step advances. The poll exists only to find the anchor: once found it is
  *  cleared, and the anchor's own ResizeObserver plus resize/scroll keep the
  *  panel on it from then on. */
 const FIND_RETRY_MS = 250;
 
 /**
- * Three-step first-run coach mark over the real, signed-in dashboard
- * (filter bar -> map/inspect -> Ask), anchored with the same
+ * Three-step first-run coach mark over Pulse, anchored with the same
  * viewport-aware positioning `Tooltip` uses (`computeTooltipPosition`).
+ * `onTime` is the on-time window the on-time step describes: the one the
+ * Routes link beside its anchor carries over.
  * Persistence: "seen" is written only when a
  * visitor finishes the last step or explicitly dismisses the tour; "later"
  * closes it for this mount without writing, so it resumes on the next one.
@@ -46,23 +65,7 @@ const FIND_RETRY_MS = 250;
  * React state (the same trick `Tooltip.tsx` uses): a poll that hasn't found
  * anything new yet never re-renders this component.
  */
-/** The element a coach mark points at: a `display: contents` marker draws
- *  no box (its rect is all zeros), so its first child stands in for it. */
-function boxOf(marker: Element | null): Element | null {
-  if (marker && getComputedStyle(marker).display === "contents") return marker.firstElementChild;
-  return marker;
-}
-
-/** The smallest box holding both rects. */
-function unionRect(a: DOMRect, b: DOMRect) {
-  const top = Math.min(a.top, b.top);
-  const left = Math.min(a.left, b.left);
-  const bottom = Math.max(a.bottom, b.bottom);
-  const right = Math.max(a.right, b.right);
-  return { top, left, bottom, right, width: right - left, height: bottom - top };
-}
-
-export function FirstRunTour() {
+export function FirstRunTour({ onTime }: { onTime: OnTimeWindow }) {
   const { t } = useTranslation();
   // "unavailable" as well as "seen": a store that cannot be read or written
   // can never remember a dismissal, so running the tour on every single
@@ -124,7 +127,7 @@ export function FirstRunTour() {
       // A poll that forces layout on a tab nobody is looking at buys
       // nothing; the anchor cannot have moved under the visitor.
       if (document.hidden) return;
-      const target = boxOf(document.querySelector(step.selector));
+      const target = document.querySelector(step.selector);
       if (!target || !panel) {
         if (panel) panel.hidden = true;
         if (observed) {
@@ -143,12 +146,8 @@ export function FirstRunTour() {
           intervalId = 0;
         }
       }
-      const clear = step.clear ? document.querySelector(step.clear) : null;
-      const anchorRect = clear
-        ? unionRect(target.getBoundingClientRect(), clear.getBoundingClientRect())
-        : target.getBoundingClientRect();
       const pos = computeTooltipPosition(
-        anchorRect,
+        target.getBoundingClientRect(),
         panel.getBoundingClientRect(),
         step.placement,
         { width: window.innerWidth, height: window.innerHeight },
@@ -173,7 +172,7 @@ export function FirstRunTour() {
       window.removeEventListener("resize", frame.schedule);
       window.removeEventListener("scroll", frame.schedule, true);
     };
-  }, [dismissed, step.selector, step.clear, step.placement]);
+  }, [dismissed, step.selector, step.placement]);
 
   if (dismissed) return null;
 
@@ -186,7 +185,7 @@ export function FirstRunTour() {
       </button>
       <p className="first-run-tour__step">{t("tour.step_of", { step: stepIndex + 1, total: STEPS.length })}</p>
       <h4 className="first-run-tour__title">{t(step.titleKey)}</h4>
-      <p className="first-run-tour__body">{t(step.bodyKey)}</p>
+      <p className="first-run-tour__body">{step.body(t, onTime)}</p>
       <div className="first-run-tour__actions">
         <button type="button" className="first-run-tour__later" onClick={later}>
           {t("tour.later")}
@@ -198,11 +197,4 @@ export function FirstRunTour() {
     </div>,
     document.body,
   );
-}
-
-/** The tour walks the Live screen: its filter and map steps anchor there.
- *  Mounted anywhere else it would sit hidden with its focus trap active,
- *  swallowing Tab on a page that shows no tour at all. */
-export function FirstRunTourOnLive() {
-  return useMatch("/agencies/:agencyId/live") ? <FirstRunTour /> : null;
 }
