@@ -4,10 +4,8 @@ import { useTranslation } from "react-i18next";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import {
-  useAdminAskEval,
   useAdminAskFunnel,
   useAdminAskQueries,
-  usePromoteAskQuery,
   type AskQueryLogRow,
   type AskRoute,
 } from "../../api/admin";
@@ -66,35 +64,6 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     ...filters,
     cursor: cursorStack[pageIndex],
   });
-  const promote = usePromoteAskQuery();
-  /** The rows a promotion is in flight for. Only those rows' buttons go
-   *  pending — one slow embedding must not disable every other row's. */
-  const [promotingIds, setPromotingIds] = useState<ReadonlySet<number>>(() => new Set());
-  const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
-
-  async function handlePromote(queryLogId: number) {
-    setPromoteMessage(null);
-    setPromotingIds((ids) => new Set(ids).add(queryLogId));
-    let message: string;
-    try {
-      const result = await promote.mutateAsync(queryLogId);
-      if (result.promoted) {
-        message = t("admin.ask_ops.promote_success");
-      } else if (result.reason === "already_promoted") {
-        message = t("admin.ask_ops.promote_already");
-      } else {
-        message = t("admin.ask_ops.promote_not_eligible");
-      }
-    } catch {
-      message = t("admin.ask_ops.promote_error");
-    }
-    setPromotingIds((ids) => {
-      const next = new Set(ids);
-      next.delete(queryLogId);
-      return next;
-    });
-    setPromoteMessage(message);
-  }
 
   const columns: DataTableColumn<AskQueryLogRow>[] = [
     { key: "agency", header: t("admin.ask_ops.col.agency"), render: (row) => row.agency_name },
@@ -138,21 +107,6 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
             : row.cache_outcome,
     },
     { key: "created", header: t("admin.ask_ops.col.created"), render: (row) => formatDateTime(row.created_at) },
-    {
-      key: "promote",
-      header: "",
-      align: "right",
-      render: (row) =>
-        row.promotable ? (
-          <AdminButton
-            variant="secondary"
-            disabled={promotingIds.has(row.id)}
-            onClick={() => handlePromote(row.id)}
-          >
-            {t("admin.ask_ops.promote_action")}
-          </AdminButton>
-        ) : null,
-    },
   ];
 
   function goNext() {
@@ -166,11 +120,6 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     <>
       {error != null && <ErrorBanner error={error} />}
       {isLoading && <div>{t("common.loading")}</div>}
-      {promoteMessage && (
-        <div role="status" style={{ marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
-          {promoteMessage}
-        </div>
-      )}
       <DataTable
         caption={t("admin.ask_ops.table_label")}
         rows={data?.rows ?? []}
@@ -192,8 +141,8 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
   );
 }
 
-/** Admin: Ask operations — query log, route funnel, promote-to-intent-cache,
- * kill-switch pointer, and the latest weekly eval result. */
+/** Admin: Ask operations — query log, route funnel,
+ * and the kill-switch pointer. */
 export function AdminAskOpsPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -212,7 +161,6 @@ export function AdminAskOpsPage() {
     from: filters.from,
     to: filters.to,
   });
-  const { data: evalResult, error: evalError, refetch: refetchEval } = useAdminAskEval();
 
   const maxCount = Math.max(1, ...(funnel?.by_route.map((r) => r.count) ?? [1]));
 
@@ -305,36 +253,6 @@ export function AdminAskOpsPage() {
         <Link to="/admin/flags" style={{ fontSize: 13 }}>
           {t("admin.ask_ops.kill_switch.flags_link")}
         </Link>
-      </section>
-
-      <section
-        style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
-      >
-        <h2 style={{ fontSize: 15, marginBottom: 8 }}>{t("admin.ask_ops.eval.title")}</h2>
-        {evalResult === undefined ? (
-          // "Not run" is a statement about the eval job; a query that is still
-          // loading or failed says nothing about it.
-          evalError != null ? (
-            <ErrorBanner error={evalError} onRetry={() => refetchEval()} />
-          ) : (
-            <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
-          )
-        ) : evalResult ? (
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            {evalResult.score !== null && (
-              <span style={{ marginRight: 16 }}>
-                {t("admin.ask_ops.eval.score_label")}: {evalResult.score}
-              </span>
-            )}
-            {evalResult.generated_at !== null && (
-              <span>
-                {t("admin.ask_ops.eval.generated_at_label")}: {formatDateTime(evalResult.generated_at)}
-              </span>
-            )}
-          </div>
-        ) : (
-          <StatusChip tone="neutral">{t("admin.ask_ops.eval.not_run")}</StatusChip>
-        )}
       </section>
 
       <AskQueryTable key={filterKey} filters={filters} />

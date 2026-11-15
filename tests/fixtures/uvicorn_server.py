@@ -14,12 +14,8 @@ from contextlib import contextmanager
 
 import pytest
 
-# Generous because startup can load the sentence-transformers embedder (the
-# i18n scan enables ASK_INTENT_CACHE_ENABLED), which then dominates it: even
-# with the model already in the HuggingFace cache it revalidates revisions over
-# the network before loading, and on a cold cache it downloads the model first.
-# A tight bound fails as "server did not start" on a slow link or a loaded
-# runner, pointing at the wrong thing entirely.
+# Generous so a slow link or a loaded runner does not fail as "server did not
+# start", which points at the wrong thing entirely.
 STARTUP_TIMEOUT_SEC = 180
 
 

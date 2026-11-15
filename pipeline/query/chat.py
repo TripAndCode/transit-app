@@ -99,9 +99,6 @@ def _allowed_providers() -> set[str] | None:
     return names or None
 
 
-_BUILD_SENTINEL = "__build__"
-
-
 def _as_args(value: Any) -> dict:
     """Tool arguments as a dict, or {} for anything else.
 
@@ -111,31 +108,6 @@ def _as_args(value: Any) -> dict:
     (likely a "missing required arg" empty result) rather than a 500.
     """
     return value if isinstance(value, dict) else {}
-
-
-def _parse_build_sentinel(question: str) -> tuple[str, dict] | None:
-    """Extract ``(tool, args)`` from a ``__build__ TOOL {json}`` question string.
-
-    The guided build form on the frontend submits the user's structured intent
-    as a question with this sentinel prefix so the orchestrator can dispatch it
-    **without calling the LLM** — the spec's "zero-LLM determinism path."
-    Returns ``None`` if the string doesn't match the format (caller falls
-    through to the normal LLM path).
-    """
-    if not question.startswith(_BUILD_SENTINEL):
-        return None
-    rest = question[len(_BUILD_SENTINEL) :].lstrip()
-    tool, _sep, json_part = rest.partition(" ")
-    if not tool:
-        return None
-    json_part = json_part.strip() or "{}"
-    try:
-        args = json.loads(json_part)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(args, dict):
-        return None
-    return tool, args
 
 
 # Extra per-call localisation strings. Keyed identically to the table in
@@ -313,7 +285,7 @@ async def _dispatch_and_respond(
     verb_suffix: str = "",
 ) -> dict:
     """Call :func:`dispatch` and shape the response dict, handling the
-    failure modes shared by every non-build-mode call site in this module
+    failure modes shared by every call site in this module
     identically: an HTTPException(503) or a mid-query ClickHouse error both
     degrade to the ``service_unavailable`` string (never the raw exception
     text, which can carry SQL fragments or endpoint URLs — see
@@ -407,7 +379,6 @@ async def chat_with_tools(
     conn,
     agency_id: int,
     locale: str = "ja",
-    rag_examples: list | None = None,
     history: list | None = None,
     ch=None,
     force_tool_call: bool = False,
@@ -488,9 +459,9 @@ async def chat_with_tools(
     """
     client = _get_client()
     # The operator's kill switch, checked inside _call_llm before any provider
-    # or BYOK key is touched. The rules/embedding routing stages (resolved by
-    # the caller before this function runs), the intent-cache pre-hit's
-    # undated rows, and the build sentinel never call _call_llm, so they keep
+    # or BYOK key is touched. The rules stage (resolved by
+    # the caller before this function runs) and the intent-cache pre-hit's
+    # undated rows never call _call_llm, so they keep
     # answering while it is off. A dated pre-hit row is nulled out by the
     # _carries_dates check below regardless of this flag, so it falls through
     # to _call_llm and surfaces "disabled" like any other question would.
@@ -552,94 +523,6 @@ async def chat_with_tools(
     # or visible prompt differences; downstream uses (prompt, cache key, log) all
     # benefit. The frontend keeps its own copy of the user's raw input.
     question = question.strip()
-    # Build-mode synthetic questions (sent by the guided form with an ``__build__``
-    # prefix) must never be written to the intent cache as last_question, otherwise
-    # machine-generated strings surface as chips / autocomplete suggestions.
-    _skip_cache_write = question.startswith(_BUILD_SENTINEL)
-
-    # Build-mode short-circuit: when the question is a build-form sentinel,
-    # parse (tool, args) directly and dispatch without ever calling the LLM.
-    # This is the spec's "zero-LLM determinism path" — confidence=1.0 because
-    # the user constructed the query directly. The cache flag is irrelevant
-    # here: the sentinel is frontend-controlled and the path must always be
-    # deterministic regardless of cache configuration.
-    if _skip_cache_write:
-        parsed = _parse_build_sentinel(question)
-        if parsed is not None:
-            build_tool, build_args = parsed
-            try:
-                can_args = canonicalize(build_tool, build_args)
-            except ValueError:
-                # Unknown tool — fall back to dispatching with raw args so the
-                # tool handler can return its own "unknown" error string.
-                can_args = dict(build_args)
-            sig_hash = signature_hash(build_tool, can_args)
-            try:
-                result = await dispatch(build_tool, can_args, ctx, conn, agency_id, locale=locale, ch=ch)
-            except HTTPException as exc:
-                if exc.status_code != 503:
-                    raise
-                _log.warning("Build-mode dispatch for %s unavailable: %s", build_tool, exc.detail)
-                return {
-                    "answer": _chat_str("service_unavailable", locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            except clickhouse_connect.driver.exceptions.Error as exc:
-                _log.exception("Build-mode dispatch for %s: ClickHouse query error", build_tool)
-                return {
-                    "answer": ch_failure_str(exc, locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            except (asyncpg.exceptions.UndefinedTableError, UnsupportedConnectionMethod):
-                # An agg_* table missing (migration/analyze behind) must propagate
-                # to FastAPI's registered aggregate_not_ready_handler so the
-                # frontend gets the machine-readable {"code": "aggregate_not_ready"}
-                # 503 it reacts to — not a generic 200 tool_error that masks it,
-                # the same carve-out _dispatch_and_respond makes. A call the
-                # pooled connection cannot serve is a programming error and is
-                # re-raised for the same reason: it must not read as a tool failure.
-                raise
-            except Exception:
-                _log.exception("Build-mode dispatch failed for %s", build_tool)
-                return {
-                    "answer": _chat_str("tool_error", locale, name=build_tool),
-                    "tool_call": {"name": build_tool, "arguments": can_args},
-                    "result": None,
-                    "success": False,
-                    "numeric_guard_triggered": None,
-                    "signature_hash": sig_hash,
-                    "confidence": 1.0,
-                    "canonical_args": can_args,
-                    "cache_outcome": "bypass",
-                }
-            # render_tool_result formats a dispatched ToolResult deterministically —
-            # never LLM-authored prose — so the numeric guard has nothing to check.
-            return {
-                "answer": render_tool_result(result, locale=locale),
-                "tool_call": {"name": build_tool, "arguments": can_args},
-                "result": _result_to_dict(result),
-                "success": result.kind != "empty",
-                "numeric_guard_triggered": None,
-                "signature_hash": sig_hash,
-                "confidence": 1.0,
-                "canonical_args": can_args,
-                "cache_outcome": "bypass",
-            }
-
     user_prelude = _chat_str(
         "user_prelude",
         locale,
@@ -650,18 +533,7 @@ async def chat_with_tools(
         question=question,
     )
 
-    # Few-shot block: when the upstream router supplied nearest-neighbour
-    # examples from the golden-set RAG index, append them to the system
-    # prompt so the model can pattern-match similar questions onto the
-    # right tool + arg shape. Kept off the static SYSTEM_PROMPT because
-    # the block is per-request and varies with retrieval.
     system_prompt = SYSTEM_PROMPT
-    if rag_examples:
-        lines = ["\n", "== 類似質問の例 (参考) =="]
-        for m in rag_examples:
-            args_compact = json.dumps(m.args, ensure_ascii=False, separators=(",", ":"))
-            lines.append(f'- "{m.content}" → {m.tool}({args_compact})')
-        system_prompt = system_prompt + "\n" + "\n".join(lines)
 
     # Bounded conversation memory: when the API layer threads prior turns,
     # fold the last few (question → tool(args)) into a dedicated system
@@ -677,7 +549,7 @@ async def chat_with_tools(
     # phrasing, but generic anaphora ("その路線は？") also needs the prior
     # turn and doesn't match it. That means this block is just as often
     # attached ahead of a genuinely NEW, unrelated question that merely
-    # failed to get a confident rules/embedding match, which risks the model
+    # matched no rule, which risks the model
     # answering from the attached (unrelated) history text instead of
     # recognizing that the current question needs a fresh tool call. The
     # trailing guard line below makes the scope of "use history" explicit
@@ -796,10 +668,8 @@ async def chat_with_tools(
             args = _as_args(pre_row["args"])
             sig_hash_pre = pre_row["signature_hash"]
             _pre_sig = IntentSignature(tool=name, args=args, confidence=float(pre_row.get("confidence") or 0.0))
-            if not _skip_cache_write:
-                await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
-            nn_dist_pre = _nn_distance_for_tool(rag_examples or [], name)
-            final_conf_pre = derive_confidence(nn_dist_pre, float(pre_row.get("confidence") or 0.0))
+            await _cache_upsert(conn, sig_hash_pre, _pre_sig, args, agency_id, question=question)
+            final_conf_pre = derive_confidence(float(pre_row.get("confidence") or 0.0))
             return await _dispatch_and_respond(
                 name,
                 args,
@@ -907,19 +777,15 @@ async def chat_with_tools(
         # Upsert on a hit or a miss (a hit bumps hit_count), only when all hold:
         # - text_keyed: the args were resolved without history, so they are
         #   what this text means for any asker;
-        # - not a build-mode sentinel, so machine-generated strings never
-        #   become last_question;
         # - a tool we dispatch, or a hallucinated name would be cached and
         #   every similar question would collapse onto that one hash.
         from pipeline.query.intent import _TOOL_DEFAULTS as _KNOWN_TOOLS
 
         _known_tool = sig.tool in _KNOWN_TOOLS
-        if text_keyed and not _skip_cache_write and _known_tool:
+        if text_keyed and _known_tool:
             await _cache_upsert(conn, sig_hash, sig, can_args, agency_id, question=question)
 
-        # Compute final confidence blending NN distance + LLM self-report.
-        nn_dist = _nn_distance_for_tool(rag_examples or [], name)
-        final_conf = derive_confidence(nn_dist, sig.confidence)
+        final_conf = derive_confidence(sig.confidence)
 
         return await _dispatch_and_respond(
             name,
@@ -945,7 +811,7 @@ async def chat_with_tools(
         # non-answer from the caller's perspective. success=False so
         # analytics don't count it either way.
         # Route by failure kind: quota exhaustion steers the user toward
-        # question types the rules/embedding routing stages answer without
+        # question types the rules stage answers without
         # any LLM; everything else falls back to the generic retry message.
         key = _ERROR_KIND_LOCALE_KEY.get(error_kind or "", "service_unreachable")
         return {
@@ -1002,22 +868,7 @@ def _result_to_dict(r: ToolResult) -> dict:
     }
 
 
-def _nn_distance_for_tool(rag_examples: list, tool: str) -> float | None:
-    """Return the smallest cosine distance among RAG examples whose tool matches.
-
-    Each element of ``rag_examples`` is expected to have ``.tool`` and
-    ``.distance`` attributes (a :class:`~pipeline.query.rag_index.Match`
-    enriched by :func:`~pipeline.query.router._enrich`).
-
-    Returns ``None`` when ``rag_examples`` is empty or no example maps to
-    ``tool``. Used by Stage 3 to derive a confidence score without calling
-    the LLM a second time — the NN distance is already computed upstream.
-    """
-    distances = [m.distance for m in rag_examples if getattr(m, "tool", None) == tool]
-    return min(distances) if distances else None
-
-
 # Re-export the locale lookup helper so tests / shared code can use the
 # same fallback semantics without reaching into the tools module's
 # private namespace.
-__all__ = ["_nn_distance_for_tool", "_summary", "chat_with_tools"]
+__all__ = ["_summary", "chat_with_tools"]

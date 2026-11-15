@@ -2192,7 +2192,7 @@
       "route": {
         "rules": "ルール",
         "nn": "埋め込み(NN)",
-        "rag": "RAG(LLM)",
+        "rag": "LLM",
         "no_history": "履歴なし"
       },
       "status": {
@@ -2213,11 +2213,6 @@
         "miss": "キャッシュミス",
         "bypass": "バイパス"
       },
-      "promote_action": "昇格",
-      "promote_success": "昇格しました。",
-      "promote_already": "すでに昇格済みです。",
-      "promote_not_eligible": "昇格対象ではありません。",
-      "promote_error": "昇格に失敗しました。もう一度お試しください。",
       "empty": "この条件に一致する質問はありません。",
       "pagination": {
         "prev": "前へ",
@@ -2233,12 +2228,6 @@
         "title": "キルスイッチ",
         "router_note": "ASK_ROUTER_ENABLED / ASK_QUERY_LOG_ENABLED でルーターとクエリログを制御します。",
         "flags_link": "Feature flags で管理"
-      },
-      "eval": {
-        "title": "週次評価",
-        "not_run": "未実行",
-        "score_label": "スコア",
-        "generated_at_label": "時点"
       },
       "table_label": "Ask クエリログ"
     }

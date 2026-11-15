@@ -73,7 +73,7 @@ What the user sees/does:
   `route_stop_patterns` result shows a select-a-stop prompt
   (`ask.evidence.select_to_ask`) in its place. Shown only when
   `ASK_FOLLOWUP_ENABLED` is on (`useFollowupEnabled` hook) and the
-  signed-in caller is `llm_approved` (see "Who may reach the Stage-3 LLM"
+  signed-in caller is `llm_approved` (see "Who may reach the LLM"
   below).
 - There is **no free-text primary input** in the current UI — the primary
   path is entirely the parameterized card/chip templates
@@ -119,21 +119,15 @@ migration validates as a `DefinitionMeta` and stores, or drops. A card saved
 before the column existed reads `NULL` and shows no stamp. The evidence card
 renders it with the reports' `DefinitionMetaBlock`.
 
-**`__build__` sentinel on `/ask`:** a question `__build__ <tool> <json-args>`
-still dispatches that tool directly with no LLM
-(`pipeline.query.chat.chat_with_tools`). No product screen sends it any more,
-and its answer carries no method stamp; it remains a direct-API path only.
-
-**Free-text / natural-language path (the 3-stage router)** — reached via
-`POST /api/{agency_id}/ask` for any question that isn't a `__build__`
-sentinel:
+**Free-text / natural-language path (rules, then the LLM)** — reached via
+`POST /api/{agency_id}/ask`:
 
 1. `api/routers/ask.py: ask()` resolves `RangeCtx`, checks `is_follow_up()`
    (follow-up phrases route straight to the LLM with history) and, with no
    history, `needs_previous_turn()`, which gives the `no_history` prompt to
    the follow-ups a first turn cannot answer: a reference back ("さっき",
    "同じ条件") always; continuation ("もっと", "次の50件") unless the router
-   is on and a Stage-1 rule answers it; and refinement ("降順", "絞り込",
+   is on and a rule answers it; and refinement ("降順", "絞り込",
    "さらに", "別の") unless it names its own subject (a transit noun or
    metric such as 路線, 停留所, 遅延 or 定時率, or a route code; "その路線"
    does not count) or such a rule answers it. The rest are routed as usual, and with the router off
@@ -141,22 +135,10 @@ sentinel:
    `needs_history()` (with history, a question that points back at the
    conversation, "その路線は？", and names no route of its own also goes
    straight to the LLM; with no history it is routed as usual), then
-   calls `pipeline/query/router.py: route_or_examples(question, conn, agency_id, k=3)`.
-2. **Stage 1 — rules**: `_RULES` regex list (e.g. "遅延.*ワースト" →
+   calls `pipeline/query/router.py: match_rules(question)`.
+2. **Rules**: `_RULES` regex list (e.g. "遅延.*ワースト" →
    `top_n`). A match dispatches immediately via `pipeline.query.tools.dispatch`.
-3. **Stage 2 — embedding NN**: no rule match → embed the question with
-   `pipeline/query/embeddings.py` (`intfloat/multilingual-e5-small`,
-   384-dim) and look up nearest neighbors in `rag_chunks` via
-   `pipeline/query/rag_index.py: nearest()` (pgvector cosine distance). A
-   top match within threshold (`_EMBED_DISPATCH_THRESHOLD = 0.12`, margin
-   `0.02` over the runner-up) dispatches via that example's stored tool/args:
-   `tests/ask_eval/golden_set.jsonl` for a golden id, `ask_intent_cache` for a
-   promoted `cache_<signature>` chunk. The args are replayed only when the
-   question names the same entities (ASCII route codes, aliases and numbers,
-   plus any arg value the example spells out); otherwise it reaches Stage 3
-   with the example as a few-shot.
-4. **Stage 3 — RAG + LLM**: neither stage decided → the top-3 examples
-   (golden or promoted cache) are few-shot-injected and
+3. **LLM stage**: no rule matched →
    `pipeline/query/chat.py: chat_with_tools(...)` calls the provider ladder (`pipeline/query/llm_client.py`) with the
    tool-use surface from `pipeline/query/tools.py`. The ladder's order and
    membership are **env-configured**, not fixed: `CHAT_PROVIDERS` (comma
@@ -170,8 +152,8 @@ sentinel:
    follow-ups report disabled (`POST .../followup` returns 503), and
    `/api/config` reports `llm_enabled: false`, which hides the follow-up box.
    The notebook's card dispatch (signed in and `/ask/card`), threads and
-   exports need no key, nor does the direct-API `__build__` sentinel.
-5. All paths converge on `dispatch()` → a `_tool_*` handler in
+   exports need no key.
+4. All paths converge on `dispatch()` → a `_tool_*` handler in
    `pipeline/query/tools.py`. Whether that handler reads precomputed
    `agg_*` tables (Postgres) or scans live `updates` (ClickHouse) depends
    on the **specific tool**, not uniformly on filter narrowness:
@@ -190,9 +172,8 @@ sentinel:
      filter.
    Either way the result becomes a `ToolResult` →
    `render_tool_result()` produces the locale-specific summary string.
-6. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
-   log_query()` unless `ASK_QUERY_LOG_ENABLED=false` (skipped for the
-   direct-API `__build__` sentinel).
+5. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
+   log_query()` unless `ASK_QUERY_LOG_ENABLED=false`.
 
 **Follow-up path** (LLM-grounded, kill-switch gated):
 `FollowupChipsRow` → `useFollowup` →
@@ -205,7 +186,7 @@ the prior tool result's serialized data (never re-dispatches a tool).
 `api/routers/conversations.py`) — `{enabled, max_question_chars}`, drives
 `useFollowupEnabled`.
 
-## Who may reach the Stage-3 LLM
+## Who may reach the LLM
 
 Reaching an LLM requires a signed-in caller whose `users.llm_approved` flag an
 admin has set. The two LLM-backed surfaces enforce it in different places, for
@@ -217,12 +198,12 @@ one structural reason:
 | `POST /ask` | inside `chat_with_tools`'s `_call_llm` (`pipeline/query/chat.py`), via the `llm_approved` argument the router threads in | `200` with an honest-degradation answer |
 
 `/ask` cannot reject the whole request upfront the way the follow-up does:
-Stages 1 and 2 (regex rules, embedding nearest-neighbour) answer many
+The regex rules answer many
 questions with no LLM at all, and those stay open to every caller the login gate admits (everyone in anonymous-only mode). So the flag
-travels into the orchestrator and short-circuits only the Stage-3 call,
+travels into the orchestrator and short-circuits only the LLM call,
 returning `error_kind="not_approved"` before any provider or BYOK key is
 touched. Anonymous callers have no user row, so the router passes
-`llm_approved=False` for them — they get Stages 1-2 and nothing more.
+`llm_approved=False` for them — they get the rules and nothing more.
 
 Admins toggle the flag from `PATCH /api/admin/users/{uid}`, which writes an
 `llm_approved_changed` row to `login_events` whenever the value actually
@@ -259,17 +240,15 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 | File | Role |
 |---|---|
-| `api/routers/ask.py` | `POST /ask` (3-stage router entry) |
+| `api/routers/ask.py` | `POST /ask` (rules, then LLM) |
 | `api/routers/conversations.py` | Conversation CRUD, `POST /messages` (primary deterministic dispatch), `POST /followup`, `GET /ask/followup-enabled`, anon-migration |
 
 **Backend — `pipeline/query/`**
 
 | File | Role |
 |---|---|
-| `router.py` | Stage 1 (regex `_RULES`) + Stage 2 (embedding NN) dispatch decision, or few-shot examples for Stage 3; `is_follow_up()`, `needs_previous_turn()`, `needs_history()` |
-| `embeddings.py` | `intfloat/multilingual-e5-small` wrapper for Stage 2 + RAG index build |
-| `rag_index.py` | pgvector cosine-NN reader over `rag_chunks` (`nearest()`) |
-| `chat.py` | Stage 3 orchestration, `__build__` sentinel handling, intent-cache lookup/upsert |
+| `router.py` | Regex `_RULES` dispatch decision (`match_rules()`); `is_follow_up()`, `needs_previous_turn()`, `needs_history()` |
+| `chat.py` | LLM-stage orchestration, intent-cache lookup/upsert |
 | `llm_client.py` | `CHAT_PROVIDERS`-ordered provider ladder (gemini/openai) |
 | `tools.py` | Tool specs (`TOOLS`), `dispatch()`, `render_tool_result()`, the `_LOCALES` string table |
 | `tool_queries.py` | SQL helpers backing several tool handlers |
@@ -284,9 +263,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 **Automated tests:**
 
-- Backend router/pipeline: `tests/query/test_router.py` (rules +
-  embedding stage), `tests/unit/test_embeddings.py`,
-  `tests/query/test_rag_index.py`, `tests/unit/test_chat_confidence.py`,
+- Backend router/pipeline: `tests/query/test_router.py` (rules),
   `tests/query/test_chat_intent_cache.py`,
   `tests/query/test_chat_null_args.py`,
   `tests/query/test_chat_error_leakage.py`,
@@ -306,15 +283,7 @@ so it is a separate mechanism to build, not a knob to turn on.
   out to `scripts/ask_eval.py`, which reads
   `tests/ask_eval/gold_questions.jsonl` and checks that each entry's
   expected args are unchanged by `canonicalize` (it never reads the
-  `question` text, so it is not routing coverage). Separately,
-  `tests/ask_eval/test_baseline.py` (opt-in via `RUN_LLM_EVAL=1` + a real
-  `GEMINI_API_KEY`, hits a running dev API) replays
-  `tests/ask_eval/golden_set.jsonl` against the live 3-stage router and
-  scores tool-selection accuracy — `golden_set.jsonl` is also the file
-  `make build-rag-index` embeds into `rag_chunks` for Stage 2 (see
-  `pipeline/query/rag_index.py`, `gtfs_pipeline.py: cmd_build_rag_index`).
-  These are two different JSONL files with two different jobs — don't
-  conflate them.
+  `question` text, so it is not routing coverage).
 - Most of these need both throwaway Postgres (`:5544`) and throwaway
   ClickHouse (`:8124`) — see `AGENTS.md` ▸ Tests for the
   `RUN_CH_INTEGRATION=1` block; omitting it silently skips
@@ -325,7 +294,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 
 1. `cp .env.example .env`; set a real `GEMINI_API_KEY` (and optionally
    `OPENAI_API_KEY` as the paid fallback per `CHAT_PROVIDERS`) to
-   exercise Stage 3; with no key the API still boots. `ASK_FOLLOWUP_ENABLED=true` ships as the
+   exercise the LLM stage; with no key the API still boots. `ASK_FOLLOWUP_ENABLED=true` ships as the
    `.env.example` local-dev default, so the follow-up box works out of the
    box for a signed-in user an admin has marked `llm_approved`; set it
    `false` to verify the kill-switch (box hidden, `POST /followup` returns
@@ -336,30 +305,20 @@ so it is a separate mechanism to build, not a knob to turn on.
    through, or every card returns an empty result:
    `make fetch-ingest` (or `make load_static` before `ingest_live`), then
    `make analyze` for the agency.
-3. Build the Stage 2 embedding index so paraphrases actually route to
-   `"embedding"` instead of always falling to Stage 3:
-   `poetry run python gtfs_pipeline.py build_rag_index --agency-id 1`
-   (or `make build-rag-index` for all agencies). Without this,
-   `rag_chunks` is empty and Stage 2 never dispatches. Every row is
-   stamped with `embedding_version` (`<model id>@<sentence-transformers
-   version>`); Stage 2 reads only rows matching the running embedder (plus
-   unstamped legacy rows) and logs a one-off "re-index required" warning
-   when other-version rows are present, so re-run the same command after
-   changing `EMBEDDING_MODEL_ID` or upgrading the library to any new version.
-4. Open the app — the default route lands on Pulse
+3. Open the app — the default route lands on Pulse
    (`/agencies/{id}/pulse`; a fresh/remembered agency selection redirects
    there too). Click the top bar's search field (or press ⌘K), choose "Ask",
    and expect `/agencies/{id}/ask`; pressing `g` then `q` goes there directly.
-5. On the empty-thread landing view, click an instant card (e.g.
+4. On the empty-thread landing view, click an instant card (e.g.
    "Top-N delays") — expect an immediate assistant bubble with a ranked
    table (deterministic `conversations/{cid}/messages` → `dispatch` path,
    no LLM).
-6. Click a route-requiring pill (e.g. "Route delay trend"), pick a
+5. Click a route-requiring pill (e.g. "Route delay trend"), pick a
    route, then run it from the `ParamStrip` — expect a trend chart bubble.
-7. After any answer (for "Explore all stops by pattern", after selecting a
+6. After any answer (for "Explore all stops by pattern", after selecting a
    stop), type a question in the follow-up box and send it — expect a
    short LLM-generated explanation grounded only in the prior result.
-8. To exercise the 3-stage NL router directly (not reachable from the
+7. To exercise the NL router directly (not reachable from the
    current template-only UI), call the API directly:
    ```bash
    # `csrf_guard` rejects a POST with no Origin header (403 "origin required").
@@ -371,11 +330,10 @@ so it is a separate mechanism to build, not a knob to turn on.
      -H 'Cookie: sid=<your session cookie>' \
      -d '{"question":"遅延ワースト10"}'
    ```
-   Expect `router_stage: "rules"`. A paraphrase near a golden-set entry
-   should return `"embedding"`; a genuinely novel/out-of-scope question
+   Expect `router_stage: "rules"`. A genuinely novel/out-of-scope question
    should return `"llm"` (needs a working Gemini/OpenAI key) or a
    friendly refusal.
-9. Toggle `ASK_ROUTER_ENABLED=false` to force every question to Stage 3,
+8. Toggle `ASK_ROUTER_ENABLED=false` to force every question to the LLM stage,
    or `ASK_HISTORY_ENABLED=false` to disable follow-up-phrase ("もっと")
    LLM rerouting.
 

@@ -152,7 +152,7 @@ def require_llm_approved(user: User | None) -> User:
     endpoint actually receives `user` through that dependency rather than
     this function re-deriving it from ``request.state`` itself.
 
-    Endpoints that must let Stage 1/2 (rules/embedding) through for
+    Endpoints that must let the rules stage through for
     anyone -- ``/ask`` -- check ``user.llm_approved`` themselves instead of
     calling this, since they can't reject the whole request upfront.
     """

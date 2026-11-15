@@ -5,8 +5,7 @@ type ProvenancePath = "sql" | "llm";
 
 /** A dispatch-free assistant message (no `tool`) only ever comes from the
  *  LLM-grounded follow-up path -- every card/builder dispatch always
- *  carries the tool it ran. See pipeline/query/chat.py's build-sentinel
- *  short-circuit: the guided-form path never calls the LLM. */
+ *  carries the tool it ran, and never calls the LLM. */
 export function provenancePath(message: { tool: string | null }): ProvenancePath {
   return message.tool ? "sql" : "llm";
 }
@@ -19,8 +18,8 @@ const TOOL_ALIASES: Record<string, string> = {
   on_time: "on_time_rate",
 };
 
-// Tools already labeled for the guided builder UI (ask.routers.ask.py's
-// `_BUILD_TOOL_META`) -- reused rather than re-translated.
+// Tools whose labels the card templates already carry -- reused rather than
+// re-translated.
 const BUILD_LABEL_TOOLS = new Set([
   "top_n",
   "time_series",

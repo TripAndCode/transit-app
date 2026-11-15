@@ -968,11 +968,11 @@ export function useTriggerRun() {
   });
 }
 
-// ── Ask ops (query log, route funnel, promote-to-intent-cache, eval) ─────
+// ── Ask ops (query log, route funnel) ─────────────────────────────────────
 //
 // "route" here is the Ask pipeline stage that answered a question (rules ->
-// nn (embedding nearest-neighbour) -> rag (Stage-3 LLM)), matching
-// AGENTS.md's architecture naming, not a transit route/line. `no_history` is
+// nn (retired embedding stage; historic rows only) -> rag (LLM)), not a
+// transit route/line. `no_history` is
 // the router's own early-exit case (a follow-up with nothing to continue).
 // There is no "user" field and `providers` below is always null because
 // ask_query_log carries neither identity nor a per-query provider/latency
@@ -992,7 +992,6 @@ export type AskQueryLogRow = {
   cache_outcome: string | null;
   numeric_guard_triggered: boolean | null;
   created_at: string;
-  promotable: boolean;
 };
 
 type AskQueryLogPage = { rows: AskQueryLogRow[]; next_cursor: string | null };
@@ -1033,28 +1032,3 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
   });
 }
 
-type PromoteResult = { promoted: boolean; reason: string | null; chunk_id: string | null };
-
-/** Mutation: promote one ask_query_log row's cached intent into rag_chunks.
- * Nothing is invalidated: the query-log rows carry no promoted state
- * (`promotable` depends only on the row having a cached intent), so a
- * promote leaves the list unchanged, and a repeat click is answered with
- * `reason: "already_promoted"`. */
-export function usePromoteAskQuery() {
-  return useMutation({
-    mutationFn: (queryLogId: number) => apiPost<PromoteResult>("/api/admin/ask/promote", { query_log_id: queryLogId }),
-  });
-}
-
-type AskEvalResult = { generated_at: string | null; score: number | null } | null;
-
-/** Latest local weekly eval result, or null when none has been produced yet
- * (rendered as "not run" rather than an error — see the backend endpoint's
- * docstring for why null is the common case today). */
-export function useAdminAskEval() {
-  return useQuery({
-    queryKey: ["adminAskEval"],
-    queryFn: ({ signal }) => apiGet<AskEvalResult>("/api/admin/ask/eval", { signal }),
-    staleTime: 60_000,
-  });
-}

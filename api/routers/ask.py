@@ -34,7 +34,7 @@ from pipeline.query.chat import _chat_str, ch_failure_str, chat_with_tools
 from pipeline.query.followup import MAX_QUESTION_CHARS
 from pipeline.query.intent import _TOOL_DEFAULTS as _PAGINATABLE_TOOL_DEFAULTS
 from pipeline.query.query_log import log_query
-from pipeline.query.router import is_follow_up, needs_history, needs_previous_turn, route_or_examples
+from pipeline.query.router import is_follow_up, match_rules, needs_history, needs_previous_turn
 from pipeline.query.tools import _summary, dispatch, render_tool_result
 
 _log = logging.getLogger(__name__)
@@ -84,11 +84,11 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     """Response schema for ``POST /ask``.
 
-    Phase ② fields (``signature_hash``, ``confidence``, ``canonical_args``,
+    The intent-cache fields (``signature_hash``, ``confidence``, ``canonical_args``,
     ``cache_outcome``) are populated only when the ``ask_intent_cache_enabled``
     flag is on (``pipeline.flags``: a DB override, else ``ASK_INTENT_CACHE_ENABLED``)
-    and the request went through the LLM Stage-3 path.  They are ``None`` on the
-    Stage-1 / Stage-2 router paths and when the flag is off.
+    and the request went through the LLM path.  They are ``None`` on the
+    rules path and when the flag is off.
     """
 
     answer: str
@@ -164,8 +164,8 @@ async def ask(
     router_enabled = await aflag("ask_router_enabled")
 
     # With history attached, a follow-up ("次の50件", "もっと") or a reference
-    # back to the conversation ("その路線は？") skips Stages 1-2: a stateless
-    # rule or embedding match cannot see the turn it continues or points at,
+    # back to the conversation ("その路線は？") skips the rules: a stateless
+    # rule match cannot see the turn it continues or points at,
     # so it goes straight to the LLM with the last few turns.
     # Slice before dumping: the rest is discarded, so serializing it first is
     # work spent on data that never leaves here.
@@ -190,10 +190,10 @@ async def ask(
 
     # Follow-up phrasing ("もっと", "次の50件", a bare "降順") with NO prior
     # result to continue: short-circuit to a gentle prompt. Otherwise the
-    # question falls to the open LLM with no examples, which hallucinates a
+    # question falls to the open LLM, which hallucinates a
     # page the user never asked for (e.g. describe_data(routes, offset=100)).
     # needs_previous_turn() lets through the ones a first turn can answer: a
-    # refinement that names its own subject, or one a Stage-1 rule answers.
+    # refinement that names its own subject, or one a rule answers.
     if history_enabled and not history and needs_previous_turn(body.question, router_runs=router_enabled):
         msg = _summary("follow_up_no_history", lang=locale)
         resp = AskResponse(answer=msg, tool_call=None, result=None, ctx=ctx_dict, router_stage="no_history")
@@ -201,26 +201,23 @@ async def ask(
             await log_query(conn, agency_id, body.question, "no_history", None, False)
         return resp
 
-    # Single embed+search: dispatch decision and few-shot examples share
-    # one embedding so the fall-through path doesn't re-embed the question.
-    decision, examples = (None, [])
-    if router_enabled and not skip_router:
-        decision, examples = await route_or_examples(body.question, conn, agency_id, k=3)
+    decision = match_rules(body.question) if router_enabled and not skip_router else None
 
-    # Cache-layer telemetry — populated only on the Stage-3 (LLM) path.
+    # Cache-layer telemetry — populated only on the LLM path.
     sig_hash: str | None = None
     cache_outcome: str | None = None
     # Numeric-hallucination-guard verdict, as chat_with_tools reports it. No
     # /ask path runs the guard, so it stays None (see log_query).
     numeric_guard_triggered: bool | None = None
+    tool_name: str | None
 
     if decision is not None:
-        stage = decision.stage
+        stage = "rules"
         tool_name = decision.tool
-        # Stage 1/2 is the deterministic-router path (regex/embedding-matched
+        # The rules stage is the deterministic path (regex-matched
         # questions, e.g. describe_data's date_range/sample_counts/overview
         # kinds) — the ROUTINE path for those question kinds, not an edge
-        # case. It has no LLM fallback to catch a failure, unlike Stage 3
+        # case. It has no LLM fallback to catch a failure, unlike the LLM stage
         # (pipeline.query.chat.chat_with_tools), which already wraps every
         # dispatch(...) call in try/except and degrades to a tool_error
         # answer. Without a guard here, a ClickHouse-unavailable
@@ -289,7 +286,6 @@ async def ask(
             conn,
             agency_id,
             locale=locale,
-            rag_examples=examples,
             history=history,
             ch=ch,
             force_tool_call=force_tool_call,
@@ -315,20 +311,16 @@ async def ask(
         )
 
     if log_enabled:
-        # The ``__build__ tool {...}`` sentinel is a machine-made direct-API
-        # dispatch, not a question anyone asked; logging it would pollute the
-        # analytics view of what users actually ask.
-        if not body.question.startswith("__build__"):
-            await log_query(
-                conn,
-                agency_id,
-                body.question,
-                stage,
-                tool_name,
-                success,
-                signature_hash=sig_hash,
-                cache_outcome=cache_outcome,
-                numeric_guard_triggered=numeric_guard_triggered,
-            )
+        await log_query(
+            conn,
+            agency_id,
+            body.question,
+            stage,
+            tool_name,
+            success,
+            signature_hash=sig_hash,
+            cache_outcome=cache_outcome,
+            numeric_guard_triggered=numeric_guard_triggered,
+        )
 
     return resp
