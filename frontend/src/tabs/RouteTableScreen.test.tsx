@@ -51,7 +51,6 @@ function tableResponse(overrides: Record<string, unknown> = {}): ReportResponse 
 
 function setup(path: string, response: ReportResponse | undefined = tableResponse(), extra: Record<string, unknown> = {}) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
-  vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
   const useReport = vi
     .spyOn(hooks, "useReport")
     .mockReturnValue({ data: response, isFetching: false, error: null, refetch: vi.fn(), ...extra } as never);

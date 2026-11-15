@@ -87,7 +87,6 @@ from pipeline.reports.reference import REFERENCE_MIN_SAMPLES, ReferenceReason
 from pipeline.reports.report_stamp import report_definition, scanned_schedule
 from pipeline.reports.route_table import RouteTableOrder, compute_route_references, route_references_for
 from pipeline.reports.service_delivered import DeliveredMissing
-from pipeline.reports.suggest import compute_suggestion
 from pipeline.route_catalog import (
     RETIRED,
     ZERO_DELAY,
@@ -1023,58 +1022,6 @@ async def get_delay_record_stops(
     )
 
 
-class SuggestionResponse(BaseModel):
-    """Payload for GET /reports/suggest -- the Insight Panel's single pick."""
-
-    report_type: str
-    route_code: str
-    reason_text: str
-    severity: str
-    # The evaluation window the rule that produced this suggestion actually
-    # used (1 day for the anomaly rule, 7 days for trend-shift/on-time) --
-    # ISO date strings so the frontend can pin its click-through navigation
-    # to the window the reason text describes, instead of the user's ambient
-    # (possibly 30-day) Analysis tab filter, which can dilute or hide the
-    # very signal being described.
-    from_date: str
-    to_date: str
-
-
-class SuggestionEnvelope(BaseModel):
-    """Payload for GET /reports/suggest.
-
-    ``suggestion`` is ``null`` when no rule produced a pick. The envelope
-    exists so that "no signal" stays a described 200 body a client can read
-    fields off, rather than a bare ``null`` with nowhere to say why.
-    """
-
-    suggestion: SuggestionResponse | None = None
-
-
-@router.get("/reports/suggest", response_model=SuggestionEnvelope)
-@limiter.limit(tier_limit)
-async def get_suggestion(
-    request: Request,
-    agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
-    ch: AsyncClient = Depends(get_ch),
-    locale: str = Depends(get_locale),
-    exclude: list[str] = Query(default=[]),
-) -> SuggestionEnvelope:
-    """One rule-based 'go look at this' suggestion for the Analysis tab's
-    Insight Panel. ``exclude`` entries are ``"report_type:route_code"``
-    pairs the frontend has already shown this session (sessionStorage-backed,
-    stateless here). Returns ``{"suggestion": null}`` when every rule's
-    candidates are excluded or the agency has no data at all -- the frontend
-    renders its own calm 'no signal' copy for that case, not this endpoint.
-    """
-    exclude_set: frozenset[tuple[str, str]] = frozenset(
-        (report_type, route_code) for item in exclude if ":" in item for report_type, route_code in [item.split(":", 1)]
-    )
-    result = await compute_suggestion(agency_id, conn, ch, exclude=exclude_set, locale=locale)
-    return SuggestionEnvelope(suggestion=SuggestionResponse(**result) if result else None)
-
-
 class ForecastHeatmapCell(BaseModel):
     """One day-of-week × hour cell of the forecast heatmap."""
 
@@ -1809,8 +1756,8 @@ async def render_report(
         # Appends `low_confidence` (95% Wilson interval too wide to trust the
         # percentage) and `margin_pp` (that interval's half-width) as a
         # display-layer annotation — doesn't change compute_on_time's own
-        # 5-tuple contract, so pooling callers (pipeline.reports.suggest) and
-        # the Ask tools' columns are unaffected. See pipeline/stats.py.
+        # 5-tuple contract, so the Ask tools' columns are unaffected. See
+        # annotate_on_time_pct_confidence.
         rows = [(*r, on_time_pct_margin_pp(r[2], r[4])) for r in annotate_on_time_pct_confidence(listed(rated))]
         intent = {"query_type": "on_time", "sort_order": sort_order, "service": _service_label(ctx)}
         # The on-time list's CSV writes no reference, so it reads none.

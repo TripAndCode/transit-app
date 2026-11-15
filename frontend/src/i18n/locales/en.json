@@ -1709,14 +1709,6 @@
       "panels_not_frozen": "Not part of this snapshot: the panels the Routes screen shows beside its table (the agency's performance standards, and headway quality under the on-time sort). This snapshot was taken before they were stored."
     }
   },
-  "insight_panel": {
-    "title": "Worth a look",
-    "no_signal": "No notable signal right now.",
-    "load_error": "Couldn't load insight right now.",
-    "view_button": "Open route detail",
-    "collapse_aria": "Collapse insight panel",
-    "expand_aria": "Expand insight panel"
-  },
   "errors": {
     "rate_limited": "High traffic right now. Please wait a moment and retry.",
     "not_found": "No data available yet.",

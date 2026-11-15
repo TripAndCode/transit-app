@@ -8,8 +8,8 @@ import { withStorage, writeStorage } from "../utils/safeStorage";
  *  palette open a screen with the scope that screen last showed for the
  *  agency, never the scope of the screen being left. Remembered per browser
  *  tab (sessionStorage), so a new tab opens every screen on its defaults.
- *  Links whose job is to carry the current scope to another screen (Worth a
- *  look, saved views) build their own query and are not routed here. */
+ *  Links whose job is to carry the current scope to another screen (saved
+ *  views) build their own query and are not routed here. */
 const STORAGE_KEY = "transit.screenScope";
 const SCREEN_PATH = /^\/agencies\/([^/]+)\/([^/]+)\/?$/;
 const SCREENS: ReadonlySet<string> = new Set([...DESTINATIONS, "ask"]);
