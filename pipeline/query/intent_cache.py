@@ -71,12 +71,7 @@ async def upsert(
     *,
     question: str,
 ) -> None:
-    """Insert a new cache row OR increment hit_count + refresh last_question/used_at.
-
-    A row with ``promoted_at`` set keeps its last_question. Nothing sets
-    ``promoted_at`` any more, so no row is in that state today; the guard stays
-    until the owner decides what happens to the column.
-    """
+    """Insert a new cache row OR increment hit_count + refresh last_question/used_at."""
     await conn.execute(
         """
         INSERT INTO ask_intent_cache
@@ -84,9 +79,7 @@ async def upsert(
         VALUES ($1, $2, $3::jsonb, $4, 1, $5, $6)
         ON CONFLICT (signature_hash, agency_id) DO UPDATE
           SET hit_count    = ask_intent_cache.hit_count + 1,
-              last_question = CASE WHEN ask_intent_cache.promoted_at IS NULL
-                                   THEN EXCLUDED.last_question
-                                   ELSE ask_intent_cache.last_question END,
+              last_question = EXCLUDED.last_question,
               last_used_at  = now(),
               confidence    = GREATEST(ask_intent_cache.confidence, EXCLUDED.confidence)
         """,

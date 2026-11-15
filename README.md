@@ -335,7 +335,7 @@ The main endpoints are:
 | `/api/admin/ops` | Read-only ops health snapshot (migrations, aggregate freshness) |
 | `/api/admin/flags` | Feature-flag registry: resolved values + DB overrides |
 | `/api/admin/snapshots*`, `GET /api/snapshots/{id}`, `GET /api/snapshots/{id}/today` | Frozen snapshots: admins create, list and delete; anyone with the link reads one and today's figures for its query ([guide](docs/features/snapshots.md)) |
-| `/api/admin/ask/*` | Ask query log, funnel, eval result |
+| `/api/admin/ask/*` | Ask query log and funnel |
 | `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
 | `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |
 | `/api/me/export` | Download everything the app holds about you (JSON) |

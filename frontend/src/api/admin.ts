@@ -968,7 +968,7 @@ export function useTriggerRun() {
   });
 }
 
-// ── Ask ops (query log, route funnel, eval) ───────────────────────────────
+// ── Ask ops (query log, route funnel) ─────────────────────────────────────
 //
 // "route" here is the Ask pipeline stage that answered a question (rules ->
 // nn (retired embedding stage; historic rows only) -> rag (LLM)), not a

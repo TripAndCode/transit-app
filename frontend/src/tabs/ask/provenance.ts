@@ -5,8 +5,7 @@ type ProvenancePath = "sql" | "llm";
 
 /** A dispatch-free assistant message (no `tool`) only ever comes from the
  *  LLM-grounded follow-up path -- every card/builder dispatch always
- *  carries the tool it ran. See pipeline/query/chat.py's build-sentinel
- *  short-circuit: the guided-form path never calls the LLM. */
+ *  carries the tool it ran, and never calls the LLM. */
 export function provenancePath(message: { tool: string | null }): ProvenancePath {
   return message.tool ? "sql" : "llm";
 }

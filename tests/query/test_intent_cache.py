@@ -86,9 +86,9 @@ async def test_update_user_action_rejects_bad_action(conn_with_agency):
 
 
 @pytest.mark.asyncio
-async def test_upsert_keeps_a_promoted_rows_question(conn_with_agency):
-    """A row with `promoted_at` set keeps its question: a later asker's wording
-    must not replace it, though the hit still counts."""
+async def test_upsert_refreshes_the_question_even_on_a_promoted_row(conn_with_agency):
+    """A row with `promoted_at` set holds no question of its own: a later
+    asker's wording replaces it, and the hit counts."""
     pool, agency_id = conn_with_agency
     sig_hash = "8888888888888888"
     async with pool.acquire() as c:
@@ -97,5 +97,5 @@ async def test_upsert_keeps_a_promoted_rows_question(conn_with_agency):
         await upsert(c, sig_hash, _sig(), {"metric": "avg_delay"}, agency_id, question="A later Q")
         row = await lookup(c, sig_hash, agency_id)
         assert row is not None
-        assert row["last_question"] == "Promoted Q"
+        assert row["last_question"] == "A later Q"
         assert row["hit_count"] == 2
