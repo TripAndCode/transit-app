@@ -164,6 +164,7 @@ async function refreshFeed(
     const status = error instanceof ApiError ? error.status : null;
     if (status === 429) return t("operations.refresh_rate_limited");
     if (status === 401) return t("operations.refresh_sign_in");
+    if (status === 409) return t("operations.refresh_busy");
     return t("operations.refresh_failed");
   }
 }
