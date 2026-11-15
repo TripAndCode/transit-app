@@ -260,16 +260,20 @@ def write_off(ch, agency_id: int, dates: Iterable[date] | None, keep: Iterable[d
         ch.insert(FILED_DATES, gone, column_names=_RECORD_COLUMNS)
 
 
-def rows_rewritten(ch, agency_ids: Iterable[int] | None) -> None:
-    """Write off every date of *agency_ids* (every agency when None), before
-    `updates` rows of theirs are rewritten in place: such a rewrite can
-    leave a date's rows and version names as many as before, which
-    valid_builds would not see. Their next full analyze writes them again."""
+def rows_rewritten(ch, agency_ids: Iterable[int] | None, dates: Iterable[date] | None = None) -> None:
+    """Write off *dates* of *agency_ids* (every date when None; every agency
+    when *agency_ids* is None), before `updates` rows of theirs filed under
+    those dates are rewritten in place: such a rewrite can leave a date's
+    rows and version names as many as before, which valid_builds would not
+    see. Their next full analyze writes them again, but for any date before
+    the agency's retention floor, which no run rewrites
+    (pipeline.retention.retention_floor)."""
     if agency_ids is None:
         rows = ch.query(f"SELECT DISTINCT agency_id FROM {FILED_DATES}").result_rows
         agency_ids = [row[0] for row in rows]
+    within = None if dates is None else sorted(set(dates))
     for agency_id in agency_ids:
-        write_off(ch, agency_id, None)
+        write_off(ch, agency_id, within)
 
 
 def _drop_superseded(ch, agency_id: int) -> None:

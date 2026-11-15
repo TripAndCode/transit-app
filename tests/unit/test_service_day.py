@@ -9,6 +9,7 @@ from pipeline.service_day import (
     SERVICE_DAY_CUTOVER_HOURS,
     filed_capture_span,
     filed_date_of,
+    filed_dates_reached,
     service_date_ch,
     service_date_of,
     service_day_moment_utc,
@@ -141,3 +142,19 @@ def test_the_filed_capture_span_holds_every_reading_filed_under_its_days():
         for scheduled in range(0, 30 * 3600, 1800):
             if first <= filed_date_of(captured, scheduled) <= last:
                 assert span_start <= captured < span_end
+
+
+def test_the_dates_reached_are_the_inverse_of_the_filed_capture_span():
+    """Every date a reading of the window is filed under lies within the
+    dates reached, and each date reached has its capture span meet the window."""
+    start, end = _jst(2026, 3, 5, 9, 0), _jst(2026, 3, 8, 9, 0)
+    first, last = filed_dates_reached(start, end)
+    for minute in range(0, int((end - start).total_seconds() // 60), 7):
+        captured = start + timedelta(minutes=minute)
+        for scheduled in range(0, 30 * 3600, 1800):
+            assert first <= filed_date_of(captured, scheduled) <= last
+    for day in (first, last):
+        span_start, span_end = filed_capture_span(day, day)
+        assert span_start < end and span_end > start
+    assert filed_capture_span(first - timedelta(days=1), first - timedelta(days=1))[1] <= start
+    assert filed_capture_span(last + timedelta(days=1), last + timedelta(days=1))[0] >= end

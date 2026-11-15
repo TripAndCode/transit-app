@@ -42,7 +42,9 @@ def rebuildable_agg_tables() -> frozenset[str]:
     rebuild set and its agg_meta bookkeeping, plus agg_route_dow and
     agg_stop_seq, which analyze built until they were retired. Any other
     `agg_*` table, such as one analyze only upserts or one an ingest fills,
-    holds rows no rebuild restores.
+    holds rows no rebuild restores. In full only while no agency has a
+    retention floor (pipeline.retention.retention_floor): analyze never
+    rebuilds a date before one, so the rows there are restored by nothing.
 
     Imported lazily: the API's health poll imports this module, and must not
     pull in analyze with it.
@@ -158,7 +160,8 @@ def data_losing_tables(sql: str) -> list[str]:
     (tests/unit/test_migration_destructive_markers.py), and a pending up
     migration it flags stops scripts/dev_upgrade.py until the owner names it.
     The rebuildable aggregates are exempt in both directions: their rows derive
-    from source data, and an analyze rebuild restores them. A plain
+    from source data, and an analyze rebuild restores them, as long as no
+    agency has a retention floor, below which nothing restores them. A plain
     analyze-all rebuilds an incremental aggregate only for the dates its
     ledger or its table fingerprint marks, so a migration that deletes such
     rows also bumps that table's registry version, or the rebuild needs FULL=1.

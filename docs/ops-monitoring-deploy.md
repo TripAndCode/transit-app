@@ -192,12 +192,12 @@ enforcer together.
 | R2 `static/<id>/` (GTFS static zips) | 3,650 days; each agency's current timetable is always kept | `prune-r2.sh` | `R2_STATIC_RETENTION_DAYS` |
 | R2 `vp/<id>/` (VehiclePositions archives) | 180 days | `prune-r2.sh` | `R2_VP_RETENTION_DAYS` |
 | Collector spool on Oracle (local copies of the above) | RT and VP 90 days, static 365 days; most files go sooner, once R2 confirms its copy | `oracle_cloud/v3/bin/prune.sh`, `spool-cleanup.sh` | `RETENTION_DAYS`, `STATIC_RETENTION_DAYS` |
-| ClickHouse `updates`, production | every day analyze still covers; target about 400 days once analyze honours a retention floor | nothing prunes it yet (below) | none |
+| ClickHouse `updates`, production | every day while the prune is off (the default). With it on, 400 days, dropped in whole UTC months, and never a month whose dates are not all aggregated (below) | `gtfs_pipeline.py prune-updates` (`pipeline/retention.py`) | `--days` (default 400, constant `UPDATES_RETENTION_DAYS`); switch `updates_prune_enabled` |
 | ClickHouse `updates_live` | 3 days | the table's TTL (`db/clickhouse/schema.sql`) | none |
-| ClickHouse `updates_filed` (refiled rows) | follows `updates`: the dates it still holds | `pipeline/refiled.py`: whatever rewrites `updates` rows writes the agencies' dates off first (`rows_rewritten`), and their rows go at the agency's next analyze | none |
+| ClickHouse `updates_filed` (refiled rows) | follows `updates`: the dates it still holds | `pipeline/refiled.py`: whatever rewrites `updates` rows writes the affected dates off first (`rows_rewritten`), and their rows go at the agency's next analyze | none |
 | ClickHouse `updates_filed_dates` | indefinite; one small row per write or write-off of a date | nothing | none |
 | ClickHouse `updates`, VPS ML replica | every day synced, until the disk needs room | trimmed by hand (`docs/features/ml-forecast.md`, "Trimming it") | none |
-| Postgres `agg_*`, except the one below | indefinite | nothing prunes them | none |
+| Postgres `agg_*`, except the one below | indefinite; analyze never rebuilds a date before the agency's retention floor (below) | nothing prunes them | none |
 | Postgres `agg_route_forecast_ml` (published ML forecasts) | 14 days past each service date | `pipeline/ml_forecast_ingest.py`, on each forecast ingest (constant `FORECAST_ML_RETENTION_DAYS`) | none |
 | ClickHouse aggregates (`pipeline.ch_aggregates.COPIED_TABLES` and `INTERNAL_TABLES`) | indefinite, as `agg_*` | nothing prunes them | none |
 
@@ -216,10 +216,9 @@ The privacy policy's periods for personal data and logs are in
   collection, the analysis and a rerun of it. Keeping them longer gains
   nothing, and they carry vehicle descriptors, so they are kept no longer than
   the validation needs.
-- **Production `updates`** keeps every day analyze still covers; the target is
-  about 400 days once analyze honours a retention floor. A report's
-  widest range is a year, plus a margin, older days can be rebuilt from R2, and
-  the aggregates built from them are kept indefinitely.
+- **Production `updates`** keeps 400 days once the prune is on, because a
+  report's widest range is a year, plus a margin. Older days can be replayed
+  from R2, and the aggregates built from them are kept indefinitely.
 - **`agg_*` and the ClickHouse aggregates** are small and are what every page
   reads, so they keep all history. analyze rebuilds the ClickHouse ones from the
   same scopes as `agg_*` and copies them into Postgres.
@@ -228,11 +227,90 @@ The privacy policy's periods for personal data and logs are in
 - **The VPS replica** is disposable and rebuilt from R2, so its disk decides.
   A replay can bring back only what R2 still holds.
 
-### Why nothing prunes `updates` yet
+### The retention floor and the `updates` prune
 
-analyze treats every date in its per-date ledger (`agg_feed_health`) as
-rebuildable. A ledger date whose `updates` rows are gone counts as changed, so
-the next run purges its aggregates, and a full rebuild recomputes every date
-from `updates`. Dropping a day analyze covers would therefore delete its
-aggregates, which are kept indefinitely. `updates` can be cut to its target
-only once analyze stops rebuilding dates before a retention floor.
+Each agency has a **retention floor**. `pipeline.retention.retention_floor`
+says why every date before it is final. For an operator, that means:
+
+- No analyze, incremental or full, purges or rebuilds the aggregates of those
+  dates, in Postgres, in the ClickHouse aggregates or in the feed-quality
+  scorecard, whose month holding the floor is final too.
+- A method or builder change rebuilds only the dates from the floor on, so
+  older aggregates keep the method they were built under.
+- Rows that land below the floor later, from a backfill or a restamp, are never
+  aggregated.
+- A ClickHouse/Postgres disagreement before the floor's month is never
+  repaired. A table moved to ClickHouse keeps its history before the floor's
+  month in Postgres alone.
+- `scripts/ch_agg_parity.py` skips its whole-history parity check for an agency
+  with a floor, since its ledger no longer matches `updates` date for date.
+
+The floor comes from `updates_pruned_months`, which only a real prune writes.
+An agency with nothing dropped has no floor, and analyze behaves as it always
+has. Turning the prune's switch off stops further drops but keeps every floor,
+so the aggregates of the months already dropped stay.
+
+`prune-updates` drops a UTC month of `updates` only when the whole month is
+past the horizon and every agency with rows in it clears the holds
+`pipeline.retention.plan_updates_prune` states. A drop raises those agencies'
+floors to just past the month. The dry run names what holds each month, and
+for which agency:
+
+- service dates in the month without aggregates;
+- dates up to the end of the scorecard month the new floor freezes whose
+  ledger no longer matches `updates`;
+- ClickHouse aggregates that disagree with their Postgres copies;
+- a timetable or builder change analyze has not applied yet, or a date whose
+  version in force moved since it was built.
+
+Each clears once that agency is analyzed, except dates without aggregates
+below an agency's floor: analyze never builds there, so an operator decides
+whether to keep those rows or delete them.
+
+A run that fails part-way leaves a `retention` row in `pipeline_runs` with the
+rows dropped so far. The months it did not reach stay in
+`updates_pruned_months` with `dropped_at` empty. Their floor stands, and the
+next run drops them under a new row. So an empty `dropped_at` means only that
+the run which wrote the row did not confirm the drop; ClickHouse's
+`system.parts` says whether `updates` still holds the month.
+
+Before the prune is switched on in production, each of these must hold:
+
+- The readers that scan `updates` live refuse or flag a range before the floor,
+  rather than show it as having no data: the delay certificate, the banded
+  fallbacks, the trend heatmap, the Ask tools and the map.
+- `db/migrate.py` and `scripts/dev_upgrade.py` treat `agg_*` as data-losing
+  once `updates_pruned_months` has rows.
+- An export spanning the floor records that its figures before the floor keep
+  the method they were built under.
+- The floor never splits a month that is copied or purged whole. The Postgres
+  copy of a ClickHouse aggregate deletes and re-copies the floor's whole month,
+  so a floor after the 1st can lose final rows dated before it in that month.
+- A stale ledger on the first day after the month the new floor freezes holds
+  the drop too: a reading captured early that day files under the frozen
+  month's last day.
+- An agency that analyze never visits (soft-deleted, or rows with no
+  `agencies` row) gets an explicit operator-decision hold, rather than an
+  "analyze it first" hold that nothing ever clears.
+
+To turn it on in production:
+
+1. Check that Railway's deployed ingest job runs no `ALTER TABLE updates
+   DELETE`, such as one driven by `RETENTION_DAYS`. A delete like that sets no
+   floor, so the next analyze purges the aggregates of the rows it removed.
+2. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
+   `analyze_all` in the daily ingest job (`docs/deploy-railway.md`, step 5).
+   The job leaves it out until every condition above holds, so the switch
+   alone never arms a drop.
+3. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
+   writes nothing, whatever the switch says. It lists each month past the
+   horizon: the ones it would drop, with the floor each sets, and the ones it
+   keeps, with the agency and date that keep each. Analyze any agency it names
+   first.
+4. Turn on `updates_prune_enabled` from `/admin/flags`, or set
+   `UPDATES_PRUNE_ENABLED=true` on the job that runs the command.
+5. After the first run, check its `retention` row on the board, and that the
+   run's rows in `updates_pruned_months` have `dropped_at` set.
+
+A dropped month's rows come back only by a replay from R2. Its aggregates need
+none.
