@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
+  NotebookPen,
   Shield,
   X,
 } from "lucide-react";
@@ -462,7 +463,7 @@ export function Sidebar() {
               onFocus={() => prefetchRouteChunk("ask")}
               style={tabItemStyle}
             >
-              <HelpCircle size={20} strokeWidth={2} aria-hidden="true" />
+              <NotebookPen size={20} strokeWidth={2} aria-hidden="true" />
               <span>{t("nav.ask")}</span>
             </PendingNavLink>
           )}
