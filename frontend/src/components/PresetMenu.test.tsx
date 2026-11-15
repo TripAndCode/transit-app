@@ -66,6 +66,19 @@ describe("PresetMenu (anonymous)", () => {
 describe("PresetMenu (signed in)", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("names a saved view's stop from the static GTFS even when the current scope has no stop", async () => {
+    vi.spyOn(auth, "useSession").mockReturnValue({ data: { user_id: 1 } } as never);
+    const get = vi.spyOn(client, "apiGet").mockImplementation((async (path: string) =>
+      String(path).includes("/stops")
+        ? { rows: [{ stop_id: "S1", stop_name: "Central Station" }] }
+        : [{ preset_id: 1, agency_id: 1, name: "Stop view", range_ctx: { ...SAVED, stop: "S1" } }]) as never);
+    renderMenu();
+    await open();
+    expect(await within(menu()).findByText(/Central Station/)).toBeInTheDocument();
+    expect(within(menu()).queryByText(/selected stop/)).not.toBeInTheDocument();
+    expect(get).toHaveBeenCalledWith(expect.stringContaining("/api/1/stops"), expect.anything());
+  });
+
   it("heads the menu with its name and how many views it holds", async () => {
     signedIn([{ preset_id: 1, agency_id: 1, name: "Weekday mornings", range_ctx: SAVED }]);
     await open();

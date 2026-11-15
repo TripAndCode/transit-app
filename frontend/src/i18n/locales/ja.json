@@ -957,8 +957,8 @@
       "growth": "{{stop}}で {{delay}}拡大",
       "recovery": "{{stop}}で {{delay}}分回復",
       "none_reporting": "走行中の便が報告し始めると、ここに表示されます。",
-      "direction_unnamed": "方向{{letter}}",
-      "direction_unnamed_admin": "方向{{letter}}（direction_id {{id}}）"
+      "direction_unnamed": "方面{{letter}}",
+      "direction_unnamed_admin": "方面{{letter}}（direction_id {{id}}）"
     },
     "queue": {
       "location_unavailable": "停留所位置を解決できません"
@@ -2497,8 +2497,8 @@
     "unapplied_note": "この画面では使いません：{{list}}",
     "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
     "stop_unnamed": "選択した停留所",
-    "dir_unnamed": "片方向",
-    "with_id": "{{label}}（{{id}}）"
+    "dir_unnamed": "選択した方向",
+    "id_tag": "（{{id}}）"
   },
   "print": {
     "generated_at": "作成日時 {{time}}",

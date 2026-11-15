@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import type { DwellRunPayload } from "../../api/types";
@@ -25,10 +25,13 @@ const WEATHER = {
   attribution: "a",
 };
 
-function serve(weatherEnabled: boolean) {
+function serve(weatherEnabled: boolean | "never") {
   mockApiGet.mockImplementation(async (path: string) => {
     const url = String(path);
-    if (url.startsWith("/api/config")) return { auth_enabled: false, local_admin_enabled: false, weather_enabled: weatherEnabled };
+    if (url.startsWith("/api/config")) {
+      if (weatherEnabled === "never") return new Promise(() => {});
+      return { auth_enabled: false, local_admin_enabled: false, weather_enabled: weatherEnabled };
+    }
     if (url.includes("/weather_delay")) return WEATHER;
     if (url.includes("/headway_quality")) return { rows: [], ctx: {}, unavailable_reason: "no_high_frequency_routes", last_checked: null };
     if (url.includes("/session") || url.includes("/auth")) return { role: null };
@@ -44,6 +47,13 @@ function mount() {
   renderWithProviders(<RouterProvider router={router} />);
 }
 
+/** Lets the config answer land and the screen re-render before asserting. */
+async function settle() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+}
+
 const urls = () => mockApiGet.mock.calls.map((c) => String(c[0]));
 
 beforeEach(() => mockApiGet.mockReset());
@@ -54,6 +64,16 @@ describe("Why's weather panel and the weather flag", () => {
     mount();
     await waitFor(() => expect(urls().some((u) => u.startsWith("/api/config"))).toBe(true));
     await waitFor(() => expect(urls().some((u) => u.includes("/headway_quality"))).toBe(true));
+    await settle();
+    expect(urls().filter((u) => u.includes("/weather_delay"))).toEqual([]);
+    expect(screen.queryByText("Rain vs. dry average delay")).not.toBeInTheDocument();
+  });
+
+  it("makes no weather request while the config has not answered", async () => {
+    serve("never");
+    mount();
+    await waitFor(() => expect(urls().some((u) => u.includes("/headway_quality"))).toBe(true));
+    await settle();
     expect(urls().filter((u) => u.includes("/weather_delay"))).toEqual([]);
     expect(screen.queryByText("Rain vs. dry average delay")).not.toBeInTheDocument();
   });

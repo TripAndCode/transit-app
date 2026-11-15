@@ -8,8 +8,9 @@ export function directionKey(trip: LiveTrip): string {
   return "unknown";
 }
 
-/** A direction with no headsign is told apart from its sibling by position,
- *  never by its GTFS direction_id; an admin also gets that id after it. */
+/** A direction with no headsign reads "Direction A" or "Direction B", the
+ *  letter taken from its direction_id so it stays the same across refetches
+ *  whatever order the rows arrive in; an admin also gets the id after it. */
 export function directionOptions(
   trips: LiveTrip[],
   t: TFunction,
@@ -20,13 +21,12 @@ export function directionOptions(
     const key = directionKey(trip);
     grouped.set(key, [...(grouped.get(key) ?? []), trip]);
   }
-  let unnamed = 0;
   return [...grouped].map(([key, rows]) => ({
     key,
     label: rows.find((trip) => trip.headsign)?.headsign ?? (
       rows[0]?.direction_id != null
         ? t(isAdmin ? "operations.trip_panel.direction_unnamed_admin" : "operations.trip_panel.direction_unnamed", {
-            letter: String.fromCharCode(65 + (unnamed++ % 26)),
+            letter: String.fromCharCode(65 + rows[0].direction_id),
             id: rows[0].direction_id,
           })
         : t("operations.trip_panel.unknown_direction")

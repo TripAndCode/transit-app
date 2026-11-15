@@ -133,7 +133,7 @@ describe("AskTab follow-up box", () => {
   function openResultThread(llmEnabled: boolean | undefined) {
     vi.spyOn(hooks, "useIsLlmApproved").mockReturnValue(true);
     vi.spyOn(hooks, "useFollowupEnabled").mockReturnValue({ data: { enabled: true, max_question_chars: 500 } } as never);
-    vi.spyOn(config, "useConfig").mockReturnValue({ data: { llm_enabled: llmEnabled } } as never);
+    vi.spyOn(config, "useFeatureOn").mockReturnValue(llmEnabled === true);
     vi.spyOn(hooks, "useConversation").mockReturnValue({
       data: {
         conversation: {

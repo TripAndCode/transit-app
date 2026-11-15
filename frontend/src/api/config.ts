@@ -8,7 +8,6 @@ type AppConfig = {
   feedback_url?: string | null;
   llm_enabled?: boolean;
   weather_enabled?: boolean;
-  ml_forecast_enabled?: boolean;
 };
 
 /** Public client config from ``GET /api/config``. ``auth_enabled`` hides the
@@ -26,11 +25,11 @@ type AppConfig = {
  *  (https or mailto), or null when it names none. `llm_enabled` is false
  *  when no LLM provider is usable (or the operator switched LLM answers off),
  *  so LLM-only affordances hide rather than offer something that cannot
- *  answer; absence reads as off. `weather_enabled` and `ml_forecast_enabled`
- *  mirror the server flags a screen mounts a component for: until the config
- *  has arrived, or when a backend does not send them, they read as off, so a
- *  flag-off feature neither mounts nor fetches. The config is read once per
- *  load, so a flag flipped meanwhile applies on the next reload. */
+ *  answer; absence reads as off. `weather_enabled` mirrors the server flag a
+ *  screen needs before it fetches: until the config has arrived, or when a
+ *  backend does not send it, it reads as off, so a flag-off feature neither
+ *  mounts nor fetches. The config is cached for the session (re-read when
+ *  auth state changes), so a flag flipped meanwhile applies on the next read. */
 export function useConfig() {
   return useQuery({
     queryKey: ["config"],
@@ -40,6 +39,6 @@ export function useConfig() {
 }
 
 /** Whether a UI-gating server flag is on, for deciding to mount a component. */
-export function useFeatureOn(flag: "weather_enabled" | "ml_forecast_enabled"): boolean {
+export function useFeatureOn(flag: "weather_enabled" | "llm_enabled"): boolean {
   return useConfig().data?.[flag] === true;
 }

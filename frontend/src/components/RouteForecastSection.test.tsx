@@ -5,7 +5,6 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import { RouteForecastSection } from "./RouteForecastSection";
 import * as hooks from "../api/hooks";
 import * as isAdmin from "../api/useIsAdmin";
-import * as config from "../api/config";
 import { BAND_ORDER } from "../api/timeBands";
 import { type ForecastDay, type ForecastOverview } from "../api/types";
 import { delayRampVar } from "../styles/tokens";
@@ -74,8 +73,7 @@ function heatmap(populate: { d: number; h: number; v?: number; n?: number }[] = 
   };
 }
 
-function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "", hm = heatmap(), mlOn = true) {
-  vi.spyOn(config, "useFeatureOn").mockReturnValue(mlOn);
+function renderSection(ov: ForecastOverview | undefined = overview(), initialRoute = "", hm = heatmap()) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
   vi.spyOn(hooks, "useForecastOverview").mockReturnValue({ data: ov, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: hm, isPending: false, error: null, refetch: vi.fn() } as never);
@@ -507,14 +505,6 @@ describe("RouteForecastSection", () => {
     fireEvent.click(screen.getByText(/Show day . hour detail/i));
     expect(screen.getByTestId("fc-detail-fullgrid").querySelectorAll("[data-fallback]")).toHaveLength(0);
     expect(screen.queryByText("No forecast: past average")).toBeNull();
-  });
-
-  it("mounts no ML mark when the ML forecast flag is off, even for cells marked as the model's", () => {
-    const ml = heatmap();
-    ml.cells = ml.cells.map((c) => (c.expected_avg_min == null ? c : { ...c, source: "ml" as const }));
-    renderSection(overview(), "100", ml, false);
-    expect(screen.queryByTestId("fc-ml-chip")).toBeNull();
-    expect(config.useFeatureOn).toHaveBeenCalledWith("ml_forecast_enabled");
   });
 
   it("shows no ML mark on a baseline-only route or agency landing", () => {

@@ -87,7 +87,7 @@ describe("scopeTokens", () => {
     expect(labels("ja", { service: "平日", stop: "S1", dir: 0 }).slice(5, 8)).toEqual([
       "service=平日ダイヤ",
       "stop=選択した停留所",
-      "dir=片方向",
+      "dir=選択した方向",
     ]);
   });
 
@@ -103,8 +103,12 @@ describe("scopeTokens", () => {
   it("keeps the ids for an admin as secondary text after the words", () => {
     const t = i18n.getFixedT("en");
     const phrases = { t, agencyName: "A", routeLabel: (c: string) => c, showIds: true, stopName: () => "Central Station" };
-    const labelsOf = scopeTokens({ ...base, stop: "S1", dir: 1 }, phrases).filter((tok) => tok.key === "stop" || tok.key === "dir").map((tok) => tok.label);
-    expect(labelsOf).toEqual(["Central Station (S1)", "one direction (1)"]);
+    const placed = scopeTokens({ ...base, stop: "S1", dir: 1 }, phrases).filter((tok) => tok.key === "stop" || tok.key === "dir");
+    expect(placed.map((tok) => [tok.label, tok.idTag])).toEqual([
+      ["Central Station", "(S1)"],
+      ["one direction", "(direction_id 1)"],
+    ]);
+    expect(scopeTitle({ ...base, stop: "S1" }, phrases)).not.toContain("S1");
   });
 
   it("adds the early tolerance only when set, after direction and before the late tolerance", () => {

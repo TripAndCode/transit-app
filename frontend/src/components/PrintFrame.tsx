@@ -50,7 +50,7 @@ export function PrintFrame() {
   const agencyName = useAgencies().data?.find((a) => a.agency_id === agencyId)?.agency_name ?? "";
   const [scope] = useScope();
   const names = useRouteNames(agencyId);
-  const { stopName } = usePlaceLabels(agencyId, scope.stop);
+  const { stopName } = usePlaceLabels(agencyId, scope.stop != null);
   const printedAt = usePrintedAt();
   if (agencyId == null) return null;
 

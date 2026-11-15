@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useSession } from "../api/auth";
 import { ApiError, apiDelete, apiGet, apiPost, formatApiError } from "../api/client";
+import { usePlaceLabels } from "../api/usePlaceLabels";
 import { scopeAfterPreset, scopeToQueryString, type Scope } from "../api/scope";
 import { Skeleton } from "./Skeleton";
 import { Tooltip } from "./Tooltip";
@@ -54,6 +55,9 @@ export function PresetMenu({
     enabled: !!session,
   });
 
+  const { stopName } = usePlaceLabels(agencyId, presets?.some((p) => p.range_ctx.stop != null) ?? false);
+  const viewPhrases = { ...phrases, stopName: (id: string) => phrases.stopName?.(id) ?? stopName(id) };
+
   const create = useMutation({
     mutationFn: (n: string) =>
       apiPost<Preset>("/api/me/presets", { agency_id: agencyId, name: n, range_ctx: currentRangeCtx }),
@@ -97,7 +101,7 @@ export function PresetMenu({
   const error = create.error ?? remove.error;
 
   function suggestName() {
-    setName(suggestedViewName(currentRangeCtx, phrases, defaultPeriod).slice(0, NAME_MAX));
+    setName(suggestedViewName(currentRangeCtx, { ...viewPhrases, showIds: false }, defaultPeriod).slice(0, NAME_MAX));
   }
 
   function toggleMenu() {
@@ -183,7 +187,7 @@ export function PresetMenu({
                           {p.name}
                         </span>
                         <span id={`${baseId}-d${p.preset_id}`} className="preset-row__sum">
-                          {scopeTitle(view, phrases)}
+                          {scopeTitle(view, viewPhrases)}
                         </span>
                       </span>
                     </button>
@@ -220,7 +224,7 @@ export function PresetMenu({
             >
               <div className="preset-current">
                 {t("presets.current")}
-                <b>{scopeTitle(currentRangeCtx, phrases)}</b>
+                <b>{scopeTitle(currentRangeCtx, viewPhrases)}</b>
               </div>
               <div className="preset-save">
                 <label htmlFor={nameId} className="scope-sr-only">

@@ -24,7 +24,6 @@ async def test_config_exposes_both_auth_switches(client):
         "feedback_url",
         "llm_enabled",
         "weather_enabled",
-        "ml_forecast_enabled",
     }
     assert isinstance(body["login_required"], bool)
     assert isinstance(body["auth_enabled"], bool)
@@ -91,17 +90,13 @@ async def test_config_reports_llm_disabled_when_the_operator_kill_switch_is_off(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("env_var", "key"),
-    [("WEATHER_INGEST_ENABLED", "weather_enabled"), ("ML_FORECAST_ENABLED", "ml_forecast_enabled")],
-)
-async def test_config_reports_a_ui_gating_flag_as_the_registry_resolves_it(client, monkeypatch, env_var, key):
+async def test_config_reports_the_weather_flag_as_the_registry_resolves_it(client, monkeypatch):
+    """Why mounts the weather panel only when its flag is on, so the value must
+    follow the flag registry (env here, override in production)."""
     from pipeline import flags
 
-    """A screen mounts weather and the ML chip only when its flag is on, so the
-    value must follow the flag registry (env here, override in production)."""
     for raw, expected in (("true", True), ("false", False)):
-        monkeypatch.setenv(env_var, raw)
+        monkeypatch.setenv("WEATHER_INGEST_ENABLED", raw)
         flags.invalidate()
-        assert (await client.get("/api/config")).json()[key] is expected
+        assert (await client.get("/api/config")).json()["weather_enabled"] is expected
     flags.invalidate()

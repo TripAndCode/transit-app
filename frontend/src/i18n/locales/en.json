@@ -2498,7 +2498,7 @@
     "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]",
     "stop_unnamed": "selected stop",
     "dir_unnamed": "one direction",
-    "with_id": "{{label}} ({{id}})"
+    "id_tag": "({{id}})"
   },
   "print": {
     "generated_at": "Generated {{time}}",

@@ -6,7 +6,10 @@ import { roundTenth } from "../../utils/format";
 /** The `scope_applied` keys an endpoint reports, one per URL scope param. */
 export type ScopeField = "from" | "to" | "dow" | "time_band" | "hour" | "service" | "routes" | "stop" | "dir" | "late" | "early";
 export type TokenKey = "agency" | "routes" | "period" | "days" | "time" | "service" | "stop" | "dir" | "early" | "tolerance";
-export type ScopeToken = { key: TokenKey; label: string; field: ScopeField | null };
+/** `idTag` is the raw id an admin sees after the words. It is its own field so
+ *  a screen can mark it apart (and print without it) and so a saved name never
+ *  carries it. */
+export type ScopeToken = { key: TokenKey; label: string; field: ScopeField | null; idTag?: string };
 export type PhraseCtx = {
   t: LabelT;
   agencyName: string;
@@ -122,18 +125,32 @@ export function periodLabel(scope: Pick<Scope, "from" | "to">, t: LabelT): strin
   return translationT(t, "scope.period", { from: dateLabel(scope.from, crossesYear), to: dateLabel(scope.to, crossesYear) });
 }
 
-/** The stop's name, or a neutral phrase where the static GTFS has none; an
- *  admin also gets the id after it. */
-export function stopLabel(id: string, { t, stopName, showIds }: PhraseCtx): string {
+type PlaceCtx = Pick<PhraseCtx, "t" | "stopName" | "showIds">;
+
+/** The stop's name, or a neutral phrase where the static GTFS has none, and
+ *  for an admin the id as a tag after it. */
+function stopParts(id: string, { t, stopName, showIds }: PlaceCtx): { label: string; idTag?: string } {
   const label = stopName?.(id) ?? translationT(t, "scope.stop_unnamed");
-  return showIds ? translationT(t, "scope.with_id", { label, id }) : label;
+  return showIds ? { label, idTag: translationT(t, "scope.id_tag", { id }) } : { label };
 }
 
 /** No endpoint pairs a GTFS direction_id with a name across routes, so a
- *  reader gets a neutral phrase; an admin also gets the id after it. */
-export function dirLabel(dir: 0 | 1, { t, showIds }: PhraseCtx): string {
+ *  reader gets a neutral phrase; an admin also gets the id as a tag. */
+function dirParts(dir: 0 | 1, { t, showIds }: PlaceCtx): { label: string; idTag?: string } {
   const label = translationT(t, "scope.dir_unnamed");
-  return showIds ? translationT(t, "scope.with_id", { label, id: dir }) : label;
+  return showIds ? { label, idTag: translationT(t, "scope.id_tag", { id: `direction_id ${dir}` }) } : { label };
+}
+
+function joined({ label, idTag }: { label: string; idTag?: string }): string {
+  return idTag ? `${label} ${idTag}` : label;
+}
+
+export function stopLabel(id: string, ctx: PlaceCtx): string {
+  return joined(stopParts(id, ctx));
+}
+
+export function dirLabel(dir: 0 | 1, ctx: PlaceCtx): string {
+  return joined(dirParts(dir, ctx));
 }
 
 export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
@@ -156,8 +173,8 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   if (scope.service !== "all") {
     tokens.push({ key: "service", label: tr("scope.service", { value: serviceValueLabel(scope.service, t) }), field: "service" });
   }
-  if (scope.stop) tokens.push({ key: "stop", label: stopLabel(scope.stop, ctx), field: "stop" });
-  if (scope.dir != null) tokens.push({ key: "dir", label: dirLabel(scope.dir, ctx), field: "dir" });
+  if (scope.stop) tokens.push({ key: "stop", ...stopParts(scope.stop, ctx), field: "stop" });
+  if (scope.dir != null) tokens.push({ key: "dir", ...dirParts(scope.dir, ctx), field: "dir" });
   if (scope.early != null) {
     const label = scope.early === EARLY_ANY ? tr("scope.early_any") : earlyLabel(scope.early, t);
     tokens.push({ key: "early", label, field: "early" });

@@ -14,6 +14,7 @@ import { PeriodBrush } from "./PeriodBrush";
 import { dirLabel, earlyLabel, stopLabel, toleranceLabel } from "./scopePhrases";
 import { usePlaceLabels } from "../../api/usePlaceLabels";
 import { useAgencyId } from "../../api/useAgencyId";
+import { useIsAdmin } from "../../api/useIsAdmin";
 import "./scope.css";
 import { fixedTenth, roundTenth } from "../../utils/format";
 
@@ -486,8 +487,8 @@ function ClearValue({ value, onClear }: { value: string; onClear: () => void }) 
 export function StopControl({ scope, update }: ControlProps) {
   const { t } = useTranslation();
   const id = useAgencyId();
-  const place = usePlaceLabels(id, scope.stop);
-  return <ClearValue value={scope.stop ? stopLabel(scope.stop, { t, agencyName: "", routeLabel: String, ...place }) : ""} onClear={() => update({ stop: null })} />;
+  const place = usePlaceLabels(id, scope.stop != null);
+  return <ClearValue value={scope.stop ? stopLabel(scope.stop, { t, ...place }) : ""} onClear={() => update({ stop: null })} />;
 }
 
 export function EarlyControl({ scope, update }: ControlProps) {
@@ -500,7 +501,6 @@ export function EarlyControl({ scope, update }: ControlProps) {
 
 export function DirControl({ scope, update }: ControlProps) {
   const { t } = useTranslation();
-  const id = useAgencyId();
-  const place = usePlaceLabels(id, scope.stop);
-  return <ClearValue value={scope.dir == null ? "" : dirLabel(scope.dir, { t, agencyName: "", routeLabel: String, ...place })} onClear={() => update({ dir: null })} />;
+  const showIds = useIsAdmin();
+  return <ClearValue value={scope.dir == null ? "" : dirLabel(scope.dir, { t, showIds })} onClear={() => update({ dir: null })} />;
 }

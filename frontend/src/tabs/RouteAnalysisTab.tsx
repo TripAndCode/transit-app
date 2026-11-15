@@ -83,7 +83,7 @@ export function RouteAnalysisTab() {
   const previousShape = query.data?.shape_id ?? (variantParam || null);
   const previous = useRouteShape(id, compare && (variantParam || query.data) ? route : null, prevCtx, previousShape);
   const names = useRouteNames(id);
-  const { stopName } = usePlaceLabels(id, ctx.stop);
+  const { stopName, settled: stopNamesSettled } = usePlaceLabels(id, ctx.stop != null);
   const isAdmin = useIsAdmin();
   // Two plain string keys rather than one JSON-shaped one, so a shared link
   // shows a human-readable stop selection. `stopRouteParam` guards against a
@@ -190,7 +190,7 @@ export function RouteAnalysisTab() {
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
-      <button disabled={!query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id, scopeTitle(ctx, { t, agencyName: "", routeLabel: names.format, stopName }), ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
+      <button disabled={!query.data?.stops.length || !!query.error || !stopNamesSettled} onClick={() => setNotice(t(saveAnalysis(id, scopeTitle(ctx, { t, agencyName: "", routeLabel: names.format, stopName }), ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
       {/* The page has its own CSV and save, so the menu holds only the
           snapshot, which only an admin takes. */}
       {isAdmin && route && <ExportMenu csv={null} showPrint={false} snapshot={{ screen: "route_page", agencyId: id, query: snapshotQuery.toString() }} />}

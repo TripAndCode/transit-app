@@ -128,6 +128,7 @@ function Token({
       >
         {badge}
         <span className="scope-token__label">{token.label}</span>
+        {token.idTag && <span className="scope-id"> {token.idTag}</span>}
         {hint != null && (
           <>
             {" "}
@@ -160,7 +161,7 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
   const dataEnd = use(DataEndContext);
   const slot = useScopeActionsSlot();
   const names = useRouteNames(id);
-  const place = usePlaceLabels(id, scope.stop);
+  const place = usePlaceLabels(id, scope.stop != null);
   const [openKey, setOpenKey] = useState<ConditionKey | null>(null);
   const [pinned, setPinned] = useState(readScopePinned);
   const sectionRef = useRef<HTMLElement>(null);
