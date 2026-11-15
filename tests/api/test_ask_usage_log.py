@@ -210,7 +210,9 @@ async def _followup(app, agency, uid, pool, monkeypatch, result, *, fail_thread_
 
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
 
-    async def fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
+    async def fake_answer_followup(
+        *, question, context_tool, context_args, context_result, locale, llm_approved=True, route_labels=None
+    ):
         return result
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", fake_answer_followup)
