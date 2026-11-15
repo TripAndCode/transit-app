@@ -408,7 +408,7 @@ describe("OverviewHeroRow", () => {
   it("says how long a quiet feed has been quiet, by the rule Live uses", () => {
     mockFeed(2);
     renderHero();
-    expect(screen.getByText("Feed quiet for 2 h")).toBeInTheDocument();
+    expect(screen.getByText("No reports for 2 h")).toBeInTheDocument();
     expect(screen.getByText(/Last report /)).toBeInTheDocument();
   });
 
@@ -421,7 +421,7 @@ describe("OverviewHeroRow", () => {
   it("counts a long-quiet feed in days", () => {
     mockFeed(30 * 24);
     renderHero();
-    expect(screen.getByText("Feed quiet for 30 days")).toBeInTheDocument();
+    expect(screen.getByText("No reports for 30 days")).toBeInTheDocument();
     // A quiet feed keeps the dot but not the live green.
     expect(document.querySelector(".ov-fresh-dot--stale")).not.toBeNull();
   });
@@ -430,7 +430,7 @@ describe("OverviewHeroRow", () => {
     mockFeed(0.05);
     renderHero();
     expect(screen.getByText("Reporting live")).toBeInTheDocument();
-    expect(screen.queryByText(/Feed quiet/)).toBeNull();
+    expect(screen.queryByText(/No reports for/)).toBeNull();
   });
 
   it("claims nothing about reports when the feed status could not be read", () => {

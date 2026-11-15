@@ -92,9 +92,10 @@ but are not plotted.
     service it follows: the day ending, or for the first trip, the day
     before.
   - During service hours, a feed quiet for longer than the live window says
-    since when it has been quiet and that the feed may have stopped. The
-    silence counts from the first departure at the earliest, so the first
-    trip has the live window to start reporting.
+    since when it has been quiet and that either the operator's feed has
+    stopped or the app's own collection is behind. The silence counts from
+    the first departure at the earliest, so the first trip has the live
+    window to start reporting.
   - A feed still reporting within the live window names neither: a route
     filter left nothing to draw.
   - When the timetable runs no trip that day, does not cover it, or the
