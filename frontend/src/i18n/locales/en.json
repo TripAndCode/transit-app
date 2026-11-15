@@ -1,7 +1,7 @@
 {
   "nav": {
     "model": "Model evaluation",
-    "ask": "Ask",
+    "ask": "Notebook",
     "collapse_sidebar": "Collapse sidebar",
     "expand_sidebar": "Expand sidebar",
     "account_menu": "Account menu",
@@ -87,7 +87,7 @@
       "subtitle": "Check how late each route ran over a period, from the operators' own open data, with the definition and the amount of data behind every figure. Today's trips are there too.",
       "open_dashboard": "Open the dashboard",
       "view_dashboard": "View the dashboard (no sign-in needed)",
-      "login_note": "<login>Sign in</login> to keep your saved views and Ask investigations with your account."
+      "login_note": "<login>Sign in</login> to keep your saved views and notebook investigations with your account."
     },
     "hero_map": {
       "screens": {
@@ -163,8 +163,8 @@
         "body": "The same daily trend chart from Reports, with example days — a rough day still shows clearly against the trailing average around it."
       },
       "ask": {
-        "title": "Ask, get evidence",
-        "body": "The same evidence view Ask shows for a real answer — not a screenshot. Select a stop below to see it."
+        "title": "The notebook, with evidence",
+        "body": "The same evidence view the notebook shows for each result — not a screenshot. Select a stop below to see it."
       },
       "sample_caption": "Sample data · fictional {{route}}"
     }
@@ -184,8 +184,8 @@
       "body": "Every observed trip is listed here — open one to see its live progress."
     },
     "ask": {
-      "title": "Search and ask",
-      "body": "Find routes, reports and screens from here. The same field takes you to Ask, which answers common questions about delay with a table or chart."
+      "title": "Search and open the notebook",
+      "body": "Find routes, reports and screens from here. The same field opens the notebook, which holds ready-made analyses of delay as tables and charts."
     }
   },
   "forecast": {
@@ -666,7 +666,7 @@
     },
     "linked_providers": "Linked providers",
     "llm_key": {
-      "title": "AI key for Ask",
+      "title": "AI key for notebook follow-ups",
       "status_shared": "Using the shared free tier",
       "status_own": "Using your own {{provider}} key · ****{{suffix}}",
       "input_label": "API key",
@@ -686,7 +686,7 @@
       "export": "Download my data",
       "delete": "Delete account",
       "delete_title": "Delete your account?",
-      "delete_body": "This permanently deletes your account, sign-in history, saved filters, Ask conversations, AI key and usage history. It can't be undone.",
+      "delete_body": "This permanently deletes your account, sign-in history, saved filters, notebook investigations, AI key and usage history. It can't be undone.",
       "delete_confirm_label": "Type {{email}} to confirm",
       "delete_confirm": "Delete permanently",
       "error_last_admin": "You're the only admin, so this account can't be deleted. Make someone else an admin first.",
@@ -968,7 +968,7 @@
         "sql": "SQL only",
         "llm": "LLM"
       },
-      "disclosure_title": "Where this answer comes from",
+      "disclosure_title": "Where this result comes from",
       "disclosure_route": "Route",
       "disclosure_conditions": "Conditions",
       "disclosure_aggregation": "Aggregation",
@@ -987,11 +987,11 @@
       "retry": "Try again",
       "export_snapshot": "Download result (JSON)",
       "export_csv": "Table {{index}} CSV",
-      "export_notice": "Exports the selected question and stored answers, without recalculating. Files may contain conversation text; check before sharing. JSON cannot yet be reopened in the app.",
+      "export_notice": "Exports the selected step and its stored result, without recalculating. Files may contain conversation text; check before sharing. JSON cannot yet be reopened in the app.",
       "export_failed": "Could not create the download. Please try again.",
       "title": "Investigation",
-      "step_count_one": "{{count}} question",
-      "step_count_other": "{{count}} questions",
+      "step_count_one": "{{count}} step",
+      "step_count_other": "{{count}} steps",
       "steps": "Investigation steps",
       "retained_result": "Retained result",
       "historical": "Viewing an earlier result. Follow-up questions use the latest result.",
@@ -999,13 +999,13 @@
       "saved_result_notice": "Previously returned results — opening a step does not fetch new data. The filters above apply to your next analysis, not necessarily this result.",
       "full_log": "Full conversation",
       "new_analysis_first": "Start an analysis",
-      "no_questions": "This investigation has no questions yet. Pick one to start."
+      "no_questions": "This investigation has no steps yet. Pick an analysis card to start."
     },
     "thinking": "Thinking...",
     "dock": {
       "run": "Run",
-      "chip_strip_aria": "Question picker",
-      "chip_strip_idle_hint": "Click to pick a question",
+      "chip_strip_aria": "Analysis picker",
+      "chip_strip_idle_hint": "Click to pick an analysis",
       "required_marker": "*",
       "running": "Running..."
     },
@@ -1066,7 +1066,7 @@
         "route_stats": "Route stats",
         "route_meta": "Route info",
         "describe_data": "Data info",
-        "capabilities": "What I can answer"
+        "capabilities": "What the notebook covers"
       },
       "values": {
         "avg_delay": "Average delay",
@@ -1180,10 +1180,10 @@
       }
     },
     "landing": {
-      "header_title": "Pick a common question to look into",
-      "header_subtitle": "Pick a route or stop and get an answer right away",
-      "cards_title": "You can ask things like",
-      "pills_title": "More questions"
+      "header_title": "Pick a ready-made analysis",
+      "header_subtitle": "Pick a route or stop and see the result right away",
+      "cards_title": "Run at once",
+      "pills_title": "More analyses"
     }
   },
   "reports": {
@@ -2265,7 +2265,7 @@
     "nav_why_sublabel": "What the data can and can't explain",
     "nav_compare_sublabel": "Weekdays against weekends and holidays, and agencies against each other",
     "nav_reports_sublabel": "Documents to hand to someone",
-    "nav_ask_sublabel": "Ask about routes, stops, and time bands",
+    "nav_ask_sublabel": "Ready-made analyses, saved and exportable",
     "group": {
       "recent": "Recent",
       "nav": "Go to",

@@ -76,7 +76,7 @@ question is how the period went.
 | **Compare** (比較) | Weekday against weekend, and operator against operator. |
 | **Live** (ライブ) | What is running today? A check, not a dispatch console. |
 | **Reports** (レポート) | The material: the period summary and the council report, plus the delay record as a reference. |
-| **Ask** (質問) | Ready-made questions answered as tables and charts. |
+| **Notebook** (調査ノート) | Ready-made analyses run as tables and charts, kept as saved threads with exports and per-stop evidence. Not a free-text Q&A; an optional AI follow-up on a result exists where enabled. |
 
 Admins also see the admin pages and **Model evaluation**.
 

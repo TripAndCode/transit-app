@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MoreHorizontal,
+  NotebookPen,
   Shield,
   X,
 } from "lucide-react";
@@ -59,6 +60,8 @@ const COLLAPSED_PREF_KEY = "transit.sidebarCollapsed";
  *  in sync by that rule's comment pointing back here, since a plain
  *  TS constant has no way to reach a separate stylesheet. */
 export const MOBILE_TABBAR_HEIGHT_PX = 56;
+
+const TAB_LABEL_STYLE: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" };
 
 /** Read the persisted collapse preference. No-ops to `false` (expanded) if
  *  localStorage is unavailable or unset — matches theme.ts's fail-open shape. */
@@ -452,7 +455,7 @@ export function Sidebar() {
                 style={tabItemStyle}
               >
                 <item.Icon size={20} strokeWidth={2} aria-hidden="true" />
-                <span>{t(item.labelKey)}</span>
+                <span style={TAB_LABEL_STYLE}>{t(item.labelKey)}</span>
               </PendingNavLink>
             ))}
           {agencyId && (
@@ -462,8 +465,8 @@ export function Sidebar() {
               onFocus={() => prefetchRouteChunk("ask")}
               style={tabItemStyle}
             >
-              <HelpCircle size={20} strokeWidth={2} aria-hidden="true" />
-              <span>{t("nav.ask")}</span>
+              <NotebookPen size={20} strokeWidth={2} aria-hidden="true" />
+              <span style={TAB_LABEL_STYLE}>{t("nav.ask")}</span>
             </PendingNavLink>
           )}
           <button
@@ -476,7 +479,7 @@ export function Sidebar() {
             onClick={() => setMoreOpen(true)}
           >
             <MoreHorizontal size={20} strokeWidth={2} aria-hidden="true" />
-            <span>{t("nav.more")}</span>
+            <span style={TAB_LABEL_STYLE}>{t("nav.more")}</span>
           </button>
         </nav>
 
