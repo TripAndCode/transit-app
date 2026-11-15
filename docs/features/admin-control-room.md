@@ -154,6 +154,13 @@ fails if any other route's declared `response_model` schema has a grade, or if
 that route stops requiring an admin. It stays admin-only
 until operators have had the methodology's advance notice and right of reply.
 
+Below the other figures, the newest month states the daily GTFS-RT validator's
+counts: the days validated of the month's window, the days the validator could
+not run, and each rule that fired with its occurrences, polls and days. A month
+with no validated day reads not validated, never no findings. The counts are
+recorded, never graded. They come from `rt_validation_daily`, which the ML
+store ingest fills (`docs/features/ml-forecast.md`).
+
 ### RT field-coverage verdicts
 
 The drawer's RT field diagnostics show the agency's verdicts in
@@ -328,12 +335,12 @@ signed-out visitors; it is the recovery switch when OAuth is down (see
 ## Snapshots
 
 No page of its own: an admin takes a snapshot from the Export menu of the
-council report or the Routes table, or by printing the council report, and
-lists or deletes them through the API ([snapshots.md](snapshots.md)).
+council report, the Routes table or a route's page, or by printing the council
+report, and lists or deletes them through the API ([snapshots.md](snapshots.md)).
 
 Endpoints:
-- `POST /api/admin/snapshots` — compute the named screen's response for the
-  given scope and store it; answers the id and its `/s/{id}` page.
+- `POST /api/admin/snapshots` — compute the named screen's responses for the
+  given scope and store them; answers the id and its `/s/{id}` page.
 - `GET /api/admin/snapshots` — newest first, without the payloads.
 - `DELETE /api/admin/snapshots/{id}` — remove one for good.
 

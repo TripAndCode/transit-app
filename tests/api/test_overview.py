@@ -19,6 +19,14 @@ from tests.conftest import _test_pool
 _NONE = (None, 0, 0)
 
 
+@pytest.fixture(autouse=True)
+def _time_bands_read_the_clickhouse_grain(monkeypatch):
+    """These tests seed ``updates`` and pin the ClickHouse grain a time band
+    falls back to. tests/pipeline/test_route_band_daily.py covers the band
+    aggregates that serve it otherwise."""
+    monkeypatch.setattr("pipeline.reports.overview._band_aggregate_answers", lambda ctx: False)
+
+
 def _split(weekday=_NONE, saturday=_NONE, sunday_holiday=_NONE, *, weekend_holiday=None) -> list[dict]:
     """The ``service_split`` payload, each bucket given as ``(avg_min, days, samples)``.
 

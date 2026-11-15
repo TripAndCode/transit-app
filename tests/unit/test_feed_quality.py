@@ -1,12 +1,13 @@
 """The monthly feed-quality scorecard's shaping and month planning, without a database."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
 from pipeline import feed_quality
 from pipeline.feed_quality import (
     COLUMNS,
+    ValidationDay,
     last_counted_day,
     month_bounds,
     month_through,
@@ -14,6 +15,8 @@ from pipeline.feed_quality import (
     plan_months,
     shape,
     through_of,
+    validation_moved,
+    validator_figures,
 )
 from pipeline.reports.comparability import assess
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
@@ -57,6 +60,7 @@ def _shape(**over):
         "raw_samples": 1000,
         "clamp_count": 3,
         "total_rows": 1200,
+        "validation": (),
     }
     return shape(**{**args, **over})
 
@@ -361,3 +365,95 @@ def test_each_day_takes_the_stop_events_filed_under_it_and_a_day_with_only_those
         second: {"stop_time_updates": 0, "stop_id_rows": 0, "stop_events": 3},
     }
     assert feed_quality.with_stop_events(rows, {}, ["stop_time_updates"])[first]["stop_events"] == 0
+
+
+_AT = datetime(2026, 10, 3, 1, 0, tzinfo=timezone.utc)
+_LATER = datetime(2026, 11, 1, 1, 0, tzinfo=timezone.utc)
+
+
+def _rule(rule_id, occurrences, files, severity="ERROR", title=None):
+    return {
+        "rule_id": rule_id,
+        "severity": severity,
+        "title": title or f"{rule_id} title",
+        "occurrences": occurrences,
+        "files_with_rule": files,
+    }
+
+
+def test_a_month_no_summary_reached_reads_not_validated_never_zero_findings():
+    figures = validator_figures(())
+    assert figures == {
+        "validator_ok_days": 0,
+        "validator_failed_days": 0,
+        "validator_files_validated": None,
+        "validator_rules": None,
+        "validator_missing": "not_validated",
+        "validator_ingested_at": None,
+    }
+
+
+def test_days_the_validator_could_not_run_are_counted_but_validate_nothing():
+    figures = validator_figures(
+        (
+            ValidationDay(date(2026, 10, 1), "no_archive", 0, [], _AT),
+            ValidationDay(date(2026, 10, 2), "validator_failed", 0, [], _LATER),
+        )
+    )
+    assert figures["validator_ok_days"] == 0
+    assert figures["validator_failed_days"] == 2
+    assert figures["validator_files_validated"] is None
+    assert figures["validator_rules"] is None
+    assert figures["validator_missing"] == "not_validated"
+    assert figures["validator_ingested_at"] == _LATER
+
+
+def test_each_rule_sums_over_the_ok_days_with_the_days_it_fired_on():
+    figures = validator_figures(
+        (
+            ValidationDay(date(2026, 10, 1), "ok", 58, [_rule("E022", 120, 58), _rule("W001", 3, 2, "WARNING")], _AT),
+            ValidationDay(date(2026, 10, 2), "ok", 60, [_rule("E022", 100, 50, title="renamed")], _LATER),
+            ValidationDay(date(2026, 10, 3), "ok", 59, [], _AT),
+            ValidationDay(date(2026, 10, 4), "no_timetable", 0, [], _AT),
+        )
+    )
+    assert figures["validator_ok_days"] == 3
+    assert figures["validator_failed_days"] == 1
+    assert figures["validator_files_validated"] == 177
+    assert figures["validator_missing"] is None
+    assert figures["validator_ingested_at"] == _LATER
+    assert figures["validator_rules"] == {
+        "E022": {"severity": "ERROR", "title": "renamed", "occurrences": 220, "files_with_rule": 108, "days": 2},
+        "W001": {"severity": "WARNING", "title": "W001 title", "occurrences": 3, "files_with_rule": 2, "days": 1},
+    }
+
+
+def test_a_validated_month_where_no_rule_fired_states_an_empty_map():
+    figures = validator_figures((ValidationDay(date(2026, 10, 1), "ok", 58, [], _AT),))
+    assert figures["validator_rules"] == {}
+    assert figures["validator_missing"] is None
+
+
+def test_a_row_carries_the_validator_figures_of_its_window():
+    row = _shape(validation=(ValidationDay(date(2026, 10, 1), "ok", 58, [_rule("E022", 1, 1)], _AT),))
+    assert row["validator_ok_days"] == 1
+    assert row["validator_rules"]["E022"]["occurrences"] == 1
+
+
+def test_a_month_whose_summaries_moved_since_its_row_was_built_is_rebuilt():
+    stored = _spans({date(2026, 9, 1): date(2026, 9, 30), _OCT: date(2026, 10, 31)})
+    assert plan_months([], stored, stored, validation_moved=[date(2026, 9, 1)]) == (
+        [date(2026, 9, 1)],
+        [date(2026, 9, 1)],
+    )
+    assert plan_months([], stored, stored, validation_moved=[date(2026, 8, 1)]) == ([], [])
+
+
+def test_a_month_moves_when_a_summary_arrives_or_changes_and_not_otherwise():
+    sep, octo = date(2026, 9, 1), _OCT
+    stored = {sep: (30, _AT), octo: (0, None)}
+    assert validation_moved({sep: (30, _AT)}, stored, [sep, octo]) == []
+    assert validation_moved({sep: (30, _LATER)}, stored, [sep, octo]) == [sep]
+    assert validation_moved({sep: (30, _AT), octo: (1, _LATER)}, stored, [sep, octo]) == [octo]
+    # A row built before the validator columns existed records no stamp.
+    assert validation_moved({}, {sep: (None, None)}, [sep]) == [sep]

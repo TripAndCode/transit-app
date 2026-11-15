@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { RouteVariant } from "../../api/types";
 import { formatNumber } from "../../utils/format";
 import { reverseVariant } from "./routeDossier";
+import "../../styles/focusedAnalysis.css";
 
 /** A share as the picker prints it: whole percent, or one decimal below 1%
  *  so a rare variant does not read as 0%. */
@@ -12,9 +13,10 @@ function share(pct: number): string {
 /** Which of a route's stopping patterns the page shows. Each GTFS shape is
  *  one. GTFS direction_id is optional and often empty, and a feed may run
  *  each direction under its own route code, so the variant is what tells a
- *  route's directions apart. Nothing to pick for a route with one. */
+ *  route's directions apart. Nothing to pick for a route with one. Without
+ *  `onPick` it only names the variant shown, as a frozen page does. */
 export function RouteVariantPicker({ variants, shown, onPick }: {
-  variants: RouteVariant[]; shown: string | null; onPick: (shapeId: string) => void;
+  variants: RouteVariant[]; shown: string | null; onPick?: (shapeId: string) => void;
 }) {
   const { t } = useTranslation("design");
   const current = variants.find((v) => v.shape_id === shown);
@@ -24,7 +26,7 @@ export function RouteVariantPicker({ variants, shown, onPick }: {
     <div className="route-variant">
       <label>
         {t("variant")}
-        <select value={current.shape_id} onChange={(e) => onPick(e.target.value)}>
+        <select value={current.shape_id} disabled={!onPick} onChange={(e) => onPick?.(e.target.value)}>
           {variants.map((v) => (
             <option key={v.shape_id} value={v.shape_id}>
               {v.samples === 0
@@ -39,7 +41,7 @@ export function RouteVariantPicker({ variants, shown, onPick }: {
           ))}
         </select>
       </label>
-      {reverse && <button type="button" className="btn btn--secondary btn--sm" onClick={() => onPick(reverse.shape_id)}>{t("reverseDirection")}</button>}
+      {reverse && onPick && <button type="button" className="btn btn--secondary btn--sm" onClick={() => onPick(reverse.shape_id)}>{t("reverseDirection")}</button>}
       <p className="focus-muted">{current.samples === 0 ? t("variantUnobserved") : t("variantShare", { share: share(current.share_pct) })}</p>
     </div>
   );

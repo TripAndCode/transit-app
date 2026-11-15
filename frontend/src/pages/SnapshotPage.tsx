@@ -13,6 +13,7 @@ import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionM
 import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LanguageToggle } from "../components/LanguageToggle";
+import { RouteLabel } from "../components/RouteLabel";
 import { ReportTable } from "../components/ReportTable";
 import { SkeletonTable } from "../components/Skeleton";
 import { CouncilSummaryBlock } from "../components/analysis/CouncilSummaryBlock";
@@ -32,6 +33,7 @@ import { contentLocale } from "../i18n/contentLocale";
 import { useDocumentLocale } from "../i18n/useDocumentLocale";
 import { routeTableSortDirection, type RouteTableView } from "../routes/destinations";
 import { formatDuration } from "../utils/format";
+import { RoutePageSnapshot } from "./RoutePageSnapshot";
 import "./SnapshotPage.css";
 
 const JST_CLOCK = new Intl.DateTimeFormat("en-GB", { timeZone: JST_TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -115,8 +117,12 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
   const { t, i18n } = useTranslation();
   const locale = contentLocale(i18n);
   const reports = snapshot.payloads.report ?? {};
+  const pages = snapshot.payloads.route_page ?? {};
   // Both languages are stored; one missing would still leave the figures.
   const report = reports[locale] ?? reports.ja ?? reports.en;
+  const routePage = snapshot.screen === "route_page" ? (pages[locale] ?? pages.ja ?? pages.en) : undefined;
+  const routeLists = snapshot.payloads.route_lists;
+  const pageRoute = routePage ? (storedRoute(snapshot.params) ?? routePage.shape.route) : null;
   const credit = snapshot.payloads.credit?.[locale] ?? null;
   const names = buildRouteNames(snapshot.payloads.routes ?? [], t, { agencyName: snapshot.agency_name });
   const comparable = report?.report_type === "route_table" || report?.report_type === "council_summary";
@@ -135,7 +141,9 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
         </p>
         <p>{t("snapshot.frozen_note")}</p>
       </div>
-      <h1 className="snapshot-page__title">{snapshot.title ?? screenTitle(snapshot.screen, t)}</h1>
+      <h1 className="snapshot-page__title">
+        {snapshot.title ?? (pageRoute != null ? <RouteLabel code={pageRoute} names={names} /> : screenTitle(snapshot.screen, t))}
+      </h1>
       <ScopeStatement snapshot={snapshot} report={report} names={names} />
       {snapshot.note && <p className="snapshot-page__note">{snapshot.note}</p>}
       {comparable && (
@@ -156,7 +164,20 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
           )}
         </section>
       )}
-      {report?.report_type === "route_table" ? (
+      {routePage && routeLists && pageRoute != null ? (
+        <RoutePageSnapshot
+          page={routePage}
+          lists={routeLists}
+          concentration={snapshot.payloads.concentration}
+          route={pageRoute}
+          from={String(snapshot.params.from ?? "")}
+          to={String(snapshot.params.to ?? "")}
+          timeBand={String(snapshot.params.time_band ?? "all")}
+          names={names}
+          tier={tier}
+          tiers={tiers}
+        />
+      ) : report?.report_type === "route_table" ? (
         <RouteTableSnapshot
           report={report}
           names={names}
@@ -184,8 +205,16 @@ function SnapshotBody({ snapshot }: { snapshot: Snapshot }) {
   );
 }
 
+/** The one route a route page's stored scope names. */
+function storedRoute(params: Record<string, unknown>): string | null {
+  const routes = params.routes;
+  return Array.isArray(routes) && routes.length === 1 ? String(routes[0]) : null;
+}
+
 /** The live screen's scope sentence, read-only: every condition the figures
- *  were computed under, one the screen's data did not use struck through. */
+ *  were computed under, one the screen's data did not use struck through. A
+ *  route page's panels each honour their own part of the scope, so its
+ *  sentence strikes nothing through. */
 function ScopeStatement({ snapshot, report, names }: { snapshot: Snapshot; report: ReportResponse | undefined; names: RouteNames }) {
   const { t } = useTranslation();
   const scope = storedScope(snapshot.params, report);

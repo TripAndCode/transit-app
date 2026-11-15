@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Idempotent local disk reclamation for the collector's spool of RT, VP
-# (VehiclePositions) and static archives.
+# (VehiclePositions) and static archives. The spool's horizons are the
+# retention table in docs/ops-monitoring-deploy.md.
 #
 # prune.sh already deletes local archives, but only once two conditions both
 # hold: RETENTION_DAYS (default 90) has passed, AND sync-r2.sh's global

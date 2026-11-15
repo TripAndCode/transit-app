@@ -1,8 +1,10 @@
 """Parity oracle: the Postgres builders the ClickHouse-computed aggregates replaced.
 
 Each SQL below is the builder pipeline/analyze.py ran for that table before it
-moved to ClickHouse, copied verbatim. Never edit one to make a parity test pass:
-a parity test asks whether the ClickHouse build reproduces exactly this.
+moved to ClickHouse, copied verbatim, but for agg_route_band_daily, which was
+built in ClickHouse from the start: its SQL states the same rows in the legacy
+builders' terms. Never edit one to make a parity test pass: a parity test asks
+whether the ClickHouse build reproduces exactly this.
 
 These builders take the hour and band from a TIME `scheduled_time`, which holds
 no time past 24:00, so they leave every departure at 24:00 or later out of
@@ -231,6 +233,15 @@ LEGACY_SQL = {
                  AND sst.stop_sequence = d.stop_sequence
                 GROUP BY d.route_code, sst.stop_id, d.date,
                          COALESCE(d.service_type, ''), {band_case}
+            """,
+    "agg_route_band_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE scheduled_time IS NOT NULL)
+                SELECT
+                    %(agency_id)s, d.date, COALESCE(d.route_code, '') AS route_code,
+                    {band_case} AS time_band,
+                    COUNT(*), SUM(d.dep_delay)::bigint, SUM(GREATEST(d.dep_delay, 0))::bigint
+                FROM deduped d
+                GROUP BY d.date, COALESCE(d.route_code, ''), {band_case}
             """,
     "agg_route_hour_dow": """
             WITH deduped AS (

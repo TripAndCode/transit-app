@@ -64,9 +64,9 @@ def _route_rows(where: UpdatesFilter, stamp: Stamp, trip_filter_sql: str = "") -
     one (`pipeline.db.stop_event_filter_ch`), filed under *stamp*
     (`pipeline.static_archive.observation_rows`), as the FROM clause both
     shape dedups read. Refitting can give a row with no route this one, so a
-    REFIT read also reads those and tests the route on the filed row; any
+    read that refiles (Stamp.refiles) also reads those and tests the route on the filed row; any
     other tests it on the row as stored."""
-    if stamp is not Stamp.REFIT:
+    if not stamp.refiles:
         raw = f"u.route_code = {{route:String}} {trip_filter_sql} AND {where.raw}"
         return observation_rows(stop_event_filter_ch(raw), stamp, live_form=True)
     raw = f"(u.route_code = {{route:String}} OR u.route_code IS NULL) {trip_filter_sql} AND {where.raw}"
@@ -278,7 +278,7 @@ async def compute_route_shape(
     # all-time history, and an unbounded scan of the route's ENTIRE history
     # would pay for a full-table scan to return only a small number of rows.
     filed = await filing(conn, ch, agency_id, ctx.from_date, ctx.to_date)
-    where = band_candidates(updates_filter_ch(ctx, refit=filed.stamp is Stamp.REFIT), ctx.time_band, filed)
+    where = band_candidates(updates_filter_ch(ctx, refit=filed.stamp.refiles), ctx.time_band, filed)
     ch_params = {**where.params, **filed.params}
     # An argMax-based dedup, as pipeline.db.build_dedup_ch_sql's: only one
     # non-key column (dep_delay) is read off the winning row, so a single argMax

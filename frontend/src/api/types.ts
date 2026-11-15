@@ -681,6 +681,11 @@ export type RouteReferences = Omit<OverviewHeadlineReference, "avg_min" | "delta
 /** Discriminated on `report_type`: each report's `rows` element type is
  *  derived from what api/routers/reports.py actually returns for it, so a
  *  consumer narrows on `report_type` instead of casting `rows` blind. */
+/** A report's figures without its prose, as a route page snapshot stores the
+ *  agency's route lists: written in no language, so kept once. */
+export type ReportFigures = WithoutProse<ReportResponse>;
+type WithoutProse<R> = R extends unknown ? Omit<R, "text"> : never;
+
 export type ReportResponse =
   | ReportEnvelope<"route_table", RouteTableRow>
   | ReportEnvelope<"ranking" | "ranking_best", RankingRow>

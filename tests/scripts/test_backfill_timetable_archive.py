@@ -682,3 +682,86 @@ def test_a_copy_failing_in_the_target_reports_its_own_error_and_the_states_are_s
     assert f"agency {agency_id}: stopped, division by zero" in capsys.readouterr().err
     assert static_headways.current_contents(pg_conn, agency_id) == {new}
     assert _readers_cleared(pg_conn, agency_id, states)
+
+
+def _calendar_zip(folder, name: str, stop: str = "SA", removal: str = "20260504") -> str:
+    """A timetable zip *name* whose T1 runs on weekdays but *removal*, and on a Saturday addition."""
+    path = _timetable(folder, name, stop, last="20260601")
+    with zipfile.ZipFile(path, "a") as zf:
+        zf.writestr("calendar_dates.txt", f"service_id,date,exception_type\nWD,{removal},2\nWD,20260509,1\n")
+    return path
+
+
+def _archived_before_calendars(tmp_path, pg_conn, agency_id, ch_client):
+    """timetable_old, kept as a zip, loaded and then replaced by timetable_new,
+    which archives it, its calendar then dropped from the archive as if kept
+    before calendars were. The static dir, timetable_old's content, and the
+    calendar the archive had kept for it."""
+    static_dir = tmp_path / "static"
+    old = _calendar_zip(static_dir / str(agency_id), "timetable_old")
+    load_static(old, agency_id, pg_conn, ch_client=ch_client)
+    load_static(
+        _timetable(tmp_path / "loaded", "timetable_new", "SB", first="20260602"),
+        agency_id,
+        pg_conn,
+        ch_client=ch_client,
+    )
+    content = _mapped_contents(ch_client, agency_id)["timetable_old"]
+    kept = static_archive.archived_calendar(ch_client, agency_id, "timetable_old", content)
+    assert kept is not None
+    ch_client.command(f"TRUNCATE TABLE {static_archive.CALENDAR}")
+    return static_dir, content, kept
+
+
+def _run_calendars(scratch, static_dir, *extra, agency=None) -> int:
+    chosen = [] if agency is None else ["--agency", str(agency)]
+    return backfill.main(
+        ["--calendars", *chosen, "--scratch-database-url", scratch, "--static-dir", str(static_dir), *extra]
+    )
+
+
+def test_the_calendars_apply_archives_each_mapped_names_calendar_from_its_kept_zip(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    static_dir, content, kept = _archived_before_calendars(tmp_path, pg_conn, agency_id, ch_client)
+    before = _archive_rows(ch_client, agency_id)
+    assert _run_calendars(scratch_url, static_dir, "--apply", agency=agency_id) == 0
+    assert f"archived timetable_old's calendar as {content}" in capsys.readouterr().out
+    assert static_archive.archived_calendar(ch_client, agency_id, "timetable_old", content) == kept
+    assert _archive_rows(ch_client, agency_id) == before
+    assert _run_calendars(scratch_url, static_dir, agency=agency_id) == 0
+    out = capsys.readouterr().out
+    assert f"agency {agency_id}: 1 mapped name(s): 0 to archive, 1 kept" in out
+    assert "nothing to archive" in out
+
+
+def test_the_calendars_dry_run_lists_the_names_and_writes_nothing(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    static_dir, _content, _kept = _archived_before_calendars(tmp_path, pg_conn, agency_id, ch_client)
+    assert _run_calendars(scratch_url, static_dir) == 0
+    out = capsys.readouterr().out
+    assert f"agency {agency_id}: 1 mapped name(s): 1 to archive, 0 kept" in out
+    assert "dry run: 1 calendar(s) would be archived; --apply archives them" in out
+    assert static_archive.calendar_versions(ch_client, agency_id) == set()
+
+
+def test_a_zip_that_does_not_reproduce_its_names_content_archives_no_calendar(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    static_dir, content, _kept = _archived_before_calendars(tmp_path, pg_conn, agency_id, ch_client)
+    _calendar_zip(static_dir / str(agency_id), "timetable_old", stop="SB")
+    assert _run_calendars(scratch_url, static_dir, "--apply", agency=agency_id) == 1
+    assert f"does not reproduce {content}" in capsys.readouterr().out
+    assert static_archive.calendar_versions(ch_client, agency_id) == set()
+
+
+def test_a_name_without_a_kept_zip_is_reported_and_keeps_no_calendar(
+    tmp_path, pg_conn, agency_id, ch_client, scratch_url, capsys
+):
+    static_dir, content, _kept = _archived_before_calendars(tmp_path, pg_conn, agency_id, ch_client)
+    (static_dir / str(agency_id) / "timetable_old.zip").unlink()
+    assert _run_calendars(scratch_url, static_dir, "--apply", agency=agency_id) == 0
+    out = capsys.readouterr().out
+    assert f"no kept zip {content}: timetable_old" in out
+    assert static_archive.calendar_versions(ch_client, agency_id) == set()

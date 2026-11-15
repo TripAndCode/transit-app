@@ -267,6 +267,12 @@ async def fetch_live_ml_agencies(conn: asyncpg.Connection) -> set[int]:
     return {row["agency_id"] for row in rows}
 
 
+#: The most rows a report lists in one response (the client's
+#: ``REPORT_ROWS_MAX`` in ``frontend/src/api/hooks.ts``). A route's page asks
+#: the agency's route lists at this length and reads a shorter list as
+#: complete, so a list stored for its snapshot is asked at the same length.
+REPORT_ROWS_MAX = 500
+
 # Static metadata for the listing endpoint. Ordered for sidebar display.
 _REPORT_TYPES = (
     "route_table",
@@ -743,6 +749,27 @@ async def get_performance_standards(
     populated config table joined against other reports' own compute
     functions, not a single `agg_*` table scan.
     """
+    return await render_performance_standards(
+        agency_id, ctx, conn, ch, locale=locale, route=route, preset=preset, late=late, early=early
+    )
+
+
+async def render_performance_standards(
+    agency_id: int,
+    ctx: RangeCtx,
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    *,
+    locale: str,
+    route: str | None = None,
+    preset: str | None = None,
+    late: int | None = None,
+    early: EarlyTolerance = None,
+) -> PerformanceStandardsResponse:
+    """``GET /performance_standards``'s whole computation, for a caller that
+    resolved the request's parameters itself: a route page's snapshot stores
+    exactly what the page's targets were served. Each argument means what the
+    endpoint's parameter of the same name means."""
     early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
     standards = await read_standards(conn, agency_id, route)
     judges_on_time = any(r["metric_type"] == "on_time_pct" for r in standards)
@@ -1459,7 +1486,7 @@ def _csv_response(
 async def get_report(
     request: Request,
     report_type: str,
-    limit: int | None = Query(default=None, ge=1, le=500),
+    limit: int | None = Query(default=None, ge=1, le=REPORT_ROWS_MAX),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     preset: str | None = Query(
         default=None,

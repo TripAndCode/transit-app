@@ -805,7 +805,7 @@ class UpdatesFilter(NamedTuple):
     (`pipeline.static_archive.observation_rows`) tests apart.
 
     *raw* is tested on each row as ingest stored it, and *filed* on the filed
-    row ('' for no test). Only a read that refits rows (Stamp.REFIT) can
+    row ('' for no test). Only a read that refiles rows (Stamp.refiles) can
     rewrite the scheduled time and the route, so only it splits them: its
     *filed* tests the time band and the route, and its *raw* keeps both a
     row of the route and a row with no route, which filing may give it. Any
@@ -837,8 +837,8 @@ def updates_filter_ch(ctx: RangeCtx, *, refit: bool = False) -> UpdatesFilter:
             part.append(frag)
             params.update(p)
     if ctx.routes:
-        raw.append("(route_code IN {ch_routes:Array(String)} OR route_code IS NULL)")
-        filed.append("route_code IN {ch_routes:Array(String)}")
+        raw.append("(u.route_code IN {ch_routes:Array(String)} OR u.route_code IS NULL)")
+        filed.append("u.route_code IN {ch_routes:Array(String)}")
         params["ch_routes"] = list(ctx.routes)
     return UpdatesFilter(" AND ".join(raw), " AND ".join(filed), params)
 

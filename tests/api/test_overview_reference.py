@@ -169,12 +169,13 @@ async def test_a_time_band_with_routes_has_no_aggregate_to_read(aconn, aagency_i
 @pytest.mark.parametrize("band", ["morning", "late_night"])
 @pytest.mark.asyncio
 async def test_a_time_band_reference_matches_the_live_headline_over_its_window(
-    pg_conn, agency_id, aconn, ch_client, ch_async_client, band
+    pg_conn, agency_id, aconn, ch_client, ch_async_client, band, monkeypatch
 ):
     """Under a time band the reference reads ``agg_hour_daily`` and the
-    headline the live scan; analyze builds the one from the rows the other
+    headline here the live scan; analyze builds the one from the rows the other
     reads, so both give the same figure for the same window. A departure at
     24:30 on the service day's clock is 00:30, in the late-night band."""
+    monkeypatch.setattr("pipeline.reports.overview._band_aggregate_answers", lambda ctx: False)
     rows = []
     for i, day in enumerate(_days(REF_FROM, REF_TO)):
         stamp = datetime.combine(day, datetime.min.time())

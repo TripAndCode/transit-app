@@ -82,6 +82,18 @@ CREATE TABLE IF NOT EXISTS agg_hour_daily (
 PARTITION BY (agency_id, toYYYYMM(date))
 ORDER BY (agency_id, date, hour);
 
+CREATE TABLE IF NOT EXISTS agg_route_band_daily (
+    agency_id     Int32,
+    date          Date,
+    route_code    String,
+    time_band     String,
+    samples       Int32,
+    sum_delay_sec Int64,
+    sum_late_sec  Int64
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, date, route_code, time_band);
+
 CREATE TABLE IF NOT EXISTS agg_stop_daily (
     agency_id    Int32,
     stop_id      String,
@@ -291,3 +303,90 @@ CREATE TABLE IF NOT EXISTS static_version_spans (
     recorded_at       DateTime64(3, 'UTC')
 ) ENGINE = MergeTree
 ORDER BY (agency_id, static_version_id, recorded_at);
+
+-- The `updates` rows of each service date that analyze read refiled
+-- (pipeline.static_archive.Stamp.REFIT), written once by pipeline.refiled so
+-- a read of the date takes them in place of joining the schedule archive
+-- again. Each row carries `updates`' columns as stored, which a read's
+-- predicates test, and the filed_ columns REFIT gives it: the service date
+-- it is filed under, the version name in force there, and that version's
+-- schedule and route. A date is written whole under one build, and a read
+-- takes only the build updates_filed_dates names for it.
+CREATE TABLE IF NOT EXISTS updates_filed (
+    agency_id                  UInt16,
+    captured_at                DateTime64(0, 'UTC'),
+    file_name                  LowCardinality(String),
+    trip_id                    LowCardinality(String),
+    service_type               LowCardinality(Nullable(String)),
+    scheduled_time             LowCardinality(Nullable(String)),
+    route_code                 LowCardinality(Nullable(String)),
+    stop_sequence              UInt16,
+    dep_delay                  Nullable(Int32),
+    scheduled_sec              Nullable(Int32),
+    stop_id                    LowCardinality(Nullable(String)),
+    arr_delay                  Nullable(Int32),
+    schedule_relationship_trip Nullable(UInt8),
+    schedule_relationship_stop Nullable(UInt8),
+    feed_timestamp             Nullable(UInt64),
+    static_version_id          LowCardinality(Nullable(String)),
+    filed_date                 Date,
+    filed_static_version_id    LowCardinality(Nullable(String)),
+    filed_service_type         LowCardinality(Nullable(String)),
+    filed_scheduled_time       LowCardinality(Nullable(String)),
+    filed_scheduled_sec        Nullable(Int32),
+    filed_route_code           LowCardinality(Nullable(String)),
+    build                      LowCardinality(String)
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(filed_date))
+ORDER BY (agency_id, filed_date, captured_at, trip_id, stop_sequence);
+
+-- What each date's rows in updates_filed were filed against, one row per
+-- write. The latest built_at is the one in force, and an empty build writes
+-- the date off. A read checks it against the filing it would make now
+-- (pipeline.refiled.valid_builds): the filing rules it was written under
+-- (pipeline.refiled.RULES), the version and content in force on the
+-- date, the content each version name on the date's rows mapped to, and how
+-- many rows `updates` files under the date.
+CREATE TABLE IF NOT EXISTS updates_filed_dates (
+    agency_id         UInt16,
+    filed_date        Date,
+    build             String,
+    static_version_id String,
+    content_hash      String,
+    stamped           Map(String, String),
+    source_rows       UInt64,
+    rules             String,
+    -- The server's clock, so writers on several hosts order by one.
+    built_at          DateTime64(3, 'UTC') DEFAULT now64(3)
+) ENGINE = MergeTree
+ORDER BY (agency_id, filed_date, built_at);
+
+-- Each kept timetable's calendar as the loader stored it: its static_calendar
+-- rows (kind 'calendar') and static_calendar_dates rows (kind
+-- 'calendar_dates'), under the version name it was loaded as and its content
+-- (pipeline.static_archive.archive_calendar), with a digest of the rows to
+-- tell a changed calendar from the kept one. The content key does not cover
+-- the calendar, so the name tells apart two calendars of one content. A
+-- calendar row's start and end dates are ISO text, since a feed's open end is
+-- past Date32. A calendar_dates row's date is the feed's raw text, as loaded.
+CREATE TABLE IF NOT EXISTS static_calendar_archive (
+    agency_id         Int32,
+    static_version_id String,
+    content_hash      String,
+    calendar_digest   String,
+    kind              Enum8('calendar' = 1, 'calendar_dates' = 2),
+    service_id        String,
+    monday            Bool,
+    tuesday           Bool,
+    wednesday         Bool,
+    thursday          Bool,
+    friday            Bool,
+    saturday          Bool,
+    sunday            Bool,
+    start_date        Nullable(String),
+    end_date          Nullable(String),
+    date              Nullable(String),
+    exception_type    Nullable(Int32)
+) ENGINE = MergeTree
+PARTITION BY agency_id
+ORDER BY (agency_id, static_version_id, content_hash, kind, service_id);

@@ -251,7 +251,7 @@ async def _latest_route_observation(
         result = await ch.query(_latest_route_observation_sql(table, Stamp.INGESTED), parameters=params)
         if not result.result_rows:
             filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
-            if filed.stamp is Stamp.REFIT:
+            if filed.stamp.refiles:
                 result = await ch.query(
                     _latest_route_observation_sql(table, filed.stamp), parameters={**params, **filed.params}
                 )
@@ -263,9 +263,9 @@ async def _latest_route_observation(
 def _latest_route_observation_sql(table: str, stamp: Stamp) -> str:
     """The latest capture of the route bound as `route` since `bound` in
     *table*, each poll filed under *stamp*. Refitting can give a poll with no
-    route this one, so a REFIT read also reads those and tests the route on
+    route this one, so a read that refiles (Stamp.refiles) also reads those and tests the route on
     the filed poll."""
-    if stamp is not Stamp.REFIT:
+    if not stamp.refiles:
         return (
             f"SELECT captured_at FROM {checked_table(table)} "
             "WHERE agency_id = {agency_id:UInt16} AND route_code = {route:String} "
@@ -622,6 +622,22 @@ async def route_shape(
     the same fields it shows for the heatmap layer — without them route
     mode would silently drop the pole badge and stop_id footer.
     """
+    return await render_route_shape(conn, ch, agency_id, route, ctx, locale=locale, shape=shape)
+
+
+async def render_route_shape(
+    conn: asyncpg.Connection,
+    ch: AsyncClient,
+    agency_id: int,
+    route: str,
+    ctx: RangeCtx,
+    *,
+    locale: str,
+    shape: str | None = None,
+) -> dict[str, Any]:
+    """``GET /route-shape``'s whole response, for a caller that resolved the
+    request itself: a route page's snapshot stores exactly what the page's
+    delay by stop was served."""
     body = await compute_route_shape(conn, ch, agency_id, str(route), ctx, locale=locale, shape=shape)
     return {**body, "scope_applied": _ROUTE_SHAPE_SCOPE}
 
@@ -1236,11 +1252,11 @@ def _route_rows(day_param: str, stamp: Stamp, table: str, filed_where: str = "")
     withdrawing one (`pipeline.db.stop_event_filter_ch`), filed under the
     service day bound as *day_param*, read from *table*, each poll filed under *stamp*
     (`pipeline.static_archive.observation_rows`), and tested by *filed_where*.
-    Refitting can give a poll with no route this one, so a REFIT read also
+    Refitting can give a poll with no route this one, so a read that refiles also
     reads those and tests the route, and *filed_where*, on the filed poll;
     any other tests them on the poll as stored."""
     on_day = filed_between_ch(f"{{{day_param}:Date}}", f"{{{day_param}:Date}}")
-    if stamp is not Stamp.REFIT:
+    if not stamp.refiles:
         raw = " AND ".join(part for part in ("u.route_code = {route:String}", on_day, filed_where) if part)
         return observation_rows(stop_event_filter_ch(raw), stamp, table, live_form=True)
     raw = f"(u.route_code = {{route:String}} OR u.route_code IS NULL) AND {on_day}"

@@ -4,9 +4,10 @@ The VPS runs a replica of production history and the delay-forecast work on it.
 The replica is rebuilt from R2 and is neither the dev stores nor production:
 writes there are expected, and losing it costs only a re-sync.
 
-R2 holds the only complete history, so the replica is where the forecasting work
-gets one queryable copy of all of it. The baselines and the backtest read their
-cells from it. The first sync replays every archive in R2, which takes hours.
+R2 holds the only complete history, back to the horizons in the retention table
+(`docs/ops-monitoring-deploy.md`, "Data retention"), so the replica is where the
+forecasting work gets one queryable copy of all of it. The baselines and the
+backtest read their cells from it. The first sync replays every archive in R2, which takes hours.
 After that, each nightly run adds only the archives that have become final.
 
 ## What runs
@@ -63,7 +64,7 @@ The sync runs `ingest` and `load_static` only. Nothing here reads `agg_*` yet, s
 
 ## Trimming it
 
-R2 keeps everything, so old history can leave the replica whenever the disk needs it. `updates` is partitioned by UTC month of `captured_at`, so removing one is a metadata operation rather than a rewrite: `ALTER TABLE updates DROP PARTITION 202603` through `clickhouse-client` in the `ml-ch` service. The done-set still lists those archives, so the nightly sync leaves them out. Bringing a removed month back means a replay from scratch, because the replay has to load each timetable version before the days it governs.
+R2 keeps years of history (the retention table in `docs/ops-monitoring-deploy.md`), so old history can leave the replica whenever the disk needs it. `updates` is partitioned by UTC month of `captured_at`, so removing one is a metadata operation rather than a rewrite: `ALTER TABLE updates DROP PARTITION 202603` through `clickhouse-client` in the `ml-ch` service. The done-set still lists those archives, so the nightly sync leaves them out. Bringing a removed month back means a replay from scratch, because the replay has to load each timetable version before the days it governs.
 
 ## GTFS-RT validator sample
 
@@ -253,11 +254,21 @@ number; a week whose document is unchanged is left as it is. A summary that
 cannot be fetched at all is a read failure, not a skipped document. Every weekly
 live scorecard (`evaluations/<run_date>/live.json`, see Live scorecard) goes the
 same way into `ml_live_evaluations`, its own table because a live week can exist
-without a summary, under the same checks bar the summary's own fields. Each of the
-three steps is guarded on its own, so one failing never skips the others.
+without a summary, under the same checks bar the summary's own fields. The daily
+GTFS-RT validator summaries (`validation/<agency_id>/<YYYYMMDD>.json`, written by
+`scripts/rt_validate_sample.py`) go into `rt_validation_daily`
+(`pipeline/rt_validation_ingest.py`), one row per agency and day. Only a key whose
+ETag differs from its stored row's, or that lists none, is fetched. A key naming an
+agency the database does not hold is skipped before it is fetched, and tried again on
+the next run, so an agency added later picks up its history. A summary that cannot
+be trusted is skipped too. The sweep logs one line counting the skips by reason;
+`make ingest-ml` names each untrusted or malformed key and counts the rest. The
+feed-quality scorecard counts the summaries per month. Each of the four steps is
+guarded on its own, so one failing never skips the others.
 
 Locally, nothing runs that sweep. `make ingest-ml` pulls the latest published
-forecast, every evaluation summary and every live scorecard into the database
+forecast, every evaluation summary, every live scorecard and every new or changed
+validator summary into the database
 `.env`'s `DATABASE_URL` names, reading `ML_STORE_*` from the same file (a read-only
 token is enough). Unlike the sweep it exits non-zero on a missing variable, an
 unreadable publish or a failed upsert, and says "no forecast has been published

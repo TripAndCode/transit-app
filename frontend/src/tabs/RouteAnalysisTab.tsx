@@ -5,20 +5,22 @@ import { RouteLabel } from "../components/RouteLabel";
 import { useTranslation } from "react-i18next";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
-import { ScopeRouteContext, useScope, isoDaysBefore } from "../api/scope";
+import { ScopeRouteContext, scopeToQueryString, useScope, isoDaysBefore } from "../api/scope";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
 import { PinRouteButton } from "../components/PinRouteButton";
+import { ExportMenu } from "../components/ExportMenu";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import type { RouteShapeStop } from "../api/types";
 import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
-import { DelayBandLegend, StopChart } from "../components/analysis/StopChart";
+import { RiseHeadline, SelectedStopAside, StopDelayTable, StopDelayTrend } from "../components/analysis/RouteStopDelay";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { RouteVariantPicker } from "../components/analysis/RouteVariantPicker";
-import { initialStop, largestRises, missingStopKey, pickableVariants, previousWindow, windowDays } from "../components/analysis/routeDossier";
+import { initialStop, largestRises, pickableVariants, previousWindow, windowDays } from "../components/analysis/routeDossier";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
 import { scrubMapPositions, type ScrubMapPosition } from "../components/charts/mareyScrub";
 import { timeWindowForBand } from "../components/charts/mareyLayout";
@@ -28,12 +30,11 @@ import { scopeTitle } from "../components/scope/scopePhrases";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
-import { SHARED_TABLE, td, th } from "../components/tableStyles";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import "../styles/focusedAnalysis.css";
 import "./routeAnalysisTab.css";
-import { fixedTenth, formatDateRange, formatNumber } from "../utils/format";
+
 
 // Dynamic, not a static import: MapLibre would otherwise ride into this tab's
 // chunk and download with every route's page. Loaded this way, it arrives
@@ -81,6 +82,7 @@ export function RouteAnalysisTab() {
   const previousShape = query.data?.shape_id ?? (variantParam || null);
   const previous = useRouteShape(id, compare && (variantParam || query.data) ? route : null, prevCtx, previousShape);
   const names = useRouteNames(id);
+  const isAdmin = useIsAdmin();
   // Two plain string keys rather than one JSON-shaped one, so a shared link
   // shows a human-readable stop selection. `stopRouteParam` guards against a
   // stale `stop_seq` matching a different route's stop after the route
@@ -161,6 +163,8 @@ export function RouteAnalysisTab() {
     { header: "observations", value: (s) => s.samples },
     { header: "comparison_mean_minutes", value: (s) => matchedPrevious(s, prevStops) },
   ];
+  const snapshotQuery = new URLSearchParams(scopeToQueryString(ctx));
+  if (variantParam) snapshotQuery.set("shape", variantParam);
   return <div className="focus-page">
     {route && <nav className="focus-breadcrumb" aria-label={t("breadcrumb")}>
       <Link to={withQuery(`/agencies/${id}/routes`, screenQuery(String(id), "routes"))}>{t("routesCrumb")}</Link>
@@ -185,6 +189,9 @@ export function RouteAnalysisTab() {
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
       <button disabled={!query.data?.stops.length || !!query.error} onClick={() => setNotice(t(saveAnalysis(id, scopeTitle(ctx, { t, agencyName: "", routeLabel: names.format }), ctx, compare) ? "saved" : "saveFailed"))}>{t("save")}</button>
+      {/* The page has its own CSV and save, so the menu holds only the
+          snapshot, which only an admin takes. */}
+      {isAdmin && route && <ExportMenu csv={null} showPrint={false} snapshot={{ screen: "route_page", agencyId: id, query: snapshotQuery.toString() }} />}
     </div></header>
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
@@ -205,10 +212,7 @@ export function RouteAnalysisTab() {
           <label><input type="checkbox" checked={compare} onChange={(e) => setParams((old) => { const next = new URLSearchParams(old); if (e.target.checked) next.set("compare", "1"); else next.delete("compare"); return next; })} /> {t("compare")}</label>
         </div>
         <RouteVariantPicker variants={pickableVariants(query.data?.variants ?? [], query.data?.shape_id ?? null, stops)} shown={query.data?.shape_id ?? null} onPick={pickVariant} />
-        {rise && <div className="route-rise">
-          <p className="route-rise__headline">{t("riseHeadline", { from: rise.from.stop_name, to: rise.to.stop_name, min: fixedTenth(rise.increaseMin) })}</p>
-          {nextRise && <p className="focus-muted">{t("riseNext", { from: nextRise.from.stop_name, to: nextRise.to.stop_name, min: fixedTenth(nextRise.increaseMin) })}</p>}
-        </div>}
+        <RiseHeadline rise={rise} nextRise={nextRise} />
         {compare && previous.error && <ErrorBanner error={previous.error} onRetry={() => void previous.refetch()} />}
         {compare && previous.isPending && <p className="focus-muted" role="status">{t("previous", { days: windowDays(ctx.from, ctx.to) })} …</p>}
         {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
@@ -232,10 +236,7 @@ export function RouteAnalysisTab() {
         <div className="focus-split">
           <div>
             {activeTab === "trend" && <div className="focus-tab-panel" role="tabpanel" id={panelId("trend")} aria-labelledby={tabId("trend")}>
-              <div className="focus-actions focus-muted"><span style={{ color: "var(--accent)" }}>― {t("selected")}</span>{compare && <span>┄ {t("previous", { days: windowDays(ctx.from, ctx.to) })}</span>}{rise && <span><span aria-hidden="true" className="route-rise__swatch" /> {t("riseHighlight")}</span>}<span>○ {t("missing")}</span><DelayBandLegend /></div>
-              <p className="focus-muted focus-chart-hint">{t("chartScrollHint", { count: stops.length })}</p>
-              <div className="focus-chart-scroll"><StopChart stops={stops} previous={prevStops} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} highlight={rise ? { from: rise.from.stop_sequence, to: rise.to.stop_sequence } : null} /></div>
-              <p className="focus-muted">{t("selected")} {formatDateRange(ctx.from, ctx.to)}{compare && ` · ${t("previous", { days: windowDays(ctx.from, ctx.to) })} ${formatDateRange(prevCtx.from, prevCtx.to)}`}</p>
+              <StopDelayTrend stops={stops} previous={prevStops} compare={compare} selected={selected?.stop_sequence ?? 0} onSelect={(sequence) => setSelection({ route, sequence })} rise={rise} from={ctx.from} to={ctx.to} />
             </div>}
             {activeTab === "marey" && <div className="focus-tab-panel" role="tabpanel" id={panelId("marey")} aria-labelledby={tabId("marey")}>
               <AsyncSection loading={trips.isPending} error={trips.error} onRetry={() => void trips.refetch()} data={trips.data} hasContent={(d) => d.trips.length > 0} empty={<EmptyState title={t("empty")} />} skeleton={<SkeletonChart height={320} />}>
@@ -248,18 +249,14 @@ export function RouteAnalysisTab() {
               </Suspense>
             </div>}
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
-              <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("stop")}</th><th style={th()}>{t("mean")}</th><th style={th()}>{t("samples")}</th></tr></thead><tbody>
-                {stops.map((s) => <tr key={s.stop_sequence}><td style={td()}>{s.stop_name}</td><td style={td()}>{s.avg_min == null ? t(missingStopKey(s, stops)) : fixedTenth(s.avg_min)}</td><td style={td()}>{formatNumber(s.samples)}</td></tr>)}
-              </tbody></table></div>
+              <StopDelayTable stops={stops} />
             </div>}
             <p className="focus-muted">{t("caveat")}</p>
             {/* A list names a route without its route_id; its own page keeps
                 it, for anyone matching the page against the feed. */}
             <p className="focus-muted focus-route-id">{t("routeId", { id: names.parts.get(route)?.id ?? route })}</p>
           </div>
-          <aside className="focus-aside"><label>{t("selectedStop")}<select style={{ width: "100%", margin: "12px 0" }} value={selected?.stop_sequence ?? ""} onChange={(e) => setSelection({ route, sequence: Number(e.target.value) })}>
-            {stops.map((s) => <option key={s.stop_sequence} value={s.stop_sequence}>{s.stop_name}</option>)}
-          </select></label><p><strong className="num">{selected?.avg_min == null ? "—" : fixedTenth(selected.avg_min)}</strong> {t("minutes")}</p><p>{t("samples")} {formatNumber(selected?.samples ?? 0)}</p></aside>
+          <SelectedStopAside stops={stops} selected={selected} onSelect={(sequence) => setSelection({ route, sequence })} />
         </div>
       </>}
     </AsyncSection>}

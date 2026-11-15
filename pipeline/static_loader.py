@@ -42,7 +42,7 @@ from datetime import date, datetime
 from psycopg2.extras import execute_values
 
 from pipeline import static_archive, static_headways
-from pipeline.planned_trips import capture_before_reload
+from pipeline.planned_trips import WEEKDAY_COLUMNS, capture_before_reload
 from pipeline.route_terminals import load_route_terminals
 from pipeline.static_content import static_parts
 from pipeline.stop_clusters import rebuild_stop_clusters
@@ -50,8 +50,6 @@ from pipeline.timetable_in_force import version_span
 
 logger = logging.getLogger(__name__)
 
-# calendar.txt's weekly flags, Monday first (the order of ``date.weekday()``).
-WEEKDAY_COLUMNS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
 _STATIC_FILE_MAP = [
     ("stops.txt", "static_stops", ["stop_id", "stop_name", "stop_lat", "stop_lon", "stop_code", "platform_code"]),

@@ -209,7 +209,7 @@ history holds the polls the collector pushes, one every
 `ingest_live` sample each poke takes. Oracle also rolls per-day, per-agency
 archive zips and uploads them once a day to S3-compatible object storage
 (Cloudflare R2 or AWS S3). The **daily Railway scheduled job** (step 4) pulls
-them over HTTPS and runs `ingest → analyze_all → prune` into the private
+them over HTTPS and runs `ingest → analyze_all` into the private
 `clickhouse` and `db` services, but only for days the live path never
 promoted, because a day in `updates`
 has one source: it is the backfill, such as this first load. The DB is never
@@ -260,9 +260,11 @@ railway run --service app python gtfs_pipeline.py load_static <zip-or-dir> --age
 > ~$0.015/GB-mo with a free tier that likely covers early use. Alternative:
 > **Backblaze B2** (cheapest storage + egress-free to Cloudflare) if you end up
 > retaining many months of raw archives. Avoid plain AWS S3 here (egress cost)
-> and Wasabi (90-day minimum-storage charge fights the daily prune). **Set a
-> bucket lifecycle rule** to expire old zips (mirror the DB's 400-day prune) so
-> storage doesn't grow forever.
+> and Wasabi (90-day minimum-storage charge). **Set no
+> bucket lifecycle rule.** The bucket is the only complete history: the VPS ML
+> replica replays it, and a lost `updates` day is rebuilt from it.
+> `oracle_cloud/v3/bin/prune-r2.sh` bounds it at the horizons in the retention
+> table (`docs/ops-monitoring-deploy.md`, "Data retention").
 
 Production ingest runs **inside the project**, on the private network, so the
 DB stays private (step 1). Add a third service that runs once a day and exits:
@@ -274,7 +276,7 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 4. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
    (daily; pick an hour after Oracle finishes its upload).
 5. `ingest` → **Settings → Deploy → Start Command** — pull the last two UTC
-   days' realtime archives from object storage, then ingest/analyze/prune.
+   days' realtime archives from object storage, then ingest and analyze.
    The collector uploads each agency's day as `rt/<id>/<YYYYMMDD>.tar.gz`.
    Sketch (adjust to your bucket client; the image needs an S3 client +
    `postgresql-client` added to the Dockerfile for this service):
@@ -289,20 +291,10 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
    done
    python gtfs_pipeline.py analyze_all
-   # retention: aggregates are materialized, so old raw rows can go. analyze
-   # rebuilds every date whose rows changed, the ones deleted here included,
-   # so history == this window (reports max range is 365d).
-   # `updates` lives in ClickHouse, not Postgres — DELETE is a mutation there.
-   python -c "
-   from pipeline.clickhouse import get_client
-   import os
-   days = int(os.environ.get('RETENTION_DAYS', 400))
-   get_client().command(f'ALTER TABLE updates DELETE WHERE captured_at < now() - INTERVAL {days} DAY')
-   "
    ```
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
-   creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
+   creds, and `AGENCY_IDS` (see `.env.example`).
 
 > **This job writes closed JST days only, and never a day the live path
 > already promoted.** An archive is named for a UTC day, so it runs to 09:00

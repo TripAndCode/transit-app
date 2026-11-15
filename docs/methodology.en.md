@@ -220,7 +220,7 @@ A test ([tests/unit/test_never_computed.py](../tests/unit/test_never_computed.py
 **Raw archives**: the raw data collected is kept exactly as the operator published it.
 
 - The realtime archive can carry vehicle descriptors the operator included. The Service does not ingest them.
-- Positions are kept only to validate the predictions, for a bounded window (7 to 14 days of collection). They are not ingested into the app. Today they are kept as long as the realtime archive (1,825 days by default). A shorter retention for this validation archive is to be set.
+- Positions are kept only to validate the predictions, for a bounded window (7 to 14 days of collection). They are not ingested into the app. The archive of them is kept for 180 days, much shorter than the realtime archive's 1,825.
 - Any release of the archives as a public dataset strips the vehicle descriptors.
 
 ### The original fourteen gaps
@@ -378,10 +378,12 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.14`. Newest first, each version with the inputs it set.
+The current method is `2026.11.16`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.16` | `feed_quality_monthly` 7 → 8 |
+| `2026.11.15` | `agg_route_band_daily` = 1 |
 | `2026.11.14` | `agg_daily_trend` 4 → 5, `agg_hour_daily` 5 → 6, `agg_route_daily` 4 → 5, `agg_route_daily_dist` 4 → 5, `agg_route_daily_dwell_run` 4 → 5, `agg_route_headway_daily` 5 → 6, `agg_route_hour` 5 → 6, `agg_route_hour_dow` 5 → 6, `agg_route_stats` 4 → 5, `agg_route_stop_daily` 5 → 6, `agg_service_delivered_daily` 4 → 5, `agg_stop_daily` 5 → 6, `feed_quality_monthly` 6 → 7, `route_delay_counts` 5 → 6 |
 | `2026.11.13` | `agg_daily_trend` 3 → 4, `agg_hour_daily` 4 → 5, `agg_route_daily` 3 → 4, `agg_route_daily_dist` 3 → 4, `agg_route_daily_dwell_run` 3 → 4, `agg_route_headway_daily` 4 → 5, `agg_route_hour` 4 → 5, `agg_route_hour_dow` 4 → 5, `agg_route_stats` 3 → 4, `agg_route_stop_daily` 4 → 5, `agg_schedule_revision_daily` 2 → 3, `agg_service_delivered_daily` 3 → 4, `agg_stop_daily` 4 → 5, `agg_stop_routes` 2 → 3, `feed_quality_monthly` 5 → 6, `route_delay_counts` 4 → 5, `stop_route_days` 2 → 3 |
 | `2026.11.12` | `feed_quality_monthly` 4 → 5 |

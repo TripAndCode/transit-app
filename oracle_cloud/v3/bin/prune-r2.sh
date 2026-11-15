@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Enforce a bounded retention window on the Cloudflare R2 objects sync-r2.sh
-# mirrors. R2 is the durable long-term archive -- local prune.sh's window is
-# far shorter precisely because R2 was assumed to keep everything -- so these
-# defaults are generous: they exist only to bound storage growth/cost the way
-# an R2 lifecycle rule would, not to churn data on local prune.sh's cadence.
+# mirrors. The horizons, and why each is what it is, are the retention table in
+# docs/ops-monitoring-deploy.md; the defaults below are that table's. R2 is the
+# rebuild source for every downstream store, so RT and static keep years, not
+# local prune.sh's cadence.
 #   RT tarballs:  delete rt/<id>/*.tar.gz objects older than R2_RT_RETENTION_DAYS.
-#   VP tarballs:  the same for vp/<id>/*.tar.gz (VehiclePositions days), for
-#                 every agency in agencies.tsv: a VP row is removed from
-#                 vehicle_positions.tsv when its window ends, long before
-#                 any of its archive is old enough to prune.
+#   VP tarballs:  delete vp/<id>/*.tar.gz (VehiclePositions days) older than
+#                 R2_VP_RETENTION_DAYS, for every agency in agencies.tsv: a VP
+#                 row is removed from vehicle_positions.tsv when its window
+#                 ends, long before any of its archive is old enough to prune.
 #   Static zips:  delete static/<id>/gtfs_static_*.zip objects older than
 #                 R2_STATIC_RETENTION_DAYS, EXCEPT the object matching each
 #                 agency's current local latest.zip target (mirrors local
@@ -34,6 +34,7 @@ OK_MARKER="${SYNC_R2_OK_MARKER:-$BASE_DIR/.sync-r2.last-ok}"
 MAX_STALE_DAYS="${SYNC_R2_MAX_STALE_DAYS-3}"
 R2_RT_RETENTION_DAYS="${R2_RT_RETENTION_DAYS-1825}"
 R2_STATIC_RETENTION_DAYS="${R2_STATIC_RETENTION_DAYS-3650}"
+R2_VP_RETENTION_DAYS="${R2_VP_RETENTION_DAYS-180}"
 
 : "${OBJECT_STORE_ENDPOINT:?OBJECT_STORE_ENDPOINT is required}"
 : "${OBJECT_STORE_BUCKET:?OBJECT_STORE_BUCKET is required}"
@@ -43,7 +44,7 @@ R2_STATIC_RETENTION_DAYS="${R2_STATIC_RETENTION_DAYS-3650}"
 export AWS_ACCESS_KEY_ID="$OBJECT_STORE_ACCESS_KEY_ID"
 export AWS_SECRET_ACCESS_KEY="$OBJECT_STORE_SECRET_ACCESS_KEY"
 
-for var in R2_RT_RETENTION_DAYS R2_STATIC_RETENTION_DAYS MAX_STALE_DAYS; do
+for var in R2_RT_RETENTION_DAYS R2_STATIC_RETENTION_DAYS R2_VP_RETENTION_DAYS MAX_STALE_DAYS; do
     value="${!var}"
     case "$value" in
         ''|*[!0-9]*)
@@ -135,7 +136,7 @@ while IFS= read -r row || [ -n "${row:-}" ]; do
     static="$agency_static_url"
 
     prune_prefix "rt/$id/" "$R2_RT_RETENTION_DAYS" ""
-    prune_prefix "vp/$id/" "$R2_RT_RETENTION_DAYS" ""
+    prune_prefix "vp/$id/" "$R2_VP_RETENTION_DAYS" ""
 
     [ -n "${static:-}" ] || continue
     keep=$(readlink "$BASE_DIR/data/$id/static/latest.zip" 2>/dev/null || true)

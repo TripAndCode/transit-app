@@ -22,12 +22,12 @@
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { usePerformanceStandards } from "../api/hooks";
-import { useRouteNames } from "../api/useRouteNames";
+import { useRouteNames, type RouteNames } from "../api/useRouteNames";
 import { useCapabilityTier, type TierState } from "../api/useCapabilityTier";
 import { RouteLabel } from "./RouteLabel";
 import type { Scope } from "../api/scope";
 import { SHARED_TABLE, th, td } from "./tableStyles";
-import type { PerformanceStandardRow } from "../api/types";
+import type { PerformanceStandardRow, PerformanceStandardsResponse } from "../api/types";
 import { ErrorBanner } from "./ErrorBanner";
 import { OnTimeDefinition } from "./DefinitionMetaBlock";
 import { EM_DASH, fixedTenth, formatDuration, formatNumber, roundTenth } from "../utils/format";
@@ -108,10 +108,29 @@ function Judgement({
 
 /** `route` narrows the panel to one route's targets, for that route's own page. */
 export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx: Scope; route?: string }) {
-  const { t } = useTranslation();
   const routeNames = useRouteNames(aid);
   const { data, error, refetch } = usePerformanceStandards(aid, ctx, true, route);
   const tier = useCapabilityTier(aid);
+  return <PerformanceStandardView data={data} error={error} onRetry={() => void refetch()} routeNames={routeNames} tier={tier} />;
+}
+
+/** The panel from its response, fetched by the live page or stored by a
+ *  snapshot, with the route labels and the agency's capability tier its
+ *  wording reads. */
+export function PerformanceStandardView({
+  data,
+  error = null,
+  onRetry,
+  routeNames,
+  tier,
+}: {
+  data: PerformanceStandardsResponse | undefined;
+  error?: Error | null;
+  onRetry?: () => void;
+  routeNames: RouteNames;
+  tier: TierState;
+}) {
+  const { t } = useTranslation();
   const rows = data?.rows ?? [];
 
   if (!error && rows.length === 0) return null;
@@ -127,7 +146,7 @@ export function PerformanceStandardPanel({ aid, ctx, route }: { aid: number; ctx
       <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
         {t("reports.performance_standard.subtitle")}
       </p>
-      {error && <ErrorBanner error={error} onRetry={() => refetch()} />}
+      {error && <ErrorBanner error={error} onRetry={onRetry} />}
       {rows.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto" }}>
           <table style={SHARED_TABLE}>

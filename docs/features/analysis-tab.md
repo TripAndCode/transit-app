@@ -626,9 +626,12 @@ the scope as one sentence above their content
   no version has no such join, and its live stamp carries none. A live scan names its timetables too,
   and files every observation as analyze does, under the timetable in force on
   its service date (`pipeline/live_filing.py`), so its figures and the
-  aggregates agree. Where a load or a span has moved the version in force since
-  analyze last ran, the live scan already files those days under the new one,
-  and its stamp names that one rather than the one analyze recorded.
+  aggregates agree. A day analyze refiled is read from the rows it wrote
+  filed (`pipeline/refiled.py`) while that day's filing holds. Where a load or
+  a span has moved the version in force since analyze last ran, the live scan
+  already files those days under the new one, joining the archive until
+  analyze writes them again, and its stamp names that one rather than the one
+  analyze recorded.
   The names come from one indexed read per request
   (`pipeline/reports/schedule_revision.py: read_schedule_days`), which also
   gives the trend chart its timetable-revision markers, and they render in the

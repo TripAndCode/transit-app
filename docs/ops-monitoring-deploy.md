@@ -179,3 +179,60 @@ Nothing here is special: this hub follows the repo-wide CI rule in
 # What the gate reads. An EMPTY rollup means no run was triggered, not a pass.
 gh pr view <number> --json statusCheckRollup
 ```
+
+## 9. Data retention
+
+This table is the one statement of how long each store keeps data. Every
+pruning script and env var below cites it. Change a horizon here and in its
+enforcer together.
+
+| Store | Horizon | Enforced by | Setting |
+|---|---|---|---|
+| R2 `rt/<id>/` (raw GTFS-RT archives) | 1,825 days | `oracle_cloud/v3/bin/prune-r2.sh` | `R2_RT_RETENTION_DAYS` |
+| R2 `static/<id>/` (GTFS static zips) | 3,650 days; each agency's current timetable is always kept | `prune-r2.sh` | `R2_STATIC_RETENTION_DAYS` |
+| R2 `vp/<id>/` (VehiclePositions archives) | 180 days | `prune-r2.sh` | `R2_VP_RETENTION_DAYS` |
+| Collector spool on Oracle (local copies of the above) | RT and VP 90 days, static 365 days; most files go sooner, once R2 confirms its copy | `oracle_cloud/v3/bin/prune.sh`, `spool-cleanup.sh` | `RETENTION_DAYS`, `STATIC_RETENTION_DAYS` |
+| ClickHouse `updates`, production | every day analyze still covers; target about 400 days once analyze honours a retention floor | nothing prunes it yet (below) | none |
+| ClickHouse `updates_live` | 3 days | the table's TTL (`db/clickhouse/schema.sql`) | none |
+| ClickHouse `updates_filed` (refiled rows) | follows `updates`: the dates it still holds | `pipeline/refiled.py`: whatever rewrites `updates` rows writes the agencies' dates off first (`rows_rewritten`), and their rows go at the agency's next analyze | none |
+| ClickHouse `updates_filed_dates` | indefinite; one small row per write or write-off of a date | nothing | none |
+| ClickHouse `updates`, VPS ML replica | every day synced, until the disk needs room | trimmed by hand (`docs/features/ml-forecast.md`, "Trimming it") | none |
+| Postgres `agg_*`, except the one below | indefinite | nothing prunes them | none |
+| Postgres `agg_route_forecast_ml` (published ML forecasts) | 14 days past each service date | `pipeline/ml_forecast_ingest.py`, on each forecast ingest (constant `FORECAST_ML_RETENTION_DAYS`) | none |
+| ClickHouse aggregates (`pipeline.ch_aggregates.COPIED_TABLES` and `INTERNAL_TABLES`) | indefinite, as `agg_*` | nothing prunes them | none |
+
+The privacy policy's periods for personal data and logs are in
+`pipeline/retention.py`, which the API enforces daily.
+
+### Why these horizons
+
+- **R2 raw RT and static** keep years because R2 is the source everything else
+  is rebuilt from. Production `updates` is rebuilt from it by catch-up, the ML
+  replica replays it, and it is the open dataset's source. A static zip
+  outlives the realtime days it governs because a replay has to load each
+  timetable version before those days.
+- **R2 VehiclePositions** are collected only to check predicted delays against
+  observed passages, over a short collection window. 180 days covers the
+  collection, the analysis and a rerun of it. Keeping them longer gains
+  nothing, and they carry vehicle descriptors, so they are kept no longer than
+  the validation needs.
+- **Production `updates`** keeps every day analyze still covers; the target is
+  about 400 days once analyze honours a retention floor. A report's
+  widest range is a year, plus a margin, older days can be rebuilt from R2, and
+  the aggregates built from them are kept indefinitely.
+- **`agg_*` and the ClickHouse aggregates** are small and are what every page
+  reads, so they keep all history. analyze rebuilds the ClickHouse ones from the
+  same scopes as `agg_*` and copies them into Postgres.
+- **ML forecasts** in Postgres fill forecast cells for the days ahead, and a
+  forecast for a day long past serves nothing there, so they keep two weeks.
+- **The VPS replica** is disposable and rebuilt from R2, so its disk decides.
+  A replay can bring back only what R2 still holds.
+
+### Why nothing prunes `updates` yet
+
+analyze treats every date in its per-date ledger (`agg_feed_health`) as
+rebuildable. A ledger date whose `updates` rows are gone counts as changed, so
+the next run purges its aggregates, and a full rebuild recomputes every date
+from `updates`. Dropping a day analyze covers would therefore delete its
+aggregates, which are kept indefinitely. `updates` can be cut to its target
+only once analyze stops rebuilding dates before a retention floor.

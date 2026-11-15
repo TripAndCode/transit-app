@@ -1,11 +1,35 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet, apiPost } from "./client";
 import { useLocalizedQuery } from "./hooks";
-import type { CapabilityTier, ReportResponse, Route } from "./types";
+import type {
+  CapabilityTier,
+  OverviewConcentration,
+  PerformanceStandardsResponse,
+  ReportFigures,
+  ReportResponse,
+  Route,
+  RouteShapeResponse,
+} from "./types";
 import type { Locale } from "../i18n";
 
 /** The screens a snapshot can be taken of (api/routers/snapshots.py). */
-export type SnapshotScreen = "council_report" | "route_table";
+export type SnapshotScreen = "council_report" | "route_table" | "route_page";
+
+/** The agency's route lists a route's page reads its standing from, at the
+ *  length the live page asks for, without their prose. */
+export type RouteListsPayload = {
+  ranking: ReportFigures;
+  on_time: ReportFigures;
+  worst_5min: ReportFigures;
+};
+
+/** One language's responses a route's page reads for the route itself: its
+ *  performance targets and its delay by stop (`geometry` is never kept:
+ *  only the map draws it). */
+export type RoutePagePayload = {
+  standards: PerformanceStandardsResponse;
+  shape: RouteShapeResponse;
+};
 
 /** A frozen snapshot as anyone holding its id reads it: what the screen's own
  *  endpoints served when it was taken. `report` is that endpoint's response
@@ -15,13 +39,19 @@ export type SnapshotScreen = "council_report" | "route_table";
 export type Snapshot = {
   snapshot_id: string;
   created_at: string;
-  /** A screen this build may not render yet, such as `route_page`. */
+  /** A screen this build may not render yet. */
   screen: SnapshotScreen | (string & {});
   agency_id: number;
   agency_name: string;
   params: Record<string, unknown>;
   payloads: {
     report?: Partial<Record<Locale, ReportResponse>>;
+    /** A route's page, in place of `report`: the route's own responses per
+     *  language, and the agency's lists and lateness by route, written in no
+     *  language and so stored once. */
+    route_page?: Partial<Record<Locale, RoutePagePayload>>;
+    route_lists?: RouteListsPayload;
+    concentration?: OverviewConcentration;
     routes?: Route[];
     credit?: Partial<Record<Locale, string | null>>;
   };
@@ -44,8 +74,9 @@ type SnapshotCreated = {
 };
 
 /** What a screen asks a snapshot of: itself, for its agency, with the query
- *  string its own report endpoint was asked (`reportQueryString`), so the
- *  server computes exactly what the screen shows. */
+ *  string it asks its data with (a report screen's `reportQueryString`; a
+ *  route's page, its scope and its variant as `shape`), so the server
+ *  computes exactly what the screen shows. */
 export type SnapshotSpec = { screen: SnapshotScreen; agencyId: number; query: string };
 
 /** Admin only: the server computes and stores the screen's figures and

@@ -212,7 +212,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "feed_quality_monthly",
-            7,
+            8,
             Kind.DATED,
             # A planned day no capture saved reads the loaded timetable's plan.
             Timetable.LOADED,
@@ -408,6 +408,8 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
             "route_delay_counts": 6,
         },
     ),
+    MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
+    MethodVersion("2026.11.16", {"feed_quality_monthly": 8}),
 )
 
 # The method every report, CSV and council document names beside its figures

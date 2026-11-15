@@ -609,7 +609,7 @@ def cmd_restamp_archive(args):
             # since the rerun finds nothing left to move. A swap that then
             # fails costs only a rebuild that was not needed.
             mark_for_full_rebuild(conn, moved)
-            restamp_archive_rows(ch_client, before_swap=still_locked)
+            restamp_archive_rows(ch_client, agencies=moved, before_swap=still_locked)
         logger.info("restamped.")
         next_steps(sum(p.rows_refused for p in plan))
     finally:
@@ -892,12 +892,12 @@ def cmd_reprobe_rt_coverage(args):
 
 
 def cmd_ingest_ml(args):
-    """Pull the ML workbench's latest published forecast and its weekly evaluation summaries and live scorecards
-    from R2 into Postgres.
+    """Pull the ML workbench's latest published forecast, its weekly evaluation summaries and live scorecards,
+    and the daily GTFS-RT validator summaries from R2 (transit-ml) into Postgres.
 
     Operator-run, so it fails loudly: the cron sweep's copy of this step logs
     and carries on, which would turn a wrong token into a silent "0 rows"."""
-    from pipeline import ml_evaluation_ingest, ml_forecast_ingest
+    from pipeline import ml_evaluation_ingest, ml_forecast_ingest, rt_validation_ingest
 
     try:
         s3, bucket = ml_forecast_ingest.s3_client_from_env()
@@ -909,11 +909,14 @@ def cmd_ingest_ml(args):
         forecast = ml_forecast_ingest.load_forecast(conn, s3, bucket)
         evaluations = ml_evaluation_ingest.load_evaluations(conn, s3, bucket)
         live = ml_evaluation_ingest.load_live_evaluations(conn, s3, bucket)
+        validation = rt_validation_ingest.load_validation(conn, s3, bucket)
     except (
         ml_forecast_ingest.ForecastReadError,
         ml_forecast_ingest.ForecastWriteError,
         ml_evaluation_ingest.EvaluationReadError,
         ml_evaluation_ingest.EvaluationWriteError,
+        rt_validation_ingest.ValidationReadError,
+        rt_validation_ingest.ValidationWriteError,
     ) as exc:
         logger.error(f"ingest_ml: {type(exc).__name__}: {exc}")
         sys.exit(1)
@@ -935,6 +938,19 @@ def cmd_ingest_ml(args):
         logger.info(f"ingest_ml: upserted {live.upserted} live scorecard(s)")
     if live.skipped:
         logger.warning(f"ingest_ml: skipped unreadable or unsupported live scorecards: {', '.join(live.skipped)}")
+    if validation.listed == 0:
+        logger.info("ingest_ml: no validator summary has been published yet")
+    else:
+        logger.info(f"ingest_ml: upserted {validation.upserted} validator summary(ies) of {validation.fetched} fetched")
+    # Untrusted and malformed keys need fixing at their source; an unknown
+    # agency's keys are history waiting for it, picked up once it is added.
+    for reason in (rt_validation_ingest.UNTRUSTED, rt_validation_ingest.MALFORMED):
+        if validation.skipped.get(reason):
+            logger.warning(
+                f"ingest_ml: skipped validator summaries ({reason}): {', '.join(validation.skipped[reason])}"
+            )
+    if unknown := validation.skipped.get(rt_validation_ingest.UNKNOWN_AGENCY):
+        logger.warning(f"ingest_ml: {len(unknown)} validator summary key(s) name an agency not in this database")
 
 
 def main():

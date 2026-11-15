@@ -193,8 +193,19 @@ FastAPI + React SPA  <-------------------------------------------------+
   before it kept them, from the kept zips; with `--headways` it records again,
   from the same zips, the headways of archived timetables not kept at the
   current `agg_route_headway` version, whether kept at an older one or never
-  kept. A ClickHouse that predates these
+  kept. `static_calendar_archive` keeps each timetable's calendar under its
+  version name and content (a calendar-only refetch under the same name keeps
+  the first calendar), and `--calendars` keeps it, from the same zips, for
+  timetables archived before it was. A ClickHouse that predates these
   tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
+  Where the version in force on a date has other content than the one its
+  rows were ingested against, `analyze` writes that date's rows filed under
+  it to `updates_filed` (`pipeline/refiled.py`), and its own reads and the
+  live scans take them from there instead of joining the archive, for as long
+  as `updates_filed_dates` shows the date's filing unchanged. A refiled date
+  outside analyze's rebuild scope has no valid write until
+  `scripts/write_refiled_history.py --apply` writes it, so it is run again
+  after the filing rules (`pipeline.refiled.RULES`) change.
   Postgres mirrors the map in `static_version_contents`, each name at its
   latest content, written right after each map row, so the definition stamp
   names each timetable's content without reading ClickHouse.
@@ -209,6 +220,10 @@ FastAPI + React SPA  <-------------------------------------------------+
   latest timetable loaded that day until it is over. The service-delivered
   rate reads a saved day before the loaded timetable, so a reload no longer
   drops past days from it. Nothing reconstructs the days before the first save.
+  A day saved before its stop events were saved beside its trips keeps them
+  unknown until `scripts/fill_planned_stop_events.py` computes them from the
+  archived timetable in force that day, only where that timetable's calendar
+  is archived and its planned trips equal the day's saved count.
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
   calls an LLM, and optional LLM features have kill switches.
 
@@ -235,7 +250,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make ask-eval` | Check the Ask gold set's stored signatures still match canonicalization (no database; pytest runs it too) |
 | `make prune-query-log` | Delete `ask_query_log` rows older than 90 days (the API also runs this daily) |
 | `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
-| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches the deploy's data-retention horizon; the API also runs this daily) |
+| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (production `updates`' target horizon, once analyze honours a retention floor; the API also runs this daily) |
 | `make prune-personal-data` | Delete usage counts and login history older than 25 months, and expired sessions (the API also runs this daily) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
@@ -366,7 +381,7 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   reads, when it differs from its built-in default path. Unset
   on a host where that path doesn't exist and the board's `github` tile
   reads `unknown` rather than a real status.
-- `OBJECT_STORE_*`, `AGENCY_IDS`, `RETENTION_DAYS`: scheduled archive ingest.
+- `OBJECT_STORE_*`, `AGENCY_IDS`: scheduled archive ingest.
 
 ### Feature kill switches
 
@@ -462,9 +477,8 @@ Useful entry points:
 - Dev databases are read-only; see `AGENTS.md`. Use the throwaway `:5544`/
   `:8124` pair described above for writes.
 - Never push directly to `main`; use reviewed squash-merged PRs.
-- Branch commits carry no `[skip ci]`, so every push to a PR runs CI and the
-  merge gate has a result to read. Only the squash-merge commit carries the
-  trailer, keeping `main` from re-running what the branch proved. See
+- No commit carries `[skip ci]`, the squash-merge included, so every push to a
+  PR runs CI for the merge gate and every merge runs CI on `main`. See
   `AGENTS.md` for the rule and `transit-app-gotchas` for how it behaves.
 - Run the relevant checks before opening a PR, then run `make check` when the
   change affects backend behavior.

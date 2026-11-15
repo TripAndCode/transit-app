@@ -220,7 +220,7 @@
 **生データの保存について**：取得した生のデータは、事業者が配信したままの形で保存しています。
 
 - リアルタイム情報の保存データには、事業者が車両記述子を入れていることがあります。本サービスはそれを取り込みません。
-- 位置情報は、予測値の検証のためだけに、期間を区切って保存します（収集は7〜14日間）。アプリには取り込みません。今は、リアルタイム情報の保存データと同じ期間（既定で1,825日）だけ保存しています。検証用として、より短い保存期間を定める予定です。
+- 位置情報は、予測値の検証のためだけに、期間を区切って保存します（収集は7〜14日間）。アプリには取り込みません。その保存データは180日間保存します。リアルタイム情報の保存データ（1,825日）よりずっと短い期間です。
 - 保存データを公開データセットとして出すときは、車両記述子を取り除きます。
 
 ### 当初の14観点の状況
@@ -292,7 +292,7 @@
 
 - **作れる人**：作れるのは管理者だけです。管理者が協議会レポートを印刷すると、自動で一つ作り、そのリンクを印刷の末尾に記します。
 - **見られる人**：リンクを知っていれば、ログインせずに誰でも見られます。リンクの識別子は推測できない乱数で、一覧は管理者にしか見えません。
-- **今日の数値との比較**：スナップショットのページでは、今日の数値と比べられます。比べるときは、両方の算出方法の版と定時の定義を並べて示します。
+- **今日の数値との比較**：協議会レポートと「系統別の遅れ」の表のスナップショットでは、今日の数値と比べられます。比べるときは、両方の算出方法の版と定時の定義を並べて示します。路線のページのスナップショットは比べられません。
 - **保存期間**：既定で2年とします（暫定。運営者の確認を待っています）。期限を過ぎたスナップショットを消す仕組みはまだありません。今は、管理者が削除するまで残ります。作成と削除は、管理者の操作記録に残ります。
 
 画面の動きは [docs/features/snapshots.md](features/snapshots.md) にあります。
@@ -378,10 +378,12 @@ CC0 のデータを使うのに法的な同意は要りません。それでも�
 <!-- method-changelog:start -->
 <!-- poetry run python scripts/render_method_changelog.py が METHOD_VERSIONS から書く。手で編集しない -->
 
-現在の算出方法は `2026.11.14` です。新しい版から順に、各版が設定した入力を示します。
+現在の算出方法は `2026.11.16` です。新しい版から順に、各版が設定した入力を示します。
 
 | 版 | 設定した入力 |
 |---|---|
+| `2026.11.16` | `feed_quality_monthly` 7 → 8 |
+| `2026.11.15` | `agg_route_band_daily` = 1 |
 | `2026.11.14` | `agg_daily_trend` 4 → 5, `agg_hour_daily` 5 → 6, `agg_route_daily` 4 → 5, `agg_route_daily_dist` 4 → 5, `agg_route_daily_dwell_run` 4 → 5, `agg_route_headway_daily` 5 → 6, `agg_route_hour` 5 → 6, `agg_route_hour_dow` 5 → 6, `agg_route_stats` 4 → 5, `agg_route_stop_daily` 5 → 6, `agg_service_delivered_daily` 4 → 5, `agg_stop_daily` 5 → 6, `feed_quality_monthly` 6 → 7, `route_delay_counts` 5 → 6 |
 | `2026.11.13` | `agg_daily_trend` 3 → 4, `agg_hour_daily` 4 → 5, `agg_route_daily` 3 → 4, `agg_route_daily_dist` 3 → 4, `agg_route_daily_dwell_run` 3 → 4, `agg_route_headway_daily` 4 → 5, `agg_route_hour` 4 → 5, `agg_route_hour_dow` 4 → 5, `agg_route_stats` 3 → 4, `agg_route_stop_daily` 4 → 5, `agg_schedule_revision_daily` 2 → 3, `agg_service_delivered_daily` 3 → 4, `agg_stop_daily` 4 → 5, `agg_stop_routes` 2 → 3, `feed_quality_monthly` 5 → 6, `route_delay_counts` 4 → 5, `stop_route_days` 2 → 3 |
 | `2026.11.12` | `feed_quality_monthly` 4 → 5 |
