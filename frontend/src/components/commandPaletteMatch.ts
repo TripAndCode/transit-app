@@ -12,8 +12,9 @@ import { searchKey } from "../utils/searchText";
 export type Searchable = {
   label: string;
   sublabel?: string;
-  /** Search-only aliases, never shown: a match scores below any label or
-   *  sublabel match. */
+  /** Search-only aliases, never shown. A keyword match ranks below any label
+   *  or sublabel that contains the query, and above one that only holds its
+   *  letters scattered. */
   keywords?: readonly string[];
 };
 
