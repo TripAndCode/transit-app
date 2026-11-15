@@ -24,7 +24,7 @@ from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
 from pipeline.query.ask_ops import CARD_SIGNED_IN, CARD_SIGNED_OUT, FOLLOWUP
 from pipeline.query.chat import _chat_str, ch_failure_str
-from pipeline.query.followup_context import select_context_row
+from pipeline.query.followup_context import context_route_codes, fetch_route_labels, select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
 from pipeline.query.query_log import log_query
 from pipeline.query.tools import canonical_tool_name, dispatch, render_tool_result
@@ -660,8 +660,10 @@ async def followup_endpoint(
     """LLM-grounded follow-up on a prior assistant result.
 
     Disabled by default; flip ``ASK_FOLLOWUP_ENABLED=true`` to enable. The
-    follow-up calls the LLM with the prior message's structured result as the
-    sole grounding context — no tool dispatch, no external retrieval.
+    follow-up calls the LLM with the prior message's structured result, plus
+    the display name of every route code that result or its args refer to
+    (resolved here from ``static_routes``), as its sole grounding context —
+    no tool dispatch, no external retrieval.
 
     Auth: requires a signed-in, admin-approved caller (``users.llm_approved``).
     Anonymous callers never have a ``users.llm_approved`` row, so they're
@@ -705,17 +707,25 @@ async def followup_endpoint(
         except (_conv.PermissionDenied, LookupError):
             raise HTTPException(status_code=404, detail="context message not found") from None
 
-    if ctx_msg.get("role") != "assistant":
-        raise HTTPException(status_code=400, detail="context must be an assistant message")
+        if ctx_msg.get("role") != "assistant":
+            raise HTTPException(status_code=400, detail="context must be an assistant message")
+
+        context_result = select_context_row(ctx_msg.get("result"), body.context_row_index)
+        # `agency_id` is the endpoint's own scoped agency (Depends(get_agency)),
+        # so this can't resolve a route name from another agency's timetable.
+        route_labels = await fetch_route_labels(
+            conn, agency_id, context_route_codes(ctx_msg.get("args"), context_result)
+        )
 
     started = time.monotonic()
     result = await _followup.answer_followup(
         question=body.question,
         context_tool=ctx_msg.get("tool"),
         context_args=ctx_msg.get("args"),
-        context_result=select_context_row(ctx_msg.get("result"), body.context_row_index),
+        context_result=context_result,
         locale=locale,
         llm_approved=user.llm_approved,
+        route_labels=route_labels,
     )
     latency_ms = _elapsed_ms(started)
     answer, err, guard = result

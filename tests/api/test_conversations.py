@@ -753,7 +753,9 @@ async def test_followup_authed_too_long_maps_to_400(conv_app, monkeypatch):
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
     app, agency, uid, pool = conv_app
 
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
+    async def _fake_answer_followup(
+        *, question, context_tool, context_args, context_result, locale, llm_approved=True, route_labels=None
+    ):
         return FollowupResult("", "too_long")
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
@@ -827,7 +829,9 @@ async def test_followup_authed_llm_error_maps_to_502(conv_app, monkeypatch):
     monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
     app, agency, uid, pool = conv_app
 
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
+    async def _fake_answer_followup(
+        *, question, context_tool, context_args, context_result, locale, llm_approved=True, route_labels=None
+    ):
         return FollowupResult("", "provider_unavailable")
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
@@ -866,7 +870,9 @@ async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
 
     captured = {}
 
-    async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
+    async def _fake_answer_followup(
+        *, question, context_tool, context_args, context_result, locale, llm_approved=True, route_labels=None
+    ):
         captured["context_tool"] = context_tool
         captured["context_args"] = context_args
         captured["context_result"] = context_result
@@ -915,6 +921,131 @@ async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
         ("user", "what about X?"),
         ("assistant", "the answer"),
     ]
+
+
+async def _seed_two_routes(pool, agency: int) -> None:
+    """An Aomori-style route id carrying its code in a parenthesised tail,
+    plus a plain one whose id is already its code."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO static_routes "
+            "(agency_id, route_id, route_short_name, origin_name, destination_name) VALUES "
+            "($1, $2, $3, $4, $5), ($1, $6, $7, $8, $9)",
+            agency,
+            "沖館・新田線(42052)",
+            "W53 沖館・新田線",
+            "西部営業所",
+            "野木和団地",
+            "R2",
+            "Route 2",
+            "Origin 2",
+            "Destination 2",
+        )
+
+
+@pytest.mark.asyncio
+async def test_followup_fetches_route_labels_for_the_contexts_route_codes(conv_app, monkeypatch):
+    """The endpoint resolves every route_code the context's table carries
+    into a display label, through `static_routes`, and hands it to
+    `answer_followup` as `route_labels`."""
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+    await _seed_two_routes(pool, agency)
+
+    captured = {}
+
+    async def _fake_answer_followup(
+        *, question, context_tool, context_args, context_result, locale, llm_approved=True, route_labels=None
+    ):
+        captured["route_labels"] = route_labels
+        return FollowupResult("the answer", None, False)
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="on_time_rate",
+            args={},
+            signature_hash=None,
+            result={
+                "kind": "table",
+                "columns": ["route_code", "on_time_pct"],
+                "rows": [["42052", 50.6], ["R2", 60.0]],
+            },
+            rendered_summary="prior answer",
+        )
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "W53の路線名は？", "context_message_id": msg["message_id"]},
+            headers=_CSRF,
+        )
+    assert r.status_code == 200, r.text
+    assert captured["route_labels"]["42052"] == "W53 沖館・新田線 (西部営業所 → 野木和団地)"
+    assert "R2" in captured["route_labels"]
+
+
+@pytest.mark.asyncio
+async def test_followup_context_row_index_limits_route_labels_to_that_row(conv_app, monkeypatch):
+    """`context_row_index` narrows the context to one row, so the route-code
+    lookup must only see that row's code, not every code the full table
+    holds."""
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+    await _seed_two_routes(pool, agency)
+
+    captured = {}
+
+    async def _fake_answer_followup(
+        *, question, context_tool, context_args, context_result, locale, llm_approved=True, route_labels=None
+    ):
+        captured["route_labels"] = route_labels
+        return FollowupResult("the answer", None, False)
+
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="on_time_rate",
+            args={},
+            signature_hash=None,
+            result={
+                "kind": "table",
+                "columns": ["route_code", "on_time_pct"],
+                "rows": [["42052", 50.6], ["R2", 60.0]],
+            },
+            rendered_summary="prior answer",
+        )
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={
+                "question": "それの路線名は？",
+                "context_message_id": msg["message_id"],
+                "context_row_index": 1,
+            },
+            headers=_CSRF,
+        )
+    assert r.status_code == 200, r.text
+    assert set(captured["route_labels"]) == {"R2"}
 
 
 @pytest.mark.asyncio
