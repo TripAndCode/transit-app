@@ -193,17 +193,6 @@ curl -fsS https://<your>.up.railway.app/health      # → 200
 Open the domain in a browser — SPA loads. Tabs are empty until data lands
 (next step), and Ask works once `GEMINI_API_KEY`/`OPENAI_API_KEY` is valid.
 
-> **Image spec — the Ask-tab embedder is not in this image.** `sentence-
-> transformers` (and its transitive `torch`/`transformers`/`scikit-learn`/
-> `scipy`) live in poetry's optional `embeddings` group, which the
-> Dockerfile's `--only main` deliberately skips — several GB, unused until a
-> RAG index actually exists. `pipeline.query.embeddings.Embedder`'s import is
-> wrapped in try/except; every caller already falls through to the LLM-only
-> path when it's unavailable, so Ask still works (Stages 1 and 3), just
-> without Stage 2's embedding-nearest-neighbor lookup. To restore it for a
-> given deploy, add the group to the Dockerfile's `poetry install` line and
-> a build-time step that bakes the model into the image.
-
 ---
 
 ## 3. Load data
@@ -220,7 +209,7 @@ history holds the polls the collector pushes, one every
 `ingest_live` sample each poke takes. Oracle also rolls per-day, per-agency
 archive zips and uploads them once a day to S3-compatible object storage
 (Cloudflare R2 or AWS S3). The **daily Railway scheduled job** (step 4) pulls
-them over HTTPS and runs `ingest → analyze_all → prune` into the private
+them over HTTPS and runs `ingest → analyze_all` into the private
 `clickhouse` and `db` services, but only for days the live path never
 promoted, because a day in `updates`
 has one source: it is the backfill, such as this first load. The DB is never
@@ -259,17 +248,6 @@ agency's configured source; to load a zip you already have instead:
 railway run --service app python gtfs_pipeline.py load_static <zip-or-dir> --agency-id <id>
 ```
 
-Build the Ask router's RAG index once (optional — Ask degrades gracefully
-without it, falling through to the LLM). `app`'s own image excludes the
-`embeddings` poetry group (see the Image spec note above), so this needs a
-one-off install first — still via `railway run --service app` so the
-command runs inside the private network that `db`/`clickhouse` are only
-reachable from:
-
-```bash
-railway run --service app sh -c "pip install --no-cache-dir sentence-transformers && python gtfs_pipeline.py build_rag_index --agency-id 1"
-```
-
 ---
 
 ## 4. Wire the daily ingest job (Railway scheduled service)
@@ -282,9 +260,11 @@ railway run --service app sh -c "pip install --no-cache-dir sentence-transformer
 > ~$0.015/GB-mo with a free tier that likely covers early use. Alternative:
 > **Backblaze B2** (cheapest storage + egress-free to Cloudflare) if you end up
 > retaining many months of raw archives. Avoid plain AWS S3 here (egress cost)
-> and Wasabi (90-day minimum-storage charge fights the daily prune). **Set a
-> bucket lifecycle rule** to expire old zips (mirror the DB's 400-day prune) so
-> storage doesn't grow forever.
+> and Wasabi (90-day minimum-storage charge). **Set no
+> bucket lifecycle rule.** The bucket is the only complete history: the VPS ML
+> replica replays it, and a lost `updates` day is rebuilt from it.
+> `oracle_cloud/v3/bin/prune-r2.sh` bounds it at the horizons in the retention
+> table (`docs/ops-monitoring-deploy.md`, "Data retention").
 
 Production ingest runs **inside the project**, on the private network, so the
 DB stays private (step 1). Add a third service that runs once a day and exits:
@@ -296,7 +276,7 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 4. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
    (daily; pick an hour after Oracle finishes its upload).
 5. `ingest` → **Settings → Deploy → Start Command** — pull the last two UTC
-   days' realtime archives from object storage, then ingest/analyze/prune.
+   days' realtime archives from object storage, then ingest and analyze.
    The collector uploads each agency's day as `rt/<id>/<YYYYMMDD>.tar.gz`.
    Sketch (adjust to your bucket client; the image needs an S3 client +
    `postgresql-client` added to the Dockerfile for this service):
@@ -311,20 +291,10 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
    done
    python gtfs_pipeline.py analyze_all
-   # retention: aggregates are materialized, so old raw rows can go. analyze
-   # rebuilds every date whose rows changed, the ones deleted here included,
-   # so history == this window (reports max range is 365d).
-   # `updates` lives in ClickHouse, not Postgres — DELETE is a mutation there.
-   python -c "
-   from pipeline.clickhouse import get_client
-   import os
-   days = int(os.environ.get('RETENTION_DAYS', 400))
-   get_client().command(f'ALTER TABLE updates DELETE WHERE captured_at < now() - INTERVAL {days} DAY')
-   "
    ```
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
-   creds, and `AGENCY_IDS` / `RETENTION_DAYS` (see `.env.example`).
+   creds, and `AGENCY_IDS` (see `.env.example`).
 
 > **This job writes closed JST days only, and never a day the live path
 > already promoted.** An archive is named for a UTC day, so it runs to 09:00
@@ -526,6 +496,5 @@ Skip entirely if it's only demo data.
 | `connection refused` to db | `db` service not finished its first boot, or you used the public domain instead of the private one. |
 | Migrations didn't run | Confirm `railway.json` `preDeployCommand` is present and the service picked it up (Settings → Deploy). |
 | `POST /internal/cron/ingest` returns 401 / 503 | 401: the caller's `X-Cron-Secret` header doesn't match `CRON_SECRET` in the `app` Variables. 503: `CRON_SECRET` is unset on `app`. |
-| Out of memory at boot | Not the embedder by default — it's excluded from this image (see the Image spec note above). If you've added the `embeddings` poetry group and a bake step yourself, that's the likely cause: the e5-small embedder (torch) is heavy (~1–2 GB resident once loaded). Bump the app service's memory, or drop the group back out. |
 | Slow first boot / `/health` timeout after a redeploy | Check the deploy's `PUBLISH_IMAGE`/`CREATE_CONTAINER` timing first — a large image takes real time to pull onto the runtime host before the process even starts, independent of anything the app itself does. |
 | Nobody can sign in (Google/GitHub OAuth down) | Sign in at `/login` with the break-glass `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` account, turn `login_required` off on `/admin/flags`, and turn it back on once OAuth recovers. Keep those two variables set in production for exactly this: once any admin has set a `login_required` override, the `LOGIN_REQUIRED` env var alone cannot turn the gate off. |

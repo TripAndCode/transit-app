@@ -30,7 +30,7 @@ unexport db_url
 db_url = $(if $(DATABASE_URL),$(DATABASE_URL),$(error DATABASE_URL is not set. Create a .env in this checkout (git worktrees do not inherit one) or pass DATABASE_URL= on the command line))
 PORT        ?= 8000
 
-.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 catch-up-from-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml reprobe-rt-coverage seed-agencies build-rag-index promote-intent-cache prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
+.PHONY: all bootstrap doctor bake install test oracle-tests fmt fmt-check lint typecheck check serve db db-down ch-test ch-test-down ch-bootstrap migrate migrate-down fetch fetch-ingest sync-r2 catch-up-from-r2 ingest load_static analyze analyze-all check-aggs check-migrations check-hash-token-cleanup digest ingest-weather ingest-ml reprobe-rt-coverage seed-agencies prune-query-log verify-secrets verify-secrets-all-branches hooks geosql-up geosql-down git-cleanup git-cleanup-apply ask-eval frontend-install frontend-dev frontend-build capture-user-manual prune-pipeline-runs prune-admin-audit prune-personal-data
 
 # Default target — first-run setup.
 all: bootstrap
@@ -46,7 +46,7 @@ bootstrap:
 	@command -v npm    >/dev/null || { echo "ERROR: npm not installed. brew install node"; exit 1; }
 	@test -f .env || { cp .env.example .env && echo "→ created .env from .env.example — edit it before \`make serve\`"; }
 	@echo "→ installing python deps"
-	@poetry install --with embeddings
+	@poetry install
 	@echo "→ installing npm deps"
 	@cd frontend && npm install --silent
 	@echo "→ bringing up Postgres + applying migrations"
@@ -113,7 +113,7 @@ doctor:
 		fi
 
 install:
-	poetry install --with embeddings
+	poetry install
 
 # ── Quality ──────────────────────────────────────────────────────────────────
 
@@ -331,16 +331,6 @@ reprobe-rt-coverage:
 seed-agencies:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py seed_agencies $(if $(CSV),$(CSV),agencies.csv)
 
-# Idempotent: re-runnable, upserts on content_hash uniqueness. Also the
-# re-index step after an embedding model or sentence-transformers major
-# change -- rows stamped with the old embedding_version are excluded from
-# Stage-2 search until this rebuilds them.
-build-rag-index:
-	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py build_rag_index --all-agencies
-
-promote-intent-cache:
-	DATABASE_URL=$(db_url) poetry run python scripts/promote_intent_cache.py --agency-id $(AGENCY_ID)
-
 prune-query-log:
 	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py prune_query_log --days 90
 
@@ -409,8 +399,6 @@ hooks:
 # Checks that every gold entry's stored signature survives canonicalization:
 # no database, router or LLM is involved. Regenerate the gold set after card
 # changes: poetry run python scripts/_gen_phase35_gold.py > tests/ask_eval/gold_questions.jsonl
-# The scheduled Ask eval workflow, .github/workflows/ask-eval-weekly.yml, runs
-# tests/ask_eval/test_baseline.py instead.
 
 ask-eval:
 	poetry run python scripts/ask_eval.py

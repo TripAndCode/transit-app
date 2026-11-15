@@ -1,8 +1,7 @@
 name: Nightly extended
 
-# Runs suites `ci.yml` deliberately skips on every push/PR because they're
-# either slow (RUN_SLOW's ~120MB model download) or need a real browser
-# (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN). It also re-runs the Oracle-collector
+# Runs suites `ci.yml` deliberately skips on every push/PR because they
+# need a real browser (RUN_I18N_SCAN, RUN_DASHBOARD_E2E_SCAN). It also re-runs the Oracle-collector
 # bash suites under oracle_cloud/v3/tests/, which `ci.yml` already runs on
 # every pull request and every push to `main` -- kept here too to catch drift
 # in the runner's own bash/coreutils between pushes, not to recheck code that
@@ -56,19 +55,13 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.14"
+          python-version: "3.15"
 
       - name: Install Poetry
         run: pip install poetry==2.5.1
 
-      # `--with embeddings`: that group is optional (pyproject.toml keeps torch
-      # et al out of the deploy image), and this job is the one that sets
-      # RUN_SLOW=1 and treats a skipped test_embeddings as a failure. Without
-      # it the embedder import raises ModuleNotFoundError, Embedder degrades to
-      # unavailable, and that test fails rather than skips — so the guard below
-      # cannot save a run that never had the dependency it demands.
       - name: Install dependencies
-        run: poetry install --with embeddings
+        run: poetry install
 
       # RUN_I18N_SCAN and RUN_DASHBOARD_E2E_SCAN drive a real Chromium
       # against the built SPA (see those tests' own module docstrings) —
@@ -138,19 +131,18 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
-          RUN_SLOW: 1
           RUN_I18N_SCAN: 1
           RUN_DASHBOARD_E2E_SCAN: 1
 
-      # The whole point of this job is that these three files' tests run
+      # The whole point of this job is that these files' tests run
       # for real on this schedule, not that `pytest` merely exits 0 — a
       # missing dependency or a build step that silently stopped working
       # would leave them self-skipped (still exit 0) forever. Fail loud
       # instead so that regresses back into a visible nightly failure.
       - name: Fail if the gated tests are still skipped
         run: |
-          if grep -E "^SKIPPED .*(test_embeddings|i18n_coverage_test|dashboard_synthetic_display_test)" pytest-extended.log; then
-            echo "::error::a RUN_SLOW/RUN_I18N_SCAN/RUN_DASHBOARD_E2E_SCAN test was skipped instead of run" >&2
+          if grep -E "^SKIPPED .*(i18n_coverage_test|dashboard_synthetic_display_test)" pytest-extended.log; then
+            echo "::error::a RUN_I18N_SCAN/RUN_DASHBOARD_E2E_SCAN test was skipped instead of run" >&2
             exit 1
           fi
 
@@ -160,44 +152,3 @@ jobs:
       - name: Stop and remove the Postgres container
         if: always()
         run: docker rm -f -v "${{ steps.postgres.outputs.container-name }}" 2>/dev/null || true
-
-  # The push/PR-gated `ci.yml` deliberately skips the optional `embeddings`
-  # group (pyproject.toml: several GB of torch/transformers, unused until a RAG
-  # index exists, and `pipeline.query.embeddings.Embedder` tolerates it being
-  # absent by falling through to the LLM-only path). The python-extended job
-  # above installs it for the RUN_SLOW `test_embeddings` gate, among the whole
-  # suite; this job is the narrow check: a fresh `--with embeddings` install,
-  # then import and embed, with no database or API server. It guards the
-  # environments that install that group: local dev (`make bootstrap`,
-  # `make install`) and the weekly Ask eval workflow. A silent break there
-  # would otherwise surface only as Stage 2 of the Ask router quietly falling
-  # through to the LLM every time. Production is not one of them: the deploy
-  # image installs `--only main`, so its Stage 2 always falls through. Scheduled
-  # here rather than on every push because the install and model download are
-  # minutes of extra runner time not worth paying on every change.
-  embeddings-smoke:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.14"
-
-      - name: Install Poetry
-        run: pip install poetry==2.5.1
-
-      - name: Install dependencies (including the optional embeddings group)
-        run: poetry install --with embeddings
-
-      - name: Import pipeline.query.embeddings and embed one string
-        run: |
-          poetry run python -c "
-          from pipeline.query.embeddings import Embedder
-
-          e = Embedder()
-          assert e.available, 'Embedder unavailable after installing the embeddings group'
-          vec = e.embed('what routes are in the data?', mode='query')
-          assert len(vec) == e.dim, f'expected a {e.dim}-dim vector, got {len(vec)}'
-          "

@@ -1515,7 +1515,7 @@ async def _collect_documents() -> list[dict[str, Any]]:
     poll then reads cheaply.
 
     At most one collection runs at a time. The default executor is shared
-    with the embedder and the LLM calls and holds only a handful of threads,
+    with the LLM calls and holds only a handful of threads,
     and this page polls on a timer from every operator who has it open, so
     without the guard abandoned collections would accumulate there and stall
     unrelated requests. Concurrent polls await the collection already in

@@ -21,9 +21,9 @@ QUERY_LOG_RETENTION_DAYS = 90
 #: api/admin_runs.py); a run this far back has no viewer left to show it to.
 PIPELINE_RUNS_RETENTION_DAYS = 90
 
-#: Matches the deploy's own 400-day data-retention horizon (RETENTION_DAYS in
-#: docs/deploy-railway.md), so the audit trail never outlives the operational
-#: data it explains changes to.
+#: Production `updates`' target horizon in the retention table
+#: (docs/ops-monitoring-deploy.md), so the audit trail never outlives the
+#: operational data it explains changes to.
 ADMIN_AUDIT_RETENTION_DAYS = 400
 
 
@@ -56,10 +56,11 @@ def prune_query_log_sql(days: int) -> str:
 
 
 def prune_intent_cache_sql(days: int) -> str:
-    """DELETE text for the `ask_intent_cache` retention prune. A promoted row
-    stays: its `rag_chunks` suggestion resolves its tool and args from it."""
+    """DELETE text for the `ask_intent_cache` retention prune. Every row ages
+    out on last use, whatever its `promoted_at`: a row's last_question is text a
+    reader typed, and no reader of the cache needs it past the window."""
     cutoff = f"now() - INTERVAL '{int(days)} days'"
-    return f"DELETE FROM ask_intent_cache WHERE last_used_at < {cutoff} AND promoted_at IS NULL"
+    return f"DELETE FROM ask_intent_cache WHERE last_used_at < {cutoff}"
 
 
 PERSONAL_DATA_RETENTION_MONTHS = 25

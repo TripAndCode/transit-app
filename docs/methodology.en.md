@@ -220,7 +220,7 @@ A test ([tests/unit/test_never_computed.py](../tests/unit/test_never_computed.py
 **Raw archives**: the raw data collected is kept exactly as the operator published it.
 
 - The realtime archive can carry vehicle descriptors the operator included. The Service does not ingest them.
-- Positions are kept only to validate the predictions, for a bounded window (7 to 14 days of collection). They are not ingested into the app. Today they are kept as long as the realtime archive (1,825 days by default). A shorter retention for this validation archive is to be set.
+- Positions are kept only to validate the predictions, for a bounded window (7 to 14 days of collection). They are not ingested into the app. The archive of them is kept for 180 days, much shorter than the realtime archive's 1,825.
 - Any release of the archives as a public dataset strips the vehicle descriptors.
 
 ### The original fourteen gaps

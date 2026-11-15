@@ -4,11 +4,11 @@ import { useTranslation } from "react-i18next";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import {
-  useAdminAskEval,
   useAdminAskFunnel,
   useAdminAskQueries,
-  usePromoteAskQuery,
+  useAdminAskToolUsage,
   type AskQueryLogRow,
+  type AskToolUsage,
   type AskRoute,
 } from "../../api/admin";
 import { formatDateTime } from "../../utils/format";
@@ -16,6 +16,7 @@ import { AdminButton, StatusChip } from "./adminControls";
 import { PageHeader } from "../../components/ui/PageHeader";
 
 const ROUTE_ORDER: readonly AskRoute[] = ["rules", "nn", "rag", "no_history"];
+const FILTER_ROUTES: readonly AskRoute[] = [...ROUTE_ORDER, "card_signed_in", "card_signed_out", "followup"];
 const CACHE_OUTCOMES = new Set(["hit", "miss", "bypass"]);
 
 type AskFilters = { route?: string; status?: string; from?: string; to?: string };
@@ -55,6 +56,63 @@ function FunnelBar({
   );
 }
 
+/** Notebook usage: how often each tool's card ran signed in and signed out,
+ * and how often a follow-up used it as context, over the window the server
+ * reports. */
+function ToolUsageSection() {
+  const { t } = useTranslation();
+  const { data, error, refetch } = useAdminAskToolUsage();
+  const columns: DataTableColumn<AskToolUsage>[] = [
+    {
+      key: "tool",
+      header: t("admin.ask_ops.tools.col.tool"),
+      render: (row) => row.tool ?? t("admin.ask_ops.tools.unknown_tool"),
+    },
+    { key: "signed_in", header: t("admin.ask_ops.tools.col.signed_in"), render: (row) => row.signed_in },
+    { key: "signed_out", header: t("admin.ask_ops.tools.col.signed_out"), render: (row) => row.signed_out },
+    { key: "followups", header: t("admin.ask_ops.tools.col.followups"), render: (row) => row.followups },
+    { key: "failed", header: t("admin.ask_ops.tools.col.failed"), render: (row) => row.failed },
+    {
+      key: "latency",
+      header: t("admin.ask_ops.tools.col.latency"),
+      render: (row) => row.avg_latency_ms ?? "—",
+    },
+    {
+      key: "followup_latency",
+      header: t("admin.ask_ops.tools.col.followup_latency"),
+      render: (row) => row.avg_followup_latency_ms ?? "—",
+    },
+  ];
+  return (
+    <section
+      style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
+    >
+      <h2 style={{ fontSize: 15, marginBottom: 4 }}>
+        {data != null
+          ? t("admin.ask_ops.tools.title", { from: data.from_date, to: data.to_date })
+          : t("admin.ask_ops.tools.title_loading")}
+      </h2>
+      <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-tertiary)" }}>
+        {t("admin.ask_ops.tools.note")}
+      </p>
+      {error != null && <ErrorBanner error={error} onRetry={() => refetch()} />}
+      {data == null && error == null && (
+        <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
+      )}
+      {data != null && (
+        <DataTable
+          caption={t("admin.ask_ops.tools.table_label")}
+          rows={data.tools}
+          columns={columns}
+          rowKey={(row) => row.tool ?? ""}
+          emptyLabel={t("admin.ask_ops.tools.empty")}
+          settled
+        />
+      )}
+    </section>
+  );
+}
+
 /** Owns cursor-stack pagination for one fixed filter set. Remounted (via a
  * `key` on the filter values) whenever a filter changes, which resets
  * pagination back to the first page without a synchronization effect. */
@@ -66,35 +124,6 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     ...filters,
     cursor: cursorStack[pageIndex],
   });
-  const promote = usePromoteAskQuery();
-  /** The rows a promotion is in flight for. Only those rows' buttons go
-   *  pending — one slow embedding must not disable every other row's. */
-  const [promotingIds, setPromotingIds] = useState<ReadonlySet<number>>(() => new Set());
-  const [promoteMessage, setPromoteMessage] = useState<string | null>(null);
-
-  async function handlePromote(queryLogId: number) {
-    setPromoteMessage(null);
-    setPromotingIds((ids) => new Set(ids).add(queryLogId));
-    let message: string;
-    try {
-      const result = await promote.mutateAsync(queryLogId);
-      if (result.promoted) {
-        message = t("admin.ask_ops.promote_success");
-      } else if (result.reason === "already_promoted") {
-        message = t("admin.ask_ops.promote_already");
-      } else {
-        message = t("admin.ask_ops.promote_not_eligible");
-      }
-    } catch {
-      message = t("admin.ask_ops.promote_error");
-    }
-    setPromotingIds((ids) => {
-      const next = new Set(ids);
-      next.delete(queryLogId);
-      return next;
-    });
-    setPromoteMessage(message);
-  }
 
   const columns: DataTableColumn<AskQueryLogRow>[] = [
     { key: "agency", header: t("admin.ask_ops.col.agency"), render: (row) => row.agency_name },
@@ -106,7 +135,7 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
           title={row.question}
           style={{ display: "block", maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
         >
-          {row.question}
+          {row.question || "—"}
         </span>
       ),
     },
@@ -138,21 +167,6 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
             : row.cache_outcome,
     },
     { key: "created", header: t("admin.ask_ops.col.created"), render: (row) => formatDateTime(row.created_at) },
-    {
-      key: "promote",
-      header: "",
-      align: "right",
-      render: (row) =>
-        row.promotable ? (
-          <AdminButton
-            variant="secondary"
-            disabled={promotingIds.has(row.id)}
-            onClick={() => handlePromote(row.id)}
-          >
-            {t("admin.ask_ops.promote_action")}
-          </AdminButton>
-        ) : null,
-    },
   ];
 
   function goNext() {
@@ -166,11 +180,6 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
     <>
       {error != null && <ErrorBanner error={error} />}
       {isLoading && <div>{t("common.loading")}</div>}
-      {promoteMessage && (
-        <div role="status" style={{ marginBottom: 12, fontSize: 13, color: "var(--text-secondary)" }}>
-          {promoteMessage}
-        </div>
-      )}
       <DataTable
         caption={t("admin.ask_ops.table_label")}
         rows={data?.rows ?? []}
@@ -192,8 +201,8 @@ function AskQueryTable({ filters }: { filters: AskFilters }) {
   );
 }
 
-/** Admin: Ask operations — query log, route funnel, promote-to-intent-cache,
- * kill-switch pointer, and the latest weekly eval result. */
+/** Admin: Ask operations — query log, route funnel,
+ * and the kill-switch pointer. */
 export function AdminAskOpsPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -212,7 +221,6 @@ export function AdminAskOpsPage() {
     from: filters.from,
     to: filters.to,
   });
-  const { data: evalResult, error: evalError, refetch: refetchEval } = useAdminAskEval();
 
   const maxCount = Math.max(1, ...(funnel?.by_route.map((r) => r.count) ?? [1]));
 
@@ -234,7 +242,7 @@ export function AdminAskOpsPage() {
           onChange={(e) => setFilter("route", e.target.value)}
         >
           <option value="">{t("admin.ask_ops.filter.route_all")}</option>
-          {ROUTE_ORDER.map((r) => (
+          {FILTER_ROUTES.map((r) => (
             <option key={r} value={r}>
               {t(`admin.ask_ops.route.${r}`)}
             </option>
@@ -295,6 +303,8 @@ export function AdminAskOpsPage() {
         </p>
       </section>
 
+      <ToolUsageSection />
+
       <section
         style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
       >
@@ -305,36 +315,6 @@ export function AdminAskOpsPage() {
         <Link to="/admin/flags" style={{ fontSize: 13 }}>
           {t("admin.ask_ops.kill_switch.flags_link")}
         </Link>
-      </section>
-
-      <section
-        style={{ marginBottom: 24, padding: 16, background: "var(--surface-1)", borderRadius: "var(--radius-lg)" }}
-      >
-        <h2 style={{ fontSize: 15, marginBottom: 8 }}>{t("admin.ask_ops.eval.title")}</h2>
-        {evalResult === undefined ? (
-          // "Not run" is a statement about the eval job; a query that is still
-          // loading or failed says nothing about it.
-          evalError != null ? (
-            <ErrorBanner error={evalError} onRetry={() => refetchEval()} />
-          ) : (
-            <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{t("common.loading")}</div>
-          )
-        ) : evalResult ? (
-          <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-            {evalResult.score !== null && (
-              <span style={{ marginRight: 16 }}>
-                {t("admin.ask_ops.eval.score_label")}: {evalResult.score}
-              </span>
-            )}
-            {evalResult.generated_at !== null && (
-              <span>
-                {t("admin.ask_ops.eval.generated_at_label")}: {formatDateTime(evalResult.generated_at)}
-              </span>
-            )}
-          </div>
-        ) : (
-          <StatusChip tone="neutral">{t("admin.ask_ops.eval.not_run")}</StatusChip>
-        )}
       </section>
 
       <AskQueryTable key={filterKey} filters={filters} />

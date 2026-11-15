@@ -114,27 +114,17 @@ def signature_hash(tool: str, canonical_args: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
-def derive_confidence(
-    nn_distance_same_tool: float | None,
-    llm_self_reported: float | None = None,
-) -> float:
-    """Blend the embedding NN distance and the LLM's self-report into a 0..1 confidence.
+# Confidence ceiling for an LLM-resolved intent: nothing independent of the
+# model corroborates it, so its self-report is capped here.
+_LLM_CONFIDENCE_CEILING = 0.4
 
-    - ``nn_distance_same_tool``: cosine distance to the nearest RAG chunk that
-      maps to the same tool the LLM chose. ``None`` means no same-tool match
-      was found in the NN window — falls back to a conservative 0.4 floor.
-    - ``llm_self_reported``: the model's own confidence (0..1). Clamped to
-      [0, 1] before use. ``None`` means no signal — embedding wins.
 
-    Returns the minimum of the two — the lower signal caps the higher one
-    (we don't trust the model's self-report alone; the literature is loud on
-    that). Embedding-derived = max(0, 1 - distance) when present, else 0.4.
+def derive_confidence(llm_self_reported: float | None = None) -> float:
+    """Confidence in 0..1 for an LLM-resolved intent.
+
+    The model's own report is clamped to [0, 1] and never trusted above
+    :data:`_LLM_CONFIDENCE_CEILING`; with no report the ceiling itself is returned.
     """
-    if nn_distance_same_tool is None:
-        embedding_conf = 0.4
-    else:
-        embedding_conf = max(0.0, 1.0 - float(nn_distance_same_tool))
     if llm_self_reported is None:
-        return embedding_conf
-    llm_clamped = max(0.0, min(1.0, float(llm_self_reported)))
-    return min(embedding_conf, llm_clamped)
+        return _LLM_CONFIDENCE_CEILING
+    return min(_LLM_CONFIDENCE_CEILING, max(0.0, min(1.0, float(llm_self_reported))))

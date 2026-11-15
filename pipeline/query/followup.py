@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+from typing import NamedTuple
 
 from pipeline.flags import aflag, flag
 from pipeline.query.hallucination_guard import verify_numeric_claims
@@ -124,6 +125,16 @@ def _serialize_context(tool: str | None, args: dict | None, result: dict | None)
     return "\n".join(parts)
 
 
+class FollowupResult(NamedTuple):
+    """``answer`` text, ``error`` kind (None on success) and the numeric-guard
+    verdict: True when the guard replaced the answer, False when it ran and the
+    answer was clean, None when no answer was generated to check."""
+
+    answer: str
+    error: str | None
+    numeric_guard_triggered: bool | None = None
+
+
 async def answer_followup(
     *,
     question: str,
@@ -132,8 +143,8 @@ async def answer_followup(
     context_result: dict | None,
     locale: str = "ja",
     llm_approved: bool = True,
-) -> tuple[str, str | None]:
-    """Return ``(answer_text, error_kind)``.
+) -> FollowupResult:
+    """Return a :class:`FollowupResult`: ``(answer_text, error_kind, guard_verdict)``.
 
     ``error_kind`` is ``None`` on success. ``"too_long"`` if the question
     exceeds :data:`MAX_QUESTION_CHARS`. ``"not_approved"`` if
@@ -147,11 +158,11 @@ async def answer_followup(
     """
     q = question.strip()
     if not q:
-        return "", "empty"
+        return FollowupResult("", "empty")
     if len(q) > MAX_QUESTION_CHARS:
-        return "", "too_long"
+        return FollowupResult("", "too_long")
     if not llm_approved:
-        return "", "not_approved"
+        return FollowupResult("", "not_approved")
 
     system = _SYS_PROMPT_EN if locale == "en" else _SYS_PROMPT_JA
     context_block = _serialize_context(context_tool, context_args, context_result)
@@ -169,14 +180,14 @@ async def answer_followup(
         allowed_providers=_allowed_providers(),
     )
     if err is not None or msg is None:
-        return "", err or "unexpected"
+        return FollowupResult("", err or "unexpected")
     answer = (getattr(msg, "content", None) or "").strip()
     # Grounded on exactly what the model was shown: the serialized context and
     # the question, whose own numbers it may repeat.
     if not verify_numeric_claims(answer, {"context": context_block, "question": q}):
         _log.info("follow-up answer quoted a number its context does not hold; replaced")
-        return _summary("numeric_guard_fallback", lang=locale), None
-    return answer, None
+        return FollowupResult(_summary("numeric_guard_fallback", lang=locale), None, True)
+    return FollowupResult(answer, None, False)
 
 
-__all__ = ["MAX_QUESTION_CHARS", "answer_followup", "is_enabled"]
+__all__ = ["MAX_QUESTION_CHARS", "FollowupResult", "answer_followup", "is_enabled"]

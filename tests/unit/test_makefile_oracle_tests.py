@@ -109,7 +109,7 @@ def test_nightly_workflow_references_oracle_tests():
     assert "make oracle-tests" in text, "nightly-extended.yml does not run `make oracle-tests`"
     assert re.search(r"^\s*schedule:\s*$", text, re.MULTILINE), "nightly-extended.yml has no schedule trigger"
     assert "workflow_dispatch" in text
-    assert "RUN_SLOW" in text and "RUN_I18N_SCAN" in text and "RUN_DASHBOARD_E2E_SCAN" in text
+    assert "RUN_I18N_SCAN" in text and "RUN_DASHBOARD_E2E_SCAN" in text
     assert "RUN_CH_INTEGRATION" in text
     assert "permissions:" in text and "contents: read" in text
     assert "timeout-minutes: 60" in text
@@ -130,13 +130,6 @@ def _first_step_running(command: list[str]) -> int:
         if _contains(tokens, command):
             return i
     raise AssertionError(f"python-extended job never runs `{shlex.join(command)}`")
-
-
-def test_python_extended_job_installs_embeddings_group():
-    """RUN_SLOW makes test_embeddings a required non-skip; without the group
-    the embedder import fails and that test fails instead of skipping."""
-    step = _python_extended_step_tokens()[_first_step_running(["poetry", "install"])]
-    assert _contains(step, ["--with", "embeddings"]), "python-extended's `poetry install` lacks `--with embeddings`"
 
 
 def test_python_extended_job_bakes_spa_between_build_and_pytest():

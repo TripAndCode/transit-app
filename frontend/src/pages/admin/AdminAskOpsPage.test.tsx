@@ -1,25 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../../i18n";
 import { formatDateTime } from "../../utils/format";
-import type { useAdminAskEval, useAdminAskFunnel, useAdminAskQueries } from "../../api/admin";
+import type { useAdminAskFunnel, useAdminAskQueries, useAdminAskToolUsage } from "../../api/admin";
 import { AdminAskOpsPage } from "./AdminAskOpsPage";
-
-const promoteMutateAsync = vi.fn().mockResolvedValue({ promoted: true, reason: null, chunk_id: "cache_abc" });
 
 type QueriesReturn = ReturnType<typeof useAdminAskQueries>;
 type FunnelReturn = ReturnType<typeof useAdminAskFunnel>;
-type EvalReturn = ReturnType<typeof useAdminAskEval>;
+type ToolUsageReturn = ReturnType<typeof useAdminAskToolUsage>;
 
 /** Only the fields the page reads; the rest of react-query's result object
  *  is irrelevant to these tests, so the mocks are partial. */
 let queriesReturn: Partial<QueriesReturn>;
 let funnelReturn: Partial<FunnelReturn>;
-let evalReturn: Partial<EvalReturn>;
+let toolUsageReturn: Partial<ToolUsageReturn>;
 let lastQueriesArgs: Parameters<typeof useAdminAskQueries>[0] | undefined;
 let lastFunnelArgs: Parameters<typeof useAdminAskFunnel>[0] | undefined;
 
@@ -32,8 +29,7 @@ vi.mock("../../api/admin", () => ({
     lastFunnelArgs = params;
     return funnelReturn;
   },
-  useAdminAskEval: () => evalReturn,
-  usePromoteAskQuery: () => ({ mutateAsync: promoteMutateAsync, isPending: false }),
+  useAdminAskToolUsage: () => toolUsageReturn,
 }));
 
 function wrapAt(ui: React.ReactElement, path: string) {
@@ -62,12 +58,20 @@ const baseRow = {
   cache_outcome: "miss",
   numeric_guard_triggered: false,
   created_at: "2026-09-14T03:00:00Z",
-  promotable: true,
 };
 
 beforeEach(() => {
-  promoteMutateAsync.mockReset();
-  promoteMutateAsync.mockResolvedValue({ promoted: true, reason: null, chunk_id: "cache_abc" });
+  toolUsageReturn = {
+    data: {
+      from_date: "2026-10-17",
+      to_date: "2026-11-15",
+      tools: [
+        { tool: "top_n", signed_in: 7, signed_out: 3, followups: 2, failed: 1, avg_latency_ms: 142, avg_followup_latency_ms: 2500 },
+        { tool: null, signed_in: 0, signed_out: 1, followups: 0, failed: 1, avg_latency_ms: null, avg_followup_latency_ms: null },
+      ],
+    },
+    error: null,
+  };
   queriesReturn = {
     data: { rows: [baseRow], next_cursor: null },
     isLoading: false,
@@ -87,7 +91,6 @@ beforeEach(() => {
     isLoading: false,
     error: null,
   };
-  evalReturn = { data: null, isLoading: false, error: null };
 });
 
 describe("AdminAskOpsPage", () => {
@@ -105,63 +108,6 @@ describe("AdminAskOpsPage", () => {
     };
     wrap(<AdminAskOpsPage />);
     expect(screen.queryByText(/数値ガード|Numeric guard/)).toBeNull();
-  });
-
-  it("shows the promote action only for promotable (rag) rows", () => {
-    queriesReturn = {
-      data: {
-        rows: [
-          baseRow,
-          { ...baseRow, id: 2, route: "rules" as const, promotable: false, question: "Second question" },
-        ],
-        next_cursor: null,
-      },
-      isLoading: false,
-      error: null,
-    };
-    wrap(<AdminAskOpsPage />);
-    const promoteButtons = screen.getAllByRole("button", { name: /promote/i });
-    expect(promoteButtons.length).toBe(1);
-  });
-
-  it("calls the promote mutation when the action is clicked", async () => {
-    const user = userEvent.setup();
-    wrap(<AdminAskOpsPage />);
-    const button = screen.getByRole("button", { name: /promote/i });
-    await user.click(button);
-    expect(promoteMutateAsync).toHaveBeenCalledWith(1);
-  });
-
-  it("marks only the row whose promotion is in flight as pending", async () => {
-    // One slow embedding must not hold every other row's promote hostage.
-    const inFlight = new Map<number, () => void>();
-    promoteMutateAsync.mockImplementation(
-      (id: number) =>
-        new Promise((resolve) => {
-          inFlight.set(id, () => resolve({ promoted: true, reason: null, chunk_id: `cache_${id}` }));
-        }),
-    );
-    queriesReturn = {
-      data: { rows: [baseRow, { ...baseRow, id: 2, question: "Second question" }], next_cursor: null },
-      isLoading: false,
-      error: null,
-    };
-    const user = userEvent.setup();
-    wrap(<AdminAskOpsPage />);
-    const promoteIn = (row: number) =>
-      within(screen.getAllByRole("row")[row]).getByRole("button", { name: /promote/i });
-
-    await user.click(promoteIn(1));
-    expect(promoteIn(1)).toBeDisabled();
-    expect(promoteIn(2)).toBeEnabled();
-
-    await user.click(promoteIn(2));
-    expect(promoteMutateAsync).toHaveBeenCalledWith(2);
-    await act(async () => inFlight.get(1)!());
-    expect(promoteIn(1)).toBeEnabled();
-    expect(promoteIn(2)).toBeDisabled();
-    await act(async () => inFlight.get(2)!());
-    expect(promoteIn(2)).toBeEnabled();
   });
 
   it("renders the route funnel counts", () => {
@@ -194,32 +140,17 @@ describe("AdminAskOpsPage", () => {
     expect(screen.queryByText(i18n.t("admin.ask_ops.empty"))).toBeNull();
   });
 
-  it("shows neither a zero funnel nor 'not run' while those queries are loading", () => {
+  it("shows no zero funnel while the funnel query is loading", () => {
     funnelReturn = { data: undefined, isLoading: true, error: null };
-    evalReturn = { data: undefined, isLoading: true, error: null };
     wrap(<AdminAskOpsPage />);
     expect(screen.queryByText(/total/i)).toBeNull();
-    expect(screen.queryByText(i18n.t("admin.ask_ops.eval.not_run"))).toBeNull();
   });
 
-  it("shows an error, not a zero funnel or 'not run', when those queries failed", () => {
+  it("shows an error, not a zero funnel, when the funnel query failed", () => {
     funnelReturn = { data: undefined, isLoading: false, error: new Error("boom") };
-    evalReturn = { data: undefined, isLoading: false, error: new Error("boom") };
     wrap(<AdminAskOpsPage />);
-    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(screen.queryByText(/total/i)).toBeNull();
-    expect(screen.queryByText(i18n.t("admin.ask_ops.eval.not_run"))).toBeNull();
-  });
-
-  it("shows the eval result as not-run when null", () => {
-    wrap(<AdminAskOpsPage />);
-    expect(screen.getByText(/not run yet/i)).toBeTruthy();
-  });
-
-  it("shows the eval score when a result exists", () => {
-    evalReturn = { data: { generated_at: "2026-09-14T00:00:00Z", score: 0.87 }, isLoading: false, error: null };
-    wrap(<AdminAskOpsPage />);
-    expect(screen.getByText(/0.87/)).toBeTruthy();
   });
 
   it("formats created_at rather than printing the raw ISO string", () => {
@@ -261,5 +192,34 @@ describe("AdminAskOpsPage", () => {
     wrap(<AdminAskOpsPage />);
     const link = screen.getByRole("link", { name: /feature flags/i });
     expect(link.getAttribute("href")).toBe("/admin/flags");
+  });
+
+  it("shows per-tool notebook counts split signed in and signed out", () => {
+    wrap(<AdminAskOpsPage />);
+    const table = screen.getByRole("grid", { name: i18n.t("admin.ask_ops.tools.table_label") });
+    const row = within(table).getByText("top_n").closest("tr") as HTMLElement;
+    expect(within(row).getAllByRole("gridcell").map((c) => c.textContent)).toEqual(["top_n", "7", "3", "2", "1", "142", "2500"]);
+    expect(within(table).getByText(i18n.t("admin.ask_ops.tools.unknown_tool"))).toBeTruthy();
+  });
+
+  it("titles the usage table with the window the server reports, not a fixed length", () => {
+    wrap(<AdminAskOpsPage />);
+    expect(screen.getByRole("heading", { name: /2026-10-17.*2026-11-15/ })).toBeTruthy();
+    expect(screen.queryByText(/30/)).toBeNull();
+  });
+
+  it("shows an error, not an empty usage table, when the usage query failed", () => {
+    toolUsageReturn = { data: undefined, error: new Error("boom") };
+    wrap(<AdminAskOpsPage />);
+    expect(screen.queryByText(i18n.t("admin.ask_ops.tools.empty"))).toBeNull();
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
+  it("offers the notebook routes in the route filter", () => {
+    wrap(<AdminAskOpsPage />);
+    const select = screen.getByLabelText(i18n.t("admin.ask_ops.col.route")) as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(
+      expect.arrayContaining(["card_signed_in", "card_signed_out", "followup"]),
+    );
   });
 });

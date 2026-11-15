@@ -14,6 +14,7 @@ from typing import Any
 
 _log = logging.getLogger(__name__)
 
+#: The retention table in docs/ops-monitoring-deploy.md cites this horizon.
 FORECAST_ML_RETENTION_DAYS = 14
 
 _COLUMNS = (
