@@ -139,6 +139,22 @@ async def test_a_route_name_does_not_license_its_digits_elsewhere(monkeypatch, l
 
 
 @pytest.mark.parametrize(
+    ("labels", "on_time_pct", "reply", "replaced"),
+    [
+        (_NUMBER_ONLY, 7.5, "On this route 7.5% of trips ran on time.", False),
+        ({"42052": "5 草津線"}, 7.5, "定時率は7.5（草津線）です。", False),
+        (_NUMBER_ONLY, 9, "Route 7.9% of its trips were late.", True),
+        ({"42052": "5 草津線"}, 2.4, "定時率は2.5系統平均です。", True),
+    ],
+)
+async def test_a_route_name_never_matches_part_of_a_decimal(monkeypatch, labels, on_time_pct, reply, replaced):
+    result = {**_ON_TIME_RESULT, "rows": [["42052", on_time_pct]]}
+    answer, err, guard = await _answer(monkeypatch, reply, context_result=result, route_labels=labels)
+    expected = _summary("numeric_guard_fallback", lang="ja") if replaced else reply
+    assert (answer, err, guard) == (expected, None, replaced)
+
+
+@pytest.mark.parametrize(
     "reply",
     [
         "１．港通り線の定時率は50.6%です\n２．丘陵線は42052です",
