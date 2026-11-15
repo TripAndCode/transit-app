@@ -11,6 +11,10 @@ re-running is idempotent and a crash mid-run rolls back to the prior snapshot.
 The ledger's blind spot (see `_dates_needing_rebuild`) is recovered only by a
 deliberate full rebuild (`analyze --full`).
 
+Dates before the agency's retention floor (`pipeline.retention.retention_floor`)
+are final: `updates` no longer holds all of their rows, so no run, full or
+incremental, purges or rebuilds their aggregates (`_above_floor`).
+
 The tables in `pipeline.ch_aggregates.COPIED_TABLES` are computed and stored in
 ClickHouse: the date-keyed ones rebuilt in whole months, the whole-history ones
 finalized from ClickHouse-only internal tables. Each run copies what it rebuilt into
@@ -86,7 +90,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import NamedTuple
 
 import psycopg2.extras
@@ -98,6 +102,7 @@ from pipeline import (
     feed_quality,
     rebuild_headline,
     refiled,
+    retention,
     static_archive,
     static_headways,
 )
@@ -107,7 +112,7 @@ from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visi
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, schedules, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch, service_day_start_utc
+from pipeline.service_day import service_date_ch, service_date_of, service_day_start_utc
 from pipeline.static_archive import Stamp
 from pipeline.static_content import static_parts as _static_parts
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
@@ -1338,6 +1343,66 @@ def _reads(agency_id: int, ch_client, join: static_archive.ScheduleJoin, refit: 
     return reads
 
 
+def _newest_date(agency_id: int, conn, ch_client) -> date | None:
+    """The newest date a full rebuild of the agency could purge or build:
+    the newest any of its dated tables stores, in either store, or the day
+    after its newest `updates` row, the latest date that row can be filed under."""
+    newest: list[date | None] = []
+    with conn.cursor() as cur:
+        for table in _INCREMENTAL_AGG_TABLES:
+            cur.execute(f"SELECT max(date) FROM {table} WHERE agency_id = %s", (agency_id,))
+            newest.append(cur.fetchone()[0])
+    for table in ch_aggregates.MONTHLY_TABLES:
+        rows = ch_client.query(
+            f"SELECT maxOrNull(date) FROM {table} WHERE agency_id = {{agency_id:Int32}}",
+            parameters={"agency_id": agency_id},
+        ).result_rows
+        newest.append(rows[0][0])
+    captured = ch_max_captured_at(ch_client, agency_id)
+    if captured is not None:
+        newest.append(service_date_of(captured) + timedelta(days=1))
+    return max((day for day in newest if day is not None), default=None)
+
+
+def _above_floor(
+    agency_id: int,
+    conn,
+    ch_client,
+    floor: date,
+    scopes: dict[str, list | None],
+    ch_scopes: dict[str, list | None],
+) -> tuple[dict[str, list | None], dict[str, list | None]]:
+    """*scopes* and *ch_scopes* with every date before *floor* taken out of
+    the dated tables'. A dated table rebuilt in full (None) takes every date
+    from the floor to the newest the agency holds instead, so its purge and
+    build both stop at the floor. The whole-history tables keep theirs: they
+    are finalized from the internal tables, whose months before the floor
+    stand. The scorecard applies the floor to its own months
+    (feed_quality.rebuild)."""
+
+    def dated(name: str) -> bool:
+        return agg_registry.TABLES[name].kind is Kind.DATED and name != feed_quality.TABLE
+
+    every: list[date] = []
+    if any(scope is None and dated(name) for name, scope in {**scopes, **ch_scopes}.items()):
+        newest = _newest_date(agency_id, conn, ch_client)
+        if newest is not None and newest >= floor:
+            every = [floor + timedelta(days=i) for i in range((newest - floor).days + 1)]
+
+    def floored(name: str, scope: list | None) -> list | None:
+        if not dated(name):
+            return scope
+        if scope is None:
+            return every
+        return [day for day in scope if day >= floor]
+
+    logger.info(f"  retention floor {floor.isoformat()}: earlier dates are final")
+    return (
+        {name: floored(name, scope) for name, scope in scopes.items()},
+        {name: floored(name, scope) for name, scope in ch_scopes.items()},
+    )
+
+
 def analyze(agency_id: int, conn, ch_client, *, db_url: str | None = None) -> dict | None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
@@ -1399,6 +1464,14 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
     plan = _plan(agency_id, conn, ch_client, has_static, ingest_strategy)
     scopes = plan.scopes
     ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, scopes)
+    # A whole rebuild of either copy the scorecard reads, which _ch_agg_scopes
+    # can decide beyond the plan, reaches every month of it.
+    quality_scope = scopes[feed_quality.TABLE]
+    if any(ch_scopes.get(name, quality_scope) is None for name in ("agg_route_daily", "agg_route_daily_dist")):
+        quality_scope = None
+    floor = retention.retention_floor(conn, agency_id)
+    if floor is not None:
+        scopes, ch_scopes = _above_floor(agency_id, conn, ch_client, floor, scopes, ch_scopes)
     before = None
     if db_url is not None and rebuild_headline.is_rebuild(plan.reasons):
         before = rebuild_headline.read_before(db_url, agency_id)
@@ -1784,15 +1857,10 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
 
         # ── feed_quality_monthly (per-month feed-quality scorecard) ──
         # After the ClickHouse tables, whose agg_route_daily and
-        # agg_route_daily_dist copies it reads, and agg_feed_health above. A
-        # whole rebuild of either copy, which _ch_agg_scopes can decide beyond
-        # the plan, reaches every month.
-        quality_scope = scopes[feed_quality.TABLE]
-        if any(ch_scopes.get(name, quality_scope) is None for name in ("agg_route_daily", "agg_route_daily_dist")):
-            quality_scope = None
+        # agg_route_daily_dist copies it reads, and agg_feed_health above.
         with _step(f"{feed_quality.TABLE}: build"):
             quality_rewritten = feed_quality.rebuild(
-                agency_id, ingest_strategy, quality_scope, feed_quality.last_closed_day(), conn, ch_client
+                agency_id, ingest_strategy, quality_scope, feed_quality.last_closed_day(), conn, ch_client, floor
             )
 
         # ── agg_meta: record of this build ───────────────────────────────

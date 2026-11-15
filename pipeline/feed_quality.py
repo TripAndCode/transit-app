@@ -410,6 +410,7 @@ def plan_months(
     spans: Mapping[date, tuple[date, date]],
     stored: Mapping[date, tuple[date, date]],
     validation_moved: Collection[date] = (),
+    floor: date | None = None,
 ) -> tuple[list[date] | None, list[date]]:
     """``(purge, build)``: the months whose rows this run deletes (None for
     every month) and those it builds.
@@ -428,7 +429,25 @@ def plan_months(
     *validation_moved*, whose validator summaries changed since its row was
     built (:func:`validation_moved`). A stored month outside the agency's
     months goes.
+
+    A month that begins before *floor*, the agency's retention floor
+    (pipeline.retention.retention_floor), is final whatever else holds: its
+    window reads `updates` rows that are gone.
     """
+    purge, build = _plan_months(scope, spans, stored, validation_moved)
+    if floor is None:
+        return purge, build
+    if purge is None:
+        purge = sorted({*spans, *stored})
+    return [month for month in purge if month >= floor], [month for month in build if month >= floor]
+
+
+def _plan_months(
+    scope: list[date] | None,
+    spans: Mapping[date, tuple[date, date]],
+    stored: Mapping[date, tuple[date, date]],
+    validation_moved: Collection[date],
+) -> tuple[list[date] | None, list[date]]:
     months = sorted(spans)
     if scope is None:
         return None, months
@@ -714,10 +733,17 @@ def with_stop_events(
 
 
 def rebuild(
-    agency_id: int, ingest_strategy: str | None, scope: list[date] | None, last_closed: date, conn, ch_client
+    agency_id: int,
+    ingest_strategy: str | None,
+    scope: list[date] | None,
+    last_closed: date,
+    conn,
+    ch_client,
+    floor: date | None = None,
 ) -> bool:
     """Replace the agency's rows of the months :func:`plan_months` names, in
-    the caller's transaction, and return whether any row was replaced. Reads
+    the caller's transaction, and return whether any row was replaced. No
+    month beginning before *floor* is touched. Reads
     agg_feed_health, agg_route_daily and agg_route_daily_dist as this run left
     them, so it runs after all three; the other agencies' as their last runs did."""
     with conn.cursor() as cur:
@@ -740,7 +766,7 @@ def rebuild(
             stamps = {month: (int(count), at) for month, count, at in cur.fetchall()}
     spans = {month: (bounds[month][0], last) for month, last in windows.items()}
     moved = validation_moved(stamps, {month: (count, at) for month, _, _, count, at in built}, spans)
-    purge, build = plan_months(scope, spans, stored, moved)
+    purge, build = plan_months(scope, spans, stored, moved, floor)
     rows = [
         build_month(agency_id, month, *spans[month], bounds[month][1], ingest_strategy, conn, ch_client)
         for month in build
