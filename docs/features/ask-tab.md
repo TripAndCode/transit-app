@@ -175,6 +175,23 @@ renders it with the reports' `DefinitionMetaBlock`.
 5. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:
    log_query()` unless `ASK_QUERY_LOG_ENABLED=false`.
 
+**Usage log.** Each notebook card dispatch writes one `ask_query_log` row, on
+the same kill switch: `router_stage` is `card_signed_in`
+(`POST .../conversations/{cid}/messages`) or `card_signed_out`
+(`POST .../ask/card`), `tool` is the canonical handler name (an unknown or
+aliased client name resolves to the handler's, or NULL), `success` is false for
+an empty or failed dispatch, and `latency_ms` is the dispatch's own wall time
+(a signed-in card counts as a success only once its thread's transaction has
+committed). A follow-up writes a `followup` row naming the tool of the result
+it used (NULL when that answer came from no tool), with `latency_ms` of the
+model call and the numeric-guard verdict in `numeric_guard_triggered`. The
+`question` column is empty on every notebook row: the follow-up's text stays in
+the user's own conversation. Notebook rows carry no user id, conversation id,
+arguments or text. The write
+follows the request's transaction and swallows its own failure, so logging
+cannot fail a card or lose a follow-up's answer. The admin Ask ops page reports these as per-tool
+counts over the trailing `DEFAULT_RANGE_DAYS` JST days.
+
 **Follow-up path** (LLM-grounded, kill-switch gated):
 `FollowupChipsRow` → `useFollowup` →
 `POST /api/{agency_id}/conversations/{cid}/followup`
@@ -257,7 +274,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `followup.py` | LLM-grounded follow-up answerer (`ASK_FOLLOWUP_ENABLED` kill switch) |
 | `labels.py` | `dow_label`/time-band display helpers |
 | `meta_tools.py` | `describe_data`-style meta tools merged into the handler map |
-| `query_log.py` | `ask_query_log` writer, gated by `ASK_QUERY_LOG_ENABLED` |
+| `query_log.py` | `ask_query_log` writer (router, card and follow-up rows), gated by `ASK_QUERY_LOG_ENABLED` |
 
 ## How to verify manually
 

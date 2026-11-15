@@ -52,7 +52,8 @@ def test_funnel_defaults_to_the_last_30_jst_days_when_both_bounds_omitted(monkey
 
     assert r.status_code == 200
     assert len(conn.calls) == 1
-    _sql, args = conn.calls[0]
+    _sql, (_stages, *args) = conn.calls[0]
+    args = tuple(args)
     assert args == (date(2026, 8, 26), date(2026, 9, 24))
 
 
@@ -63,7 +64,8 @@ def test_funnel_does_not_default_the_other_bound_when_one_is_given(monkeypatch):
     r = _client(conn).get("/api/admin/ask/funnel", params={"from": "2026-01-01"})
 
     assert r.status_code == 200
-    _sql, args = conn.calls[0]
+    _sql, (_stages, *args) = conn.calls[0]
+    args = tuple(args)
     assert args == (date(2026, 1, 1),), "providing one bound must not fill in the other with the 30-day default"
 
 
@@ -74,5 +76,6 @@ def test_funnel_runs_unbounded_when_both_bounds_are_given(monkeypatch):
     r = _client(conn).get("/api/admin/ask/funnel", params={"from": "2020-01-01", "to": "2020-01-31"})
 
     assert r.status_code == 200
-    _sql, args = conn.calls[0]
+    _sql, (_stages, *args) = conn.calls[0]
+    args = tuple(args)
     assert args == (date(2020, 1, 1), date(2020, 1, 31))

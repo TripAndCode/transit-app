@@ -353,7 +353,22 @@ scope and method version, never the stored figures.
 Route: `/admin/ask`, backed by `AdminAskOpsPage`.
 
 Endpoints:
-- `GET /api/admin/ask/queries` — paged query log.
-- `GET /api/admin/ask/funnel` — stage/success counts.
+- `GET /api/admin/ask/queries` — paged query log. Notebook card and follow-up
+  rows are left out unless the `route` filter asks for `card_signed_in`,
+  `card_signed_out` or `followup`, as the funnel leaves them out.
+- `GET /api/admin/ask/funnel` — stage/success counts for the router; notebook
+  card dispatches and follow-ups are not part of it.
+- `GET /api/admin/ask/tools` — the notebook's usage signal: per tool, the card
+  dispatches signed in and signed out, the follow-ups that used its result as
+  context, the failures among them, the mean latency of its card dispatches and
+  the mean latency of its follow-ups, over the trailing `DEFAULT_RANGE_DAYS`
+  JST days (`from`/`to`/`agency_id` narrow it). The page titles its table with
+  the window the response reports and shows it above the query log. A NULL tool
+  covers card names no handler answers to and follow-ups on an answer that came
+  from no tool.
 
-Tables: reads `ask_query_log`.
+Tables: reads `ask_query_log`. Notebook rows carry no user id, conversation id,
+arguments or text; whether a card ran signed in or out is the only fact kept
+about its caller, and a follow-up row carries only its context tool, latency and
+numeric-guard verdict. They fall under the table's 90-day
+retention (`pipeline/retention.py`).

@@ -11,6 +11,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from pipeline.query.followup import FollowupResult
 from tests.conftest import TEST_ORIGIN, _test_pool
 
 _CSRF = {"Origin": TEST_ORIGIN}
@@ -753,7 +754,7 @@ async def test_followup_authed_too_long_maps_to_400(conv_app, monkeypatch):
     app, agency, uid, pool = conv_app
 
     async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
-        return None, "too_long"
+        return FollowupResult("", "too_long")
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
 
@@ -827,7 +828,7 @@ async def test_followup_authed_llm_error_maps_to_502(conv_app, monkeypatch):
     app, agency, uid, pool = conv_app
 
     async def _fake_answer_followup(*, question, context_tool, context_args, context_result, locale, llm_approved=True):
-        return None, "provider_unavailable"
+        return FollowupResult("", "provider_unavailable")
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
 
@@ -869,7 +870,7 @@ async def test_followup_authed_success_appends_messages(conv_app, monkeypatch):
         captured["context_tool"] = context_tool
         captured["context_args"] = context_args
         captured["context_result"] = context_result
-        return "the answer", None
+        return FollowupResult("the answer", None, False)
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
 
@@ -958,7 +959,7 @@ async def test_followup_holds_no_pool_connection_across_the_llm_call(conv_app, m
                 probe["acquired"] = await other.fetchval("SELECT 1")
         except asyncio.TimeoutError:
             probe["acquired"] = "timed out — a connection is held across the LLM call"
-        return "the answer", None
+        return FollowupResult("the answer", None, False)
 
     monkeypatch.setattr(conv_router._followup, "answer_followup", _probing_answer_followup)
 

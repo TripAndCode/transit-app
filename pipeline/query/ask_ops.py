@@ -1,9 +1,11 @@
 """Pure display/derivation helpers for the admin Ask-ops surface.
 
 ``ask_query_log`` stores the pipeline stage that answered a question
-(``router_stage``: ``rules`` / ``embedding`` / ``llm`` / ``no_history``) and
-whether it succeeded (``success``: bool). It has no ``route``, ``status``,
-``latency_ms``, ``provider`` or user-identity column — see
+(``router_stage``: ``rules`` / ``embedding`` / ``llm`` / ``no_history``, or
+``card_signed_in`` / ``card_signed_out`` / ``followup`` for the notebook
+paths that bypass the router) and whether it succeeded (``success``: bool).
+``latency_ms`` is set only on those notebook rows. It has no ``route``,
+``status``, ``provider`` or user-identity column — see
 ``db/migrations/0013_ask_query_log.up.sql``, which deliberately omits
 identity, and ``pipeline/query/query_log.py``'s INSERT column list for the
 full set that exists. The admin surface's "route" and "status" columns are
@@ -17,17 +19,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# router_stage (DB value) -> display route, in pipeline order.
+# router_stage values of the notebook paths that never touch the router. They
+# name the path only: whether a card ran signed in is the one fact kept about
+# the caller, and no identity is stored with it.
+CARD_SIGNED_IN = "card_signed_in"
+CARD_SIGNED_OUT = "card_signed_out"
+FOLLOWUP = "followup"
+
+# router_stage (DB value) -> display route: router stages in pipeline order,
+# then the notebook paths.
 _STAGE_TO_ROUTE = {
     "rules": "rules",
     "embedding": "nn",
     "llm": "rag",
     "no_history": "no_history",
+    CARD_SIGNED_IN: CARD_SIGNED_IN,
+    CARD_SIGNED_OUT: CARD_SIGNED_OUT,
+    FOLLOWUP: FOLLOWUP,
 }
 _ROUTE_TO_STAGE = {v: k for k, v in _STAGE_TO_ROUTE.items()}
 
 # Canonical funnel order: pipeline stages first, then the early-exit bucket.
 ROUTE_ORDER = ("rules", "nn", "rag", "no_history")
+
+# Notebook paths, reported per tool rather than as a stage of the router funnel.
+NOTEBOOK_STAGES = (CARD_SIGNED_IN, CARD_SIGNED_OUT, FOLLOWUP)
 
 
 def derive_route(router_stage: str) -> str:
