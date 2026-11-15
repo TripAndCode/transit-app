@@ -11,6 +11,8 @@ A change to what any of these statements produces is a builder change: bump
 the table's version in `pipeline/agg_registry.py` in the same commit.
 """
 
+from datetime import datetime, timezone
+
 from pipeline.clickhouse import LIVE_SOURCED, STOP_SKIPPED, TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
 from pipeline.db import (
     departure_ch,
@@ -55,6 +57,21 @@ def feed_health_ch_sql(date_where: str) -> str:
             GROUP BY date
             """
     )
+
+
+#: Per service date of capture, the pair agg_feed_health keeps as analyze's
+#: ledger (raw_samples, total_rows; feed_health_ch_sql's own counts), as
+#: `updates` holds it now, over the rows captured from ``after`` up to
+#: ``before``. analyze's rebuild decision and the `updates` prune both compare
+#: it with the stored ledger. A range on the stored instant, so the sort key
+#: prunes the scan; EARLIEST_CAPTURE and LATEST_CAPTURE leave an end open.
+LEDGER_COUNTS_CH_SQL = (
+    f"SELECT {_SERVICE_DATE} AS date, countIf(dep_delay IS NOT NULL) AS raw_samples, count() AS total_rows "
+    "FROM updates WHERE agency_id = {agency_id:UInt16} "
+    "AND captured_at >= {after:DateTime64} AND captured_at < {before:DateTime64} GROUP BY date"
+)
+EARLIEST_CAPTURE = datetime(1970, 1, 1, tzinfo=timezone.utc)
+LATEST_CAPTURE = datetime(2200, 1, 1, tzinfo=timezone.utc)
 
 
 # ClickHouse's argMax(arg, val) silently SKIPS a row whose `arg`

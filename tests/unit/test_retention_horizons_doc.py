@@ -35,3 +35,12 @@ def test_the_retention_table_states_prune_r2s_horizons():
     assert f"| {_default('R2_RT_RETENTION_DAYS'):,} days |" in _line(doc, "| R2 `rt/<id>/`")
     assert f"| {_default('R2_STATIC_RETENTION_DAYS'):,} days;" in _line(doc, "| R2 `static/<id>/`")
     assert f"| {_default('R2_VP_RETENTION_DAYS'):,} days |" in _line(doc, "| R2 `vp/<id>/`")
+
+
+def test_the_retention_table_states_the_updates_horizon_the_prune_enforces():
+    from pipeline.retention import UPDATES_RETENTION_DAYS
+
+    row = _line("docs/ops-monitoring-deploy.md", "| ClickHouse `updates`, production |")
+    assert f"With it on, {UPDATES_RETENTION_DAYS:,} days," in row
+    assert f"(default {UPDATES_RETENTION_DAYS:,}, constant `UPDATES_RETENTION_DAYS`)" in row
+    assert "`updates_prune_enabled`" in row

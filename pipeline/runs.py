@@ -1,9 +1,10 @@
 """One row per pipeline job, so the control board can show what actually ran.
 
-``pipeline_runs`` records ingest, promotion, analyze, weather, static-load and
-RT coverage-probe jobs from both entry points -- the CLI (``gtfs_pipeline.py``)
-and the cron fallback endpoint -- including the jobs that never did any work
-because another process held the ingest/analyze advisory lock. A run that
+``pipeline_runs`` records ingest, promotion, analyze, weather, static-load
+and RT coverage-probe jobs from both entry points -- the CLI
+(``gtfs_pipeline.py``) and the cron fallback endpoint -- and the `updates`
+retention prune, which only the CLI runs. It records the jobs that never did
+any work because another process held the ingest/analyze advisory lock too. A run that
 was skipped is the most interesting row on the board: it is the only
 evidence that a scheduled job was displaced, and nothing else in the system
 keeps it.
@@ -46,7 +47,7 @@ logger = logging.getLogger(__name__)
 #: Mirrors the ``kind`` CHECK constraint. Validated before the statement is
 #: built so a typo fails here, where the caller's stack still says which job
 #: it was, rather than as a constraint violation swallowed by the guard below.
-RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static", "update", "probe")
+RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "weather", "static", "update", "probe", "retention")
 
 #: Mirrors the ``status`` CHECK constraint. ``unchanged`` closes a job that
 #: ran and found nothing newer to do (a timetable check that loaded no zip).
@@ -77,7 +78,7 @@ _RECORD_REBUILD_HEADLINE_SQL = "UPDATE pipeline_runs SET rebuild_headline = %s::
 #: one working on an old ``running`` row of one of these kinds. An ``update``
 #: umbrella spends most of its life inside the ingest + analyze sweep, so it
 #: is spared on the same terms as the steps it is waiting on.
-LOCKED_RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "update")
+LOCKED_RUN_KINDS: tuple[str, ...] = ("ingest", "promote", "analyze", "update", "retention")
 
 #: Closes rows whose process died before it could. ``finished_at`` is the
 #: reap moment rather than the cutoff: the row records when the run was given

@@ -11,6 +11,10 @@ re-running is idempotent and a crash mid-run rolls back to the prior snapshot.
 The ledger's blind spot (see `_dates_needing_rebuild`) is recovered only by a
 deliberate full rebuild (`analyze --full`).
 
+No run, full or incremental, purges or rebuilds a date before the agency's
+retention floor (`pipeline.retention.retention_floor`, which says why).
+`_above_floor` is the one place that enforces it, on every scope a run builds.
+
 The tables in `pipeline.ch_aggregates.COPIED_TABLES` are computed and stored in
 ClickHouse: the date-keyed ones rebuilt in whole months, the whole-history ones
 finalized from ClickHouse-only internal tables. Each run copies what it rebuilt into
@@ -86,7 +90,7 @@ import logging
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import NamedTuple
 
 import psycopg2.extras
@@ -98,6 +102,7 @@ from pipeline import (
     feed_quality,
     rebuild_headline,
     refiled,
+    retention,
     static_archive,
     static_headways,
 )
@@ -107,7 +112,7 @@ from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, _static_loaded, build_stop_visi
 from pipeline.headways import daily_headway_rows, dominant_contents, pool_daily_gaps, schedules, thresholds
 from pipeline.locks import agency_ingest_lock
 from pipeline.planned_trips import capture_planned_trips
-from pipeline.service_day import service_date_ch, service_day_start_utc
+from pipeline.service_day import filed_dates_reached, service_date_ch, service_day_start_utc
 from pipeline.static_archive import Stamp
 from pipeline.static_content import static_parts as _static_parts
 from pipeline.strategies.static_join import RT_INGEST_STRATEGIES, VERSION_STAMPING_STRATEGIES
@@ -570,27 +575,23 @@ def _dates_the_move_reaches(
     return {ArchivedInput.STOP_TIMES: stop_times, ArchivedInput.MEDIANS: medians}
 
 
-def _ledger_counts(agency_id: int, ch_client) -> dict:
-    """Each service date's (raw_samples, total_rows) as ClickHouse holds them now."""
+def _ledger_counts(agency_id: int, ch_client, floor: date | None = None) -> dict:
+    """Each service date's (raw_samples, total_rows) as ClickHouse holds them
+    now, from *floor* on when given."""
     live = _ch_query(
         "plan: per-date ledger",
         ch_client,
-        """
-        SELECT """
-        + _SERVICE_DATE
-        + """ AS date,
-               countIf(dep_delay IS NOT NULL) AS raw_samples,
-               count() AS total_rows
-        FROM updates
-        WHERE agency_id = {agency_id:UInt16}
-        GROUP BY date
-        """,
-        {"agency_id": agency_id},
+        agg_sql.LEDGER_COUNTS_CH_SQL,
+        {
+            "agency_id": agency_id,
+            "after": agg_sql.EARLIEST_CAPTURE if floor is None else service_day_start_utc(floor),
+            "before": agg_sql.LATEST_CAPTURE,
+        },
     )
     return {row[0]: (row[1], row[2]) for row in live.result_rows}
 
 
-def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
+def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None = None) -> list | None:
     """The service dates whose aggregates no longer match their sources.
 
     ``None`` means every date, which is what a first run or a missing ledger
@@ -631,6 +632,14 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
     deliberate full rebuild recovers from that: ``gtfs_pipeline.py analyze
     --full`` / ``analyze_all --full`` (``make analyze-all FULL=1``), which
     calls :func:`mark_for_full_rebuild` first.
+
+    With a retention floor (:func:`pipeline.retention.retention_floor`), only
+    the dates from it on are compared, and none before it is returned. The
+    rows the prune dropped were captured before the floor's filed span, so
+    no date from the floor on was filed from them. The other direction is
+    still open: a change on the floor date itself lends to the day before it
+    (:func:`_dates_filed_from`), a final date, which is why the result is
+    clamped as well, and why _above_floor clamps every scope again.
     """
     # The Postgres read comes first, so a run with no ledger at all never pays
     # for a full-history remote scan to be told so. A first run is exactly the
@@ -641,15 +650,18 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client) -> list | None:
         stored = {d: (raw, total) for d, raw, total in cur.fetchall()}
     if not stored:
         return None
+    if floor is not None:
+        stored = {day: counts for day, counts in stored.items() if day >= floor}
     if any(total is None for _, total in stored.values()):
         logger.info("  incremental: ledger predates total_rows; rebuilding every date")
         return None
 
-    live_counts = _ledger_counts(agency_id, ch_client)
+    live_counts = _ledger_counts(agency_id, ch_client, floor)
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
-    return sorted(stale | _dates_filed_from(agency_id, ch_client, stale, stored, live_counts))
+    changed = stale | _dates_filed_from(agency_id, ch_client, stale, stored, live_counts)
+    return sorted(day for day in changed if floor is None or day >= floor)
 
 
 def _dates_filed_from(agency_id: int, ch_client, stale: set, stored: dict, live_counts: dict) -> set:
@@ -755,6 +767,7 @@ class Plan(NamedTuple):
     join: static_archive.ScheduleJoin
     # Why each table rebuilt in full is (agg_registry.table_scopes).
     reasons: dict[str, str]
+    floor: date | None  # the agency's retention floor (pipeline.retention.retention_floor)
 
 
 # The versions in force each run built against (db/migrations/0090).
@@ -819,9 +832,11 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     static_archive.require_tables(ch_client)
     refiled.require_tables(ch_client)
     with conn.cursor() as cur:
-        cur.execute("SELECT to_regclass(%s)", (IN_FORCE_TABLE,))
-        if cur.fetchone()[0] is None:
-            raise RuntimeError(f"Postgres has no {IN_FORCE_TABLE}; run `make migrate`")
+        for required in (IN_FORCE_TABLE, retention.PRUNED_TABLE):
+            cur.execute("SELECT to_regclass(%s)", (required,))
+            if cur.fetchone()[0] is None:
+                raise RuntimeError(f"Postgres has no {required}; run `make migrate`")
+    floor = retention.retention_floor(conn, agency_id)
     static_archive.require_mirror(conn)
     content_key = None
     if has_static:
@@ -853,7 +868,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
     # With no table's fingerprint matching, every table goes in full whatever
     # the ledger says, so its full-history scan is skipped.
     if any(stored.get(name) == fingerprint for name, fingerprint in current.items()):
-        ledger = _dates_needing_rebuild(agency_id, conn, ch_client)
+        ledger = _dates_needing_rebuild(agency_id, conn, ch_client, floor)
     else:
         ledger = []
     stamped = ingest_strategy in VERSION_STAMPING_STRATEGIES
@@ -894,6 +909,8 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
             for name, table in agg_registry.TABLES.items():
                 if table.in_force:
                     extra[name] = sorted({*extra.get(name, []), *moved})
+    if floor is not None:
+        extra = {name: [day for day in dates if day >= floor] for name, dates in extra.items()}
     scopes, reasons = agg_registry.table_scopes(current, stored, ledger, extra)
     for name in sorted(scopes):
         scope = scopes[name]
@@ -904,7 +921,7 @@ def _plan(agency_id: int, conn, ch_client, has_static: bool, ingest_strategy: st
         else:
             described = f"{len(scope)} date(s)"
         logger.info(f"  scope {name}: {described}")
-    return Plan(current, scopes, content_key, join, reasons)
+    return Plan(current, scopes, content_key, join, reasons, floor)
 
 
 def _date_filter(rebuild_dates: list | None, agency_id: int, *, filed: bool = True) -> tuple[str, dict]:
@@ -1070,7 +1087,9 @@ def _ch_build_and_insert(
     logger.info(f"  {table}: {len(rows)} rows")
 
 
-def _ch_agg_scopes(agency_id: int, conn, ch_client, scopes: dict[str, list | None]) -> dict[str, list | None]:
+def _ch_agg_scopes(
+    agency_id: int, conn, ch_client, scopes: dict[str, list | None], floor: date | None = None
+) -> dict[str, list | None]:
     """The dates each ClickHouse-computed table recomputes: its own scope
     (:func:`agg_registry.table_scopes`), or None for all of them.
 
@@ -1082,6 +1101,11 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, scopes: dict[str, list | Non
     forces a full rebuild of the agency. Comparing the two stores, rather than
     asking whether ClickHouse holds any row, keeps an agency whose data yields no
     rows for a table from rebuilding it on every run.
+
+    With a retention *floor*, a dated table's stores are compared from the
+    floor's month on, the months a rebuild repairs: below it, a disagreement
+    is final, and a table moved to ClickHouse keeps its history before the
+    floor's month in Postgres alone.
 
     An internal table has no Postgres copy, so its figure is compared with its
     ch_aggregates.REFERENCES table's instead. A whole-history table is rebuilt whole
@@ -1099,36 +1123,98 @@ def _ch_agg_scopes(agency_id: int, conn, ch_client, scopes: dict[str, list | Non
         if scopes[table] is None:
             result[table] = None
             continue
-        with _step(f"{table}: compare stores"):
-            agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
+        agree = _stores_agree(table, agency_id, conn, ch_client, floor)
         if not agree:
             logger.info(f"  {table}: ClickHouse and Postgres disagree; rebuilding every month")
         result[table] = scopes[table] if agree else None
-    for internal, (reference, _, pg_expression) in ch_aggregates.REFERENCES.items():
+    for internal in ch_aggregates.REFERENCES:
         if scopes[internal] is None:
             result[internal] = None
             continue
-        with _step(f"{internal}: compare stores"):
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT coalesce({pg_expression}, 0)::bigint FROM {reference} WHERE agency_id = %s", (agency_id,)
-                )
-                expected = int(cur.fetchone()[0])
-            agree = ch_aggregates.reference_figure(ch_client, internal, agency_id) == expected
+        agree = _reference_agrees(internal, agency_id, conn, ch_client)
         if not agree:
-            logger.info(f"  {internal}: figures differ from {reference}; recounting every month")
+            logger.info(
+                f"  {internal}: figures differ from {ch_aggregates.REFERENCES[internal][0]}; recounting every month"
+            )
         result[internal] = scopes[internal] if agree else None
     for table in ch_aggregates.WHOLE_HISTORY_TABLES:
         if scopes[table] is None or result[ch_aggregates.whole_history_source(table)] != []:
             result[table] = None
             continue
-        with _step(f"{table}: compare stores"):
-            agree = ch_aggregates.totals(ch_client, table, agency_id, None) == _pg_totals(conn, table, agency_id, None)
-        result[table] = [] if agree else None
+        result[table] = [] if _stores_agree(table, agency_id, conn, ch_client, floor) else None
     return result
 
 
-def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tuple[int, int, int]:
+def _stores_agree(table: str, agency_id: int, conn, ch_client, floor: date | None) -> bool:
+    """Whether *table*'s ClickHouse rows add up to its Postgres copy: a dated
+    table's from *floor*'s month on when given, a whole-history table's whole."""
+    since = floor.replace(day=1) if floor is not None and table in ch_aggregates.TABLES else None
+    with _step(f"{table}: compare stores"):
+        return ch_aggregates.totals(ch_client, table, agency_id, None, since=since) == _pg_totals(
+            conn, table, agency_id, None, since=since
+        )
+
+
+def _reference_agrees(internal: str, agency_id: int, conn, ch_client) -> bool:
+    """Whether *internal*'s figure matches its REFERENCES table's, over the
+    agency's whole history. A retention floor needs no narrower comparison:
+    no run rebuilds or drops a month of an internal table before the floor's
+    (`swap` touches only the months a run rebuilds), and the prune holds an
+    agency whose figures disagree (store_disagreements), so a difference found
+    here lies from the floor on, where recounting from the floor repairs it."""
+    reference, _, pg_expression = ch_aggregates.REFERENCES[internal]
+    with _step(f"{internal}: compare stores"):
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT coalesce({pg_expression}, 0)::bigint FROM {reference} WHERE agency_id = %s", (agency_id,)
+            )
+            expected = int(cur.fetchone()[0])
+        return ch_aggregates.reference_figure(ch_client, internal, agency_id) == expected
+
+
+def store_disagreements(agency_id: int, conn, ch_client, floor: date | None) -> list[str]:
+    """The ClickHouse aggregates of the agency whose figures a run's store
+    check (:func:`_ch_agg_scopes`) finds off, compared as it compares them."""
+    tables = [
+        table
+        for table in (*ch_aggregates.TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES)
+        if not _stores_agree(table, agency_id, conn, ch_client, floor)
+    ]
+    return tables + [
+        internal for internal in ch_aggregates.REFERENCES if not _reference_agrees(internal, agency_id, conn, ch_client)
+    ]
+
+
+class Unapplied(NamedTuple):
+    """What a run of analyze would still apply to the agency's built dates."""
+
+    tables: list[str]  # those whose recorded fingerprint is not the one a run would build under now
+    moved: list  # the built dates whose version in force moved since (_dates_in_force_moved)
+
+
+def unapplied(agency_id: int, conn, ch_client) -> Unapplied:
+    """The timetable and builder changes the agency's aggregates do not
+    reflect yet, read as _plan reads them, without archiving anything."""
+    has_static = _static_loaded(conn, agency_id)
+    with conn.cursor() as cur:
+        cur.execute("SELECT ingest_strategy FROM agencies WHERE agency_id = %s", (agency_id,))
+        row = cur.fetchone()
+        ingest_strategy = row[0] if row else None
+        cur.execute("SELECT table_name, fingerprint FROM agg_table_state WHERE agency_id = %s", (agency_id,))
+        stored = dict(cur.fetchall())
+    current = table_fingerprints(ingest_strategy, has_static, _static_parts(agency_id, conn, has_static))
+    tables = sorted(name for name, fingerprint in current.items() if stored.get(name) != fingerprint)
+    moved: list = []
+    if ingest_strategy in VERSION_STAMPING_STRATEGIES:
+        # The versions in force do not depend on the loaded timetable's key.
+        join = static_archive.schedule_join(ch_client, agency_id, None, by_service_date=True)
+        moved = _dates_in_force_moved(agency_id, conn, join)
+    return Unapplied(tables, moved)
+
+
+def _pg_totals(
+    conn, table: str, agency_id: int, months: list[int] | None, since: date | None = None
+) -> tuple[int, int, int]:
     """`ch_aggregates.totals` for the Postgres copy. *months* is None or non-empty."""
     where = "agency_id = %s"
     params: list = [agency_id]
@@ -1136,6 +1222,9 @@ def _pg_totals(conn, table: str, agency_id: int, months: list[int] | None) -> tu
         bounds = [ch_aggregates.month_bounds(month) for month in months]
         where += " AND (" + " OR ".join(["(date >= %s AND date < %s)"] * len(bounds)) + ")"
         params += [day for pair in bounds for day in pair]
+    if since is not None:
+        where += " AND date >= %s"
+        params.append(since)
     (_, first), (_, second) = ch_aggregates.store_figures(table)
     with conn.cursor() as cur:
         cur.execute(
@@ -1338,6 +1427,68 @@ def _reads(agency_id: int, ch_client, join: static_archive.ScheduleJoin, refit: 
     return reads
 
 
+def _newest_date(agency_id: int, conn, ch_client) -> date | None:
+    """The newest date a full rebuild of the agency could purge or build:
+    the newest any of its dated tables stores, in either store, or the latest
+    its newest `updates` row can be filed under."""
+    newest: list[date | None] = []
+    with conn.cursor() as cur:
+        for table in _INCREMENTAL_AGG_TABLES:
+            cur.execute(f"SELECT max(date) FROM {table} WHERE agency_id = %s", (agency_id,))
+            newest.append(cur.fetchone()[0])
+    for table in ch_aggregates.MONTHLY_TABLES:
+        rows = ch_client.query(
+            f"SELECT maxOrNull(date) FROM {table} WHERE agency_id = {{agency_id:Int32}}",
+            parameters={"agency_id": agency_id},
+        ).result_rows
+        newest.append(rows[0][0])
+    captured = ch_max_captured_at(ch_client, agency_id)
+    if captured is not None:
+        newest.append(filed_dates_reached(captured, captured + timedelta(microseconds=1))[1])
+    return max((day for day in newest if day is not None), default=None)
+
+
+def _above_floor(
+    agency_id: int,
+    conn,
+    ch_client,
+    floor: date,
+    scopes: dict[str, list | None],
+    ch_scopes: dict[str, list | None],
+) -> tuple[dict[str, list | None], dict[str, list | None]]:
+    """*scopes* and *ch_scopes* with no date before *floor* in any dated
+    table's scope, the internal tables' included. A dated table rebuilt in full
+    (None) takes every date from the floor to the newest the agency holds
+    instead, so its purge and build both stop at the floor. Every scope a run
+    builds passes through here, so this, not where a scope's dates came from,
+    keeps the dates before the floor final. The whole-history tables keep their
+    scopes: they are finalized from the internal tables, whose months before
+    the floor stand. The scorecard applies the floor to its own months
+    (feed_quality.rebuild)."""
+
+    def dated(name: str) -> bool:
+        return agg_registry.TABLES[name].kind is Kind.DATED and name != feed_quality.TABLE
+
+    every: list[date] = []
+    if any(scope is None and dated(name) for name, scope in {**scopes, **ch_scopes}.items()):
+        newest = _newest_date(agency_id, conn, ch_client)
+        if newest is not None and newest >= floor:
+            every = [floor + timedelta(days=i) for i in range((newest - floor).days + 1)]
+
+    def floored(name: str, scope: list | None) -> list | None:
+        if not dated(name):
+            return scope
+        if scope is None:
+            return list(every)
+        return [day for day in scope if day >= floor]
+
+    logger.info(f"  retention floor {floor.isoformat()}: earlier dates are final (pipeline.retention.retention_floor)")
+    return (
+        {name: floored(name, scope) for name, scope in scopes.items()},
+        {name: floored(name, scope) for name, scope in ch_scopes.items()},
+    )
+
+
 def analyze(agency_id: int, conn, ch_client, *, db_url: str | None = None) -> dict | None:
     """Compute and materialise all aggregation tables for *agency_id*.
 
@@ -1398,7 +1549,17 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
     ingest_strategy = strategy_row[0] if strategy_row else None
     plan = _plan(agency_id, conn, ch_client, has_static, ingest_strategy)
     scopes = plan.scopes
-    ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, scopes)
+    floor = plan.floor
+    ch_scopes = _ch_agg_scopes(agency_id, conn, ch_client, scopes, floor)
+    # A whole rebuild of either copy the scorecard reads, which _ch_agg_scopes
+    # can decide beyond the plan, reaches every month of it. Decided before
+    # _above_floor, which turns those Nones into date lists; the scorecard
+    # applies the floor to its months itself.
+    quality_scope = scopes[feed_quality.TABLE]
+    if any(ch_scopes.get(name, quality_scope) is None for name in ("agg_route_daily", "agg_route_daily_dist")):
+        quality_scope = None
+    if floor is not None:
+        scopes, ch_scopes = _above_floor(agency_id, conn, ch_client, floor, scopes, ch_scopes)
     before = None
     if db_url is not None and rebuild_headline.is_rebuild(plan.reasons):
         before = rebuild_headline.read_before(db_url, agency_id)
@@ -1784,15 +1945,10 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
 
         # ── feed_quality_monthly (per-month feed-quality scorecard) ──
         # After the ClickHouse tables, whose agg_route_daily and
-        # agg_route_daily_dist copies it reads, and agg_feed_health above. A
-        # whole rebuild of either copy, which _ch_agg_scopes can decide beyond
-        # the plan, reaches every month.
-        quality_scope = scopes[feed_quality.TABLE]
-        if any(ch_scopes.get(name, quality_scope) is None for name in ("agg_route_daily", "agg_route_daily_dist")):
-            quality_scope = None
+        # agg_route_daily_dist copies it reads, and agg_feed_health above.
         with _step(f"{feed_quality.TABLE}: build"):
             quality_rewritten = feed_quality.rebuild(
-                agency_id, ingest_strategy, quality_scope, feed_quality.last_closed_day(), conn, ch_client
+                agency_id, ingest_strategy, quality_scope, feed_quality.last_closed_day(), conn, ch_client, floor
             )
 
         # ── agg_meta: record of this build ───────────────────────────────

@@ -78,7 +78,7 @@ class _Conn:
 
 
 def test_kind_and_status_vocabularies_match_the_table_constraints():
-    assert RUN_KINDS == ("ingest", "promote", "analyze", "weather", "static", "update", "probe")
+    assert RUN_KINDS == ("ingest", "promote", "analyze", "weather", "static", "update", "probe", "retention")
     assert RUN_STATUSES == ("running", "ok", "skipped", "error", "unchanged")
 
 
@@ -258,7 +258,7 @@ def test_the_reaper_spares_the_locked_kinds_while_the_lock_is_held():
     sql, params = conn.statements[0]
     assert "FROM pg_locks" in sql
     assert params[2:] == (
-        ["ingest", "promote", "analyze", "update"],
+        ["ingest", "promote", "analyze", "update", "retention"],
         INGEST_ANALYZE_LOCK_KEY >> 32,
         INGEST_ANALYZE_LOCK_KEY & 0xFFFFFFFF,
     )

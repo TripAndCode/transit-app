@@ -360,10 +360,10 @@ def test_a_noop_run_issues_no_service_delivered_or_schedule_revision_scan():
 def test_a_changed_run_scopes_service_delivered_and_schedule_revision_to_the_changed_dates():
     _, ch = _changed_run(ingest_strategy="static_join")
     assert ch.service_delivered_builds and ch.schedule_revision_builds
-    filed_on = f"has({{filed_days:Array(Date)}}, {static_archive.FILED_DATE_SQL})"
+    filed_on = f"{static_archive.FILED_DATE_SQL} BETWEEN {{run_first:Date}} AND {{run_last:Date}}"
     for sql, params in ch.service_delivered_builds + ch.schedule_revision_builds:
         assert sql.count(filed_on) >= 1
-        assert params["filed_days"] == [LEDGER_DATE]
+        assert (params["run_first"], params["run_last"]) == (LEDGER_DATE, LEDGER_DATE)
     # Every FROM updates in the cancellation builder is bounded, not just the first.
     ((sd_sql, _),) = ch.service_delivered_builds
     assert sd_sql.count("FROM updates") == sd_sql.count(filed_on)
@@ -534,7 +534,7 @@ def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_ov
     tables = len(ch_aggregates.MONTHLY_TABLES)
     dedup = ch_aggregates.dedup_table(AGENCY_ID)
     start, end = filed_capture_span(LEDGER_DATE, LEDGER_DATE)
-    day = {"filed_days": [LEDGER_DATE], "day_start_0": start, "day_end_0": end}
+    day = {"run_first": LEDGER_DATE, "run_last": LEDGER_DATE, "day_start_0": start, "day_end_0": end}
     filled = [params for sql, params in ch.ch_agg_builds if sql.startswith(f"INSERT INTO {dedup} ")]
     carried = [params for sql, params in ch.ch_agg_builds if "NOT has({days:" in sql]
     recomputed = [params for sql, params in ch.ch_agg_builds if f"FROM {dedup}" in sql]
