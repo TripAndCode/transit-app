@@ -68,14 +68,16 @@ from pipeline.db import (
     stop_event_filter_ch,
 )
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
-from pipeline.live_filing import Filing, RangeNotRetained, filing
+from pipeline.live_filing import Filing, filing
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
+from pipeline.retention import retention_floor_async
 from pipeline.service_day import (
     clock_to_sec,
     filed_between_ch,
     service_date_of,
     service_day_offset,
+    service_day_start_utc,
 )
 from pipeline.service_hours import load_service_hours
 from pipeline.static_archive import Stamp, observation_rows
@@ -242,21 +244,24 @@ async def _latest_route_observation(
     """
     if not await route_exists(conn, agency_id, route_code):
         return None
+    # The window is anchored on the agency's own data, not named by the
+    # request, so a stalled agency's would reach before its retention floor:
+    # it starts no earlier than the floor's second day, whose captures, with
+    # the day either side they can file under, are all retained.
+    floor = await retention_floor_async(conn, agency_id)
     for table in (LIVE_TABLE, UPDATES_TABLE):
         agency_latest = await max_captured_at(ch, agency_id, table=table)
         if agency_latest is None:
             continue
         bound = agency_latest - timedelta(days=30)
+        if floor is not None:
+            bound = max(bound, service_day_start_utc(floor + timedelta(days=1)))
+            if bound > agency_latest:
+                continue
         params = {"agency_id": agency_id, "route": route_code, "bound": bound}
         result = await ch.query(_latest_route_observation_sql(table, Stamp.INGESTED), parameters=params)
         if not result.result_rows:
-            try:
-                filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
-            except RangeNotRetained:
-                # The window is anchored on the agency's own data, not named by
-                # the request: a stalled agency's reaches before its floor, where
-                # the filed polls are not looked for, so the route has none here.
-                continue
+            filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
             if filed.stamp.refiles:
                 result = await ch.query(
                     _latest_route_observation_sql(table, filed.stamp), parameters={**params, **filed.params}

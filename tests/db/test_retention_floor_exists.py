@@ -5,14 +5,17 @@ migration (`db.migrate.data_losing_tables`)."""
 from __future__ import annotations
 
 from db.migrate import retention_floor_exists
+from pipeline.retention import floor_after, partition_span
+
+PARTITION = "202501"
 
 
 def _record_drop(pg_conn, agency_id: int) -> None:
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO updates_pruned_months (partition_id, agency_ids, retention_floor, rows, bytes) "
-            "VALUES ('202501', %s, '2025-02-01', 10, 100)",
-            ([agency_id],),
+            "VALUES (%s, %s, %s, 10, 100)",
+            (PARTITION, [agency_id], floor_after(partition_span(PARTITION)[1])),
         )
     pg_conn.commit()
 

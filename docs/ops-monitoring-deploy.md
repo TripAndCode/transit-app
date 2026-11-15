@@ -280,6 +280,22 @@ operator decides whether to keep the agency's rows or delete them: an agency
 `analyze_all` never visits, and dates without aggregates below an agency's
 floor, where analyze never builds.
 
+Once any agency has a floor, the migration runner treats the rebuildable
+aggregates like every other table (`db.migrate.data_losing_tables`): no analyze
+restores their rows below the floor. `migrate up`, which every deploy runs,
+refuses a pending migration that deletes, truncates or drops such rows or
+columns, adds a column analyze fills, or creates such a table, and applies
+nothing. The owner names each version, with `--allow-destructive-up VERSION`
+or `MIGRATE_ALLOW_DESTRUCTIVE_UP=V1,V2` in the environment of the deploy that
+runs it. `migrate down` refuses such a down migration, marked or not, without
+`--force-destructive`.
+
+A run that drops a month records the new floors, then waits
+`pipeline.retention.LIVE_REQUEST_DRAIN_SECONDS` before the first drop, so a
+live report that checked the old floor finishes before its rows go. It holds
+the affected agencies' ingest locks for that wait, so their analyze and
+promotion queue behind it. A run that drops nothing does not wait.
+
 A run that fails part-way leaves a `retention` row in `pipeline_runs` with the
 rows dropped so far. The months it did not reach stay in
 `updates_pruned_months` with `dropped_at` empty. Their floor stands, and the
@@ -289,6 +305,9 @@ the run which wrote the row did not confirm the drop; ClickHouse's
 
 Before the prune is switched on in production, each of these must hold:
 
+- A live read re-reads the floor after its last scan and refuses if the floor
+  moved past its start, so no partial answer is returned or cached. Until
+  then, the drain wait above bounds it by time.
 - An export spanning the floor records that its figures before the floor keep
   the method they were built under.
 

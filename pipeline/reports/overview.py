@@ -120,18 +120,6 @@ def _grain_lookback_days(ctx: RangeCtx) -> int:
     return _baseline_reach_days(ctx) if ctx.time_band != "all" else 0
 
 
-async def _baseline_before_floor(agency_id: int, ctx: RangeCtx, conn) -> bool:
-    """Whether the grain's reach before a period the agency still retains
-    crosses its retention floor. Such a grain is fetched over the period
-    alone and the baseline is left out, rather than the period refused for
-    days it does not cover. A period that itself starts before the floor is
-    left to the grain's read to refuse (pipeline.live_filing.require_retained)."""
-    floor = await retention_floor_async(conn, agency_id)
-    if floor is None or ctx.from_date < floor:
-        return False
-    return ctx.from_date - timedelta(days=_grain_lookback_days(ctx)) < floor
-
-
 def _calendar_from(ctx: RangeCtx) -> date:
     """The first day of the span the overview resolves its day types over.
 
@@ -1688,9 +1676,17 @@ async def compute_overview_summary(
             raise RuntimeError("overview slow path requires a ClickHouse client")
         async with perf.timed_block("overview.grain"):
             if ctx.time_band != "all":
-                baseline_unavailable = await _baseline_before_floor(agency_id, ctx, grain_conn)
                 try:
-                    grain = await _fetch_grain(agency_id, ctx, grain_conn, ch, baseline=not baseline_unavailable)
+                    try:
+                        grain = await _fetch_grain(agency_id, ctx, grain_conn, ch)
+                    except RangeNotRetained as refused:
+                        # Only the reach back for the baseline crosses the floor:
+                        # the period is served without its baseline. A period that
+                        # itself starts before the floor stays refused.
+                        if ctx.from_date < refused.floor:
+                            raise
+                        baseline_unavailable = True
+                        grain = await _fetch_grain(agency_id, ctx, grain_conn, ch, baseline=False)
                 except Exception as exc:
                     if not (is_result_overflow(exc) or is_query_timeout(exc)):
                         raise

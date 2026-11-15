@@ -16,7 +16,7 @@ all DB queries are scoped to the request's ``agency_id``.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any
+from typing import Any, NamedTuple
 
 from api.range import RangeCtx
 from api.sqlutil import escape_like
@@ -63,17 +63,31 @@ def _contains_pattern(substring: str) -> str:
     return f"%{escape_like(substring)}%"
 
 
-async def _retained_span(conn, agency_id: int) -> tuple[date | None, date | None]:
-    """The agency's retention floor (pipeline.retention.retention_floor) and
-    the first date its aggregates hold, or (None, None) without a floor.
-    Below the floor `updates` no longer holds every row, so its earliest
-    reading is no longer where the data starts; the aggregates keep every
-    date."""
+class _Retained(NamedTuple):
+    floor: date | None  # pipeline.retention.retention_floor
+    first_aggregated: date | None
+    last_aggregated: date | None
+
+
+async def _retained_span(conn, agency_id: int) -> _Retained:
+    """The agency's retention floor and the first and last dates its
+    aggregates hold, all None without a floor. Below the floor `updates` no
+    longer holds every row, so its earliest reading is no longer where the
+    data starts, and once every raw row is gone the aggregates alone say
+    where it does."""
     floor = await retention_floor_async(conn, agency_id)
     if floor is None:
-        return None, None
-    first = await conn.fetchval("SELECT MIN(date) FROM agg_route_daily WHERE agency_id = $1", agency_id)
-    return floor, first
+        return _Retained(None, None, None)
+    first, last = await conn.fetchrow(
+        "SELECT MIN(date), MAX(date) FROM agg_route_daily WHERE agency_id = $1", agency_id
+    )
+    return _Retained(floor, first, last)
+
+
+def _retained_pairs(retained: _Retained) -> list[tuple[str, str]]:
+    assert retained.floor is not None
+    pairs = [("first_aggregated_date", retained.first_aggregated.isoformat())] if retained.first_aggregated else []
+    return [*pairs, ("raw_readings_kept_from", retained.floor.isoformat())]
 
 
 async def describe_data(
@@ -289,14 +303,27 @@ async def describe_data(
         # forces a full-table scan; a single query also can't get both the
         # index-served min AND max at once, so this is split into two cheap
         # probes instead, combined in Python.
+        retained = await _retained_span(conn, agency_id)
         first_result = await ch.query(
             "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at ASC LIMIT 1",
             parameters={"agency_id": agency_id},
         )
         if not first_result.result_rows:
+            if retained.floor is None or retained.first_aggregated is None:
+                return ToolResult(
+                    kind="empty",
+                    summary=_summary("mt_no_observations", locale),
+                )
             return ToolResult(
-                kind="empty",
-                summary=_summary("mt_no_observations", locale),
+                kind="kv",
+                summary=_summary(
+                    "mt_date_range_summary_floor",
+                    locale,
+                    first_date=retained.first_aggregated,
+                    last_date=retained.last_aggregated,
+                    floor=retained.floor,
+                ),
+                pairs=_retained_pairs(retained),
             )
         first_obs = first_result.result_rows[0][0]
         last_result = await ch.query(
@@ -328,20 +355,20 @@ async def describe_data(
         # a 00:30 JST capture still belongs to the previous day, and a
         # 06:00 JST capture is the previous UTC day.
         first_date = service_date_of(first_obs)
-        floor, first_aggregated = await _retained_span(conn, agency_id)
-        if floor is None:
+        if retained.floor is None:
             summary = _summary(
                 "mt_date_range_summary", locale, first_date=first_date, last_date=service_date_of(last_obs)
             )
         else:
-            first_date = min(first_date, first_aggregated or first_date)
-            pairs += [("first_aggregated_date", first_date.isoformat()), ("raw_readings_kept_from", floor.isoformat())]
+            if retained.first_aggregated is not None:
+                first_date = min(first_date, retained.first_aggregated)
+            pairs += _retained_pairs(retained)
             summary = _summary(
                 "mt_date_range_summary_floor",
                 locale,
                 first_date=first_date,
                 last_date=service_date_of(last_obs),
-                floor=floor,
+                floor=retained.floor,
             )
         return ToolResult(kind="kv", summary=summary, pairs=pairs)
 
@@ -498,7 +525,7 @@ async def describe_data(
         obs_last = last_result.result_rows[0][0] if last_result.result_rows else None
         obs_first = _as_utc(obs_first)
         obs_last = _as_utc(obs_last)
-        floor, first_aggregated = await _retained_span(conn, agency_id)
+        retained = await _retained_span(conn, agency_id)
         pairs = [
             ("routes", str(route_count)),
             ("stops", str(stop_count)),
@@ -512,9 +539,8 @@ async def describe_data(
                 obs_last.isoformat() if obs_last else "—",
             ),
         ]
-        if floor is not None:
-            first_date = first_aggregated or floor
-            pairs += [("first_aggregated_date", first_date.isoformat()), ("raw_readings_kept_from", floor.isoformat())]
+        if retained.floor is not None:
+            pairs += _retained_pairs(retained)
         return ToolResult(
             kind="kv",
             summary=_summary("mt_overview_summary", locale),

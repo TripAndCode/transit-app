@@ -559,8 +559,9 @@ def prune_updates(
     the floor after.
 
     Every drop is recorded first (_record_drops), and the run then *sleep*s
-    for LIVE_READ_DRAIN_SECONDS, so no live read that checked the old floor is
-    still scanning; then each partition in turn
+    for LIVE_REQUEST_DRAIN_SECONDS, so no live request that checked the old
+    floor is still reading; a run that drops nothing does not wait. Then each
+    partition in turn
     has its refiled dates written off, goes, and is stamped dropped, so a
     failure part-way leaves the months it reached on record and their rows on
     the run.
@@ -584,11 +585,21 @@ def prune_updates(
         return PruneResult(True, verdicts, _drop(conn, ch, [v for v in verdicts if v.held_by is None], sleep=sleep))
 
 
-#: How long a drop waits once its floors are committed. A live read checks the
-#: floor before it scans (pipeline.live_filing.require_retained), so one that
-#: passed just before the commit may still be scanning; any such read has
-#: finished, or run out its time budget, by then.
-LIVE_READ_DRAIN_SECONDS = LIVE_READ_MAX_EXECUTION_SECONDS + 5
+#: A ceiling on the ClickHouse queries a live request runs, one after another,
+#: from one floor check to the last query that relies on it. Each
+#: pipeline.live_filing.filing checks the floor, then runs up to six of its own
+#: (the archive state, the three of the schedule join, the stamped days, the
+#: written builds), and its reader follows with its scans, the route shape's
+#: four being the longest chain; a later filing checks the floor again. Twice
+#: that chain leaves room for a reader to grow.
+LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES = 20
+
+#: How long a run that drops something waits once its floors are committed,
+#: before the first DROP PARTITION: by then every live request that checked
+#: the old floor has run its last query or out its time budget
+#: (LIVE_READ_MAX_EXECUTION_SECONDS per query). The run holds the agencies'
+#: ingest locks throughout, so their analyze and promotion wait behind it.
+LIVE_REQUEST_DRAIN_SECONDS = LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES * LIVE_READ_MAX_EXECUTION_SECONDS
 
 
 def _drop(conn, ch, droppable: list[PartitionVerdict], *, sleep: Callable[[float], None]) -> list[str]:
@@ -599,7 +610,7 @@ def _drop(conn, ch, droppable: list[PartitionVerdict], *, sleep: Callable[[float
             run.status = "unchanged"
             return dropped
         _record_drops(conn, run.run_id, droppable)
-        sleep(LIVE_READ_DRAIN_SECONDS)
+        sleep(LIVE_REQUEST_DRAIN_SECONDS)
         for verdict in droppable:
             partition = verdict.partition
             partition_span(partition.partition_id)  # the id is interpolated into DDL

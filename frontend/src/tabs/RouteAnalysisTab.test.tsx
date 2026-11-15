@@ -627,6 +627,7 @@ describe("RouteAnalysisTab where delay grows", () => {
     });
     expect(screen.getByText("No comparison data available")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeEnabled();
   });
 
   it("compares with the previous window on the variant shown", () => {

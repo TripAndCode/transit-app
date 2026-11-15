@@ -745,16 +745,20 @@ def cmd_ingest_live(args):
 
 def cmd_migrate(args):
     """Apply or roll back schema migrations."""
-    from db.migrate import migrate_down, migrate_up
+    from db.migrate import DestructiveMigrationError, allowed_destructive_ups, migrate_down, migrate_up
 
     # The one command whose whole purpose is a database that does not have the
     # schema yet, so it cannot require one.
     conn = _get_conn(require_schema=False)
-    if args.direction == "up":
-        migrate_up(conn)
-    else:
-        migrate_down(args.target, conn, force_destructive=args.force_destructive)
-    conn.close()
+    try:
+        if args.direction == "up":
+            migrate_up(conn, allow_destructive=allowed_destructive_ups(args.allow_destructive_up))
+        else:
+            migrate_down(args.target, conn, force_destructive=args.force_destructive)
+    except DestructiveMigrationError as refused:
+        sys.exit(f"migrate {args.direction}: {refused}")
+    finally:
+        conn.close()
 
 
 def cmd_prune_query_log(args):
@@ -1063,7 +1067,16 @@ def main():
     p_migrate.add_argument(
         "--force-destructive",
         action="store_true",
-        help="Allow rolling back a down migration marked `-- DESTRUCTIVE` (see db/migrations/README.md)",
+        help="Allow rolling back a down migration marked `-- DESTRUCTIVE`, or one that loses data below a "
+        "retention floor (see db/migrations/README.md)",
+    )
+    p_migrate.add_argument(
+        "--allow-destructive-up",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="the owner's go-ahead for a pending up migration that loses data below this database's retention "
+        "floor; also read from MIGRATE_ALLOW_DESTRUCTIVE_UP=V1,V2",
     )
 
     p_prune = sub.add_parser("prune_query_log", help="Delete ask_query_log rows older than N days")

@@ -7,8 +7,10 @@ Driven by `gtfs_pipeline.py migrate up|down`.
 
 import functools
 import logging
+import os
 import pathlib
 import re
+from collections.abc import Collection, Iterable, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +22,23 @@ _MIGRATIONS_DIR = pathlib.Path(__file__).parent / "migrations"
 _DESTRUCTIVE_MARKER = "-- DESTRUCTIVE"
 
 
+#: Versions whose data-losing up migration may apply on a database with a
+#: retention floor, comma-separated, beside `migrate up --allow-destructive-up`:
+#: a deploy's pre-deploy command is fixed, so its environment names them.
+ALLOW_DESTRUCTIVE_UP_ENV = "MIGRATE_ALLOW_DESTRUCTIVE_UP"
+
+
 class DestructiveMigrationError(RuntimeError):
-    """Raised when a `-- DESTRUCTIVE`-marked down migration runs without
-    force_destructive=True."""
+    """Raised when a migration that loses data runs without being named: a
+    down marked `-- DESTRUCTIVE`, or on a database with a retention floor any
+    down or pending up that `data_losing_tables` flags."""
+
+
+def allowed_destructive_ups(named: Iterable[str], environ: Mapping[str, str] = os.environ) -> frozenset[str]:
+    """The versions named with --allow-destructive-up and in
+    ALLOW_DESTRUCTIVE_UP_ENV."""
+    from_env = (v.strip() for v in environ.get(ALLOW_DESTRUCTIVE_UP_ENV, "").split(","))
+    return frozenset(v for v in (*named, *from_env) if v)
 
 
 def is_destructive_down(sql: str) -> bool:
@@ -293,12 +309,24 @@ def pending_migrations(conn) -> list[str]:
     return [v for v in on_disk if v not in applied]
 
 
-def _run_up(version: str, conn) -> None:
-    """Apply one up-migration and record its version, atomically."""
+def _up_migration_path(version: str) -> pathlib.Path:
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.up.sql"))
     if not matches:
         raise FileNotFoundError(f"No up migration file for version {version}")
-    sql = matches[0].read_text()
+    return matches[0]
+
+
+def _losing_on_a_floor(paths: Iterable[pathlib.Path], conn) -> dict[str, list[str]]:
+    """Each of *paths* that loses data on *conn*'s database once it has a
+    retention floor, with the tables it loses it from; nothing without one."""
+    losing = {p.name: t for p in paths if (t := data_losing_tables(p.read_text(), retention_floor=True))}
+    return losing if losing and retention_floor_exists(conn) else {}
+
+
+def _run_up(version: str, conn) -> None:
+    """Apply one up-migration and record its version, atomically."""
+    path = _up_migration_path(version)
+    sql = path.read_text()
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
@@ -307,7 +335,7 @@ def _run_up(version: str, conn) -> None:
     except Exception:
         conn.rollback()
         raise
-    logger.info(f"  Applied: {matches[0].name}")
+    logger.info(f"  Applied: {path.name}")
 
 
 def _down_migration_path(version: str) -> pathlib.Path:
@@ -323,9 +351,12 @@ def _down_migration_path(version: str) -> pathlib.Path:
     return matches[0]
 
 
-def _destructive_versions(versions: list[str]) -> list[str]:
-    """Which of *versions* have a down migration marked `-- DESTRUCTIVE`."""
-    return [v for v in versions if is_destructive_down(_down_migration_path(v).read_text())]
+def _destructive_versions(versions: list[str], conn) -> list[str]:
+    """Which of *versions* have a down migration marked `-- DESTRUCTIVE`, or,
+    on a database with a retention floor, one that loses data there."""
+    paths = {v: _down_migration_path(v) for v in versions}
+    on_floor = _losing_on_a_floor(paths.values(), conn)
+    return [v for v, p in paths.items() if is_destructive_down(p.read_text()) or p.name in on_floor]
 
 
 def _run_down(version: str, conn, *, force_destructive: bool) -> None:
@@ -334,10 +365,10 @@ def _run_down(version: str, conn, *, force_destructive: bool) -> None:
     sql = path.read_text()
     # Also checked ahead of the loop in `migrate_down`; kept here so the
     # invariant survives a direct call to this function.
-    if is_destructive_down(sql) and not force_destructive:
+    if not force_destructive and _destructive_versions([version], conn):
         raise DestructiveMigrationError(
-            f"{path.name} is marked `-- DESTRUCTIVE` and will not run without "
-            "force_destructive=True (CLI: `migrate down --force-destructive`)."
+            f"{path.name} is marked `-- DESTRUCTIVE`, or loses data below this database's retention floor, "
+            "and will not run without force_destructive=True (CLI: `migrate down --force-destructive`)."
         )
     try:
         with conn.cursor() as cur:
@@ -350,8 +381,16 @@ def _run_down(version: str, conn, *, force_destructive: bool) -> None:
     logger.info(f"  Rolled back: {path.name}")
 
 
-def migrate_up(conn) -> None:
-    """Apply every migration on disk that is not yet in schema_migrations."""
+def migrate_up(conn, *, allow_destructive: Collection[str] = ()) -> None:
+    """Apply every migration on disk that is not yet in schema_migrations.
+
+    On a database with a retention floor, refuses (raises
+    DestructiveMigrationError, applying nothing) while any pending up
+    migration loses data there (`data_losing_tables`) and its version is not
+    in *allow_destructive* (`allowed_destructive_ups`). Every deploy runs
+    this, and below the floor no analyze restores what such a migration
+    deletes or leaves unfilled.
+    """
     with conn.cursor() as cur:
         cur.execute(_CREATE_TRACKING)
     conn.commit()
@@ -361,6 +400,21 @@ def migrate_up(conn) -> None:
     if not pending:
         logger.info("Already up to date.")
         return
+    paths = {v: _up_migration_path(v) for v in pending}
+    losing = _losing_on_a_floor(paths.values(), conn)
+    refused = [
+        f"{p.name} ({', '.join(losing[p.name])})"
+        for v, p in paths.items()
+        if p.name in losing and v not in allow_destructive
+    ]
+    if refused:
+        conn.rollback()
+        raise DestructiveMigrationError(
+            "refusing to migrate up: this database has a retention floor, and "
+            + "; ".join(refused)
+            + " loses data below it that no analyze restores. Nothing has been applied. The owner names each "
+            f"version with --allow-destructive-up VERSION, or in {ALLOW_DESTRUCTIVE_UP_ENV}=V1,V2 for a deploy."
+        )
     for v in pending:
         _run_up(v, conn)
     logger.info(f"Applied {len(pending)} migration(s).")
@@ -396,12 +450,13 @@ def migrate_down(target: str | None, conn, *, force_destructive: bool = False) -
         logger.info(f"Already at or before version {target}.")
         return
     if not force_destructive:
-        marked = _destructive_versions(to_roll)
+        marked = _destructive_versions(to_roll, conn)
         if marked:
             raise DestructiveMigrationError(
                 "refusing to roll back: "
                 + ", ".join(_down_migration_path(v).name for v in marked)
-                + " is marked `-- DESTRUCTIVE`. Nothing has been rolled back. Re-run with "
+                + " is marked `-- DESTRUCTIVE`, or loses data below this database's retention floor. "
+                "Nothing has been rolled back. Re-run with "
                 "force_destructive=True (CLI: `migrate down --force-destructive`), or pass a "
                 "`--target` that stops short of it."
             )

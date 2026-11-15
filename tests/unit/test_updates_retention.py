@@ -415,8 +415,30 @@ def test_the_switch_is_read_once(stores, monkeypatch):
     assert reads == [1]
 
 
-def test_the_drop_waits_out_the_longest_live_read():
-    assert retention.LIVE_READ_DRAIN_SECONDS > retention.LIVE_READ_MAX_EXECUTION_SECONDS
+def test_the_drop_waits_out_a_whole_live_request():
+    """From its floor check, a live request runs at most
+    LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES ClickHouse queries in turn, each
+    capped at the live client's time budget."""
+    assert retention.LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES >= 20
+    assert retention.LIVE_REQUEST_DRAIN_SECONDS >= (
+        retention.LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES * retention.LIVE_READ_MAX_EXECUTION_SECONDS
+    )
+    assert retention.LIVE_REQUEST_DRAIN_SECONDS >= 10 * 60
+
+
+def test_a_run_that_drops_nothing_does_not_wait(stores, monkeypatch):
+    monkeypatch.setenv("UPDATES_PRUNE_ENABLED", "true")
+    monkeypatch.setattr(retention, "read_candidates", lambda ch, cutoff: [])
+    result = _prune(stores)
+    assert result.dropped == []
+    assert stores[-1] == ("run closed", "unchanged", 0)
+    assert not any(entry[0] == "wait" for entry in stores)
+
+
+def test_the_live_read_budget_is_the_api_clients():
+    from api.clickhouse import get_ch_client
+
+    assert "LIVE_READ_MAX_EXECUTION_SECONDS" in get_ch_client.__code__.co_names
 
 
 def test_a_prune_locks_records_every_floor_then_writes_off_and_drops_each_month_in_turn(stores, monkeypatch):
@@ -429,7 +451,7 @@ def test_a_prune_locks_records_every_floor_then_writes_off_and_drops_each_month_
         ("run", "retention"),
         ("record", [date(2024, 3, 1), date(2024, 4, 1)]),
         # Live reads that checked the old floors finish before any row goes.
-        ("wait", retention.LIVE_READ_DRAIN_SECONDS),
+        ("wait", retention.LIVE_REQUEST_DRAIN_SECONDS),
         # Only the service dates the month's rows can be filed under.
         ("rows_rewritten", [1, 2], date(2024, 1, 1), date(2024, 2, 1)),
         ("command", "ALTER TABLE updates DROP PARTITION ID '202401'"),
