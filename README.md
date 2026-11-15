@@ -247,7 +247,6 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
 | `make reprobe-rt-coverage` | Re-probe each agency whose RT field-coverage verdict is missing, refuted or about to lapse; probes only in service hours, so schedule it daily in the late morning |
-| `make build-rag-index` | Build the Ask RAG index for all agencies (also the re-index after an embedder change) |
 | `make ask-eval` | Check the Ask gold set's stored signatures still match canonicalization (no database; pytest runs it too) |
 | `make prune-query-log` | Delete `ask_query_log` rows older than 90 days (the API also runs this daily) |
 | `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
@@ -336,7 +335,7 @@ The main endpoints are:
 | `/api/admin/ops` | Read-only ops health snapshot (migrations, aggregate freshness) |
 | `/api/admin/flags` | Feature-flag registry: resolved values + DB overrides |
 | `/api/admin/snapshots*`, `GET /api/snapshots/{id}`, `GET /api/snapshots/{id}/today` | Frozen snapshots: admins create, list and delete; anyone with the link reads one and today's figures for its query ([guide](docs/features/snapshots.md)) |
-| `/api/admin/ask/*` | Ask query log, funnel, intent-cache promotion, eval result |
+| `/api/admin/ask/*` | Ask query log and funnel |
 | `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
 | `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |
 | `/api/me/export` | Download everything the app holds about you (JSON) |

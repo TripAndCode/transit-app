@@ -260,11 +260,6 @@ async def lifespan(app: FastAPI):
         # are both set. See api.routers.auth.seed_local_admin.
         await seed_local_admin(app.state.pool)
 
-        from pipeline.query.embeddings import get_embedder
-
-        embedder = get_embedder()
-        if not embedder.available:
-            _log.warning("Embedder unavailable at startup — router degrades to LLM-only")
         activity.start(app)
         retention.start(app)
     except Exception:

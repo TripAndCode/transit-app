@@ -104,13 +104,12 @@ def test_every_prune_builder_lives_in_pipeline_retention():
     assert gtfs_pipeline.prune_admin_audit_sql is retention.prune_admin_audit_sql
 
 
-def test_intent_cache_prune_keeps_promoted_rows():
-    """A promoted row is where its rag_chunks suggestion resolves its tool and
-    args, so it outlives the question window."""
+def test_intent_cache_prune_ages_out_every_row_on_last_use():
+    """No row outlives the question window, `promoted_at` or not."""
     from pipeline import retention
 
     assert retention.prune_intent_cache_sql(90) == (
-        "DELETE FROM ask_intent_cache WHERE last_used_at < now() - INTERVAL '90 days' AND promoted_at IS NULL"
+        "DELETE FROM ask_intent_cache WHERE last_used_at < now() - INTERVAL '90 days'"
     )
 
 

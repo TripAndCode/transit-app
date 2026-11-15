@@ -115,7 +115,6 @@ class _Args:
     "command,args",
     [
         ("cmd_prune_query_log", _Args(days=90)),
-        ("cmd_build_rag_index", _Args(all_agencies=True, agency_id=None)),
     ],
 )
 def test_asyncpg_commands_refuse_a_target_without_the_schema(schemaless_target, command, args):

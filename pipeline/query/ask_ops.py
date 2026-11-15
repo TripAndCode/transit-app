@@ -1,36 +1,49 @@
 """Pure display/derivation helpers for the admin Ask-ops surface.
 
 ``ask_query_log`` stores the pipeline stage that answered a question
-(``router_stage``: ``rules`` / ``embedding`` / ``llm`` / ``no_history``) and
-whether it succeeded (``success``: bool). It has no ``route``, ``status``,
-``latency_ms``, ``provider`` or user-identity column — see
+(``router_stage``: ``rules`` / ``embedding`` / ``llm`` / ``no_history``, or
+``card_signed_in`` / ``card_signed_out`` / ``followup`` for the notebook
+paths that bypass the router) and whether it succeeded (``success``: bool).
+``latency_ms`` is set only on those notebook rows. It has no ``route``,
+``status``, ``provider`` or user-identity column — see
 ``db/migrations/0013_ask_query_log.up.sql``, which deliberately omits
 identity, and ``pipeline/query/query_log.py``'s INSERT column list for the
 full set that exists. The admin surface's "route" and "status" columns are
 derived here from ``router_stage``/``success`` rather than stored directly,
-using AGENTS.md's architecture naming (rules → embedding nearest-neighbour →
-RAG LLM) so the UI can speak "rules / nn / rag" without the DB needing a
-redundant column.
+using the display routes "rules / nn / rag" so the DB needs no redundant
+column. ``embedding`` is a retired stage: only historic rows carry it, and it
+keeps its display route so they stay readable.
 """
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
-# router_stage (DB value) -> display route, in pipeline order.
+# router_stage values of the notebook paths that never touch the router. They
+# name the path only: whether a card ran signed in is the one fact kept about
+# the caller, and no identity is stored with it.
+CARD_SIGNED_IN = "card_signed_in"
+CARD_SIGNED_OUT = "card_signed_out"
+FOLLOWUP = "followup"
+
+# router_stage (DB value) -> display route: router stages in pipeline order,
+# then the notebook paths.
 _STAGE_TO_ROUTE = {
     "rules": "rules",
     "embedding": "nn",
     "llm": "rag",
     "no_history": "no_history",
+    CARD_SIGNED_IN: CARD_SIGNED_IN,
+    CARD_SIGNED_OUT: CARD_SIGNED_OUT,
+    FOLLOWUP: FOLLOWUP,
 }
 _ROUTE_TO_STAGE = {v: k for k, v in _STAGE_TO_ROUTE.items()}
 
 # Canonical funnel order: pipeline stages first, then the early-exit bucket.
 ROUTE_ORDER = ("rules", "nn", "rag", "no_history")
+
+# Notebook paths, reported per tool rather than as a stage of the router funnel.
+NOTEBOOK_STAGES = (CARD_SIGNED_IN, CARD_SIGNED_OUT, FOLLOWUP)
 
 
 def derive_route(router_stage: str) -> str:
@@ -107,29 +120,3 @@ def build_funnel(raw_counts: list[tuple[str, bool, int]]) -> AskFunnel:
     routes = list(ROUTE_ORDER) + [r for r in totals if r not in ROUTE_ORDER]
     by_route = tuple(FunnelRouteCount(route=r, count=totals[r], success_count=successes.get(r, 0)) for r in routes)
     return AskFunnel(by_route=by_route, total=sum(totals.values()))
-
-
-def find_latest_eval_result(cache_dir: Path, pattern: str = "ask-eval-*.json") -> dict[str, Any] | None:
-    """Read the newest local ask-eval artifact under ``cache_dir`` matching
-    ``pattern`` (lexicographic order == chronological order for an
-    ISO-date-prefixed filename), or ``None`` when none exists or the latest
-    one isn't valid JSON.
-
-    No current producer writes this file: ``scripts/ask_eval.py`` and the
-    weekly workflow (``.github/workflows/ask-eval-weekly.yml``) report
-    pass/fail via CI exit code and pytest output only, not a persisted JSON
-    artifact under this path. This read path is forward-compatible — once
-    either is extended to write here, the admin page picks it up with no
-    further change — and returns ``None`` until then, which the admin UI
-    renders as "not run yet" rather than fabricating a result.
-    """
-    if not cache_dir.is_dir():
-        return None
-    candidates = sorted(cache_dir.glob(pattern))
-    if not candidates:
-        return None
-    try:
-        data = json.loads(candidates[-1].read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None

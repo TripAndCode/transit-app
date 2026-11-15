@@ -5,9 +5,7 @@ AGENTS.md's "pure logic tests under tests/unit/" convention (see
 `tests/unit/conftest.py`). These give the dashboard display check's
 "a deliberately wrong number makes the test fail, confirming it actually
 checks displayed values and isn't a vacuous pass" property a fast,
-always-runnable proof, the same way `tests/unit/test_ask_eval_numeric_helper.py`
-proves its own ground-truth comparison helper isn't vacuous without needing
-a live LLM. The real end-to-end check
+always-runnable proof. The real end-to-end check
 (`tests/dashboard_synthetic_display_test.py`) additionally needs a real
 browser + the throwaway Postgres/ClickHouse stack and is gated off by
 default — see that module's docstring for why, and for the one-time manual
@@ -41,8 +39,7 @@ def test_assert_avg_min_matches_passes_for_correct_value():
     # outlier_spike's expected avg_min (2dp) rounds to 0.9 for display via
     # the frontend's own toFixed(1) — matches a "0.9分" cell. Read live from
     # the fixture pattern (not hand-typed) so this test can't silently
-    # desync from a future edit to that pattern -- same convention as
-    # test_ask_eval_numeric_helper.py's use of tests.fixtures.synthetic_gtfs.
+    # desync from a future edit to that pattern.
     avg_min = outlier_spike().expected["agg_route_stats"]["avg_min"]
     assert_avg_min_matches("0.9分", avg_min, label="outlier_spike")
 

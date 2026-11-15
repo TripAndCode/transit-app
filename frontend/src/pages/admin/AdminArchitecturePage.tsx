@@ -25,9 +25,8 @@ flowchart LR
   ch[("ClickHouse: raw GTFS-RT updates")] -->|narrow filters| api
   pg[("Postgres: aggregates, OLTP, PostGIS, pgvector")] -->|default reports| api
 
-  api --> rules["Ask Stage 1: rules"]
-  rules --> ann["Ask Stage 2: embedding nearest-neighbour"]
-  ann --> rag["Ask Stage 3: RAG LLM (only stage calling an LLM)"]
+  api --> rules["Ask: rules"]
+  rules --> llm["Ask: LLM (only stage calling an LLM)"]
 \`\`\`
 `;
 

@@ -25,6 +25,7 @@ async def log_query(
     signature_hash: str | None = None,
     cache_outcome: str | None = None,
     numeric_guard_triggered: bool | None = None,
+    latency_ms: int | None = None,
 ) -> None:
     """Insert one anonymized query-log row. Swallows all errors.
 
@@ -33,20 +34,26 @@ async def log_query(
     LLM stage; they are NULL otherwise.
 
     ``numeric_guard_triggered`` is the column for a post-generation
-    numeric-guard verdict, and no /ask path produces one: a dispatched
-    tool's answer is rendered from grounded data, and the Stage-3 plain-text
-    reply has nothing to trace a number back to (see
-    ``pipeline.query.chat._text_reply``). The one path that runs the guard,
-    the conversation follow-up, does not write this log. So every row
-    records NULL ("no verdict"), which must stay distinct from FALSE ("ran,
-    answer was clean").
+    numeric-guard verdict. Only a conversation follow-up produces one (see
+    ``pipeline.query.followup.answer_followup``): a dispatched tool's answer is
+    rendered from grounded data, and the Stage-3 plain-text reply has nothing
+    to trace a number back to (see ``pipeline.query.chat._text_reply``), so
+    every other row records NULL ("no verdict"), which must stay distinct from
+    FALSE ("ran, answer was clean").
+
+    ``latency_ms`` is measured only for notebook card dispatches (the
+    dispatch itself) and follow-ups (the model call); other rows leave it NULL.
+
+    The write is its own statement. A caller inside a transaction must log
+    after it ends: a failed INSERT aborts the transaction it runs in, and
+    swallowing the exception here cannot undo that.
     """
     try:
         await conn.execute(
             "INSERT INTO ask_query_log "
             "(agency_id, question, router_stage, tool, success, signature_hash, cache_outcome, "
-            "numeric_guard_triggered) "
-            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "numeric_guard_triggered, latency_ms) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             agency_id,
             (question or "")[:_MAX_QUESTION_CHARS],
             router_stage,
@@ -55,6 +62,7 @@ async def log_query(
             signature_hash,
             cache_outcome,
             numeric_guard_triggered,
+            latency_ms,
         )
     except Exception as exc:
         _log.warning("ask_query_log insert failed (%s) — ignored", exc.__class__.__name__)

@@ -14,20 +14,12 @@ COPY scripts/strip_vite_manifest.sh /tmp/strip_vite_manifest.sh
 RUN sh /tmp/strip_vite_manifest.sh dist
 
 # ── Stage 2: Python API + bundled static ─────────────────────────────────────
-FROM python:3.14-slim
+FROM python:3.15-slim
 WORKDIR /app
 
 RUN pip install --no-cache-dir poetry==2.5.1
 
 COPY pyproject.toml poetry.lock ./
-# The `embeddings` group (sentence-transformers, and transitively torch,
-# transformers, scikit-learn, scipy) is optional and deliberately excluded
-# here by `--only main`: `pipeline.query.embeddings.Embedder`'s import is
-# already wrapped in try/except and every caller falls through to the
-# LLM-only path when it's unavailable (see that module's docstring — API
-# startup never aborts on embedding failure). That whole dependency subtree
-# is several GB and unused until a RAG index actually exists; carrying it in
-# the deploy image bought nothing but slower builds and a slower cold start.
 RUN poetry config virtualenvs.create false \
     && poetry install --only main --no-root --no-interaction
 

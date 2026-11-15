@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import asyncpg
@@ -17,13 +18,16 @@ from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, clamp_range_ctx
 from api.security import User, csrf_guard, require_llm_approved
+from pipeline.flags import aflag
 from pipeline.query import conversations as _conv
 from pipeline.query import followup as _followup
 from pipeline.query import intent_cache as _intent_cache
+from pipeline.query.ask_ops import CARD_SIGNED_IN, CARD_SIGNED_OUT, FOLLOWUP
 from pipeline.query.chat import _chat_str, ch_failure_str
 from pipeline.query.followup_context import select_context_row
 from pipeline.query.intent import IntentSignature, canonicalize, signature_hash
-from pipeline.query.tools import dispatch, render_tool_result
+from pipeline.query.query_log import log_query
+from pipeline.query.tools import canonical_tool_name, dispatch, render_tool_result
 from pipeline.reports.definition import DefinitionMeta
 
 _log = logging.getLogger(__name__)
@@ -296,6 +300,81 @@ async def migrate_anon_endpoint(
     return {"inserted": inserted}
 
 
+def _elapsed_ms(started: float) -> int:
+    return round((time.monotonic() - started) * 1000)
+
+
+async def _write_usage(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    stage: str,
+    tool: str | None,
+    success: bool,
+    latency_ms: int,
+    numeric_guard_triggered: bool | None,
+) -> None:
+    await log_query(
+        conn,
+        agency_id,
+        "",
+        stage,
+        canonical_tool_name(tool) if tool is not None else None,
+        success,
+        numeric_guard_triggered=numeric_guard_triggered,
+        latency_ms=latency_ms,
+    )
+
+
+async def _log_usage(
+    conn: asyncpg.Connection,
+    agency_id: int,
+    stage: str,
+    tool: str | None,
+    success: bool,
+    latency_ms: int,
+    *,
+    numeric_guard_triggered: bool | None = None,
+) -> None:
+    """Record one notebook dispatch or follow-up in ``ask_query_log``.
+
+    Never raises: bookkeeping must not change a response. The row stores the
+    canonical tool name only (never client text, a card's arguments or the
+    user's question) and the *latency_ms* the caller measured around the work
+    itself. Call it outside any transaction of the request, since a failed
+    INSERT aborts the transaction it runs in."""
+    try:
+        if await aflag("ask_query_log_enabled"):
+            await _write_usage(conn, agency_id, stage, tool, success, latency_ms, numeric_guard_triggered)
+    except Exception as exc:
+        _log.warning("ask usage log failed (%s) -- ignored", exc.__class__.__name__)
+
+
+async def _log_usage_pooled(
+    pool: asyncpg.Pool,
+    agency_id: int,
+    stage: str,
+    tool: str | None,
+    success: bool,
+    latency_ms: int,
+    *,
+    numeric_guard_triggered: bool | None = None,
+) -> None:
+    """:func:`_log_usage` for a caller holding no connection: it borrows one
+    only after the kill switch is read, and a failure to borrow is swallowed
+    like any other bookkeeping failure."""
+    try:
+        if await aflag("ask_query_log_enabled"):
+            async with pool.acquire(timeout=1.0) as conn:
+                await _write_usage(conn, agency_id, stage, tool, success, latency_ms, numeric_guard_triggered)
+    except Exception as exc:
+        _log.warning("ask usage log failed (%s) -- ignored", exc.__class__.__name__)
+
+
+def _card_succeeded(card: dict[str, Any]) -> bool:
+    result = card["result"]
+    return result is not None and result["kind"] != "empty"
+
+
 @router.post("/conversations/{conversation_id}/messages", response_model=None)
 @limiter.limit(tier_limit)
 async def append_message_endpoint(
@@ -345,21 +424,41 @@ async def append_message_endpoint(
     # User message + card in one transaction. Without it, a concurrent DELETE of
     # this conversation would FK-cascade-delete the user_msg row mid-flight,
     # producing a 500 instead of a clean 404.
-    async with conn.transaction():
-        user_msg = await _conv.append_message(
-            conn,
-            conversation_id,
-            role="user",
-            tool=None,
-            args=None,
-            signature_hash=None,
-            result=None,
-            rendered_summary=user_summary,
-        )
-        card = await _run_card(
-            conn, resolved_tool, resolved_args, ctx_obj, agency_id, locale, ch, cache_question=user_summary
-        )
-        assistant_msg = await _conv.append_message(conn, conversation_id, role="assistant", **card)
+    # None until a dispatch starts: a failed user-message write is not a
+    # dispatch. A returned result counts as a success only once the thread's
+    # transaction has committed.
+    outcome: bool | None = None
+    latency_ms = 0
+    try:
+        async with conn.transaction():
+            user_msg = await _conv.append_message(
+                conn,
+                conversation_id,
+                role="user",
+                tool=None,
+                args=None,
+                signature_hash=None,
+                result=None,
+                rendered_summary=user_summary,
+            )
+            started = time.monotonic()
+            try:
+                card = await _run_card(
+                    conn, resolved_tool, resolved_args, ctx_obj, agency_id, locale, ch, cache_question=user_summary
+                )
+            except Exception:
+                latency_ms = _elapsed_ms(started)
+                outcome = False
+                raise
+            latency_ms = _elapsed_ms(started)
+            dispatched = _card_succeeded(card)
+            outcome = False
+            assistant_msg = await _conv.append_message(conn, conversation_id, role="assistant", **card)
+        if dispatched:
+            outcome = True
+    finally:
+        if outcome is not None:
+            await _log_usage(conn, agency_id, CARD_SIGNED_IN, resolved_tool, outcome, latency_ms)
     return {"user": user_msg, "assistant": assistant_msg}
 
 
@@ -518,9 +617,14 @@ async def run_card_endpoint(
     *filter_ctx* exactly as a stored thread's filters scope its cards."""
     csrf_guard(request)
     ctx_obj = _ctx_from_stored_filters(body.filter_ctx)
-    return CardAnswer(
-        **await _run_card(conn, body.tool, body.args, ctx_obj, agency_id, locale, ch, cache_question=None)
-    )
+    started = time.monotonic()
+    try:
+        card = await _run_card(conn, body.tool, body.args, ctx_obj, agency_id, locale, ch, cache_question=None)
+    except Exception:
+        await _log_usage(conn, agency_id, CARD_SIGNED_OUT, body.tool, False, _elapsed_ms(started))
+        raise
+    await _log_usage(conn, agency_id, CARD_SIGNED_OUT, body.tool, _card_succeeded(card), _elapsed_ms(started))
+    return CardAnswer(**card)
 
 
 # ─── LLM follow-up (kill-switch gated) ────────────────────────────────────────
@@ -583,12 +687,12 @@ async def followup_endpoint(
             detail="authed followup requires context_message_id",
         )
 
-    # Two short-lived connections acquired around the LLM call, rather than
-    # one held across it via ``Depends(get_conn)``: ``answer_followup`` waits
-    # on a provider for seconds, and a pool connection parked for that long
-    # is one no other request can use. The reads here and the writes below
-    # share no transaction — the writes open their own — so nothing needs a
-    # single connection to span both.
+    # Short-lived connections acquired around the LLM call, rather than one
+    # held across it via ``Depends(get_conn)``: ``answer_followup`` waits on a
+    # provider for seconds, and a pool connection parked for that long is one
+    # no other request can use. The reads here and the writes below share no
+    # transaction — the writes open their own — so nothing needs a single
+    # connection to span both.
     async with request.app.state.pool.acquire() as conn:
         # Ownership check (also confirms the conversation exists).
         await _owned_or_404(_conv.get_conversation(conn, conversation_id, user_id=user.user_id, agency_id=agency_id))
@@ -604,7 +708,8 @@ async def followup_endpoint(
     if ctx_msg.get("role") != "assistant":
         raise HTTPException(status_code=400, detail="context must be an assistant message")
 
-    answer, err = await _followup.answer_followup(
+    started = time.monotonic()
+    result = await _followup.answer_followup(
         question=body.question,
         context_tool=ctx_msg.get("tool"),
         context_args=ctx_msg.get("args"),
@@ -612,31 +717,52 @@ async def followup_endpoint(
         locale=locale,
         llm_approved=user.llm_approved,
     )
-    _raise_for_followup_error(err)
+    latency_ms = _elapsed_ms(started)
+    answer, err, guard = result
+    if err is not None:
+        # Input the model never saw says nothing about follow-up usage.
+        if err not in ("empty", "too_long"):
+            await _log_usage_pooled(
+                request.app.state.pool,
+                agency_id,
+                FOLLOWUP,
+                ctx_msg.get("tool"),
+                False,
+                latency_ms,
+                numeric_guard_triggered=guard,
+            )
+        _raise_for_followup_error(err)
 
     # Append both messages atomically so a mid-flight cancel doesn't leave
     # a dangling user message in the thread.
     async with request.app.state.pool.acquire() as conn:
-        async with conn.transaction():
-            user_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="user",
-                tool=None,
-                args=None,
-                signature_hash=None,
-                result=None,
-                rendered_summary=body.question,
-            )
-            assistant_msg = await _conv.append_message(
-                conn,
-                conversation_id,
-                role="assistant",
-                tool=None,
-                args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
-                signature_hash=None,
-                result=None,
-                rendered_summary=answer,
+        committed = False
+        try:
+            async with conn.transaction():
+                user_msg = await _conv.append_message(
+                    conn,
+                    conversation_id,
+                    role="user",
+                    tool=None,
+                    args=None,
+                    signature_hash=None,
+                    result=None,
+                    rendered_summary=body.question,
+                )
+                assistant_msg = await _conv.append_message(
+                    conn,
+                    conversation_id,
+                    role="assistant",
+                    tool=None,
+                    args={"context_message_id": body.context_message_id, "context_row_index": body.context_row_index},
+                    signature_hash=None,
+                    result=None,
+                    rendered_summary=answer,
+                )
+            committed = True
+        finally:
+            await _log_usage(
+                conn, agency_id, FOLLOWUP, ctx_msg.get("tool"), committed, latency_ms, numeric_guard_triggered=guard
             )
     return {"user": user_msg, "assistant": assistant_msg}
 

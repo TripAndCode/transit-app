@@ -30,14 +30,6 @@ def test_dockerignore_reincludes_docs_features_after_excluding_docs():
     )
 
 
-def test_dockerignore_reincludes_the_golden_set_after_excluding_tests():
-    """pipeline/query/router.py and the RAG index read the Ask golden set at
-    runtime; without the re-include the image has none and Stage 2 degrades."""
-    lines = _dockerignore_lines()
-    assert lines.index("!tests/ask_eval/golden_set.jsonl") > lines.index("tests")
-    assert (_REPO_ROOT / "tests" / "ask_eval" / "golden_set.jsonl").is_file()
-
-
 def test_dockerfile_runs_as_non_root_user():
     text = (_REPO_ROOT / "Dockerfile").read_text()
     assert "USER " in text, "Dockerfile must switch to a non-root user before CMD"
@@ -109,7 +101,7 @@ def test_dockerfile_python_minor_matches_ci():
     Matched to the minor, not just the major: 3.12 and 3.14 are as different
     to a C extension as two majors are anywhere else.
 
-    Every workflow pin is checked, not only ci.yml's: the nightly and Ask-eval
+    Every workflow pin is checked, not only ci.yml's: the workflow
     jobs run the same code, and a base-image bump that touches only the
     Dockerfile would otherwise leave them on the old interpreter unnoticed. A
     pin this guard cannot read, such as a matrix list or an expression, fails

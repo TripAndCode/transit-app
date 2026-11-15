@@ -7,8 +7,7 @@ Split out from `tests/dashboard_synthetic_display_test.py` (which needs a
 real browser + the throwaway Postgres/ClickHouse stack and is skipped by
 default — see that module's docstring) so the comparison LOGIC itself can be
 exercised by fast, offline, always-run tests too
-(`tests/unit/test_dashboard_value_check.py`), mirroring the live-LLM
-numeric eval's `tests/ask_eval/numeric_ground_truth.py` split: prove the check isn't
+(`tests/unit/test_dashboard_value_check.py`): prove the check isn't
 vacuous without needing a browser/DB at all.
 
 Every dashboard surface this repo's ``ReportTable.tsx``/``OverviewHeroRow.tsx``

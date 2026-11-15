@@ -101,40 +101,6 @@ async def test_chat_with_tools_survives_non_dict_arguments(
 
 
 @pytest.mark.asyncio
-async def test_rag_examples_appended_to_system_prompt(monkeypatch):
-    """When chat_with_tools receives rag_examples, the system prompt includes them."""
-    from types import SimpleNamespace
-
-    from pipeline.query import chat
-    from pipeline.query.rag_index import Match
-
-    captured = {}
-
-    class _FakeClient:
-        def chat_completions(self, *, messages, tools, tool_choice, temperature, allowed_providers=None):
-            captured["messages"] = messages
-            return SimpleNamespace(content="ok", tool_calls=None), None
-
-    monkeypatch.setattr(chat, "get_client", lambda: _FakeClient())
-
-    from datetime import date
-
-    from api.range import RangeCtx
-
-    examples = [
-        Match(chunk_id="g-1", content="中央大橋線の遅延", tool="route_stats", args={"route": "12211"}, distance=0.05),
-        Match(chunk_id="g-2", content="国道線の傾向", tool="time_series", args={}, distance=0.10),
-    ]
-    ctx = RangeCtx(from_date=date(2026, 5, 1), to_date=date(2026, 5, 27))
-    await chat.chat_with_tools("もっと変な質問", ctx, conn=None, agency_id=1, locale="ja", rag_examples=examples)
-
-    system = captured["messages"][0]["content"]
-    assert "中央大橋線の遅延" in system
-    assert "route_stats" in system
-    assert "国道線の傾向" in system
-
-
-@pytest.mark.asyncio
 async def test_history_injected_into_prompt(monkeypatch):
     """When history is supplied, prior turns appear in the prompt messages."""
     from types import SimpleNamespace
@@ -335,7 +301,7 @@ async def test_history_block_scopes_use_to_explicit_references(monkeypatch):
 
     With history from an unrelated ranking turn attached, a plain
     "停留所はいくつ？" ("how many stops?") — on-topic but with no follow-up
-    phrasing, so ``route_or_examples()`` still runs and finds no confident
+    phrasing, so ``match_rules()`` still runs and finds no confident
     match — must dispatch ``describe_data(kind=stops)``. Without an explicit
     instruction the model can answer from the attached history text instead
     ("the table doesn't show stop counts"). Pin that the history block

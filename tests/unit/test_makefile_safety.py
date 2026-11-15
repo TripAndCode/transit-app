@@ -118,7 +118,7 @@ def test_phony_has_single_list_including_ask_eval():
     phony_lines = [line for line in text.splitlines() if line.startswith(".PHONY:")]
     assert len(phony_lines) == 1, f"expected exactly one .PHONY line, found {len(phony_lines)}"
     targets = phony_lines[0].split(":", 1)[1].split()
-    assert targets.count("promote-intent-cache") == 1
+    assert targets.count("prune-query-log") == 1
     assert "ask-eval" in targets
 
 

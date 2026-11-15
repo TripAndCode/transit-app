@@ -53,8 +53,8 @@ def test_different_scopes_do_not_share_a_container():
 
 
 def test_different_callers_do_not_share_a_container():
-    """Nightly and the weekly eval both run on main's ref."""
-    assert _name("refs/heads/main", "transit-nightly-db") != _name("refs/heads/main", "transit-eval-db")
+    """Nightly and CI's push-to-main run both use main's ref."""
+    assert _name("refs/heads/main", "transit-nightly-db") != _name("refs/heads/main", "transit-ci-db-1")
 
 
 def test_a_ref_with_slashes_is_a_valid_docker_name():

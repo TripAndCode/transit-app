@@ -75,7 +75,7 @@ BLOCKED = [
     pytest.param("make db", id="make-db"),
     pytest.param("make analyze-all", id="make-analyze-all"),
     pytest.param("make seed-agencies", id="make-seed-agencies"),
-    pytest.param("make lint && make build-rag-index", id="make-second-command-build-rag-index"),
+    pytest.param("make lint && make prune-query-log", id="make-second-command-prune-query-log"),
     # A quoted script, a renamed make, and the CLI run as a module.
     pytest.param('bash -c "make prune-query-log"', id="make-target-inside-bash-c"),
     pytest.param("gmake prune-query-log", id="gmake-prune-query-log"),
