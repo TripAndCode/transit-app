@@ -148,6 +148,9 @@ async def test_a_route_name_does_not_license_its_digits_elsewhere(monkeypatch, l
         ({"42052": "1"}, 1250, "On this route 1,250 trips ran on time.", False),
         ({"42052": "1"}, 250, "On this route 1,250 trips ran on time.", True),
         ({"42052": "250 草津線"}, 1, "1,250系統の平均です。", True),
+        ({"42052": "W53"}, 5, "W53-5分の遅延です。", False),
+        ({"42052": "25 草津線"}, 5, "25 草津線-5分の遅延です。", False),
+        ({"42052": "W53"}, -5, "W53-5分の遅延です。", True),
     ],
 )
 async def test_a_route_name_never_matches_part_of_a_number(monkeypatch, labels, on_time_pct, reply, replaced):

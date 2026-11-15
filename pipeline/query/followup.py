@@ -214,8 +214,10 @@ def _without_route_names(answer: str, route_labels: Mapping[str, str] | None) ->
     if not route_labels:
         return answer
     answer = answer.translate(_FULLWIDTH_ALNUM)
+    # "_" is a word character, like the name it stands for, so the guard still
+    # reads a minus glued to the name ("W53-5") as a hyphen, not a sign.
     for pattern in _route_name_patterns(route_labels):
-        answer = pattern.sub(" ", answer)
+        answer = pattern.sub("_", answer)
     return answer
 
 
