@@ -161,6 +161,19 @@ per route over the scope:
   minute by default, or one minute while every early departure counts as on
   time. Its header and the note under the table name that threshold; it is
   not a sort.
+- **Statistics, on request.** The observation count is a statistic about a
+  row's figures, so it shows only while the reader ticks 「統計を表示」 /
+  "Show statistics" (`frontend/src/components/analysis/StatisticsToggle.tsx`).
+  One per-browser setting (`frontend/src/api/statisticsPref.ts`, localStorage
+  `transit.showStatistics`, off by default) drives every table that has such
+  columns: a `ReportTable` column marked `stat` (the Routes table's and the
+  day-type reports' observations), `DwellRunBlock`'s medians, 90th percentiles
+  and counts, the period summary's counts and the snapshot page's table. While
+  the count is hidden the few-data badge moves onto the sorted figure (else
+  the first figure), and the 「誤差大」 badge stays on the on-time cell either
+  way, so a thin figure never reads as a solid one. CSV exports are built from
+  the rows, not the screen, and keep every column; a browser print shows what
+  the screen shows.
 - **Sort.** `sort` picks the figure: `avg`, `on_time`, `late5_share` or
   `late5_count`. The routes that need attention come first; `order=best`
   turns the order around. The sorted column alone carries the bar and the
