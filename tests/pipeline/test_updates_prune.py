@@ -122,8 +122,8 @@ def test_a_month_past_the_horizon_whose_dates_are_aggregated_is_dropped(pg_conn,
     assert result.dropped == ["202301"]
     assert _partitions(ch_client) == [p for p in before if p != "202301"]
     assert _runs(pg_conn) == [("retention", "ok", 2)]
-    assert _recorded(pg_conn) == [("202301", [seeded], date(2023, 2, 2), 2, True)]
-    assert retention_floor(pg_conn, seeded) == date(2023, 2, 2)
+    assert _recorded(pg_conn) == [("202301", [seeded], date(2023, 3, 1), 2, True)]
+    assert retention_floor(pg_conn, seeded) == date(2023, 3, 1)
     # Only the dropped month's dates are written off, not the recent one.
     assert _written_off(ch_client, seeded) == [_OLD_DAY]
 
@@ -161,3 +161,52 @@ def test_a_dry_run_or_a_switched_off_prune_writes_nothing(pg_conn, ch_client, se
     assert _written_off(ch_client, seeded) == []
     if dry_run:
         assert [v.partition.partition_id for v in result.verdicts if v.held_by is None] == ["202301"]
+
+
+def test_a_prune_with_no_month_past_the_horizon_records_an_unchanged_run(pg_conn, ch_client, monkeypatch):
+    _switch(monkeypatch, True)
+    result = _prune(pg_conn, ch_client)
+    assert (result.verdicts, result.dropped) == ([], [])
+    assert _runs(pg_conn) == [("retention", "unchanged", 0)]
+
+
+def test_a_floor_recorded_mid_month_reads_as_the_first_of_the_next(pg_conn, seeded):
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO updates_pruned_months (partition_id, agency_ids, retention_floor, rows, bytes) "
+            "VALUES ('202301', %s, %s, 1, 1), ('202212', %s, %s, 1, 1)",
+            ([seeded], date(2023, 2, 2), [seeded], date(2023, 1, 1)),
+        )
+    pg_conn.commit()
+    assert retention_floor(pg_conn, seeded) == date(2023, 3, 1)
+
+
+@pytest.mark.parametrize("reason", ["soft-deleted", "unknown agency, with no agencies row"])
+def test_an_agency_analyze_all_never_visits_holds_its_month_for_an_operator(
+    pg_conn, ch_client, seeded, monkeypatch, reason
+):
+    """Its rows share the month with an agency whose dates are all aggregated."""
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, deleted_at) VALUES ('gone', 'http://example.com/gone.pb', "
+            "now()) RETURNING agency_id"
+        )
+        (other,) = cur.fetchone()
+        if reason != "soft-deleted":
+            cur.execute("DELETE FROM agencies WHERE agency_id = %s", (other,))
+    pg_conn.commit()
+    insert_updates(ch_client, other, [("gone.pb", _OLD, "T9", "weekday", "07:00:00", "R9", 1, 10)])
+    _ledger(pg_conn, seeded, _OLD_DAY, 2)
+    _switch(monkeypatch, True)
+
+    result = _prune(pg_conn, ch_client)
+
+    assert result.dropped == []
+    assert [(v.partition.partition_id, v.held_by) for v in result.verdicts] == [
+        (
+            "202301",
+            f"agency {other} is not analyzed by analyze_all: {reason}; "
+            "an operator decides whether to keep or delete its rows",
+        )
+    ]
+    assert retention_floor(pg_conn, seeded) is None

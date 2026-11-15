@@ -33,7 +33,7 @@ from pipeline.agg_sql import EARLIEST_CAPTURE, LEDGER_COUNTS_CH_SQL
 from pipeline.clickhouse import UPDATES_TABLE
 from pipeline.flags import get_flag_state
 from pipeline.locks import agency_ingest_lock
-from pipeline.service_day import filed_dates_reached, service_day_start_utc
+from pipeline.service_day import filed_capture_span, filed_dates_reached, service_day_start_utc
 
 if TYPE_CHECKING:
     from pipeline.analyze import Unapplied
@@ -168,21 +168,16 @@ def updates_cutoff(now: datetime, days: int) -> datetime:
     return now - timedelta(days=int(days))
 
 
+def _month_start_on_or_after(day: date) -> date:
+    if day.day == 1:
+        return day
+    return (day.replace(day=1) + timedelta(days=32)).replace(day=1)
+
+
 def floor_after(dropped_before: datetime) -> date:
     """The retention floor once every `updates` row captured before
-    *dropped_before* is gone: the day after the last service date such a row
-    can be filed under, so every row any later date files is still held."""
-    return filed_dates_reached(dropped_before, dropped_before)[1] + timedelta(days=1)
-
-
-def frozen_before(floor: date) -> date:
-    """The first date analyze still rebuilds everything of, given *floor*:
-    the floor itself on a month's first day, and otherwise the first day of
-    the next month, since the scorecard's month holding the floor is final
-    with it (feed_quality.plan_months)."""
-    if floor.day == 1:
-        return floor
-    return (floor.replace(day=1) + timedelta(days=32)).replace(day=1)
+    *dropped_before* is gone (retention_floor says where it lies)."""
+    return _month_start_on_or_after(filed_dates_reached(dropped_before, dropped_before)[1] + timedelta(days=1))
 
 
 def retention_floors(conn, agency_ids: Iterable[int]) -> dict[int, date]:
@@ -196,16 +191,27 @@ def retention_floors(conn, agency_ids: Iterable[int]) -> dict[int, date]:
             "WHERE agency_id = ANY(%s) GROUP BY agency_id",
             (ids,),
         )
-        return dict(cur.fetchall())
+        return {agency_id: _month_start_on_or_after(floor) for agency_id, floor in cur.fetchall()}
 
 
 def retention_floor(conn, agency_id: int) -> date | None:
     """The first service date analyze may still purge or rebuild for
-    *agency_id*. Every earlier date is final: `updates` no longer holds all of
-    its rows, so its aggregates stand as they were last built, under the
-    method of that build, and rows that land below it later are never
-    aggregated. None while no month of the agency's rows has been dropped,
-    which leaves every date rebuildable, exactly as before any prune.
+    *agency_id*. Every earlier date is final: its aggregates stand as they
+    were last built, under the method of that build, and rows that land below
+    it later are never aggregated. None while no month of the agency's rows
+    has been dropped, which leaves every date rebuildable, exactly as before
+    any prune.
+
+    The floor is the first of a month, on or after the day past the last
+    service date a dropped row can be filed under, so whatever works in whole
+    months never straddles it: the Postgres copy of a ClickHouse aggregate,
+    which purges and re-copies whole months, the store comparison, and the
+    scorecard's months. The dates from that day up to the floor are final
+    while `updates` still holds their rows. The floor date's own rows can
+    still file a stop event under the day before it, which is final, so the
+    prune requires that date to be current as well (plan_updates_prune).
+    floor_after rounds the floor a drop records, and retention_floors rounds
+    whatever floor it reads back.
 
     Read from the drops prune_updates records rather than from its switch:
     turning the switch off stops further drops, and must not let the next
@@ -217,6 +223,8 @@ def plan_updates_prune(
     partitions: Iterable[UpdatesPartition],
     *,
     cutoff: datetime,
+    now: datetime,
+    soft_deleted: Mapping[int, bool],
     floors: Mapping[int, date],
     ledgers: Mapping[int, Mapping[date, Counts]],
     live: Mapping[int, Mapping[date, Counts]],
@@ -227,32 +235,41 @@ def plan_updates_prune(
 
     Dropping one raises the retention floor of each agency with rows in it to
     floor_after the partition's end, and analyze then treats every date below
-    that floor as final. So a partition is held unless, for each such agency:
+    that floor as final. So a partition is held while, at *now*, readings
+    that file under the day before that floor can still be captured
+    (service_day.filed_capture_span): analyze would never aggregate them. A
+    short horizon (`--days`) reaches such a month. Otherwise it is held
+    unless, for each such agency:
 
+    - analyze_all visits it: it has an agencies row (*soft_deleted*, keyed by
+      the ids that have one) that is not soft-deleted. No analyze clears a
+      hold on an agency it skips, so such an agency holds the month for an
+      operator to decide whether to keep or delete its rows;
     - every service date its rows there are captured on is in the agency's
       ledger (*ledgers*, from agg_feed_health). A date without aggregates,
       such as a catch-up backfill older than the horizon, would otherwise be
       left with nothing. Below the agency's current floor analyze never
       builds one, so such a month waits for an operator;
-    - every date from the agency's current floor (*floors*) up to
-      frozen_before the new one counts in its ledger what `updates` holds
-      (*live*), so no stale aggregate, and no scorecard month built from one,
-      is frozen. Dates below the current floor are final already, and once a
-      month of their rows is gone their counts differ by design;
+    - every date from the agency's current floor (*floors*) through the new
+      one counts in its ledger what `updates` holds (*live*), so no stale
+      aggregate, and no scorecard month built from one, is frozen. The new
+      floor's own date is included: its rows can file under the day before
+      it. Dates below the current floor are final already, and once a month
+      of their rows is gone their counts differ by design;
     - its ClickHouse aggregates add up to their Postgres copies from its
-      current floor's month on (*disagreeing* names those that do not):
-      analyze repairs a disagreement only from the floor on;
+      current floor on (*disagreeing* names those that do not): analyze
+      repairs a disagreement only from the floor on;
     - analyze has applied every timetable and builder change to it
       (*unapplied*, pipeline.analyze.unapplied): no table waits on a new
-      fingerprint, and no date from its current floor up to frozen_before the
-      new one waits on a moved version in force. Frozen first, such a date
-      would keep the old timetable for good.
+      fingerprint, and no date from its current floor through the new one
+      waits on a moved version in force. Frozen first, such a date would
+      keep the old timetable for good.
 
-    *live* must hold, per agency, the counts of every date before
-    frozen_before the newest floor its partitions set, from its current floor
-    or its oldest partition, whichever is earlier (read_held_counts). A month
-    held for a date makes every later month of that agency wait too, since
-    that date lies below their floors as well.
+    *live* must hold, per agency, the counts of every date through the newest
+    floor its partitions set, from its current floor or its oldest partition,
+    whichever is earlier (read_held_counts). A month held for a date makes
+    every later month of that agency wait too, since that date lies below
+    their floors as well.
     """
     verdicts = []
     for partition in partitions:
@@ -261,26 +278,35 @@ def plan_updates_prune(
             continue
         floor = floor_after(end)
         held_by = None
-        for agency_id in sorted(partition.agency_ids):
-            held_by = _held_by(
-                agency_id,
-                start,
-                end,
-                floor,
-                floors.get(agency_id),
-                ledgers.get(agency_id, {}),
-                live.get(agency_id, {}),
-                (disagreeing or {}).get(agency_id, ()),
-                (unapplied or {}).get(agency_id),
+        arriving_until = filed_capture_span(floor - timedelta(days=1), floor - timedelta(days=1))[1]
+        if now < arriving_until:
+            held_by = (
+                f"readings that file under the day before its floor {floor.isoformat()} are still arriving "
+                f"until {arriving_until.isoformat()}"
             )
-            if held_by is not None:
-                break
+        else:
+            for agency_id in sorted(partition.agency_ids):
+                held_by = _held_by(
+                    agency_id,
+                    soft_deleted.get(agency_id),
+                    start,
+                    end,
+                    floor,
+                    floors.get(agency_id),
+                    ledgers.get(agency_id, {}),
+                    live.get(agency_id, {}),
+                    (disagreeing or {}).get(agency_id, ()),
+                    (unapplied or {}).get(agency_id),
+                )
+                if held_by is not None:
+                    break
         verdicts.append(PartitionVerdict(partition, floor, held_by))
     return verdicts
 
 
 def _held_by(
     agency_id: int,
+    deleted: bool | None,
     start: datetime,
     end: datetime,
     floor: date,
@@ -290,6 +316,12 @@ def _held_by(
     disagreeing: Sequence[str],
     pending: "Unapplied | None",
 ) -> str | None:
+    if deleted is not False:
+        return (
+            f"agency {agency_id} is not analyzed by analyze_all: "
+            f"{'soft-deleted' if deleted else 'unknown agency, with no agencies row'}; "
+            "an operator decides whether to keep or delete its rows"
+        )
     lacking = sorted(
         day
         for day in live
@@ -309,11 +341,10 @@ def _held_by(
             f"agency {agency_id} has {len(lacking)} service date(s) without aggregates, from "
             f"{lacking[0].isoformat()}; analyze it first"
         )
-    bound = frozen_before(floor)
     stale = sorted(
         day
         for day in {*live, *ledger}
-        if day < bound and (current is None or day >= current) and live.get(day) != ledger.get(day)
+        if day <= floor and (current is None or day >= current) and live.get(day) != ledger.get(day)
     )
     if stale:
         return (
@@ -330,7 +361,7 @@ def _held_by(
             f"agency {agency_id}'s {', '.join(pending.tables)} wait on a timetable or builder change; analyze it first"
         )
     moved = (
-        sorted(day for day in pending.moved if day < bound and (current is None or day >= current)) if pending else []
+        sorted(day for day in pending.moved if day <= floor and (current is None or day >= current)) if pending else []
     )
     if moved:
         return (
@@ -361,14 +392,26 @@ def read_candidates(ch, cutoff: datetime) -> list[UpdatesPartition]:
     return [UpdatesPartition(pid, rows, size, tuple(sorted(agencies.get(pid, ())))) for pid, rows, size in past]
 
 
+def read_soft_deleted(conn, agency_ids: Iterable[int]) -> dict[int, bool]:
+    """Whether each of *agency_ids* that has an agencies row is soft-deleted.
+    analyze_all visits only the agencies whose deleted_at is unset
+    (gtfs_pipeline.ACTIVE_AGENCY_IDS_SQL)."""
+    ids = sorted(set(agency_ids))
+    if not ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute("SELECT agency_id, deleted_at IS NOT NULL FROM agencies WHERE agency_id = ANY(%s)", (ids,))
+        return dict(cur.fetchall())
+
+
 def read_ledgers(conn, bounds: Mapping[int, date]) -> dict[int, dict[date, Counts]]:
-    """Each agency's agg_feed_health counts of the dates before its bound in *bounds*."""
+    """Each agency's agg_feed_health counts of the dates through its bound in *bounds*."""
     ledgers: dict[int, dict[date, Counts]] = {}
     with conn.cursor() as cur:
-        for agency_id, before in sorted(bounds.items()):
+        for agency_id, through in sorted(bounds.items()):
             cur.execute(
-                "SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s AND date < %s",
-                (agency_id, before),
+                "SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s AND date <= %s",
+                (agency_id, through),
             )
             ledgers[agency_id] = {day: (raw, total) for day, raw, total in cur.fetchall()}
     return ledgers
@@ -393,23 +436,25 @@ def read_unapplied(conn, ch, agency_id: int) -> "Unapplied":
 
 def read_disagreements(conn, ch, agency_id: int, floor: date | None) -> list[str]:
     """The ClickHouse aggregates of the agency that do not add up to their
-    Postgres copies from *floor*'s month on (pipeline.analyze.store_disagreements)."""
+    Postgres copies from *floor* on (pipeline.analyze.store_disagreements)."""
     from pipeline.analyze import store_disagreements
 
     return store_disagreements(agency_id, conn, ch, floor)
 
 
-def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime) -> list[PartitionVerdict]:
+def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime, now: datetime) -> list[PartitionVerdict]:
     """plan_updates_prune over *candidates*, with the counts it needs read from both stores."""
-    floors = retention_floors(conn, {agency_id for partition in candidates for agency_id in partition.agency_ids})
-    newest: dict[int, date] = {}
+    agency_ids = {agency_id for partition in candidates for agency_id in partition.agency_ids}
+    floors = retention_floors(conn, agency_ids)
+    soft_deleted = read_soft_deleted(conn, agency_ids)
+    bounds: dict[int, date] = {}
     oldest: dict[int, datetime] = {}
     for partition in candidates:
         start, end = partition_span(partition.partition_id)
         for agency_id in partition.agency_ids:
-            newest[agency_id] = max(newest.get(agency_id, date.min), floor_after(end))
-            oldest[agency_id] = min(oldest.get(agency_id, start), start)
-    bounds = {agency_id: frozen_before(floor) for agency_id, floor in newest.items()}
+            if soft_deleted.get(agency_id) is False:
+                bounds[agency_id] = max(bounds.get(agency_id, date.min), floor_after(end))
+                oldest[agency_id] = min(oldest.get(agency_id, start), start)
     ledgers = read_ledgers(conn, bounds)
     live = {}
     disagreeing = {}
@@ -417,12 +462,14 @@ def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime) ->
     for agency_id, bound in bounds.items():
         current = floors.get(agency_id)
         after = None if current is None else min(oldest[agency_id], service_day_start_utc(current))
-        live[agency_id] = read_held_counts(ch, agency_id, service_day_start_utc(bound), after)
+        live[agency_id] = read_held_counts(ch, agency_id, service_day_start_utc(bound + timedelta(days=1)), after)
         disagreeing[agency_id] = read_disagreements(conn, ch, agency_id, current)
         pending[agency_id] = read_unapplied(conn, ch, agency_id)
     return plan_updates_prune(
         candidates,
         cutoff=cutoff,
+        now=now,
+        soft_deleted=soft_deleted,
         floors=floors,
         ledgers=ledgers,
         live=live,
@@ -506,13 +553,14 @@ def prune_updates(
         return PruneResult(False, [], [])
     if not dry_run:
         acquire()
-    cutoff = updates_cutoff(now or datetime.now(timezone.utc), days)
+    now = now or datetime.now(timezone.utc)
+    cutoff = updates_cutoff(now, days)
     candidates = read_candidates(ch, cutoff)
     with ExitStack() as held:
         if not dry_run:
             for agency_id in sorted({a for partition in candidates for a in partition.agency_ids}):
                 held.enter_context(agency_ingest_lock(conn, agency_id))
-        verdicts = _verdicts(conn, ch, candidates, cutoff)
+        verdicts = _verdicts(conn, ch, candidates, cutoff, now)
         if dry_run:
             return PruneResult(enabled, verdicts, [])
         return PruneResult(True, verdicts, _drop(conn, ch, [v for v in verdicts if v.held_by is None]))

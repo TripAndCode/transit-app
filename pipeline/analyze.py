@@ -1103,9 +1103,9 @@ def _ch_agg_scopes(
     rows for a table from rebuilding it on every run.
 
     With a retention *floor*, a dated table's stores are compared from the
-    floor's month on, the months a rebuild repairs: below it, a disagreement
-    is final, and a table moved to ClickHouse keeps its history before the
-    floor's month in Postgres alone.
+    floor on, the months a rebuild repairs: below it, a disagreement is
+    final, and a table moved to ClickHouse keeps its history before the
+    floor in Postgres alone.
 
     An internal table has no Postgres copy, so its figure is compared with its
     ch_aggregates.REFERENCES table's instead. A whole-history table is rebuilt whole
@@ -1147,8 +1147,8 @@ def _ch_agg_scopes(
 
 def _stores_agree(table: str, agency_id: int, conn, ch_client, floor: date | None) -> bool:
     """Whether *table*'s ClickHouse rows add up to its Postgres copy: a dated
-    table's from *floor*'s month on when given, a whole-history table's whole."""
-    since = floor.replace(day=1) if floor is not None and table in ch_aggregates.TABLES else None
+    table's from *floor* on when given, a whole-history table's whole."""
+    since = floor if table in ch_aggregates.TABLES else None
     with _step(f"{table}: compare stores"):
         return ch_aggregates.totals(ch_client, table, agency_id, None, since=since) == _pg_totals(
             conn, table, agency_id, None, since=since
@@ -1158,7 +1158,7 @@ def _stores_agree(table: str, agency_id: int, conn, ch_client, floor: date | Non
 def _reference_agrees(internal: str, agency_id: int, conn, ch_client) -> bool:
     """Whether *internal*'s figure matches its REFERENCES table's, over the
     agency's whole history. A retention floor needs no narrower comparison:
-    no run rebuilds or drops a month of an internal table before the floor's
+    no run rebuilds or drops a month of an internal table before the floor
     (`swap` touches only the months a run rebuilds), and the prune holds an
     agency whose figures disagree (store_disagreements), so a difference found
     here lies from the floor on, where recounting from the floor repairs it."""
@@ -1238,6 +1238,10 @@ def _pg_totals(
 def _copy_ch_aggregate(table: str, agency_id: int, scope: list[int] | None, conn, ch_client) -> None:
     """Replace the agency's Postgres rows of *table* with ClickHouse's, over the
     months in *scope*, or every row of the agency when it is None.
+
+    With a retention floor, *scope* starts at or after it, and the floor is a
+    month's first day (pipeline.retention.retention_floor), so the purge never
+    reaches a final row.
 
     A full rebuild purges the whole agency rather than the months ClickHouse
     holds, so a Postgres row in a month ClickHouse never had goes too. The copy is
