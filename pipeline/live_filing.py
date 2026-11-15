@@ -29,6 +29,7 @@ from datetime import date, datetime
 from typing import NamedTuple
 
 from api.range import TimeBand, UpdatesFilter, time_band_clause_ch_for
+from api.retention_guard import require_retained
 from pipeline import refiled, static_archive
 from pipeline.cache import async_lru_cache, clear_all
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
@@ -155,7 +156,12 @@ async def filing(
 ) -> Filing:
     """How a read of *table*'s rows of the service dates [first, last] files
     them. *since*, for a read of a window that starts within *first*, is the
-    earliest capture it reads, so deciding costs the window, not the day."""
+    earliest capture it reads, so deciding costs the window, not the day.
+
+    A read of `updates` from before the agency's retention floor raises
+    api.retention_guard.RangeNotRetained before anything is read."""
+    if table == UPDATES_TABLE:
+        await require_retained(agency_id, first)
     between = (first, last)
     join = await schedule_join(conn, ch, agency_id)
     params = {} if join is None else join.filing_params(between)

@@ -39,6 +39,7 @@ import asyncpg
 import clickhouse_connect
 
 from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
+from api.retention_guard import RangeNotRetained
 from pipeline import perf
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -229,6 +230,14 @@ _LOCALES: dict[tuple[str, str], str] = {
         "この条件では集計に時間がかかりすぎました。期間を短くするか、路線を絞ってお試しください。"
     ),
     ("query_timeout", "en"): "This took too long to count. Try a shorter period or fewer routes.",
+    ("range_not_retained", "ja"): (
+        "{floor} より前の生の観測データは保存期間を過ぎたため、この条件では集計できません。"
+        "{floor} 以降の期間を選んでください。それより前の期間は集計済みのレポートで確認できます。"
+    ),
+    ("range_not_retained", "en"): (
+        "Raw readings before {floor} are no longer retained, so this view can't cover that period. "
+        "Choose a period from {floor} on; the aggregated reports still cover the earlier dates."
+    ),
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
     ("did_you_mean_candidate", "ja"): "路線{code}({name})",
@@ -1599,7 +1608,12 @@ async def dispatch(
         # own window; every handler then reads the scope's service filter as
         # the agency's own timetable days.
         effective_ctx = await resolve_service_dates(_apply_date_overrides(ctx, arguments), conn, agency_id)
-        return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
+        try:
+            return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
+        except RangeNotRetained as exc:
+            return ToolResult(
+                kind="empty", summary=_summary("range_not_retained", lang=locale, floor=exc.floor.isoformat())
+            )
 
 
 # Rendering — the assistant bubble's text body

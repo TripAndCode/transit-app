@@ -276,11 +276,6 @@ the run which wrote the row did not confirm the drop; ClickHouse's
 
 Before the prune is switched on in production, each of these must hold:
 
-- The readers that scan `updates` live refuse or flag a range before the floor,
-  rather than show it as having no data: the delay certificate, the banded
-  fallbacks, the trend heatmap, the Ask tools and the map.
-- `db/migrate.py` and `scripts/dev_upgrade.py` treat `agg_*` as data-losing
-  once `updates_pruned_months` has rows.
 - An export spanning the floor records that its figures before the floor keep
   the method they were built under.
 - The floor never splits a month that is copied or purged whole. The Postgres

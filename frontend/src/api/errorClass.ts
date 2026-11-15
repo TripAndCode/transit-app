@@ -1,4 +1,4 @@
-import { ApiError, isAggregateNotReady, isLlmNotApproved, isQueryTooSlow } from "./client";
+import { ApiError, isAggregateNotReady, isLlmNotApproved, isQueryTooSlow, rangeNotRetainedFloor } from "./client";
 
 /**
  * The error classes `ErrorBanner` gives distinct copy and a distinct
@@ -12,6 +12,7 @@ export type ErrorClass =
   | "timeout"
   | "not_ready"
   | "too_slow"
+  | "not_retained"
   | "not_approved"
   | "not_found"
   | "rate_limited"
@@ -34,6 +35,7 @@ export function classifyError(err: unknown): ErrorClass {
   if (isLlmNotApproved(err)) return "not_approved";
   if (isAggregateNotReady(err)) return "not_ready";
   if (isQueryTooSlow(err)) return "too_slow";
+  if (rangeNotRetainedFloor(err) != null) return "not_retained";
   if (err instanceof ApiError) {
     if (err.status === 429) return "rate_limited";
     if (err.status === 404) return "not_found";

@@ -36,6 +36,20 @@ export function isQueryTooSlow(err: unknown): boolean {
   return apiErrorField(err, "code") === QUERY_TIMEOUT_CODE;
 }
 
+/** Machine `code` on the 422 the API answers when a view that scans raw readings
+ * is asked for a period starting before the agency's retention floor, which it
+ * names in `floor`. Mirrors api/retention_guard.py::RANGE_NOT_RETAINED_CODE. */
+const RANGE_NOT_RETAINED_CODE = "range_not_retained";
+
+/** The retention floor (YYYY-MM-DD) a request was refused for starting before,
+ * or `null` when `err` is not that refusal. Asking again for the same period
+ * would be refused again, so the UI asks for a later one instead of a retry. */
+export function rangeNotRetainedFloor(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 422) return null;
+  if (apiErrorField(err, "code") !== RANGE_NOT_RETAINED_CODE) return null;
+  return apiErrorField(err, "floor");
+}
+
 /** True when an error is the "aggregates not built in this environment" 503 —
  * a persistent, not-transient condition, so the UI should explain it calmly and
  * NOT offer a futile retry. */

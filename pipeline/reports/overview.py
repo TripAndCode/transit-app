@@ -75,6 +75,7 @@ from api.range import (
     scheduled_hour_ch,
     service_date_clause,
 )
+from api.retention_guard import RangeNotRetained
 from pipeline import perf
 from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.clickhouse import is_query_timeout, is_result_overflow
@@ -1629,9 +1630,13 @@ async def compute_overview_summary(
 
     async def _period_hours() -> _Grain | None:
         """The period's hour set from ClickHouse, or None once a failure has
-        degraded the three hour profiles: no other figure reads it."""
+        degraded the three hour profiles: no other figure reads it. A period
+        before the retention floor is refused, as every live read refuses it,
+        rather than shown without its hour profiles."""
         try:
             return await _fetch_grain(agency_id, ctx, grain_conn, ch, shape="period_hours")
+        except RangeNotRetained:
+            raise
         except Exception as exc:
             _log.warning(
                 "ClickHouse grain fetch failed for agency %s — degrading the peak-hour profiles to null",
