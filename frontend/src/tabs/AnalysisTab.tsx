@@ -19,7 +19,6 @@ import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { InsightHint } from "../components/InsightHint";
-import { InsightPanel } from "../components/InsightPanel";
 import { SkeletonChart, SkeletonTable } from "../components/Skeleton";
 import { DailyChart } from "../components/charts/DailyChart";
 import { HourlyHeatmap } from "../components/charts/HourlyHeatmap";
@@ -321,11 +320,6 @@ export function AnalysisTab({
           </div>
         )}
       </div>
-      {/* key={id} forces a remount on agency switch -- InsightPanel's `seen`
-          state is seeded once from sessionStorage per mount; without this,
-          switching agencies would keep the previous agency's exclude set
-          in React state even though its sessionStorage key is now separate. */}
-      <InsightPanel key={id} className="analysis-insights" />
       </div>
     </div>
   );

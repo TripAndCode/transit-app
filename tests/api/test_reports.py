@@ -2418,58 +2418,6 @@ async def test_compute_trend_series_week_bucket_sql_excludes_null_sum_delay_sec_
     assert offender["avg_min"] == 1.0  # NOT the buggy 0.5 from counting the NULL date's samples
 
 
-# GET /reports/suggest -- the Insight Panel's single rule-based pick. Both
-# tests use ch_client directly (the sync fixture _run_analyze/mirror_updates_
-# to_ch already expect) rather than app.state.ch_client: compute_suggestion's
-# RangeCtx calls never set a time_band, so they always take the agg-table
-# fast path and never touch `ch` at all -- app.state.ch_client stays at
-# reports_app's default None, and get_ch's lazy-503 stand-in is never
-# exercised.
-
-
-@pytest.mark.asyncio
-async def test_suggest_returns_on_time_fallback_when_no_anomaly(reports_client, ch_client):
-    client, agency_id, pool = reports_client
-    from datetime import timedelta
-
-    from api.range import jst_today
-
-    today = jst_today()
-    for offset in range(6, -1, -1):
-        day = (today - timedelta(days=offset)).isoformat()
-        await _seed_route(pool, agency_id, "GOOD", "weekday", day, [30] * 25)
-        await _seed_route(pool, agency_id, "BAD", "weekday", day, [600] * 25)
-    _run_analyze(agency_id, ch_client)
-
-    resp = await client.get(f"/api/{agency_id}/reports/suggest")
-    assert resp.status_code == 200
-    body = resp.json()["suggestion"]
-    assert body["report_type"] == "on_time"
-    assert body["route_code"] == "BAD"
-    assert body.get("reason_text")
-
-
-@pytest.mark.asyncio
-async def test_suggest_exclude_param_narrows_candidates(reports_client, ch_client):
-    client, agency_id, pool = reports_client
-    from datetime import timedelta
-
-    from api.range import jst_today
-
-    today = jst_today()
-    for offset in range(6, -1, -1):
-        day = (today - timedelta(days=offset)).isoformat()
-        await _seed_route(pool, agency_id, "ONLY", "weekday", day, [600] * 25)
-    _run_analyze(agency_id, ch_client)
-
-    # A malformed entry (no ":") alongside the well-formed one must be
-    # silently ignored at the HTTP boundary, not 500 -- the endpoint only
-    # keeps entries it can split into (report_type, route_code).
-    resp = await client.get(f"/api/{agency_id}/reports/suggest?exclude=on_time:ONLY&exclude=garbage")
-    assert resp.status_code == 200
-    assert resp.json() == {"suggestion": None}
-
-
 def _run_analyze_from_ch(agency_id, ch_client):
     """Like `_run_analyze`, but for dwell_run tests that seed ClickHouse
     `updates` directly (via `insert_updates`) instead of mirroring from

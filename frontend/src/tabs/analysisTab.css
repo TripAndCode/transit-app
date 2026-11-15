@@ -1,16 +1,15 @@
 /* Below the shared mobile breakpoint (MOBILE_BREAKPOINT_PX in
    frontend/src/hooks/useMediaQuery.ts) this row's 280px report list +
-   flex:1 report body + 260px InsightPanel force a combined min-width the
-   phone viewport can't satisfy, pushing the whole page into horizontal
-   scroll (the tables inside are already self-contained via ReportTable's
-   own overflow-x:auto, so it's only this outer row that needs help). This
-   tab's dense multi-column reports stay desktop-oriented by design -- the
-   fix here is just to stack the three sections vertically instead of
-   side-by-side, not to redesign them for touch. */
+   flex:1 report body force a combined min-width the phone viewport can't
+   satisfy, pushing the whole page into horizontal scroll (the tables inside
+   are already self-contained via ReportTable's own overflow-x:auto, so it's
+   only this outer row that needs help). This tab's dense multi-column
+   reports stay desktop-oriented by design -- the fix here is just to stack
+   the sections vertically instead of side-by-side, not to redesign them for
+   touch. */
 @media (max-width: 640px) {
   .analysis-body { flex-direction: column; }
   .analysis-report-list { width: 100% !important; }
-  .analysis-insights { width: 100% !important; border-left: none !important; border-top: 1px solid var(--border-subtle); }
 }
 .trend-single-day { margin: 12px 0 20px; color: var(--text-secondary); font-size: var(--text-sm); }
 .ranking-sparse-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0; color: var(--text-secondary); font-size: var(--text-sm); }
@@ -21,11 +20,10 @@
 .cert-staff__summary { font-size: var(--text-sm); }
 .cert-staff__basis { margin: 8px 0 0; color: var(--text-tertiary); font-size: var(--text-xs); }
 
-/* A printed report is the report alone: the list beside it and the insight
-   panel are the screen's navigation, and the staff list is not the record. */
+/* A printed report is the report alone: the list beside it is the screen's
+   navigation, and the staff list is not the record. */
 @media print {
   .analysis-report-list { display: none !important; }
-  .analysis-insights { display: none !important; }
   .cert-staff { display: none; }
 }
 

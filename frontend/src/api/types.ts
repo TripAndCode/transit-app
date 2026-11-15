@@ -845,25 +845,6 @@ export type WeatherDelayResponse = {
   buckets?: WeatherDelayBucket[];
 };
 
-export type Suggestion = {
-  report_type: string;
-  route_code: string;
-  reason_text: string;
-  severity: "notable" | "normal";
-  // The evaluation window the rule that produced this suggestion actually
-  // used (ISO date strings) -- pin click-through navigation to this window
-  // rather than the user's ambient Analysis tab filter.
-  from_date: string;
-  to_date: string;
-};
-
-/** GET /:agency/reports/suggest. `suggestion` is null when no rule produced a
- *  pick — an object body rather than a bare `null`, so the endpoint has
- *  somewhere to say more about the empty case later. */
-export type SuggestionEnvelope = {
-  suggestion: Suggestion | null;
-};
-
 export type TrendDay = {
   date: string;
   avg_min: number;

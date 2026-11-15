@@ -13,7 +13,6 @@ import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ExportMenu } from "../components/ExportMenu";
-import { InsightPanel } from "../components/InsightPanel";
 import { SkeletonTable } from "../components/Skeleton";
 import { StillWorking } from "../components/StillWorking";
 import { ReportTable } from "../components/ReportTable";
@@ -224,9 +223,6 @@ export function RouteTableScreen() {
           {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} />}
           {id != null && <PerformanceStandardPanel aid={id} ctx={ctx} />}
         </div>
-        {/* key={id}: InsightPanel seeds its `seen` set from sessionStorage
-            once per mount, and that set belongs to one agency. */}
-        <InsightPanel key={id} className="analysis-insights" />
       </div>
     </div>
   );

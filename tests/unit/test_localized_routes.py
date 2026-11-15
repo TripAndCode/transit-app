@@ -21,7 +21,6 @@ LOCALIZED_GET_ROUTES = {
     ("GET", "/api/{agency_id}/forecast/heatmap"),
     ("GET", "/api/{agency_id}/forecast/overview"),
     ("GET", "/api/{agency_id}/performance_standards"),
-    ("GET", "/api/{agency_id}/reports/suggest"),
     ("GET", "/api/{agency_id}/reports/{report_type}"),
     ("GET", "/api/{agency_id}/route-shape"),
     ("GET", "/api/{agency_id}/weather_delay"),
