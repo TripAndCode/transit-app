@@ -59,9 +59,8 @@ One `snapshots` row (`db/migrations/0092_snapshots.up.sql`):
       once.
     - `standards`: the agency's performance standards
       (`GET /api/{agency_id}/performance_standards`), once per language,
-      since the targets' disclaimer is the server's prose. Everything but
-      that disclaimer must match between the languages, or the create answers
-      409.
+      since the targets' disclaimer is the server's prose. The figures are
+      computed once and only the disclaimer is written per language.
   - A route's page stores, in place of `report`, the responses its panels
     read, each asked what the live page asks:
     - `route_lists`: the agency's route lists over the scope without its

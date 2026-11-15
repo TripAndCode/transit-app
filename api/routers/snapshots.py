@@ -59,7 +59,7 @@ from api.routers.reports import (
 from api.routers.static import fetch_static_routes
 from api.security import User, csrf_guard, require_admin
 from pipeline.data_sources import credit_line
-from pipeline.reports import ROUTE_TABLE_SORTS
+from pipeline.reports import ROUTE_TABLE_SORTS, simulation_disclaimer
 from pipeline.reports.capability import CapabilityTier, capability_tiers
 from pipeline.reports.rankings import EARLY_ANY
 
@@ -540,21 +540,24 @@ async def _route_table_panels(
     - ``headway`` (``HeadwayQualityPanel``), only where the table is sorted
       by on-time, as the screen shows it. It is written in no language, so it
       is stored once, asked the unresolved ``scope`` as its endpoint is;
-    - ``standards`` (``PerformanceStandardPanel``) per language, since the
-      targets' disclaimer is the server's prose.
-
-    409 when the languages' targets disagree on anything but that prose."""
+    - ``standards`` (``PerformanceStandardPanel``) per language. The
+      language changes only the targets' disclaimer, so the figures are
+      computed once and the other languages' disclaimers written beside
+      them."""
     early = scope_early(q.early)
     panels: dict[str, Any] = {}
     if sort == "on_time":
         headway = await render_headway_quality(agency_id, scope, conn)
         panels["headway"] = headway.model_dump(mode="json", by_alias=True)
-    standards: dict[str, dict[str, Any]] = {}
-    for locale in SUPPORTED_LOCALES:
-        rendered = await render_performance_standards(agency_id, ctx, conn, ch, locale=locale, late=q.late, early=early)
-        standards[locale] = rendered.model_dump(mode="json", by_alias=True)
-    if _disagree([_standards_figures(each) for each in standards.values()]):
-        raise HTTPException(status_code=409, detail=_LOCALES_DISAGREE)
+    rendered = await render_performance_standards(
+        agency_id, ctx, conn, ch, locale=SUPPORTED_LOCALES[0], preset=q.preset, late=q.late, early=early
+    )
+    standards = {
+        locale: rendered.model_copy(update={"disclaimer": simulation_disclaimer(locale)}).model_dump(
+            mode="json", by_alias=True
+        )
+        for locale in SUPPORTED_LOCALES
+    }
     panels["standards"] = standards
     return panels
 

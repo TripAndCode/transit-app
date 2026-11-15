@@ -590,19 +590,11 @@ describe("SnapshotPage, a route's page", () => {
   });
 });
 
-function tablePanels(locale: "ja" | "en") {
-  return {
-    headway: {
-      rows: [{ route_code: "42", ewt_sec: 120, cov: 0.5, long_gap_rate: 0.1, samples: 80 }],
-      ctx: CTX,
-      scope_applied: {},
-    },
-    standards: {
-      ja: { ...routePage("ja").standards },
-      en: { ...routePage("en").standards },
-    }[locale],
-  };
-}
+const HEADWAY = {
+  rows: [{ route_code: "42", ewt_sec: 120, cov: 0.5, long_gap_rate: 0.1, samples: 80 }],
+  ctx: CTX,
+  scope_applied: {},
+};
 
 describe("SnapshotPage, a Routes table's side panels", () => {
   afterEach(async () => {
@@ -615,8 +607,8 @@ describe("SnapshotPage, a Routes table's side panels", () => {
     return snapshot({
       payloads: {
         ...snapshot().payloads,
-        headway: tablePanels("en").headway,
-        standards: { ja: tablePanels("ja").standards, en: tablePanels("en").standards },
+        headway: HEADWAY,
+        standards: { ja: routePage("ja").standards, en: routePage("en").standards },
       } as Snapshot["payloads"],
     });
   }
@@ -625,7 +617,9 @@ describe("SnapshotPage, a Routes table's side panels", () => {
     const fetchMock = stubFetch(200, withPanels());
     renderPage();
     expect(await screen.findByText("A simulation, as stored")).toBeInTheDocument();
-    expect(screen.getByText("Headway quality")).toBeInTheDocument();
+    const headway = screen.getByText("Headway quality").closest("div")!;
+    expect(within(headway).getByText("+2 min")).toBeInTheDocument();
+    expect(within(headway).getByText("80")).toBeInTheDocument();
     expect(screen.getByText("Minimum performance standard")).toBeInTheDocument();
     expect(screen.queryByText(/before they were stored/)).toBeNull();
     const urls = fetchMock.mock.calls.map(([url]) => String(url));

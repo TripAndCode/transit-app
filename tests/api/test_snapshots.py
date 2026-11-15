@@ -714,6 +714,7 @@ _TABLE_OPTIONS = ("sort", "order", "include_sparse", "include_retired", "include
 _PANEL_QUERIES = {
     "default": {"from": DAY, "to": DAY, "sort": "on_time"},
     "scoped": {"from": DAY, "to": DAY, "sort": "on_time", "dow": "weekday", "late": "120", "include_sparse": "1"},
+    "service": {"from": DAY, "to": DAY, "sort": "on_time", "service": "平日"},
 }
 
 
@@ -731,7 +732,12 @@ async def _live_table_panels(client, agency_id, query, locale):
 
 @pytest.fixture
 async def with_standard(reports_client):  # noqa: F811
+    """``reports_client`` with a target on route A and a high-frequency route
+    whose headway panel has a row."""
+    from tests.conftest import confirm_rt_field_coverage
+
     client, agency_id, pool = reports_client
+    day = date.fromisoformat(DAY)
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO route_performance_standards "
@@ -739,9 +745,26 @@ async def with_standard(reports_client):  # noqa: F811
             "VALUES ($1, 'A', 'on_time_pct', 80, 0.01)",
             agency_id,
         )
+        await conn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", agency_id)
+        await conn.execute(
+            "INSERT INTO agg_route_headway "
+            "(agency_id, route_code, scheduled_headway_median_sec, scheduled_samples, is_high_frequency) "
+            "VALUES ($1, 'A', 480.0, 10, true)",
+            agency_id,
+        )
+        await conn.execute(
+            "INSERT INTO agg_route_headway_daily "
+            "(agency_id, route_code, date, actual_headway_median_sec, actual_samples, actual_headway_sum_sec, "
+            " actual_headway_sumsq_sec2, long_gap_count, scheduled_headway_median_sec, is_high_frequency, "
+            " scheduled_headway_sum_sec, scheduled_headway_sumsq_sec2) "
+            "VALUES ($1, 'A', $2, 480.0, 2, 960.0, 813600.0, 1, 480.0, true, 4800.0, 2304000.0)",
+            agency_id,
+            day,
+        )
+    await confirm_rt_field_coverage(pool, agency_id)
     yield client, agency_id, pool
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE route_performance_standards CASCADE")
+        await conn.execute("TRUNCATE route_performance_standards, agg_route_headway, agg_route_headway_daily CASCADE")
 
 
 @pytest.mark.asyncio
@@ -756,16 +779,21 @@ async def test_a_route_table_snapshot_freezes_the_panels_beside_the_table(with_s
     await _seed(pool, agency_id, _BEFORE)
     sid = (await seed_session(aconn, role="admin")).sid
     live = {locale: await _live_table_panels(client, agency_id, query, locale) for locale in ("ja", "en")}
+    assert live["ja"][0]["rows"]
     assert live["ja"][1]["rows"]
 
     created = await _create(client, sid, agency_id, "route_table", query=query)
     assert created.status_code == 201, created.text
     async with pool.acquire() as conn:
         await conn.execute("DELETE FROM route_performance_standards WHERE agency_id = $1", agency_id)
-    assert (await _live_table_panels(client, agency_id, query, "ja"))[1]["rows"] == []
+        await conn.execute("DELETE FROM agg_route_headway_daily WHERE agency_id = $1", agency_id)
+    moved_headway, moved_standards = await _live_table_panels(client, agency_id, query, "ja")
+    assert moved_headway["rows"] == []
+    assert moved_standards["rows"] == []
 
     payloads = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]
     assert payloads["headway"] == live["ja"][0] == live["en"][0]
+    assert payloads["headway"]["rows"]
     assert set(payloads["standards"]) == {"ja", "en"}
     for locale, (_, standards) in live.items():
         assert payloads["standards"][locale] == standards
@@ -796,22 +824,15 @@ async def test_a_council_report_snapshot_stores_no_panels(reports_client, aconn)
 
 
 @pytest.mark.asyncio
-async def test_route_table_locales_that_disagree_on_a_target_store_nothing(with_standard, aconn, monkeypatch):
-    import api.routers.snapshots as snapshots
-
+async def test_route_table_standards_differ_between_languages_only_in_the_disclaimer(with_standard, aconn):
     client, agency_id, pool = with_standard
     await _seed(pool, agency_id, _BEFORE)
-    real = snapshots.render_performance_standards
-
-    async def moved_between_locales(*args, **kwargs):
-        rendered = await real(*args, **kwargs)
-        if kwargs["locale"] == "en":
-            row = rendered.rows[0].model_copy(update={"actual_value": 1.0})
-            return rendered.model_copy(update={"rows": [row]})
-        return rendered
-
-    monkeypatch.setattr(snapshots, "render_performance_standards", moved_between_locales)
     sid = (await seed_session(aconn, role="admin")).sid
-    resp = await _create(client, sid, agency_id, "route_table", query={"from": DAY, "to": DAY})
-    assert resp.status_code == 409
-    assert await aconn.fetchval("SELECT count(*) FROM snapshots") == 0
+    created = await _create(client, sid, agency_id, "route_table", query={"from": DAY, "to": DAY})
+    assert created.status_code == 201, created.text
+    standards = (await client.get(f"/api/snapshots/{created.json()['snapshot_id']}")).json()["payloads"]["standards"]
+    assert standards["ja"]["rows"]
+    assert standards["ja"]["disclaimer"] != standards["en"]["disclaimer"]
+    assert {k: v for k, v in standards["ja"].items() if k != "disclaimer"} == {
+        k: v for k, v in standards["en"].items() if k != "disclaimer"
+    }

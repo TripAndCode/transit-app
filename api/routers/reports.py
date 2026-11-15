@@ -774,8 +774,8 @@ async def render_performance_standards(
     early: EarlyTolerance = None,
 ) -> PerformanceStandardsResponse:
     """``GET /performance_standards``'s whole computation, for a caller that
-    resolved the request's parameters itself: a route page's snapshot stores
-    exactly what the page's targets were served. Each argument means what the
+    resolved the request's parameters itself: a snapshot stores exactly what
+    the panel was served. Each argument means what the
     endpoint's parameter of the same name means."""
     early_tolerance_sec, late_tolerance_sec = _preset_window(preset, early, late)
     standards = await read_standards(conn, agency_id, route)
