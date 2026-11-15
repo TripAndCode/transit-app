@@ -82,6 +82,25 @@ _KV = {
 }
 _STOP_COUNT = "24"  # the only stop figure present
 
+# on_time_rate shape, plus the route names the endpoint resolves from
+# static_routes. Two codes share one line name, so a correct answer names the
+# line and tells the variant apart by code or origin.
+_ROUTES_TABLE = {
+    "kind": "table",
+    "summary": "On-time rate, lowest first (synthetic)",
+    "columns": ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"],
+    "rows": [
+        ["50101", 48.2, 5.9, 420, False],  # lowest on-time rate
+        ["50102", 61.5, 3.4, 380, False],
+        ["50103", 77.0, 1.8, 510, False],
+    ],
+    "route_labels": {
+        "50101": "A12 港通り線 (北営業所 → 港公園)",
+        "50102": "A12 港通り線 (中央駅 → 港公園)",
+        "50103": "B07 丘陵線 (中央駅 → 丘陵団地)",
+    },
+}
+
 # Explicit refusal / uncertainty markers across both locales. Kept deliberately
 # narrow: bare negations like "is not"/"cannot" also appear in confidently-wrong
 # answers, so matching them would let a fabrication false-pass a faithfulness
@@ -121,15 +140,19 @@ def _has_refusal(text: str) -> bool:
 
 
 async def _ask(question: str, locale: str, context: dict) -> tuple[str, str | None]:
-    """Call ``answer_followup`` for one probe; ``context_args`` is irrelevant to grading."""
+    """Call ``answer_followup`` for one probe; ``context_args`` is irrelevant to grading.
+
+    A fixture's ``route_labels`` stands in for the names the endpoint resolves
+    from ``static_routes``; it travels beside the stored result, not inside it."""
     from pipeline.query.followup import answer_followup
 
     result = await answer_followup(
         question=question,
         context_tool=context.get("kind"),
         context_args={},
-        context_result=context,
+        context_result={k: v for k, v in context.items() if k != "route_labels"},
         locale=locale,
+        route_labels=context.get("route_labels"),
     )
     return result.answer, result.error
 
@@ -192,7 +215,10 @@ async def main() -> int:
             "Which route_id has the highest weekday average delay?",
             "en",
             _TABLE,
-            lambda a, e: (e is None and _MAX_ROUTE in a, f"intended answer {_MAX_ROUTE} must appear"),
+            lambda a, e: (
+                e is None and _MAX_ROUTE in a and "does not include" not in a,
+                f"intended answer {_MAX_ROUTE} must appear, with no unasked gap",
+            ),
         ),
         # Echoing the queried id while refusing is correct; the failure mode is
         # fabricating a *value* for it. Grade on refusal, not id-absence.
@@ -253,6 +279,46 @@ async def main() -> int:
             "en",
             _KV,
             lambda a, e: (e is None and _has_refusal(a), "fare not in pairs → must refuse"),
+        ),
+        # ── route names (Routes section) ──────────────────────────────────────
+        (
+            "routes:name-ja",
+            "定時率が一番低い路線の名前は？",
+            "ja",
+            _ROUTES_TABLE,
+            lambda a, e: (
+                e is None and "港通り線" in a and ("50101" in a or "北営業所" in a),
+                "50101 の路線名と、同名系統を見分ける手がかりが必要",
+            ),
+        ),
+        (
+            "routes:name-en",
+            "What is the name of the route with the lowest on-time rate?",
+            "en",
+            _ROUTES_TABLE,
+            lambda a, e: (e is None and "港通り線" in a, "the Routes list names 50101"),
+        ),
+        # No Routes list: refuse as "not in this result", never as a dataset
+        # that lacks names or needs a separate mapping table.
+        (
+            "routes:absent-ja",
+            "系統16071の路線名は？",
+            "ja",
+            _TABLE,
+            lambda a, e: (
+                e is None and _has_refusal(a) and "対応表" not in a,
+                "名前は結果に無い → 拒否、ただし対応表が必要とは言わない",
+            ),
+        ),
+        (
+            "routes:absent-en",
+            "What is the name of route 16071?",
+            "en",
+            _TABLE,
+            lambda a, e: (
+                e is None and _has_refusal(a) and "separate" not in a.lower(),
+                "no name in the result → refuse, without claiming a separate table is needed",
+            ),
         ),
     ]
 

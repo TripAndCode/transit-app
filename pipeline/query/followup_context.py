@@ -12,9 +12,9 @@ from fastapi import HTTPException
 
 from pipeline.route_catalog import route_code_sql
 
-# _serialize_context only ever shows a table's first 50 rows to the model, so
-# a route_code past that row is never grounding the model actually saw.
-_MAX_TABLE_ROWS = 50
+# The follow-up shows the model only a table's first rows, so a route_code
+# past them is never grounding the model actually saw.
+MAX_CONTEXT_TABLE_ROWS = 50
 _MAX_LABEL_CHARS = 120
 _WHITESPACE_RUN_RE = re.compile(r"\s+")
 
@@ -42,7 +42,7 @@ def context_route_codes(args: dict | None, result: dict | None) -> list[str]:
     first-seen order.
 
     Codes come from two places: a ``kind == "table"`` result's ``route_code``
-    column, over only the first :data:`_MAX_TABLE_ROWS` rows -- the ones
+    column, over only the first :data:`MAX_CONTEXT_TABLE_ROWS` rows -- the ones
     :func:`pipeline.query.followup._serialize_context` actually shows the
     model -- and ``args["route"]``/``args["route_code"]``, where a
     route-scoped card keeps its route even when its result carries no such
@@ -68,7 +68,7 @@ def context_route_codes(args: dict | None, result: dict | None) -> list[str]:
         rows = result.get("rows")
         if isinstance(columns, list) and "route_code" in columns and isinstance(rows, list):
             idx = columns.index("route_code")
-            for row in rows[:_MAX_TABLE_ROWS]:
+            for row in rows[:MAX_CONTEXT_TABLE_ROWS]:
                 if isinstance(row, (list, tuple)) and idx < len(row):
                     _add(row[idx])
 
