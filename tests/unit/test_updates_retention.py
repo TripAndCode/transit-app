@@ -171,10 +171,14 @@ def test_a_date_the_drop_freezes_whose_ledger_no_longer_matches_holds_the_month(
     assert stale_day.isoformat() in verdicts[0].held_by
 
 
-def test_a_stale_date_past_the_month_the_new_floor_freezes_does_not_hold_the_month():
+@pytest.mark.parametrize("stale_day, holds", [(date(2025, 3, 1), True), (date(2025, 3, 2), False)])
+def test_a_stale_ledger_on_the_new_floor_holds_the_month(stale_day, holds):
+    """A reading captured early on the floor date files under the day before
+    it, which the drop freezes; the day after the floor lends to no final date."""
     live = _counts(date(2024, 12, 31), date(2025, 3, 10))
-    ledger = {**live, date(2025, 3, 1): (4, 4)}
-    assert _plan([_partition("202501", 1)], ledgers={1: ledger}, live={1: live})[0].held_by is None
+    ledger = {**live, stale_day: (4, 4)}
+    verdicts = _plan([_partition("202501", 1)], ledgers={1: ledger}, live={1: live})
+    assert (verdicts[0].held_by is not None) is holds
 
 
 def test_dates_below_the_agencys_current_floor_are_final_and_not_compared():

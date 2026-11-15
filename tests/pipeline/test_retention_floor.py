@@ -44,6 +44,8 @@ def pruned(request, pg_conn, ch_client, agency_id, monkeypatch):
             update_row(datetime(2025, 2, 1, 12, 0), "c", 45, scheduled_time="12:00:00"),
             update_row(datetime(2025, 2, 2, 9, 0), "c", 50, scheduled_time="09:00:00"),
             update_row(datetime(2025, 2, 5, 8, 0), "d", 15),
+            update_row(datetime(2025, 2, 28, 8, 0), "b", 20, route_code="R2"),
+            update_row(datetime(2025, 3, 1, 9, 0), "c", 55, scheduled_time="09:00:00"),
             update_row(datetime(2025, 3, 10, 8, 0), "a", 75),
         ],
     )
@@ -313,3 +315,57 @@ def test_the_prune_holds_an_agency_with_a_table_awaiting_a_new_fingerprint(pg_co
     result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
     assert result.dropped == []
     assert "agg_stop_daily" in result.verdicts[0].held_by
+
+
+def _pg_route_daily(pg_conn, agency_id, condition: str, day: date) -> list:
+    with pg_conn.cursor() as cur:
+        cur.execute(f"SELECT * FROM agg_route_daily WHERE agency_id = %s AND date {condition} %s", (agency_id, day))
+        return sorted(map(repr, cur.fetchall()))
+
+
+def _delete_ch_route_daily(ch_client, agency_id, condition: str = "") -> None:
+    ch_client.command(
+        f"DELETE FROM agg_route_daily WHERE agency_id = {{a:Int32}} {condition}",
+        parameters={"a": agency_id, "day": date(2025, 2, 1)},
+    )
+
+
+def test_postgres_keeps_final_rows_clickhouse_lost_in_the_month_before_the_floor(pg_conn, ch_client, agency_id, pruned):
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    before = _pg_route_daily(pg_conn, agency_id, "=", date(2025, 2, 1))
+    assert before
+    _delete_ch_route_daily(ch_client, agency_id, "AND date = {day:Date}")
+    analyze(agency_id, pg_conn, ch_client)
+    assert _pg_route_daily(pg_conn, agency_id, "=", date(2025, 2, 1)) == before
+
+
+def test_a_table_clickhouse_rebuilds_from_the_floor_leaves_its_final_postgres_rows(
+    pg_conn, ch_client, agency_id, pruned
+):
+    """As after the table moves to ClickHouse once a floor exists: only the
+    rows from the floor on come back, and Postgres keeps every final one."""
+    _prune(pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    final = _pg_route_daily(pg_conn, agency_id, "<", date(2025, 3, 1))
+    rebuilt = _pg_route_daily(pg_conn, agency_id, ">=", date(2025, 3, 1))
+    assert final and rebuilt
+    _delete_ch_route_daily(ch_client, agency_id)
+    analyze(agency_id, pg_conn, ch_client)
+    assert _pg_route_daily(pg_conn, agency_id, "<", date(2025, 3, 1)) == final
+    assert _pg_route_daily(pg_conn, agency_id, ">=", date(2025, 3, 1)) == rebuilt
+
+
+def test_the_prune_holds_a_reading_on_the_new_floor_date_analyze_has_not_seen(pg_conn, ch_client, agency_id, pruned):
+    """Captured early on 2025-03-01, it files under 2025-02-28, which the drop freezes."""
+    captured = datetime(2025, 3, 1, 7, 30)
+    scheduled_sec = 3 * 3600 + 50 * 60
+    assert filed_date_of(captured.replace(tzinfo=JST), scheduled_sec) == date(2025, 2, 28)
+    insert_updates(
+        ch_client,
+        agency_id,
+        [update_row(captured, "c", 40, scheduled_time="03:50:00", scheduled_sec=scheduled_sec)],
+    )
+    result = prune_updates(pg_conn, ch_client, acquire=lambda: None, days=30, now=_NOW)
+    assert result.dropped == []
+    assert "2025-03-01" in result.verdicts[0].held_by
