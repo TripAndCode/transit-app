@@ -69,6 +69,34 @@ describe("LandingPage", () => {
       expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
       expect(screen.queryByText(/to keep your saved views/)).toBeNull();
     });
+
+    it("leaves out the sign-in note on a deployment with nothing to sign in with", () => {
+      mockUseConfig.mockReturnValue({ data: { ...OPEN, auth_enabled: false } });
+      renderLanding();
+      const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
+      expect(ctas).toHaveLength(2);
+      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
+      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
+    });
+
+    it("offers sign-in, not the guest entry, while the session is still loading", () => {
+      mockUseSession.mockReturnValue({ data: undefined, isLoading: true });
+      renderLanding();
+      const ctas = screen.getAllByRole("link", { name: "Sign in" });
+      expect(ctas).toHaveLength(2);
+      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/login");
+      expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
+      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
+    });
+
+    it("promises no sign-in-free entry before the configuration says so", () => {
+      mockUseConfig.mockReturnValue({ data: undefined });
+      renderLanding();
+      const ctas = screen.getAllByRole("link", { name: "Sign in" });
+      expect(ctas).toHaveLength(2);
+      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/login");
+      expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
+    });
   });
 
   describe("the pause toggle", () => {
@@ -105,6 +133,13 @@ describe("LandingPage", () => {
     it("sends a visitor who would not reach the app to sign-in first, regardless of a stored agency", () => {
       writeLastAgency(7);
       mockUseConfig.mockReturnValue({ data: GATED });
+      renderLanding();
+      expect(screen.getByRole("link", { name: "Open Bus Town" })).toHaveAttribute("href", "/login");
+    });
+
+    it("sends a visitor whose session is still loading to sign-in first, regardless of a stored agency", () => {
+      writeLastAgency(7);
+      mockUseSession.mockReturnValue({ data: undefined, isLoading: true });
       renderLanding();
       expect(screen.getByRole("link", { name: "Open Bus Town" })).toHaveAttribute("href", "/login");
     });
@@ -147,6 +182,10 @@ describe("LandingPage", () => {
     expect(within(credits).getByRole("link", { name: "Aomori City Bus information" })).toHaveAttribute(
       "href",
       "https://ckan.odpt.org/dataset/aomori_city_all_lines",
+    );
+    expect(within(credits).getByRole("link", { name: "Creative Commons CC0" })).toHaveAttribute(
+      "href",
+      "https://creativecommons.org/publicdomain/zero/1.0/deed.en",
     );
   });
 

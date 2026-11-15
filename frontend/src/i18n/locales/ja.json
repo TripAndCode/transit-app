@@ -173,7 +173,6 @@
       "col_ontime": "定時率",
       "col_grade": "月次評価",
       "col_updated": "最終受信",
-      "feed_count": "フィード {{n}} 本",
       "coverage_label": "カバー率 {{pct}}%",
       "no_data": "データ不足",
       "offline": "停止中",
@@ -190,7 +189,9 @@
         "matsuyama": "松山市",
         "naha": "那覇市"
       },
-      "see_all_link": "全 {{total}} 本のフィードを見る"
+      "see_all_link": "全 {{total}} 本のフィードを見る",
+      "feed_count_one": "フィード {{count}} 本",
+      "feed_count_other": "フィード {{count}} 本"
     },
     "councils": {
       "eyebrow": "FOR COUNCILS ・ 自治体・協議会の方へ",

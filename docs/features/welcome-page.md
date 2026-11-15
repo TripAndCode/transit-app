@@ -3,7 +3,8 @@
 Public landing page, rendered outside `<App />` and outside `RequireAuth`
 (`frontend/src/main.tsx`) so a signed-out visitor can reach it. One CTA
 decision (`frontend/src/pages/landing/useCtaKind.ts`) drives both the header
-button and the hero's primary CTA, the way in this visitor has:
+button and the hero's primary CTA, the way in this visitor has. Below 720px
+the header hides its copy, since the hero's sits in the first screen:
 
 - **Signed in:** "Open the dashboard" (`/`).
 - **Signed out, and `GET /api/config` says `login_required` is off:** "View
@@ -135,12 +136,16 @@ duplicating them: `header.app_title`/`header.app_tagline` for the brand, and
    page (the stage dots, the Bus Town markers, the method flow pulse) to
    freeze in place, and the toggle to flip back to playing on a second
    click.
-6. Click the Bus Town section's button — expect it to land on that agency's
+6. At a 360px-wide viewport, in both languages — expect no sideways scroll,
+   the pause toggle as an icon beside the brand, and the CTA only in the
+   hero.
+7. Click the Bus Town section's button — expect it to land on that agency's
    Bus Town tab when a last-chosen agency is stored, or on `/` to choose one
    otherwise, or on `/login` when the deployment requires sign-in.
-7. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
+8. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
    `frontend/src/pages/LandingPage.css.test.ts`,
    `frontend/src/pages/landing/busTownLink.test.ts`,
+   `frontend/src/pages/landing/severityStyle.test.ts`,
    `frontend/src/pages/AccountPage.test.tsx`,
    `frontend/src/pages/LoginPage.test.tsx`,
    `frontend/src/components/Sidebar.test.tsx`,

@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { FEED_ROWS, STATUS, ON_TIME_THRESHOLD_SECONDS, onTimeRateBand } from "./welcomeSample";
-import { fixtureFill } from "./severityStyle";
+import { DELAY_RAMP } from "../../styles/tokens";
 import { SampleTag } from "./SampleTag";
 import { fixedTenth } from "../../utils/format";
 
@@ -55,10 +55,10 @@ export function FeedTable() {
               <div className="landing-table__row" role="row" key={row.cityKey}>
                 <span role="cell" className="landing-table__city">
                   <b>{t(`landing.observatory.rows.${row.cityKey}`)}</b>
-                  <span className="landing-muted">{t("landing.observatory.feed_count", { n: row.feeds })}</span>
+                  <span className="landing-muted">{t("landing.observatory.feed_count", { count: row.feeds })}</span>
                 </span>
                 <span role="cell" className="landing-table__freshness">
-                  <span className="landing-swatch" style={{ background: fixtureFill(row.freshnessBand) }} />
+                  <span className="landing-swatch" style={{ background: DELAY_RAMP[row.freshnessBand] }} />
                   {formatFreshness(row.freshnessSeconds, t)}
                 </span>
                 <span role="cell" className="landing-table__ontime">
@@ -68,7 +68,7 @@ export function FeedTable() {
                     <>
                       <span className="landing-table__ontime-value">{fixedTenth(row.onTimePct)}%</span>
                       <span className="landing-bar">
-                        <span className="landing-bar__fill" style={{ width: `${row.onTimePct}%`, background: fixtureFill(onTimeBand!) }} />
+                        <span className="landing-bar__fill" style={{ width: `${row.onTimePct}%`, background: DELAY_RAMP[onTimeBand!] }} />
                       </span>
                     </>
                   )}

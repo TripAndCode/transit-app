@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useCtaKind } from "./useCtaKind";
 
 /** The dashboard/sign-in link, rendered identically wherever it appears
- *  (header button, hero primary CTA): same three destinations and copy as
- *  the pre-rebuild page, see useCtaKind. */
+ *  (header button, hero primary CTA): one CTA decision, from useCtaKind,
+ *  wherever it renders. */
 export function CtaLink({ className }: { className?: string }) {
   const { t } = useTranslation();
   const { kind } = useCtaKind();

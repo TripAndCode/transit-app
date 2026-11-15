@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useCtaKind } from "./useCtaKind";
 import { busTownHref } from "./busTownLink";
@@ -53,9 +54,9 @@ export function BusTownTeaser() {
           <div className="landing-eyebrow landing-bustown__eyebrow">{t("landing.bustown.eyebrow")}</div>
           <h2 className="landing-h2 landing-bustown__heading">{t("landing.bustown.heading")}</h2>
           <p className="landing-bustown__body">{t("landing.bustown.body")}</p>
-          <a className="btn btn--primary landing-bustown__cta" href={href}>
+          <Link className="btn btn--primary landing-bustown__cta" to={href}>
             {t("landing.bustown.cta", { name: t("nav.bus-town") })}
-          </a>
+          </Link>
         </div>
         <div className="landing-bustown__panel">
           <div className="landing-bustown__map">

@@ -173,7 +173,6 @@
       "col_ontime": "On-time rate",
       "col_grade": "Monthly grade",
       "col_updated": "Last update",
-      "feed_count": "{{n}} feeds",
       "coverage_label": "{{pct}}% coverage",
       "no_data": "Not enough data",
       "offline": "Offline",
@@ -190,7 +189,9 @@
         "matsuyama": "Matsuyama",
         "naha": "Naha"
       },
-      "see_all_link": "See all {{total}} feeds"
+      "see_all_link": "See all {{total}} feeds",
+      "feed_count_one": "{{count}} feed",
+      "feed_count_other": "{{count}} feeds"
     },
     "councils": {
       "eyebrow": "FOR COUNCILS",

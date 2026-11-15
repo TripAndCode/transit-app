@@ -1,10 +1,11 @@
 // Static fixture data for the whole /welcome page. Every figure, table row,
 // chart and map the page draws comes from here, never from an API call -- a
-// signed-out visitor sees no real data (see docs/features/welcome-page.md).
-// Values are plain ASCII (numbers and key suffixes only, no human-readable
-// text): scripts/lint-i18n-strings.py bans literal Japanese/English copy in
-// source files, and every label a reader sees still goes through t().
+// signed-out visitor sees no real data. Values are plain ASCII (numbers and
+// key suffixes only, no human-readable text): scripts/lint-i18n-strings.py
+// bans literal Japanese/English copy in source files, and every label a
+// reader sees still goes through t().
 import type { DelayBand } from "../../styles/tokens";
+import type { FixtureBand } from "./severityStyle";
 
 export type Band = DelayBand;
 
@@ -23,7 +24,7 @@ export interface StageCity {
   /** Percent position within the stage's viewBox. */
   readonly x: number;
   readonly y: number;
-  readonly band: Band | "offline";
+  readonly band: FixtureBand;
   /** i18n label suffix (under landing.stage.cities.*) for the few cities the
    *  stage labels in HTML; absent for the purely decorative dots. */
   readonly labelKey?: string;

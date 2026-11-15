@@ -43,70 +43,72 @@ export function CouncilSample() {
           <p className="landing-muted landing-councils__disclaimer">{t("landing.councils.disclaimer")}</p>
         </div>
         <div className="landing-report-figure">
-          <div className="landing-report-figure__backdrop" aria-hidden="true" />
-          <article className="landing-report" aria-label={t("landing.report.aria_label")}>
-            <div className="landing-report__head">
-              <span>{t("header.app_tagline")}</span>
-              <span className="landing-report__badge">{t("landing.report.badge")}</span>
-            </div>
-            <div className="landing-muted">{t("landing.report.addressee")}</div>
-            <div className="landing-report__title">{t("landing.report.title")}</div>
-            <div className="landing-muted">{period}</div>
-            <div className="landing-report__kpis">
-              <div className="landing-report__kpi">
-                <div className="landing-muted">{t("landing.report.kpi_confirmed_label")}</div>
-                <div className="landing-report__kpi-value">{fixedTenth(REPORT.confirmationPct)}%</div>
-                <div className="landing-muted">
-                  {t("landing.report.kpi_confirmed_sub", { confirmed: formatNumber(REPORT.confirmedTrips), total: formatNumber(REPORT.totalTrips) })}
+          <div className="landing-report-figure__frame">
+            <div className="landing-report-figure__backdrop" aria-hidden="true" />
+            <article className="landing-report" aria-label={t("landing.report.aria_label")}>
+              <div className="landing-report__head">
+                <span>{t("header.app_tagline")}</span>
+                <span className="landing-report__badge">{t("landing.report.badge")}</span>
+              </div>
+              <div className="landing-muted">{t("landing.report.addressee")}</div>
+              <div className="landing-report__title">{t("landing.report.title")}</div>
+              <div className="landing-muted">{period}</div>
+              <div className="landing-report__kpis">
+                <div className="landing-report__kpi">
+                  <div className="landing-muted">{t("landing.report.kpi_confirmed_label")}</div>
+                  <div className="landing-report__kpi-value">{fixedTenth(REPORT.confirmationPct)}%</div>
+                  <div className="landing-muted">
+                    {t("landing.report.kpi_confirmed_sub", { confirmed: formatNumber(REPORT.confirmedTrips), total: formatNumber(REPORT.totalTrips) })}
+                  </div>
+                </div>
+                <div className="landing-report__kpi">
+                  <div className="landing-muted">{t("landing.report.kpi_ontime_label")}</div>
+                  <div className="landing-report__kpi-value">{fixedTenth(REPORT.onTimePct)}%</div>
+                  <div className="landing-muted">{t("landing.report.kpi_ontime_sub", { seconds: ON_TIME_THRESHOLD_SECONDS })}</div>
+                </div>
+                <div className="landing-report__kpi">
+                  <div className="landing-muted">{t("landing.report.kpi_coverage_label")}</div>
+                  <div className="landing-report__kpi-value">{fixedTenth(REPORT.coveragePct)}%</div>
+                  <div className="landing-muted">{t("landing.report.kpi_coverage_sub")}</div>
                 </div>
               </div>
-              <div className="landing-report__kpi">
-                <div className="landing-muted">{t("landing.report.kpi_ontime_label")}</div>
-                <div className="landing-report__kpi-value">{fixedTenth(REPORT.onTimePct)}%</div>
-                <div className="landing-muted">{t("landing.report.kpi_ontime_sub", { seconds: ON_TIME_THRESHOLD_SECONDS })}</div>
+              <div className="landing-report__bars-head">
+                <b>{t("landing.report.route_bars_heading")}</b>
+                <span className="landing-muted">{t("landing.report.target_note", { pct: REPORT.targetPct })}</span>
               </div>
-              <div className="landing-report__kpi">
-                <div className="landing-muted">{t("landing.report.kpi_coverage_label")}</div>
-                <div className="landing-report__kpi-value">{fixedTenth(REPORT.coveragePct)}%</div>
-                <div className="landing-muted">{t("landing.report.kpi_coverage_sub")}</div>
+              <div className="landing-report__bars">
+                <span
+                  aria-hidden="true"
+                  className="landing-report__target-line"
+                  style={{ left: `calc(${NAME_COL} + (100% - ${NAME_COL} - ${VALUE_COL}) * ${REPORT.targetPct}/100)` }}
+                />
+                {REPORT_ROUTES.map((route) => (
+                  <div className="landing-report__bar-row" key={route.nameKey} style={{ gridTemplateColumns: `${NAME_COL} 1fr ${VALUE_COL}` }}>
+                    <span>{t(`landing.report.routes.${route.nameKey}`)}</span>
+                    <i className={route.belowTarget ? "landing-report__bar landing-report__bar--below" : "landing-report__bar"} style={{ width: `${route.pct}%` }} />
+                    <span>{fixedTenth(route.pct)}</span>
+                  </div>
+                ))}
               </div>
-            </div>
-            <div className="landing-report__bars-head">
-              <b>{t("landing.report.route_bars_heading")}</b>
-              <span className="landing-muted">{t("landing.report.target_note", { pct: REPORT.targetPct })}</span>
-            </div>
-            <div className="landing-report__bars">
-              <span
-                aria-hidden="true"
-                className="landing-report__target-line"
-                style={{ left: `calc(${NAME_COL} + (100% - ${NAME_COL} - ${VALUE_COL}) * ${REPORT.targetPct}/100)` }}
-              />
-              {REPORT_ROUTES.map((route) => (
-                <div className="landing-report__bar-row" key={route.nameKey} style={{ gridTemplateColumns: `${NAME_COL} 1fr ${VALUE_COL}` }}>
-                  <span>{t(`landing.report.routes.${route.nameKey}`)}</span>
-                  <i className={route.belowTarget ? "landing-report__bar landing-report__bar--below" : "landing-report__bar"} style={{ width: `${route.pct}%` }} />
-                  <span>{fixedTenth(route.pct)}</span>
+              {belowTargetNames.length > 0 && (
+                <div className="landing-report__below-target">
+                  {t("landing.report.below_target", { routes: belowTargetNames.join(separator) })}
                 </div>
-              ))}
-            </div>
-            {belowTargetNames.length > 0 && (
-              <div className="landing-report__below-target">
-                {t("landing.report.below_target", { routes: belowTargetNames.join(separator) })}
+              )}
+              <p className="landing-report__footnote">
+                {t("landing.report.footnote", {
+                  seconds: ON_TIME_THRESHOLD_SECONDS,
+                  timetableDate: `${REPORT.timetableYear}-${String(REPORT.timetableMonth).padStart(2, "0")}-${String(REPORT.timetableDay).padStart(2, "0")}`,
+                  version: REPORT.definitionVersion,
+                  unobserved: formatNumber(REPORT.unobservedTrips),
+                })}
+              </p>
+              <div className="landing-report__foot">
+                <span>{t("landing.report.generated_line", { date: REPORT.generatedDate, id: REPORT.recalculationId })}</span>
+                <span>{t("landing.report.page_indicator", { page: REPORT.page, total: REPORT.pageTotal })}</span>
               </div>
-            )}
-            <p className="landing-report__footnote">
-              {t("landing.report.footnote", {
-                seconds: ON_TIME_THRESHOLD_SECONDS,
-                timetableDate: `${REPORT.timetableYear}-${String(REPORT.timetableMonth).padStart(2, "0")}-${String(REPORT.timetableDay).padStart(2, "0")}`,
-                version: REPORT.definitionVersion,
-                unobserved: formatNumber(REPORT.unobservedTrips),
-              })}
-            </p>
-            <div className="landing-report__foot">
-              <span>{t("landing.report.generated_line", { date: REPORT.generatedDate, id: REPORT.recalculationId })}</span>
-              <span>{t("landing.report.page_indicator", { page: REPORT.page, total: REPORT.pageTotal })}</span>
-            </div>
-          </article>
+            </article>
+          </div>
         </div>
       </div>
     </section>
