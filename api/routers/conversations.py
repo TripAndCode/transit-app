@@ -711,11 +711,15 @@ async def followup_endpoint(
             raise HTTPException(status_code=400, detail="context must be an assistant message")
 
         context_result = select_context_row(ctx_msg.get("result"), body.context_row_index)
-        # `agency_id` is the endpoint's own scoped agency (Depends(get_agency)),
-        # so this can't resolve a route name from another agency's timetable.
-        route_labels = await fetch_route_labels(
-            conn, agency_id, context_route_codes(ctx_msg.get("args"), context_result)
-        )
+        # Route names only enrich the answer, so a failed lookup answers
+        # without them rather than failing the follow-up.
+        try:
+            route_labels = await fetch_route_labels(
+                conn, agency_id, context_route_codes(ctx_msg.get("args"), context_result)
+            )
+        except Exception:
+            _log.warning("follow-up route-name lookup failed; answering without names", exc_info=True)
+            route_labels = {}
 
     started = time.monotonic()
     result = await _followup.answer_followup(

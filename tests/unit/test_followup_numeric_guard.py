@@ -74,10 +74,8 @@ async def test_an_answer_with_a_number_the_context_lacks_is_replaced(monkeypatch
 
 
 async def test_a_route_name_quoting_its_code_passes_when_route_labels_ground_it(monkeypatch):
-    """A route name like 'W53' reads as the number 53 to the numeric guard.
-    Without its label in the grounding, that would be indistinguishable from
-    an invented number -- with it, the guard traces '53' back to the Routes
-    section the same way it traces any other grounded figure."""
+    """A route name like 'W53' reads as the number 53 to the numeric guard,
+    so a labelled route's name is blanked from the answer before the check."""
     reply = "42052はW53 沖館・新田線（西部営業所→野木和団地）で、定時率は50.6%です。"
     answer, err, guard = await _answer(
         monkeypatch,
@@ -89,8 +87,7 @@ async def test_a_route_name_quoting_its_code_passes_when_route_labels_ground_it(
 
 
 async def test_the_same_reply_without_route_labels_is_replaced(monkeypatch):
-    """Proves the label is what let the reply above through: with no
-    route_labels, 'W53's embedded '53' has nothing to trace to."""
+    """With no route_labels, 'W53's embedded '53' has nothing to trace to."""
     reply = "42052はW53 沖館・新田線（西部営業所→野木和団地）で、定時率は50.6%です。"
     answer, err, guard = await _answer(
         monkeypatch,
@@ -98,4 +95,32 @@ async def test_the_same_reply_without_route_labels_is_replaced(monkeypatch):
         context_result=_ON_TIME_RESULT,
         route_labels=None,
     )
+    assert (answer, err, guard) == (_summary("numeric_guard_fallback", lang="ja"), None, True)
+
+
+_NUMERIC_NAMED = {"2300128744": "25 草津線 (広島駅 → 草津)"}
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "25 草津線の定時率は50.6%です。",
+        "25系統の定時率は50.6%です。",
+        "Route 25 is 50.6% on time.",
+    ],
+)
+async def test_a_bare_numeric_route_name_passes_where_it_names_the_route(monkeypatch, reply):
+    answer, err, guard = await _answer(monkeypatch, reply, context_result=_ON_TIME_RESULT, route_labels=_NUMERIC_NAMED)
+    assert (answer, err, guard) == (reply, None, False)
+
+
+@pytest.mark.parametrize(
+    ("labels", "reply"),
+    [
+        (_NUMERIC_NAMED, "25 草津線は平均25分遅れています。"),
+        ({"42052": "W53 沖館・新田線 (西部営業所 → 野木和団地)"}, "W53 沖館・新田線は平均53分遅れています。"),
+    ],
+)
+async def test_a_route_name_does_not_license_its_digits_elsewhere(monkeypatch, labels, reply):
+    answer, err, guard = await _answer(monkeypatch, reply, context_result=_ON_TIME_RESULT, route_labels=labels)
     assert (answer, err, guard) == (_summary("numeric_guard_fallback", lang="ja"), None, True)

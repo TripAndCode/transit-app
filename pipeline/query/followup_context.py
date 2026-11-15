@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Sequence
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -47,9 +48,7 @@ def context_route_codes(args: dict | None, result: dict | None) -> list[str]:
     model -- and ``args["route"]``/``args["route_code"]``, where a
     route-scoped card keeps its route even when its result carries no such
     column (a non-table result, or a table one row scoped to a single
-    route). Stored results are JSON a prior request shaped, so every access
-    here tolerates a row that isn't a list, is too short, or a missing
-    column instead of raising.
+    route).
     """
     seen: set[str] = set()
     codes: list[str] = []
@@ -98,18 +97,14 @@ def route_label(
     via: str | None,
     destination: str | None,
 ) -> str:
-    """A route's display label from its ``static_routes`` columns: the
-    non-empty short/long name (the long name dropped when the short name
-    already contains it), followed by ``(origin → via → destination)`` with
-    the empty legs left out and the whole parenthetical omitted when neither
-    origin nor destination is present. Every field is sanitized first;
-    the finished label is capped at :data:`_MAX_LABEL_CHARS` characters.
-    Empty when every field is absent.
-    """
+    """A route's display label from its ``static_routes`` columns, e.g.
+    ``W53 沖館・新田線 (西部営業所 → 野木和団地)``."""
     short_s = _sanitize(short)
     long_s = _sanitize(long_name)
     if short_s and long_s and long_s in short_s:
         long_s = ""
+    elif short_s and long_s and _leads(short_s, long_s):
+        short_s = ""
     name = " ".join(p for p in (short_s, long_s) if p)
 
     origin_s, via_s, destination_s = _sanitize(origin), _sanitize(via), _sanitize(destination)
@@ -123,26 +118,40 @@ def route_label(
     return label.strip()[:_MAX_LABEL_CHARS]
 
 
+def _leads(short: str, long_name: str) -> bool:
+    """True when ``long_name`` opens with ``short`` as a whole word, as in
+    ``10`` / ``10号線``; ``1`` does not lead ``10号線``."""
+    if not long_name.startswith(short) or len(long_name) == len(short):
+        return False
+    last, nxt = short[-1], long_name[len(short)]
+    if last.isdigit() and nxt.isdigit():
+        return False
+    return not (last.isascii() and last.isalpha() and nxt.isascii() and nxt.isalpha())
+
+
 async def fetch_route_labels(conn, agency_id: int, codes: Sequence[str]) -> dict[str, str]:
-    """``{route_code: label}`` for every one of ``codes`` that
-    ``static_routes`` can name, in ``codes``' order. Empty, with no query,
-    when ``codes`` is empty. Scoped to ``agency_id`` so a lookup can never
-    read another agency's routes. A code whose built label comes out empty
-    is omitted.
+    """``{route_code: label}`` for the ``codes`` that ``static_routes`` can
+    name, in ``codes``' order. Scoped to ``agency_id`` so a lookup can never
+    read another agency's routes. Two route_ids can share a code across a
+    timetable change; the first by short name, then route_id, names it.
     """
-    if not codes:
+    ordered = list(dict.fromkeys(str(c) for c in codes))
+    if not ordered:
         return {}
     code_sql = route_code_sql("route_id")
     rows = await conn.fetch(
         f"SELECT {code_sql} AS route_code, route_short_name, route_long_name, "
         "origin_name, via_name, destination_name FROM static_routes "
-        f"WHERE agency_id = $1 AND {code_sql} = ANY($2::text[])",
+        f"WHERE agency_id = $1 AND {code_sql} = ANY($2::text[]) "
+        "ORDER BY route_short_name, route_id",
         agency_id,
-        list(dict.fromkeys(str(c) for c in codes)),
+        ordered,
     )
-    by_code = {row["route_code"]: row for row in rows}
+    by_code: dict[str, Any] = {}
+    for row in rows:
+        by_code.setdefault(row["route_code"], row)
     labels: dict[str, str] = {}
-    for code in dict.fromkeys(str(c) for c in codes):
+    for code in ordered:
         row = by_code.get(code)
         if row is None:
             continue

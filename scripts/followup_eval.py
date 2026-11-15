@@ -296,7 +296,10 @@ async def main() -> int:
             "What is the name of the route with the lowest on-time rate?",
             "en",
             _ROUTES_TABLE,
-            lambda a, e: (e is None and "港通り線" in a, "the Routes list names 50101"),
+            lambda a, e: (
+                e is None and "港通り線" in a and ("50101" in a or "北営業所" in a),
+                "the Routes list names 50101, and a shared line name needs its code or origin",
+            ),
         ),
         # No Routes list: refuse as "not in this result", never as a dataset
         # that lacks names or needs a separate mapping table.

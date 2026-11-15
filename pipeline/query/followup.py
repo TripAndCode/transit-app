@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import Mapping
 from typing import NamedTuple
 
@@ -155,6 +156,48 @@ def _serialize_context(
     return "\n".join(parts)
 
 
+_LABEL_TOKEN_SPLIT_RE = re.compile(r"[\s()（）→]+")
+_BARE_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_NOT_ALNUM_BEFORE = r"(?<![0-9A-Za-z])"
+_NOT_ALNUM_AFTER = r"(?![0-9A-Za-z])"
+
+
+def _route_name_patterns(route_labels: Mapping[str, str]) -> list[re.Pattern[str]]:
+    """Patterns for the places an answer names a labelled route.
+
+    A name token that mixes digits with anything else (``W53``, ``61-2``,
+    ``10号線``) names a route wherever it appears. A bare number (``25``)
+    could as well be a delay or a count, so it names a route only beside
+    the rest of its name, after "route", or before a route word."""
+    patterns: list[re.Pattern[str]] = []
+    for label in route_labels.values():
+        tokens = [t for t in _LABEL_TOKEN_SPLIT_RE.split(label) if t]
+        for i, token in enumerate(tokens):
+            if not any(ch.isdigit() for ch in token):
+                continue
+            t = re.escape(token)
+            if not _BARE_NUMBER_RE.fullmatch(token):
+                patterns.append(re.compile(_NOT_ALNUM_BEFORE + t + _NOT_ALNUM_AFTER))
+                continue
+            alternatives = [rf"(?i:route)\s*{t}(?!\d)", rf"{t}(?=\s*(?:系統|番線|番(?!目)|号線|号))"]
+            if i + 1 < len(tokens):
+                alternatives.append(rf"{t}\s*{re.escape(tokens[i + 1])}")
+            patterns.append(re.compile(r"(?<!\d)(?:" + "|".join(alternatives) + ")"))
+    return patterns
+
+
+def _without_route_names(answer: str, route_labels: Mapping[str, str] | None) -> str:
+    """``answer`` with each mention of a labelled route's name blanked, so
+    the numeric guard reads the digits in a route name as a name, not as a
+    claim. The names stay out of the guard's grounding: a route called
+    ``25`` must not license a "25 minutes" claim elsewhere in the answer."""
+    if not route_labels:
+        return answer
+    for pattern in _route_name_patterns(route_labels):
+        answer = pattern.sub(" ", answer)
+    return answer
+
+
 def _append_route_labels(parts: list[str], route_labels: Mapping[str, str] | None) -> None:
     if not route_labels:
         return
@@ -197,11 +240,9 @@ async def answer_followup(
 
     ``route_labels`` maps a route_code the context refers to (in its rows or
     its args) to its display name, resolved by the caller from
-    ``static_routes`` -- this module stays DB-free. When non-empty it is
-    folded into the same serialized context string the numeric guard checks,
-    so the model can name a route instead of only its code, and a code or
-    name that looks numeric (``W53``, ``904-06-01``) doesn't trip the guard
-    as an invented number.
+    ``static_routes`` -- this module stays DB-free. The model sees the
+    labels; the numeric guard does not ground on them, and instead blanks
+    the answer's mentions of those route names before checking it.
     """
     q = question.strip()
     if not q:
@@ -229,9 +270,10 @@ async def answer_followup(
     if err is not None or msg is None:
         return FollowupResult("", err or "unexpected")
     answer = (getattr(msg, "content", None) or "").strip()
-    # Grounded on exactly what the model was shown: the serialized context and
-    # the question, whose own numbers it may repeat.
-    if not verify_numeric_claims(answer, {"context": context_block, "question": q}):
+    # Grounded on what the model was shown, less the route names (blanked from
+    # the answer instead), and on the question, whose own numbers it may repeat.
+    grounding = _serialize_context(context_tool, context_args, context_result) if route_labels else context_block
+    if not verify_numeric_claims(_without_route_names(answer, route_labels), {"context": grounding, "question": q}):
         _log.info("follow-up answer quoted a number its context does not hold; replaced")
         return FollowupResult(_summary("numeric_guard_fallback", lang=locale), None, True)
     return FollowupResult(answer, None, False)

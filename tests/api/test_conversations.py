@@ -1049,6 +1049,53 @@ async def test_followup_context_row_index_limits_route_labels_to_that_row(conv_a
 
 
 @pytest.mark.asyncio
+async def test_followup_answers_without_route_names_when_their_lookup_fails(conv_app, monkeypatch):
+    """Route names only enrich the answer, so a failed lookup must not fail the follow-up."""
+    import api.routers.conversations as conv_router
+
+    monkeypatch.setenv("ASK_FOLLOWUP_ENABLED", "true")
+    app, agency, uid, pool = conv_app
+
+    async def _failing_lookup(conn, agency_id, codes):
+        raise RuntimeError("static_routes unavailable")
+
+    captured = {}
+
+    async def _fake_answer_followup(
+        *, question, context_tool, context_args, context_result, locale, llm_approved=True, route_labels=None
+    ):
+        captured["route_labels"] = route_labels
+        return FollowupResult("the answer", None, False)
+
+    monkeypatch.setattr(conv_router, "fetch_route_labels", _failing_lookup)
+    monkeypatch.setattr(conv_router._followup, "answer_followup", _fake_answer_followup)
+
+    async with _authed_client(app, uid) as c:
+        cr = await c.post(f"/api/{agency}/conversations", json={"title": "T", "filter_ctx": {}}, headers=_CSRF)
+        conv_id = cr.json()["conversation_id"]
+    async with pool.acquire() as conn:
+        msg = await conv_router._conv.append_message(
+            conn,
+            conv_id,
+            role="assistant",
+            chip_id=None,
+            tool="on_time_rate",
+            args={},
+            signature_hash=None,
+            result={"kind": "table", "columns": ["route_code", "on_time_pct"], "rows": [["42052", 50.6]]},
+            rendered_summary="prior answer",
+        )
+    async with _authed_optional_client(app, uid) as c:
+        r = await c.post(
+            f"/api/{agency}/conversations/{conv_id}/followup",
+            json={"question": "路線名は？", "context_message_id": msg["message_id"]},
+            headers=_CSRF,
+        )
+    assert r.status_code == 200, r.text
+    assert captured["route_labels"] == {}
+
+
+@pytest.mark.asyncio
 async def test_followup_holds_no_pool_connection_across_the_llm_call(conv_app, monkeypatch):
     """A provider call takes seconds; a connection parked for that long is one
     no other request can use.

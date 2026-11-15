@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from pipeline.query.followup import _serialize_context, answer_followup
 from pipeline.query.followup_context import context_route_codes, route_label
 
@@ -89,6 +91,19 @@ def test_the_aomori_example():
 def test_long_name_dropped_when_short_already_contains_it():
     label = route_label("W53 沖館・新田線", "沖館・新田線", "西部営業所", None, "野木和団地")
     assert label == "W53 沖館・新田線 (西部営業所 → 野木和団地)"
+
+
+@pytest.mark.parametrize(
+    ("short", "long_name", "expected"),
+    [
+        ("10", "10号線", "10号線"),
+        ("めいぷる～ぷ", "めいぷる～ぷ（新天地経由）", "めいぷる～ぷ（新天地経由）"),
+        ("1", "10号線", "1 10号線"),
+        ("A", "AB線", "A AB線"),
+    ],
+)
+def test_a_short_name_that_opens_the_long_name_as_a_word_is_dropped(short, long_name, expected):
+    assert route_label(short, long_name, None, None, None) == expected
 
 
 def test_all_empty_fields_yield_an_empty_label():
