@@ -92,6 +92,14 @@ describe("CommandPalette", () => {
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/pulse");
   });
 
+  it("still finds the notebook by its former name, typed as 'ask'", async () => {
+    const user = userEvent.setup();
+    renderPalette();
+    openWithCtrlK();
+    await user.type(screen.getByRole("combobox"), "ask");
+    expect(screen.getByText("Notebook")).toBeInTheDocument();
+  });
+
   it("shows no-results copy when nothing matches", async () => {
     const user = userEvent.setup();
     renderPalette();
@@ -163,11 +171,11 @@ describe("CommandPalette", () => {
     });
   });
 
-  it("opens the shortcut sheet on '?' and lists the go-to chords for every destination plus Ask", () => {
+  it("opens the shortcut sheet on '?' and lists the go-to chords for every destination plus Notebook", () => {
     renderPalette();
     fireEvent.keyDown(document, { key: "?" });
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    for (const name of ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports", "Ask"]) {
+    for (const name of ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports", "Notebook"]) {
       expect(within(dialog).getByText(`Go to ${name}`)).toBeInTheDocument();
     }
     expect(within(dialog).getByText("Show this shortcut list")).toBeInTheDocument();

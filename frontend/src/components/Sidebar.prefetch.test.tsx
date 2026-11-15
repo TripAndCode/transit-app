@@ -63,11 +63,11 @@ describe("Sidebar chunk prefetch", () => {
     expect(prefetch).toHaveBeenCalledWith("reports");
   });
 
-  it("warms the Ask chunk from its rail entry", async () => {
+  it("warms the Notebook chunk from its rail entry", async () => {
     const user = userEvent.setup();
     renderSidebar();
 
-    await user.hover(screen.getByRole("link", { name: "Ask" }));
+    await user.hover(screen.getByRole("link", { name: "Notebook" }));
     expect(prefetch).toHaveBeenCalledWith("ask");
   });
 

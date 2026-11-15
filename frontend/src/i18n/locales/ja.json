@@ -1,7 +1,7 @@
 {
   "nav": {
     "model": "モデル評価",
-    "ask": "質問",
+    "ask": "調査ノート",
     "collapse_sidebar": "サイドバーを折りたたむ",
     "expand_sidebar": "サイドバーを開く",
     "account_menu": "アカウントメニュー",
@@ -84,7 +84,7 @@
     "hero": {
       "open_dashboard": "ダッシュボードを開く",
       "view_dashboard": "ダッシュボードを見る（ログイン不要）",
-      "login_note": "<login>ログイン</login>すると、保存したビューと「質問」画面の調査をアカウントに残せます",
+      "login_note": "<login>ログイン</login>すると、保存したビューと「調査ノート」の調査をアカウントに残せます",
       "live_badge": "全国の公開バスフィードを毎分観測しています",
       "title": "そのバスは、時刻表どおりに走ったか。",
       "lead": "全国の公開 GTFS-RT（リアルタイム運行情報）を毎分収集し、時刻表と 1 便ずつ突き合わせます。事業者との契約に頼らない、第三者の記録です。",
@@ -286,8 +286,8 @@
       "body": "観測されたすべての便がここに一覧表示されます — 選ぶとリアルタイムの進行状況を確認できます。"
     },
     "ask": {
-      "title": "探す・質問する",
-      "body": "路線・レポート・画面をここから探せます。同じ欄から「質問」へ進むと、遅延についてのよくある質問に表や図で答えます。"
+      "title": "探す・調査ノートを開く",
+      "body": "路線・レポート・画面をここから探せます。同じ欄から「調査ノート」へ進むと、遅延についての用意された分析を表や図で見られます。"
     }
   },
   "forecast": {
@@ -768,7 +768,7 @@
     },
     "linked_providers": "連携プロバイダ",
     "llm_key": {
-      "title": "質問タブのAIキー",
+      "title": "調査ノートの追質問用AIキー",
       "status_shared": "無料の共有枠を使用中",
       "status_own": "ご自身の{{provider}}キーを使用中・****{{suffix}}",
       "input_label": "APIキー",
@@ -788,7 +788,7 @@
       "export": "データをダウンロード",
       "delete": "アカウントを削除",
       "delete_title": "アカウントを削除しますか？",
-      "delete_body": "アカウント、ログイン履歴、保存したフィルター、質問の会話、AIキー、利用履歴を完全に削除します。元に戻せません。",
+      "delete_body": "アカウント、ログイン履歴、保存したフィルター、調査ノートの調査、AIキー、利用履歴を完全に削除します。元に戻せません。",
       "delete_confirm_label": "確認のため {{email}} と入力してください",
       "delete_confirm": "完全に削除",
       "error_last_admin": "唯一の管理者のため、このアカウントは削除できません。先に別のユーザーを管理者にしてください。",
@@ -1070,7 +1070,7 @@
         "sql": "集計のみ",
         "llm": "AI 回答"
       },
-      "disclosure_title": "この答えの出どころ",
+      "disclosure_title": "この結果の出どころ",
       "disclosure_route": "路線",
       "disclosure_conditions": "条件",
       "disclosure_aggregation": "集計",
@@ -1089,11 +1089,11 @@
       "retry": "再試行",
       "export_snapshot": "結果を保存（JSON）",
       "export_csv": "表{{index}}のCSV",
-      "export_notice": "選択した質問と取得済みの回答を保存します。再計算はしません。会話の内容を含むため共有前に確認してください。JSONのアプリ内再読み込みは未対応です。",
+      "export_notice": "選択したステップと取得済みの結果を保存します。再計算はしません。会話の内容を含むため共有前に確認してください。JSONのアプリ内再読み込みは未対応です。",
       "export_failed": "ダウンロードを作成できませんでした。もう一度お試しください。",
       "title": "調査",
-      "step_count_one": "{{count}}件の質問",
-      "step_count_other": "{{count}}件の質問",
+      "step_count_one": "{{count}}ステップ",
+      "step_count_other": "{{count}}ステップ",
       "steps": "調査の経緯",
       "retained_result": "保存されている結果",
       "historical": "過去の結果を表示中です。追質問は最新の結果をもとに回答します。",
@@ -1101,13 +1101,13 @@
       "saved_result_notice": "取得済みの結果です。開くだけでは再取得しません。上のフィルターは次の分析用で、この結果の条件とは異なる場合があります。",
       "full_log": "会話全文を開く",
       "new_analysis_first": "分析を始める",
-      "no_questions": "この調査にはまだ質問がありません。質問を選んで始めましょう。"
+      "no_questions": "この調査にはまだステップがありません。分析カードを選んで始めましょう。"
     },
     "thinking": "考え中...",
     "dock": {
       "run": "実行",
-      "chip_strip_aria": "質問の選択",
-      "chip_strip_idle_hint": "クリックで質問を選ぶ",
+      "chip_strip_aria": "分析の選択",
+      "chip_strip_idle_hint": "クリックで分析を選ぶ",
       "required_marker": "*",
       "running": "実行中..."
     },
@@ -1168,7 +1168,7 @@
         "route_stats": "路線統計",
         "route_meta": "路線情報",
         "describe_data": "データ情報",
-        "capabilities": "対応質問"
+        "capabilities": "対応する分析"
       },
       "values": {
         "avg_delay": "平均遅延",
@@ -1282,10 +1282,10 @@
       }
     },
     "landing": {
-      "header_title": "よくある質問から選んで調べる",
-      "header_subtitle": "路線や停留所を選ぶだけで、すぐに答えが返ってきます",
-      "cards_title": "こんな質問ができます",
-      "pills_title": "その他の質問"
+      "header_title": "用意された分析から選ぶ",
+      "header_subtitle": "路線や停留所を選ぶだけで、すぐに結果が表示されます",
+      "cards_title": "すぐに実行できる調査",
+      "pills_title": "その他の分析"
     }
   },
   "reports": {
@@ -2365,7 +2365,7 @@
     "nav_why_sublabel": "データで説明できること・できないこと",
     "nav_compare_sublabel": "平日と土日祝、事業者どうしを比べる",
     "nav_reports_sublabel": "人に渡す資料",
-    "nav_ask_sublabel": "系統・停留所・時間帯について聞く",
+    "nav_ask_sublabel": "用意された分析を選び、保存・書き出し",
     "group": {
       "recent": "最近使った項目",
       "nav": "移動",
