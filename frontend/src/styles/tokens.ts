@@ -107,7 +107,7 @@ export const DELAY_RAMP = {
   severe: SEVERE_VAR, // >= 5 min, per-theme via --delay-severe
 } as const;
 
-type DelayBand = "ok" | "mild" | "moderate" | "severe";
+export type DelayBand = "ok" | "mild" | "moderate" | "severe";
 
 // The band-boundary minute values `delayBand()` applies below. Exported so any
 // UI that displays the cutoffs as text (e.g. a heatmap legend) can read them

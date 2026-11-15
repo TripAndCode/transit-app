@@ -1,8 +1,9 @@
 # Welcome page (`/welcome`)
 
 Public landing page, rendered outside `<App />` and outside `RequireAuth`
-(`frontend/src/main.tsx`) so a signed-out visitor can reach it. Its hero
-has one CTA, the way in this visitor has:
+(`frontend/src/main.tsx`) so a signed-out visitor can reach it. One CTA
+decision (`frontend/src/pages/landing/useCtaKind.ts`) drives both the header
+button and the hero's primary CTA, the way in this visitor has:
 
 - **Signed in:** "Open the dashboard" (`/`).
 - **Signed out, and `GET /api/config` says `login_required` is off:** "View
@@ -12,15 +13,44 @@ has one CTA, the way in this visitor has:
 - **Signed out otherwise** (sign-in required, or the config not loaded yet):
   "Sign in" (`/login`). `/` would only bounce such a visitor back here.
 
+Below 720px the header hides its copy of the CTA, since the hero's sits in the
+first screen.
+
 Signed-in users still reach the page.
 
-## The hero plays once
+## Every figure is a labelled sample, never a live read
 
-The animated map (`LiveMapHero`) plays its script once and stops on its last
-frame, the settled live-operations view. A control in the hero's corner
-pauses it while it plays and replays it from `REPLAY_START`
-(`heroMapTimeline.ts`) once it has ended. Under `prefers-reduced-motion` the
-settled frame is drawn once and no control is shown.
+The page walks a visitor through what the product shows — a nationwide
+real-time observatory, a council-ready report, graded feed quality, a Bus
+Town day replayed stop by stop, and the calculation method behind every
+number — using only static fixture data from
+`frontend/src/pages/landing/welcomeSample.ts`. Nothing on `/welcome` calls the
+API for its figures, so a signed-out visitor is never shown a real agency's
+numbers. Every figure, table, chart and the map carries a visible "Sample"
+label (`SampleTag`, or the council report's own `landing.report.badge`), so
+it reads as illustrative rather than live.
+
+The one link that leaves the page for a real destination is the Bus Town
+section's own CTA (`BusTownTeaser.tsx`): a visitor who would reach the
+signed-in app (a session, or a guest-enabled deployment) goes straight to
+Bus Town for their last-chosen agency (`readLastAgency`), or to `/` to choose
+one when none is stored yet; anyone else goes to sign-in first
+(`busTownLink.ts`). Every other link on the page — the header nav, the three
+"who it's for" cards, each section's own in-page link — points at an anchor
+(`#councils`, `#observatory`, `#bus-town`, `#method`) on this same page, never
+a destination the product doesn't have.
+
+## Motion pauses from one control
+
+The hero's observatory stage, the Bus Town mini map, and the method section's
+flow indicator each loop a small CSS animation (a breathing city dot, buses
+riding a motion path, a pulse moving through the three pipeline steps),
+declared only inside `@media (prefers-reduced-motion: no-preference)` so a
+visitor who has asked for less motion never receives them. A single visible
+toggle in the header (`PauseToggle.tsx`) freezes every one of them at once,
+regardless of that media query, via `.landing-shell.is-paused *, ::before,
+::after { animation-play-state: paused }` — the one override that must apply
+whether or not reduced motion is already in effect.
 
 ## Ways back to it
 
@@ -58,61 +88,66 @@ caller.
 A signed-out visitor who opens `/me` while sign-in is not required goes to
 `/login?next=/me`, so signing in returns them to their account page.
 
-## The scroll narrative is real charts on fixture data, not a live demo
-
-Below the hero, `frontend/src/pages/landing/ScrollNarrative.tsx` renders
-three sections — each a heading/body pair beside a real chart component:
-the route-delay `StopChart`, the day-over-day `DailyChart`, and Ask's
-`StopEvidenceChart`. Each fades into view (`useRevealOnScroll`) behind
-`prefers-reduced-motion: no-preference`. None of them fetches: every figure
-is static example data from `frontend/src/pages/landing/previewData.ts`, so
-the page shows the product without exposing any real data to a signed-out
-visitor.
-
-All three show one sample route, route 12 of the hero's fictional city, with
-the hero's stop names (`landing.hero_map.stops.*`) in the reader's language:
-a stop carries the same figure in the stop chart and in the Ask evidence,
-which lists the route's worst few stops ranked, as the real hotspot answer
-does. Each chart fits its figure at any width: the stop chart is drawn at the
-figure's measured width (`StopChart`'s `width`), so nothing scrolls sideways.
-
 ## Key files
 
 | File | Role |
 |---|---|
-| `frontend/src/pages/LandingPage.tsx` | Hero: headline and the sign-in or dashboard CTA |
-| `frontend/src/pages/LandingPage.css` | Hero and CTA styling |
-| `frontend/src/pages/landing/LiveMapHero.tsx` | Animated backdrop behind the hero: the operations map with trip dots and the app's right-hand panel, on a fictional city whose rail lines are scenery only (every trip and figure is a bus route's). Scene data in `heroMapScene.ts`, script in `heroMapTimeline.ts`, map layers in `heroMapDraw.ts`, panel in `heroPanelDraw.ts`, driven by `useHeroMapAnimation.ts` |
-| `frontend/src/pages/landing/ScrollNarrative.tsx` | Post-hero scroll narrative on fixture data |
-| `frontend/src/pages/landing/previewData.ts` | Static fixture data for the narrative's charts |
+| `frontend/src/pages/LandingPage.tsx` | Page shell: header, section order, footer |
+| `frontend/src/pages/LandingPage.css` | All of the page's own styling, reusing `global.css` tokens |
+| `frontend/src/pages/landing/useCtaKind.ts` | The one CTA decision, shared by the header and hero |
+| `frontend/src/pages/landing/CtaLink.tsx` | Renders that CTA, used in both places |
+| `frontend/src/pages/landing/WelcomeHero.tsx` | Headline, lead, CTAs, and the observatory stage |
+| `frontend/src/pages/landing/ObservatoryStage.tsx` | The hero's dark dotted map of Japan |
+| `frontend/src/pages/landing/StatusBar.tsx` | The fixture figures under the hero (feeds, buses tracked, on-time rate) |
+| `frontend/src/pages/landing/AudienceCards.tsx` | "Who it's for": three in-page links into the sections below |
+| `frontend/src/pages/landing/FeedTable.tsx` | Sample A–F feed-quality grading table |
+| `frontend/src/pages/landing/CouncilSample.tsx` | Sample council quarterly report figure |
+| `frontend/src/pages/landing/MethodSteps.tsx` | Collect/compare/publish pipeline and the "what we don't hide" honesty list |
+| `frontend/src/pages/landing/BusTownTeaser.tsx` | Bus Town mini map and its one real CTA (`busTownLink.ts`) |
+| `frontend/src/pages/landing/PauseToggle.tsx` | The page's one motion control |
+| `frontend/src/pages/landing/welcomeSample.ts` | Every static fixture value the page draws |
+| `frontend/src/pages/landing/severityStyle.ts` | Maps a fixture band to the app's shared delay-severity ramp |
 | `frontend/src/components/RequireAuth.tsx` | Sends signed-out visitors here or to `/login` when sign-in is required |
 | `frontend/src/api/authExpiry.ts` | Refetches session and config on an auth-required 401 |
 
 ## i18n
 
-Hero strings live under `landing.hero.*`
-(`frontend/src/i18n/locales/{ja,en}.json`): `title_question` and `title_scope`
-(the headline's two lines: the period question the dashboard opens on, and
-its scope, rendered as separate spans so it never breaks mid-phrase), `subtitle`, and `open_dashboard` (the signed-in CTA). The
-sign-in CTA reuses `common.login`; the rail link is `nav.about`. Text drawn
-on the hero canvas lives under `landing.hero_map.*`, its playback control
-under `landing.hero_map.playback_control.*`; the narrative's heading/body
-pairs under `landing.narrative.{route,trend,ask}.{title,body}`, and its
-sample caption under `landing.narrative.sample_caption`. The guest CTA and
-its note are `landing.hero.view_dashboard` and `landing.hero.login_note`;
-the tagline above the headline is `header.app_tagline`.
+Every visible string on the page lives under `landing.*`
+(`frontend/src/i18n/locales/{ja,en}.json`), one sub-key per section
+(`landing.hero.*`, `landing.stage.*`, `landing.status.*`, `landing.doors.*`,
+`landing.observatory.*`, `landing.councils.*`, `landing.report.*`,
+`landing.method.*`, `landing.bustown.*`, `landing.pause_toggle.*`,
+`landing.footer.*`), plus `landing.nav.*` for the header's in-page links and
+`landing.sample_tag` for the shared "Sample data" label. The page reuses
+three strings that already exist for the rest of the app rather than
+duplicating them: `header.app_title`/`header.app_tagline` for the brand, and
+`nav.bus-town` for the Bus Town nav link and CTA.
 
 ## How to verify manually
 
 1. With SSO configured and `login_required` on, sign out and open `/` —
-   expect `/welcome` with a single "Sign in" button.
+   expect `/welcome` with a single "Sign in" button, in the header and in
+   the hero.
 2. Open a deep link such as `/agencies/1/routes?routes=12&sort=on_time` —
    expect `/login?next=…`; sign in and expect to land on that exact URL.
 3. Sign in, then choose "About this app" in the rail — expect `/welcome`
    with "Open the dashboard" in place of "Sign in". With `login_required`
    off and signed out, expect "View the dashboard (no sign-in needed)".
 4. Sign out from the account page — expect `/welcome`.
-5. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
+5. Click the header's pause toggle — expect every looping animation on the
+   page (the stage dots, the Bus Town markers, the method flow pulse) to
+   freeze in place, and the toggle to flip back to playing on a second
+   click.
+6. At a 360px-wide viewport, in both languages — expect no sideways scroll,
+   the pause toggle as an icon beside the brand, and the CTA only in the
+   hero.
+7. Click the Bus Town section's button — expect it to land on that agency's
+   Bus Town tab when a last-chosen agency is stored, or on `/` to choose one
+   otherwise, or on `/login` when the deployment requires sign-in.
+8. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
+   `frontend/src/pages/LandingPage.css.test.ts`,
+   `frontend/src/pages/landing/busTownLink.test.ts`,
+   `frontend/src/pages/landing/severityStyle.test.ts`,
    `frontend/src/pages/AccountPage.test.tsx`,
    `frontend/src/pages/LoginPage.test.tsx`,
    `frontend/src/components/Sidebar.test.tsx`,

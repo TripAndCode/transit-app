@@ -82,91 +82,193 @@
   },
   "landing": {
     "hero": {
-      "title_question": "バスは計画どおりに走ったか。",
-      "title_scope": "路線ごと、時間帯ごとに。",
-      "subtitle": "事業者が公開しているデータから、期間中に路線ごとにどれだけ遅れたかを、数字の定義と元になったデータの量とともに確かめられます。今日走っている便も見られます。",
       "open_dashboard": "ダッシュボードを開く",
       "view_dashboard": "ダッシュボードを見る（ログイン不要）",
-      "login_note": "<login>ログイン</login>すると、保存したビューと「調査ノート」の調査をアカウントに残せます"
+      "login_note": "<login>ログイン</login>すると、保存したビューと「調査ノート」の調査をアカウントに残せます",
+      "live_badge": "全国の公開バスフィードを毎分観測しています",
+      "title": "そのバスは、時刻表どおりに走ったか。",
+      "lead": "全国の公開 GTFS-RT（リアルタイム運行情報）を毎分収集し、時刻表と 1 便ずつ突き合わせます。事業者との契約に頼らない、第三者の記録です。",
+      "check_public_data": "公開データのみを使用",
+      "check_published_formula": "定義と計算式を公開",
+      "check_unobserved_flagged": "観測できなかった便も明示",
+      "secondary_cta": "全国のフィードを見る"
     },
-    "hero_map": {
-      "screens": {
-        "live": "現在の運行",
-        "period": "期間概況"
+    "nav": {
+      "aria_label": "メイン",
+      "councils": "自治体・協議会の方へ",
+      "feeds": "全国フィード",
+      "method": "計算方法"
+    },
+    "status": {
+      "aria_label": "現在の観測状況",
+      "updated_at": "{{datetime}} 現在",
+      "cadence": "毎分更新",
+      "feeds_label": "監視中のフィード",
+      "feeds_value": "{{feeds}} 本 ・ {{cities}} 都市",
+      "buses_label": "今日追跡したバス",
+      "buses_value": "{{count}} 台",
+      "ontime_label": "全国の定時率",
+      "ontime_value": "{{pct}}% ・ 遅れ {{seconds}} 秒未満"
+    },
+    "sample_tag": "サンプルデータ",
+    "stage": {
+      "map_alt": "日本の点描地図。観測している都市を、定時率の色の点で示しています。",
+      "title": "全国 GTFS-RT 観測所",
+      "subtitle": "Observatory ・ {{feeds}} 本 ・ {{cities}} 都市",
+      "legend_title": "定時率",
+      "legend_band_high": "85% 以上",
+      "legend_band_mid": "75〜85%",
+      "legend_band_low": "65〜75%",
+      "legend_band_poor": "65% 未満",
+      "legend_offline": "フィード停止中",
+      "cities": {
+        "sapporo": "札幌",
+        "aomori": "青森",
+        "sendai": "仙台",
+        "nagoya": "名古屋",
+        "hiroshima": "広島",
+        "fukuoka": "福岡",
+        "naha": "那覇"
       },
-      "captions": {
-        "live": "現在の運行",
-        "trip": "12系統の便を選択",
-        "playback": "1日の動きを再生",
-        "overview": "期間概況"
+      "okinawa_inset": "沖縄"
+    },
+    "doors": {
+      "councils": {
+        "who": "自治体・地域公共交通協議会",
+        "title": "監査レポート",
+        "body": "補助・委託路線が計画どおりに運行されたか。路線別の運行確認率と定時率を、四半期の協議会資料の形にまとめます。",
+        "cta": "レポートの見本を見る →"
       },
+      "operators": {
+        "who": "バス事業者・データ担当",
+        "title": "データ品質",
+        "body": "GTFS-RT フィードの鮮度とカバー率を毎月 A〜F で評価。どの路線・時間帯で欠けているかが分かります。",
+        "cta": "全国のフィード評価を見る →",
+        "chip_monthly": "月次評価",
+        "chip_gaps": "欠測の内訳"
+      },
+      "everyone": {
+        "who": "市民・どなたでも",
+        "body": "ある街の実際の 1 日を、動くバスで再生します。朝夕のラッシュで遅れが広がる様子が、色でひと目で分かります。",
+        "cta": "{{name}} を開く →",
+        "chip_no_signup": "登録不要",
+        "chip_mobile": "スマホ対応"
+      },
+      "eyebrow": "WHO IT'S FOR ・ 3 つの入口",
+      "heading": "同じデータを、3 つの立場から。"
+    },
+    "chips": {
+      "pdf": "PDF",
+      "csv": "CSV",
+      "print": "印刷"
+    },
+    "observatory": {
+      "eyebrow": "OBSERVATORY ・ 全国 GTFS-RT 観測所",
+      "heading": "日本のリアルタイムバスフィードを、毎月採点。",
+      "lead": "公開されているリアルタイムのバスフィードをすべて監視しています。事業者との契約は不要です。鮮度とカバー率から、毎月 A〜F の評価を付けます。",
+      "shown_count": "{{total}} 本中 {{shown}} 本を表示",
+      "table_aria": "都市別のフィード状況",
+      "col_city": "都市",
+      "col_freshness": "フィード鮮度（中央値）",
+      "col_ontime": "定時率",
+      "col_grade": "月次評価",
+      "col_updated": "最終受信",
+      "coverage_label": "カバー率 {{pct}}%",
+      "no_data": "データ不足",
+      "offline": "停止中",
+      "ago_seconds": "{{n}} 秒前",
+      "ago_minutes": "{{n}} 分前",
+      "footnote": "定時率は、予定時刻から {{seconds}} 秒未満の遅れで発車した便の割合です。月次評価はフィードそのものの品質で、運行の良し悪しとは別の指標です。",
+      "rows": {
+        "aomori": "青森市",
+        "sendai": "仙台市",
+        "toyama": "富山市",
+        "gifu": "岐阜市",
+        "kyoto": "京都市",
+        "hiroshima": "広島市",
+        "matsuyama": "松山市",
+        "naha": "那覇市"
+      },
+      "see_all_link": "全 {{total}} 本のフィードを見る",
+      "feed_count_one": "フィード {{count}} 本",
+      "feed_count_other": "フィード {{count}} 本"
+    },
+    "councils": {
+      "eyebrow": "FOR COUNCILS ・ 自治体・協議会の方へ",
+      "heading": "協議会資料に、そのまま綴じられる報告書。",
+      "lead": "補助・委託路線が計画どおりに運行されたかを、第三者の数字でまとめます。出典・定義・時刻表の版は脚注に自動で記載されます。",
+      "check_rates": "路線別の運行確認率・定時率・観測カバー率",
+      "check_unobserved": "観測できなかった便は別表で明示",
+      "check_print": "A4 縦、白黒印刷でも読める配色",
+      "disclaimer": "見本は架空の自治体のサンプルデータです。"
+    },
+    "report": {
+      "aria_label": "四半期報告書の見本",
+      "badge": "見本",
+      "addressee": "〇〇市地域公共交通協議会 御中",
+      "title": "補助対象路線の運行実績",
+      "period": "{{year}}年度 第{{quarter}}四半期（{{from}}〜{{to}}）・ 対象 {{routes}} 路線",
+      "kpi_confirmed_label": "運行確認率",
+      "kpi_confirmed_sub": "{{total}} 便中 {{confirmed}} 便",
+      "kpi_ontime_label": "定時率",
+      "kpi_ontime_sub": "遅れ {{seconds}} 秒未満",
+      "kpi_coverage_label": "観測カバー率",
+      "kpi_coverage_sub": "未観測は別表 A",
+      "route_bars_heading": "路線別 定時率",
+      "target_note": "┆ 協議会目標 {{pct}}%",
       "routes": {
-        "rapid": "快速",
-        "local": "各停",
-        "bus5": "5系統",
-        "bus12": "12系統",
-        "bus7": "7系統",
-        "bus3": "3系統"
+        "loop": "市内循環線",
+        "north": "北部団地線",
+        "eastwest": "東西線",
+        "south": "南部線",
+        "mountain": "山間地域線"
       },
-      "stops": {
-        "konan": "港南",
-        "shiyakusho": "市役所前",
-        "central": "中央駅",
-        "honmachi": "本町",
-        "higashidai": "東台",
-        "minatomachi": "港町",
-        "toshokan": "図書館前",
-        "kitamachi": "北町"
-      },
-      "queue_title": "確認したい便",
-      "kpi": {
-        "observed": "観測便",
-        "delayed": "5分以上の遅延",
-        "on_time": "定時率"
-      },
-      "legend": {
-        "under": "{{minutes}}分未満",
-        "over": "{{minutes}}分以上",
-        "disclosure": "最新報告停留所の位置（GPSではありません）"
-      },
-      "trip_heading": "12系統 · 北町行",
-      "trip_chart_title": "停留所ごとの遅延推移",
-      "trip_note": "中央駅 → 本町で拡大",
-      "refresh": "更新  08:12:30",
-      "playback": "1日の動きを再生",
-      "playback_speed": "1×",
-      "hourly_title": "時間帯別の悪化",
-      "peak": "ピーク",
-      "overview_average": "ネットワーク平均遅延",
-      "overview_change": "▼ {{minutes}}  前の期間より",
-      "overview_delayed_routes": "遅延中の路線",
-      "routes_to_check": "今すぐ確認すべき路線",
-      "sample_notice": "サンプルデータ · 架空の都市",
-      "delay_short": "+{{minutes}}分",
-      "minutes": "{{minutes}}分",
-      "hour_of_day": "{{hour}}時",
-      "clock": "{{hour}}:00",
-      "minute_unit": "分",
-      "playback_control": {
-        "playing": "一時停止",
-        "paused": "再生",
-        "ended": "もう一度再生"
-      }
+      "below_target": "{{routes}}は目標未達（薄い棒）",
+      "footnote": "※ 出典：各事業者が公開する GTFS-RT（毎分取得）と GTFS 時刻表（{{timetableDate}} 版）を、本サービスが独自に突合・集計。定時は予定時刻から {{seconds}} 秒未満の遅れ（定義 v{{version}}）。未観測の {{unobserved}} 便は分母から除き、別表 A に列挙。",
+      "generated_line": "作成 {{date}} ・ 再計算 ID {{id}}",
+      "page_indicator": "{{page}} / {{total}}"
     },
-    "narrative": {
-      "route": {
-        "title": "路線に沿って遅延が積み重なる",
-        "body": "路線のページと同じ停留所ごとのチャートを、サンプルデータで — 停留所を進むごとに遅延が積み重なる様子を、落ち着いた前週比較と並べて確認できます。"
-      },
-      "trend": {
-        "title": "日ごとに比べる",
-        "body": "レポート画面と同じ日次トレンドチャートを、サンプルの日付で — 荒れた1日も、周囲の移動平均と並べればはっきり見えます。"
-      },
-      "ask": {
-        "title": "調査ノートで、根拠を見る",
-        "body": "調査ノートが結果ごとに表示するのと同じ根拠ビューです — スクリーンショットではありません。下の停留所を選んで試せます。"
-      },
-      "sample_caption": "サンプルデータ · 架空の{{route}}"
+    "method": {
+      "eyebrow": "HOW WE KNOW ・ 計算方法",
+      "heading": "数字の出どころを、すべて開示します。",
+      "lead": "集める、比べる、公開する。3 つの手順は全国どこでも同じ定義で動いています。",
+      "step1_label": "01 ・ Collect",
+      "step1_title": "収集",
+      "step1_body": "公開 GTFS-RT を毎分取得し、受信したまま保管します。取れなかった時間も記録します。",
+      "step1_gap_caption": "欠測 {{minutes}} 分（灰色）",
+      "step2_label": "02 ・ Compare",
+      "step2_title": "照合",
+      "step2_body": "各便が停留所を通過した時刻を、GTFS 時刻表の予定と 1 停留所ずつ比べます。",
+      "step2_scheduled": "予定",
+      "step2_observed": "観測",
+      "step2_difference": "差",
+      "step2_delta": "+{{delta}} ・ やや遅れ",
+      "step3_label": "03 ・ Publish",
+      "step3_title": "公開",
+      "step3_body": "定義・計算式・時刻表の版を公開。誰が計算しても同じ数字になります。",
+      "step3_formula_ontime": "定時 ＝ 遅れ {{seconds}} 秒未満",
+      "step3_formula_coverage": "カバー率 ＝ 観測便 ÷ 計画便",
+      "step3_definition_version": "定義 v{{version}} ・ {{date}} 改定",
+      "honesty_title": "隠さないこと",
+      "honesty_coverage": "観測カバー率を必ず併記",
+      "honesty_unobserved_stops": "未観測の停留所 {{n}} か所も一覧に",
+      "honesty_gaps": "欠測した時間帯は灰色で表示",
+      "honesty_changelog": "定義の変更履歴を公開"
+    },
+    "bustown": {
+      "eyebrow": "BUS TOWN ・ 市民の方へ",
+      "heading": "街の 1 日を、動くバスで見る。",
+      "body": "実際に走ったバスの記録を、路線図の上で再生します。緑は時刻どおり、黄から橙は遅れ。ラッシュで色が変わる様子が見えます。",
+      "map_alt": "ある街の路線図上を動くバスの再生、サンプル",
+      "caption": "{{city}} ・ {{date}} の記録を再生",
+      "cta": "{{name}} を開く"
+    },
+    "pause_toggle": {
+      "label": "アニメーションを一時停止"
+    },
+    "footer": {
+      "disclaimer": "各事業者が公開するデータを独自に集計したもので、事業者の公式情報ではありません。このページの数値はサンプルです。",
+      "copyright": "© {{year}} {{name}}"
     }
   },
   "tour": {
