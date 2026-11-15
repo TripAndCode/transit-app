@@ -235,7 +235,8 @@ grep -q "s3 rm s3://test-bucket/vp/8/20260901.tar.gz" "$AWS_LOG" \
 grep -q "s3 rm s3://test-bucket/rt/" "$AWS_LOG" \
     && fail "an rt/ object was pruned on R2_VP_RETENTION_DAYS"
 : > "$AWS_LOG"
-R2_RT_RETENTION_DAYS=1 R2_STATIC_RETENTION_DAYS=1 R2_VP_RETENTION_DAYS=3650 ../bin/prune-r2.sh >/dev/null
+R2_RT_RETENTION_DAYS=1 R2_STATIC_RETENTION_DAYS=1 R2_VP_RETENTION_DAYS=3650 ../bin/prune-r2.sh \
+    > "$TEST_BASE/out.log" 2>&1 || fail "prune-r2.sh with a long VP horizon should exit 0: $(cat "$TEST_BASE/out.log")"
 grep -q "s3 rm s3://test-bucket/vp/" "$AWS_LOG" && fail "a vp/ object was pruned on R2_RT_RETENTION_DAYS"
 pass "vp/<id>/ objects are pruned on R2_VP_RETENTION_DAYS alone, without a VP roster"
 
@@ -243,7 +244,8 @@ pass "vp/<id>/ objects are pruned on R2_VP_RETENTION_DAYS alone, without a VP ro
 # goes, while an RT object of the same age stays.
 touch "$COLLECTOR_BASE/.sync-r2.last-ok"
 : > "$AWS_LOG"
-../bin/prune-r2.sh >/dev/null
+../bin/prune-r2.sh > "$TEST_BASE/out.log" 2>&1 \
+    || fail "prune-r2.sh on the default horizons should exit 0: $(cat "$TEST_BASE/out.log")"
 grep -q "s3 rm s3://test-bucket/vp/8/20200101.tar.gz" "$AWS_LOG" \
     || fail "the default VP horizon kept a $old_ts vp/ object"
 grep -q "s3 rm s3://test-bucket/vp/8/20260901.tar.gz" "$AWS_LOG" && fail "the default VP horizon pruned a young vp/ object"

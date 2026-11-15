@@ -220,7 +220,7 @@ history holds the polls the collector pushes, one every
 `ingest_live` sample each poke takes. Oracle also rolls per-day, per-agency
 archive zips and uploads them once a day to S3-compatible object storage
 (Cloudflare R2 or AWS S3). The **daily Railway scheduled job** (step 4) pulls
-them over HTTPS and runs `ingest → analyze_all → prune` into the private
+them over HTTPS and runs `ingest → analyze_all` into the private
 `clickhouse` and `db` services, but only for days the live path never
 promoted, because a day in `updates`
 has one source: it is the backfill, such as this first load. The DB is never
@@ -298,7 +298,7 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 4. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
    (daily; pick an hour after Oracle finishes its upload).
 5. `ingest` → **Settings → Deploy → Start Command** — pull the last two UTC
-   days' realtime archives from object storage, then ingest/analyze/prune.
+   days' realtime archives from object storage, then ingest and analyze.
    The collector uploads each agency's day as `rt/<id>/<YYYYMMDD>.tar.gz`.
    Sketch (adjust to your bucket client; the image needs an S3 client +
    `postgresql-client` added to the Dockerfile for this service):
@@ -313,9 +313,6 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
      python gtfs_pipeline.py ingest "/tmp/zips/$id" --agency-id "$id"
    done
    python gtfs_pipeline.py analyze_all
-   # Drops nothing unless updates_prune_enabled is on; the retention table in
-   # docs/ops-monitoring-deploy.md says what it may drop.
-   python gtfs_pipeline.py prune-updates
    ```
 6. `ingest` → **Variables**: the same `DATABASE_URL` (private host) plus the
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`

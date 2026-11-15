@@ -44,7 +44,6 @@ const KIND_ORDER: readonly PipelineRun["kind"][] = [
   "weather",
   "probe",
   "static",
-  "retention",
 ];
 
 function hoursFrom(dayStart: Date, iso: string | null, fallback: Date): number {

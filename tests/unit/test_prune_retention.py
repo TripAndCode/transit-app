@@ -14,8 +14,8 @@ def test_pipeline_runs_retention_default_is_90_days():
     assert gtfs_pipeline.PIPELINE_RUNS_RETENTION_DAYS == 90
 
 
-def test_admin_audit_retention_default_matches_the_updates_horizon():
-    assert gtfs_pipeline.ADMIN_AUDIT_RETENTION_DAYS == gtfs_pipeline.UPDATES_RETENTION_DAYS == 400
+def test_admin_audit_retention_default_matches_the_updates_target_horizon():
+    assert gtfs_pipeline.ADMIN_AUDIT_RETENTION_DAYS == 400
 
 
 def test_prune_pipeline_runs_sql_targets_started_at():

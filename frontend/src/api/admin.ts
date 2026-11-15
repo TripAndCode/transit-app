@@ -318,14 +318,14 @@ export type BoardAlert = {
   acked: boolean;
 };
 
-/** One `pipeline_runs` row: an ingest, promote, analyze, weather, static,
- *  RT field-coverage probe or retention-prune job, from the CLI or the cron
- *  path, including the ones the advisory lock displaced. */
+/** One `pipeline_runs` row: an ingest, promote, analyze, weather, static or
+ *  RT field-coverage probe job, from the CLI or the cron path, including the
+ *  ones the advisory lock displaced. */
 export type PipelineRun = {
   run_id: number;
   /** `update` is the agencies page's chained update: its steps are rows of
    *  the other kinds. */
-  kind: "ingest" | "promote" | "analyze" | "weather" | "static" | "update" | "probe" | "retention";
+  kind: "ingest" | "promote" | "analyze" | "weather" | "static" | "update" | "probe";
   /** Null for a fleet-wide job, and for one displaced before it resolved
    *  which agency it was for. */
   agency_id: number | null;

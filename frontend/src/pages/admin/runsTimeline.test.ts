@@ -81,19 +81,6 @@ describe("runsToBars", () => {
     expect(lanes.map((l) => l.kind)).toEqual(["analyze", "weather", "probe", "static"]);
   });
 
-  it("draws a retention prune last, below the runs that write what it prunes", () => {
-    const lanes = runsToBars(
-      [
-        run({ run_id: 1, kind: "retention", agency_id: null, agency_name: null }),
-        run({ run_id: 2, kind: "static" }),
-        run({ run_id: 3, kind: "ingest" }),
-      ],
-      DAY_START,
-      DAY_START,
-    );
-    expect(lanes.map((l) => l.kind)).toEqual(["ingest", "static", "retention"]);
-  });
-
   it("draws a chained update's umbrella above the steps it spans", () => {
     const lanes = runsToBars(
       [run({ run_id: 1, kind: "static" }), run({ run_id: 2, kind: "ingest" }), run({ run_id: 3, kind: "update" })],

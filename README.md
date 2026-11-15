@@ -251,7 +251,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make ask-eval` | Check the Ask gold set's stored signatures still match canonicalization (no database; pytest runs it too) |
 | `make prune-query-log` | Delete `ask_query_log` rows older than 90 days (the API also runs this daily) |
 | `make prune-pipeline-runs` | Delete `pipeline_runs` rows older than 90 days |
-| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (matches production `updates`' horizon; the API also runs this daily) |
+| `make prune-admin-audit` | Delete `admin_audit` rows older than 400 days (production `updates`' target horizon, once analyze honours a retention floor; the API also runs this daily) |
 | `make prune-personal-data` | Delete usage counts and login history older than 25 months, and expired sessions (the API also runs this daily) |
 | `make doctor` | Check environment, ports, databases, and baked SPA |
 | `make hooks` | Install/verify the mandatory gitleaks pre-commit hook |
@@ -403,7 +403,6 @@ value when neither an override nor the env var is set.
 | `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
 | `login_required` | `LOGIN_REQUIRED` | on |
 | `ml_forecast` | `ML_FORECAST_ENABLED` | off |
-| `updates_prune_enabled` | `UPDATES_PRUNE_ENABLED` | off |
 
 `openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json`;
 `.env.example` turns it on for local dev.
@@ -417,12 +416,6 @@ configured.
 `/forecast/overview` fill a cell from the ML model's fresh forecasts in
 `agg_route_forecast_ml`, marked `source: "ml"`; with it off, every cell is the
 historical baseline.
-
-`updates_prune_enabled` lets `python gtfs_pipeline.py prune-updates` drop
-ClickHouse `updates` months past the horizon. The retention table in
-`docs/ops-monitoring-deploy.md` ("Data retention") says which months it may
-drop. With it off the command drops nothing, and its `--dry-run` lists what a
-run would drop either way.
 
 Leaving all OAuth variables unset runs the app in anonymous-only mode: nobody
 can sign in through SSO (only the break-glass account, when it is set), so the

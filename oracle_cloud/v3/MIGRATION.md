@@ -102,9 +102,10 @@ progress to release its lock (a problem in itself past
 each configured agency's actual R2 objects, checking freshness and
 byte-size integrity against local disk instead of trusting `sync-r2.sh`'s
 own exit status. `bin/prune-r2.sh` runs weekly (like `prune.sh`, gated on
-the same fresh-marker check) and enforces a bounded, multi-year retention
-window on R2 objects — see that script for why its defaults are so much
-longer than `prune.sh`'s local ones. Both are wrapped by `cron-wrap.sh` like
+the same fresh-marker check) and enforces the R2 horizons in the retention
+table (`docs/ops-monitoring-deploy.md`, "Data retention"): years for RT and
+static, far longer than `prune.sh`'s local ones, and `R2_VP_RETENTION_DAYS`
+(180) for VehiclePositions. Both are wrapped by `cron-wrap.sh` like
 `sync-r2.sh` and `prune.sh`, so a failure of either pages the same way.
 
 `bin/reconcile-r2.sh` runs weekly, right after `prune-r2.sh`, and covers what
@@ -310,9 +311,10 @@ What each job does with them:
   `VP_STALE_FACTOR` (default 60, so 20 minutes at 20 s, the grace a 60 s RT
   feed gets from `RT_STALE_FACTOR`), and a fresh, size-matched day in
   `vp/<id>/` on the RT thresholds.
-- `reconcile-r2.sh` and `prune-r2.sh` treat `vp/<id>/` as expected, on the RT
-  retention, for any id in `agencies.tsv`, so ending the window never turns
-  the archive into orphans.
+- `reconcile-r2.sh` and `prune-r2.sh` treat `vp/<id>/` as expected for any id
+  in `agencies.tsv`, so ending the window never turns the archive into
+  orphans. `prune-r2.sh` prunes it at `R2_VP_RETENTION_DAYS` (180), the VP row
+  of the retention table in `docs/ops-monitoring-deploy.md`.
 - `storage-metrics.sh` reports `vp_object_count`/`vp_bytes` and counts them in
   `r2_bytes_total`. `status-snapshot.sh` leaves VP out.
 

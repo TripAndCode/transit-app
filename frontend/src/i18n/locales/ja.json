@@ -2057,8 +2057,7 @@
         "openapiDocsEnabled": "API: OpenAPI ドキュメント",
         "perfDebugEnabled": "API: パフォーマンスデバッグ面",
         "loginRequired": "アクセス: ログイン必須",
-        "mlForecast": "ML予測",
-        "updatesPruneEnabled": "保持期間: 期限を過ぎた ClickHouse の生データ updates を削除"
+        "mlForecast": "ML予測"
       }
     },
     "table": {
@@ -2101,8 +2100,7 @@
         "weather": "気象",
         "probe": "RT 項目の計測",
         "static": "静的データ",
-        "update": "まとめて更新",
-        "retention": "保持期間の削除"
+        "update": "まとめて更新"
       },
       "run_status": {
         "running": "実行中",

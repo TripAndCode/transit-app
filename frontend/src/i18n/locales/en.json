@@ -2057,8 +2057,7 @@
         "openapiDocsEnabled": "API: OpenAPI docs",
         "perfDebugEnabled": "API: perf debug surface",
         "loginRequired": "Access: sign-in required",
-        "mlForecast": "ML forecast",
-        "updatesPruneEnabled": "Retention: drop raw ClickHouse updates past the horizon"
+        "mlForecast": "ML forecast"
       }
     },
     "table": {
@@ -2101,8 +2100,7 @@
         "weather": "Weather",
         "probe": "RT field probe",
         "static": "Static",
-        "update": "Update",
-        "retention": "Retention prune"
+        "update": "Update"
       },
       "run_status": {
         "running": "Running",
