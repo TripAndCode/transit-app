@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import re
-import unicodedata
 from collections.abc import Mapping
 from typing import NamedTuple
 
@@ -157,26 +156,37 @@ def _serialize_context(
     return "\n".join(parts)
 
 
-_LABEL_TOKEN_SPLIT_RE = re.compile(r"[\s()→]+")
+_LABEL_TOKEN_SPLIT_RE = re.compile(r"[\s()（）→]+")
 _BARE_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 _NOT_ALNUM_BEFORE = r"(?<![0-9A-Za-z])"
 _NOT_ALNUM_AFTER = r"(?![0-9A-Za-z])"
+# Only full-width digits and Latin letters fold: the numeric guard reads the
+# rest of the full-width forms (．, ％, ①) itself, and folding them changes
+# which numbers it sees.
+_FULLWIDTH_ALNUM = str.maketrans(
+    "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ",
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+)
 _NAMING_PREFIX = r"(?:(?i:route|named|called|name is)|(?:名前|名称|路線名)は)\s*"
+# What may follow a number a naming prefix introduces, so "route 7 trips"
+# stays a count while "Route 7 is" and 名前は7です name the route.
+_NAME_END = r"(?!\d)(?=\s*(?:$|[,.;:!?、。(（)）」]|(?:is|was|has|had|runs|ran|averages)\b|['’]s\b|[はのがをでもと]))"
 _ROUTE_WORD_AFTER = r"(?=\s*(?:系統|番線|番(?!目)|号線|号))"
-_LABEL_GAP = r"[\s(]*"
+_LABEL_GAP = r"[\s(（]*"
 
 
 def _route_name_patterns(route_labels: Mapping[str, str]) -> list[re.Pattern[str]]:
-    """Patterns for the places an NFKC-normalized answer names a labelled route.
+    """Patterns for the places an answer, with full-width letters and digits
+    folded, names a labelled route.
 
     A name token that mixes digits with anything else (``W53``, ``61-2``,
     ``10号線``) names a route wherever it appears. A bare number (``25``)
     could as well be a delay or a count, so it names a route only beside
-    the rest of its label, after a naming word ("route", 名前は), or before
-    a route word (系統, 番線)."""
+    the rest of its label, after a naming word ("Route 25 is", 名前は25です),
+    or before a route word (系統, 番線)."""
     patterns: list[re.Pattern[str]] = []
     for label in route_labels.values():
-        tokens = [t for t in _LABEL_TOKEN_SPLIT_RE.split(unicodedata.normalize("NFKC", label)) if t]
+        tokens = [t for t in _LABEL_TOKEN_SPLIT_RE.split(label.translate(_FULLWIDTH_ALNUM)) if t]
         for i, token in enumerate(tokens):
             if not any(ch.isdigit() for ch in token):
                 continue
@@ -184,22 +194,21 @@ def _route_name_patterns(route_labels: Mapping[str, str]) -> list[re.Pattern[str
             if not _BARE_NUMBER_RE.fullmatch(token):
                 patterns.append(re.compile(_NOT_ALNUM_BEFORE + t + _NOT_ALNUM_AFTER, re.IGNORECASE))
                 continue
-            alternatives = [_NAMING_PREFIX + t + r"(?!\d)", t + _ROUTE_WORD_AFTER]
+            alternatives = [_NAMING_PREFIX + t + _NAME_END, t + _ROUTE_WORD_AFTER]
             if i + 1 < len(tokens):
                 alternatives.append(t + _LABEL_GAP + re.escape(tokens[i + 1]))
-            patterns.append(re.compile(r"(?<!\d)(?:" + "|".join(alternatives) + ")"))
+            patterns.append(re.compile(r"(?<!\d)(?:" + "|".join(alternatives) + ")", re.MULTILINE))
     return patterns
 
 
 def _without_route_names(answer: str, route_labels: Mapping[str, str] | None) -> str:
-    """``answer``, NFKC-normalized so full- and half-width digits compare
-    equal, with each mention of a labelled route's name blanked, so the
-    numeric guard reads the digits in a route name as a name, not as a
+    """``answer`` with each mention of a labelled route's name blanked, so
+    the numeric guard reads the digits in a route name as a name, not as a
     claim. The names stay out of the guard's grounding: a route called
     ``25`` must not license a "25 minutes" claim elsewhere in the answer."""
     if not route_labels:
         return answer
-    answer = unicodedata.normalize("NFKC", answer)
+    answer = answer.translate(_FULLWIDTH_ALNUM)
     for pattern in _route_name_patterns(route_labels):
         answer = pattern.sub(" ", answer)
     return answer

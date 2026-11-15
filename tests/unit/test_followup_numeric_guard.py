@@ -128,8 +128,26 @@ async def test_a_numeric_route_name_passes_where_it_names_the_route(monkeypatch,
         ({"42052": "W53 沖館・新田線 (西部営業所 → 野木和団地)"}, "W53 沖館・新田線は平均53分遅れています。"),
         (_NUMBER_ONLY, "7（野木和団地→駅西口）は平均7分遅れています。"),
         (_NUMBER_ONLY, "この路線は7本遅れています。"),
+        (_NUMBER_ONLY, "On this route 7 trips ran late."),
+        (_NUMBER_ONLY, "The driver called 7 times about delays."),
+        (_NUMBER_ONLY, "路線名は7本あります。"),
     ],
 )
 async def test_a_route_name_does_not_license_its_digits_elsewhere(monkeypatch, labels, reply):
     answer, err, guard = await _answer(monkeypatch, reply, context_result=_ON_TIME_RESULT, route_labels=labels)
     assert (answer, err, guard) == (_summary("numeric_guard_fallback", lang="ja"), None, True)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "１．港通り線の定時率は50.6%です\n２．丘陵線は42052です",
+        "1）港通り線は50.6%\n2）丘陵線も同じです",
+        "①W53 沖館・新田線の定時率は50.6%です。②ほかの路線はありません。",
+        "W53 沖館・新田線の定時率は５０.６％です。",
+    ],
+)
+async def test_route_labels_leave_list_markers_and_full_width_numbers_to_the_guard(monkeypatch, reply):
+    labels = {"42052": "W53 沖館・新田線 (西部営業所 → 野木和団地)"}
+    answer, err, guard = await _answer(monkeypatch, reply, context_result=_ON_TIME_RESULT, route_labels=labels)
+    assert (answer, err, guard) == (reply, None, False)
