@@ -23,6 +23,9 @@ from pipeline.query.router import (
         ("計算できる指標は？", "describe_data", "metrics"),
         ("サンプル数の多い系統", "describe_data", "sample_counts"),
         ("サンプル数が多い路線の一覧", "describe_data", "sample_counts"),
+        ("観測数の多い系統", "describe_data", "sample_counts"),
+        ("観測数が少ない路線", "describe_data", "sample_counts"),
+        ("観測数の多い路線の一覧", "describe_data", "sample_counts"),
         # A date's digits are not a route reference.
         ("2025年の全体の概要を", "describe_data", "overview"),
         ("2024年10月のデータセットの概要", "describe_data", "overview"),

@@ -1450,11 +1450,11 @@
         "dwell_avg": "Dwell avg",
         "dwell_p50": "Dwell p50",
         "dwell_p90": "Dwell p90",
-        "dwell_samples": "Dwell observations",
+        "dwell_samples": "Dwell-time observations",
         "run_avg": "Running avg",
         "run_p50": "Running p50",
         "run_p90": "Running p90",
-        "run_samples": "Running observations"
+        "run_samples": "Running-time observations"
       },
       "see_when": "See when delay happens",
       "compare_day_types": "Compare weekdays with weekends and holidays"

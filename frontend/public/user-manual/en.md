@@ -462,6 +462,7 @@ What the words on the screens and in this manual mean.
 
 - **Feed**: the data an agency publishes. Delays are the departure delays its real-time feed (GTFS-Realtime) reports at each stop, used as they are; the Service does not work delays out from the timetable and vehicle positions. Route names, scheduled times, timetables and planned trips come from the timetable feed (GTFS).
 - **Observation** (“Observations” in the tables): one trip departing one stop counts as one observation. When the same trip and stop are reported many times, the last report is used. “Observations” counts these, so one trip gives one observation per stop. The council report’s “Observations (stop level)” is the same count.
+- **Reading**: one report from the feed. An observation keeps only the last reading of each trip at each stop.
 - **First recorded stop**: the first stop where the real-time data reported the trip’s departure. For a trip with no report from the stop where it starts, it is a later stop. The staff list of late departures picks each trip by its delay there; the delay record (for reference) gives the delay at the stop where the passenger boarded.
 - **Set aside as implausible**: a report more than 2 hours (7,200 seconds) late or early is left out as a feed fault.
 - **Missing data**: days or hours with no observations are left out, not counted as on time.

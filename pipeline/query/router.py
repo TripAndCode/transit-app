@@ -63,7 +63,7 @@ _RULES: list[Rule] = [
         args={"kind": "routes"},
         # An on-time list is ranking-on-time's to answer, a sample-count list
         # meta-sample-counts'.
-        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数"),
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数|観測数"),
     ),
     Rule(
         name="meta-date-range",
@@ -107,7 +107,7 @@ _RULES: list[Rule] = [
     ),
     Rule(
         name="meta-sample-counts",
-        pattern=re.compile(r"サンプル数.*?(多い|TOP|ランキング)"),
+        pattern=re.compile(r"(サンプル数|観測数).*?(多い|少ない|TOP|ランキング)"),
         tool="describe_data",
         args={"kind": "sample_counts"},
     ),

@@ -80,6 +80,14 @@ jobs:
           npm ci
           npm run build
 
+      # Date-gated tests fail here, never on a pull request: they are a
+      # reminder that a removal date has passed, not a defect in a diff.
+      - name: Check removal deadlines
+        working-directory: frontend
+        run: npx vitest run src/routes/legacyRedirects.test.tsx
+        env:
+          RUN_DEADLINES: 1
+
       # `npm run build` writes frontend/dist; both gated tests open
       # api/static/index.html. `make bake` is the one definition of that
       # copy (it also strips the vite manifest), so this calls it rather

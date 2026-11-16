@@ -554,7 +554,7 @@ async def describe_data(
                 ("p50_min", "median delay (min)"),
                 ("p90_min", "90th percentile delay (min)"),
                 ("on_time_pct", "on-time rate (%) — by default the industry standard: ≤1 min early, ≤5 min late"),
-                ("samples", "observation sample count"),
+                ("samples", "observations (count)"),
             ]
         else:
             metric_list = [
@@ -562,7 +562,7 @@ async def describe_data(
                 ("p50_min", "中央値遅延 (分)"),
                 ("p90_min", "90 パーセンタイル遅延 (分)"),
                 ("on_time_pct", "定時率 (%) — 既定は業界標準 (早発1分・遅延5分以内)"),
-                ("samples", "観測サンプル数"),
+                ("samples", "観測数"),
             ]
         return ToolResult(
             kind="kv",
@@ -582,7 +582,7 @@ _CAPABILITY_EXAMPLES_JP = {
     "on_time": "5分以内の定時率 / 定時率ランキング / しきい値別の率",
     "stop_level": "区間別の遅延ホットスポット / どの停留所で遅延が蓄積 / 停留所ごとの遅れ",
     "causal": "なぜ遅れる？どこで発生 / 時間帯・曜日パターン / 時刻表の妥当性・余裕時間 / 慢性的か最近悪化か",
-    "meta": "どんな路線がある？ / いつからのデータ？ / サンプル数の多い路線",
+    "meta": "どんな路線がある？ / いつからのデータ？ / 観測数の多い路線",
 }
 
 _CAPABILITY_EXAMPLES_EN = {
@@ -593,7 +593,7 @@ _CAPABILITY_EXAMPLES_EN = {
     "on_time": "on-time rate within 5min / on-time ranking / by threshold",
     "stop_level": "per-segment delay hotspots / which stop the delay builds up at / delay by stop",
     "causal": "why is it late / time-of-day and dow pattern / schedule padding realism / chronic vs recent shift",
-    "meta": "what routes exist? / since when do we have data? / top routes by samples",
+    "meta": "what routes exist? / since when do we have data? / top routes by observations",
 }
 
 

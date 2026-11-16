@@ -1,13 +1,15 @@
 import { Navigate, useLocation, useParams } from "react-router-dom";
+import { readLastAgency } from "../api/lastAgency";
 import { destHref, reportHref, routesHref, savedTarget, type Destination } from "./destinations";
 
-/** Every legacy URL keeps working: each one replaces itself with the screen
- *  that serves it, carrying the query string so filters and deep links
- *  survive.
+/** The redirects from retired URLs, each replacing itself with the screen that
+ *  serves it and carrying the query string so filters and deep links survive,
+ *  until the removal date.
  *
- *  Remove these redirects, and the routes in `main.tsx` that mount them, after
- *  2027-05-16 (Asia/Tokyo): a bookmark older than that is stale. The date is
- *  enforced by `legacyRedirects.test.tsx`. */
+ *  Date after which these redirects and the routes in `main.tsx` that mount
+ *  them are deleted. The old paths are what go stale: a bookmark to one that
+ *  nobody has opened since then no longer matters. `legacyRedirects.test.tsx`
+ *  fails on a scheduled run once the date has passed. */
 export const LEGACY_REDIRECTS_REMOVE_AFTER = "2027-05-16";
 
 export function RedirectTo({ dest, extra = {} }: { dest: Destination; extra?: Record<string, string> }) {
@@ -61,4 +63,14 @@ export function RedirectForecast() {
   const { agencyId = "" } = useParams();
   const { search } = useLocation();
   return <Navigate to={reportHref(agencyId, "route_forecast", search)} replace />;
+}
+
+/** The bare `/network` bookmark: the last-selected agency's Compare screen by
+ *  agencies if one is known, otherwise onboarding via "/", since a bare hit
+ *  has no current agency. */
+export function RedirectNetworkToAgencyNetwork() {
+  const { search } = useLocation();
+  const lastAgencyId = readLastAgency();
+  if (lastAgencyId == null) return <Navigate to="/" replace />;
+  return <Navigate to={destHref(lastAgencyId, "compare", search, { by: "agencies" })} replace />;
 }

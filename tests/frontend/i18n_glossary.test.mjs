@@ -33,6 +33,7 @@ const JA_VARIANTS = [
   [/観測データ数/, "観測数"],
   [/サンプル数/, "観測数"],
   [/計測回数/, "観測数"],
+  [/計測(記録|が少な|の平均)|これまでの計測/, "観測"],
 ];
 const EN_VARIANTS = [
   [/Print \/ Save PDF/, "Print / Save as PDF"],
@@ -42,8 +43,10 @@ const EN_VARIANTS = [
   // column, figure or glossary term. A bare lower-case "samples" stays legal:
   // the admin board's probe samples are a different count.
   [/\bSamples\b/, "Observations"],
-  [/\b(?:dwell|running) samples\b/i, "Dwell observations / Running observations"],
+  [/\b(?:dwell|running) samples\b/i, "Dwell-time observations / Running-time observations"],
   [/\{\{count\}\} samples/, "{{count}} observations"],
+  [/\bSample counts?\b/, "Observation counts"],
+  [/\bmeasurements\b/i, "observations"],
 ];
 
 const JA_SOURCES = [

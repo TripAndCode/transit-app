@@ -16,7 +16,7 @@ defend; see [Comparability gate](#comparability-gate).
   `/agencies/:agencyId/network` and `analysis/compare?mode=agencies`
   redirect here, keeping the rest of the query string (`mode=agencies`
   becomes `by=agencies`), and so does a bare `/network` bookmark, via
-  `frontend/src/routes/networkRedirect.tsx: RedirectNetworkToAgencyNetwork`
+  `frontend/src/routes/legacyRedirects.tsx: RedirectNetworkToAgencyNetwork`
   (to the last-used agency, or to `/` when none is remembered).
 - Top-level component: `frontend/src/tabs/NetworkTab.tsx`. Unlike every other
   tab, it does **not** show the scope sentence, and the board's endpoint reads
@@ -235,7 +235,7 @@ default order is still by delay among the comparable agencies.
 | `frontend/src/tabs/NetworkTab.tsx` | Network tab: date pickers, ranked card list rendering |
 | `frontend/src/components/comparabilityReason.ts` | `unrankedReason()` — an unranked agency's reason in words, shared with the council report's comparison tile |
 | `frontend/src/tabs/CompareTab.tsx` | Compare screen: the `by` switch between this board and `compare_ranking` |
-| `frontend/src/routes/networkRedirect.tsx` | Bare `/network` → `/agencies/{lastAgencyId}/compare?by=agencies` redirect (or `/` with no remembered agency) |
+| `frontend/src/routes/legacyRedirects.tsx` (`RedirectNetworkToAgencyNetwork`) | Bare `/network` → `/agencies/{lastAgencyId}/compare?by=agencies` redirect (or `/` with no remembered agency) |
 | `frontend/src/styles/tokens.ts` | `delayColor()` — shared warm-ramp coloring used by the delay bar |
 | `frontend/src/api/hooks.ts` | `useNetworkSummary` |
 
@@ -261,7 +261,7 @@ default order is still by delay among the comparable agencies.
   `tests/pipeline/test_service_delivered.py` (observed trips and the coverage
   bound).
 - Frontend: `frontend/src/tabs/NetworkTab.test.tsx`,
-  `frontend/src/routes/networkRedirect.test.tsx`,
+  `frontend/src/routes/legacyRedirects.test.tsx`,
   `frontend/src/tabs/destinationTabs.test.tsx` (Compare's `by` switch).
 
 **Manual click-through** (`make serve` + `make frontend-dev`):

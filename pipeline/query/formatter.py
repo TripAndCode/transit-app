@@ -151,7 +151,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
     ("council_header", "ja"): "【協議会向け報告（{agency}、{from_date} 〜 {to_date}）】",
     ("council_header", "en"): "[Council report ({agency}, {from_date} to {to_date})]",
-    ("council_headline", "ja"): "定時率 {on_time}%{early}、平均遅延 {avg}分（観測数{samples}件・停留所単位）",
+    ("council_headline", "ja"): "定時率 {on_time}%{early}、平均遅延 {avg}分（観測数 {samples}件・停留所単位）",
     ("council_headline", "en"): (
         "On-time rate {on_time}%{early}, mean delay {avg} min ({samples} stop-level observations)"
     ),

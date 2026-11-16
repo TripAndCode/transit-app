@@ -107,7 +107,7 @@ describe("ForecastPeriodNote", () => {
     expect(screen.queryByTestId("fc-period")).toBeNull();
   });
 
-  it("renders nothing before the data arrives, or for an agency with neither forecast nor measurements", () => {
+  it("renders nothing before the data arrives, or for an agency with neither forecast nor observations", () => {
     mockData(undefined);
     const { container, unmount } = renderWithProviders(<ForecastPeriodNote aid={1} route={null} />);
     expect(container).toBeEmptyDOMElement();
@@ -119,7 +119,7 @@ describe("ForecastPeriodNote", () => {
 });
 
 describe("ForecastHistory", () => {
-  it("heads its content as past measurements over the window they cover", () => {
+  it("heads its content as past observations over the window they cover", () => {
     renderWithProviders(
       <ForecastHistory from="2026-07-12" to="2026-10-21" recentFrom="2026-10-17" recentTo="2026-10-23">
         <p>routes</p>
@@ -131,7 +131,7 @@ describe("ForecastHistory", () => {
     expect(section).toHaveTextContent("routes");
   });
 
-  it("keeps the past-measurements heading when the window is unknown", () => {
+  it("keeps the past-observations heading when the window is unknown", () => {
     renderWithProviders(
       <ForecastHistory from={null} to={null} recentFrom={null} recentTo={null}>
         <p>routes</p>

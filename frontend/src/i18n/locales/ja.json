@@ -2285,7 +2285,7 @@
       "section_unavailable": "このセクションを読み込めませんでした。",
       "alert_open": "開く",
       "alert": {
-        "clamp_high": "{{agency}}：{{date}} の観測の {{pct}}% を異常値として除外",
+        "clamp_high": "{{agency}}：{{date}} の受信データの {{pct}}% を異常値として除外",
         "agency_stale_one": "{{agency}}：集計が {{count}} 日遅れ",
         "agency_stale_other": "{{agency}}：集計が {{count}} 日遅れ",
         "migrations_behind_one": "スキーマが {{count}} 件遅れています",
@@ -2446,7 +2446,7 @@
       "reports_through": "{{date}}までの運行日",
       "live": "ライブ",
       "live_none": "まだ受信していません",
-      "readings": "直近7集計日の観測数",
+      "readings": "直近7集計日の受信件数",
       "set_aside": "異常値として除外",
       "set_aside_note": "表示中の数値は除外後の値です。",
       "note": "観測のない日は定時扱いにせず、集計から外しています。"

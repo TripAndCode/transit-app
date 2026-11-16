@@ -255,7 +255,7 @@ describe("RouteForecastSection", () => {
     );
   });
 
-  it("heads the route list as past measurements over its window, apart from the forecast and its caveat", () => {
+  it("heads the route list as past observations over its window, apart from the forecast and its caveat", () => {
     renderSection();
     const history = screen.getByRole("region", { name: "Past observations (Jul 12 – Oct 23)" });
     expect(within(history).getByTestId("fc-overview-routes")).toHaveTextContent("Routes that ran late");

@@ -5,12 +5,12 @@ import { createBrowserRouter, RouterProvider, Navigate } from "react-router-dom"
 import {
   RedirectAnalysisLens,
   RedirectForecast,
+  RedirectNetworkToAgencyNetwork,
   RedirectReportType,
   RedirectSaved,
   RedirectTo,
   RedirectWhere,
 } from "./routes/legacyRedirects";
-import { RedirectNetworkToAgencyNetwork } from "./routes/networkRedirect";
 import {
   loadAskTab,
   loadBusTownTab,
