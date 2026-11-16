@@ -1,6 +1,6 @@
 # Terms of Service
 
-Last updated: October 27, 2026
+Last updated: November 17, 2026
 
 These terms are the conditions for using Delay Dashboard (“the Service”), run by TripAndCode, an individual. By using the Service, you agree to them. The Japanese version of these terms is the authoritative one.
 
@@ -8,11 +8,9 @@ These terms are the conditions for using Delay Dashboard (“the Service”), ru
 
 The Service aggregates and shows delays of buses, trams and other public transport from GTFS and GTFS-Realtime data that operators and others publish. The figures are for reference; they are not the operators' official information. The “Delay record (for reference)” is a reference document too: it is not a delay certificate issued by an operator, and can't be used in place of one.
 
-## Your account
+## Signing in
 
-- You sign in with a Google or GitHub account.
-- Only you may use your account.
-- You can delete your account at any time from your account page.
+Every screen of the Service can be used without an account. Only the Service's administrators sign in, and the operator manages their accounts.
 
 ## What you must not do
 
