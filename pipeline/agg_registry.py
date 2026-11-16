@@ -212,9 +212,13 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "feed_quality_monthly",
-            8,
+            9,
             Kind.DATED,
             # A planned day no capture saved reads the loaded timetable's plan.
+            # The poll figures' service hours come from the archived timetable
+            # in force (poll_outages.in_force_hours), which in_force does not
+            # track: it means rows filed under it. A version in force moving
+            # without a load leaves built months as they were.
             Timetable.LOADED,
             _feed_quality,
             depends_on=("agg_route_daily", "agg_route_daily_dist", "agg_feed_health"),
@@ -410,6 +414,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     ),
     MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
     MethodVersion("2026.11.16", {"feed_quality_monthly": 8}),
+    MethodVersion("2026.11.17", {"feed_quality_monthly": 9}),
 )
 
 # The method every report, CSV and council document names beside its figures

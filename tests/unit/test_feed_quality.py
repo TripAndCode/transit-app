@@ -4,14 +4,16 @@ from datetime import date, datetime, timezone
 
 import pytest
 
-from pipeline import feed_quality
+from pipeline import feed_quality, poll_outages
 from pipeline.feed_quality import (
     COLUMNS,
+    PeerStamp,
     ValidationDay,
     last_counted_day,
     month_bounds,
     month_through,
     month_windows,
+    peers_moved,
     plan_months,
     shape,
     through_of,
@@ -22,6 +24,13 @@ from pipeline.reports.comparability import assess
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 
 _OCT = date(2026, 10, 1)
+_OUTAGES = {
+    **dict.fromkeys(poll_outages.COLUMNS),
+    "poll_days": 0,
+    "polls_missing": "no_service_hours",
+    "outage_missing": "no_service_hours",
+    "peer_rows": 0,
+}
 
 
 def _service(observed=900, coverage_planned=1000, covered_days=31, planned=None):
@@ -61,6 +70,7 @@ def _shape(**over):
         "clamp_count": 3,
         "total_rows": 1200,
         "validation": (),
+        "outages": _OUTAGES,
     }
     return shape(**{**args, **over})
 
@@ -483,11 +493,11 @@ def test_a_row_carries_the_validator_figures_of_its_window():
 
 def test_a_month_whose_summaries_moved_since_its_row_was_built_is_rebuilt():
     stored = _spans({date(2026, 9, 1): date(2026, 9, 30), _OCT: date(2026, 10, 31)})
-    assert plan_months([], stored, stored, validation_moved=[date(2026, 9, 1)]) == (
+    assert plan_months([], stored, stored, moved=[date(2026, 9, 1)]) == (
         [date(2026, 9, 1)],
         [date(2026, 9, 1)],
     )
-    assert plan_months([], stored, stored, validation_moved=[date(2026, 8, 1)]) == ([], [])
+    assert plan_months([], stored, stored, moved=[date(2026, 8, 1)]) == ([], [])
 
 
 def test_a_month_moves_when_a_summary_arrives_or_changes_and_not_otherwise():
@@ -498,3 +508,24 @@ def test_a_month_moves_when_a_summary_arrives_or_changes_and_not_otherwise():
     assert validation_moved({sep: (30, _AT), octo: (1, _LATER)}, stored, [sep, octo]) == [octo]
     # A row built before the validator columns existed records no stamp.
     assert validation_moved({}, {sep: (None, None)}, [sep]) == [sep]
+
+
+def test_a_row_carries_the_poll_columns_of_its_window():
+    outages = {**_OUTAGES, "poll_days": 3, "poll_success_pct": 98.5, "polls_missing": None, "outage_missing": None}
+    row = _shape(outages=outages)
+    assert {column: row[column] for column in poll_outages.COLUMNS} == outages
+
+
+def test_a_month_with_an_outage_moves_when_the_other_agencies_archives_it_was_split_against_move():
+    sep, octo = date(2026, 9, 1), _OCT
+    stored = {sep: PeerStamp(500, True), octo: PeerStamp(0, True)}
+    assert peers_moved({sep: 500}, stored, [sep, octo]) == []
+    assert peers_moved({sep: 800}, stored, [sep, octo]) == [sep]
+    assert peers_moved({sep: 500, octo: 10}, stored, [sep, octo]) == [octo]
+    # A row built before the stamp existed records none.
+    assert peers_moved({}, {sep: PeerStamp(None, True)}, [sep]) == [sep]
+
+
+def test_a_month_without_an_outage_never_read_the_other_agencies_so_does_not_move_with_them():
+    sep = date(2026, 9, 1)
+    assert peers_moved({sep: 800}, {sep: PeerStamp(500, False)}, [sep]) == []
