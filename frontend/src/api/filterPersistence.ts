@@ -37,7 +37,7 @@ function writeStored(key: string, value: StoredFilter): void {
 }
 
 /**
- * Remember the last-used date range/DOW/time-band/routes filter per agency
+ * Remember the last-used date range/DOW/time-band/service/routes filter per agency
  * and screen in localStorage, and restore it on a fresh visit to that screen
  * that has no explicit filter params in the URL. Keyed by screen for the
  * same reason the rail is (see screenScope.ts): a filter set on one screen
