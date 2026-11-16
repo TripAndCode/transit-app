@@ -105,7 +105,8 @@ as the live scope sentence does, every condition the figures were computed
 under, one the screen's data did not use struck through; a Routes table also
 states its observation floor and the routes it left out, as disabled toggles.
 Route rows are not links, since a route's live page would show today's
-figures.
+figures. The table's observation counts follow the reader's statistics
+setting, as on the live screen (`analysis-tab.md` ▸ The Routes table).
 
 A Routes table's snapshot also freezes the two panels the screen draws
 beside its table, which come from endpoints of their own (see

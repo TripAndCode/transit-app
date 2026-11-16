@@ -24,6 +24,9 @@ const JA_VARIANTS = [
   // are named; 停車 stays only for other things (a stopping pattern, the
   // holds behind the time-adjustment rate).
   [/停留所での停車/, "滞留"],
+  // The Saturday-Sunday day filter is 土日 on every screen; 土日祝 names the
+  // weekend-and-holiday timetable, which is a different set of days.
+  [/土日のみ/, "土日"],
 ];
 const EN_VARIANTS = [
   [/Print \/ Save PDF/, "Print / Save as PDF"],

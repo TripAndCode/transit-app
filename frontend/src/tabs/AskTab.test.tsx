@@ -382,7 +382,7 @@ describe("AskTab unsaved filter edits", () => {
 
   async function editFilterThenFailToSave() {
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await userEvent.click(screen.getByRole("button", { name: "Weekdays only" }));
+    await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
     await userEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   }

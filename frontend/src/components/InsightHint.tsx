@@ -40,8 +40,9 @@ export function InsightHint({
 
   usePortalPlacement(open, () => triggerRef.current?.getBoundingClientRect(), popoverRef, "bottom");
 
+  // A span, so the hint can sit inside a heading or a paragraph.
   return (
-    <div style={{ display: "inline-flex" }}>
+    <span style={{ display: "inline-flex", verticalAlign: "middle" }}>
       <button
         ref={triggerRef}
         type="button"
@@ -103,6 +104,6 @@ export function InsightHint({
           </div>,
           document.body,
         )}
-    </div>
+    </span>
   );
 }

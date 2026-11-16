@@ -6,6 +6,10 @@ menu (chart PNG, combined CSV, share link, browser print/PDF), and
 browser-local saved-analysis bookmarks — plus a link out to Time for deeper
 reports.
 
+The slowest-routes table shows each route's observation count only while the
+reader's statistics setting is on (`analysis-tab.md` ▸ The Routes table); the
+combined CSV always carries it.
+
 ## How a user reaches it
 
 - Route: Reports at `/agencies/:agencyId/reports`, rendered by

@@ -855,6 +855,15 @@
 .ov-hero-facts li + li {
   border-top: 1px solid var(--border-soft);
 }
+/* The fact's definition sits beside its button, never inside it. */
+.ov-hero-facts li {
+  display: flex;
+  align-items: center;
+}
+.ov-hero-facts li > .ov-hero-fact {
+  flex: 1;
+  min-width: 0;
+}
 .ov-hero-fact {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto 14px;

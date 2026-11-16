@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { REPORT_ROWS_MAX, reportQueryString, useReport, type ReportOptions } from "../api/hooks";
+import { REPORT_ROWS_MAX, reportQueryString, useHeadwayQuality, useReport, type ReportOptions } from "../api/hooks";
 import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
@@ -20,6 +20,8 @@ import { DefinitionMetaBlock, OnTimeDefinition } from "../components/DefinitionM
 import { HeadwayQualityPanel } from "../components/HeadwayQualityPanel";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { CsvLink } from "../components/analysis/CsvLink";
+import { StatisticsToggle } from "../components/analysis/StatisticsToggle";
+import { useShowStatistics } from "../api/statisticsPref";
 import { LeftOutLine, RowsShown, SparseToggle } from "../components/analysis/RankingCoverage";
 import { RouteReferenceLegend } from "../components/analysis/RouteReference";
 import { onTimeReferenceMark } from "../components/analysis/routeReferenceText";
@@ -58,6 +60,7 @@ export function RouteTableScreen() {
   const id = useAgencyId();
   const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
+  const [showStatistics] = useShowStatistics();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   const isAdmin = useIsAdmin();
   const view = routeTableView(searchParams);
@@ -79,6 +82,10 @@ export function RouteTableScreen() {
   // loads, the rows held are still in the order they arrived in.
   const shown: RouteTableView = data?.sort ? { sort: data.sort, order: data.order ?? "worst" } : view;
   const reference = data?.reference ?? null;
+  // The toggle only where a table it changes is drawn: the routes, or
+  // headway quality under the on-time sort (the panel's own query, shared).
+  const headway = useHeadwayQuality(id, ctx, view.sort === "on_time" && id != null);
+  const headwayTable = view.sort === "on_time" && (headway.data?.rows.length ?? 0) > 0;
 
   /** Writes the table's params. The current sort and order go into `sort`
    *  and `order` first, in place of a former list's `report`, so changing one
@@ -165,6 +172,7 @@ export function RouteTableScreen() {
               kept={kept}
               onChange={(reason, on) => setTableParams({ [reason]: on ? "1" : null })}
             />
+            {(data.rows.length > 0 || headwayTable) && <StatisticsToggle />}
           </div>
         )}
         {report.error && <ErrorBanner error={report.error} onRetry={() => report.refetch()} />}
@@ -185,6 +193,7 @@ export function RouteTableScreen() {
                 sortDirection={routeTableSortDirection(shown)}
                 earlyDepartureSec={data.definition.early_departure_sec}
                 cellMarks={reference ? { 2: (row) => onTimeReferenceMark(reference, row, t) } : undefined}
+                showStatistics={showStatistics}
               />
               {data.rows_total != null && data.rows_total > data.rows.length && (
                 <RowsShown
@@ -219,7 +228,7 @@ export function RouteTableScreen() {
             sort. Every sort shows each route's on-time rate, so the
             agency's targets follow the table under each; the panel renders
             nothing when no standards are configured. */}
-        {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} />}
+        {view.sort === "on_time" && id != null && <HeadwayQualityPanel aid={id} ctx={ctx} showStatistics={showStatistics} />}
         {id != null && <PerformanceStandardPanel aid={id} ctx={ctx} />}
       </div>
     </div>

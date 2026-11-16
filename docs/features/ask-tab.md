@@ -30,8 +30,7 @@ this doc expands on with file-level detail.
   (also ⌘K); the palette's "Go to" group lists the notebook after the rail
   destinations (`GO_TO_TARGETS` in
   `frontend/src/components/paletteNavTargets.ts`, `nav.ask` i18n key —
-  "Notebook" / "調査ノート"). That field carries `data-tour="ask-nav"`, the first-run
-  tour's third step (placed "bottom"); the bar's right side holds the data-freshness
+  "Notebook" / "調査ノート"). The bar's right side holds the data-freshness
   chip (`frontend/src/components/DataFreshness.tsx`): the agency's
   `latest_data_date` and the newest live reading, with a panel that spells
   both out (`topbar.freshness.*`). On a phone, the notebook is also one of the bottom tabs in
