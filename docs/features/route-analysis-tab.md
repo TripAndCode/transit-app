@@ -46,7 +46,7 @@ What the user sees/does:
   Period, days and timetable, time band and the on-time tolerance apply as
   on every other screen. A condition is struck through only when none of
   the stop delays (`route-shape`), the summary strip's on-time list
-  (`useAgencyOnTime`) and the performance standard used it, so
+  (`useAgencyOnTime` in `components/analysis/agencyOnTime.ts`) and the performance standard used it, so
   a stop, direction or hour carried over from another screen is named as
   unused.
   Inside the dossier the scope always holds the path's one route (see

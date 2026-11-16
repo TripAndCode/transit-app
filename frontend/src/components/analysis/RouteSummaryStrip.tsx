@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { REPORT_ROWS_MAX, useOverviewSummary, useReport } from "../../api/hooks";
+import { useOverviewSummary, useReport } from "../../api/hooks";
+import { useAgencyOnTime, WHOLE_LIST } from "./agencyOnTime";
 import { scopeToQueryString, type Scope } from "../../api/scope";
 import type { OverviewConcentration, ReportFigures } from "../../api/types";
 import { reportHref } from "../../routes/destinations";
@@ -11,15 +12,6 @@ import { routeStanding } from "./routeDossier";
 import { RouteReferenceNote } from "./RouteReference";
 import "../../styles/focusedAnalysis.css";
 
-/** Every route the lists rank, so this route's place among them is known. */
-const WHOLE_LIST = { limit: REPORT_ROWS_MAX } as const;
-
-/** The agency's on-time list the strip reads the route's rate from. The
- *  route page reads it too, for the conditions the rate used, and shares
- *  this one request. */
-export function useAgencyOnTime(agencyId: number | null, ctx: Scope) {
-  return useReport(agencyId, "on_time", { ...ctx, routes: [] }, WHOLE_LIST);
-}
 
 function Figure({
   label,
