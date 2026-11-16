@@ -34,7 +34,6 @@ vi.mock("../api/auth", () => ({
 const mockApiGet = vi.fn().mockResolvedValue([]);
 vi.mock("../api/client", () => ({
   apiGet: (...args: unknown[]) => mockApiGet(...args),
-  apiUrl: (path: string) => `https://api.example.test${path}`,
 }));
 
 function renderAccount() {
@@ -92,10 +91,31 @@ describe("AccountPage for a guest", () => {
   });
 });
 
-describe("AccountPage data export", () => {
-  it("downloads the account's data from the API's origin", () => {
+describe("AccountPage composition", () => {
+  it("links to the privacy policy and the terms", () => {
     renderAccount();
-    expect(screen.getByRole("link", { name: "Download my data" })).toHaveAttribute("href", "https://api.example.test/api/me/export");
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
+    expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
+  });
+
+  it("has no LLM key, data export, or account deletion section", () => {
+    renderAccount();
+    expect(screen.queryByRole("link", { name: /download my data/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete account/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/api key|apiキー/i)).not.toBeInTheDocument();
+  });
+
+  it("shows an error, not a blank section, when the sessions fetch failed", async () => {
+    try {
+      mockApiGet.mockImplementation(async (path: string) => {
+        if (path === "/api/me/sessions") throw new Error("boom");
+        return [];
+      });
+      renderAccount();
+      expect(await screen.findByText("Couldn't load your sessions.")).toBeInTheDocument();
+    } finally {
+      mockApiGet.mockReset().mockResolvedValue([]);
+    }
   });
 });
 

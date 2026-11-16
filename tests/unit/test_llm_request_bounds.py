@@ -2,8 +2,8 @@
 
 The fallback ladder only helps while the caller is still waiting: a rung that
 hangs for the SDK's default read timeout never hands over to the next one in
-time. Both client constructors (the shared ladder and the BYOK one-off path)
-therefore pass :data:`pipeline.query.llm_client.REQUEST_TIMEOUT`.
+time. The client constructor therefore passes
+:data:`pipeline.query.llm_client.REQUEST_TIMEOUT`.
 
 The usage line is the only per-call cost signal the app has; it carries token
 counts and provider/model names, never key material or message content.
@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import openai
 import pytest
 
-from pipeline.query import chat, llm_client
+from pipeline.query import llm_client
 
 SECRET = "sk-live-thisistheoperators-secret-key"
 PROMPT_TEXT = "一番遅れている路線は？"
@@ -62,25 +62,6 @@ def test_ladder_client_is_built_with_the_request_timeout(monkeypatch):
     assert kwargs["timeout"] is llm_client.REQUEST_TIMEOUT
 
 
-def test_byok_client_is_built_with_the_request_timeout():
-    with patch("openai.OpenAI") as mock_openai:
-        mock_openai.return_value.chat.completions.create.return_value = _response(_usage())
-        chat._completion_with_key("gemini", SECRET, messages=[{"role": "user", "content": PROMPT_TEXT}])
-    _, kwargs = mock_openai.call_args
-    assert kwargs["timeout"] is llm_client.REQUEST_TIMEOUT
-
-
-def test_byok_call_uses_the_operator_endpoint_and_model(monkeypatch):
-    monkeypatch.setenv("GEMINI_BASE_URL", "https://proxy.example/v1")
-    monkeypatch.setenv("GEMINI_MODEL", "gemini-operator-pick")
-    with patch("openai.OpenAI") as mock_openai:
-        create = mock_openai.return_value.chat.completions.create
-        create.return_value = _response(_usage())
-        chat._completion_with_key("gemini", SECRET, messages=[{"role": "user", "content": PROMPT_TEXT}])
-    assert mock_openai.call_args.kwargs["base_url"] == "https://proxy.example/v1"
-    assert create.call_args.kwargs["model"] == "gemini-operator-pick"
-
-
 def _usage_lines(caplog) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.getMessage().startswith("llm usage")]
 
@@ -106,21 +87,6 @@ def test_ladder_logs_token_usage_without_key_or_content(monkeypatch, caplog, cac
         "completion_tokens=7",
     ):
         assert fragment in line
-    assert SECRET not in caplog.text
-    assert PROMPT_TEXT not in caplog.text
-
-
-def test_byok_call_logs_token_usage_without_key(caplog, monkeypatch):
-    monkeypatch.delenv("OPENAI_MODEL", raising=False)
-    with caplog.at_level(logging.INFO, logger="pipeline.query.llm_client"):
-        with patch("openai.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.return_value = _response(_usage(prompt=9, completion=3))
-            chat._completion_with_key("openai", SECRET, messages=[{"role": "user", "content": PROMPT_TEXT}])
-    lines = _usage_lines(caplog)
-    assert len(lines) == 1
-    assert "provider=openai" in lines[0]
-    assert "model=gpt-5.4-mini" in lines[0]
-    assert "prompt_tokens=9" in lines[0]
     assert SECRET not in caplog.text
     assert PROMPT_TEXT not in caplog.text
 

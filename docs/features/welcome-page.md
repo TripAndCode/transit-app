@@ -80,7 +80,7 @@ value.
 The session probe itself, `GET /api/me`, answers a signed-out caller with
 `200` and a `null` body, so no page logs a refused request. `fetchMe`
 (`frontend/src/api/auth.ts`) reads `null` (or a `401`) as signed out. Every
-other `/api/me/*` route, and `DELETE /api/me`, refuses a signed-out caller.
+other `/api/me/*` route refuses a signed-out caller.
 
 ## Key files
 

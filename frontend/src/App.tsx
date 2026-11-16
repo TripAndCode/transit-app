@@ -1,7 +1,7 @@
 import { Suspense, useRef, ViewTransition } from "react";
 import { Outlet, useMatch, useLocation, useMatches } from "react-router-dom";
 import { AgencyDataEndProvider } from "./api/AgencyDataEndProvider";
-import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence";
+import { useFilterPersistence } from "./api/filterPersistence";
 import { useAgencyId } from "./api/useAgencyId";
 import { NoticeStack } from "./components/NoticeStack";
 import { HelpHint } from "./components/HelpHint";
@@ -28,7 +28,7 @@ export default function App() {
   const agencyIdNum = useAgencyId();
   const { pathname } = useLocation();
   const focused = FOCUSED_TAB_PATTERN.test(pathname);
-  useAnonymousFilterPersistence(agencyIdNum);
+  useFilterPersistence(agencyIdNum);
   const titleKey = pageTitleKey(pathname);
   const agencyName = useAgencies().data?.find((a) => a.agency_id === agencyIdNum)?.agency_name;
   useDocumentLocale([titleKey ? t(titleKey) : null, agencyName]);

@@ -65,9 +65,7 @@ _SYS_PROMPT_EN = (
 
 
 def _has_allowed_provider() -> bool:
-    """True when the shared ladder holds a provider ``ASK_FOLLOWUP_PROVIDERS`` allows.
-
-    The follow-up never uses a BYOK key, so only the shared ladder counts."""
+    """True when the shared ladder holds a provider ``ASK_FOLLOWUP_PROVIDERS`` allows."""
     allowed = _allowed_providers()
     return any(p.name in allowed for p in get_client().providers())
 

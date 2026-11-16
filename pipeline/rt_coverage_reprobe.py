@@ -63,6 +63,7 @@ from pipeline.strategies._pb import is_feed_message
 from pipeline.strategies.static_join import (
     RT_COVERAGE_FIELDS,
     RT_INGEST_STRATEGIES,
+    RtCoverageField,
     field_coverage,
     record_field_coverage_probe,
 )
@@ -250,7 +251,7 @@ def _measure(raw: bytes) -> dict:
 _CURRENT_FEED_URL_SQL = "SELECT feed_url FROM agencies WHERE agency_id = $1 AND deleted_at IS NULL FOR SHARE"
 
 
-async def _record(db_url: str, agency_id: int, feed_url: str, cov: dict) -> dict[str, bool] | None:
+async def _record(db_url: str, agency_id: int, feed_url: str, cov: dict) -> dict[RtCoverageField, bool] | None:
     """Write *cov* as *agency_id*'s verdict, or return None without writing
     when the agency no longer points at the feed that was measured."""
     import asyncpg

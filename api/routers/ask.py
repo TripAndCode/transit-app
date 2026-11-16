@@ -289,7 +289,6 @@ async def ask(
             history=history,
             ch=ch,
             force_tool_call=force_tool_call,
-            user_id=user.user_id if user is not None else None,
             llm_approved=user.llm_approved if user is not None else False,
         )
         stage = "llm"

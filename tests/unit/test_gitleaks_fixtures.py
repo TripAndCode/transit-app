@@ -120,7 +120,7 @@ def test_negative_control_is_suppressed_by_the_project_allowlist():
     assert result.returncode == 0, (
         "gitleaks flagged the negative-control fixture even though its path "
         "is allowlisted in .gitleaks.toml -- the allowlist mechanism used "
-        "for .env.example and the BYOK test fixtures is broken.\n"
+        "for .env.example is broken.\n"
         f"stdout={result.stdout}"
     )
 

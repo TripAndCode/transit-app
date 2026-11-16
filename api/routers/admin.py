@@ -186,9 +186,6 @@ class UserDetail(UserRow):
 
     identities: list[dict]
     recent_events: list[dict]
-    # BYOK (bring-your-own-key) presence only -- never the key or its
-    # suffix. `None` means the user hasn't configured a provider key.
-    byok_provider: str | None
 
 
 @router.get("/users/{uid}", response_model=UserDetail)
@@ -219,11 +216,6 @@ async def user_detail(
         "FROM login_events WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
         uid,
     )
-    # Presence-only check -- deliberately not pipeline.query.user_llm_keys's
-    # get_user_llm_key, which decrypts the stored value and requires
-    # LLM_KEY_ENCRYPTION_KEY to be configured. This admin view never needs
-    # (or should see) the key itself, so it skips that dependency entirely.
-    byok_row = await conn.fetchrow("SELECT provider FROM user_llm_keys WHERE user_id=$1", uid)
     return UserDetail(
         **dict(row),
         identities=[dict(i) for i in ids],
@@ -237,7 +229,6 @@ async def user_detail(
             }
             for e in events
         ],
-        byok_provider=byok_row["provider"] if byok_row else None,
     )
 
 
