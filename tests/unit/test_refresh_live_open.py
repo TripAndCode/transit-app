@@ -1,6 +1,7 @@
 """POST /api/{agency_id}/delays/refresh fetches the agency's live feed and
-writes it. It is open to every visitor, signed in or not, under a per-address
-rate limit and a per-agency cooldown that only a successful poll starts. An
+writes it. It is open to every visitor, signed in or not, under a per-caller
+rate limit (per address, or per account when signed in) and a per-agency
+cooldown that only a successful poll starts. An
 agency with no timetable loaded is refused as unavailable, not as a failed
 feed.
 
