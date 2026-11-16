@@ -116,7 +116,7 @@ Once you change any condition from its default, **Reset** appears at the end of 
 
 To the right of the screen's heading:
 
-- **Saved views ▾** lists the views you have saved. Each shows its conditions under its name, and the one matching the current conditions has a ✓. Pick one to switch to it, or × to delete it. “Save current conditions” fills in a name suggested from the current conditions; keep it or change it, then press “Save”. Saving needs an account: signed out, it reads “Saved views” with the hint “Sign in to save”.
+- **Saved views ▾** lists the views you have saved. Each shows its conditions under its name, and the one matching the current conditions has a ✓. Pick one to switch to it, or × to delete it. “Save current conditions” fills in a name suggested from the current conditions; keep it or change it, then press “Save”. Views are kept in this browser, so no account is needed to save one.
 - **Show all filters** lays out the controls for every condition in a row under the sentence. It stays on until you turn it off.
 
 A condition the screen does not use is struck through, and a line under the sentence names it, for example “Not used on this screen: Days and timetable”. The weekday and weekend reports, for instance, choose their own days.
@@ -364,7 +364,7 @@ Missing observations are not counted as on time; only the periods with observati
 
 The analyses you saved with **Save analysis** on a route’s page. Click one to reopen it with the latest data; **Delete** removes it. They are kept in this browser only, so another browser or device will not show them.
 
-**Saved views** (chapter 3) are a different thing: conditions saved under “Saved views ▾” at the top of a screen while signed in are kept with your account and open from that same menu on any device. They do not appear on this tab.
+**Saved views** (chapter 3) are a different thing: conditions saved under “Saved views ▾” at the top of a screen are kept in this browser too, in their own list. They do not appear on this tab.
 
 ### 10-3. Council report & delay record
 

@@ -9,9 +9,9 @@ reaches; only the wording follows the session:
 - **Signed in:** "Open the dashboard".
 - **Anyone else, a session still loading included:** "View the dashboard (no
   sign-in needed)". Once the visitor is known to be signed out, a note under
-  the hero says that signing in keeps saved views and notebook investigations
-  with the account. The note's "Sign in" links to `/login`, and the note is
-  left out when no provider is configured.
+  the hero says that signing in keeps notebook investigations with the
+  account. The note's "Sign in" links to `/login`, and the note is left out
+  when no provider is configured.
 
 Below 720px the header hides its copy of the CTA, since the hero's sits in the
 first screen.

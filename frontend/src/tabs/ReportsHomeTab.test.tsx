@@ -137,13 +137,13 @@ describe("ReportsHomeTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("tells saved analyses in this browser apart from saved views kept with an account", () => {
+  it("tells saved analyses apart from saved views, both browser-local", () => {
     mockReports(trendResponse(), rankingResponse());
     renderTab("/agencies/1/reports?doc=saved");
     expect(
       screen.getByText(
         "These are saved analyses, kept in this browser by “Save analysis” on a route's page. Saved views are different: " +
-          "while signed in, “Saved views ▾” at the top of a screen keeps them with your account, and opens them on any device.",
+          "“Saved views ▾” at the top of a screen saves them in this browser too.",
       ),
     ).toBeInTheDocument();
   });

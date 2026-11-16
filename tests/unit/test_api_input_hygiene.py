@@ -1,25 +1,18 @@
 """Request-shape bounds on inputs that were typed as `Any`/`str` or not bounded
-at all. Pure model validation plus two standalone apps with the auth and
-connection dependencies overridden; no database."""
+at all. Pure model validation, plus one standalone app checking a CORS
+setting; no database."""
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import asyncpg
 import pytest
-from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from api.deps import get_conn
-from api.routers import me as me_router
 from api.routers.admin import ApiKeyCreate, InviteCreate
 from api.routers.auth import ProviderRejected, _fetch_userinfo
 from api.routers.conversations import _MAX_FILTER_CTX_BYTES, CreateConversation, UpdateConversation
-from api.security import require_user
-from tests.fixtures.users import admin_user
 
 
 # ── ApiKeyCreate ─────────────────────────────────────────────────────────────
@@ -60,27 +53,6 @@ def test_invite_create_accepts_a_plain_address():
 def test_invite_create_rejects_a_malformed_address(email):
     with pytest.raises(ValidationError):
         InviteCreate(email=email)
-
-
-# ── /me/presets unknown agency ───────────────────────────────────────────────
-class _FkFailingConn:
-    async def fetchrow(self, sql, *args):
-        raise asyncpg.ForeignKeyViolationError("insert or update on table violates foreign key constraint")
-
-
-def test_a_preset_for_an_unknown_agency_is_a_404_not_a_500(monkeypatch):
-    monkeypatch.setenv("ALLOW_TEST_ORIGIN", "1")
-    app = FastAPI()
-    app.include_router(me_router.router)
-    app.dependency_overrides[require_user] = lambda: admin_user()
-    app.dependency_overrides[get_conn] = lambda: _FkFailingConn()
-    resp = TestClient(app).post(
-        "/api/me/presets",
-        json={"agency_id": 999, "name": "p", "range_ctx": {}},
-        headers={"Origin": "http://test"},
-    )
-    assert resp.status_code == 404
-    assert resp.json()["detail"] == "unknown agency"
 
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
