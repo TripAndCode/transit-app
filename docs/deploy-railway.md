@@ -339,14 +339,16 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > `POST /internal/cron/ingest` poke) — the sketch has no `set -e`, so a
 > failed iteration is swallowed and the loop moves to the next `$id`
 > automatically, same effect as `scripts/fetch_and_ingest.sh`'s explicit
-> `continue` on exit 75. But unlike that script's local replay, this job's
+> `continue` on exit 75. `ingest` also exits 75 when it could not leave a day
+> with one source (`pipeline/archive_replace.py`); a retry over the same
+> archives settles it. But unlike that script's local replay, this job's
 > `/tmp/zips` is on **ephemeral** compute and the bucket pull is a
 > **two-day window** (the two UTC days before the run) — a skipped
 > agency's newer day is pulled once more by the next run, but its older day
 > then leaves the window, and no later run of this job pulls it again. The
 > archive stays in the bucket, so only a manual pull and `ingest` recovers
-> it. Given a lock collision is the one failure mode in this loop that's
-> known to be transient, add a short bounded retry around each `ingest`
+> it. Given exit 75 is the one failure in this loop that's known to be
+> transient, add a short bounded retry around each `ingest`
 > call (the archives are still local for the rest of this job's run)
 > rather than relying on "next scheduled run" to recover it, e.g.:
 > ```bash

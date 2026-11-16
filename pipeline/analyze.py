@@ -98,7 +98,6 @@ import psycopg2.extras
 from pipeline import (
     agg_registry,
     agg_sql,
-    archive_replace,
     ch_aggregates,
     feed_quality,
     rebuild_headline,
@@ -577,8 +576,8 @@ def _dates_the_move_reaches(
 
 
 def _ledger_counts(agency_id: int, ch_client, floor: date | None = None) -> dict:
-    """Each service date's (raw_samples, total_rows) as ClickHouse holds them
-    now, from *floor* on when given."""
+    """Each service date's (raw_samples, total_rows, live_rows) as ClickHouse
+    holds them now, from *floor* on when given."""
     live = _ch_query(
         "plan: per-date ledger",
         ch_client,
@@ -589,7 +588,7 @@ def _ledger_counts(agency_id: int, ch_client, floor: date | None = None) -> dict
             "before": agg_sql.LATEST_CAPTURE,
         },
     )
-    return {row[0]: (row[1], row[2]) for row in live.result_rows}
+    return {row[0]: (row[1], row[2], row[3]) for row in live.result_rows}
 
 
 def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None = None) -> list | None:
@@ -629,9 +628,8 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None =
     A date whose rows changed source is listed too, with both its neighbours,
     which the rows it lost may have filed under, even when its two counts held:
     archive ingest replacing a promoted day (pipeline.archive_replace) can keep
-    them. Only the dates stored with live rows are read for that
-    (archive_replace.live_rows_moved), since a replacement only moves a day
-    from live to archive.
+    them. A stored ``live_rows`` that is NULL predates the column and is taken
+    to match.
 
     One blind spot survives: the ledger compares per-date row COUNTS, so a
     date whose rows were replaced by exactly as many different rows from the
@@ -669,13 +667,16 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None =
         logger.info("  incremental: ledger predates total_rows; rebuilding every date")
         return None
 
-    live_counts = _ledger_counts(agency_id, ch_client, floor)
+    held = _ledger_counts(agency_id, ch_client, floor)
+    live_counts = {d: (raw, total) for d, (raw, total, _live) in held.items()}
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
-    swapped = archive_replace.live_rows_moved(
-        ch_client, agency_id, {d: live for d, live in stored_live.items() if d in stored and d not in stale}
-    )
+    swapped = {
+        d
+        for d, (_raw, _total, live) in held.items()
+        if d in stored and d not in stale and stored_live.get(d) is not None and stored_live[d] != live
+    }
     changed = stale | swapped | {d + timedelta(days=step) for d in swapped for step in (-1, 1)}
     changed |= _dates_filed_from(agency_id, ch_client, stale, stored, live_counts)
     return sorted(day for day in changed if floor is None or day >= floor)

@@ -70,15 +70,16 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
         STATIC_DIR="$SCRIPT_DIR/../raw_archives_static/$id"
         echo "==> [a$id] Ingesting RT archives"
         # gtfs_pipeline.py's ingest/analyze exit 75 (EX_TEMPFAIL) on ingest/
-        # analyze lock contention -- transient, self-healing on the next
-        # scheduled run -- rather than a genuine failure. Caught here (an
+        # analyze lock contention, and ingest on a day it left unsettled --
+        # transient, self-healing on the next scheduled run -- rather than a
+        # genuine failure. Caught here (an
         # `||` list is `set -e`-safe) and treated as "skip this agency
         # this run", not a script-ending error: a hard `exit` on contention
         # would abort every agency after this one under `set -euo pipefail`.
         code=0
         ingest_agency "$SCRIPT_DIR/../raw_archives/$id" "$STATIC_DIR" "*.zip" "$id" || code=$?
         if [ "$code" -eq 75 ]; then
-            echo "==> [a$id] ingest lock busy, skipping this agency this run"
+            echo "==> [a$id] ingest lock busy or a day left unsettled (see above), skipping this agency this run"
             continue
         fi
         if [ "$code" -eq 78 ]; then

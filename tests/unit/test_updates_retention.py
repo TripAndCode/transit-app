@@ -349,7 +349,11 @@ def stores(monkeypatch):
     monkeypatch.setattr(retention, "read_soft_deleted", lambda conn, ids: dict.fromkeys(ids, False))
     monkeypatch.setattr(retention, "read_ledgers", lambda conn, bounds: {1: held, 2: held})
     monkeypatch.setattr(retention, "read_stored_live", lambda conn, bounds: {agency_id: {} for agency_id in bounds})
-    monkeypatch.setattr(retention, "read_held_counts", lambda ch, agency_id, before, after: held)
+    monkeypatch.setattr(
+        retention,
+        "read_held_counts",
+        lambda ch, agency_id, before, after: {day: (*counts, 0) for day, counts in held.items()},
+    )
     monkeypatch.setattr(retention, "read_disagreements", lambda conn, ch, agency_id, floor: [])
     monkeypatch.setattr(retention, "read_unapplied", lambda conn, ch, agency_id: Unapplied([], []))
     monkeypatch.setattr(

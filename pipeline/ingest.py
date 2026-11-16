@@ -297,9 +297,9 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     agency's `updates` lock, which analyze takes too, so analyze never reads
     a day between the two while the run lasts. A run that dies between them
     leaves the day with both sources; the next run whose folder reaches near
-    that day settles it. A day this run cannot settle raises
+    that day returns it to its live copy, unless that folder covers it. A day this run cannot settle raises
     :class:`pipeline.archive_replace.ReplacementIncomplete` once every other
-    day is settled.
+    day is settled, unless *strict* raises :class:`IngestIncomplete` first.
 
     Raises :class:`StaticTimetableMissing`, having read and marked nothing,
     when the agency's strategy needs a timetable it does not have loaded.
@@ -385,6 +385,9 @@ def _ingest_folder(
     # The JST day each admitted file's rows land on, and the days a failed
     # file could have held rows of: a day among them is not replaced.
     stamped: dict[str, date] = {}
+    # Every member name the folder holds, stored, refused or already in the
+    # skip-list alike: the archive has those polls, whatever day they landed on.
+    read_members: set[str] = {f"{_date_dir(p.parent.name)}/{p.name}" for p in pb_loose}
     failed_days: set[date] = set()
 
     # A member is refused, and left unmarked, when its rows would land on a
@@ -558,6 +561,7 @@ def _ingest_folder(
                         inner_dir = pathlib.Path(m.name).parent.name
                         d = _date_dir(inner_dir) or date_dir
                         members.append((m, pb_name, d))
+                    read_members.update(f"{d}/{pb}" for _, pb, d in members)
                     # Checked before `seen` is consulted, not after: a member
                     # stamped before the bound is exactly the one a bounded
                     # skip-list cannot speak for.
@@ -642,10 +646,19 @@ def _ingest_folder(
     _flush()
 
     # A day left holding both sources by a run that died before settling it
-    # is settled here too, by the first run whose folder reaches near it.
+    # goes back to its live copy here, in the first run whose folder reaches
+    # near it, unless this run's folder covers it.
     span = {d for u in utc_days for d in (u, u + timedelta(days=1))} | set(stamped.values())
     unfinished = archive_replace.residue(ch_client, agency_id, span, floor, today) - replacing
-    rolled_back, unsettled = archive_replace.settle_all(ch_client, agency_id, replacing | unfinished, failed_days)
+    rolled_back, unsettled = archive_replace.settle_all(
+        ch_client,
+        agency_id,
+        replacing,
+        unfinished,
+        read=read_members,
+        failed=failed_days,
+        stored=set(stamped.values()),
+    )
     # The rows rolled back can include an earlier run's, on an unfinished day.
     n_inserted = max(0, n_inserted - rolled_back)
 
@@ -655,11 +668,13 @@ def _ingest_folder(
         logger.warning(f"Rolled back {rolled_back} archive rows of days that keep their live copy")
     logger.info(f"\nDone: {n_inserted} new rows inserted")
     if unsettled:
+        logger.error(f"Left {len(unsettled)} day(s) holding both sources: {'; '.join(unsettled)}")
+    if strict and n_errors:
+        raise IngestIncomplete(n_inserted, n_errors)
+    if unsettled:
         raise archive_replace.ReplacementIncomplete(
             f"agency {agency_id}: days left unsettled, holding both sources: {'; '.join(unsettled)}"
         )
-    if strict and n_errors:
-        raise IngestIncomplete(n_inserted, n_errors)
     return n_inserted
 
 

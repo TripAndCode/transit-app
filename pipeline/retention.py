@@ -28,7 +28,7 @@ from contextlib import ExitStack
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
 
-from pipeline import archive_replace, refiled
+from pipeline import refiled
 from pipeline import runs as pipeline_runs
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.agg_sql import EARLIEST_CAPTURE, LEDGER_COUNTS_CH_SQL
@@ -282,8 +282,8 @@ def plan_updates_prune(
       floor's own date is included: its rows can file under the day before
       it. Dates below the current floor are final already, and once a month
       of their rows is gone their counts differ by design. A date whose rows
-      changed source since it was built (*moved*,
-      archive_replace.live_rows_moved) is stale as well, whatever its counts;
+      changed source since it was built (*moved*: its live_rows differ) is
+      stale as well, whatever its counts;
     - its ClickHouse aggregates add up to their Postgres copies from its
       current floor on (*disagreeing* names those that do not): analyze
       repairs a disagreement only from the floor on;
@@ -448,26 +448,27 @@ def read_ledgers(conn, bounds: Mapping[int, date]) -> dict[int, dict[date, Count
 
 
 def read_stored_live(conn, bounds: Mapping[int, date]) -> dict[int, dict[date, int]]:
-    """Each agency's agg_feed_health dates through its bound in *bounds* that were built with live rows."""
+    """Each agency's agg_feed_health live_rows through its bound in *bounds*, where recorded."""
     stored: dict[int, dict[date, int]] = {}
     with conn.cursor() as cur:
         for agency_id, through in sorted(bounds.items()):
             cur.execute(
-                "SELECT date, live_rows FROM agg_feed_health WHERE agency_id = %s AND date <= %s AND live_rows > 0",
+                "SELECT date, live_rows FROM agg_feed_health "
+                "WHERE agency_id = %s AND date <= %s AND live_rows IS NOT NULL",
                 (agency_id, through),
             )
             stored[agency_id] = dict(cur.fetchall())
     return stored
 
 
-def read_held_counts(ch, agency_id: int, before: datetime, after: datetime | None) -> dict[date, Counts]:
-    """The agency's ledger counts of the rows `updates` holds captured before
-    *before*, and from *after* when given."""
+def read_held_counts(ch, agency_id: int, before: datetime, after: datetime | None) -> dict[date, tuple[int, int, int]]:
+    """The agency's ledger counts (raw_samples, total_rows, live_rows) of the
+    rows `updates` holds captured before *before*, and from *after* when given."""
     rows = ch.query(
         LEDGER_COUNTS_CH_SQL,
         parameters={"agency_id": agency_id, "after": after or EARLIEST_CAPTURE, "before": before},
     ).result_rows
-    return {day: (int(raw), int(total)) for day, raw, total in rows}
+    return {day: (int(raw), int(total), int(live)) for day, raw, total, live in rows}
 
 
 def read_unapplied(conn, ch, agency_id: int) -> "Unapplied":
@@ -507,10 +508,10 @@ def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime, no
     for agency_id, bound in bounds.items():
         current = floors.get(agency_id)
         after = None if current is None else min(oldest[agency_id], service_day_start_utc(current))
-        live[agency_id] = read_held_counts(ch, agency_id, service_day_start_utc(bound + timedelta(days=1)), after)
-        moved[agency_id] = archive_replace.live_rows_moved(
-            ch, agency_id, {day: n for day, n in stored_live[agency_id].items() if current is None or day >= current}
-        )
+        held = read_held_counts(ch, agency_id, service_day_start_utc(bound + timedelta(days=1)), after)
+        live[agency_id] = {day: (raw, total) for day, (raw, total, _live) in held.items()}
+        recorded = stored_live[agency_id]
+        moved[agency_id] = {day for day, (_raw, _total, n) in held.items() if day in recorded and recorded[day] != n}
         disagreeing[agency_id] = read_disagreements(conn, ch, agency_id, current)
         pending[agency_id] = read_unapplied(conn, ch, agency_id)
     return plan_updates_prune(

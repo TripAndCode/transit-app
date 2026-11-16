@@ -252,9 +252,9 @@ def _rolling_pair(folder, day: date) -> None:
     _tarball(folder, day, [_at(day, hh) for hh in (10, 12, 20)] + [_at(day + _DAY, hh) for hh in (1, 3)])
 
 
-def test_the_next_rolling_pair_finishes_an_interrupted_replacement(pg_conn, ch_client, agency_id, tmp_path):
-    """The next day's folder no longer covers D, and every member of D is
-    already stored, yet D is settled from what `updates` holds."""
+def test_the_next_rolling_pair_returns_an_interrupted_day_to_live(pg_conn, ch_client, agency_id, tmp_path):
+    """The next day's folder no longer covers D, so it has not read D's
+    archive itself: D goes back to its live copy, whatever `updates` holds."""
     _promote(ch_client, agency_id, [*_LIVE_POLLS, _at(D + _DAY, 3), _at(D + _DAY, 12)])
     first, second = tmp_path / "first", tmp_path / "second"
     first.mkdir()
@@ -268,7 +268,7 @@ def test_the_next_rolling_pair_finishes_an_interrupted_replacement(pg_conn, ch_c
     _tarball(second, D, [_at(D, hh) for hh in (10, 12, 20)] + [_at(D + _DAY, hh) for hh in (1, 3)])
     _ingest(second, agency_id, pg_conn, ch_client)
 
-    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 4, 2)
     assert day_sources(ch_client, agency_id, D + _DAY) == DaySources(10, 5, 0, 0)
 
 
@@ -305,18 +305,21 @@ def test_an_archive_with_a_gap_keeps_the_live_day_whatever_its_poll_count(pg_con
 
 def test_a_push_stamped_after_midnight_matches_its_member_stamped_before(pg_conn, ch_client, agency_id, tmp_path):
     """The collector stamps a push when it sends it, the archive by the feed's
-    header, so one poll can fall either side of JST midnight."""
+    header, so one poll can fall either side of JST midnight. D-1 still holds
+    its live copy, so that member is refused and never stored; the run read
+    it all the same."""
     header = _at(D - _DAY, 23, 59)
     sent = header + timedelta(minutes=2)
     rows = [(f"oracle/{_member_name(header)}", sent, trip, "平日", "12:00", "R1", 1, 60) for trip in ("T1", "T2")]
     insert_updates(ch_client, agency_id, rows)
-    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _promote(ch_client, agency_id, [*_LIVE_POLLS, _at(D - _DAY, 12)])
     _tarball(tmp_path, D - _DAY, [header, *(_at(D, hh) for hh in (1, 3))])
     _tarball(tmp_path, D, [_at(D, hh) for hh in (10, 12, 20)])
 
     _ingest(tmp_path, agency_id, pg_conn, ch_client)
 
-    assert day_sources(ch_client, agency_id, D).live_rows == 0
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+    assert day_sources(ch_client, agency_id, D - _DAY) == DaySources(0, 0, 2, 1)
 
 
 def test_an_insert_that_lands_before_it_fails_is_taken_back(pg_conn, ch_client, agency_id, tmp_path):
@@ -364,7 +367,11 @@ def test_an_unreadable_tarball_keeps_both_of_its_days_live(pg_conn, ch_client, a
     assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 4, 2)
 
 
-def test_check_aggs_fails_on_a_day_holding_both_sources(pg_conn, ch_client, agency_id, tmp_path, monkeypatch, caplog):
+def test_check_aggs_warns_of_a_day_holding_both_sources_without_failing(
+    pg_conn, ch_client, agency_id, tmp_path, monkeypatch, caplog
+):
+    """dev's upgrade runs check-aggs with no sanctioned way to settle such a
+    day, and the next ingest reaching it settles it anyway."""
     import gtfs_pipeline
     from pipeline import freshness
 
@@ -375,11 +382,59 @@ def test_check_aggs_fails_on_a_day_holding_both_sources(pg_conn, ch_client, agen
         _ingest(tmp_path, agency_id, pg_conn, ch_client)
     assert freshness.two_source_days(pg_conn, ch_client, [agency_id]) == {agency_id: [D]}
 
-    with pytest.raises(SystemExit) as exc:
-        gtfs_pipeline.cmd_check_aggs(None)
-    assert exc.value.code == 1
+    gtfs_pipeline.cmd_check_aggs(None)
     assert f"TWO SOURCES agency {agency_id}: {D}" in caplog.text
 
     _ingest(tmp_path, agency_id, pg_conn, ch_client)
     assert freshness.two_source_days(pg_conn, ch_client, [agency_id]) == {}
-    gtfs_pipeline.cmd_check_aggs(None)
+
+
+def test_a_day_with_no_push_keeps_its_live_samples(pg_conn, ch_client, agency_id, tmp_path):
+    """A run died after flushing tarball D-1's members of D. D holds only the
+    live path's own samples, which the archive cannot be checked against, so
+    even a rerun over both tarballs keeps them."""
+    samples = [_at(D, 6), _at(D, 18)]
+    insert_updates(
+        ch_client,
+        agency_id,
+        [(f"live_{at:%Y%m%dT%H%M%SZ}", at, "T1", "平日", "12:00", "R1", 1, 60) for at in samples],
+    )
+    flushed = [_at(D, 1), _at(D, 3)]
+    insert_updates(
+        ch_client, agency_id, [row for at in flushed for row in _poll_rows(b"", at, _member_name(at), 0, None)]
+    )
+    _complete_archive(tmp_path)
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 2, 0)
+
+
+def test_a_day_whose_tarball_fails_before_this_run_stored_any_is_left_as_it_is(pg_conn, ch_client, agency_id, tmp_path):
+    """A run died after storing all of D's archive. The rerun cannot open
+    tarball D-1 and reads every member of D's own tarball from the skip-list,
+    so it stores nothing of D and has no ground to delete what is there."""
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+    with patch.object(archive_replace, "settle", return_value=0):
+        _ingest(tmp_path, agency_id, pg_conn, ch_client)
+    (tmp_path / f"{D - _DAY:%Y%m%d}.tar.gz").write_bytes(b"not a tarball")
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 4, 2)
+
+
+def test_a_strict_run_reports_its_skipped_files_before_an_unsettled_day(pg_conn, ch_client, agency_id, tmp_path):
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+    broken = _member_name(_at(D, 20))
+
+    def parse(raw, ts, file_name, aid, conn):
+        if file_name == broken:
+            raise ValueError("corrupt member")
+        return _poll_rows(raw, ts, file_name, aid, conn)
+
+    with patch.object(archive_replace, "_delete", side_effect=OperationalError("delete timed out")):
+        with pytest.raises(IngestIncomplete):
+            _ingest(tmp_path, agency_id, pg_conn, ch_client, parse=parse, strict=True)

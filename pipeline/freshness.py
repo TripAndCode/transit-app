@@ -38,7 +38,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from pipeline.clickhouse import days_with_source, jst_date, majority_source, newest_filed_date_before
+from pipeline.agg_sql import EARLIEST_CAPTURE
+from pipeline.clickhouse import LIVE_SOURCED, jst_date, jst_midnight_utc, majority_source, newest_filed_date_before
 from pipeline.retention import retention_floors
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -134,7 +135,11 @@ def day_ranges(days: list[date]) -> str:
     return ", ".join(str(run[0]) if len(run) == 1 else f"{run[0]}..{run[-1]}" for run in runs)
 
 
-_EARLIEST_ROW_SQL = "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at LIMIT 1"
+_TWO_SOURCE_DAYS_SQL = (
+    "SELECT toDate(captured_at, 'Asia/Tokyo') AS day FROM updates "
+    "WHERE agency_id = {agency_id:UInt16} AND captured_at >= {since:DateTime64} AND captured_at < {before:DateTime64} "
+    f"GROUP BY day HAVING countIf({LIVE_SOURCED}) > 0 AND countIf(NOT {LIVE_SOURCED}) > 0 ORDER BY day"
+)
 
 
 def two_source_days(
@@ -148,21 +153,14 @@ def two_source_days(
     and a live one. Read-only."""
     ids = sorted(set(agency_ids))
     floors = retention_floors(conn, ids)
-    yesterday = jst_date(now or datetime.now(ZoneInfo("UTC"))) - timedelta(days=1)
+    before = jst_midnight_utc(jst_date(now or datetime.now(ZoneInfo("UTC"))))
     found: dict[int, list[date]] = {}
     for agency_id in ids:
-        rows = ch_client.query(_EARLIEST_ROW_SQL, parameters={"agency_id": agency_id}).result_rows
-        if not rows:
-            continue
-        earliest = rows[0][0] if rows[0][0].tzinfo else rows[0][0].replace(tzinfo=ZoneInfo("UTC"))
-        first = jst_date(earliest)
         floor = floors.get(agency_id)
-        if floor is not None:
-            first = max(first, floor + timedelta(days=1))
-        days = [first + timedelta(days=i) for i in range((yesterday - first).days + 1)]
-        both = days_with_source(ch_client, agency_id, days, live_sourced=True) & days_with_source(
-            ch_client, agency_id, days, live_sourced=False
-        )
-        if both:
-            found[agency_id] = sorted(both)
+        since = EARLIEST_CAPTURE if floor is None else jst_midnight_utc(floor + timedelta(days=1))
+        rows = ch_client.query(
+            _TWO_SOURCE_DAYS_SQL, parameters={"agency_id": agency_id, "since": since, "before": before}
+        ).result_rows
+        if rows:
+            found[agency_id] = [row[0] for row in rows]
     return found
