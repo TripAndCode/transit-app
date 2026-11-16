@@ -31,14 +31,14 @@ from api.range import TIME_BAND_RANGES
 from api.triage import LOW_CONFIDENCE_SAMPLES
 
 # Plain-language disclaimer — NO jargon (p90/percentile/baseline forbidden).
-# Defines a "measurement" inline so `samples` is never ambiguous.
+# Defines an "observation" inline so the unit is never ambiguous.
 _DISCLAIMER: dict[tuple[str, str], str] = {
     ("heatmap", "ja"): (
-        "曜日・時間帯ごとに、この路線の過去の遅れの計測記録から平均を出したものです"
-        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
+        "曜日・時間帯ごとに、この路線の過去の遅れの観測から平均を出したものです"
+        "（1件＝ある日のある停留所での1観測）。事故・天候・当日の運行状況は反映していません。"
     ),
     ("heatmap", "en"): (
-        "Average delay by day of week and hour, from this route's past measurements "
+        "Average delay by day of week and hour, from this route's past observations "
         "(each = one stop, on one run, on one day). It does not account for incidents, "
         "weather, or today's conditions."
     ),
@@ -47,35 +47,35 @@ _DISCLAIMER: dict[tuple[str, str], str] = {
     # would then be false for those cells.
     ("heatmap_ml", "ja"): (
         "曜日・時間帯ごとの見込みです。一部は予測モデルによる見込み値で、"
-        "残りはこの路線の過去の遅れの計測記録から平均を出したものです"
-        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況を"
+        "残りはこの路線の過去の遅れの観測から平均を出したものです"
+        "（1件＝ある日のある停留所での1観測）。事故・天候・当日の運行状況を"
         "完全には反映していません。"
     ),
     ("heatmap_ml", "en"): (
         "Expected delay by day of week and hour. Some cells show a forecast model's "
-        "estimate; the rest average this route's past measurements "
+        "estimate; the rest average this route's past observations "
         "(each = one stop, on one run, on one day). It may not fully account for "
         "incidents, weather, or today's conditions."
     ),
     # The agency-wide overview pools every route, so it names the agency's routes, not one route.
     ("overview", "ja"): (
-        "曜日・時間帯ごとに、この事業者の全路線の過去の遅れの計測記録から平均を出したものです"
-        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況は反映していません。"
+        "曜日・時間帯ごとに、この事業者の全路線の過去の遅れの観測から平均を出したものです"
+        "（1件＝ある日のある停留所での1観測）。事故・天候・当日の運行状況は反映していません。"
     ),
     ("overview", "en"): (
-        "Average delay by day of week and time of day, across the past measurements of all "
+        "Average delay by day of week and time of day, across the past observations of all "
         "of this agency's routes (each = one stop, on one run, on one day). It does not "
         "account for incidents, weather, or today's conditions."
     ),
     ("overview_ml", "ja"): (
         "曜日・時間帯ごとの見込みです。一部は予測モデルによる見込み値で、"
-        "残りはこの事業者の全路線の過去の遅れの計測記録から平均を出したものです"
-        "（1回＝ある日のある停留所での1計測）。事故・天候・当日の運行状況を"
+        "残りはこの事業者の全路線の過去の遅れの観測から平均を出したものです"
+        "（1件＝ある日のある停留所での1観測）。事故・天候・当日の運行状況を"
         "完全には反映していません。"
     ),
     ("overview_ml", "en"): (
         "Expected delay by day of week and time of day. Some cells show a forecast model's "
-        "estimate; the rest average the past measurements of all of this agency's routes "
+        "estimate; the rest average the past observations of all of this agency's routes "
         "(each = one stop, on one run, on one day). It may not fully account for "
         "incidents, weather, or today's conditions."
     ),
@@ -316,7 +316,7 @@ def summarize_agency_overview(
     already computed, for the same reason as the heatmap's own ``ml_cells``.
     A published forecast's ``mean_min`` is the model's point forecast, which
     need not be a mean, so ``worst`` carries its band's ``source`` too: a
-    caller must not word an ML-sourced figure as an average of measurements.
+    caller must not word an ML-sourced figure as an average of observations.
     """
     # ── grid: pool hours into bands per (dow, band) ──────────────────────
     ml_cells = list(ml_cells)

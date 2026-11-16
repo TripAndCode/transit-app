@@ -51,7 +51,7 @@ describe("ForecastPeriodNote", () => {
     renderWithProviders(<ForecastPeriodNote aid={1} route={null} />);
     const note = screen.getByTestId("fc-period");
     expect(note).toHaveTextContent("Forecast for Tue, Oct 27 – Sun, Nov 1.");
-    expect(note).toHaveTextContent("Days and times without a forecast show the average of measurements over Jul 12 – Oct 23.");
+    expect(note).toHaveTextContent("Days and times without a forecast show the average of observations over Jul 12 – Oct 23.");
   });
 
   it("says nothing about past averages when every shown cell is a forecast", () => {
@@ -64,7 +64,7 @@ describe("ForecastPeriodNote", () => {
     mockData(overview({ history_from: "2026-09-10" }));
     renderWithProviders(<ForecastPeriodNote aid={1} route={null} />);
     expect(screen.getByTestId("fc-period")).toHaveTextContent(
-      "Not a forecast for particular dates: the average by day and time of day of measurements over Sep 10 – Oct 23.",
+      "Not a forecast for particular dates: the average by day and time of day of observations over Sep 10 – Oct 23.",
     );
   });
 
@@ -83,13 +83,13 @@ describe("ForecastPeriodNote", () => {
     renderWithProviders(<ForecastPeriodNote aid={1} route="100" />);
     const note = screen.getByTestId("fc-period");
     expect(note).toHaveTextContent("Forecast for Tue, Oct 27.");
-    expect(note).toHaveTextContent("measurements over Aug 1 – Oct 20.");
+    expect(note).toHaveTextContent("observations over Aug 1 – Oct 20.");
   });
 
   it("falls back to undated wording when the measured period is unknown", () => {
     mockData(overview({ grid: grid([2]), forecast_days: [SIX_DAYS[0]], history_from: null, history_to: null, recent_from: null, recent_to: null }));
     renderWithProviders(<ForecastPeriodNote aid={1} route={null} />);
-    expect(screen.getByTestId("fc-period")).toHaveTextContent("Days and times without a forecast show the average of past measurements.");
+    expect(screen.getByTestId("fc-period")).toHaveTextContent("Days and times without a forecast show the average of past observations.");
   });
 
   it("reads only the chosen route's forecast on a route's view, never the agency overview", () => {
@@ -107,7 +107,7 @@ describe("ForecastPeriodNote", () => {
     expect(screen.queryByTestId("fc-period")).toBeNull();
   });
 
-  it("renders nothing before the data arrives, or for an agency with neither forecast nor measurements", () => {
+  it("renders nothing before the data arrives, or for an agency with neither forecast nor observations", () => {
     mockData(undefined);
     const { container, unmount } = renderWithProviders(<ForecastPeriodNote aid={1} route={null} />);
     expect(container).toBeEmptyDOMElement();
@@ -119,25 +119,25 @@ describe("ForecastPeriodNote", () => {
 });
 
 describe("ForecastHistory", () => {
-  it("heads its content as past measurements over the window they cover", () => {
+  it("heads its content as past observations over the window they cover", () => {
     renderWithProviders(
       <ForecastHistory from="2026-07-12" to="2026-10-21" recentFrom="2026-10-17" recentTo="2026-10-23">
         <p>routes</p>
       </ForecastHistory>,
     );
-    const section = screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 21)" });
-    expect(section).toHaveTextContent("Each route's figure is the average of its measurements in this period.");
+    const section = screen.getByRole("region", { name: "Past observations (Jul 12 – Oct 21)" });
+    expect(section).toHaveTextContent("Each route's figure is the average of its observations in this period.");
     expect(section).toHaveTextContent("The small line traces its daily average on the days with data over Oct 17 – Oct 23.");
     expect(section).toHaveTextContent("routes");
   });
 
-  it("keeps the past-measurements heading when the window is unknown", () => {
+  it("keeps the past-observations heading when the window is unknown", () => {
     renderWithProviders(
       <ForecastHistory from={null} to={null} recentFrom={null} recentTo={null}>
         <p>routes</p>
       </ForecastHistory>,
     );
-    const section = screen.getByRole("region", { name: "Past measurements" });
+    const section = screen.getByRole("region", { name: "Past observations" });
     expect(section).not.toHaveTextContent("small line");
   });
 });

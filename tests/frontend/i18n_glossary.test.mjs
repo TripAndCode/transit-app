@@ -27,11 +27,27 @@ const JA_VARIANTS = [
   // The Saturday-Sunday day filter is 土日 on every screen; 土日祝 names the
   // weekend-and-holiday timetable, which is a different set of days.
   [/土日のみ/, "土日"],
+  // One trip leaving one stop is an 観測, and its count is 観測数 on every
+  // screen, in the manual and in the council report. サンプルデータ (sample
+  // data in the landing page's mock-up) is a different thing and stays.
+  [/観測データ数/, "観測数"],
+  [/サンプル数/, "観測数"],
+  [/計測回数/, "観測数"],
+  [/計測(記録|が少な|の平均|から)|これまでの計測/, "観測"],
+  [/少数サンプル|サンプルが少な/, "観測数が少ない"],
 ];
 const EN_VARIANTS = [
   [/Print \/ Save PDF/, "Print / Save as PDF"],
   [/Continue with/, "Sign in with"],
   [/certificate(?! issued)/i, "Delay record (for reference)"],
+  // The count of one trip leaving one stop is Observations wherever it is a
+  // column, figure or glossary term, in prose as in a label. The admin
+  // board's probe samples are a different count, so assertAbsent skips the
+  // locale file's admin subtree for these.
+  // Not a bare `samples:` key, which design.ts keeps as an identifier.
+  [/\bsamples\b(?!\s*:)/i, "observations"],
+  [/\bSample counts?\b/, "Observation counts"],
+  [/\bmeasurements\b/i, "observations"],
 ];
 
 const JA_SOURCES = [
@@ -51,9 +67,13 @@ const EN_SOURCES = [
 
 /** The words a reader sees in a file: a locale file's values, not its keys,
  *  and a Markdown page's prose, not its link and image targets. */
-function copyText(file) {
+function copyText(file, { skipAdmin = false } = {}) {
   const text = readFileSync(file, "utf8");
-  if (file.endsWith(".json")) return jsonValues(JSON.parse(text)).join("\n");
+  if (file.endsWith(".json")) {
+    const locale = JSON.parse(text);
+    if (skipAdmin) delete locale.admin;
+    return jsonValues(locale).join("\n");
+  }
   if (file.endsWith(".md")) return text.replace(/\]\([^)]*\)/g, "]");
   return text;
 }
@@ -64,9 +84,10 @@ function jsonValues(node) {
   return [];
 }
 
-function assertAbsent(variants, sources) {
+function assertAbsent(variants, sources, options) {
   for (const file of sources) {
-    const text = copyText(file);
+    // A {{samples}} placeholder is a field name, not a word the reader sees.
+    const text = copyText(file, options).replace(/\{\{[^}]*\}\}/g, " ");
     for (const [variant, preferred] of variants) {
       assert.equal(text.match(variant), null, `${file} uses ${variant.source}; say ${preferred}`);
     }
@@ -75,4 +96,4 @@ function assertAbsent(variants, sources) {
 
 test("glossary: Japanese copy uses one word per thing", () => assertAbsent(JA_VARIANTS, JA_SOURCES));
 
-test("glossary: English copy uses one phrase per thing", () => assertAbsent(EN_VARIANTS, EN_SOURCES));
+test("glossary: English copy uses one phrase per thing", () => assertAbsent(EN_VARIANTS, EN_SOURCES, { skipAdmin: true }));

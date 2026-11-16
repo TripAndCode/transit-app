@@ -99,18 +99,18 @@ describe("RouteTableScreen", () => {
   it("hides the observation count until statistics are asked for, and remembers the choice", async () => {
     setup("/agencies/9/routes");
     const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
-    expect(headers()).not.toContain("Samples");
+    expect(headers()).not.toContain("Observations");
     const toggle = screen.getByRole("checkbox", { name: "Show statistics" });
     expect(toggle).not.toBeChecked();
     await userEvent.click(toggle);
-    expect(headers()).toContain("Samples");
+    expect(headers()).toContain("Observations");
     expect(localStorage.getItem("transit.showStatistics")).toBe("1");
     // A later visit in this browser reads the stored choice.
     cleanup();
     resetShowStatisticsForTests();
     setup("/agencies/9/routes");
     expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeChecked();
-    expect(headers()).toContain("Samples");
+    expect(headers()).toContain("Observations");
     await userEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
     expect(localStorage.getItem("transit.showStatistics")).toBe("0");
   });

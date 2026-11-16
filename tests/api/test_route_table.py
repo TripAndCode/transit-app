@@ -266,7 +266,7 @@ async def test_the_summary_names_the_sort_in_the_requested_language(reports_clie
     )
     assert en["text"] == (
         "[Routes, highest share over 5 min first]\n"
-        "#1 route S1 mean 1.7 min, on-time 75.0%, more than 1 min early 0.0%, over 5 min 25.0% (25), 100 samples"
+        "#1 route S1 mean 1.7 min, on-time 75.0%, more than 1 min early 0.0%, over 5 min 25.0% (25), 100 observations"
     )
 
 

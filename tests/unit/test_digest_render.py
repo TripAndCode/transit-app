@@ -35,7 +35,7 @@ def test_render_ja_contains_core_parts():
     assert "44372" in out
     assert "広島バス" in out
     assert "データなし" in out
-    assert "※少数サンプル" in out
+    assert "※観測数が少ない" in out
     assert "鮮度警告" in out
 
 
@@ -43,7 +43,7 @@ def test_render_en_switches_language():
     out = render_digest(_sample_data(), "en")
     assert "Daily digest" in out
     assert "No data for" in out
-    assert "(low sample)" in out
+    assert "(few observations)" in out
     assert "Freshness: aggregates lagging" in out
 
 
