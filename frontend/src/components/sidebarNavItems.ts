@@ -1,7 +1,10 @@
 import { Activity, Clock, FileText, GitCompare, Radio, Route, SearchCheck } from "lucide-react";
 import type { Destination } from "../routes/destinations";
 
-/** The sidebar's destinations, in the order it lists them.
+/** The sidebar's destinations, in the order it lists them. `railLabelKey`
+ *  is a shorter name for the open rail, where a station's name has about
+ *  165px beside its badge (less while the chord hint shows); the page title,
+ *  palette and phone sheet use `labelKey`.
  *
  *  Lives outside Sidebar.tsx so a consumer can take the list without
  *  importing the component -- a file exporting both is not a component
@@ -11,7 +14,7 @@ export const SIDEBAR_NAV_ITEMS = [
   { to: "routes", labelKey: "nav.routes", Icon: Route },
   { to: "time", labelKey: "nav.time", Icon: Clock },
   { to: "why", labelKey: "nav.why", Icon: SearchCheck },
-  { to: "compare", labelKey: "nav.compare", Icon: GitCompare },
+  { to: "compare", labelKey: "nav.compare", railLabelKey: "nav.compare_short", Icon: GitCompare },
   { to: "live", labelKey: "nav.live", Icon: Radio },
   { to: "reports", labelKey: "nav.reports", Icon: FileText },
-] as const satisfies readonly { to: Destination; labelKey: string; Icon: unknown }[];
+] as const satisfies readonly { to: Destination; labelKey: string; railLabelKey?: string; Icon: unknown }[];

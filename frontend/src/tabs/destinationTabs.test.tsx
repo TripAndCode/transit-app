@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { CompareTab } from "./CompareTab";
 import { TimeTab } from "./TimeTab";
@@ -96,11 +95,5 @@ describe("destination screens", () => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
     expect(await screen.findByText("single-report:compare_ranking")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Weekdays and weekends/holidays" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("names the Compare screen for what it compares in both languages", async () => {
-    const en = i18n.getFixedT("en");
-    const ja = i18n.getFixedT("ja");
-    expect([en("nav.compare"), ja("nav.compare")]).toEqual(["Day types & agencies", "日種別・事業者の比較"]); // i18n-ignore: wording under test
   });
 });

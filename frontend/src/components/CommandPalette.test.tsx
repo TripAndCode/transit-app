@@ -246,7 +246,7 @@ describe("CommandPalette", () => {
     await user.click(screen.getByText("Dwell/running time"));
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/why");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
-    expect(search.get("report")).toBe("dwell_run");
+    expect(search.has("report")).toBe(false);
     expect(search.has("from")).toBe(false);
   });
 

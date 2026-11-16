@@ -121,8 +121,9 @@ export function reportsView(doc: string | null, report: string | null): ReportsV
 }
 
 /** Where each report type lives. Reports' own documents are picked by
- *  `doc`, the Routes table's lists by `sort` (and `order`), and every other
- *  screen opens the type by `report`. */
+ *  `doc`, the Routes table's lists by `sort` (and `order`), and Time opens
+ *  its types by `report`. Why and Compare each show their one report, so a
+ *  link to either names only the screen (and Compare's `by`). */
 const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<string, string> }> = {
   ranking: { dest: "routes", extra: { sort: "avg" } },
   ranking_best: { dest: "routes", extra: { sort: "avg", order: "best" } },
@@ -132,8 +133,8 @@ const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<strin
   dow_weekday: { dest: "time", extra: { report: "dow_weekday" } },
   dow_weekend: { dest: "time", extra: { report: "dow_weekend" } },
   route_forecast: { dest: "time", extra: { report: "route_forecast" } },
-  dwell_run: { dest: "why", extra: { report: "dwell_run" } },
-  compare_ranking: { dest: "compare", extra: { by: "periods", report: "compare_ranking" } },
+  dwell_run: { dest: "why", extra: {} },
+  compare_ranking: { dest: "compare", extra: { by: "periods" } },
   council_summary: { dest: "reports", extra: { doc: "council" } },
   delay_certificate: { dest: "reports", extra: { doc: "certificate" } },
 };

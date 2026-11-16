@@ -128,7 +128,7 @@ describe("legacy redirects", () => {
   it("sends an analysis/:reportType bookmark to the screen hosting it", () => {
     const loc = go(LENS, <RedirectAnalysisLens />, "/agencies/9/analysis/dwell_run?routes=50", "agencies/:agencyId/why");
     expect(loc.pathname).toBe("/agencies/9/why");
-    expect(loc.params.get("report")).toBe("dwell_run");
+    expect(loc.params.has("report")).toBe(false);
     expect(loc.params.get("routes")).toBe("50");
   });
 

@@ -536,8 +536,10 @@ export function Sidebar() {
         className="app-sidebar-desktop"
         style={{
           // The line map's badge column is centred 38px in at either width
-          // (sidebarLineMap.css), so the collapsed rail is twice that. 248
-          // fits a station's name and its chord hint beside the badge.
+          // (sidebarLineMap.css), so the collapsed rail is twice that. At 248
+          // a station's name has about 165px beside its badge, and about
+          // 110px while the chord hint shows; a longer name truncates
+          // (`.rail-name`), so a long screen name gets a short rail key.
           width: collapsed ? 76 : 248,
           background: "var(--bg-surface)",
           borderRight: "1px solid var(--border-soft)",

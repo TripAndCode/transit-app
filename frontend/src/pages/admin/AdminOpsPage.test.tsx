@@ -85,7 +85,7 @@ describe("AdminOpsPage", () => {
 
   it("points the cross-agency comparison at Compare by agencies", () => {
     wrap(<AdminOpsPage />);
-    expect(screen.getByText("To compare delay across agencies, open Compare and choose Agencies.")).toBeTruthy();
+    expect(screen.getByText("To compare delay across agencies, open Day types & agencies and choose Agencies.")).toBeTruthy();
   });
 
   it("renders agency row", () => {

@@ -425,8 +425,15 @@ describe("AnalysisTab empty state recoveries", () => {
     renderRecoveryTab("/agencies/8/analysis/rider?report=ranking&from=2020-01-01&to=2020-01-07&routes=A05");
     expect(screen.getByRole("button", { name: "Clear the route filter" })).toBeInTheDocument();
   });
+});
 
-  it("offers the dwell_run recovery only for the no-routes case, not the not_available/unsupported states", () => {
+
+describe("Why screen empty state recovery", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("offers the recovery only for the no-routes case, not the not_available/unsupported states", () => {
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null } as never);
     vi.spyOn(hooks, "useAgencies").mockReturnValue({
       data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
@@ -450,7 +457,7 @@ describe("AnalysisTab empty state recoveries", () => {
   });
 });
 
-describe("AnalysisTab dwell_run route cap", () => {
+describe("Why screen route cap", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -704,7 +711,7 @@ describe("AnalysisTab route list coverage", () => {
   });
 });
 
-describe("AnalysisTab Why without arrival times", () => {
+describe("Why screen without arrival times", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -750,7 +757,7 @@ describe("AnalysisTab Why without arrival times", () => {
     const { router } = showUnavailableDwellRun();
     await userEvent.click(screen.getByRole("button", { name: "Compare weekdays with weekends and holidays" }));
     expect(router.state.location.pathname).toBe("/agencies/1/compare");
-    expect(new URLSearchParams(router.state.location.search).get("report")).toBe("compare_ranking");
+    expect(new URLSearchParams(router.state.location.search).has("report")).toBe(false);
   });
 
   it("offers no CSV of a split it can't make", () => {
@@ -1439,10 +1446,10 @@ describe("SingleReportScreen", () => {
     expect(useReport.mock.calls.at(-1)?.[1]).toBe(reportType);
   });
 
-  it("keeps the report's heading, export and controls", () => {
+  it("keeps the report's heading, export and statistics toggle", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReport").mockReturnValue({
-      data: { ...emptyReport("dwell_run"), rows: [{ available: true, time_band_supported: true, routes: [] }] },
+      data: { ...emptyReport("dwell_run"), rows: [{ available: true, time_band_supported: true, routes: [{ route_code: "R1", service_type: null, dwell_samples: 1, dwell_avg_sec: 20, dwell_p50_sec: 18, dwell_p90_sec: 40, run_samples: 1, run_avg_sec: 90, run_p50_sec: 85, run_p90_sec: 130 }] }] },
       isFetching: false,
       error: null,
       refetch: vi.fn(),
@@ -1450,5 +1457,6 @@ describe("SingleReportScreen", () => {
     renderSingleReport("/agencies/1/analysis/why", "dwell_run");
     expect(screen.getByRole("heading", { level: 2, name: "Dwell/running time" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /CSV/ })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeInTheDocument();
   });
 });

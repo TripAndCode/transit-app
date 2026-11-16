@@ -78,6 +78,7 @@ export function SidebarLineMap({
         />
         {SIDEBAR_NAV_ITEMS.map((item) => {
           const label = t(item.labelKey);
+          const railLabel = "railLabelKey" in item ? t(item.railLabelKey) : label;
           const stops = place?.dest === item.to ? openStops : undefined;
           const figure = collapsed ? undefined : figures[item.to];
           return (
@@ -86,7 +87,7 @@ export function SidebarLineMap({
                 <PendingNavLink
                   to={withQuery(`/agencies/${agencyId}/${item.to}`, screenQuery(agencyId, item.to))}
                   className="rail-station"
-                  aria-label={collapsed || figure ? label : undefined}
+                  aria-label={collapsed || figure || railLabel !== label ? label : undefined}
                   aria-describedby={figure ? `${figureId}-${item.to}` : undefined}
                   onMouseEnter={() => prefetchRouteChunk(item.to)}
                   onFocus={() => prefetchRouteChunk(item.to)}
@@ -94,7 +95,11 @@ export function SidebarLineMap({
                   <span className="rail-badge" aria-hidden="true">
                     <item.Icon size={18} strokeWidth={2} />
                   </span>
-                  {!collapsed && <span className="rail-name">{label}</span>}
+                  {!collapsed && (
+                    <span className="rail-name" title={railLabel !== label ? label : undefined}>
+                      {railLabel}
+                    </span>
+                  )}
                   {/* The link keeps the screen's name through aria-label and
                       reads the figure as its description. */}
                   {figure && (

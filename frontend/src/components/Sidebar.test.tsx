@@ -60,6 +60,21 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: /Open the command palette/ })).toBeNull();
   });
 
+  it.each([
+    ["en", "Days & agencies", "Day types & agencies"],
+    ["ja", "日種別・事業者", "日種別・事業者の比較"],
+  ])("shows the short %s name on the rail and keeps the full one as the link's name", async (lang, shortName, fullName) => {
+    await i18n.changeLanguage(lang);
+    try {
+      renderSidebar();
+      const link = within(screen.getByRole("navigation", { name: i18n.t("nav.destinations_label") })).getByRole("link", { name: fullName });
+      expect(link.querySelector(".rail-name")).toHaveTextContent(new RegExp(`^${shortName}$`));
+      expect(link.querySelector(".rail-name")).toHaveAttribute("title", fullName);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
+  });
+
   it("never lists Bus Town in the desktop rail, which reaches it only through the command palette", () => {
     renderSidebar();
     expect(screen.queryByRole("link", { name: "Bus Town" })).toBeNull();

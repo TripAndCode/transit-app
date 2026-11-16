@@ -36,7 +36,7 @@ section, each scoped to the shared date/dow/time-band/service/route filter.
   figure the reader picks. See "The Routes table" below.
 - Redirects keep the query string: `/agencies/:agencyId/analysis/:reportType`
   and `/agencies/:agencyId/reports/:reportType` send a report-type segment to
-  the screen hosting it (with `report=<type>` on Time, Why or Compare, the
+  the screen hosting it (with `report=<type>` on Time, plain Why, `by=periods` on Compare, the
   Routes table sorted as that list was ordered for `ranking`, `ranking_best`,
   `on_time` and `worst_5min`, and `doc=council` / `doc=certificate` on
   Reports). The named `analysis/`
@@ -66,8 +66,9 @@ What the user sees/does:
 - **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`
   (see Scope below), greying what the open report's `scope_applied` did not
   use.
-- **Report list** (left column) — one button per report type the hosting
-  screen owns; clicking sets `report={reportType}` on the current URL, keeping
+- **Report list** (left column; only on screens with several reports, Time
+  and the Reports documents — Why and Compare have none) — one button per
+  report type the hosting screen owns; clicking sets `report={reportType}` on the current URL, keeping
   the filter query string. A `?` hint icon (`frontend/src/components/InsightHint.tsx`)
   explains what each report type means.
 - **Report body** (right column) — for most report types,
@@ -572,11 +573,11 @@ the scope as one sentence above their content
    no-data empty state.
 2. Click "Time" in the rail -> URL `/agencies/:agencyId/time`; expect its
    first report (`trend`) to be selected.
-3. Click each report-type button in the left column on Time. Why and the
-   Compare entry ("Day types & agencies") show their one report across
-   the page with no list. Expect the URL's `report` param to
-   update and the body to show either a table (with a working CSV download
+3. Click each report-type button in the left column on Time. Expect the
+   URL's `report` param to update and the body to show either a table (with a working CSV download
    link) or, for `trend`, the daily chart + hourly heatmap + day x hour surface.
+   Open Why and "Day types & agencies" (by periods) - expect one full-width
+   report with no list, and the same report whatever `?report=` holds.
    Open `/agencies/:agencyId/routes?report=on_time` - expect the Routes table
    sorted by on-time rate, lowest first; pick another sort and expect `sort`
    to replace `report` in the URL.

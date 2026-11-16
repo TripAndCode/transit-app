@@ -20,10 +20,10 @@ export const loadOverviewTab: TabLoader = () =>
   import("../tabs/OverviewTab").then((m) => ({ default: m.OverviewTab }));
 export const loadMapTab: TabLoader = () => import("../tabs/MapTab").then((m) => ({ default: m.MapTab }));
 export const loadAskTab: TabLoader = () => import("../tabs/AskTab").then((m) => ({ default: m.AskTab }));
-export const loadAnalysisTab = () =>
-  import("../tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab }));
+const loadAnalysisModule = () => import("../tabs/AnalysisTab");
+export const loadAnalysisTab = () => loadAnalysisModule().then((m) => ({ default: m.AnalysisTab }));
 export const loadSingleReportScreen = () =>
-  import("../tabs/AnalysisTab").then((m) => ({ default: m.SingleReportScreen }));
+  loadAnalysisModule().then((m) => ({ default: m.SingleReportScreen }));
 export const loadRouteAnalysisTab: TabLoader = () =>
   import("../tabs/RouteAnalysisTab").then((m) => ({ default: m.RouteAnalysisTab }));
 export const loadReportsHomeTab: TabLoader = () =>
