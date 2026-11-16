@@ -358,6 +358,11 @@ describe("AskTab scope sentence", () => {
     expect(screen.getByRole("button", { name: "Morning (05–09)" })).toBeInTheDocument();
   });
 
+  it("names the screen's conditions a thread would not keep as unused while no thread is open", () => {
+    renderAskTab("/agencies/5/ask?from=2026-09-01&to=2026-09-07&stop=S1&late=120");
+    expect(region()).toHaveTextContent("Not used on this screen: Stop, On-time tolerance");
+  });
+
   it("shows an open thread's own conditions, with no tolerance clause, saved views or pin", () => {
     vi.spyOn(hooks, "useConversation").mockReturnValue({
       data: {

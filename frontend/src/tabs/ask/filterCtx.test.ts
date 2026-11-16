@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { patchThreadFilter, resolvedFilterCtx, threadScope } from "./filterCtx";
+import { notebookScope, patchThreadFilter, resolvedFilterCtx, splitNotebookPatch, threadScope } from "./filterCtx";
 
 describe("resolvedFilterCtx", () => {
   afterEach(() => vi.useRealTimers());
@@ -53,5 +53,27 @@ describe("patchThreadFilter", () => {
   it("clears the routes and restores the default period on a reset", () => {
     const next = patchThreadFilter(stored, { routes: null, from: null, to: null, dow: "all" }, "2026-09-30");
     expect(next).toMatchObject({ from_date: "2026-09-01", to_date: "2026-09-30", dow: undefined, routes: undefined });
+  });
+});
+
+describe("notebookScope", () => {
+  const url = threadScope({ from_date: "2026-09-01", to_date: "2026-09-07" }, "2026-09-30");
+  const linked = { ...url, stop: "S1", late: 120, hour: [7, 9] as [number, number] };
+
+  it("keeps the URL's conditions a thread does not store while no thread is open", () => {
+    expect(notebookScope({ dow: "weekday" }, linked, "2026-09-30")).toMatchObject({ dow: "weekday", stop: "S1", late: 120, hour: [7, 9] });
+  });
+
+  it("shows an open thread's conditions alone", () => {
+    expect(notebookScope({ dow: "weekday" }, null, "2026-09-30")).toMatchObject({ stop: null, late: null, hour: null });
+  });
+});
+
+describe("splitNotebookPatch", () => {
+  it("sends the conditions a thread does not store to the URL", () => {
+    expect(splitNotebookPatch({ time_band: "evening", hour: null, stop: null })).toEqual({
+      thread: { time_band: "evening" },
+      url: { hour: null, stop: null },
+    });
   });
 });

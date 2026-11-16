@@ -37,7 +37,14 @@ import { buildCardTemplates, defaultsFor, type CardTemplate } from "../component
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
 import { PageHeader } from "../components/ui/PageHeader";
-import { patchThreadFilter, rangeCtxToFilterCtx, resolvedFilterCtx, threadScope, THREAD_SCOPE_APPLIED } from "./ask/filterCtx";
+import {
+  notebookScope,
+  patchThreadFilter,
+  rangeCtxToFilterCtx,
+  resolvedFilterCtx,
+  splitNotebookPatch,
+  THREAD_SCOPE_APPLIED,
+} from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
@@ -62,7 +69,7 @@ export function AskTab() {
   const { t } = useTranslation();
   const id = useAgencyId();
   const navigate = useNavigate();
-  const [rangeCtx] = useScope();
+  const [rangeCtx, updateUrlScope] = useScope();
   const routeNames = useRouteNames(id);
 
   // ── Thread state ──────────────────────────────────────────────────────────
@@ -386,8 +393,12 @@ export function AskTab() {
               from the screen's scope, and each change saves to the thread. */}
           <ScopeSentence
             source={{
-              scope: threadScope(filterCtx, dataEnd),
-              update: (patch) => handleFilterChange(patchThreadFilter(filterCtx, patch, dataEnd)),
+              scope: notebookScope(filterCtx, activeId ? null : rangeCtx, dataEnd),
+              update: (patch) => {
+                const { thread, url } = splitNotebookPatch(patch);
+                handleFilterChange(patchThreadFilter(filterCtx, thread, dataEnd));
+                if (!activeId && Object.keys(url).length > 0) updateUrlScope(url);
+              },
             }}
             applied={THREAD_SCOPE_APPLIED}
             actions={false}

@@ -120,8 +120,10 @@ What the user sees/does:
   `filter_ctx`, its period, days, timetable, time band and routes, through
   `threadScope`/`patchThreadFilter` in `frontend/src/tabs/ask/filterCtx.ts`,
   which read a stored filter through the URL scope's own parser. With no
-  thread open it shows the screen's URL scope, which seeds the next new
-  thread (`rangeCtxToFilterCtx`). An edit shows at once but stays local to
+  thread open it shows the screen's URL scope whole (`notebookScope`), which
+  seeds the next new thread (`rangeCtxToFilterCtx`); a stop, direction,
+  hour or tolerance in it, which a thread does not store, is named as
+  unused, and clearing one writes the URL (`splitNotebookPatch`). An edit shows at once but stays local to
   the screen; it is saved to the open thread only when it is needed: before
   the next dispatch, which awaits the save (the authed backend reads the
   persisted `filter_ctx`), and when the reader leaves the thread (another
