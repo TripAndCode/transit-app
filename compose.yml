@@ -152,10 +152,12 @@ services:
 
   poller:
     <<: *standalone-app
-    # Exec form: the poller is PID 1 and receives SIGTERM itself, which ends
-    # its loop after the poll in flight.
+    # Exec form: the poller is PID 1 and receives SIGTERM itself. It stops
+    # once the cycle in flight has archived what arrived, and a fetch still
+    # running ends at its deadline (pipeline.poller.FETCH_DEADLINE_SEC, 30 s),
+    # inside this grace period.
     command: ["python", "gtfs_pipeline.py", "poll"]
-    stop_grace_period: 30s
+    stop_grace_period: 45s
     healthcheck:
       disable: true
     volumes:

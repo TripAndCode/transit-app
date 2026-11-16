@@ -3,17 +3,23 @@
 It produces what the Oracle collector (`oracle_cloud/v3/bin/rt-poller.sh`,
 `rotate-day.sh`) produces and hands it to the same code the app already runs.
 
-Every cycle, for every enabled agency:
-- the feed is fetched (a few at a time, so one dead feed delays no other) and
-  archived as ``<archive>/<agency_id>/rt/<UTC YYYYMMDD>/TripUpdate_HHMMSS.pb``,
-  whether or not the stores are reachable;
-- then the poll is pushed into `updates_live` through
+Every cycle, once the agency list has been read (from Postgres, or the last
+list read while Postgres is down):
+- each enabled agency's feed is fetched, a few at a time and each within a
+  wall-clock deadline, so one slow or dead feed delays no other;
+- each poll is archived as it arrives, as
+  ``<archive>/<agency_id>/rt/<UTC YYYYMMDD>/TripUpdate_HHMMSS.pb``, whatever
+  the state of ClickHouse;
+- then it is pushed into `updates_live` through
   `pipeline.collector_push.ingest_pushed_poll`, the function the collector's
   HTTP push uses, so it carries the same provenance. The file is in place
   before its push, which keeps every pushed poll in the archive: archive
-  replacement counts a pushed poll without its member as a gap.
+  replacement counts a pushed poll without its member as a gap. After the
+  first push that fails for a reason other than the poll itself, the rest of
+  the cycle's polls are archived only.
 
-On a worker thread, so polls keep their pace:
+On a worker thread, so polls keep their pace, the steps
+`pipeline.poller_schedule` decides:
 - the first cycle of each UTC day packs every closed day directory into
   ``<YYYYMMDD>.tar.gz`` in `rotate-day.sh`'s format, then, under the lock the
   cron sweep takes, promotes the closed JST days, ingests the tarballs not yet
@@ -22,27 +28,30 @@ On a worker thread, so polls keep their pace:
   aggregates are fresh;
 - the first cycle of each JST day promotes and analyzes, so yesterday reaches
   history at JST midnight rather than at the UTC rollover nine hours later;
-- a stage that failed is retried on its own a bounded number of times a day;
-- once an hour, the RT field-coverage verdicts that are due are re-probed
-  (`pipeline.rt_coverage_reprobe`, which waits for each agency's service
-  hours).
+- a stage that failed runs again on its own, within its own budget.
+Once an hour another thread re-probes the RT field-coverage verdicts that are
+due (`pipeline.rt_coverage_reprobe`, which waits for each agency's service
+hours).
 
 Ingest reads every tarball after the agency's ``.ingested-through`` marker,
 plus the one before it, since a JST day spans two UTC days. The marker moves
-only when an ingest succeeds, so days that waited out an outage or a missing
-timetable are read by the next run that can. ``gtfs_pipeline.py ingest
-<archive>/<agency_id>/rt --agency-id <id>`` reads all of them by hand.
+past a tarball only once an ingest has read it with no failure a rerun could
+get past (`pipeline.ingest.IngestReport`); a file whose bytes never decode
+does not hold it. ``gtfs_pipeline.py ingest <archive>/<agency_id>/rt
+--agency-id <id>`` reads every tarball by hand.
 
 Feed URLs come only from the agencies table, and are fetched through
 `pipeline.url_guard.safe_urlopen` (http(s) only, every redirect hop vetted,
 body capped). A failed fetch, archive write or push is logged and counted, and
-the next poll goes ahead. The tarballs stay in the archive volume; nothing
-uploads or prunes them.
+the next poll goes ahead. SIGTERM ends the loop once the cycle in flight has
+archived what arrived; a fetch still running ends at its deadline. The
+tarballs stay in the archive volume; nothing uploads or prunes them.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import shutil
@@ -52,15 +61,15 @@ import tempfile
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Iterable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import AbstractContextManager, ExitStack
 from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from pipeline import poller_schedule as schedule
 from pipeline.collector_push import MAX_POLL_BYTES, UnknownAgency, ingest_pushed_poll, member_name
 from pipeline.stores import Stores, open_stores
 from pipeline.url_guard import redact_url, redact_urls_in_text, safe_urlopen
@@ -69,17 +78,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SEC = 60.0
 FETCH_TIMEOUT_SEC = 15
+# The longest one fetch may take end to end, however slowly the body drips.
+FETCH_DEADLINE_SEC = 30
 FETCH_WORKERS = 4
-DAILY_RETRY_SEC = 15 * 60
-MAX_RETRIES_PER_DAY = 8
+# A poll cycle's pushes give up on a ClickHouse that stops answering after
+# this long, rather than holding the cycle.
+POLL_CH_TIMEOUT_SEC = 15
 REPROBE_INTERVAL_SEC = 60 * 60
 INGESTED_MARKER = ".ingested-through"
 
-UTC_DAY_STAGES = frozenset({"pack", "promote", "ingest", "analyze"})
-JST_DAY_STAGES = frozenset({"promote", "analyze"})
 _STAGE_ORDER = ("promote", "ingest", "analyze")
-
-_JST = ZoneInfo("Asia/Tokyo")
 _DAY_DIR = re.compile(r"[0-9]{8}")
 _ENABLED_AGENCIES_SQL = (
     "SELECT agency_id, feed_url FROM agencies "
@@ -96,7 +104,8 @@ OK, SKIPPED, FAILED = "ok", "skipped", "failed"
 
 
 def fetch_feed(url: str) -> bytes:
-    with safe_urlopen(url, timeout=FETCH_TIMEOUT_SEC, max_bytes=MAX_POLL_BYTES) as resp:
+    deadline = time.monotonic() + FETCH_DEADLINE_SEC
+    with safe_urlopen(url, timeout=FETCH_TIMEOUT_SEC, max_bytes=MAX_POLL_BYTES, deadline=deadline) as resp:
         return resp.read()
 
 
@@ -211,36 +220,58 @@ def _stage(conn, stage: str, agency_id: int, work: Callable[[], Any]) -> str:
 
 
 def _ingest_stage(conn, ch_client, archive_root: Path, agency_id: int) -> str:
-    from pipeline.ingest import ingest
+    """Ingest the agency's window and move its marker as far as the run
+    allows. Any OSError here is this agency's failed ingest, not the step's."""
+    from pipeline.ingest import IngestReport, ingest
 
     agency_rt = rt_dir(archive_root, agency_id)
-    tarballs = ingest_window(agency_rt)
-    if not tarballs:
-        logger.info("poller: agency %s has no tarball after %s to ingest", agency_id, ingested_through(agency_rt))
+    try:
+        marker = ingested_through(agency_rt)
+        tarballs = ingest_window(agency_rt)
+        if not tarballs:
+            logger.info("poller: agency %s has no tarball after %s to ingest", agency_id, marker)
+            return OK
+        logger.info(
+            "poller: agency %s ingests %d tarball(s) %s..%s (ingested through %s)",
+            agency_id,
+            len(tarballs),
+            _tarball_day(tarballs[0]),
+            _tarball_day(tarballs[-1]),
+            marker,
+        )
+        report = IngestReport()
+        with tempfile.TemporaryDirectory(prefix=f"poller-{agency_id}-") as staging:
+            for tarball in tarballs:
+                os.symlink(tarball.resolve(), Path(staging) / tarball.name)
+            work = partial(ingest, staging, agency_id, conn, ch_client, report=report)
+            outcome = _stage(conn, "ingest", agency_id, work)
+        if outcome != OK:
+            return outcome
+        if report.transient_unplaced:
+            logger.warning("poller: agency %s ingest left files a rerun may store; its marker stays", agency_id)
+            return FAILED
+        if report.transient_days:
+            hold = f"{min(report.transient_days) - timedelta(days=1):%Y%m%d}"
+            mark_ingested_through(agency_rt, hold)
+            logger.warning(
+                "poller: agency %s ingest failed on day(s) %s for a reason a rerun may clear; ingested through %s",
+                agency_id,
+                sorted(f"{d:%Y%m%d}" for d in report.transient_days),
+                hold,
+            )
+            return FAILED
+        mark_ingested_through(agency_rt, _tarball_day(tarballs[-1]))
         return OK
-    first, last = _tarball_day(tarballs[0]), _tarball_day(tarballs[-1])
-    logger.info(
-        "poller: agency %s ingests %d tarball(s) %s..%s (ingested through %s)",
-        agency_id,
-        len(tarballs),
-        first,
-        last,
-        ingested_through(agency_rt),
-    )
-    with tempfile.TemporaryDirectory(prefix=f"poller-{agency_id}-") as staging:
-        for tarball in tarballs:
-            os.symlink(tarball.resolve(), Path(staging) / tarball.name)
-        outcome = _stage(conn, "ingest", agency_id, partial(ingest, staging, agency_id, conn, ch_client))
-    if outcome == OK:
-        mark_ingested_through(agency_rt, last)
-    return outcome
+    except OSError:
+        logger.exception("poller: agency %s ingest could not stage its archive", agency_id)
+        return FAILED
 
 
 def run_daily_step(archive_root: Path, plan: Plan) -> Plan:
     """Run each agency's planned stages (promote, ingest, analyze, in that
     order) under the ingest/analyze lock the cron sweep takes, then check the
     analyzed agencies' aggregates are fresh. Returns the stages that failed;
-    every planned one when the lock is busy or a store is down."""
+    every planned one when the lock is busy."""
     from pipeline import runs as pipeline_runs
     from pipeline.analyze import analyze
     from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC
@@ -300,23 +331,15 @@ def run_reprobe() -> None:
         reprobe_due_agencies(stores.conn, stores.db_url)
 
 
-def _with_followups(plan: Plan) -> Plan:
-    """A retried stage brings the stages that consume its result."""
-    out: Plan = {}
-    for aid, stages in plan.items():
-        s = set(stages)
-        if "pack" in s:
-            s.add("ingest")
-        if s & {"pack", "promote", "ingest"}:
-            s.add("analyze")
-        out[aid] = s
-    return out
+def open_poll_stores() -> AbstractContextManager[Stores]:
+    return open_stores(send_receive_timeout=POLL_CH_TIMEOUT_SEC)
 
 
-def _merge(into: Plan, more: Plan) -> None:
-    for aid, stages in more.items():
-        if stages:
-            into.setdefault(aid, set()).update(stages)
+def _plan(keys: Iterable[schedule.Key]) -> Plan:
+    plan: Plan = {}
+    for _, aid, stage in keys:
+        plan.setdefault(aid, set()).add(stage)
+    return plan
 
 
 class Poller:
@@ -334,10 +357,11 @@ class Poller:
         interval_sec: float = DEFAULT_INTERVAL_SEC,
         fetch: Fetcher = fetch_feed,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-        stores: StoresFactory = open_stores,
+        stores: StoresFactory = open_poll_stores,
         daily_step: DailyStep = run_daily_step,
         reprobe: Callable[[], None] = run_reprobe,
         fetch_workers: int = FETCH_WORKERS,
+        fetch_deadline_sec: float = FETCH_DEADLINE_SEC,
         stop: threading.Event | None = None,
     ):
         if interval_sec <= 0:
@@ -350,6 +374,8 @@ class Poller:
         self._daily_step = daily_step
         self._reprobe = reprobe
         self._fetch_workers = fetch_workers
+        self._fetch_deadline_sec = fetch_deadline_sec
+        self._pool: ThreadPoolExecutor | None = None
         self.stop = stop or threading.Event()
         self.fetch_failures: Counter[int] = Counter()
         self.push_failures: Counter[int] = Counter()
@@ -357,35 +383,39 @@ class Poller:
         self.pushed: Counter[int] = Counter()
         self._roster: list[tuple[int, str]] = []
         self._lock = threading.Lock()
-        self._utc_done_for: date | None = None
-        self._jst_done_for: date | None = None
-        self._retry: Plan = {}
-        self._retry_at: datetime | None = None
-        self._retries = 0
+        self._schedule = schedule.State()
         self._daily_thread: threading.Thread | None = None
         self._reprobe_at: datetime | None = None
         self._reprobe_thread: threading.Thread | None = None
 
     @property
-    def pending_retry(self) -> Plan:
+    def schedule_state(self) -> schedule.State:
         with self._lock:
-            return {aid: set(stages) for aid, stages in self._retry.items()}
+            return self._schedule
 
     def run(self) -> None:
         self._remove_partial_polls()
         logger.info("poller: polling every %ss into %s", self.interval_sec, self.archive_root)
-        while not self.stop.is_set():
-            started = time.monotonic()
-            try:
-                self.poll_cycle()
-                self.maybe_start_daily()
-                self.maybe_start_reprobe()
-            except Exception:
-                logger.exception("poller: cycle failed")
-            self.stop.wait(max(0.0, self.interval_sec - (time.monotonic() - started)))
+        try:
+            while not self.stop.is_set():
+                started = time.monotonic()
+                try:
+                    self.poll_cycle()
+                    self.maybe_start_daily()
+                    self.maybe_start_reprobe()
+                except Exception:
+                    logger.exception("poller: cycle failed")
+                self.stop.wait(max(0.0, self.interval_sec - (time.monotonic() - started)))
+        finally:
+            self.close()
         if self._daily_thread is not None and self._daily_thread.is_alive():
             logger.warning("poller: stopping while the daily step runs; it runs again on the next start")
         logger.info("poller: stopped")
+
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
 
     # --- polling --------------------------------------------------------------
 
@@ -407,8 +437,7 @@ class Poller:
                 stores = None
             if not self._roster or self.stop.is_set():
                 return
-            polls = self._fetch_and_archive(self._roster)
-            self._push(polls, stores)
+            self._collect(list(self._roster), stores)
 
     def _fetch_one(self, feed_url: str) -> tuple[datetime, bytes | Exception, datetime]:
         at = self._clock()
@@ -418,104 +447,107 @@ class Poller:
             raw = exc
         return at, raw, self._clock()
 
-    def _fetch_and_archive(self, roster: list[tuple[int, str]]) -> list[tuple[int, str, bytes, str]]:
-        """Fetch every feed concurrently, then archive the polls one by one.
-        Every write lands before this returns, so no later cycle writes into a
-        day directory the daily step may be packing."""
-        with ThreadPoolExecutor(max_workers=self._fetch_workers, thread_name_prefix="poller-fetch") as pool:
-            results = list(pool.map(self._fetch_one, [url for _, url in roster]))
-        polls = []
-        for (agency_id, feed_url), (at, raw, fetched_at) in zip(roster, results, strict=True):
-            if isinstance(raw, Exception):
-                self.fetch_failures[agency_id] += 1
-                logger.warning(
-                    "poller: agency %s fetch of %s failed (%d so far): %s: %s",
-                    agency_id,
-                    redact_url(feed_url),
-                    self.fetch_failures[agency_id],
-                    type(raw).__name__,
-                    redact_urls_in_text(str(raw)),
-                )
-                continue
-            try:
-                member = write_poll(rt_dir(self.archive_root, agency_id), at, raw)
-            except OSError:
-                self.archive_failures[agency_id] += 1
-                logger.exception("poller: agency %s poll could not be archived; it is not pushed", agency_id)
-                continue
-            polls.append((agency_id, member, raw, fetched_at.astimezone(timezone.utc).isoformat()))
-        return polls
+    def _collect(self, roster: list[tuple[int, str]], stores: Stores | None) -> None:
+        """Fetch every feed on the pool, and archive then push each poll as it
+        arrives. A fetch not back by the cycle's deadline is dropped and never
+        written, so once this returns no later write lands in a day directory
+        the daily step may be packing."""
+        if self._pool is None:
+            self._pool = ThreadPoolExecutor(max_workers=self._fetch_workers, thread_name_prefix="poller-fetch")
+        futures: dict[Future, tuple[int, str]] = {
+            self._pool.submit(self._fetch_one, url): (aid, url) for aid, url in roster
+        }
+        waves = math.ceil(len(roster) / self._fetch_workers)
+        end = time.monotonic() + waves * self._fetch_deadline_sec + 5
+        pushing = stores is not None
+        remaining = set(futures)
+        while remaining and not self.stop.is_set():
+            left = end - time.monotonic()
+            if left <= 0:
+                break
+            done, remaining = wait(remaining, timeout=min(left, 1.0), return_when=FIRST_COMPLETED)
+            for fut in done:
+                aid, url = futures[fut]
+                pushing = self._take(aid, url, fut.result(), stores if pushing else None) and pushing
+        for fut in remaining:
+            fut.cancel()
+            aid, url = futures[fut]
+            self.fetch_failures[aid] += 1
+            logger.warning("poller: agency %s fetch of %s dropped, past its deadline", aid, redact_url(url))
+        if stores is None:
+            logger.warning("poller: Postgres unreachable; this cycle's polls are archived only")
 
-    def _push(self, polls: list[tuple[int, str, bytes, str]], stores: Stores | None) -> None:
+    def _take(
+        self, agency_id: int, feed_url: str, result: tuple[datetime, bytes | Exception, datetime], stores: Stores | None
+    ) -> bool:
+        """Archive one fetched poll, then push it when *stores* is given.
+        Returns False when the push failed for a reason other than the poll
+        itself, so the cycle stops pushing."""
         from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
-        if not polls:
-            return
-        ch_client = None
-        if stores is not None:
-            try:
-                ch_client = stores.ch
-            except Exception as exc:
-                logger.error(
-                    "poller: ClickHouse unreachable: %s: %s", type(exc).__name__, redact_urls_in_text(str(exc))
-                )
-        if stores is None or ch_client is None:
-            for agency_id, *_ in polls:
-                self.push_failures[agency_id] += 1
-            logger.warning("poller: %d poll(s) archived but not pushed", len(polls))
-            return
-        for agency_id, member, raw, captured_at in polls:
-            try:
-                ingest_pushed_poll(agency_id, raw, captured_at, member, stores.conn, ch_client)
-                self.pushed[agency_id] += 1
-            except (UnknownAgency, PayloadDecodeError, StaticTimetableMissing) as exc:
-                self.push_failures[agency_id] += 1
-                logger.warning("poller: agency %s poll %s not stored: %s", agency_id, member, exc)
-            except Exception:
-                self.push_failures[agency_id] += 1
-                logger.exception("poller: agency %s poll %s not stored", agency_id, member)
+        at, raw, fetched_at = result
+        if isinstance(raw, Exception):
+            self.fetch_failures[agency_id] += 1
+            logger.warning(
+                "poller: agency %s fetch of %s failed (%d so far): %s: %s",
+                agency_id,
+                redact_url(feed_url),
+                self.fetch_failures[agency_id],
+                type(raw).__name__,
+                redact_urls_in_text(str(raw)),
+            )
+            return True
+        try:
+            member = write_poll(rt_dir(self.archive_root, agency_id), at, raw)
+        except OSError:
+            self.archive_failures[agency_id] += 1
+            logger.exception("poller: agency %s poll could not be archived; it is not pushed", agency_id)
+            return True
+        if stores is None:
+            self.push_failures[agency_id] += 1
+            return True
+        captured_at = fetched_at.astimezone(timezone.utc).isoformat()
+        try:
+            ingest_pushed_poll(agency_id, raw, captured_at, member, stores)
+            self.pushed[agency_id] += 1
+        except (UnknownAgency, PayloadDecodeError, StaticTimetableMissing) as exc:
+            self.push_failures[agency_id] += 1
+            logger.warning("poller: agency %s poll %s not stored: %s", agency_id, member, exc)
+        except Exception as exc:
+            self.push_failures[agency_id] += 1
+            logger.error(
+                "poller: agency %s poll %s not stored, and this cycle's later polls are archived only: %s: %s",
+                agency_id,
+                member,
+                type(exc).__name__,
+                redact_urls_in_text(str(exc)),
+            )
+            return False
+        return True
 
     # --- background jobs ------------------------------------------------------
 
     def maybe_start_daily(self) -> str | None:
-        """Start the step due, if the last one has finished: the UTC-day step
-        on the first cycle of a UTC day (and of a start), the JST-day step on
-        the first of a JST day, else a retry of what failed once its wait is
-        over. Returns which started."""
+        """Start the step `pipeline.poller_schedule.decide` picks, once the
+        last one has finished. Returns its kind."""
         if self._daily_thread is not None and self._daily_thread.is_alive():
             return None
         now = self._clock()
-        utc_today = now.astimezone(timezone.utc).date()
-        jst_today = now.astimezone(_JST).date()
         archived = archived_agency_ids(self.archive_root)
         with self._lock:
-            if self._utc_done_for != utc_today:
-                kind, plan = "utc", {aid: set(UTC_DAY_STAGES) for aid in archived}
-                self._utc_done_for, self._jst_done_for = utc_today, jst_today
-                self._retry, self._retries = {}, 0
-            elif self._jst_done_for != jst_today:
-                kind, plan = "jst", {aid: set(JST_DAY_STAGES) for aid in archived}
-                self._jst_done_for = jst_today
-            elif self._retry and self._retry_at is not None and now >= self._retry_at:
-                if self._retries >= MAX_RETRIES_PER_DAY:
-                    logger.error("poller: giving up on %s until the next UTC day", self._retry)
-                    self._retry = {}
-                    return None
-                kind, plan = "retry", _with_followups(self._retry)
-                self._retry, self._retries = {}, self._retries + 1
-            else:
-                return None
-        if not plan:
+            kind, keys, self._schedule = schedule.decide(now, archived, self._schedule)
+        if not keys:
             return None
-        logger.info("poller: starting the %s step for %d agency(ies)", kind, len(plan))
+        logger.info("poller: starting the %s step: %s", kind, _plan(keys))
         self._daily_thread = threading.Thread(
-            target=self._run_daily, args=(utc_today, plan), name="poller-daily", daemon=True
+            target=self._run_daily, args=(now.astimezone(timezone.utc).date(), keys), name="poller-daily", daemon=True
         )
         self._daily_thread.start()
         return kind
 
-    def _run_daily(self, utc_today: date, plan: Plan) -> None:
-        failed: Plan = {}
+    def _run_daily(self, utc_today: date, keys: frozenset[schedule.Key]) -> None:
+        plan = _plan(keys)
+        failed: set[tuple[int, str]] = set()
         for aid, stages in plan.items():
             if "pack" not in stages:
                 continue
@@ -523,18 +555,22 @@ class Poller:
                 pack_closed_days(rt_dir(self.archive_root, aid), utc_today)
             except Exception:
                 logger.exception("poller: packing agency %s failed; its step still runs", aid)
-                failed[aid] = {"pack"}
+                failed.add((aid, "pack"))
         work = {aid: stages - {"pack"} for aid, stages in plan.items()}
         try:
-            _merge(failed, self._daily_step(self.archive_root, work))
+            step_failed = self._daily_step(self.archive_root, work)
         except Exception:
             logger.exception("poller: daily step failed")
-            _merge(failed, work)
+            step_failed = work
+        failed |= {(aid, stage) for aid, stages in step_failed.items() for stage in stages}
         with self._lock:
-            _merge(self._retry, failed)
-            if self._retry:
-                self._retry_at = self._clock() + timedelta(seconds=DAILY_RETRY_SEC)
-                logger.warning("poller: retrying %s in %ss", self._retry, DAILY_RETRY_SEC)
+            before = set(schedule.exhausted(self._schedule))
+            self._schedule = schedule.settle(self._clock(), self._schedule, keys, failed)
+            newly = sorted(set(schedule.exhausted(self._schedule)) - before)
+        if failed:
+            logger.warning("poller: failed stages %s are retried in %s", sorted(failed), schedule.RETRY_AFTER)
+        if newly:
+            logger.error("poller: %s used every retry; they wait for their next day", newly)
 
     def maybe_start_reprobe(self) -> bool:
         if self._reprobe_thread is not None and self._reprobe_thread.is_alive():
@@ -564,7 +600,8 @@ class Poller:
 
 
 def install_stop_handlers(stop: threading.Event) -> None:
-    """SIGTERM and SIGINT end the loop after the poll in flight."""
+    """SIGTERM and SIGINT end the loop once the cycle in flight has archived
+    what arrived."""
 
     def _handler(signum, frame) -> None:
         logger.info("poller: signal %s received; stopping", signum)

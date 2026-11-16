@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from api.range import jst_today
@@ -119,3 +120,48 @@ def test_tarballs_left_by_a_four_day_outage_are_all_ingested(pg_conn, ch_client,
     for day, at in zip(days[1:], polls[1:], strict=True):
         assert _file_names(ch_client, agency_id, day, live=False) == {member_name(at)}, day
     assert poller.ingested_through(rt) == f"{d:%Y%m%d}"
+
+
+def _archive(rt: Path, recorded: bytes, *instants: datetime) -> None:
+    for at in instants:
+        poller.write_poll(rt, at, _restamped(recorded, at))
+    poller.pack_closed_days(rt, max(at.date() for at in instants) + _DAY)
+
+
+def test_an_insert_failure_holds_the_marker_before_its_tarball(pg_conn, ch_client, agency_id, tmp_path):
+    d = jst_today() - _DAY
+    rt = poller.rt_dir(tmp_path, agency_id)
+    recorded = _RECORDED.read_bytes()
+    _archive(rt, recorded, _utc(d - _DAY, 6))
+    assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {}
+    assert poller.ingested_through(rt) == f"{d - _DAY:%Y%m%d}"
+
+    _archive(rt, recorded, _utc(d, 6))
+    with patch("pipeline.ingest.insert_updates", side_effect=ConnectionResetError("clickhouse went away")):
+        assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {agency_id: {"ingest"}}
+    assert poller.ingested_through(rt) == f"{d - _DAY:%Y%m%d}"
+    assert not _file_names(ch_client, agency_id, d, live=False)
+
+    assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {}
+    assert poller.ingested_through(rt) == f"{d:%Y%m%d}"
+    assert _file_names(ch_client, agency_id, d, live=False) == {member_name(_utc(d, 6))}
+
+
+def test_a_parse_failure_does_not_hold_the_marker(pg_conn, ch_client, agency_id, tmp_path):
+    from pipeline.strategies import aomori_regex
+
+    d = jst_today() - _DAY
+    rt = poller.rt_dir(tmp_path, agency_id)
+    good, bad = _utc(d, 6), _utc(d, 7)
+    _archive(rt, _RECORDED.read_bytes(), good, bad)
+    real_parse = aomori_regex.parse_feed
+
+    def parse(raw, ts, file_name, aid, conn):
+        if file_name == member_name(bad):
+            raise ValueError("truncated varint")
+        return real_parse(raw, ts, file_name, aid, conn)
+
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=parse):
+        assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {}
+    assert poller.ingested_through(rt) == f"{d:%Y%m%d}"
+    assert _file_names(ch_client, agency_id, d, live=False) == {member_name(good)}

@@ -34,7 +34,6 @@ from pipeline.collector_push import (
     SOURCE_FILE_RE,
     UnknownAgency,
     ingest_pushed_poll,
-    require_agency,
 )
 from pipeline.locks import try_lock_ingest_analyze_timed
 from pipeline.ml_evaluation_ingest import ingest_evaluations, ingest_live_evaluations
@@ -81,16 +80,13 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, sour
     if not db_url:
         raise RuntimeError("DATABASE_URL is not configured")
     with open_stores(db_url) as stores:
-        # Before the ClickHouse client exists, so an unknown agency is told
-        # so (404) whatever state ClickHouse is in.
-        require_agency(stores.conn, agency_id)
         # No advisory lock: a push writes updates_live, which analyze never
         # reads (pipeline/locks.py). ingest_live_payload's check-then-insert
         # over the last 10 minutes of captured_at absorbs a sequential
         # second arrival of the same file_name within that window; two
         # pushes that overlap in flight can both insert, and analyze's
         # argMax dedup on captured_at absorbs the duplicate from there.
-        return ingest_pushed_poll(agency_id, raw, captured_at, source_file, stores.conn, stores.ch)
+        return ingest_pushed_poll(agency_id, raw, captured_at, source_file, stores)
 
 
 @collector_router.post("/updates/{agency_id}")

@@ -20,6 +20,7 @@ import http.client
 import ipaddress
 import re
 import socket
+import time
 import urllib.error
 import urllib.request
 from typing import Literal
@@ -211,11 +212,41 @@ class _CappedResponse:
         return False
 
 
+_READ_CHUNK = 64 * 1024
+
+
+def _check_deadline(deadline: float | None, url: str) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise FeedURLError(f"fetching {redact_url(url)} ran past its deadline")
+
+
+def _read_capped(resp, max_bytes: int, deadline: float | None, url: str) -> bytes:
+    """The body, capped. With a *deadline* it is read in chunks, so the
+    deadline is checked between reads rather than once at the end."""
+    if deadline is None:
+        body = resp.read(max_bytes + 1)
+        if len(body) > max_bytes:
+            raise FeedURLError(f"response from {redact_url(url)} exceeded the {max_bytes}-byte cap")
+        return body
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        _check_deadline(deadline, url)
+        chunk = resp.read(min(_READ_CHUNK, max_bytes + 1 - total))
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > max_bytes:
+            raise FeedURLError(f"response from {redact_url(url)} exceeded the {max_bytes}-byte cap")
+
+
 def safe_urlopen(
     url_or_request: str | urllib.request.Request,
     *,
     timeout: float = 30,
     max_bytes: int = DEFAULT_MAX_BYTES,
+    deadline: float | None = None,
 ) -> _CappedResponse:
     """Validate-then-fetch: the SSRF-safe replacement for ``urllib.request.urlopen``.
 
@@ -232,6 +263,11 @@ def safe_urlopen(
     A non-redirect HTTP error (e.g. 304 Not Modified) propagates unchanged as
     ``urllib.error.HTTPError``, matching plain ``urlopen``'s behavior, so
     existing callers that catch it keep working.
+
+    *timeout* bounds each socket operation, so a server that drips its body
+    can hold a plain read for as long as it likes. A caller that needs the
+    whole fetch bounded passes *deadline*, a ``time.monotonic()`` instant:
+    past it, the fetch raises :class:`FeedURLError` between reads.
     """
     if isinstance(url_or_request, urllib.request.Request):
         headers = dict(url_or_request.header_items())
@@ -248,6 +284,7 @@ def safe_urlopen(
 
     for _ in range(_MAX_REDIRECTS + 1):
         validate_feed_url(current)
+        _check_deadline(deadline, current)
         req = urllib.request.Request(current, data=data, headers=headers, method=method)
         try:
             resp = _opener.open(req, timeout=timeout)
@@ -281,9 +318,7 @@ def safe_urlopen(
                 headers = {k: v for k, v in headers.items() if k.lower() not in ("authorization", "cookie")}
             continue
         with resp:
-            body = resp.read(max_bytes + 1)
-            if len(body) > max_bytes:
-                raise FeedURLError(f"response from {redact_url(current)} exceeded the {max_bytes}-byte cap")
+            body = _read_capped(resp, max_bytes, deadline, current)
             status = resp.status if hasattr(resp, "status") else resp.getcode()
             return _CappedResponse(body, resp.headers, status)
     raise FeedURLError(f"too many redirects fetching {redact_url(current)}")

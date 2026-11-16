@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pipeline.stores import Stores
 
 PUSH_PREFIX = "oracle/"
 SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
@@ -47,17 +51,21 @@ def require_agency(conn, agency_id: int) -> None:
             raise UnknownAgency(f"Unknown or deleted agency_id={agency_id}")
 
 
-def ingest_pushed_poll(agency_id: int, raw: bytes, captured_at: str, source_file: str, conn, ch_client) -> int:
+def ingest_pushed_poll(agency_id: int, raw: bytes, captured_at: str, source_file: str, stores: Stores) -> int:
     """Store one pushed poll in `updates_live` and return the rows inserted.
 
     *source_file* is the poll's archive member name. Raises ``ValueError``
     for a name not in the collector's format, :class:`UnknownAgency` for an
     agency that is missing or disabled, and whatever
-    `pipeline.ingest.ingest_live_payload` raises.
+    `pipeline.ingest.ingest_live_payload` raises. The agency is checked
+    before the ClickHouse client is first used, so an unknown agency is
+    reported as such whatever state ClickHouse is in.
     """
     if not SOURCE_FILE_RE.fullmatch(source_file):
         raise ValueError(f"not a collector member name: {source_file!r}")
     from pipeline import ingest
 
-    require_agency(conn, agency_id)
-    return ingest.ingest_live_payload(agency_id, raw, captured_at, f"{PUSH_PREFIX}{source_file}", conn, ch_client)
+    require_agency(stores.conn, agency_id)
+    return ingest.ingest_live_payload(
+        agency_id, raw, captured_at, f"{PUSH_PREFIX}{source_file}", stores.conn, stores.ch
+    )

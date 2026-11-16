@@ -8,6 +8,7 @@ hosts so no real DNS/network call happens - the opener itself is mocked,
 matching this suite's existing hermetic style (see test_url_guard.py).
 """
 
+import time
 import urllib.error
 import urllib.request
 
@@ -255,3 +256,31 @@ def test_preserves_request_body_across_redirect(monkeypatch):
     with safe_urlopen(req) as resp:
         assert resp.read() == b"ok"
     assert seen_bodies == [b"payload", b"payload"]
+
+
+class _DripResponse(_FakeResponse):
+    """A server that sends one byte at a time, each just inside a per-read timeout."""
+
+    def read(self, amt=None):
+        time.sleep(0.02)
+        return b"x"
+
+
+def test_a_deadline_ends_a_fetch_whose_body_drips(monkeypatch):
+    monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _DripResponse(b""))
+    started = time.monotonic()
+    with pytest.raises(FeedURLError, match="deadline"):
+        safe_urlopen("http://8.8.8.8/feed", deadline=time.monotonic() + 0.3)
+    assert time.monotonic() - started < 2
+
+
+def test_a_deadline_still_returns_a_body_that_arrives_in_time(monkeypatch):
+    monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _FakeResponse(b"hello" * 30000))
+    with safe_urlopen("http://8.8.8.8/feed", deadline=time.monotonic() + 5) as resp:
+        assert resp.read() == b"hello" * 30000
+
+
+def test_a_deadline_keeps_the_size_cap(monkeypatch):
+    monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _FakeResponse(b"x" * 1000))
+    with pytest.raises(FeedURLError, match="exceeded"):
+        safe_urlopen("http://8.8.8.8/feed", max_bytes=500, deadline=time.monotonic() + 5)

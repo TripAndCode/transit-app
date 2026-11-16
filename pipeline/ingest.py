@@ -10,7 +10,9 @@ import pathlib
 import re
 import struct
 import tarfile
+import zlib
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 from zoneinfo import ZoneInfo
@@ -56,6 +58,43 @@ _BATCH_ROWS = 20_000
 # YYYYMMDD path segment (e.g. tar member dir or .pb parent dir). Used to
 # derive captured_at when the filename alone doesn't carry the date.
 _DATE_DIR_RE = re.compile(r"\d{8}")
+
+
+# Bytes that do not decode fail the same way however often they are read.
+_UNDECODABLE = (IndexError, ValueError, struct.error, UnicodeDecodeError)
+# So does an archive that cannot be unpacked, and a row ClickHouse's client
+# cannot serialize.
+_PERMANENT = (*_UNDECODABLE, tarfile.TarError, EOFError, zlib.error, DataError)
+
+
+@dataclass
+class IngestReport:
+    """Why the files an archive ingest left unstored failed.
+
+    A transient failure (I/O, a store's error) is one a later run over the
+    same file can get past: it records the UTC day the file's archive name
+    carries in ``transient_days``, or counts it in ``transient_unplaced``
+    when the name carries none. A permanent one (see ``_PERMANENT``) is only
+    counted, since reading the file again cannot help.
+    """
+
+    transient_days: set[date] = field(default_factory=set)
+    transient_unplaced: int = 0
+    permanent: int = 0
+
+    def record(self, exc: BaseException, utc_day: str | None) -> None:
+        if isinstance(exc, _PERMANENT):
+            self.permanent += 1
+            return
+        try:
+            self.transient_days.add(datetime.strptime(utc_day or "", "%Y%m%d").date())
+        except ValueError:
+            self.transient_unplaced += 1
+
+
+def _key_day(file_key: str) -> str | None:
+    head, sep, _ = file_key.partition("/")
+    return head if sep else None
 
 
 def _date_dir(name: str) -> str:
@@ -276,7 +315,16 @@ class IngestIncomplete(Exception):
         self.n_errors = n_errors
 
 
-def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None = None, strict: bool = False) -> int:
+def ingest(
+    folder: str,
+    agency_id: int,
+    conn,
+    ch_client,
+    *,
+    now: datetime | None = None,
+    strict: bool = False,
+    report: IngestReport | None = None,
+) -> int:
     """Ingest all .pb files from tarballs and loose files in folder.
 
     Dispatches to the agency's ingest strategy. Returns the number of rows
@@ -304,11 +352,24 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
 
     Raises :class:`StaticTimetableMissing`, having read and marked nothing,
     when the agency's strategy needs a timetable it does not have loaded.
+
+    A caller that passes *report* learns why each skipped file failed
+    (:class:`IngestReport`), so it can tell a file worth reading again from
+    one that never will be.
     """
     strategy_name = require_timetable(agency_id, conn)
     try:
         with agency_ingest_lock(conn, agency_id):
-            return _ingest_folder(folder, agency_id, conn, ch_client, strategy_name, now=now, strict=strict)
+            return _ingest_folder(
+                folder,
+                agency_id,
+                conn,
+                ch_client,
+                strategy_name,
+                now=now,
+                strict=strict,
+                report=report if report is not None else IngestReport(),
+            )
     finally:
         # The unlock opens a transaction; the run reads only, so it ends here.
         if conn.get_transaction_status() == TRANSACTION_STATUS_INTRANS:
@@ -316,7 +377,15 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
 
 
 def _ingest_folder(
-    folder: str, agency_id: int, conn, ch_client, strategy_name: str, *, now: datetime | None, strict: bool
+    folder: str,
+    agency_id: int,
+    conn,
+    ch_client,
+    strategy_name: str,
+    *,
+    now: datetime | None,
+    strict: bool,
+    report: IngestReport,
 ) -> int:
     strategy = get_ingest_strategy(strategy_name)
 
@@ -519,6 +588,7 @@ def _ingest_folder(
                         done.add(file_name)
                     except Exception as e2:
                         _failed(file_name, None)
+                        report.record(e2, _key_day(file_name))
                         # Broad catch is safe here (unlike the top-level gate
                         # above): this is a single one-shot attempt per file,
                         # never itself retried, so there's no risk of
@@ -541,6 +611,7 @@ def _ingest_folder(
                 n_errors += len(pending_files)
                 for file_name in pending_files:
                     _failed(file_name, None)
+                    report.record(e, _key_day(file_name))
         finally:
             pending_rows.clear()
             pending_files.clear()
@@ -593,6 +664,7 @@ def _ingest_folder(
                             logger.error(f"  [ERROR] {pb_name}: {e}")
                             n_errors += 1
                             _failed(f"{d}/{pb_name}", d or None)
+                            report.record(e, d or None)
                             continue
                         _buffer_parsed(f"{d}/{pb_name}", rows)
                         if j % 300 == 0 and j > 0:
@@ -608,6 +680,7 @@ def _ingest_folder(
                 logger.error(f"  [ERROR] {e}")
                 n_errors += 1
                 _failed(None, date_dir or None)
+                report.record(e, date_dir or None)
                 conn.rollback()
             conn.commit()
 
@@ -634,6 +707,7 @@ def _ingest_folder(
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
                     _failed(f"{d}/{path.name}", d or None)
+                    report.record(e, d or None)
                     continue
                 _buffer_parsed(f"{d}/{path.name}", rows)
                 if j % 500 == 0:
@@ -748,7 +822,7 @@ def ingest_live_payload(
 
     try:
         rows = strategy.parse_feed(raw, captured_at, file_name, agency_id, conn)
-    except (IndexError, ValueError, struct.error, UnicodeDecodeError) as exc:
+    except _UNDECODABLE as exc:
         raise PayloadDecodeError(f"{file_name}: {type(exc).__name__}: {exc}") from exc
     n_inserted = insert_updates(ch_client, agency_id, rows, table=LIVE_TABLE)
     conn.commit()
