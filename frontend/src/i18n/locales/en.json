@@ -663,7 +663,6 @@
     "loading_agencies": "Loading agencies...",
     "guest": "Guest",
     "no_match": "No matches",
-    "optional_paren": "(optional)",
     "reload": "Reload",
     "retry": "Retry",
     "route_code_fallback": "Route {{code}}",

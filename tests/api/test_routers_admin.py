@@ -742,15 +742,13 @@ _HEADERS = {"Origin": "http://test"}
 
 
 async def _seed_key(conn, *, owner_user_id, owner_email, revoked_at=None):
-    raw = f"sk_{secrets.token_urlsafe(16)}"
-    key_id = await conn.fetchval(
+    return await conn.fetchval(
         "INSERT INTO api_keys (key_hash, owner_user_id, owner_email, revoked_at) VALUES ($1, $2, $3, $4) RETURNING id",
-        token_hash(raw),
+        token_hash(f"sk_{secrets.token_urlsafe(16)}"),
         owner_user_id,
         owner_email,
         revoked_at,
     )
-    return key_id, raw
 
 
 async def _delete(client, sid, uid):
@@ -765,10 +763,10 @@ async def test_soft_delete_masks_and_revokes_every_key_the_user_owns(admin_clien
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid, _ = await _seed(aconn, email="keyed@x")
     _, uid_other, _ = await _seed(aconn, email="other@x")
-    live_id, _ = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x")
-    revoked_id, _ = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x", revoked_at=_ORIGINAL_SUSPENSION)
-    legacy_id, _ = await _seed_key(aconn, owner_user_id=None, owner_email="Keyed@X")
-    other_id, _ = await _seed_key(aconn, owner_user_id=uid_other, owner_email="other@x")
+    live_id = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x")
+    revoked_id = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x", revoked_at=_ORIGINAL_SUSPENSION)
+    legacy_id = await _seed_key(aconn, owner_user_id=None, owner_email="Keyed@X")
+    other_id = await _seed_key(aconn, owner_user_id=uid_other, owner_email="other@x")
 
     assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
 
@@ -785,7 +783,7 @@ async def test_soft_delete_masks_and_revokes_every_key_the_user_owns(admin_clien
 async def test_soft_delete_marks_the_row_deleted_and_audits_the_revoked_keys(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid, _ = await _seed(aconn, email="marked@x")
-    key_id, _ = await _seed_key(aconn, owner_user_id=uid, owner_email="marked@x")
+    key_id = await _seed_key(aconn, owner_user_id=uid, owner_email="marked@x")
     assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
     assert await aconn.fetchval("SELECT deleted_at FROM users WHERE user_id=$1", uid) is not None
     after = await aconn.fetchval(

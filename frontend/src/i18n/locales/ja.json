@@ -663,7 +663,6 @@
     "loading_agencies": "事業者を読み込み中...",
     "guest": "ゲスト",
     "no_match": "該当なし",
-    "optional_paren": "(オプション)",
     "reload": "再読み込み",
     "retry": "再試行",
     "route_code_fallback": "路線{{code}}",

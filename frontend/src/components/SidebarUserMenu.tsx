@@ -53,10 +53,9 @@ const groupLabelStyle: CSSProperties = {
   color: "var(--text-tertiary)",
 };
 
-/** Sidebar footer control: collapses what used to be four separate header
- *  controls (Live/sign-in/language/theme) into one avatar-trigger popover,
- *  following the standard "user menu" pattern instead of a row of bare icons
- *  wrapping across two lines. */
+/** Sidebar footer control: gathers Live, sign-in, language and theme into
+ *  one avatar-trigger popover, following the standard "user menu" pattern
+ *  instead of a row of bare icons wrapping across two lines. */
 export function SidebarUserMenu() {
   const { t, i18n } = useTranslation();
   const { data: config, isLoading: configLoading } = useConfig();

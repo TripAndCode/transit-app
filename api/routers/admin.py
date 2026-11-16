@@ -28,10 +28,9 @@ provider sub creates a fresh user. The user's API keys are revoked and
 their recorded owner address is replaced with the anonymized one.
 
 A soft-delete is terminal and ``deleted_at`` records it. Suspension alone
-is reversible, and lifting it would bring the account's keys back, so the
-routes that change a user refuse a deleted row with a 409: the single and
-bulk PATCH, and DELETE. Revoking a session or a key only takes access away
-and needs no such guard.
+is reversible, so the routes that change a user refuse a deleted row with a
+409: the single and bulk PATCH, and DELETE. Revoking a session only takes
+access away and needs no such guard.
 """
 
 import asyncio

@@ -29,9 +29,8 @@ class _FakeConn:
     Dispatches on a recognizable substring of the SQL text, matching the
     exact queries written in ``api/routers/admin.py``."""
 
-    def __init__(self, *, sessions=None, users=None):
+    def __init__(self, *, sessions=None):
         self.sessions = sessions or []  # list of dict(sid_hash, user_id)
-        self.users = users if users is not None else {1: "admin@example.com"}
         self.events: list[tuple] = []
         self.audit: list[tuple] = []
 
@@ -59,9 +58,6 @@ class _FakeConn:
         raise AssertionError(f"unexpected fetchval: {sql}")
 
     async def fetchrow(self, sql, *args):
-        if "FROM users WHERE user_id=$1" in sql:
-            (uid,) = args
-            return {"deleted_at": None} if uid in self.users else None
         raise AssertionError(f"unexpected fetchrow: {sql}")
 
     async def execute(self, sql, *args):

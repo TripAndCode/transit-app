@@ -232,16 +232,12 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
   return controller.signal;
 }
 
-async function rawFetch(path: string, init: RequestInit): Promise<Response> {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
-  return sendOnce(path, init, signal);
-}
-
 // credentials:'include' sends the sid cookie cross-origin too (Vite dev :5173 →
 // :8000). Accept-Language follows the UI language so server-rendered text
 // matches it.
-function sendOnce(path: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
+async function rawFetch(path: string, init: RequestInit): Promise<Response> {
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "Accept-Language": requestLanguage(i18n),
