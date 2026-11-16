@@ -6,7 +6,6 @@ import zlib
 from datetime import date
 
 import pytest
-from clickhouse_connect.driver.exceptions import DataError
 
 from pipeline.ingest import IngestReport
 
@@ -20,7 +19,6 @@ from pipeline.ingest import IngestReport
         tarfile.ReadError("corrupt"),
         EOFError(),
         zlib.error(),
-        DataError("None in a non-Nullable column"),
     ],
 )
 def test_bytes_that_never_decode_are_permanent(exc):

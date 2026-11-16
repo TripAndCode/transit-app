@@ -99,7 +99,7 @@ def test_the_poller_archive_replaces_the_day_it_promoted(pg_conn, ch_client, age
     held = day_sources(ch_client, agency_id, d)
     assert held.live_rows == 0 and held.archive_rows > 0
     assert p.fetch_failures == {} and p.push_failures == {}
-    assert p.pending_retry == {}
+    assert p.schedule_state.pending == {}
     assert poller.ingested_through(tmp_path / str(agency_id) / "rt") == f"{d:%Y%m%d}"
 
 
