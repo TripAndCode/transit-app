@@ -1,19 +1,16 @@
-"""Pure-logic helpers behind the admin user drawer (sessions/api-keys/invites):
-deriving a display-safe session prefix, resolving the prefix both session
+"""Pure-logic helpers behind the admin user drawer (sessions/api-keys):
+deriving a display-safe session prefix, and resolving the prefix both session
 revoke routes accept to one session without ever pattern-matching a raw
-secret, and deciding whether a pending invite is still usable.
+secret.
 
 API key hashing itself is ``api.security.token_hash`` (shared with session id
 hashing) and is tested in ``tests/unit/test_token_hash.py``.
 """
 
-from datetime import datetime, timedelta, timezone
-
 import pytest
 
 from pipeline.admin_users import (
     SessionPrefixError,
-    invite_is_usable,
     resolve_session_prefix,
     session_id_prefix,
 )
@@ -95,23 +92,3 @@ async def test_resolve_session_prefix_404s_when_nothing_matches():
 async def test_resolve_session_prefix_409s_when_several_match():
     err = await _refusal(_Hashes(_MINE, _PREFIX + "b" * 52), _PREFIX)
     assert (err.status, err.detail) == (409, "prefix matches multiple sessions")
-
-
-def test_invite_is_usable_when_pending_and_unexpired():
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert invite_is_usable(consumed_at=None, expires_at=now + timedelta(days=1), now=now) is True
-
-
-def test_invite_is_usable_false_once_consumed():
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert invite_is_usable(consumed_at=now, expires_at=now + timedelta(days=1), now=now) is False
-
-
-def test_invite_is_usable_false_once_expired():
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert invite_is_usable(consumed_at=None, expires_at=now - timedelta(seconds=1), now=now) is False
-
-
-def test_invite_is_usable_true_with_no_expiry():
-    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert invite_is_usable(consumed_at=None, expires_at=None, now=now) is True

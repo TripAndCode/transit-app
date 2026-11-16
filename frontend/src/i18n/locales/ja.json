@@ -85,7 +85,6 @@
     "hero": {
       "open_dashboard": "ダッシュボードを開く",
       "view_dashboard": "ダッシュボードを見る（ログイン不要）",
-      "login_note": "<login>ログイン</login>すると、「調査ノート」の調査をアカウントに残せます",
       "live_badge": "全国の公開バスフィードを毎分観測しています",
       "title": "そのバスは、時刻表どおりに走ったか。",
       "lead": "全国の公開 GTFS-RT（リアルタイム運行情報）を毎分収集し、時刻表と 1 便ずつ突き合わせます。事業者との契約に頼らない、第三者の記録です。",
@@ -669,7 +668,6 @@
     "loading": "読み込み中...",
     "loading_agencies": "事業者を読み込み中...",
     "guest": "ゲスト",
-    "login": "ログイン",
     "no_match": "該当なし",
     "optional_paren": "(オプション)",
     "reload": "再読み込み",
@@ -730,7 +728,8 @@
     "rel_days_ago_other": "{{count}}日前",
     "still_working": "まだ処理しています…",
     "still_working_period": "まだ処理しています。期間が長いほど集計に時間がかかります。",
-    "narrow_to_week": "期間の最後の7日間に絞る"
+    "narrow_to_week": "期間の最後の7日間に絞る",
+    "admin_login": "管理者ログイン"
   },
   "legal": {
     "privacy": "プライバシーポリシー",
@@ -782,16 +781,15 @@
         "suspended": "このアカウントは利用停止中です。お心当たりがない場合は、運営者にお問い合わせください。",
         "invalid_credentials": "ユーザー名またはパスワードが正しくありません。",
         "too_many_attempts": "試行回数が多すぎます。しばらくしてから再試行してください。",
-        "generic": "ログインに失敗しました。"
+        "generic": "ログインに失敗しました。",
+        "not_admin": "このアカウントは本サイトの管理者ではありません。すべての画面はログインせずに使えます。"
       },
       "sso_disabled_title": "SSO 未設定",
       "sso_disabled_body": "このビルドでは SSO が無効です。匿名で閲覧できます。",
       "config_error_title": "ログイン方法を読み込めませんでした",
       "config_error_body": "サーバーへの接続で問題が発生しました。もう一度お試しください。",
       "back_to_top": "トップへ戻る",
-      "choose_provider": "Google または GitHub のアカウントで続けます",
       "guest_link": "ログインせずに使う",
-      "username_prompt": "ユーザー名でログイン",
       "google_aria": "Googleでログイン",
       "google_continue": "Googleでログイン",
       "github_aria": "GitHubでログイン",
@@ -800,7 +798,8 @@
       "username_label": "ユーザー名",
       "password_label": "パスワード",
       "local_submit": "ログイン",
-      "terms_consent": "ログインすると、<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。"
+      "terms_consent": "ログインすると、<terms>利用規約</terms>と<privacy>プライバシーポリシー</privacy>に同意したものとみなされます。",
+      "admin_note": "ログインは本サイトの管理者向けです。すべての画面はログインせずに使えます。"
     },
     "back_to_agency": "← {{agency}}に戻る",
     "linked_none": "連携なし",
@@ -885,7 +884,6 @@
     "refresh_unchanged": "再取得済み・新しい観測はありません",
     "refresh_failed": "再取得できませんでした",
     "refresh_rate_limited": "更新回数が多すぎます。しばらく待ってから再試行してください",
-    "refresh_sign_in": "ライブ観測を取得するにはログインしてください",
     "loading": "最新の運行状況を取得中...",
     "map": {
       "aria_label": "最新報告停留所と遅延の地図",
@@ -974,7 +972,8 @@
       "toggle_on": "1日の動きを再生",
       "toggle_off": "現在の運行に戻る"
     },
-    "refresh_busy": "別のデータ更新が実行中です。終わってからもう一度お試しください"
+    "refresh_busy": "別のデータ更新が実行中です。終わってからもう一度お試しください",
+    "refresh_recent": "直前に取得したライブデータを表示しています"
   },
   "map": {
     "style": {
@@ -1066,7 +1065,7 @@
     "workspace": {
       "investigations": "これまでの調査",
       "new_analysis": "別の分析を始める",
-      "unavailable": "調査を開けませんでした。接続とログイン中のアカウントを確認してください。ゲストの調査は保存したブラウザでのみ開けます。",
+      "unavailable": "調査を開けませんでした。接続を確認してください。ログインせずに保存した調査は、保存したブラウザでのみ開けます。",
       "retry": "再試行",
       "export_snapshot": "結果を保存（JSON）",
       "export_csv": "表{{index}}のCSV",
@@ -1790,17 +1789,6 @@
       "activity_col_requests": "リクエスト数",
       "activity_col_errors": "エラー数",
       "activity_agency": "事業者 {{id}}"
-    },
-    "invite": {
-      "trigger": "＋ 招待",
-      "dialog_title": "ユーザーを招待",
-      "email_label": "メールアドレス",
-      "role_label": "ロール",
-      "llm_approved_label": "AI利用を事前承認",
-      "submit": "招待を送信",
-      "success": "{{email}} 宛の招待を作成しました。",
-      "error": "エラー: {{msg}}",
-      "error_account_exists": "{{email}} はすでにアカウントがあるため、招待は適用されません。ユーザー一覧でロールとAI利用を変更してください。"
     },
     "nav": {
       "label": "管理ナビゲーション",

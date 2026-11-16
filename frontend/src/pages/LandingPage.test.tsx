@@ -12,10 +12,6 @@ void i18n.changeLanguage("en");
 const mockUseSession = vi.fn<() => { data: unknown; isLoading: boolean }>(() => ({ data: null, isLoading: false }));
 vi.mock("../api/auth", () => ({ useSession: () => mockUseSession() }));
 
-type Config = { auth_enabled: boolean; local_admin_enabled: boolean };
-const mockUseConfig = vi.fn<() => { data: Config | undefined }>();
-vi.mock("../api/config", () => ({ useConfig: () => mockUseConfig() }));
-const SSO: Config = { auth_enabled: true, local_admin_enabled: false };
 
 function renderLanding() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -35,56 +31,32 @@ function renderLanding() {
 describe("LandingPage", () => {
   beforeEach(() => {
     mockUseSession.mockReturnValue({ data: null, isLoading: false });
-    mockUseConfig.mockReturnValue({ data: SSO });
     clearLastAgency();
   });
 
   describe("the one CTA decision, shared by the header button and the hero's primary CTA", () => {
-    it("opens the dashboard to a signed-out visitor without sign-in, and says what sign-in adds", () => {
+    it("opens the dashboard to a signed-out visitor without sign-in, and asks nothing of them", () => {
       renderLanding();
       const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      const note = screen.getByText(/to keep your notebook investigations/);
-      expect(within(note).getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+      expect(screen.queryByRole("link", { name: /sign in/i })).toBeNull();
     });
 
-    it("stays open to a signed-in visitor and offers the dashboard in place of sign-in", () => {
+    it("stays open to a signed-in visitor and offers to open the dashboard", () => {
       mockUseSession.mockReturnValue({ data: { user_id: 1 }, isLoading: false });
       renderLanding();
       const ctas = screen.getAllByRole("link", { name: "Open the dashboard" });
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
-      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
     });
 
-    it("leaves out the sign-in note on a deployment with nothing to sign in with", () => {
-      mockUseConfig.mockReturnValue({ data: { ...SSO, auth_enabled: false } });
-      renderLanding();
-      const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
-      expect(ctas).toHaveLength(2);
-      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
-    });
-
-    it("opens the dashboard while the session is still loading, with no sign-in note yet", () => {
+    it("opens the dashboard while the session is still loading", () => {
       mockUseSession.mockReturnValue({ data: undefined, isLoading: true });
       renderLanding();
       const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
-      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
-    });
-
-    it("opens the dashboard before the configuration has loaded, with no sign-in note yet", () => {
-      mockUseConfig.mockReturnValue({ data: undefined });
-      renderLanding();
-      const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
-      expect(ctas).toHaveLength(2);
-      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
     });
   });
 

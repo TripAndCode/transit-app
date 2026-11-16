@@ -88,7 +88,9 @@ but are not plotted.
   protobuf into `updates_live` when the local-dev SSH transport is configured;
   environments without that transport use the agency's live feed URL as a
   fallback, writing to `updates_live` as well, then the client reads the
-  newly persisted data.
+  newly persisted data. Manual refresh works signed out, under a per-caller
+  rate limit (per address, or per account when signed in). Within 30 seconds of an agency's last successful poll, it reads
+  the stored data instead of polling again.
 - An empty map says why it is empty (`frontend/src/tabs/map/emptyMapReason.ts`).
   Its reason comes from today's hours by the loaded timetable
   (`GET /api/{agency_id}/today/service-hours`): the first departure and the

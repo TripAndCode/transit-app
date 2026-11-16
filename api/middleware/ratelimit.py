@@ -55,8 +55,8 @@ def _key_func(request: Request) -> str:
 def user_key(request: Request) -> str:
     """Bucket a signed-in caller's writes by account, not by address.
 
-    Session middleware attaches the resolved user before routing. The address
-    fallback covers anonymous-only mode, where nobody can sign in.
+    Session middleware attaches the resolved user before routing. A
+    signed-out caller is bucketed by address.
     """
     user = current_user(request)
     if user is not None:
