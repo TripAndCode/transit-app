@@ -21,8 +21,8 @@ from typing import Any, NamedTuple
 from api.range import RangeCtx
 from api.sqlutil import escape_like
 from pipeline.query.results import ToolResult
+from pipeline.recorded_floor import retention_floor_async
 from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
-from pipeline.retention import retention_floor_async
 from pipeline.service_day import service_date_ch, service_date_of
 
 VALID_KINDS = (

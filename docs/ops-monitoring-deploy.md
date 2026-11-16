@@ -301,10 +301,10 @@ comes after its floor is recorded, so a report that sees the old floor on
 the second check finished reading before any rows went. One that sees the
 new floor past its start does not answer:
 
-- A cached report and an Ask tool check before they keep or return the
-  answer. On a refusal they compute once more, so a look-back they derived
-  starts at the new floor. A requested period that now starts before it is
-  refused.
+- A cached report, an Ask tool and the map's look for an undated route
+  view's day check before they keep or return the answer. On a refusal they
+  compute once more, so a window they derived starts at the new floor. A
+  requested period that now starts before it is refused.
 - A snapshot checks before it is stored.
 - Any other API request checks before its response is sent, and is refused
   like any read before the floor.

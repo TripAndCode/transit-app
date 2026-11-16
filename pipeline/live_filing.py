@@ -29,7 +29,7 @@ from datetime import date, datetime
 from typing import NamedTuple
 
 from api.range import TimeBand, UpdatesFilter, time_band_clause_ch_for
-from pipeline import refiled, retained_reads, retention, static_archive
+from pipeline import recorded_floor, refiled, retained_reads, static_archive
 from pipeline.cache import async_lru_cache, clear_all
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.retained_reads import RangeNotRetained
@@ -63,12 +63,13 @@ async def require_retained(conn, agency_id: int, first: date) -> None:
 
     A reader whose span reaches before the period it was asked for (a
     baseline, a look-back) starts that span no earlier than the floor itself
-    (pipeline.retention.retention_floor_async), so only a requested period
-    is ever refused."""
-    floor = await retention.retention_floor_async(conn, agency_id)
+    (pipeline.recorded_floor.retention_floor_async), so only a requested
+    period is ever refused."""
+    records_drops = await recorded_floor.pruned_table_exists(conn)
+    floor = await recorded_floor.recorded_floor_async(conn, agency_id) if records_drops else None
     if floor is not None and first < floor:
         raise RangeNotRetained(floor)
-    retained_reads.note(conn, agency_id, first)
+    retained_reads.note(conn, agency_id, first, records_drops=records_drops)
 
 
 # Rows as ingested, for a reader of no agency's versions in force.

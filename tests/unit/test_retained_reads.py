@@ -9,14 +9,16 @@ from __future__ import annotations
 import asyncio
 from datetime import date
 
+import asyncpg
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
 from api.range_not_retained import range_not_retained_handler, recheck_live_reads
-from pipeline import retained_reads, retention
+from pipeline import recorded_floor, retained_reads
 from pipeline.cache import async_lru_cache
 from pipeline.live_filing import require_retained
+from pipeline.query.pooled_conn import PooledConnection
 from pipeline.retained_reads import RangeNotRetained
 
 START = date(2025, 2, 10)
@@ -29,21 +31,36 @@ class Connection:
 
 
 class _Floors:
-    """Stands in for pipeline.retention.retention_floor_async, counting reads."""
+    """Stands in for pipeline.recorded_floor's reads, counting each. A
+    connection marked released raises as asyncpg's pool proxy does."""
 
     def __init__(self) -> None:
         self.floors: dict[int, date] = {}
+        self.records_drops = True
+        self.lookups: list[object] = []
         self.reads: list[tuple[object, int]] = []
 
-    async def __call__(self, conn, agency_id: int) -> date | None:
+    async def exists(self, conn) -> bool:
+        self._check(conn)
+        self.lookups.append(conn)
+        return self.records_drops
+
+    async def floor(self, conn, agency_id: int) -> date | None:
+        self._check(conn)
         self.reads.append((conn, agency_id))
         return self.floors.get(agency_id)
+
+    @staticmethod
+    def _check(conn) -> None:
+        if getattr(conn, "released", False):
+            raise asyncpg.InterfaceError("connection has been released back to the pool")
 
 
 @pytest.fixture
 def floors(monkeypatch):
     fake = _Floors()
-    monkeypatch.setattr(retention, "retention_floor_async", fake)
+    monkeypatch.setattr(recorded_floor, "pruned_table_exists", fake.exists)
+    monkeypatch.setattr(recorded_floor, "recorded_floor_async", fake.floor)
     return fake
 
 
@@ -89,7 +106,7 @@ async def test_a_derived_span_the_floor_passes_mid_compute_is_computed_again_fro
 
     @async_lru_cache(ttl_seconds=600)
     async def compute(conn, agency_id: int) -> date:
-        floor = await retention.retention_floor_async(conn, agency_id)
+        floor = await recorded_floor.retention_floor_async(conn, agency_id)
         first = START if floor is None else max(START, floor)
         await require_retained(conn, agency_id, first)
         starts.append(first)
@@ -132,8 +149,24 @@ async def test_without_a_floor_a_compute_adds_one_floor_read_on_its_own_connecti
 
     assert await compute(conn, 1) == "whole"
     assert floors.reads == [(conn, 1)] * 3
+    # The re-check skips the table lookup the checks already made.
+    assert floors.lookups == [conn, conn]
     assert await compute(conn, 1) == "whole"
     assert len(floors.reads) == 3
+
+
+async def test_a_database_not_recording_drops_is_asked_again_and_has_no_floor_to_read(floors):
+    floors.records_drops = False
+    conn = Connection()
+
+    @async_lru_cache(ttl_seconds=600)
+    async def compute(conn, agency_id: int) -> str:
+        await require_retained(conn, agency_id, START)
+        return "whole"
+
+    assert await compute(conn, 1) == "whole"
+    assert floors.lookups == [conn, conn]
+    assert floors.reads == []
 
 
 async def test_a_compute_without_live_reads_reads_no_floor(floors):
@@ -307,3 +340,45 @@ async def test_outside_any_computation_nothing_is_noted(floors):
     await require_retained(Connection(), 1, START)
     await retained_reads.checkpoint()
     assert len(floors.reads) == 1
+
+
+class _Released(Connection):
+    released = False
+
+
+def _pooled_app(endpoint) -> FastAPI:
+    app = _app(endpoint)
+    app.state.pool = object()
+    return app
+
+
+def test_a_read_checked_on_a_connection_since_given_back_is_rechecked_through_the_pool(floors):
+    async def live():
+        conn = _Released()
+        await require_retained(conn, 1, START)
+        conn.released = True
+        floors.floors[1] = FLOOR
+        return {"answer": "partial"}
+
+    resp = TestClient(_pooled_app(live)).get("/live")
+    assert resp.status_code == 422
+    assert isinstance(floors.reads[-1][0], PooledConnection)
+
+
+def test_without_a_floor_a_read_on_a_connection_given_back_is_served(floors):
+    async def live():
+        conn = _Released()
+        await require_retained(conn, 1, START)
+        conn.released = True
+        return {"answer": "whole"}
+
+    assert TestClient(_pooled_app(live), raise_server_exceptions=False).get("/live").status_code == 200
+
+
+async def test_without_a_fallback_a_connection_given_back_still_raises(floors):
+    conn = _Released()
+    with retained_reads.recording() as reads:
+        await require_retained(conn, 1, START)
+    conn.released = True
+    with pytest.raises(asyncpg.InterfaceError):
+        await reads.verify()

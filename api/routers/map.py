@@ -57,6 +57,7 @@ from api.range import (
 from api.scope_applied import ALL_SIX, scope_applied
 from api.security import User, csrf_guard, require_user_when_sign_in_exists
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
+from pipeline import retained_reads
 from pipeline.cache import async_lru_cache
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE, checked_table
 from pipeline.day_types import DayTypes, load_day_types
@@ -69,10 +70,10 @@ from pipeline.db import (
 )
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
 from pipeline.live_filing import Filing, filing
+from pipeline.recorded_floor import retention_floor_async
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 from pipeline.retained_reads import RangeNotRetained
-from pipeline.retention import retention_floor_async
 from pipeline.service_day import (
     clock_to_sec,
     filed_between_ch,
@@ -1177,7 +1178,9 @@ async def route_trips(
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
     # just a bounded-but-still-huge scan. See `_latest_route_observation` for
     # the full existence-check and bound rationale.
-    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
+    # Its own computation (pipeline.retained_reads.checked): a floor raised mid-probe
+    # re-runs it from the new floor rather than refusing a day the request never named.
+    latest_ts = await retained_reads.checked(lambda: _latest_route_observation(conn, ch, agency_id, route_code), conn)
     empty = RouteTripsResponse(
         date=None, time_band=time_band, truncated=False, trips=[], scope_applied=_ROUTE_TRIPS_SCOPE
     )
@@ -1318,7 +1321,9 @@ async def route_stop_profile(
     # `_latest_route_observation` for the full rationale (same
     # fabricated-route-code / unbounded-scan vulnerability, same fix, shared
     # with route_trips above).
-    latest_ts = await _latest_route_observation(conn, ch, agency_id, route_code)
+    # Its own computation (pipeline.retained_reads.checked): a floor raised mid-probe
+    # re-runs it from the new floor rather than refusing a day the request never named.
+    latest_ts = await retained_reads.checked(lambda: _latest_route_observation(conn, ch, agency_id, route_code), conn)
     if latest_ts is None:
         return {"date": None, "stops": []}
     # The service day of the latest observation: the query files captured_at by

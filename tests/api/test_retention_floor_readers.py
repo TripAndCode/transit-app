@@ -480,6 +480,32 @@ async def test_an_ask_tool_reading_live_itself_whose_floor_rises_mid_read_gives_
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "unobserved"),
+    [
+        ("/today/route/R1/stop-profile", {"date": None, "stops": []}),
+        ("/today/route/R1/trips", {"date": None, "trips": []}),
+    ],
+)
+async def test_an_undated_route_view_whose_floor_rises_mid_probe_probes_again_from_the_floor(
+    client, agency_id, pg_conn, ch_client, floor_app, monkeypatch, path, unobserved
+):
+    """The request names no day, so a floor raised while it looks for the
+    route's latest day re-runs the look from the new floor rather than refuse
+    a day the reader never chose. The agency's newest reading, another
+    route's, is past the floor, so its 30-day window crosses it until the
+    look starts again."""
+    from api.routers import map as map_router
+
+    _seed_route(pg_conn, agency_id)
+    _observe(ch_client, agency_id, FLOOR + timedelta(days=2), route="R2")
+    _dropping_after_check(monkeypatch, map_router, pg_conn, agency_id)
+    resp = await client.get(f"/api/{agency_id}" + path, headers=EN)
+    assert resp.status_code == 200, resp.text
+    assert {key: resp.json()[key] for key in unobserved} == unobserved
+
+
+@pytest.mark.asyncio
 async def test_without_a_floor_a_live_reader_is_served_after_its_recheck(
     client, agency_id, pg_conn, ch_client, floor_app
 ):

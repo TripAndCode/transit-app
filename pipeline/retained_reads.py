@@ -16,8 +16,9 @@ RangeNotRetained, so its partial answer is neither returned, cached nor
 stored.
 
 A computation is whatever runs inside one `recording()`: each cached compute
-(pipeline.cache.async_lru_cache), each Ask tool (pipeline.query.tools), and
-each API request (api.range_not_retained.recheck_live_reads). A check is
+(pipeline.cache.async_lru_cache), each Ask tool (pipeline.query.tools), the
+map's look for an undated route view's day (api.routers.map), and each API
+request (api.range_not_retained.recheck_live_reads). A check is
 noted against the innermost one, which verifies it; an enclosing one gets
 only the verified result. Tasks a computation starts (asyncio.gather) copy
 its context, and with it the same record, so their checks reach it. Outside
@@ -31,7 +32,12 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import date
+from functools import partial
 from typing import Any, TypeVar
+
+import asyncpg
+
+from pipeline import recorded_floor
 
 T = TypeVar("T")
 
@@ -53,47 +59,65 @@ class RangeNotRetained(Exception):
 class Reads:
     """The live reads of `updates` one computation has made: for each agency,
     the earliest service date read and the connection it was last checked
-    on."""
+    on, and whether any check found the database recording drops."""
 
-    __slots__ = ("starts",)
+    __slots__ = ("records_drops", "starts")
 
     def __init__(self) -> None:
         self.starts: dict[int, tuple[date, Any]] = {}
+        self.records_drops = False
 
-    def note(self, conn: Any, agency_id: int, first: date) -> None:
+    def note(self, conn: Any, agency_id: int, first: date, *, records_drops: bool) -> None:
         held = self.starts.get(agency_id)
         self.starts[agency_id] = (first if held is None else min(held[0], first), conn)
+        self.records_drops = self.records_drops or records_drops
 
-    async def verify(self, conn: Any = None) -> None:
+    async def verify(self, conn: Any = None, *, fallback: Callable[[], Any] | None = None) -> None:
         """Raise RangeNotRetained unless each agency's floor, read again now,
         is still at or below the earliest date read from it. Each floor is
         read on *conn*, or without one on the connection the agency was last
-        checked on, which the caller must still hold."""
+        checked on; should that one be back in its pool, on *fallback()*."""
         if not self.starts:
             return
-        # pipeline.retention imports pipeline.cache, which imports this module.
-        from pipeline import retention
-
         pending = list(self.starts.items())
-        for agency_id, (first, checked_on) in pending:
-            floor = await retention.retention_floor_async(checked_on if conn is None else conn, agency_id)
-            if floor is not None and first < floor:
-                raise RangeNotRetained(floor)
+        if self.records_drops or await _on(
+            pending[0][1][1] if conn is None else conn, fallback, recorded_floor.pruned_table_exists
+        ):
+            for agency_id, (first, checked_on) in pending:
+                floor = await _on(
+                    checked_on if conn is None else conn,
+                    fallback,
+                    partial(recorded_floor.recorded_floor_async, agency_id=agency_id),
+                )
+                if floor is not None and first < floor:
+                    raise RangeNotRetained(floor)
         # A read noted while the floors were being read is left to the next verify.
         for agency_id, held in pending:
             if self.starts.get(agency_id) is held:
                 del self.starts[agency_id]
 
 
+async def _on(conn: Any, fallback: Callable[[], Any] | None, read: Callable[[Any], Awaitable[T]]) -> T:
+    try:
+        return await read(conn)
+    except asyncpg.InterfaceError:
+        if fallback is None:
+            raise
+        return await read(fallback())
+
+
 _current: ContextVar[Reads | None] = ContextVar("retained_reads", default=None)
 
 
-def note(conn: Any, agency_id: int, first: date) -> None:
+def note(conn: Any, agency_id: int, first: date, *, records_drops: bool) -> None:
     """Note that a read of *agency_id*'s `updates` from *first* passed its
-    floor check on *conn*, against the computation in progress, if any."""
+    floor check on *conn*, against the computation in progress, if any.
+    *records_drops* is whether that check found the database recording
+    drops (recorded_floor.pruned_table_exists), which a re-check then need
+    not ask again."""
     reads = _current.get()
     if reads is not None:
-        reads.note(conn, agency_id, first)
+        reads.note(conn, agency_id, first, records_drops=records_drops)
 
 
 @contextmanager
