@@ -650,14 +650,8 @@
   "header": {
     "app_title": "遅延ダッシュボード",
     "app_tagline": "広島・青森のバス",
-    "settings_aria": "設定",
     "agency_picker_empty": "事業者が登録されていません",
-    "agency_picker_placeholder": "事業者を選択",
-    "settings_title": "設定",
-    "settings_api_key_label": "API キー",
-    "settings_api_key_placeholder": "未設定でも全機能が使えます",
-    "settings_api_key_hint": "通常利用には不要です。Pro プラン（レート制限 60 → 600 req/min）が必要な場合のみ設定してください。",
-    "settings_api_key_rejected": "保存されていた API キーが受け付けられなかったため、削除しました。まだ使えるはずのキーなら、設定から入力し直してください。"
+    "agency_picker_placeholder": "事業者を選択"
   },
   "common": {
     "cancel": "キャンセル",
@@ -1774,14 +1768,6 @@
       "sessions_empty": "有効なセッションはありません。",
       "session_revoke": "失効",
       "session_last_seen": "最終アクセス: {{time}}",
-      "api_keys_title": "APIキー",
-      "api_keys_empty": "発行済みのAPIキーはありません。",
-      "api_key_issue": "発行",
-      "api_key_revoke": "失効",
-      "api_key_revoked_label": "失効済み",
-      "api_key_issued_notice": "このキーは今すぐコピーしてください。二度と表示されません。",
-      "api_key_copy": "コピー",
-      "api_key_copied": "コピーしました",
       "danger_zone_title": "危険な操作",
       "activity_title": "利用状況（直近30日）",
       "activity_empty": "直近30日のリクエスト記録はありません。",
@@ -2340,7 +2326,6 @@
         "method": "メソッド",
         "signed_out": "未ログイン",
         "signed_in": "ログイン",
-        "api_key": "APIキー",
         "errors": "エラー"
       }
     }

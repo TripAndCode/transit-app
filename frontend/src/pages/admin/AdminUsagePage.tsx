@@ -19,12 +19,11 @@ import { PageHeader } from "../../components/ui/PageHeader";
 
 const DAY_OPTIONS = [7, 30, 90] as const;
 
-/** The three caller kinds, in stacking order, as shades of one accent so the
+/** The two caller kinds, in stacking order, as shades of one accent so the
  *  bar stays calm. The labels reuse the route table's column headers. */
 const SEGMENTS = [
   { key: "signed_out", labelKey: "admin.usage.col.signed_out", opacity: 1 },
   { key: "signed_in", labelKey: "admin.usage.col.signed_in", opacity: 0.55 },
-  { key: "api_key", labelKey: "admin.usage.col.api_key", opacity: 0.25 },
 ] as const;
 
 function Swatch({ opacity }: { opacity: number }) {
@@ -47,7 +46,7 @@ function Swatch({ opacity }: { opacity: number }) {
 /** One day's three counts as a stacked bar, scaled to the window's busiest
  *  day, with the day's total beside it. */
 function DayBar({ day, maxTotal }: { day: AdminUsageDay; maxTotal: number }) {
-  const total = day.signed_out + day.signed_in + day.api_key;
+  const total = day.signed_out + day.signed_in;
   return (
     <div
       style={{
@@ -98,9 +97,9 @@ function DayBar({ day, maxTotal }: { day: AdminUsageDay; maxTotal: number }) {
 }
 
 /** Admin: the cookie-free usage signal -- requests per route template per
- *  day, split by whether the caller was signed out, signed in, or an API
- *  key. Readers never sign in, so this is the only server-side count of
- *  how much the notebook itself is used. */
+ *  day, split by whether the caller was signed out or signed in. Readers
+ *  never sign in, so this is the only server-side count of how much the
+ *  notebook itself is used. */
 export function AdminUsagePage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -141,12 +140,6 @@ export function AdminUsagePage() {
       render: (row) => formatNumber(row.signed_in),
     },
     {
-      key: "api_key",
-      header: t("admin.usage.col.api_key"),
-      align: "right",
-      render: (row) => formatNumber(row.api_key),
-    },
-    {
       key: "errors",
       header: t("admin.usage.col.errors"),
       align: "right",
@@ -156,7 +149,7 @@ export function AdminUsagePage() {
 
   const maxDayTotal = Math.max(
     1,
-    ...(data?.days.map((d) => d.signed_out + d.signed_in + d.api_key) ?? [1]),
+    ...(data?.days.map((d) => d.signed_out + d.signed_in) ?? [1]),
   );
 
   return (

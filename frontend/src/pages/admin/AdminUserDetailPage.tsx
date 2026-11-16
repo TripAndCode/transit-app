@@ -8,7 +8,7 @@ import { usePatchUser, useDeleteUser } from "../../api/admin";
 import { useSession } from "../../api/auth";
 import { AdminButton } from "./adminControls";
 import { Drawer } from "../../components/admin/Drawer";
-import { ActivitySection, ApiKeysSection, SessionsSection } from "./UserDrawerSections";
+import { ActivitySection, SessionsSection } from "./UserDrawerSections";
 
 type AdminUserDetail = {
   user_id: number;
@@ -248,7 +248,6 @@ function AdminUserDetailBody({
         )}
 
         <SessionsSection uid={data.user_id} />
-        <ApiKeysSection uid={data.user_id} canIssue={!isDeleted} />
         <ActivitySection uid={data.user_id} />
 
         <section style={{ marginBottom: 24 }}>

@@ -650,14 +650,8 @@
   "header": {
     "app_title": "Delay Dashboard",
     "app_tagline": "Buses in Hiroshima and Aomori",
-    "settings_aria": "Settings",
     "agency_picker_empty": "No agencies registered",
-    "agency_picker_placeholder": "Select agency",
-    "settings_title": "Settings",
-    "settings_api_key_label": "API key",
-    "settings_api_key_placeholder": "All features work without one",
-    "settings_api_key_hint": "Not needed for typical use. Only set this if you need the Pro tier (rate limit 60 → 600 req/min).",
-    "settings_api_key_rejected": "The saved API key was not accepted, so it has been removed. If it should still work, enter it again in Settings."
+    "agency_picker_placeholder": "Select agency"
   },
   "common": {
     "cancel": "Cancel",
@@ -1774,14 +1768,6 @@
       "sessions_empty": "No active sessions.",
       "session_revoke": "Revoke",
       "session_last_seen": "Last seen {{time}}",
-      "api_keys_title": "API keys",
-      "api_keys_empty": "No API keys issued.",
-      "api_key_issue": "Issue",
-      "api_key_revoke": "Revoke",
-      "api_key_revoked_label": "revoked",
-      "api_key_issued_notice": "Copy this key now — it won't be shown again.",
-      "api_key_copy": "Copy",
-      "api_key_copied": "Copied",
       "danger_zone_title": "Danger zone",
       "activity_title": "Usage (last 30 days)",
       "activity_empty": "No recorded requests in the last 30 days.",
@@ -2340,7 +2326,6 @@
         "method": "Method",
         "signed_out": "Signed out",
         "signed_in": "Signed in",
-        "api_key": "API key",
         "errors": "Errors"
       }
     }

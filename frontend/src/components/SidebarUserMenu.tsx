@@ -53,11 +53,11 @@ const groupLabelStyle: CSSProperties = {
   color: "var(--text-tertiary)",
 };
 
-/** Sidebar footer control: collapses what used to be five separate header
- *  controls (Live/sign-in/language/theme/settings) into one avatar-trigger
- *  popover, following the standard "user menu" pattern instead of a row of
- *  bare icons wrapping across two lines. */
-export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void }) {
+/** Sidebar footer control: collapses what used to be four separate header
+ *  controls (Live/sign-in/language/theme) into one avatar-trigger popover,
+ *  following the standard "user menu" pattern instead of a row of bare icons
+ *  wrapping across two lines. */
+export function SidebarUserMenu() {
   const { t, i18n } = useTranslation();
   const { data: config, isLoading: configLoading } = useConfig();
   const { data: session, isLoading: sessionLoading } = useSession();
@@ -164,18 +164,6 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onOpenSettings();
-            }}
-            className="sidebar-user-menu-item"
-            style={popItemStyle}
-          >
-            <span>{t("header.settings_aria")}</span>
-          </button>
           {config?.auth_enabled && session && (
             <>
               <div role="separator" style={{ height: 1, margin: "6px 0", background: "var(--border-soft)" }} />
