@@ -19,8 +19,41 @@ function secondsText(v: number): string {
   return formatNumber(v, { maximumFractionDigits: 1 });
 }
 
+const FIELD_PCT = {
+  stop_id: "stop_id_pct",
+  arr_delay: "arr_delay_pct",
+  schedule_relationship_trip: "schedule_relationship_trip_pct",
+  schedule_relationship_stop: "schedule_relationship_stop_pct",
+} as const satisfies Record<AgencyFeedQualityMonth["grade_failing_fields"][number], keyof AgencyFeedQualityMonth>;
+
+/** A failing criterion with the figure it was judged on, printed to the
+ *  precision the grade judges it at. */
+function failingItem(t: TFunction, m: AgencyFeedQualityMonth, name: AgencyFeedQualityMonth["grade_failing"][number]) {
+  const separator = t("admin.agency_diag.quality_list_separator");
+  const plain = t(`admin.agency_diag.quality_criterion.${name}`);
+  const valued = (value: string) => t(`admin.agency_diag.quality_failing_value.${name}`, { value });
+  if (name === "rt_completeness") return m.rt_completeness_pct == null ? plain : valued(pctText(m.rt_completeness_pct));
+  if (name === "stale_polls")
+    return m.message_age_stale_pct == null ? plain : valued(clampText(m.message_age_stale_pct));
+  if (name === "clamp") return m.clamp_pct == null ? plain : valued(pctText(m.clamp_pct));
+  const fields = m.grade_failing_fields.flatMap((field) => {
+    const pct = m[FIELD_PCT[field]];
+    return pct == null
+      ? []
+      : [
+          t("admin.agency_diag.quality_failing_field", {
+            field: t(`admin.agency_diag.quality_field.${field}`),
+            value: pctText(pct),
+          }),
+        ];
+  });
+  return fields.length === 0
+    ? plain
+    : t("admin.agency_diag.quality_failing_value.field_coverage", { fields: fields.join(separator) });
+}
+
 /** Why a month has its grade: the criteria it cannot be judged on and why,
- *  then those it misses, or that it meets them all. */
+ *  then those it misses with their figures, or that it meets them all. */
 function gradeReasons(t: TFunction, m: AgencyFeedQualityMonth): string[] {
   const separator = t("admin.agency_diag.quality_list_separator");
   const criterion = (name: string) => t(`admin.agency_diag.quality_criterion.${name}`);
@@ -36,7 +69,9 @@ function gradeReasons(t: TFunction, m: AgencyFeedQualityMonth): string[] {
   }
   if (m.grade_failing.length > 0) {
     reasons.push(
-      t("admin.agency_diag.quality_grade_failing", { criteria: m.grade_failing.map(criterion).join(separator) }),
+      t("admin.agency_diag.quality_grade_failing", {
+        criteria: m.grade_failing.map((name) => failingItem(t, m, name)).join(separator),
+      }),
     );
   } else if (m.grade != null) {
     reasons.push(t("admin.agency_diag.quality_grade_pass"));

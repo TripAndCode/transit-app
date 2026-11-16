@@ -28,10 +28,9 @@ provider sub creates a fresh user. The user's API keys are revoked and
 their recorded owner address is replaced with the anonymized one.
 
 A soft-delete is terminal and ``deleted_at`` records it. Suspension alone
-is reversible, and lifting it would bring the account's keys back, so the
-routes that change a user or give it credentials refuse a deleted row with a
-409: the single and bulk PATCH, DELETE, and API-key issue. Revoking a
-session or a key only takes access away and needs no such guard.
+is reversible, so the routes that change a user refuse a deleted row with a
+409: the single and bulk PATCH, and DELETE. Revoking a session only takes
+access away and needs no such guard.
 """
 
 import asyncio
@@ -39,19 +38,18 @@ import json
 import logging
 import os
 import re
-import secrets
 import time
 import unicodedata
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from api.admin_audit import record_admin_action
 from api.admin_board import alert_key, board_alerts, board_freshness, board_window, collector_tiles
@@ -67,7 +65,7 @@ from api.admin_runs import (
 from api.deps import get_ch, get_conn
 from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.routers.agencies import AdminAgencyOut
-from api.security import User, csrf_guard, require_admin, token_hash
+from api.security import User, csrf_guard, require_admin
 from api.sqlutil import escape_like
 from pipeline.admin_users import SessionPrefixError, resolve_session_prefix, session_id_prefix
 from pipeline.api_key_ownership import OWNED_BY_USER
@@ -84,7 +82,6 @@ _log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 MAX_BULK_USER_IDS = 200
-MAX_API_KEYS_LISTED = 500
 USER_DELETED = "user is deleted"
 
 
@@ -567,8 +564,9 @@ async def delete_user(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
     """Soft-delete: anonymize PII, suspend, mark deleted, revoke and
-    anonymize API keys, drop sessions + identities, keep ``login_events``
-    intact for audit.
+    anonymize API keys, drop sessions + identities, delete the user's
+    Notebook investigations (``ask_conversations``, cascading to their
+    messages), keep ``login_events`` intact for audit.
 
     Last-admin guard fires only if the target is currently an active
     admin (i.e. role=admin AND not suspended) — suspending an already-
@@ -609,6 +607,9 @@ async def delete_user(
         )
         await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
         await conn.execute("DELETE FROM oauth_identities WHERE user_id=$1", uid)
+        deleted_conversations = await conn.fetch(
+            "DELETE FROM ask_conversations WHERE user_id=$1 RETURNING conversation_id", uid
+        )
         await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted", ip=ip, user_agent=ua)
         await record_admin_action(
             conn,
@@ -626,6 +627,7 @@ async def delete_user(
                 "email": anonymized,
                 "deleted_at": deleted_at,
                 "api_keys_revoked": sorted(r["id"] for r in revoked),
+                "ask_conversations_deleted": len(deleted_conversations),
             },
             ip=ip,
         )
@@ -711,7 +713,6 @@ class AdminUsageRouteRow(BaseModel):
     method: str
     signed_out: int
     signed_in: int
-    api_key: int
     errors: int
 
 
@@ -721,7 +722,6 @@ class AdminUsageDayRow(BaseModel):
     day: date
     signed_out: int
     signed_in: int
-    api_key: int
 
 
 class AdminUsageOut(BaseModel):
@@ -740,8 +740,7 @@ _USAGE_ANON_ROUTES_SQL = """
 
 _USAGE_USER_ROUTES_SQL = """
     SELECT route, method,
-           COALESCE(SUM(requests) FILTER (WHERE NOT via_api_key), 0)::int AS signed_in,
-           COALESCE(SUM(requests) FILTER (WHERE via_api_key), 0)::int AS api_key,
+           COALESCE(SUM(requests), 0)::int AS signed_in,
            COALESCE(SUM(errors), 0)::int AS errors
     FROM user_activity_daily
     WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
@@ -756,9 +755,7 @@ _USAGE_ANON_DAYS_SQL = """
 """
 
 _USAGE_USER_DAYS_SQL = """
-    SELECT day,
-           COALESCE(SUM(requests) FILTER (WHERE NOT via_api_key), 0)::int AS signed_in,
-           COALESCE(SUM(requests) FILTER (WHERE via_api_key), 0)::int AS api_key
+    SELECT day, COALESCE(SUM(requests), 0)::int AS signed_in
     FROM user_activity_daily
     WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
     GROUP BY day
@@ -772,8 +769,8 @@ async def admin_usage(
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> AdminUsageOut:
-    """Requests per route template per day, split by signed-out, signed-in
-    and API-key traffic, over the trailing ``days`` JST days ending today.
+    """Requests per route template per day, split by signed-out and
+    signed-in traffic, over the trailing ``days`` JST days ending today.
     Either table missing (a deployment behind on migrations) degrades to an
     empty contribution rather than a 500."""
     today = today_jst(datetime.now(timezone.utc))
@@ -796,33 +793,27 @@ async def admin_usage(
         routes[(r["route"], r["method"])] = {
             "signed_out": r["requests"],
             "signed_in": 0,
-            "api_key": 0,
             "errors": r["errors"],
         }
     for r in user_routes:
-        entry = routes.setdefault(
-            (r["route"], r["method"]), {"signed_out": 0, "signed_in": 0, "api_key": 0, "errors": 0}
-        )
+        entry = routes.setdefault((r["route"], r["method"]), {"signed_out": 0, "signed_in": 0, "errors": 0})
         entry["signed_in"] = r["signed_in"]
-        entry["api_key"] = r["api_key"]
         entry["errors"] += r["errors"]
     route_rows = [
         AdminUsageRouteRow(route=route, method=method, **counts) for (route, method), counts in routes.items()
     ]
-    route_rows.sort(key=lambda row: (-(row.signed_out + row.signed_in + row.api_key), row.route, row.method))
+    route_rows.sort(key=lambda row: (-(row.signed_out + row.signed_in), row.route, row.method))
 
     by_day: dict[date, dict[str, int]] = {}
     for r in anon_days:
-        by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0, "api_key": 0})["signed_out"] = r["requests"]
+        by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0})["signed_out"] = r["requests"]
     for r in user_days:
-        entry = by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0, "api_key": 0})
-        entry["signed_in"] = r["signed_in"]
-        entry["api_key"] = r["api_key"]
+        by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0})["signed_in"] = r["signed_in"]
 
     day_rows = []
     cursor = since + timedelta(days=1)
     while cursor <= today:
-        counts = by_day.get(cursor, {"signed_out": 0, "signed_in": 0, "api_key": 0})
+        counts = by_day.get(cursor, {"signed_out": 0, "signed_in": 0})
         day_rows.append(AdminUsageDayRow(day=cursor, **counts))
         cursor += timedelta(days=1)
 
@@ -871,173 +862,6 @@ async def revoke_user_session(
             action="user.session_revoked",
             target_type="user",
             target_id=str(uid),
-            ip=ip,
-        )
-    return Response(status_code=204)
-
-
-# ── API keys ──────────────────────────────────────────────────────────────
-
-
-class ApiKeyOut(BaseModel):
-    """One admin-issued API key's metadata. Never the raw key or its hash."""
-
-    id: int
-    owner_user_id: int | None
-    tier: str
-    label: str | None
-    created_at: Any
-    expires_at: Any
-    revoked_at: Any
-
-
-class ApiKeyIssued(ApiKeyOut):
-    """Same shape as :class:`ApiKeyOut` plus the raw key -- returned exactly
-    once, from the issuing POST response, and never persisted in this form."""
-
-    key: str
-
-
-class ApiKeyCreate(BaseModel):
-    owner_user_id: int
-    # The only tier `_key_func` grants anything to; the column default agrees.
-    tier: Literal["pro"] = "pro"
-    label: str | None = Field(default=None, max_length=120)
-    expires_at: datetime | None = None
-
-    @field_validator("expires_at")
-    @classmethod
-    def _utc_when_naive(cls, v: datetime | None) -> datetime | None:
-        # asyncpg reads a naive value for a timestamptz column in the server's local zone.
-        return v.replace(tzinfo=timezone.utc) if v is not None and v.tzinfo is None else v
-
-
-class ApiKeyListOut(BaseModel):
-    """The bounded API-key listing plus whether the cap actually cut rows.
-
-    Without ``truncated``, a caller at exactly ``MAX_API_KEYS_LISTED`` rows
-    is indistinguishable from one with thousands more never shown.
-    """
-
-    keys: list[ApiKeyOut]
-    truncated: bool
-
-
-@router.get("/api-keys", response_model=ApiKeyListOut)
-async def list_api_keys(
-    owner_user_id: int | None = None,
-    _admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> ApiKeyListOut:
-    """List admin-issued API keys (rows with an ``owner_user_id``) -- excludes
-    legacy operator-inserted rows that predate this table's ownership/label
-    columns. ``key_hash`` no longer distinguishes the two: it is backfilled
-    for every row, admin-issued or legacy.
-
-    Bounded: unscoped, this returns at most ``MAX_API_KEYS_LISTED`` of every
-    admin-issued key in the system, and that set only grows; ``truncated``
-    tells the caller whether the cap actually cut anything."""
-    rows = await conn.fetch(
-        """
-        SELECT id, owner_user_id, tier, label, created_at, expires_at, revoked_at
-        FROM api_keys
-        WHERE owner_user_id IS NOT NULL AND ($1::int IS NULL OR owner_user_id = $1)
-        ORDER BY created_at DESC
-        LIMIT $2
-        """,
-        owner_user_id,
-        MAX_API_KEYS_LISTED + 1,
-    )
-    truncated = len(rows) > MAX_API_KEYS_LISTED
-    page = rows[:MAX_API_KEYS_LISTED]
-    return ApiKeyListOut(keys=[ApiKeyOut(**dict(r)) for r in page], truncated=truncated)
-
-
-@router.post("/api-keys", response_model=ApiKeyIssued, status_code=201)
-async def issue_api_key(
-    body: ApiKeyCreate,
-    request: Request,
-    admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> ApiKeyIssued:
-    """Generate a raw API key, store only its hash, and return the raw value
-    once. ``key_hash`` is ``api.security.token_hash`` of the raw key -- the
-    same digest the auth stack uses for sessions -- so this key validates
-    through the same ``key_hash`` lookup as any other row in the table."""
-    csrf_guard(request)
-    ua = request.headers.get("user-agent")
-    ip = request.client.host if request.client else None
-    async with conn.transaction():
-        # FOR UPDATE: a concurrent delete_user either finishes first and is
-        # seen here, or waits and then revokes this key along with the rest.
-        owner = await conn.fetchrow("SELECT deleted_at FROM users WHERE user_id=$1 FOR UPDATE", body.owner_user_id)
-        if not owner:
-            raise HTTPException(404, "owner user not found")
-        if owner["deleted_at"] is not None:
-            raise HTTPException(409, USER_DELETED)
-        raw_key = f"sk_{secrets.token_urlsafe(32)}"
-        digest = token_hash(raw_key)
-        row = await conn.fetchrow(
-            """
-            INSERT INTO api_keys (key_hash, owner_user_id, tier, label, expires_at, owner_email)
-            VALUES ($1, $2, $3, $4, $5, (SELECT email FROM users WHERE user_id=$2))
-            RETURNING id, owner_user_id, tier, label, created_at, expires_at, revoked_at
-            """,
-            digest,
-            body.owner_user_id,
-            body.tier,
-            body.label,
-            body.expires_at,
-        )
-        await record_event(
-            conn,
-            user_id=body.owner_user_id,
-            actor_id=admin.user_id,
-            kind="api_key_issued",
-            meta={"label": body.label},
-            ip=ip,
-            user_agent=ua,
-        )
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="api_key.issued",
-            target_type="user",
-            target_id=str(body.owner_user_id),
-            after={"label": body.label, "tier": body.tier},
-            ip=ip,
-        )
-    return ApiKeyIssued(**dict(row), key=raw_key)
-
-
-@router.delete("/api-keys/{key_id}", status_code=204)
-async def revoke_api_key(
-    key_id: int,
-    request: Request,
-    admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> Response:
-    csrf_guard(request)
-    ua = request.headers.get("user-agent")
-    ip = request.client.host if request.client else None
-    async with conn.transaction():
-        row = await conn.fetchrow(
-            "UPDATE api_keys SET revoked_at = now() "
-            "WHERE id=$1 AND owner_user_id IS NOT NULL AND revoked_at IS NULL "
-            "RETURNING id, owner_user_id",
-            key_id,
-        )
-        if not row:
-            raise HTTPException(404, "api key not found")
-        await record_event(
-            conn, user_id=row["owner_user_id"], actor_id=admin.user_id, kind="api_key_revoked", ip=ip, user_agent=ua
-        )
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="api_key.revoked",
-            target_type="api_key",
-            target_id=str(key_id),
             ip=ip,
         )
     return Response(status_code=204)

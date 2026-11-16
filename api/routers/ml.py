@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.deps import get_conn
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.routers.reports import fetch_live_ml_agencies
 from api.security import User, require_admin
 from pipeline.flags import aflag
@@ -103,7 +103,7 @@ class MlEvaluationsResponse(BaseModel):
 
 
 @router.get("/evaluations", response_model=MlEvaluationsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def ml_evaluations(
     request: Request, conn: asyncpg.Connection = Depends(get_conn), _admin: User = Depends(require_admin)
 ) -> dict[str, Any]:

@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, ctx_payload, get_range_ctx
 from api.routers.network import COMPARABILITY_THRESHOLDS, ComparabilityThresholds
 from api.scope_applied import ALL_SIX, scope_applied
@@ -548,7 +548,7 @@ def _report_ctx(ctx: RangeCtx) -> ReportCtx:
 
 
 @router.get("/reports", response_model=list[ReportMeta])
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def list_reports(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -607,7 +607,7 @@ class HeadwayQualityResponse(BaseModel):
 
 
 @router.get("/headway_quality", response_model=HeadwayQualityResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_headway_quality(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -723,7 +723,7 @@ class PerformanceStandardsResponse(BaseModel):
 
 
 @router.get("/performance_standards", response_model=PerformanceStandardsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_performance_standards(
     request: Request,
     preset: str | None = Query(
@@ -887,7 +887,7 @@ class WeatherDelayResponse(BaseModel):
 
 
 @router.get("/weather_delay", response_model=WeatherDelayResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_weather_delay(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -972,7 +972,7 @@ class DelayRecordStopsResponse(BaseModel):
 
 
 @router.get("/delay_record/trips", response_model=DelayRecordTripsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_delay_record_trips(
     request: Request,
     day: date = Query(alias="date", description="The service day travelled on."),
@@ -997,7 +997,7 @@ async def get_delay_record_trips(
 
 
 @router.get("/delay_record/stops", response_model=DelayRecordStopsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_delay_record_stops(
     request: Request,
     day: date = Query(alias="date", description="The service day travelled on."),
@@ -1062,7 +1062,7 @@ class ForecastHeatmapResponse(BaseModel):
 
 
 @router.get("/forecast/heatmap", response_model=ForecastHeatmapResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def forecast_heatmap(
     request: Request,
     route: str = Query(..., min_length=1),
@@ -1181,7 +1181,7 @@ async def _fetch_recent_daily_rows(
 
 
 @router.get("/forecast/overview", response_model=ForecastOverviewResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def forecast_overview(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -1436,7 +1436,7 @@ def _csv_response(
 
 
 @router.get("/reports/{report_type}", response_model=ReportResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def get_report(
     request: Request,
     report_type: str,

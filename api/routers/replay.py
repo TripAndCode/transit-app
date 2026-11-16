@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from api.clickhouse import newest_filed_date_before, table_holding
 from api.deps import get_agency, get_ch, get_conn
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from pipeline.clickhouse import TRIP_CANCELED
 from pipeline.db import departure_ch, stop_event_filter_ch
 from pipeline.live_filing import filing
@@ -375,7 +375,7 @@ async def _route_labels(conn: asyncpg.Connection, agency_id: int, route_codes: l
 
 
 @router.get("/{agency_id}/replay", response_model=ReplayResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def replay(
     request: Request,
     date: CalendarDate | None = Query(

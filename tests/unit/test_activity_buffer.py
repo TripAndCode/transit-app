@@ -4,7 +4,7 @@ from datetime import date
 from api.activity import ActivityBuffer, ActivityKey, AnonymousKey, agency_id_from, flush
 from api.middleware.usage import _should_count
 
-_KEY = ActivityKey(1, date(2026, 1, 5), "/api/{agency_id}/overview/summary", "GET", 3, False)
+_KEY = ActivityKey(1, date(2026, 1, 5), "/api/{agency_id}/overview/summary", "GET", 3)
 _ANON_KEY = AnonymousKey(date(2026, 1, 5), "/api/agencies", "GET", None)
 
 
@@ -78,9 +78,13 @@ def test_stopping_during_a_periodic_flush_lets_that_write_finish(monkeypatch):
             async def execute(self, sql, *args):
                 started.set()
                 await release.wait()
-                written.append(args[6])
+                written.append(args[5])
 
         app = SimpleNamespace(state=SimpleNamespace(pool=_SlowPool()))
+        # Both module buffers outlive a test, and requests from earlier tests
+        # in the process leave counts in them. Only this test's one user count
+        # may reach the pool.
+        activity.ANONYMOUS_BUFFER.drain()
         activity.BUFFER.drain()
         activity.BUFFER.record(_KEY, is_error=False)
         activity.start(app)

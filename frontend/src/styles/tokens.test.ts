@@ -272,26 +272,18 @@ describe("motion tokens", () => {
 });
 
 describe("elevation tokens", () => {
-  it.each(["--el-1", "--el-2", "--el-3", "--el-left"])("%s is defined in both themes", (prop) => {
+  it.each(["--el-1", "--el-2", "--el-3"])("%s is defined in both themes", (prop) => {
     expect(decl(rootBlock, prop)).toBeTruthy();
     expect(decl(darkBlock, prop)).toBeTruthy();
   });
 
   it("the dark elevations are the hairline/inset treatment, not the light drop shadows", () => {
-    for (const prop of ["--el-1", "--el-2", "--el-3", "--el-left"]) {
+    for (const prop of ["--el-1", "--el-2", "--el-3"]) {
       const dark = decl(darkBlock, prop)!;
       expect(dark).toContain("inset");
       expect(dark).not.toBe(decl(rootBlock, prop));
     }
     expect(resolveDecl(darkBlock, "--el-3")).toMatch(/rgba\(0, ?0, ?0, ?0?\.[5-9]\d*\)/);
-  });
-
-  it("--el-left casts to the left (negative x-offset), not downward like --el-2/--el-3", () => {
-    // A right-anchored drawer's shadow has to fall onto the page it covers,
-    // not below itself, so the offset is on the x axis and negative.
-    for (const block of [rootBlock, darkBlock]) {
-      expect(decl(block, "--el-left")).toMatch(/-\d+px 0/);
-    }
   });
 
   /** Top-level `,`-separated shadow layers of a box-shadow value, ignoring

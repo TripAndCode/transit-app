@@ -15,7 +15,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from api.deps import get_agency, get_ch, get_conn, get_current_user, get_current_user_optional, get_locale
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, clamp_range_ctx
 from api.security import User, csrf_guard, require_llm_approved
 from pipeline.flags import aflag
@@ -205,7 +205,7 @@ async def list_conversations(
 
 
 @router.post("/conversations", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def create_conversation(
     request: Request,
     body: CreateConversation,
@@ -236,7 +236,7 @@ async def get_conversation(
 
 
 @router.patch("/conversations/{conversation_id}", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def update_conversation(
     request: Request,
     conversation_id: str,
@@ -254,7 +254,7 @@ async def update_conversation(
 
 
 @router.delete("/conversations/{conversation_id}")
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def delete_conversation(
     request: Request,
     conversation_id: str,
@@ -280,7 +280,7 @@ async def list_messages(
 
 
 @router.post("/conversations/migrate-anon")
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def migrate_anon_endpoint(
     request: Request,
     body: MigrateAnon,
@@ -376,7 +376,7 @@ def _card_succeeded(card: dict[str, Any]) -> bool:
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def append_message_endpoint(
     request: Request,
     conversation_id: str,
@@ -618,7 +618,7 @@ class CardAnswer(BaseModel):
 
 
 @router.post("/ask/card", response_model=CardAnswer)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def run_card_endpoint(
     request: Request,
     body: RunCard,
@@ -664,7 +664,7 @@ class FollowupBody(BaseModel):
 
 
 @router.post("/conversations/{conversation_id}/followup", response_model=None)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def followup_endpoint(
     request: Request,
     conversation_id: str,

@@ -12,9 +12,11 @@ from pathlib import Path
 
 import pytest
 
+from pipeline import feed_quality, feed_quality_grade
 from pipeline.agg_registry import METHOD_VERSION, METHOD_VERSIONS, MethodVersion
 from pipeline.reports import comparability
 from pipeline.reports.definition import METHODOLOGY_URLS
+from pipeline.strategies import static_join
 from scripts import render_method_changelog as changelog
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -126,3 +128,86 @@ def test_a_longer_number_does_not_state_the_threshold(locale, stated, stale):
     section = _comparability_section(locale)
     assert stated in section
     assert _unstated(section.replace(stated, stale), locale, *_CURRENT)
+
+
+_GRADE_CURRENT = (
+    feed_quality_grade.MIN_RT_COMPLETENESS_PCT,
+    feed_quality.STALE_MESSAGE_AGE_SEC,
+    feed_quality_grade.MAX_STALE_POLLS_PCT,
+    comparability.MAX_CLAMP_PCT,
+    static_join._NEAR_UNIVERSAL_MIN,
+    static_join._ARR_DELAY_SPARSE_RANGE,
+)
+
+
+def _arr_delay_band(locale: str, band: tuple[float, float]) -> str:
+    """The prose for arr_delay's exclusive band: "some" is above 0, "half" is 0.5."""
+    lo, hi = band
+    if locale == "en":
+        lower = "some" if lo == 0 else f"more than {lo:.0%}"
+        upper = "half" if hi == 0.5 else f"{hi:.0%}"
+        return f"the arrival delay on {lower} but fewer than {upper} of them"
+    lower = "一部" if lo == 0 else f"{lo:.0%}超"
+    upper = "半分未満" if hi == 0.5 else f"{hi:.0%}未満"
+    return f"到着の遅延が報告の{lower}（{upper}）にある"
+
+
+def _grade_rows(locale: str, rt, age, stale, clamp, near_universal, arr_band) -> list[str]:
+    """The methodology's grade table cells for the thresholds the grade, the
+    comparability gate and the RT field-coverage probe hold."""
+    near = f"{near_universal:.0%}"
+    if locale == "en":
+        return [
+            f"| Trips reported | at least {rt:g}% |",
+            f"| Polls over {age:g} s | at most {stale:g}% |",
+            f"| Implausible readings | at most {clamp:g}% |",
+            f"| Field coverage | the stop ID and both statuses on at least {near} of reports, and "
+            f"{_arr_delay_band(locale, arr_band)} |",
+        ]
+    return [
+        f"| 便の報告率 | {rt:g}% 以上 |",
+        f"| {age:g}秒を超えた取得 | {stale:g}% 以下 |",
+        f"| 不自然な値の割合 | {clamp:g}% 以下 |",
+        f"| 項目の充足率 | 停留所 ID と二つの状態が報告の {near} 以上にあり、{_arr_delay_band(locale, arr_band)} |",
+    ]
+
+
+def _unstated_grade_rows(locale: str, *thresholds) -> list[str]:
+    text = changelog.DOCS[locale].read_text(encoding="utf-8")
+    return [row for row in _grade_rows(locale, *thresholds) if row not in text]
+
+
+@pytest.mark.parametrize("locale", sorted(changelog.DOCS))
+def test_the_documents_state_the_grade_s_current_thresholds(locale):
+    missing = _unstated_grade_rows(locale, *_GRADE_CURRENT)
+    assert not missing, (
+        f"{changelog.DOCS[locale].name} must state {missing}, the thresholds in feed_quality_grade.py, "
+        "comparability.py and static_join.py"
+    )
+
+
+@pytest.mark.parametrize("locale", sorted(changelog.DOCS))
+@pytest.mark.parametrize(
+    "moved",
+    [
+        (96.0, 65, 5.0, 5.0, 0.99, (0.0, 0.5)),
+        (95.0, 60, 5.0, 5.0, 0.99, (0.0, 0.5)),
+        (95.0, 65, 4.0, 5.0, 0.99, (0.0, 0.5)),
+        (95.0, 65, 5.0, 4.0, 0.99, (0.0, 0.5)),
+        (95.0, 65, 5.0, 5.0, 0.98, (0.0, 0.5)),
+        (95.0, 65, 5.0, 5.0, 0.99, (0.0, 0.4)),
+        (95.0, 65, 5.0, 5.0, 0.99, (0.1, 0.5)),
+    ],
+)
+def test_a_moved_grade_threshold_is_not_what_the_documents_state(locale, moved):
+    assert _unstated_grade_rows(locale, *moved)
+
+
+def test_delay_analysis_points_to_the_grade_thresholds_rather_than_repeating_them():
+    """The methodology is the thresholds' one home in prose."""
+    scorecard = (ROOT / "DELAY_ANALYSIS.md").read_text(encoding="utf-8").split("## Feed-quality scorecard", 1)[1]
+    scorecard = scorecard.split("\n## ", 1)[0]
+    assert "docs/methodology.en.md#feed-quality" in scorecard
+    assert "docs/methodology.md#フィードの品質" in scorecard
+    assert not any(row in scorecard for locale in changelog.DOCS for row in _grade_rows(locale, *_GRADE_CURRENT))
+    assert "| Criterion |" not in scorecard

@@ -22,7 +22,7 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field, field_serializer, field_validator
 
 from api.deps import get_agency, get_ch, get_current_user_optional, get_locale, get_pooled_conn
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import (
     RangeCtx,
     clamp_range_ctx,
@@ -130,7 +130,7 @@ def _resolve_ctx(body_ctx: AskCtx | None) -> RangeCtx:
 
 
 @router.post("/ask", response_model=AskResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def ask(
     request: Request,
     body: AskRequest,

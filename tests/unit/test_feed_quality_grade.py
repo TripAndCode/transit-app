@@ -42,7 +42,7 @@ def test_the_thresholds_start_from_cal_itps_and_the_gates():
 
 def test_a_month_passing_every_criterion_is_an_a():
     graded = grade_month(_month())
-    assert (graded.grade, graded.failing, graded.missing) == ("A", (), ())
+    assert (graded.grade, graded.failing, graded.missing, graded.failing_fields) == ("A", (), (), ())
 
 
 @pytest.mark.parametrize(
@@ -89,6 +89,40 @@ def test_field_coverage_passes_only_as_the_rt_field_probe_would_confirm_it(over)
     """arr_delay is the sparse arrival estimate the app reads it as only when
     some but fewer than half of the updates carry it."""
     assert grade_month(_month(**over)).failing == ("field_coverage",)
+
+
+@pytest.mark.parametrize(
+    ("over", "fields"),
+    [
+        ({}, ()),
+        ({"arr_delay_pct": 100.0}, ("arr_delay",)),
+        ({"stop_id_pct": 0.0, "schedule_relationship_stop_pct": 98.9}, ("stop_id", "schedule_relationship_stop")),
+        # Other criteria failing name no field.
+        ({"rt_completeness_pct": 80.0}, ()),
+    ],
+)
+def test_failing_field_coverage_names_each_field_it_fails_on(over, fields):
+    assert grade_month(_month(**over)).failing_fields == fields
+
+
+def test_field_coverage_with_nothing_to_assess_fails_without_naming_a_field():
+    """A month whose stored shares rest on no stop_time_update cannot be
+    confirmed, as the RT field probe would not confirm it either."""
+    graded = grade_month(_month(stop_time_updates=0))
+    assert (graded.failing, graded.failing_fields) == (("field_coverage",), ())
+
+
+def test_a_month_without_field_coverage_names_no_failing_field():
+    graded = grade_month(
+        _month(
+            stop_id_pct=None,
+            arr_delay_pct=None,
+            schedule_relationship_trip_pct=None,
+            schedule_relationship_stop_pct=None,
+            field_coverage_missing="feed_cannot_report",
+        )
+    )
+    assert (graded.grade, graded.failing_fields) == (None, ())
 
 
 @pytest.mark.parametrize(

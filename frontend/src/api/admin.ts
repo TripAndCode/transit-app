@@ -473,6 +473,9 @@ type ValidatorRule = {
 /** A criterion of the month's grade (pipeline/feed_quality_grade.py's `CRITERIA`). */
 type FeedQualityCriterion = "rt_completeness" | "stale_polls" | "clamp" | "field_coverage";
 
+/** A field the RT field-coverage probe judges (pipeline/strategies/static_join.py's `RT_COVERAGE_FIELDS`). */
+type RtCoverageField = "stop_id" | "arr_delay" | "schedule_relationship_trip" | "schedule_relationship_stop";
+
 /** One month of an agency's feed-quality scorecard. Each figure is null
  *  exactly when its `*_missing` reason is set. The grade is null exactly
  *  when `grade_missing` names a criterion whose figure the month lacks. The
@@ -520,6 +523,8 @@ export type AgencyFeedQualityMonth = {
   grade: "A" | "B" | "C" | "D" | "F" | null;
   grade_failing: FeedQualityCriterion[];
   grade_missing: { criterion: FeedQualityCriterion; reason: FeedQualityMissing }[];
+  /** The fields `field_coverage` fails on, when it fails on any. */
+  grade_failing_fields: RtCoverageField[];
 };
 
 type AgencyDiagnostics = {
@@ -754,11 +759,10 @@ export type AdminUsageRoute = {
   method: string;
   signed_out: number;
   signed_in: number;
-  api_key: number;
   errors: number;
 };
 
-export type AdminUsageDay = { day: string; signed_out: number; signed_in: number; api_key: number };
+export type AdminUsageDay = { day: string; signed_out: number; signed_in: number };
 
 export type AdminUsage = {
   from: string;
@@ -767,7 +771,7 @@ export type AdminUsage = {
   days: AdminUsageDay[];
 };
 
-/** Requests per route template, split signed-out/signed-in/API-key, over the
+/** Requests per route template, split signed-out/signed-in, over the
  *  trailing window -- the cookie-free reader signal, since readers never
  *  sign in and the server keeps no visitor identity to count by. */
 export function useAdminUsage(params: { days: number; agencyId?: number }) {
@@ -787,53 +791,6 @@ export function useRevokeSession(uid: number) {
   return useMutation({
     mutationFn: (sidPrefix: string) => apiDelete(`/api/admin/users/${uid}/sessions/${sidPrefix}`),
     onSettled: () => qc.invalidateQueries({ queryKey: ["adminUserSessions", uid] }),
-  });
-}
-
-// ── User drawer: API keys ─────────────────────────────────────────────────
-
-type AdminApiKey = {
-  id: number;
-  owner_user_id: number | null;
-  tier: string;
-  label: string | null;
-  created_at: string;
-  expires_at: string | null;
-  revoked_at: string | null;
-};
-
-export type AdminApiKeyIssued = AdminApiKey & { key: string };
-
-/** `truncated` is true when more admin-issued keys exist than the backend's
- * per-request cap returned -- see MAX_API_KEYS_LISTED in api/routers/admin.py. */
-export type AdminApiKeyList = { keys: AdminApiKey[]; truncated: boolean };
-
-/** API keys issued (via the admin drawer) for one user. */
-export function useApiKeys(ownerUserId: number) {
-  return useQuery({
-    queryKey: ["adminApiKeys", ownerUserId],
-    queryFn: ({ signal }) =>
-      apiGet<AdminApiKeyList>(`/api/admin/api-keys?owner_user_id=${ownerUserId}`, { signal }),
-  });
-}
-
-/** Mutation: issue a new API key for a user. The raw key is returned only
- * in this response -- callers must show it once and never refetch it. */
-export function useIssueApiKey(ownerUserId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: { tier?: string; label?: string | null }) =>
-      apiPost<AdminApiKeyIssued>("/api/admin/api-keys", { owner_user_id: ownerUserId, ...body }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
-  });
-}
-
-/** Mutation: revoke an API key by id; refetches the owner's key list. */
-export function useRevokeApiKey(ownerUserId: number) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => apiDelete(`/api/admin/api-keys/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adminApiKeys", ownerUserId] }),
   });
 }
 

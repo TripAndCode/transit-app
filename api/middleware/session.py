@@ -1,6 +1,6 @@
 """Cookie → DB lookup → request.state.user.
 
-Mounted before APIKeyMiddleware in api/main.py so per-request handlers
+Mounted before UsageCountMiddleware in api/main.py so per-request handlers
 see the user (or None) on request.state. last_seen_at writes are
 throttled in-process to 1/min/session.
 
