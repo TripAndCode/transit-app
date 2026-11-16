@@ -558,10 +558,11 @@ def prune_updates(
     that lock, so it sees the floor before a drop with every row of it, or
     the floor after.
 
-    Every drop is recorded first (_record_drops), and the run then *sleep*s
-    for LIVE_REQUEST_DRAIN_SECONDS, so no live request that checked the old
-    floor is still reading; a run that drops nothing does not wait. Then each
-    partition in turn
+    Every drop is recorded first (_record_drops), so a live read that is
+    still scanning when its rows go sees the new floor once its scans end
+    and is refused (pipeline.retained_reads). The run then *sleep*s for
+    LIVE_REQUEST_DRAIN_SECONDS, so such a refusal stays rare; a run that
+    drops nothing does not wait. Then each partition in turn
     has its refiled dates written off, goes, and is stamped dropped, so a
     failure part-way leaves the months it reached on record and their rows on
     the run.
@@ -595,11 +596,14 @@ def prune_updates(
 LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES = 20
 
 #: How long a run that drops something waits once its floors are committed,
-#: before the first DROP PARTITION: by then every live request that checked
-#: the old floor has run its last query or out its time budget
-#: (LIVE_READ_MAX_EXECUTION_SECONDS per query). The run holds the agencies'
-#: ingest locks throughout, so an analyze or promotion that meets the wait is
-#: turned away (a cron poke is recorded skipped, a CLI exits), not queued.
+#: before the first DROP PARTITION: by then nearly every live request that
+#: checked the old floor has run its last query or out its time budget
+#: (LIVE_READ_MAX_EXECUTION_SECONDS per query). It is defence in depth, not
+#: what keeps an answer whole: a request still reading after the drop is
+#: refused when it checks the floor again after its last scan
+#: (pipeline.retained_reads). The run holds the agencies' ingest locks
+#: throughout, so an analyze or promotion that meets the wait is turned away
+#: (a cron poke is recorded skipped, a CLI exits), not queued.
 LIVE_REQUEST_DRAIN_SECONDS = LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES * LIVE_READ_MAX_EXECUTION_SECONDS
 
 

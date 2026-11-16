@@ -68,9 +68,10 @@ from pipeline.db import (
     stop_event_filter_ch,
 )
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
-from pipeline.live_filing import Filing, RangeNotRetained, filing
+from pipeline.live_filing import Filing, filing
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
+from pipeline.retained_reads import RangeNotRetained
 from pipeline.retention import retention_floor_async
 from pipeline.service_day import (
     clock_to_sec,

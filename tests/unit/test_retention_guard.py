@@ -13,7 +13,8 @@ import pytest
 from api.range_not_retained import range_not_retained_handler
 from pipeline import live_filing
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE
-from pipeline.live_filing import RANGE_NOT_RETAINED_CODE, RangeNotRetained, require_retained
+from pipeline.live_filing import require_retained
+from pipeline.retained_reads import RANGE_NOT_RETAINED_CODE, RangeNotRetained
 
 FLOOR = date(2025, 3, 1)
 

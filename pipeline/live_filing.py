@@ -29,9 +29,10 @@ from datetime import date, datetime
 from typing import NamedTuple
 
 from api.range import TimeBand, UpdatesFilter, time_band_clause_ch_for
-from pipeline import refiled, retention, static_archive
+from pipeline import refiled, retained_reads, retention, static_archive
 from pipeline.cache import async_lru_cache, clear_all
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
+from pipeline.retained_reads import RangeNotRetained
 from pipeline.service_day import filed_capture_span
 from pipeline.static_archive import ScheduleJoin, Stamp
 from pipeline.strategies.static_join import VERSION_STAMPING_STRATEGIES
@@ -53,25 +54,12 @@ class Filing(NamedTuple):
             raise ValueError(f"a read of {first}..{last} reaches outside its filing's {self.between}")
 
 
-#: The machine code of a refused read (RangeNotRetained) on the API's 422.
-RANGE_NOT_RETAINED_CODE = "range_not_retained"
-
-
-class RangeNotRetained(Exception):
-    """A live read of `updates` starts before *floor*, the agency's retention
-    floor (pipeline.retention.retention_floor): `updates` no longer holds
-    every row there, so the read would show a dropped month as one with no
-    data, or give a partial answer across the floor."""
-
-    def __init__(self, floor: date) -> None:
-        super().__init__(f"raw readings before {floor.isoformat()} are no longer retained")
-        self.floor = floor
-
-
 async def require_retained(conn, agency_id: int, first: date) -> None:
     """Raise RangeNotRetained when a read of `updates` from the service date
     *first* starts before the agency's retention floor, read fresh, so a
-    floor a prune has just committed already holds.
+    floor a prune has just committed already holds. A read that passes is
+    noted against the computation in progress, which checks the floor again
+    once its last scan has ended (pipeline.retained_reads).
 
     A reader whose span reaches before the period it was asked for (a
     baseline, a look-back) starts that span no earlier than the floor itself
@@ -80,6 +68,7 @@ async def require_retained(conn, agency_id: int, first: date) -> None:
     floor = await retention.retention_floor_async(conn, agency_id)
     if floor is not None and first < floor:
         raise RangeNotRetained(floor)
+    retained_reads.note(conn, agency_id, first)
 
 
 # Rows as ingested, for a reader of no agency's versions in force.

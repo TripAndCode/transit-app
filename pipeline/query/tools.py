@@ -39,8 +39,7 @@ import asyncpg
 import clickhouse_connect
 
 from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
-from pipeline import perf
-from pipeline.live_filing import RangeNotRetained
+from pipeline import perf, retained_reads
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
@@ -66,6 +65,7 @@ from pipeline.reports.definition import DefinitionMeta
 from pipeline.reports.rankings import _weighted_avg_min, on_time_window, threshold_aggregates_serve
 from pipeline.reports.report_stamp import report_definition
 from pipeline.reports.savepoint import savepoint
+from pipeline.retained_reads import RangeNotRetained
 from pipeline.route_catalog import left_out_unless_named, route_list, rows_to_fetch
 from pipeline.stats import annotate_on_time_pct_confidence
 
@@ -1596,7 +1596,9 @@ async def dispatch(
         # the agency's own timetable days.
         effective_ctx = await resolve_service_dates(_apply_date_overrides(ctx, arguments), conn, agency_id)
         try:
-            return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
+            return await retained_reads.checked(
+                lambda: handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch), conn
+            )
         except RangeNotRetained as exc:
             return ToolResult(
                 kind="empty", summary=_summary("range_not_retained", lang=locale, floor=exc.floor.isoformat())

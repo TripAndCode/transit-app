@@ -31,7 +31,7 @@ from collections import OrderedDict
 from contextvars import ContextVar
 from typing import Any, Awaitable, Callable, Iterable, Literal, TypeVar
 
-from pipeline import perf
+from pipeline import perf, retained_reads
 
 T = TypeVar("T")
 
@@ -201,7 +201,9 @@ def async_lru_cache(
             call = _Call()
             token = _current_call.set(call)
             try:
-                value = await fn(*args, **kwargs)
+                # Checked before the waiters or the cache see it, so a partial
+                # answer from rows a prune dropped mid-compute reaches neither.
+                value = await retained_reads.checked(lambda: fn(*args, **kwargs), _connection_among(args, kwargs))
                 fut.set_result(value)
                 succeeded = True
             except asyncio.CancelledError:
@@ -286,6 +288,20 @@ def _agency_reader(fn: Callable[..., Any], name: str) -> Callable[[Any], Any]:
     return read
 
 
+# The connection-like types a key leaves out, and a compute's re-check of its
+# live reads runs on.
+_CONNECTION_TYPES = frozenset({"Connection", "PoolConnectionProxy", "Pool", "PooledConnection"})
+
+
+def _connection_among(args: tuple, kwargs: dict) -> Any:
+    """The Postgres connection a cached call was passed, else its pool, else
+    None. Its caller holds the connection until the call returns, unlike one
+    the call borrows for a stage of its own and has given back by then; a read
+    through the pool would borrow another beside it."""
+    passed = [v for v in (*args, *kwargs.values()) if type(v).__name__ in _CONNECTION_TYPES]
+    return next((v for v in passed if type(v).__name__ != "Pool"), passed[0] if passed else None)
+
+
 def _keyable(obj: Any) -> Any:
     """Asyncpg connection-like objects are POOLED and per-request — they hash
     by identity, which would make every request a cache miss. Replace them
@@ -301,7 +317,7 @@ def _keyable(obj: Any) -> Any:
     frozenset(a_dict.items())) if a future cached function needs one.
     """
     cls = type(obj).__name__
-    if cls in {"Connection", "PoolConnectionProxy", "Pool", "PooledConnection"}:
+    if cls in _CONNECTION_TYPES:
         return f"<conn:{cls}>"
     try:
         hash(obj)
