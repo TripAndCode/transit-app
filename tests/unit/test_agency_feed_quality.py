@@ -9,6 +9,7 @@ from fastapi.routing import APIRoute
 from pydantic import TypeAdapter
 
 from api import agency_diagnostics as ad
+from api.routers.admin_agencies import FeedQualityMonth
 from api.security import require_admin
 from tests.fixtures.routes import api_routes
 
@@ -87,9 +88,25 @@ def test_each_month_carries_its_grade_from_its_own_figures():
     october, september = ad.build_feed_quality(rows)
     assert october["message_age_stale_pct"] == 25.0 and isinstance(october["message_age_stale_pct"], float)
     assert (october["grade"], october["grade_failing"], october["grade_missing"]) == ("B", ["stale_polls"], [])
+    assert october["grade_failing_fields"] == []
     assert september["grade"] is None
     assert september["grade_failing"] == ["rt_completeness"]
     assert september["grade_missing"] == [{"criterion": "stale_polls", "reason": "archive_stamped"}]
+
+
+def test_a_month_failing_field_coverage_names_the_fields_it_fails_on_in_the_response():
+    unvalidated = {
+        "validator_ok_days": None,
+        "validator_failed_days": None,
+        "validator_files_validated": None,
+        "validator_rules": None,
+        "validator_missing": None,
+        "validator_ingested_at": None,
+    }
+    (built,) = ad.build_feed_quality([_month(date(2026, 10, 1), arr_delay_pct=Decimal("100.00"), **unvalidated)])
+    october = FeedQualityMonth(**built).model_dump()
+    assert "field_coverage" in october["grade_failing"]
+    assert october["grade_failing_fields"] == ["arr_delay"]
 
 
 def _has_grade(schema: Any) -> bool:

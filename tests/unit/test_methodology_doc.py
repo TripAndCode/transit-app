@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from pipeline import feed_quality, feed_quality_grade
 from pipeline.agg_registry import METHOD_VERSION, METHOD_VERSIONS, MethodVersion
 from pipeline.reports import comparability
 from pipeline.reports.definition import METHODOLOGY_URLS
@@ -126,3 +127,31 @@ def test_a_longer_number_does_not_state_the_threshold(locale, stated, stale):
     section = _comparability_section(locale)
     assert stated in section
     assert _unstated(section.replace(stated, stale), locale, *_CURRENT)
+
+
+def _grade_rows(locale: str) -> list[str]:
+    """The methodology's grade table rows for the two thresholds the grade
+    holds itself; the other two are the gate's and the probe's."""
+    rt = feed_quality_grade.MIN_RT_COMPLETENESS_PCT
+    stale = feed_quality_grade.MAX_STALE_POLLS_PCT
+    age = feed_quality.STALE_MESSAGE_AGE_SEC
+    if locale == "en":
+        return [f"| Trips reported | at least {rt:g}% |", f"| Polls over {age:g} s | at most {stale:g}% |"]
+    return [f"| 便の報告率 | {rt:g}% 以上 |", f"| {age:g}秒を超えた取得 | {stale:g}% 以下 |"]
+
+
+@pytest.mark.parametrize("locale", sorted(changelog.DOCS))
+def test_the_documents_state_the_grade_s_current_thresholds(locale):
+    text = changelog.DOCS[locale].read_text(encoding="utf-8")
+    missing = [row for row in _grade_rows(locale) if row not in text]
+    assert not missing, f"{changelog.DOCS[locale].name} must state {missing}, the thresholds in feed_quality_grade.py"
+
+
+def test_delay_analysis_points_to_the_grade_thresholds_rather_than_repeating_them():
+    """The methodology is the thresholds' one home in prose."""
+    scorecard = (ROOT / "DELAY_ANALYSIS.md").read_text(encoding="utf-8").split("## Feed-quality scorecard", 1)[1]
+    scorecard = scorecard.split("\n## ", 1)[0]
+    assert "docs/methodology.en.md#feed-quality" in scorecard
+    assert "docs/methodology.md#フィードの品質" in scorecard
+    assert not any(row in scorecard for locale in changelog.DOCS for row in _grade_rows(locale))
+    assert "| Criterion |" not in scorecard

@@ -37,19 +37,25 @@ criterion needs has no grade and names that criterion with the scorecard's
 reason, never a guess, while still naming the criteria its stated figures
 fail. Stop-event completeness and the message-age quantiles are stated beside
 the grade but decide none of it.
+
+A month failing ``field_coverage`` names each field it fails on
+(``failing_fields``), so the drawer can say which figure fell short.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pipeline.reports.comparability import clamp_is_high
 from pipeline.strategies.static_join import RT_COVERAGE_FIELDS, assess_field_coverage
 
 Criterion = Literal["rt_completeness", "stale_polls", "clamp", "field_coverage"]
 CRITERIA: tuple[Criterion, ...] = ("rt_completeness", "stale_polls", "clamp", "field_coverage")
+
+#: :data:`~pipeline.strategies.static_join.RT_COVERAGE_FIELDS` as a type.
+RtCoverageField = Literal["stop_id", "arr_delay", "schedule_relationship_trip", "schedule_relationship_stop"]
 
 #: The grade for each number of failed criteria, from none to all.
 GRADES = ("A", "B", "C", "D", "F")
@@ -70,11 +76,20 @@ _FIGURES: dict[Criterion, tuple[str, str]] = {
 class MonthGrade:
     """``grade`` is None exactly when ``missing`` names a criterion, each with
     the scorecard's reason its figure is missing; ``failing`` names the
-    criteria the month's stated figures fail, in :data:`CRITERIA` order."""
+    criteria the month's stated figures fail, in :data:`CRITERIA` order.
+    ``failing_fields`` names the fields ``field_coverage`` fails on, in
+    :data:`~pipeline.strategies.static_join.RT_COVERAGE_FIELDS` order, and is
+    empty when it passes, is missing, or has no update to judge."""
 
     grade: str | None
     failing: tuple[Criterion, ...]
     missing: tuple[tuple[Criterion, str], ...]
+    failing_fields: tuple[RtCoverageField, ...] = ()
+
+
+def _field_verdicts(row: Mapping[str, Any]) -> dict[str, bool] | None:
+    shares = {f"{field}_coverage": float(row[f"{field}_pct"]) / 100 for field in RT_COVERAGE_FIELDS}
+    return assess_field_coverage({"stop_time_updates": row["stop_time_updates"], **shares})
 
 
 def _passes(criterion: Criterion, row: Mapping[str, Any]) -> bool:
@@ -84,8 +99,7 @@ def _passes(criterion: Criterion, row: Mapping[str, Any]) -> bool:
         return float(row["message_age_stale_pct"]) <= MAX_STALE_POLLS_PCT
     if criterion == "clamp":
         return not clamp_is_high(float(row["clamp_pct"]))
-    shares = {f"{field}_coverage": float(row[f"{field}_pct"]) / 100 for field in RT_COVERAGE_FIELDS}
-    verdicts = assess_field_coverage({"stop_time_updates": row["stop_time_updates"], **shares})
+    verdicts = _field_verdicts(row)
     return verdicts is not None and all(verdicts.values())
 
 
@@ -102,4 +116,8 @@ def grade_month(row: Mapping[str, Any]) -> MonthGrade:
         elif not _passes(criterion, row):
             failing.append(criterion)
     grade = None if missing else GRADES[len(failing)]
-    return MonthGrade(grade=grade, failing=tuple(failing), missing=tuple(missing))
+    failing_fields: tuple[RtCoverageField, ...] = ()
+    if "field_coverage" in failing:
+        verdicts = _field_verdicts(row) or {}
+        failing_fields = tuple(cast(RtCoverageField, field) for field, confirmed in verdicts.items() if not confirmed)
+    return MonthGrade(grade=grade, failing=tuple(failing), missing=tuple(missing), failing_fields=failing_fields)
