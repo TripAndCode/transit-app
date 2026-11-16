@@ -548,22 +548,7 @@ async def describe_data(
         )
 
     if kind == "metrics":
-        if locale == "en":
-            metric_list = [
-                ("avg_delay", "average delay (min)"),
-                ("p50_min", "median delay (min)"),
-                ("p90_min", "90th percentile delay (min)"),
-                ("on_time_pct", "on-time rate (%) — by default the industry standard: ≤1 min early, ≤5 min late"),
-                ("samples", "observations (count)"),
-            ]
-        else:
-            metric_list = [
-                ("avg_delay", "平均遅延 (分)"),
-                ("p50_min", "中央値遅延 (分)"),
-                ("p90_min", "90 パーセンタイル遅延 (分)"),
-                ("on_time_pct", "定時率 (%) — 既定は業界標準 (早発1分・遅延5分以内)"),
-                ("samples", "観測数"),
-            ]
+        metric_list = _METRIC_LABELS["en" if locale == "en" else "ja"]
         return ToolResult(
             kind="kv",
             summary=_summary("mt_metrics_summary", locale),
@@ -573,6 +558,24 @@ async def describe_data(
     # Unreachable — VALID_KINDS gate caught it.
     return ToolResult(kind="empty", summary="impossible")
 
+
+# The metrics `describe_data kind=metrics` lists, labelled per locale.
+_METRIC_LABELS: dict[str, list[tuple[str, str]]] = {
+    "en": [
+        ("avg_delay", "average delay (min)"),
+        ("p50_min", "median delay (min)"),
+        ("p90_min", "90th percentile delay (min)"),
+        ("on_time_pct", "on-time rate (%) — by default the industry standard: ≤1 min early, ≤5 min late"),
+        ("samples", "observations (count)"),
+    ],
+    "ja": [
+        ("avg_delay", "平均遅延 (分)"),
+        ("p50_min", "中央値遅延 (分)"),
+        ("p90_min", "90 パーセンタイル遅延 (分)"),
+        ("on_time_pct", "定時率 (%) — 既定は業界標準 (早発1分・遅延5分以内)"),
+        ("samples", "観測数"),
+    ],
+}
 
 _CAPABILITY_EXAMPLES_JP = {
     "single_route": "路線22171の遅延 / A1の運行情報",

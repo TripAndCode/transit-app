@@ -178,10 +178,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("council_stale_caveat", "ja"): "集計が最新の完了日に追いついていない可能性があります（集計遅延）。",
     ("council_stale_caveat", "en"): "Aggregates may lag the most recently completed day (processing delay).",
-    ("council_quality_caveat", "ja"): "データ品質: 観測値の{clamp_pct}%が異常値として除外されています。",
-    ("council_quality_caveat", "en"): "Data quality: {clamp_pct}% of observations were excluded as implausible.",
-    ("council_quality_unavailable", "ja"): "データ品質: 評価不能（この期間の生観測データがありません）。",
-    ("council_quality_unavailable", "en"): "Data quality: not available (no raw observations in this period).",
+    ("council_quality_caveat", "ja"): "データ品質: 受信データの{clamp_pct}%が異常値として除外されています。",
+    ("council_quality_caveat", "en"): "Data quality: {clamp_pct}% of readings were excluded as implausible.",
+    ("council_quality_unavailable", "ja"): "データ品質: 評価不能（この期間の受信データがありません）。",
+    ("council_quality_unavailable", "en"): "Data quality: not available (no readings in this period).",
     # A missing service-delivered rate gives its reason in the words the
     # agencies board shows beside its own (frontend network.delivered_missing),
     # one per pipeline.reports.service_delivered.DeliveredMissing value.

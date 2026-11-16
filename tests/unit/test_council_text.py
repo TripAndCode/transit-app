@@ -450,13 +450,13 @@ _STAMPED_QUALITY = FeedQuality(
         (
             "ja",
             "※フィード品質（事業者全体）: 観測カバー率 90.0%（計画1,000便中900便）、異常値 1.5%",
-            "※データ品質: 観測値の1.5%が異常値として除外されています。",
+            "※データ品質: 受信データの1.5%が異常値として除外されています。",
         ),
         (
             "en",
             "* Feed quality (whole agency): observation coverage 90.0% (900 of 1,000 planned trips), "
             "implausible readings 1.5%",
-            "* Data quality: 1.5% of observations were excluded as implausible.",
+            "* Data quality: 1.5% of readings were excluded as implausible.",
         ),
     ],
 )

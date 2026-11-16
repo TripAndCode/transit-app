@@ -24,7 +24,6 @@ from pipeline.query.router import (
         ("サンプル数の多い系統", "describe_data", "sample_counts"),
         ("サンプル数が多い路線の一覧", "describe_data", "sample_counts"),
         ("観測数の多い系統", "describe_data", "sample_counts"),
-        ("観測数が少ない路線", "describe_data", "sample_counts"),
         ("観測数の多い路線の一覧", "describe_data", "sample_counts"),
         # A date's digits are not a route reference.
         ("2025年の全体の概要を", "describe_data", "overview"),
@@ -42,6 +41,37 @@ def test_rule_meta_dispatch(question, expected_tool, expected_kind):
     assert decision is not None
     assert decision.tool == expected_tool
     assert decision.args.get("kind") == expected_kind
+
+
+@pytest.mark.parametrize(
+    ("question", "order"),
+    [
+        ("サンプル数の多い系統", None),
+        ("観測数の多い系統", None),
+        ("観測数TOP10の路線", None),
+        ("観測数が少ない路線", "asc"),
+        ("サンプル数が少ない路線", "asc"),
+    ],
+)
+def test_sample_count_listing_carries_its_direction(question, order):
+    decision = match_rules(question)
+    assert decision is not None
+    assert decision.args["kind"] == "sample_counts"
+    assert decision.args.get("order") == order
+
+
+@pytest.mark.parametrize(
+    ("question", "rule"),
+    [
+        ("観測数が多い路線の定時率ランキング", "ranking-on-time"),
+        ("定時率が低い路線ランキング（観測数が少ない路線は除く）", "ranking-on-time-low"),
+        ("遅延が少ない路線TOP5（観測数が少ないものを除く）", "ranking-least-delay"),
+        ("観測数100件以上の路線の遅延ランキング", None),
+    ],
+)
+def test_a_count_used_as_a_filter_stays_with_its_ranking_rule(question, rule):
+    decision = match_rules(question)
+    assert (decision.matched_pattern if decision else None) == rule
 
 
 @pytest.mark.parametrize(

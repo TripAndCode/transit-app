@@ -835,7 +835,7 @@ describe("AnalysisTab council report", () => {
     expect(figure("Early departures (more than 1 min early)")).toHaveTextContent("4.2%");
   });
 
-  it("names the observation count as stop-level readings, not departures", () => {
+  it("names the observation count as stop-level observations, not departures", () => {
     showCouncil();
     expect(figure("Observations (stop level)")).toHaveTextContent("540,357");
     expect(screen.queryByText("Departures observed")).toBeNull();
