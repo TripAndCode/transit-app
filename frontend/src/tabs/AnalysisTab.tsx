@@ -1,4 +1,4 @@
-import { use, useState } from "react";
+import { use, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -81,8 +81,8 @@ function rankingOptions(reportType: string | null | undefined, kept: KeptRoutes)
   return { ...kept };
 }
 
-/** One screen's reports: the list shows only `reportTypes`, and the open
- *  report is the one `pickReport` resolves from the `report` param. */
+/** A screen's reports behind a list: the list shows only `reportTypes`, and
+ *  the open report is the one `pickReport` resolves from the `report` param. */
 export function AnalysisTab({
   reportTypes,
   defaultReport,
@@ -94,11 +94,7 @@ export function AnalysisTab({
   const [searchParams, setSearchParams] = useSearchParams();
   const reportType = pickReport(searchParams.get("report"), reportTypes, defaultReport);
   const id = useAgencyId();
-  const tier = useCapabilityTier(id);
-  const routeNames = useRouteNames(id);
-  const [ctx, update] = useScope();
-  const [showStatistics] = useShowStatistics();
-  const jumpToLatestData = useJumpToLatestDataRange(id);
+  const list = useReports(id);
   function selectReport(type: string) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -106,6 +102,65 @@ export function AnalysisTab({
       return next;
     });
   }
+  // `route_forecast` is served by its own endpoint, so the reports list never
+  // returns it -- it is appended here as list data rather than re-rendered as
+  // a second, hand-copied button underneath the list.
+  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"].filter((type) =>
+    reportTypes.includes(type),
+  );
+  return (
+    <ReportScreen
+      reportType={reportType}
+      aside={
+        <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
+          <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {t("reports.list_title")}
+            <InsightHint
+              title={t("reports.hint.title")}
+              body={
+                <>
+                  <strong>{t("reports.hint.ranking_strong")}</strong>{t("reports.hint.ranking_body")}
+                  <br /><br />
+                  <strong>{t("reports.hint.trend_strong")}</strong>{t("reports.hint.trend_body")}
+                  <br /><br />
+                  <strong>{t("reports.hint.heatmap_strong")}</strong>{t("reports.hint.heatmap_body")}
+                  <br /><br />
+                  <strong>{t("reports.hint.dow_strong")}</strong>{t("reports.hint.dow_body")}
+                  <br /><br />
+                  {t("reports.hint.csv")}
+                </>
+              }
+            />
+          </h3>
+          {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
+          {list.isLoading && <SkeletonTable rows={6} rowHeight={48} />}
+          {list.data && list.data.length === 0 && (
+            <EmptyState title={t("reports.empty.title")} hint={t("reports.empty.hint")} />
+          )}
+          {list.data && <ReportList types={listedTypes} active={reportType ?? null} onSelect={selectReport} />}
+        </div>
+      }
+    />
+  );
+}
+
+/** A screen with one report: the report fills the page, with no list beside
+ *  it, whatever `report` the URL carries. */
+export function SingleReportScreen({ reportType }: { reportType: string }) {
+  return <ReportScreen reportType={reportType} />;
+}
+
+/** The open report with its scope sentence, and `aside` (a report list)
+ *  beside it when the screen has several. */
+function ReportScreen({ reportType, aside }: { reportType: string | null; aside?: ReactNode }) {
+  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const id = useAgencyId();
+  const tier = useCapabilityTier(id);
+  const routeNames = useRouteNames(id);
+  const [ctx, update] = useScope();
+  const [showStatistics] = useShowStatistics();
+  const jumpToLatestData = useJumpToLatestDataRange(id);
   function setFlag(param: string, on: boolean) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -118,7 +173,6 @@ export function AnalysisTab({
     includeRetired: searchParams.get("retired") === "1",
     includeZeroDelay: searchParams.get("zero_delay") === "1",
   };
-  const list = useReports(id);
   // The certificate, like route_forecast, owns its section and its queries.
   // Its day and route are its own scope, so the screen's period sentence,
   // which nothing on it reads, is left off.
@@ -158,53 +212,11 @@ export function AnalysisTab({
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, kept))}&format=csv`);
   }
 
-  // `route_forecast` is served by its own endpoint, so the reports list never
-  // returns it -- it is appended here as list data rather than re-rendered as
-  // a second, hand-copied button underneath the list.
-  const listedTypes = [...(list.data ?? []).map((r) => r.report_type), "route_forecast"].filter((type) =>
-    reportTypes.includes(type),
-  );
-
   return (
     <div className="analysis-tab" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {!isCertificate && <ScopeSentence applied={scopeApplied} />}
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
-      <div className="analysis-report-list" style={{ width: 280, flexShrink: 0 }}>
-        <h3 style={{ marginTop: 0, fontSize: 14, color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {t("reports.list_title")}
-          <InsightHint
-            title={t("reports.hint.title")}
-            body={
-              <>
-                <strong>{t("reports.hint.ranking_strong")}</strong>{t("reports.hint.ranking_body")}
-                <br /><br />
-                <strong>{t("reports.hint.trend_strong")}</strong>{t("reports.hint.trend_body")}
-                <br /><br />
-                <strong>{t("reports.hint.heatmap_strong")}</strong>{t("reports.hint.heatmap_body")}
-                <br /><br />
-                <strong>{t("reports.hint.dow_strong")}</strong>{t("reports.hint.dow_body")}
-                <br /><br />
-                {t("reports.hint.csv")}
-              </>
-            }
-          />
-        </h3>
-        {list.error && <ErrorBanner error={list.error} onRetry={() => list.refetch()} />}
-        {list.isLoading && <SkeletonTable rows={6} rowHeight={48} />}
-        {list.data && list.data.length === 0 && (
-          <EmptyState
-            title={t("reports.empty.title")}
-            hint={t("reports.empty.hint")}
-          />
-        )}
-        {list.data && (
-          <ReportList
-            types={listedTypes}
-            active={reportType ?? null}
-            onSelect={selectReport}
-          />
-        )}
-      </div>
+      {aside}
 
       <div style={{ flex: 1, minWidth: 0 }}>
         {!reportType && (

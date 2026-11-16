@@ -11,7 +11,7 @@ transportation operators. It answers four questions on one screen:
 A day-playback mode (below) replays how delay moved across the whole service
 day on this same map, so a look back at "how did today unfold" never needs a
 second map screen. Deeper historical analysis — trend lines, route
-comparisons, forecasts — stays on the Time, Routes and Compare screens; a
+comparisons, forecasts — stays on the Time, Routes and Day types & agencies screens; a
 delayed trip's row in the attention panel links straight to that route's
 dossier.
 

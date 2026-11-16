@@ -15,7 +15,7 @@ The screenshots were taken with real data from Aomori City Bus (青森市バス)
 5. [Routes — which routes run late](#5-routes--which-routes-run-late)
 6. [Time — when delay happens](#6-time--when-delay-happens)
 7. [Why — what the data can explain](#7-why--what-the-data-can-explain)
-8. [Compare — side by side](#8-compare--side-by-side)
+8. [Day types & agencies — side by side](#8-day-types--agencies--side-by-side)
 9. [Live — the trips running now](#9-live--the-trips-running-now)
 10. [Reports — documents to hand on](#10-reports--documents-to-hand-on)
 11. [Notebook — ready-made analyses](#11-notebook--ready-made-analyses)
@@ -58,7 +58,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 | **Routes** | Which routes run late or on time, and how one route looks stop by stop |
 | **Time** | When delay happens: by day, by hour and by day of the week |
 | **Why** | Where the time goes: waiting at stops or running between them |
-| **Compare** | Weekdays against weekends and holidays route by route, and agencies against each other |
+| **Day types & agencies** | Weekdays against weekends and holidays route by route, and agencies against each other |
 | **Live** | The trips running now |
 | **Reports** | Pages to print or hand on: a period summary, a council report, a delay record (for reference) |
 | **Notebook** | Ready-made analyses of delay, run as tables and charts, saved as investigations you can export |
@@ -83,7 +83,7 @@ On a narrow screen the sidebar becomes a bar along the bottom with **Pulse**, **
 
 ### Notices at the top
 
-On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
+On Pulse, Routes, Time, Why and Day types & agencies, a notice can appear above the screen:
 
 - “Data is out of date — last ingest: …” appears when no new reading has arrived for a day or more. Data collection is running behind; the app itself is working. Close the notice with ×.
 - “… implausible readings are left out of the figures. The figures shown already exclude them.” appears when 0.1% or more of the readings over the last 7 analyzed days were set aside as implausible (likely a stuck or stale feed). Below that there is no notice, and the count appears only under “How fresh the data is”. × dismisses it.
@@ -92,7 +92,7 @@ On Pulse, Routes, Time, Why and Compare, a notice can appear above the screen:
 
 ## 3. The scope sentence: what a screen shows
 
-**Pulse**, **Routes**, **Time**, **Why** and **Compare** (weekdays and weekends/holidays), and the period summary and council report in **Reports**, open with one sentence that says what the screen is counting (the delay record for reference has none, since the date and route chosen on it are its conditions). With the default conditions it reads like this:
+**Pulse**, **Routes**, **Time**, **Why** and **Day types & agencies** (weekdays and weekends/holidays), and the period summary and council report in **Reports**, open with one sentence that says what the screen is counting (the delay record for reference has none, since the date and route chosen on it are its conditions). With the default conditions it reads like this:
 
 > Viewing all routes of (agency), (period), every day, all hours, counting on-time as within 5 min
 
@@ -154,7 +154,7 @@ If the period has no observations, the screen says so and suggests a change to t
 
 ### 5-1. The report screens
 
-**Time**, **Why** and **Compare** (weekdays and weekends/holidays) share one layout, as do the council report and the delay record (for reference) in **Reports**. **Routes** holds every route in one table instead (5-3).
+**Time** and the council report and the delay record (for reference) in **Reports** share one layout. **Why** and **Day types & agencies** (weekdays and weekends/holidays) each show their one report across the whole page, with no list beside it, and **Routes** holds every route in one table (5-3).
 
 | Area | Where | What it holds |
 |---|---|---|
@@ -162,7 +162,7 @@ If the period has no observations, the screen says so and suggests a change to t
 | Report list | Left | This screen’s reports in groups such as “Rankings” and “Punctuality”, each with a one-line description |
 | Report | Center | The chosen report: a table or charts, the period it covers (“Range: …”), and **Download CSV** where the report has rows to export |
 
-A screen opens with its first report already showing; click another in the list to switch. On a phone, the list becomes a drop-down above the report.
+A screen with a list opens with its first report already showing; click another in the list to switch. On a phone, the list becomes a drop-down above the report.
 
 If a report takes a while to count, after a few seconds it says “Still working on it…”. For a period longer than a week it says “Still working: a long period takes longer to count.” and offers **Narrow to the last 7 days of the period**.
 
@@ -304,7 +304,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ---
 
-## 8. Compare — side by side
+## 8. Day types & agencies — side by side
 
 Two buttons at the top switch between **Weekdays and weekends/holidays** and **Agencies**.
 

@@ -9,8 +9,8 @@ defend; see [Comparability gate](#comparability-gate).
 ## How a user reaches it
 
 - Route: Compare by agencies, `/agencies/:agencyId/compare?by=agencies`,
-  rendered by `frontend/src/tabs/CompareTab.tsx` (the rail's Compare entry,
-  `nav.compare`). Its two-button switch (`compare.mode_periods` /
+  rendered by `frontend/src/tabs/CompareTab.tsx` (the rail's "Day types & agencies"
+  entry, `nav.compare`). Its two-button switch (`compare.mode_periods` /
   `compare.mode_agencies`) sets `by`: `by=agencies` shows this board, and
   any other `by` (default `periods`) shows the `compare_ranking` report.
   `/agencies/:agencyId/network` and `analysis/compare?mode=agencies`
@@ -271,7 +271,7 @@ default order is still by delay among the comparable agencies.
    `make fetch-ingest` (or `make load_static` before `ingest_live`) then
    `make analyze` per agency — a single agency still renders (one card),
    just without a comparison.
-2. Click "Compare" in the rail, then its "Agencies" button → URL
+2. Click "Day types & agencies" in the rail, then its "Agencies" button → URL
    `/agencies/:agencyId/compare?by=agencies`.
 3. Expect the comparable agencies first, worst-avg-delay first, with the
    current agency's card visually highlighted and tagged "Viewing"; then,

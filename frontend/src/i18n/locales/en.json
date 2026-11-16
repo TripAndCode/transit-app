@@ -17,7 +17,7 @@
     "routes": "Routes",
     "time": "Time",
     "why": "Why",
-    "compare": "Compare",
+    "compare": "Day types & agencies",
     "reports": "Reports",
     "destinations_label": "Destinations",
     "other": "Other",
@@ -31,7 +31,8 @@
     "pin_route_full": "Up to {{max}} pinned routes",
     "station_figure_mean": "Today's mean {{delay}}",
     "station_figure_unusual": "{{n}} unusually late today",
-    "bus-town": "Bus Town"
+    "bus-town": "Bus Town",
+    "compare_short": "Days & agencies"
   },
   "compare": {
     "mode_periods": "Weekdays and weekends/holidays",
@@ -1907,7 +1908,7 @@
       "age_hours": "{{h}} h ago",
       "age_minutes": "{{m}} min ago",
       "unknown": "Unknown",
-      "network_link": "To compare delay across agencies, open Compare and choose Agencies."
+      "network_link": "To compare delay across agencies, open Day types & agencies and choose Agencies."
     },
     "agencies": {
       "title": "Agencies",

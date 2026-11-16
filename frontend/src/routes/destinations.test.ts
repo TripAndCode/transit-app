@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 import {
-  COMPARE_REPORT_TYPES,
+  COMPARE_REPORT,
   DESTINATIONS,
   ROUTES_REPORT_TYPES,
   SAVED_REPORT_TYPES,
   TIME_REPORT_TYPES,
-  WHY_REPORT_TYPES,
+  WHY_REPORT,
   agencySwitchHref,
   destHref,
   compareMode,
@@ -30,8 +30,8 @@ describe("destinations", () => {
     const homes = [
       ...ROUTES_REPORT_TYPES,
       ...TIME_REPORT_TYPES,
-      ...WHY_REPORT_TYPES,
-      ...COMPARE_REPORT_TYPES,
+      WHY_REPORT,
+      COMPARE_REPORT,
       ...SAVED_REPORT_TYPES,
     ];
     expect([...homes].sort()).toEqual([...REPORT_TYPE_IDS].sort());
@@ -67,7 +67,7 @@ describe("destinations", () => {
 
   it("sends each report type to the screen that hosts it", () => {
     expect(reportHref(9, "trend", "?routes=5")).toBe("/agencies/9/time?routes=5&report=trend");
-    expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why?report=dwell_run");
+    expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why");
     expect(reportHref(9, "on_time")).toBe("/agencies/9/routes?sort=on_time");
     expect(reportHref(9, "ranking_best", "?from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg&order=best");
     // A previous report or sort gives way to the report's own; a former
@@ -78,7 +78,7 @@ describe("destinations", () => {
     expect(reportHref(9, "ranking", "?order=best&from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg");
     expect(reportHref(9, "worst_5min", "?order=best")).toBe("/agencies/9/routes?sort=late5_count");
     expect(reportHref(9, "worst_5min")).toBe("/agencies/9/routes?sort=late5_count");
-    expect(reportHref(9, "compare_ranking")).toBe("/agencies/9/compare?by=periods&report=compare_ranking");
+    expect(reportHref(9, "compare_ranking")).toBe("/agencies/9/compare?by=periods");
     expect(reportHref(9, "council_summary", "?report=trend&from=2026-09-01")).toBe(
       "/agencies/9/reports?from=2026-09-01&doc=council",
     );

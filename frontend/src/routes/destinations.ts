@@ -11,8 +11,9 @@ type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
  *  way that list was ordered. */
 export const ROUTES_REPORT_TYPES = ["ranking", "ranking_best", "on_time", "worst_5min"] as const satisfies readonly ReportTypeId[];
 export const TIME_REPORT_TYPES = ["trend", "dow_weekday", "dow_weekend", "route_forecast"] as const satisfies readonly ReportTypeId[];
-export const WHY_REPORT_TYPES = ["dwell_run"] as const satisfies readonly ReportTypeId[];
-export const COMPARE_REPORT_TYPES = ["compare_ranking"] as const satisfies readonly ReportTypeId[];
+/** The one report each single-report screen shows, in full, with no list. */
+export const WHY_REPORT = "dwell_run" satisfies ReportTypeId;
+export const COMPARE_REPORT = "compare_ranking" satisfies ReportTypeId;
 export const SAVED_REPORT_TYPES = ["council_summary", "delay_certificate"] as const satisfies readonly ReportTypeId[];
 
 /** The figures the Routes table sorts by, in the order its control lists
@@ -120,8 +121,9 @@ export function reportsView(doc: string | null, report: string | null): ReportsV
 }
 
 /** Where each report type lives. Reports' own documents are picked by
- *  `doc`, the Routes table's lists by `sort` (and `order`), and every other
- *  screen opens the type by `report`. */
+ *  `doc`, the Routes table's lists by `sort` (and `order`), and Time opens
+ *  its types by `report`. Why and Compare each show their one report, so a
+ *  link to either names only the screen (and Compare's `by`). */
 const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<string, string> }> = {
   ranking: { dest: "routes", extra: { sort: "avg" } },
   ranking_best: { dest: "routes", extra: { sort: "avg", order: "best" } },
@@ -131,8 +133,8 @@ const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<strin
   dow_weekday: { dest: "time", extra: { report: "dow_weekday" } },
   dow_weekend: { dest: "time", extra: { report: "dow_weekend" } },
   route_forecast: { dest: "time", extra: { report: "route_forecast" } },
-  dwell_run: { dest: "why", extra: { report: "dwell_run" } },
-  compare_ranking: { dest: "compare", extra: { by: "periods", report: "compare_ranking" } },
+  dwell_run: { dest: "why", extra: {} },
+  compare_ranking: { dest: "compare", extra: { by: "periods" } },
   council_summary: { dest: "reports", extra: { doc: "council" } },
   delay_certificate: { dest: "reports", extra: { doc: "certificate" } },
 };
