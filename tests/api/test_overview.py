@@ -1771,6 +1771,40 @@ async def test_the_late_route_count_is_out_of_the_routes_the_routes_table_ranks(
     assert table.rows_total == out["top_delayed"]["route_count"] == (1 if routes else 2)
 
 
+@pytest.mark.asyncio
+async def test_the_late_route_count_and_the_routes_table_agree_under_a_time_band(
+    aconn, aagency_id, ch_client, ch_async_client
+):
+    """Under a time band both read live rows. An observation the feed sent
+    without a route, frequent enough to clear the floor, is no route on
+    either side, so the totals still agree."""
+    from api.routers.reports import render_report
+    from pipeline.reports.overview import compute_overview_summary
+    from pipeline.reports.rankings import RANKING_MIN_SAMPLES
+
+    when = datetime.combine(date(2026, 5, 20), time(8, 0), tzinfo=timezone.utc)
+    for seq in range(1, RANKING_MIN_SAMPLES + 1):
+        await _seed_update(aconn, aagency_id, when, "R_TB", 360, seq=seq)
+        await _seed_update(aconn, aagency_id, when, None, 600, seq=seq)
+    from tests.conftest import mirror_updates_to_ch
+
+    mirror_updates_to_ch(ch_client, aagency_id)
+
+    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
+    window = replace(
+        ctx,
+        from_date=date.fromisoformat(out["headline"]["window_from"]),
+        to_date=date.fromisoformat(out["headline"]["window_to"]),
+    )
+    table = await render_report(
+        "route_table", agency_id=aagency_id, ctx=window, conn=aconn, ch=ch_async_client, locale="en", limit=5
+    )
+
+    assert table.rows_total == out["top_delayed"]["route_count"] == 1
+    assert [row[0] for row in table.rows] == ["R_TB"]
+
+
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
 #
 # Every slow-path stage helper derives from a single `_fetch_grain` round

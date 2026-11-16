@@ -61,11 +61,17 @@ function answeredScope(
 /** Where a ranking card's routes sit on the Routes table: the list its
  *  metric ranks, in the order the card listed them, over every route
  *  observed often enough for the card to rank it (`sparse=1`, the table's
- *  floor then being the card's). `best_first` defaults as the tools default
- *  it: highest on-time rate first, longest delay first. */
+ *  floor then being the card's). A card over named routes lists them even
+ *  where the table would leave one out (a retired code, a feed reporting no
+ *  delay), so the link keeps both reasons' routes. `best_first` defaults as
+ *  the tools default it: highest on-time rate first, longest delay first. */
 function rankingHome(agencyId: number, metric: unknown, bestFirst: unknown, scope: URLSearchParams | null): CardHome | null {
   if (scope == null) return null;
   scope.set("sparse", "1");
+  if (scope.has("routes")) {
+    scope.set("retired", "1");
+    scope.set("zero_delay", "1");
+  }
   const m = metric ?? "avg_delay";
   if (m === "worst_5min") return { screen: "routes", href: reportHref(agencyId, "worst_5min", scope.toString()) };
   if (m === "avg_delay") {

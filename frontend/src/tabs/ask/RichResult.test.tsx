@@ -357,7 +357,7 @@ describe("RichResult's link to the screen answering the card's question", () => 
     );
     expect(screen.getByRole("link", { name: "Open on Routes →" })).toHaveAttribute(
       "href",
-      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekend&routes=R1&sparse=1&sort=avg",
+      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekend&routes=R1&sparse=1&retired=1&zero_delay=1&sort=avg",
     );
   });
 

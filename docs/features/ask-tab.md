@@ -81,19 +81,24 @@ What the user sees/does:
   - A card saved before `conditions` kept the period has no link: a link to
     the screen's default days would show other figures.
   - Ranking links set `sparse=1`, so the Routes table ranks at
-    `MIN_GROUP_SAMPLES` (21), the cards' own floor, rather than its default
-    100. The 5-minute ranking has no floor of its own, so its card can list a
-    route thinner than the table shows. A ranking card keeps its order
-    (`best_first`), and an on-time card's `threshold_min` becomes the scope's
-    late tolerance with every early departure on time, which is how the tool
-    counts it.
+    `MIN_GROUP_SAMPLES` (21), the floor every ranking card applies, the
+    5-minute one included, rather than its default 100. A ranking card over
+    named routes lists a retired code or a zero-delay route it names
+    (`left_out_unless_named`), so its link also sets `retired=1` and
+    `zero_delay=1`. Compare's board has no such toggle, so a weekday/weekend
+    card naming a retired route links to a board without it. A ranking card
+    keeps its order (`best_first`), and an on-time card's `threshold_min`
+    becomes the scope's late tolerance with every early departure on time,
+    which is how the tool counts it.
   - Time's trend is daily, so a weekly or monthly trend card's link says
     "daily" rather than promising its own granularity.
   - The per-day-type split of one route (`compare_segments`,
     `dimension="service_type"`) has no home and no link.
 - **Result exports** — `frontend/src/tabs/ask/ResultExports.tsx`: the
   selected step as JSON, and a CSV for each table answer (`resultTableCsv`
-  in `resultSnapshot.ts`). The CSV opens with key/value rows recording what
+  in `resultSnapshot.ts`). Both record the filters the answer ran under
+  (`historical_filter_ctx`) when its message kept them with its period, and
+  say they were not recorded for an older message. The CSV opens with key/value rows recording what
   produced it, the last being `data_source`: the agency's open-data credit
   in the UI language (`useAgencyCredit`), left out when no source covers
   the agency's feed. A blank row and the table follow.

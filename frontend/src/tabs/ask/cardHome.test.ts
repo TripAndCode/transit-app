@@ -19,14 +19,21 @@ describe("cardHome", () => {
   it("opens a top-N delay card on the Routes table over the thread's scope it was answered under", () => {
     expect(cardHome(8, "top_n", { metric: "avg_delay", k: 5 }, CONDITIONS)).toEqual({
       screen: "routes",
-      href: `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&sort=avg`,
+      href: `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&retired=1&zero_delay=1&sort=avg`,
     });
   });
 
   it("lets a top-N card's own service type replace the thread's", () => {
     expect(cardHome(8, "top_n", { metric: "avg_delay", k: 5, service_type: "saturday" }, CONDITIONS)?.href).toBe(
-      `/agencies/8/routes?${SCOPE}&service=%E5%9C%9F%E6%9B%9C&routes=R1%2CR2&sparse=1&sort=avg`,
+      `/agencies/8/routes?${SCOPE}&service=%E5%9C%9F%E6%9B%9C&routes=R1%2CR2&sparse=1&retired=1&zero_delay=1&sort=avg`,
     );
+  });
+
+  it("keeps the routes the thread named even where the table leaves them out by default", () => {
+    const named = new URL(cardHome(8, "top_n", { metric: "avg_delay" }, CONDITIONS)!.href, "http://x");
+    expect([named.searchParams.get("retired"), named.searchParams.get("zero_delay")]).toEqual(["1", "1"]);
+    const unnamed = new URL(cardHome(8, "top_n", { metric: "avg_delay" }, { ...CONDITIONS, routes: [] })!.href, "http://x");
+    expect([unnamed.searchParams.has("retired"), unnamed.searchParams.has("zero_delay")]).toEqual([false, false]);
   });
 
   it("ranks at the card's own floor, not the table's default", () => {
@@ -36,34 +43,34 @@ describe("cardHome", () => {
 
   it("lets a card's own dates win over the thread's, as they do at dispatch", () => {
     expect(cardHome(8, "top_n", { metric: "avg_delay", from_date: "2026-05-01", to_date: "2026-05-31" }, CONDITIONS)?.href).toBe(
-      "/agencies/8/routes?from=2026-05-01&to=2026-05-31&dow=weekday&time_band=morning&routes=R1%2CR2&sparse=1&sort=avg",
+      "/agencies/8/routes?from=2026-05-01&to=2026-05-31&dow=weekday&time_band=morning&routes=R1%2CR2&sparse=1&retired=1&zero_delay=1&sort=avg",
     );
   });
 
   it("keeps a best-first delay card's order", () => {
     expect(cardHome(8, "top_n", { metric: "avg_delay", best_first: true }, CONDITIONS)?.href).toBe(
-      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&sort=avg&order=best`,
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&retired=1&zero_delay=1&sort=avg&order=best`,
     );
   });
 
   it("opens a top-N on-time card highest first, as the card lists it", () => {
     expect(cardHome(8, "top_n", { metric: "on_time_rate" }, CONDITIONS)?.href).toBe(
-      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&order=best&sort=on_time`,
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&retired=1&zero_delay=1&order=best&sort=on_time`,
     );
   });
 
   it("opens a top-N 5-minute card on the late-departure count", () => {
     expect(cardHome(8, "top_n", { metric: "worst_5min" }, CONDITIONS)?.href).toBe(
-      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&sort=late5_count`,
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&retired=1&zero_delay=1&sort=late5_count`,
     );
   });
 
   it("opens an on-time ranking card in its order, under its threshold", () => {
     expect(cardHome(8, "on_time", { k: 5, best_first: false, threshold_min: 3 }, CONDITIONS)?.href).toBe(
-      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&late=180&early=any&sparse=1&sort=on_time`,
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&late=180&early=any&sparse=1&retired=1&zero_delay=1&sort=on_time`,
     );
     expect(cardHome(8, "on_time_rate", {}, CONDITIONS)?.href).toBe(
-      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&order=best&sort=on_time`,
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&retired=1&zero_delay=1&order=best&sort=on_time`,
     );
   });
 

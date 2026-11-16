@@ -897,6 +897,21 @@ async def test_rankings_leave_out_retired_and_zero_delay_routes(aconn, aagency_i
 
 
 @pytest.mark.asyncio
+async def test_the_late_departure_ranking_leaves_out_a_route_observed_too_few_times(aconn, aagency_id):
+    """The 5-minute ranking keeps the other rankings' floor, so the card lists
+    only routes the Routes table lists at it: a route with 20 departures, all
+    late, would otherwise lead on a handful of trips."""
+    from pipeline.reports.rankings import MIN_GROUP_SAMPLES
+    from tests.fixtures.route_dist import seed_route_dist_day
+
+    day = date(2026, 10, 20)
+    await seed_route_dist_day(aconn, aagency_id, "THIN", day, [600] * (MIN_GROUP_SAMPLES - 1))
+    await seed_route_dist_day(aconn, aagency_id, "SOLID", day, [600] * 10 + [0] * (MIN_GROUP_SAMPLES - 10))
+    result = await dispatch("top_n", {"metric": "worst_5min"}, RangeCtx(day, day), aconn, aagency_id, locale="en")
+    assert [r[0] for r in result.rows] == ["SOLID"]
+
+
+@pytest.mark.asyncio
 async def test_a_ranking_lists_a_left_out_route_the_routes_filter_names(aconn, aagency_id):
     await _seed_left_out_routes(aconn, aagency_id)
     named = RangeCtx(from_date=_LEFT_OUT_CTX.from_date, to_date=_LEFT_OUT_CTX.to_date, routes=("ECHO", "C1"))
