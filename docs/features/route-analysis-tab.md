@@ -44,8 +44,9 @@ What the user sees/does:
   never marked as a change; picking one route there moves the page to it,
   and picking several hands them to the Routes list (`RouteDossier`).
   Period, days and timetable, time band and the on-time tolerance apply as
-  on every other screen. A condition is struck through only when neither
-  the stop delays (`route-shape`) nor the performance standard used it, so
+  on every other screen. A condition is struck through only when none of
+  the stop delays (`route-shape`), the summary strip's on-time list
+  (`useAgencyOnTime`) and the performance standard used it, so
   a stop, direction or hour carried over from another screen is named as
   unused.
   Inside the dossier the scope always holds the path's one route (see

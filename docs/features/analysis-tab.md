@@ -449,7 +449,7 @@ The other screens with filters use the same sentence and controls:
 
 | Screen | Scope | Sentence | Saved views / pin |
 |---|---|---|---|
-| A route's page | The URL's; the page's route is its routes baseline, never marked changed | Default; greyed by what none of its sections used (`mergeScopeApplied` over the stop delays and the performance standard) | No |
+| A route's page | The URL's; the page's route is its routes baseline, never marked changed | Default; greyed by what none of its sections used (`mergeScopeApplied` over the stop delays, the summary strip's on-time list and the performance standard) | No |
 | Live | The URL's; a routes change also drops the map selection | `template="live"`: routes and tolerance, no period | No |
 | Day types & agencies ▸ Agencies | The URL's | `template="board"`: the period only; everything else it ignores is named in the note, from the endpoint's `scope_applied` | No |
 | Notebook | The open thread's `filter_ctx` (`source`), seeded from the URL's for a new thread | Default, without the tolerance clause, since a thread stores none | No |
@@ -459,7 +459,10 @@ picks a sentence (`scope.sentence_live`, `scope.sentence_board`) for a screen
 the default would misdescribe. A condition such a sentence leaves out still
 appears in the not-used note when it is set and `applied` marks it unused.
 `actions={false}` leaves out the saved views and the pin, which hold and lay
-out the URL's scope.
+out the URL's scope. A sentence with a `template` never fetches the scope
+summary: its figures are one agency's over the scope's period, which the
+board (every agency) and Live (no period) do not count by, so their
+controls show without them.
 
 - **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
   scope into one labelled token per condition, in sentence order, and names

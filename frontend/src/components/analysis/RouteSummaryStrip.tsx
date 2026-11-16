@@ -14,6 +14,13 @@ import "../../styles/focusedAnalysis.css";
 /** Every route the lists rank, so this route's place among them is known. */
 const WHOLE_LIST = { limit: REPORT_ROWS_MAX } as const;
 
+/** The agency's on-time list the strip reads the route's rate from. The
+ *  route page reads it too, for the conditions the rate used, and shares
+ *  this one request. */
+export function useAgencyOnTime(agencyId: number | null, ctx: Scope) {
+  return useReport(agencyId, "on_time", { ...ctx, routes: [] }, WHOLE_LIST);
+}
+
 function Figure({
   label,
   value,
@@ -62,7 +69,7 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
   const { t } = useTranslation("design");
   const agencyWide = { ...ctx, routes: [] };
   const ranking = useReport(agencyId, "ranking", agencyWide, WHOLE_LIST);
-  const onTime = useReport(agencyId, "on_time", agencyWide, WHOLE_LIST);
+  const onTime = useAgencyOnTime(agencyId, ctx);
   const worst = useReport(agencyId, "worst_5min", agencyWide, WHOLE_LIST);
   const overview = useOverviewSummary(agencyId, agencyWide);
   const routeQuery = scopeToQueryString({ ...ctx, routes: [route] });

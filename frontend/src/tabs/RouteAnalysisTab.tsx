@@ -19,7 +19,7 @@ import type { RouteShapeStop } from "../api/types";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { RiseHeadline, SelectedStopAside, StopDelayTable, StopDelayTrend } from "../components/analysis/RouteStopDelay";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
-import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
+import { RouteSummaryStrip, useAgencyOnTime } from "../components/analysis/RouteSummaryStrip";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { RouteVariantPicker } from "../components/analysis/RouteVariantPicker";
 import { initialStop, largestRises, pickableVariants, previousWindow, windowDays } from "../components/analysis/routeDossier";
@@ -83,8 +83,9 @@ export function RouteAnalysisTab() {
   // picked shape that isn't the route's, and the two windows must agree.
   const previousShape = query.data?.shape_id ?? (variantParam || null);
   const previous = useRouteShape(id, compare && (variantParam || query.data) ? route : null, prevCtx, previousShape);
-  // The same request PerformanceStandardPanel makes, so it is fetched once;
-  // read here for the conditions its on-time figures use.
+  // The same requests the summary strip and the performance standard make,
+  // read here for the conditions their figures used.
+  const onTimeList = useAgencyOnTime(route == null ? null : id, ctx);
   const standards = usePerformanceStandards(id, ctx, route != null, route ?? undefined);
   const names = useRouteNames(id);
   const { stopName, settled: stopNamesSettled } = usePlaceLabels(id, ctx.stop != null);
@@ -203,7 +204,7 @@ export function RouteAnalysisTab() {
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
     {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
-    <ScopeSentence applied={mergeScopeApplied(query.data?.scope_applied, standards.data?.scope_applied)} actions={false} />
+    <ScopeSentence applied={mergeScopeApplied(query.data?.scope_applied, onTimeList.data?.scope_applied, standards.data?.scope_applied)} actions={false} />
     {!route ? <EmptyState title={t("choose")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t, names.format)}
       recoveries={buildFilterCtxRecoveries({

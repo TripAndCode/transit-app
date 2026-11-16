@@ -647,9 +647,15 @@ describe("RouteAnalysisTab where delay grows", () => {
       from: true, to: true, dow: true, time_band: true, service: true, routes: true,
       hour: false, stop: false, dir: false, late: false, early: false,
     };
-    const STANDARDS_APPLIED = {
-      from: true, to: true, dow: true, time_band: true, service: true, routes: false,
+    // The on-time list's own conditions; the route's on-time rate is read from it.
+    const ON_TIME_APPLIED = {
+      from: true, to: true, dow: true, time_band: true, service: true, routes: true,
       hour: false, stop: false, dir: false, late: true, early: true,
+    };
+    // An agency with no on-time target: its standards use the dates alone.
+    const STANDARDS_APPLIED = {
+      from: true, to: true, dow: false, time_band: false, service: false, routes: false,
+      hour: false, stop: false, dir: false, late: false, early: false,
     };
 
     function renderRoutePage(search: string) {
@@ -657,6 +663,10 @@ describe("RouteAnalysisTab where delay grows", () => {
       vi.spyOn(hooks, "useRouteShape").mockReturnValue({
         data: { ...shape([]), scope_applied: ROUTE_SHAPE_APPLIED }, isPending: false, error: null, refetch: vi.fn(),
       } as never);
+      vi.spyOn(hooks, "useReport").mockImplementation(((_id: number | null, type: string) => ({
+        data: type === "on_time" ? { report_type: "on_time", rows: [], definition: { late_tolerance_sec: 300, early_tolerance_sec: 60 }, scope_applied: ON_TIME_APPLIED } : undefined,
+        isPending: false, error: null, refetch: vi.fn(),
+      })) as never);
       vi.spyOn(hooks, "usePerformanceStandards").mockReturnValue({
         data: { scope_applied: STANDARDS_APPLIED, rows: [], ctx: {}, disclaimer: "", on_time_definition: null },
         error: null, refetch: vi.fn(),

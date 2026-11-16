@@ -217,7 +217,11 @@ export function ScopeSentence({
   const byKey = new Map(tokens.map((tok) => [tok.key, tok]));
   // A condition that was cleared from elsewhere has no popover to show.
   const open = openKey != null && byKey.has(openKey) ? openKey : null;
-  const { data: summary } = useScopeSummary(id, scope, pinned || (open != null && DATA_KEYS.has(open)));
+  // The summary's figures are one agency's over the scope's period: neither
+  // the board, which compares every agency, nor Live, which has no period,
+  // counts by them.
+  const wantsSummary = template == null && (pinned || (open != null && DATA_KEYS.has(open)));
+  const { data: summary } = useScopeSummary(id, scope, wantsSummary);
   const separator = t("common.list_separator");
 
   const isOff = (tok: ScopeToken & { key: ConditionKey }) => isScopeConditionOff(tok, scope, applied);

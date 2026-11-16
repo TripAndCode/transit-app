@@ -867,6 +867,14 @@ describe("NetworkTab", () => {
       );
     });
 
+    it("draws no one agency's figures into the period control", () => {
+      const summary = vi.spyOn(hooks, "useScopeSummary");
+      renderBoard("?from=2026-04-01&to=2026-04-07");
+      fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));
+      expect(summary).toHaveBeenCalled();
+      expect(summary.mock.calls.every(([, , enabled]) => enabled === false)).toBe(true);
+    });
+
     it("writes the period it is given as the canonical from and to", () => {
       renderBoard("?from=2026-04-01&to=2026-04-07");
       fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));
