@@ -123,18 +123,25 @@ What the user sees/does:
   thread open it shows the screen's URL scope whole (`notebookScope`), which
   seeds the next new thread (`rangeCtxToFilterCtx`); a stop, direction,
   hour or tolerance in it, which a thread does not store, is named as
-  unused, and clearing one writes the URL (`splitNotebookPatch`). An edit shows at once but stays local to
-  the screen; it is saved to the open thread only when it is needed: before
-  the next dispatch, which awaits the save (the authed backend reads the
-  persisted `filter_ctx`), and when the reader leaves the thread (another
-  thread, a new one, or the screen). Saves run one after another, so the
-  server sees them in order and a dispatch reads the last; only the save of
-  the edit still on screen clears it, so an older save landing or failing
-  late never touches a newer edit. A failed save before a dispatch stops the
-  dispatch and offers a retry of the whole submission. A thread stores no on-time tolerance,
+  unused, and clearing one writes the URL (`splitNotebookPatch`); an edit
+  made with no thread open stays on the screen until it seeds one.
+  On an open thread each edit is saved as it is made (`useThreadFilter` in
+  `frontend/src/api/hooks.ts`) and shown at once through the conversation's
+  cached copy, which a refetch keeps while a save is pending. The saves go
+  through one coalescing saver per thread (`frontend/src/api/threadFilterSaver.ts`),
+  module state so it outlives a remount: with a save in flight, a newer edit
+  waits as the thread's single next save, replacing any earlier one, so a
+  burst of edits is at most two PATCHes, in order, ending with the latest. A
+  signed-out reader's edit is a localStorage write, made at once. A dispatch
+  awaits `flush`, which resolves once the thread's saves have landed; if the
+  last one failed it is sent again, and a second failure stops the dispatch
+  with a retry of the whole submission. While a dispatch waits, the dock and
+  the sentence count as busy, so a second press sends nothing. Deleting a
+  thread drops its queued save and ignores its running one, with no error.
+  A reload or a closed tab loses at most the save still in flight. A thread stores no on-time tolerance,
   so its sentence has no tolerance clause, and it carries no saved views or
   pin; its tokens, Reset and any open popover's controls are disabled while a
-  question is being sent.
+  question is being sent or waits for its thread's saves.
 
 ## Request path
 

@@ -410,7 +410,7 @@ The investigation notebook holds ready-made analyses of delay. Each one is a car
 
 ### 11-1. Running an analysis
 
-- The sentence at the top shows the conditions your analyses will cover: routes, period, days of the week and timetable, and time of day (chapter 3). Click one to change it. A new investigation starts from the conditions of the screen you came from; once an investigation is open, each change is kept with it.
+- The sentence at the top shows the conditions your analyses will cover: routes, period, days of the week and timetable, and time of day (chapter 3). Click one to change it. A new investigation starts from the conditions of the screen you came from; once an investigation is open, each change is saved to it as you make it.
 - Under “Run at once”, a card runs immediately: “5 most delayed routes” or “5 least on-time routes”.
 - Under “More analyses”, each one needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
 - After the first result, open **Start another analysis** at the bottom to see every analysis. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes analysis.

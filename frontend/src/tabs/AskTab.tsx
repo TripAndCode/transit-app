@@ -20,7 +20,7 @@ import {
   useMigrateAnon,
   useIsAuthenticated,
   useIsLlmApproved,
-  useUpdateConversation,
+  useThreadFilter,
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
@@ -120,7 +120,6 @@ export function AskTab() {
   const convQuery = useConversation(id ?? 0, activeId);
   const createConv = useCreateConversation(id ?? 0);
   const appendMsg = useAppendMessage(id ?? 0);
-  const updateConv = useUpdateConversation(id ?? 0);
   const followup = useFollowup(id ?? 0);
   const followupFlag = useFollowupEnabled(id);
   const llmEnabled = useFeatureOn("llm_enabled");
@@ -130,59 +129,28 @@ export function AskTab() {
   const followupEnabled = followupFlag.data?.enabled === true && llmEnabled && llmApproved;
 
   // ── Filter context (derived, no sync effects) ─────────────────────────────
-  // Single source of truth, in priority order:
-  //   1. an unsaved user edit for the *current* thread (keyed by activeId so a
-  //      thread switch never carries another thread's edit across),
-  //   2. the active conversation's stored filter_ctx,
-  //   3. the URL range context (no active thread / conversation still loading).
-  const [filterEdit, setFilterEdit] = useState<{ key: string | null; fc: FilterCtx } | null>(null);
+  // An open thread's filter is its stored one: each edit is saved as it is
+  // made and shown at once through the conversation's cached copy
+  // (`useThreadFilter`), so what the sentence shows is what the thread's saves
+  // leave it with. With no thread open, an edit stays on this screen and
+  // seeds the next new thread; before any edit, that is the URL's scope.
+  const threadFilter = useThreadFilter(id ?? 0);
+  const [newThreadFilter, setNewThreadFilter] = useState<FilterCtx | null>(null);
   const storedFc = convQuery.data?.conversation?.filter_ctx;
   const dataEnd = use(DataEndContext);
-  const filterCtx: FilterCtx =
-    filterEdit && filterEdit.key === activeId
-      ? filterEdit.fc
-      : activeId && storedFc
-        ? resolvedFilterCtx(storedFc, dataEnd)
-        : rangeCtxToFilterCtx(rangeCtx);
-
-  // A filter edit stays on screen only until it is needed elsewhere: it is
-  // saved to the thread before a dispatch (the authed backend reads the
-  // persisted filter_ctx) and when the reader leaves the thread. Saving on
-  // every tick would send a burst of PATCHes for one decision.
-  //
-  // Saves run one after another on `saveChain`, so the server sees them in
-  // the order they were made and a dispatch that awaits the chain reads the
-  // last one. `unsavedFilter` is cleared only by the save of the very edit it
-  // still holds: an older save landing, or failing, late never touches a
-  // newer edit.
-  const unsavedFilter = useRef<{ id: string; fc: FilterCtx } | null>(null);
-  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const filterCtx: FilterCtx = activeId
+    ? storedFc
+      ? resolvedFilterCtx(storedFc, dataEnd)
+      : rangeCtxToFilterCtx(rangeCtx)
+    : (newThreadFilter ?? rangeCtxToFilterCtx(rangeCtx));
   function handleFilterChange(next: FilterCtx) {
-    setFilterEdit({ key: activeId, fc: next });
-    if (activeId) unsavedFilter.current = { id: activeId, fc: next };
+    if (activeId) threadFilter.save(activeId, next);
+    else setNewThreadFilter(next);
   }
-  function saveFilter(edit: { id: string; fc: FilterCtx }): Promise<void> {
-    const save = saveChain.current.then(async () => {
-      await updateConv.mutateAsync({ id: edit.id, patch: { filter_ctx: edit.fc } });
-      if (unsavedFilter.current === edit) unsavedFilter.current = null;
-    });
-    saveChain.current = save.catch(() => {});
-    return save;
-  }
-  // Leaving a thread saves the edit made on it. The failure is still shown,
-  // with nothing to retry: the edit is the thread's, and the reader has moved
-  // on from it.
-  function saveOnLeave() {
-    const edit = unsavedFilter.current;
-    if (!edit) return;
-    unsavedFilter.current = null;
-    saveFilter(edit).catch((error: unknown) => setDispatchFailure({ error, retry: null }));
-  }
-  const saveOnUnmount = useEffectEvent(() => {
-    const edit = unsavedFilter.current;
-    if (edit) void saveFilter(edit).catch(() => {});
-  });
-  useEffect(() => () => saveOnUnmount(), []);
+  // Waiting for a thread's saves before a dispatch counts as busy, so a
+  // second press cannot send the question twice.
+  const [flushing, setFlushing] = useState(false);
+  const dispatching = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -193,9 +161,8 @@ export function AskTab() {
 
   function handleSelectThread(threadId: string | null) {
     historyRef.current?.removeAttribute("open");
-    if (threadId !== activeId) saveOnLeave();
     setActiveId(threadId);
-    setFilterEdit(null);
+    setNewThreadFilter(null);
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -209,9 +176,8 @@ export function AskTab() {
 
   function handleNewThread() {
     historyRef.current?.removeAttribute("open");
-    saveOnLeave();
     setActiveId(null);
-    setFilterEdit(null);
+    setNewThreadFilter(null);
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -223,6 +189,15 @@ export function AskTab() {
   // adding the question to it failed: the retry must append to that thread,
   // not create a second one.
   async function handleCardSubmit(submission: Submission, createdConvId: string | null = null) {
+    if (id == null || dispatching.current) return;
+    dispatching.current = true;
+    // dispatchCard reports its own failures through `settle` and never throws.
+    await dispatchCard(submission, createdConvId);
+    dispatching.current = false;
+    setFlushing(false);
+  }
+
+  async function dispatchCard(submission: Submission, createdConvId: string | null) {
     if (id == null) return;
     const { tool, user_summary } = submission;
     let { args } = submission;
@@ -236,15 +211,16 @@ export function AskTab() {
     }
 
     await settle(async () => {
-      // The authed path's backend reads the *persisted* filter_ctx, so the
-      // thread's edit is saved, after every save before it, ahead of the
-      // dispatch. If it fails, the error surfaces with a retry that repeats
-      // this whole submission, and nothing is asked under the old filter.
-      const unsaved = unsavedFilter.current;
-      if (unsaved && unsaved.id === activeId) await saveFilter(unsaved);
-      else await saveChain.current;
-
       let convId = createdConvId ?? activeId;
+      // The authed path's backend reads the *persisted* filter_ctx, so the
+      // thread's saves land before the dispatch. If the last one failed, the
+      // error surfaces with a retry that repeats this whole submission, and
+      // nothing is asked under the old filter.
+      if (convId !== null) {
+        setFlushing(true);
+        await threadFilter.flush(convId);
+      }
+
       if (convId === null) {
         const created = await createConv.mutateAsync({
           title: user_summary.slice(0, 60),
@@ -252,9 +228,9 @@ export function AskTab() {
         });
         convId = created.conversation_id;
         setActiveId(convId);
-        // The new conversation was created with the visible filter; drop any
+        // The new conversation was created with the visible filter; drop the
         // no-thread edit so the derived ctx now reads from the conversation.
-        setFilterEdit(null);
+        setNewThreadFilter(null);
       }
 
       appendMsg.mutate(
@@ -264,7 +240,7 @@ export function AskTab() {
     }, failWith(createdConvId));
   }
 
-  const busy = appendMsg.isPending || createConv.isPending;
+  const busy = appendMsg.isPending || createConv.isPending || flushing;
 
   function handleChipTap(tpl: CardTemplate) {
     if (busy) return;
@@ -402,7 +378,7 @@ export function AskTab() {
             }}
             applied={THREAD_SCOPE_APPLIED}
             actions={false}
-            disabled={appendMsg.isPending || createConv.isPending}
+            disabled={busy}
           />
         </div>
 

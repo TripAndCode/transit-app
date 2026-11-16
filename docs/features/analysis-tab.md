@@ -452,7 +452,7 @@ The other screens with filters use the same sentence and controls:
 | A route's page | The URL's; the page's route is its routes baseline, never marked changed | Default; greyed by what none of its sections used (`mergeScopeApplied` over the stop delays, the summary strip's on-time list and the performance standard) | No |
 | Live | The URL's; a routes change also drops the map selection | `template="live"`: routes and tolerance, no period | No |
 | Day types & agencies ▸ Agencies | The URL's | `template="board"`: the period only; everything else it ignores is named in the note, from the endpoint's `scope_applied` | No |
-| Notebook | The open thread's `filter_ctx` (`source`), seeded from the URL's for a new thread | Default, without the tolerance clause, since a thread stores none | No |
+| Notebook | The open thread's `filter_ctx` (`source`), seeded from the URL's for a new thread | Default, without the tolerance clause unless the screen's URL sets one, which then shows as unused | No |
 
 `source` swaps the URL's scope for another one and its writer. `template`
 picks a sentence (`scope.sentence_live`, `scope.sentence_board`) for a screen
