@@ -1,10 +1,10 @@
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
+import { use, useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { routeHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
 import { ScopeSentence } from "../components/scope/ScopeSentence";
-import { applyLiveScopePatch, LIVE_SCOPE_APPLIED } from "./map/liveScope";
+import { applyLiveScopePatch, LIVE_SCOPE_APPLIED, liveShapeScope } from "./map/liveScope";
 import { PlaybackToggle } from "./map/PlaybackToggle";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { Tooltip } from "../components/Tooltip";
@@ -18,7 +18,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
-import { useScope, type ScopePatch } from "../api/scope";
+import { DataEndContext, useScope, type ScopePatch } from "../api/scope";
 import { scopeWindow, windowSide } from "../api/onTimeDefault";
 import { durationLabel, windowLabels } from "../components/scope/scopePhrases";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
@@ -156,6 +156,7 @@ export function MapTab() {
   const { t, i18n } = useTranslation();
   const { t: td } = useTranslation("design");
   const [ctx] = useScope();
+  const dataEnd = use(DataEndContext);
   const [, setParams] = useSearchParams();
   function updateScope(patch: ScopePatch) {
     setParams((prev) => applyLiveScopePatch(prev, patch), { replace: true });
@@ -322,7 +323,7 @@ export function MapTab() {
   const directionTrips = directions.find((direction) => direction.key === effectiveDirection)?.trips ?? [];
   const effectiveTrip = directionTrips.find((trip) => trip.trip_id === selectedTripId) ?? directionTrips[0] ?? null;
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
-  const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
+  const shapeQuery = useRouteShape(id, effectiveRoute, liveShapeScope(ctx, dataEnd));
   const stopBoundsQuery = useStopBounds(id);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
   // The live table keeps only the last few days, so a feed stalled longer has

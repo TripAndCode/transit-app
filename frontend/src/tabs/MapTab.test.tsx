@@ -229,12 +229,20 @@ describe("MapTab scope sentence", () => {
     expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
   });
 
+  it("asks for a route's shape over Live's own scope, not a linked period or day", () => {
+    renderLive("?routes=R1&from=2020-01-01&to=2020-01-31&dow=weekday");
+    const scopes = vi.mocked(hooks.useRouteShape).mock.calls.map((call) => call[2]);
+    expect(scopes.length).toBeGreaterThan(0);
+    for (const scope of scopes) expect(scope).toMatchObject({ dow: "all", routes: ["R1"] });
+    expect(scopes.some((scope) => scope.from === "2020-01-01")).toBe(false);
+  });
+
   it("offers no reset for a period it does not show", () => {
     renderLive("?from=2026-09-01&to=2026-09-30");
     expect(screen.queryByRole("button", { name: "Reset conditions" })).toBeNull();
   });
 
-  it("drops the map's selection in the same write that changes the routes", () => {
+  it("drops the map's selection in the same write as a Reset that clears the routes", () => {
     renderLive("?routes=R1&route_focus=R1&route_focus_agency=1&direction=0&trip=T1");
     fireEvent.click(screen.getByRole("button", { name: "Reset conditions" }));
     const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
