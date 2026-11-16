@@ -325,14 +325,10 @@ invalidate the flag cache immediately. See `pipeline/flags.py` for the
 registry, precedence, and cache TTL, and `README.md`'s kill-switch section
 for the full key list.
 
-`login_required` is the sign-in gate (`api/middleware/login_gate.py`): on,
-every `/api/*` route except the sign-in flow, `/api/config`, a read of
-`/api/me` (who-am-I, `null` when signed out) and a read of a frozen snapshot
-or of today's figures for it (`/api/snapshots/{id}` and
-`/api/snapshots/{id}/today`, see [snapshots.md](snapshots.md)) refuses a signed-out
-caller while SSO is configured. Turning it off reopens the app to
-signed-out visitors; it is the recovery switch when OAuth is down (see
-`docs/deploy-railway.md`).
+No flag closes the reader pages: they work signed out. Each admin route
+carries its own `require_admin` dependency, and
+`tests/unit/test_admin_route_guard.py` keeps every `/api/admin/*` route behind
+it.
 
 ## Snapshots
 

@@ -354,10 +354,8 @@ frontend-build:
 
 # Recaptures docs/features/ml-forecast.md's sibling, the in-app user manual's
 # own screenshots: build+bake a production bundle first (the dev server's
-# dev-only sidebar section would otherwise leak into every scene), set
-# login_required off via the admin flags UI/API (the dev-database guard
-# blocks that write from an agent's own tool calls), run this, then set it
-# back on.
+# dev-only sidebar section would otherwise leak into every scene), then run
+# this. It captures as a signed-out reader, so it needs no sign-in.
 capture-user-manual:
 	poetry run python scripts/capture_user_manual_screenshots.py
 
