@@ -875,6 +875,12 @@ describe("NetworkTab", () => {
       expect(summary.mock.calls.every(([, , enabled]) => enabled === false)).toBe(true);
     });
 
+    it("asks for no agency's routes, since its sentence names none", () => {
+      const routes = vi.spyOn(hooks, "useRoutes");
+      renderBoard("?from=2026-04-01&to=2026-04-07&routes=50");
+      expect(routes.mock.calls.every(([agencyId]) => agencyId == null)).toBe(true);
+    });
+
     it("writes the period it is given as the canonical from and to", () => {
       renderBoard("?from=2026-04-01&to=2026-04-07");
       fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));

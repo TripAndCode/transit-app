@@ -149,12 +149,21 @@ function Token({
   );
 }
 
-/** A sentence whose words differ from the default one's, for a screen the
+export type SentenceTemplate = "live" | "board";
+
+/** Sentences whose words differ from the default one's, for a screen the
  *  default would misdescribe: Live counts the trips running now, over no
  *  period, and the agencies board compares every agency, not one agency's
  *  routes. A condition such a sentence leaves out still shows in the
- *  not-used note whenever it is set and `applied` says it went unused. */
-export type SentenceTemplate = "live" | "board";
+ *  not-used note whenever it is set and `applied` says it went unused.
+ *
+ *  `figures` says whether its controls may draw the scope summary. The
+ *  summary is one agency's figures over the scope's period, which neither
+ *  of these counts by. */
+const SENTENCES: Record<SentenceTemplate, { key: string; figures: boolean }> = {
+  live: { key: "scope.sentence_live", figures: false },
+  board: { key: "scope.sentence_board", figures: false },
+};
 
 /** The scope as one sentence. Each condition is a chip that opens its own
  *  control. A single-choice control applies each change at once; the routes
@@ -190,7 +199,15 @@ export function ScopeSentence({
   const { data: agencies } = useAgencies();
   const dataEnd = use(DataEndContext);
   const slot = useScopeActionsSlot();
-  const names = useRouteNames(id);
+  // A screen that never applies the on-time tolerance gets no clause for it
+  // unless the scope sets one, which then shows greyed like any unused one.
+  const omitTolerance = applied?.late === false && scope.late == null;
+  const templateKey = template ? SENTENCES[template].key : omitTolerance ? "scope.sentence_no_tolerance" : "scope.sentence";
+  const parts = sentenceParts(t(templateKey));
+  // Route names are only for the routes token; a sentence without one (the
+  // board's) never asks for the agency's routes.
+  const showsRoutes = parts.some((part) => "slot" in part && part.slot === "routes");
+  const names = useRouteNames(showsRoutes ? id : null);
   const place = usePlaceLabels(id, scope.stop != null);
   const [openKey, setOpenKey] = useState<ConditionKey | null>(null);
   const [pinnedPref, setPinned] = useState(readScopePinned);
@@ -217,10 +234,8 @@ export function ScopeSentence({
   const byKey = new Map(tokens.map((tok) => [tok.key, tok]));
   // A condition that was cleared from elsewhere has no popover to show.
   const open = openKey != null && byKey.has(openKey) ? openKey : null;
-  // The summary's figures are one agency's over the scope's period: neither
-  // the board, which compares every agency, nor Live, which has no period,
-  // counts by them.
-  const wantsSummary = template == null && (pinned || (open != null && DATA_KEYS.has(open)));
+  const figures = template == null || SENTENCES[template].figures;
+  const wantsSummary = figures && (pinned || (open != null && DATA_KEYS.has(open)));
   const { data: summary } = useScopeSummary(id, scope, wantsSummary);
   const separator = t("common.list_separator");
 
@@ -293,11 +308,7 @@ export function ScopeSentence({
   // flattened so a token can take the punctuation that follows it.
   type Run = { text: string } | { token: ScopeToken };
   const runs: Run[] = [];
-  // A screen that never applies the on-time tolerance gets no clause for it
-  // unless the scope sets one, which then shows greyed like any unused one.
-  const omitTolerance = applied?.late === false && scope.late == null;
-  const templateKey = template ? `scope.sentence_${template}` : omitTolerance ? "scope.sentence_no_tolerance" : "scope.sentence";
-  for (const part of sentenceParts(t(templateKey))) {
+  for (const part of parts) {
     if ("text" in part) runs.push({ text: part.text });
     else if (part.slot === "extras") {
       for (const tok of tokens) if (!PLACED_KEYS.has(tok.key)) runs.push({ text: separator }, { token: tok });
