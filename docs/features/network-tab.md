@@ -34,7 +34,8 @@ What the user sees/does:
 - **Scope sentence** — the shared `ScopeSentence` with `template="board"`:
   「全事業者を[period]で比較する」 / "Comparing every agency over [period]",
   whose one condition is the period, with the period control every screen
-  uses (presets, the daily brush and from/to dates), writing `from`/`to`.
+  uses (presets and from/to dates; no daily chart, since its figures are one
+  agency's), writing `from`/`to`.
   Every other condition set in the URL that the endpoint's `scope_applied`
   marks unused is named in the sentence's "Not used on this screen" note,
   never ignored silently. It carries no saved views or pin.

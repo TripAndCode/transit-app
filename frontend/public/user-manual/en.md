@@ -471,7 +471,7 @@ What the words on the screens and in this manual mean.
 - **Service day**: the date turns over at 04:00. A report that arrives between midnight and 04:00 counts toward the previous day.
 - **Timetable type**: each day is classed by the timetable the agency ran that day, as weekdays, Saturdays, or Sundays & holidays; for an agency whose Saturday and Sunday timetables are the same, as weekdays or weekends & holidays. A day the timetable cannot class is classed by its day of the week and public holidays.
 - **Route**: what the agency’s timetable codes as one route. Each row of the **Routes** table is one route. Route pickers put routes that share a name under one entry, with a count of its variants.
-- **Service pattern**: on a route’s page, the “Route” filter picks a name that one or more routes share, and “Service pattern” picks one of those routes.
+- **Service pattern**: one of the routes that share a name. A route picker lists the name once; open it to pick one of its service patterns.
 
 ### 13-2. Delay figures
 

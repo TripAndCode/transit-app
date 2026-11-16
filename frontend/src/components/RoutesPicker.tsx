@@ -93,7 +93,6 @@ export function RoutesPicker({
   onChange,
   delays,
   renderDelay,
-  tray = false,
   onSubmit,
 }: {
   selected: string[];
@@ -101,12 +100,7 @@ export function RoutesPicker({
   /** Mean delay per route code; each line shows its own beside its name. */
   delays?: ReadonlyMap<string, RouteDelay>;
   renderDelay?: (minutes: number) => ReactNode;
-  /** Shows the picked routes as removable chips above the list, with a
-   *  Clear button, for a caller that stages edits behind its own Apply
-   *  step. */
-  tray?: boolean;
-  /** Enter in the search field submits the caller's own pending change
-   *  (only meaningful together with `tray`). */
+  /** Enter in the search field submits the caller's own pending change. */
   onSubmit?: () => void;
 }) {
   const { t } = useTranslation();
@@ -178,55 +172,56 @@ export function RoutesPicker({
         }}
         style={{ width: "100%", marginBottom: 6, fontSize: 13 }}
       />
-      {tray && (
-        <div style={{ marginBottom: 6 }}>
-          {selected.length === 0 ? (
-            <p style={{ color: "var(--text-tertiary)", fontSize: 12, margin: 0 }}>{t("filters.routes.tray_empty")}</p>
-          ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-              {selected.map((code) => {
-                const parts = names.parts.get(code);
-                return (
-                  <span
-                    key={code}
+      {/* The picked routes as removable chips, with a Clear button: the
+          caller stages picks behind its own Apply, so the pending ones are
+          listed before they take effect. */}
+      <div style={{ marginBottom: 6 }}>
+        {selected.length === 0 ? (
+          <p style={{ color: "var(--text-tertiary)", fontSize: 12, margin: 0 }}>{t("filters.routes.tray_empty")}</p>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            {selected.map((code) => {
+              const parts = names.parts.get(code);
+              return (
+                <span
+                  key={code}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "2px 4px 2px 8px",
+                    borderRadius: "var(--radius)",
+                    background: "var(--accent-soft)",
+                    fontSize: 12,
+                  }}
+                >
+                  {parts ? <RoutePartsLabel parts={parts} compact nameOnly /> : code}
+                  <button
+                    type="button"
+                    onClick={() => removeFromTray(selected.filter((c) => c !== code))}
+                    aria-label={t("filters.routes.tray_remove", { route: parts ? `${routeNameText(parts)} (${code})` : code })}
                     style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: "2px 4px 2px 8px",
-                      borderRadius: "var(--radius)",
-                      background: "var(--accent-soft)",
-                      fontSize: 12,
+                      appearance: "none",
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "var(--text-tertiary)",
+                      padding: "0 2px",
+                      fontSize: 14,
+                      lineHeight: 1,
                     }}
                   >
-                    {parts ? <RoutePartsLabel parts={parts} compact nameOnly /> : code}
-                    <button
-                      type="button"
-                      onClick={() => removeFromTray(selected.filter((c) => c !== code))}
-                      aria-label={t("filters.routes.tray_remove", { route: parts ? `${routeNameText(parts)} (${code})` : code })}
-                      style={{
-                        appearance: "none",
-                        background: "transparent",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "var(--text-tertiary)",
-                        padding: "0 2px",
-                        fontSize: 14,
-                        lineHeight: 1,
-                      }}
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => removeFromTray([])}>
-                {t("scope.control.clear")}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => removeFromTray([])}>
+              {t("scope.control.clear")}
+            </button>
+          </div>
+        )}
+      </div>
       <div
         style={{
           maxHeight: 220,

@@ -307,7 +307,6 @@ export function RoutesControl({ scope, update, summary, close }: ControlProps) {
         onChange={setDraft}
         delays={delays}
         renderDelay={(minutes) => <DelayBar minutes={minutes} />}
-        tray
         onSubmit={commit}
       />
       <WholeDayNote scope={scope} update={update} summary={summary} />
