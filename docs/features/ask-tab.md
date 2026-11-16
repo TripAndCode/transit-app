@@ -121,8 +121,15 @@ What the user sees/does:
   `threadScope`/`patchThreadFilter` in `frontend/src/tabs/ask/filterCtx.ts`,
   which read a stored filter through the URL scope's own parser. With no
   thread open it shows the screen's URL scope, which seeds the next new
-  thread (`rangeCtxToFilterCtx`). Each change saves to the open thread
-  before the next dispatch reads it. A thread stores no on-time tolerance,
+  thread (`rangeCtxToFilterCtx`). An edit shows at once but stays local to
+  the screen; it is saved to the open thread only when it is needed: before
+  the next dispatch, which awaits the save (the authed backend reads the
+  persisted `filter_ctx`), and when the reader leaves the thread (another
+  thread, a new one, or the screen). Saves run one after another, so the
+  server sees them in order and a dispatch reads the last; only the save of
+  the edit still on screen clears it, so an older save landing or failing
+  late never touches a newer edit. A failed save before a dispatch stops the
+  dispatch and offers a retry of the whole submission. A thread stores no on-time tolerance,
   so its sentence has no tolerance clause, and it carries no saved views or
   pin; its tokens are disabled while a question is being sent.
 

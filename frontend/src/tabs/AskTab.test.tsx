@@ -384,11 +384,7 @@ describe("AskTab unsaved filter edits", () => {
     Element.prototype.scrollTo = vi.fn();
   });
 
-  function openThreadWithFailedFilterSave(secondSave: "ok" | "fails") {
-    const updateMutateAsync = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("save failed"))
-      .mockImplementation(() => (secondSave === "ok" ? Promise.resolve(undefined) : Promise.reject(new Error("again"))));
+  function openThread(updateMutateAsync: ReturnType<typeof vi.fn>) {
     const appendMutate = vi.fn();
     vi.spyOn(hooks, "useUpdateConversation").mockReturnValue(mutationStub({ mutateAsync: updateMutateAsync }));
     vi.spyOn(hooks, "useAppendMessage").mockReturnValue(mutationStub({ mutate: appendMutate }));
@@ -411,13 +407,12 @@ describe("AskTab unsaved filter edits", () => {
       refetch: vi.fn(),
     } as never);
     renderAskTab("/agencies/5/ask?conversation=t1");
-    return { updateMutateAsync, appendMutate };
+    return { appendMutate };
   }
 
-  async function editFilterThenFailToSave() {
-    await userEvent.click(screen.getByRole("button", { name: "every day" }));
-    await userEvent.click(screen.getByRole("radio", { name: "Weekdays" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  async function pick(token: string, choice: string) {
+    await userEvent.click(screen.getByRole("button", { name: token }));
+    await userEvent.click(screen.getByRole("radio", { name: choice }));
   }
 
   function firstInstantCard() {
@@ -425,25 +420,79 @@ describe("AskTab unsaved filter edits", () => {
     return landing.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0];
   }
 
-  it("saves the filter again before dispatching, so the answer is scoped to the filter on screen", async () => {
-    const { updateMutateAsync, appendMutate } = openThreadWithFailedFilterSave("ok");
-    await editFilterThenFailToSave();
+  function deferred() {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it("keeps edits on screen and saves only the last one, once, before the next run", async () => {
+    const updateMutateAsync = vi.fn().mockResolvedValue(undefined);
+    const { appendMutate } = openThread(updateMutateAsync);
+    await pick("every day", "Weekdays");
+    await pick("all hours", "Evening (17–20)");
+    await pick("weekdays", "Weekend");
+    expect(screen.getByRole("button", { name: "weekends" })).toBeInTheDocument();
+    expect(updateMutateAsync).not.toHaveBeenCalled();
 
     await userEvent.click(firstInstantCard());
 
+    await waitFor(() => expect(appendMutate).toHaveBeenCalledTimes(1));
+    expect(updateMutateAsync).toHaveBeenCalledTimes(1);
+    expect(updateMutateAsync.mock.calls[0][0]).toMatchObject({
+      id: "t1",
+      patch: { filter_ctx: { dow: "weekend", time_band: "evening" } },
+    });
+    expect(updateMutateAsync.mock.invocationCallOrder[0]).toBeLessThan(appendMutate.mock.invocationCallOrder[0]);
+  });
+
+  it("does not dispatch under the previous filter when the save fails, and saves it again on the next run", async () => {
+    const updateMutateAsync = vi.fn().mockRejectedValueOnce(new Error("save failed")).mockResolvedValue(undefined);
+    const { appendMutate } = openThread(updateMutateAsync);
+    await pick("every day", "Weekdays");
+
+    await userEvent.click(firstInstantCard());
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(appendMutate).not.toHaveBeenCalled();
+
+    await userEvent.click(firstInstantCard());
     await waitFor(() => expect(appendMutate).toHaveBeenCalledTimes(1));
     expect(updateMutateAsync).toHaveBeenCalledTimes(2);
     expect(updateMutateAsync.mock.calls[1][0]).toMatchObject({ id: "t1", patch: { filter_ctx: { dow: "weekday" } } });
   });
 
-  it("does not dispatch under the previous filter when the retried save also fails", async () => {
-    const { updateMutateAsync, appendMutate } = openThreadWithFailedFilterSave("fails");
-    await editFilterThenFailToSave();
+  it("saves the thread's edit when the reader leaves it for a new investigation", async () => {
+    const updateMutateAsync = vi.fn().mockResolvedValue(undefined);
+    openThread(updateMutateAsync);
+    await pick("every day", "Weekdays");
+    expect(updateMutateAsync).not.toHaveBeenCalled();
 
+    await userEvent.click(screen.getByText("Your investigations"));
+    await userEvent.click(screen.getByRole("button", { name: /New investigation/ }));
+
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalledTimes(1));
+    expect(updateMutateAsync.mock.calls[0][0]).toMatchObject({ id: "t1", patch: { filter_ctx: { dow: "weekday" } } });
+  });
+
+  it("saves a later edit only after a slow earlier save has landed, and dispatches under the later one", async () => {
+    const slow = deferred();
+    const later = deferred();
+    const updateMutateAsync = vi.fn().mockReturnValueOnce(slow.promise).mockReturnValueOnce(later.promise);
+    const { appendMutate } = openThread(updateMutateAsync);
+    await pick("every day", "Weekdays");
     await userEvent.click(firstInstantCard());
+    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalledTimes(1));
 
+    await pick("weekdays", "Weekend");
+    await userEvent.click(firstInstantCard());
+    expect(updateMutateAsync).toHaveBeenCalledTimes(1);
+
+    await act(async () => slow.resolve());
     await waitFor(() => expect(updateMutateAsync).toHaveBeenCalledTimes(2));
-    expect(appendMutate).not.toHaveBeenCalled();
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(updateMutateAsync.mock.calls[1][0]).toMatchObject({ patch: { filter_ctx: { dow: "weekend" } } });
+    expect(appendMutate).toHaveBeenCalledTimes(1);
+
+    await act(async () => later.resolve());
+    await waitFor(() => expect(appendMutate).toHaveBeenCalledTimes(2));
   });
 });

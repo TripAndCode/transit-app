@@ -138,38 +138,44 @@ export function AskTab() {
         ? resolvedFilterCtx(storedFc, dataEnd)
         : rangeCtxToFilterCtx(rangeCtx);
 
-  // User-initiated filter edit. When an active thread exists, persist the new
-  // filter to the conversation so subsequent 実行 calls dispatch with the
-  // visible filter. The save promise is tracked so handleCardSubmit can await
-  // it — without that, an edit followed by an immediate 実行 would race the
-  // PATCH and the backend would answer with the previous (stale) filter scope.
-  // Resolves to whether the save landed; it never rejects, so a failed save
-  // is reported once (as a failure banner) rather than as an unhandled
-  // rejection.
-  const pendingFilterSave = useRef<Promise<boolean> | null>(null);
-  // The filter the user applied that never reached the thread. The screen
-  // shows it, but the backend reads the persisted one, so a dispatch must save
-  // it first or it would answer under a scope the user is not looking at.
+  // A filter edit stays on screen only until it is needed elsewhere: it is
+  // saved to the thread before a dispatch (the authed backend reads the
+  // persisted filter_ctx) and when the reader leaves the thread. Saving on
+  // every tick would send a burst of PATCHes for one decision.
+  //
+  // Saves run one after another on `saveChain`, so the server sees them in
+  // the order they were made and a dispatch that awaits the chain reads the
+  // last one. `unsavedFilter` is cleared only by the save of the very edit it
+  // still holds: an older save landing, or failing, late never touches a
+  // newer edit.
   const unsavedFilter = useRef<{ id: string; fc: FilterCtx } | null>(null);
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
   function handleFilterChange(next: FilterCtx) {
     setFilterEdit({ key: activeId, fc: next });
-    if (activeId) {
-      const id = activeId;
-      pendingFilterSave.current = updateConv.mutateAsync({ id, patch: { filter_ctx: next } }).then(
-        () => {
-          pendingFilterSave.current = null;
-          unsavedFilter.current = null;
-          return true;
-        },
-        (error: unknown) => {
-          pendingFilterSave.current = null;
-          unsavedFilter.current = { id, fc: next };
-          setDispatchFailure({ error, retry: null });
-          return false;
-        },
-      );
-    }
+    if (activeId) unsavedFilter.current = { id: activeId, fc: next };
   }
+  function saveFilter(edit: { id: string; fc: FilterCtx }): Promise<void> {
+    const save = saveChain.current.then(async () => {
+      await updateConv.mutateAsync({ id: edit.id, patch: { filter_ctx: edit.fc } });
+      if (unsavedFilter.current === edit) unsavedFilter.current = null;
+    });
+    saveChain.current = save.catch(() => {});
+    return save;
+  }
+  // Leaving a thread saves the edit made on it. The failure is still shown,
+  // with nothing to retry: the edit is the thread's, and the reader has moved
+  // on from it.
+  function saveOnLeave() {
+    const edit = unsavedFilter.current;
+    if (!edit) return;
+    unsavedFilter.current = null;
+    saveFilter(edit).catch((error: unknown) => setDispatchFailure({ error, retry: null }));
+  }
+  const saveOnUnmount = useEffectEvent(() => {
+    const edit = unsavedFilter.current;
+    if (edit) void saveFilter(edit).catch(() => {});
+  });
+  useEffect(() => () => saveOnUnmount(), []);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -180,9 +186,9 @@ export function AskTab() {
 
   function handleSelectThread(threadId: string | null) {
     historyRef.current?.removeAttribute("open");
+    if (threadId !== activeId) saveOnLeave();
     setActiveId(threadId);
     setFilterEdit(null);
-    unsavedFilter.current = null;
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -196,9 +202,9 @@ export function AskTab() {
 
   function handleNewThread() {
     historyRef.current?.removeAttribute("open");
+    saveOnLeave();
     setActiveId(null);
     setFilterEdit(null);
-    unsavedFilter.current = null;
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -223,18 +229,13 @@ export function AskTab() {
     }
 
     await settle(async () => {
-      // An in-flight filter save must land before dispatch — the authed path's
-      // backend reads the *persisted* conversation.filter_ctx. A failed save
-      // has already been reported, and dispatching would answer under the
-      // previous filter scope.
-      if (pendingFilterSave.current && !(await pendingFilterSave.current)) return;
-      // A save that failed earlier is retried now; if it fails again the
-      // error surfaces with a retry that repeats this whole submission.
+      // The authed path's backend reads the *persisted* filter_ctx, so the
+      // thread's edit is saved, after every save before it, ahead of the
+      // dispatch. If it fails, the error surfaces with a retry that repeats
+      // this whole submission, and nothing is asked under the old filter.
       const unsaved = unsavedFilter.current;
-      if (unsaved && unsaved.id === activeId) {
-        await updateConv.mutateAsync({ id: unsaved.id, patch: { filter_ctx: unsaved.fc } });
-        unsavedFilter.current = null;
-      }
+      if (unsaved && unsaved.id === activeId) await saveFilter(unsaved);
+      else await saveChain.current;
 
       let convId = createdConvId ?? activeId;
       if (convId === null) {
