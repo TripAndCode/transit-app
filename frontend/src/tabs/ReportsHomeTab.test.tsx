@@ -186,6 +186,28 @@ describe("ReportsHomeTab", () => {
     );
   });
 
+  it("links its list to the Routes table over the same period and filters, sorted as the list is", () => {
+    mockReports(trendResponse(), { ...rankingResponse([["101", null, 2, 1, 3, 400] as unknown as RankingRow]), rows_total: 1 });
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101");
+    // One route in scope still opens the table, not that route's page.
+    expect(screen.getByRole("link", { name: "Every route on the Routes table →" })).toHaveAttribute(
+      "href",
+      "/agencies/1/routes?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101&sort=avg",
+    );
+  });
+
+  it("links its chart to Time's trend over the same period and filters", () => {
+    mockReports(
+      trendResponse([{ date: "2026-06-03", avg_min: 2, samples: 10, top_offenders: [] }]),
+      rankingResponse([["101", null, 2, 1, 3, 400] as unknown as RankingRow]),
+    );
+    renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101");
+    expect(screen.getByRole("link", { name: "The trend by day and hour on Time →" })).toHaveAttribute(
+      "href",
+      "/agencies/1/time?from=2026-06-01&to=2026-06-07&dow=weekday&routes=101&report=trend",
+    );
+  });
+
   it("keeps the page's exports in its one Export menu", () => {
     mockReports(trendResponse([{ date: "2026-10-23", avg_min: 5, samples: 10, top_offenders: [] }]), rankingResponse([["101", null, 2, 1, 3, 400] as unknown as RankingRow]));
     renderTab();
@@ -234,14 +256,17 @@ describe("ReportsHomeTab", () => {
     expect(screen.getByText("Routes observed fewer than 100 times in the period are left out.")).toBeInTheDocument();
   });
 
-  it("opens a ranking row in its route's dossier and the detailed reports on Time", () => {
-    mockReports(trendResponse(), rankingResponse([["101", "平日", 2, 1, 3, 4] as RankingRow]));
+  it("opens a ranking row in its route's dossier and the trend on Time", () => {
+    mockReports(
+      trendResponse([{ date: "2026-06-03", avg_min: 2, samples: 10, top_offenders: [] }]),
+      rankingResponse([["101", "平日", 2, 1, 3, 4] as RankingRow]),
+    );
     renderTab("/agencies/1/reports?from=2026-06-01&to=2026-06-07&service=平日");
     const open = new URL(screen.getByRole("link", { name: "Open analysis →" }).getAttribute("href")!, "http://x");
     expect(open.pathname).toBe("/agencies/1/routes/101");
     expect(open.searchParams.has("routes")).toBe(false);
     expect(open.searchParams.get("service")).toBe("平日");
-    const detailed = new URL(screen.getByRole("link", { name: "Detailed reports →" }).getAttribute("href")!, "http://x");
+    const detailed = new URL(screen.getByRole("link", { name: "The trend by day and hour on Time →" }).getAttribute("href")!, "http://x");
     expect(detailed.pathname).toBe("/agencies/1/time");
     expect(detailed.searchParams.get("report")).toBe("trend");
     expect(detailed.searchParams.get("from")).toBe("2026-06-01");

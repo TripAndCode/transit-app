@@ -5,9 +5,9 @@ describe("English pluralization", () => {
   beforeAll(async () => await i18n.changeLanguage("en"));
   afterAll(async () => await i18n.changeLanguage("ja"));
 
-  it("peakHourModal.routeCount uses the singular noun for count=1", () => {
-    expect(i18n.t("peakHourModal.routeCount", { count: 1 })).toBe("1 route");
-    expect(i18n.t("peakHourModal.routeCount", { count: 2 })).toBe("2 routes");
+  it("overview.routes_to_check.see_all uses the singular noun for count=1", () => {
+    expect(i18n.t("overview.routes_to_check.see_all", { count: 1 })).toBe("See the 1 route →");
+    expect(i18n.t("overview.routes_to_check.see_all", { count: 2 })).toBe("See all 2 routes →");
   });
 
   it("filters.routes.variant_count uses the singular noun for count=1", () => {

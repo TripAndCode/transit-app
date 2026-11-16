@@ -30,7 +30,7 @@ describe("SVG text floor", () => {
   });
 
   it("stretched charts draw their labels in HTML, never as SVG text", () => {
-    for (const f of ["components/PeakHourRibbon.tsx", "components/ServiceSplit.tsx", "components/ConcentrationBar.tsx"]) {
+    for (const f of ["components/ConcentrationBar.tsx"]) {
       expect(src(f), f).not.toMatch(/<text[\s>]/);
     }
   });

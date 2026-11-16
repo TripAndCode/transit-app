@@ -545,7 +545,8 @@
       "feed_status_quiet": "No reports for {{duration}}",
       "feed_status_none": "No reports yet",
       "feed_status_last": "Last report {{time}}",
-      "on_time_pointer": "On-time % is on <routes>Routes</routes> and on each route's page."
+      "on_time_pointer": "On-time % is on <routes>Routes</routes> and on each route's page.",
+      "see_trend": "See the trend on Time →"
     },
     "story": {
       "state_behind_one": "+{{delta}} min on the day before",
@@ -588,23 +589,9 @@
       "scope_one": "Covers the {{count}} route observed {{min}} or more times.",
       "scope_other": "Covers the {{count}} routes observed {{min}} or more times.",
       "empty": "No routes need attention",
-      "band_severe_one": "{{count}} route averaging {{min}} min or more late",
-      "band_severe_other": "{{count}} routes averaging {{min}} min or more late",
-      "band_severe_truncated_one": "{{count}} route averaging {{min}} min or more late (top {{shown}} shown)",
-      "band_severe_truncated_other": "{{count}} routes averaging {{min}} min or more late (top {{shown}} shown)",
-      "band_moderate_one": "{{count}} route averaging {{min}}–{{max}} min late",
-      "band_moderate_other": "{{count}} routes averaging {{min}}–{{max}} min late",
-      "band_moderate_truncated_one": "{{count}} route averaging {{min}}–{{max}} min late (top {{shown}} shown)",
-      "band_moderate_truncated_other": "{{count}} routes averaging {{min}}–{{max}} min late (top {{shown}} shown)",
-      "band_mild_one": "{{count}} route averaging {{min}}–{{max}} min late",
-      "band_mild_other": "{{count}} routes averaging {{min}}–{{max}} min late",
-      "band_mild_truncated_one": "{{count}} route averaging {{min}}–{{max}} min late (top {{shown}} shown)",
-      "band_mild_truncated_other": "{{count}} routes averaging {{min}}–{{max}} min late (top {{shown}} shown)",
-      "change_week": "{{delta}} min vs last week",
-      "change_days_one": "{{delta}} min vs the day before",
-      "change_days_other": "{{delta}} min vs the {{count}} days before",
       "see_all_one": "See the {{count}} route →",
-      "see_all_other": "See all {{count}} routes →"
+      "see_all_other": "See all {{count}} routes →",
+      "open_table": "Open the Routes table →"
     },
     "concentration": {
       "single_route": "{{name}} accounts for 100% — only 1 route counted.",
@@ -621,29 +608,16 @@
       "pair": "{{a}} and {{b}}",
       "story_slowest": "{{slowest}} run the latest, {{diff}} longer on average than {{fastest}}.",
       "story_same": "Delay is about the same whatever the day type.",
-      "days_one": "{{count}} day",
-      "days_other": "{{count}} days",
-      "samples": "{{value}} obs.",
-      "no_data": "No data",
-      "insufficient": "Not enough data",
-      "daily_label": "Daily trend by day type"
-    },
-    "peak_hour": {
-      "max_label": "Max {{avg}} min",
-      "avg_label": "Avg",
-      "weekday_empty": "No weekday data.",
-      "weekend_empty": "No weekend data.",
-      "spread_legend": "Shaded: hours above the day's average"
+      "story_none": "Too little data in this period to compare day types.",
+      "see_compare": "Compare weekdays and weekends/holidays route by route →",
+      "no_data": "no data",
+      "insufficient": "not enough data"
     },
     "modal": {
-      "concentration": "Delay concentration (top 20)",
-      "peak_hour": "Worst hour (Weekday vs Weekend)",
-      "service_split": "Service-day trend"
+      "concentration": "Delay concentration (top 20)"
     },
     "empty": "No observations in this range. Try a wider window.",
     "concentration_explainer": "Each route's share of the delay summed over the routes counted in the selected range. Route codes the current timetable no longer runs, and routes whose feed always reports zero delay, are not counted. The Lorenz curve below shows the skew: the dotted diagonal would be a perfectly even spread, and the further the curve bows away from it, the more the delay sits with a few routes.",
-    "peak_explainer": "Average delay by hour (0–23) across the selected range, split by day of week into weekdays (Mon–Fri) and weekends (Sat–Sun); a public holiday counts as its day of week. Compare commute peaks against weekend patterns.",
-    "service_split_explainer": "Average delay by day type (weekdays, Saturdays, and Sundays & holidays; or weekdays and weekends & holidays) across the selected range. Each day's type is the timetable the agency's schedule ran that day. A day type with too few days or observations is marked “Not enough data” and left out of the comparison. The daily series below shows whether a gap is persistent or a one-off.",
     "never_collected": "We haven't collected any data for {{agency}} yet.",
     "choose_another_agency": "Choose another agency",
     "definition": {
@@ -654,7 +628,7 @@
       },
       "peak_hour": {
         "title": "Heaviest hour",
-        "body": "The hour of the day whose departures had the highest average delay over the period, under the conditions above. Click the row to see every hour."
+        "body": "The hour of the day whose departures had the highest average delay over the period, under the conditions above. The row opens Time, which shows every hour by day."
       },
       "concentration": {
         "title": "Share of delay",
@@ -666,20 +640,15 @@
       },
       "routes_to_check": {
         "title": "Routes to check",
-        "body": "The most delayed routes in the period, grouped by their average delay, among the routes observed {{floor}} or more times, leaving out the routes Routes leaves out by default (retired route codes and feeds that always report zero delay). Each row's change compares it with the same number of days just before the period. Click a route to open its page."
+        "body": "The first rows of the Routes table for these days: the routes with the highest average delay, among the routes observed {{floor}} or more times, leaving out the routes Routes leaves out by default (retired route codes and feeds that always report zero delay). Click a route to open its page, or the link below for every route."
       }
+    },
+    "peak_hour": {
+      "see_time": "See every hour by day on Time →"
     }
   },
   "markdownMermaid": {
     "diagram_fallback_label": "Diagram"
-  },
-  "peakHourModal": {
-    "title_dow": "{{dow}} {{hour}}:00 — delayed routes",
-    "title_all": "All days {{hour}}:00 — delayed routes",
-    "noData": "Not enough data for this time slot",
-    "avgMin": "{{sign}}{{value}}min",
-    "routeCount_one": "{{count}} route",
-    "routeCount_other": "{{count}} routes"
   },
   "header": {
     "app_title": "Delay Dashboard",
@@ -1117,7 +1086,9 @@
       },
       "row_count_one": "{{count}} row",
       "row_count_other": "{{count}} rows",
-      "stop_unnamed": "Unnamed stop"
+      "stop_unnamed": "Unnamed stop",
+      "open_home": "Open on {{screen}} →",
+      "open_daily_trend": "See the daily trend on Time →"
     },
     "workspace": {
       "investigations": "Your investigations",

@@ -1,18 +1,20 @@
 import { useRef, type CSSProperties, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { TFunction } from "i18next";
-import type { DefinitionMeta, ToolResult, TrendDay } from "../../api/types";
+import type { CardConditions, DefinitionMeta, ToolResult, TrendDay } from "../../api/types";
 import { DefinitionMetaBlock } from "../../components/DefinitionMetaBlock";
 import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
 import { formatNumber } from "../../utils/format";
 import { serviceValueLabel } from "../../utils/filterValueLabels";
 import { exportSvgAsPng } from "./chartPng";
+import { cardHome } from "./cardHome";
 import { buildNextStepChips, type NextStepAction } from "./nextStepChips";
 import { conditionsLabel, formatWindow, provenancePath, resultRowCount, toolLabel } from "./provenance";
 import { MAX_STAGGER, rankedBarColor, rankedBarColumn, rankedBarShares } from "./rankedBars";
 import { SHARED_TABLE } from "../../components/tableStyles";
 import "./rankedBars.css";
 
-type Conditions = { dow?: string; time_band?: string; service?: string } | null;
+type Conditions = CardConditions | null;
 
 /** Render a tool result as a table / key-value list / chart, falling back to
  *  plain text for empty or text-kind results. Table/kv/series results are
@@ -31,6 +33,7 @@ export function RichResult({
   conditions,
   definition,
   onChip,
+  agencyId = null,
 }: {
   result: ToolResult;
   fallbackText: string;
@@ -41,10 +44,13 @@ export function RichResult({
   conditions?: Conditions;
   definition?: DefinitionMeta | null;
   onChip?: (action: NextStepAction) => void;
+  /** The agency the card was answered for: with it, the card links to the
+   *  screen that answers its question in full. */
+  agencyId?: number | null;
 }) {
   if (result.kind === "table" && result.rows && result.columns) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} agencyId={agencyId} t={t}>
         <ResultTable result={result} formatRoute={formatRoute} t={t} />
       </EvidenceCard>
     );
@@ -52,7 +58,7 @@ export function RichResult({
 
   if (result.kind === "kv" && result.pairs) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} agencyId={agencyId} t={t}>
         <table style={{ borderCollapse: "collapse", fontSize: 14 }}>
           <tbody>
             {(result.pairs as [string, unknown][]).map(([k, v], i) => (
@@ -69,7 +75,7 @@ export function RichResult({
 
   if (result.kind === "series" && result.series && (result.series as unknown[]).length > 0) {
     return (
-      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} t={t}>
+      <EvidenceCard result={result} tool={tool} args={args} conditions={conditions} definition={definition} onChip={onChip} agencyId={agencyId} t={t}>
         <DailyChart days={result.series as TrendDay[]} granularity={seriesGranularity(args)} height={200} brushable={false} routeName={formatRoute} />
       </EvidenceCard>
     );
@@ -194,6 +200,7 @@ function EvidenceCard({
   conditions,
   definition,
   onChip,
+  agencyId,
   t,
   children,
 }: {
@@ -203,6 +210,7 @@ function EvidenceCard({
   conditions?: Conditions;
   definition?: DefinitionMeta | null;
   onChip?: (action: NextStepAction) => void;
+  agencyId: number | null;
   t: TFunction;
   children: ReactNode;
 }) {
@@ -211,6 +219,7 @@ function EvidenceCard({
   const window_ = formatWindow(args ?? null, t);
   const count = resultRowCount(result);
   const chips = buildNextStepChips({ tool, args: args ?? null, conditions: conditions ?? null, resultKind: result.kind, t });
+  const home = agencyId != null ? cardHome(agencyId, tool, args, conditions) : null;
   const cardRef = useRef<HTMLDivElement | null>(null);
 
   function handleChip(action: NextStepAction) {
@@ -282,6 +291,12 @@ function EvidenceCard({
             </button>
           ))}
         </div>
+      )}
+
+      {home && (
+        <Link className="ask-evidence-home" to={home.href} style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "var(--accent-strong)" }}>
+          {home.screen === "time" ? t("ask.evidence.open_daily_trend") : t("ask.evidence.open_home", { screen: t(`nav.${home.screen}`) })}
+        </Link>
       )}
 
       <details className="ask-evidence-disclosure" style={{ marginTop: 10, fontSize: 12, color: "var(--text-tertiary)" }}>

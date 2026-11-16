@@ -609,8 +609,10 @@ async def compute_worst_5min(
     ch=None,
     limit: int = 100,
     late_tolerance_sec: int | None = None,
+    min_samples: int = 0,
 ) -> list[tuple]:
-    """Routes ranked by count of severely-late observations.
+    """Routes ranked by count of severely-late observations, among those
+    observed at least ``min_samples`` times (every route by default).
 
     Reads agg_route_daily_dist (``late5_count`` is exact, >300s baked in at
     analyze time — the five-minute cutoff, the default preset's late edge).
@@ -628,7 +630,7 @@ async def compute_worst_5min(
     if not tolerance_aggregates_serve(ctx, None, late_tolerance_sec):
         if ch is None:
             raise RuntimeError("compute_worst_5min's live fallback requires a ClickHouse client")
-        return await _worst_5min_live(agency_id, ctx, conn, ch, limit, late)
+        return await _worst_5min_live(agency_id, ctx, conn, ch, limit, late, min_samples)
 
     service = _service_label(ctx)
     if late_tolerance_sec is None:
@@ -636,7 +638,7 @@ async def compute_worst_5min(
         out: list[tuple] = []
         for r in rows:
             late5 = r["late5_count"]
-            if late5 <= 0:  # mirror live HAVING SUM(...) > 0
+            if late5 <= 0 or r["samples"] < min_samples:  # mirror live HAVING
                 continue
             out.append(
                 (
@@ -664,7 +666,7 @@ async def compute_worst_5min(
         # rationale as _avg_min/_round1 above, applied to this estimate's
         # nearest-integer count.
         late5 = int(Decimal(str(late5_est)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-        if late5 <= 0:
+        if late5 <= 0 or samples < min_samples:
             continue
         out.append(
             (
@@ -680,7 +682,9 @@ async def compute_worst_5min(
     return out[:limit]
 
 
-async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int, late_tolerance_sec: int) -> list[tuple]:
+async def _worst_5min_live(
+    agency_id: int, ctx: RangeCtx, conn, ch, limit: int, late_tolerance_sec: int, min_samples: int = 0
+) -> list[tuple]:
     """Live raw-scan worst-5min — fallback for time_band-filtered queries."""
     cte_sql, ch_params = _dedup_cte_ch(ctx, await ctx_filing(conn, ch, agency_id, ctx))
     result = await ch.query(
@@ -692,12 +696,14 @@ async def _worst_5min_live(agency_id: int, ctx: RangeCtx, conn, ch, limit: int, 
         "FROM deduped\n"
         "GROUP BY route_code\n"
         "HAVING sum(CASE WHEN dep_delay > {w5_threshold:Int32} THEN 1 ELSE 0 END) > 0\n"
+        "   AND count(*) >= {w5_min:UInt32}\n"
         "ORDER BY late5_count DESC, route_code\n"
         "LIMIT {w5_limit:UInt32}",
         parameters={
             "agency_id": agency_id,
             "w5_threshold": late_tolerance_sec,
             "w5_limit": limit,
+            "w5_min": min_samples,
             **ch_params,
         },
     )

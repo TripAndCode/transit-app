@@ -12,7 +12,25 @@ const message: ConvMessage = {
   rendered_summary: "Stored answer", created_at: "2026-09-01T00:00:00Z",
 };
 
+const recorded = {
+  dow: "weekday", time_band: "all", service: "all", from_date: "2026-08-01", to_date: "2026-08-30", routes: ["C10"],
+};
+const answered: ConvMessage = { ...message, conditions: recorded };
+
 describe("result snapshot", () => {
+  it("carries the filters a message recorded with its period, and says only that timestamps are not freshness", () => {
+    const snapshot = JSON.parse(resultSnapshot(9, { id: 1, question: "Which route?", messages: [answered] }, "2026-09-14T00:00:00Z"));
+    expect(snapshot.historical_filter_ctx).toEqual(recorded);
+    expect(snapshot.provenance_note).toBe("Message timestamps are not source-data freshness.");
+    expect(resultTableCsv(9, answered, null)).toContainEqual(["historical_filter_ctx", JSON.stringify(recorded)]);
+  });
+  it("leaves the filters of a message recorded without its period as not recorded", () => {
+    const legacy: ConvMessage = { ...message, conditions: { dow: "weekday", time_band: "all", service: "all" } };
+    const snapshot = JSON.parse(resultSnapshot(9, { id: 1, question: "Which route?", messages: [legacy] }, "2026-09-14T00:00:00Z"));
+    expect(snapshot.historical_filter_ctx).toBeNull();
+    expect(snapshot.provenance_note).toContain("Full historical filters were not recorded");
+    expect(resultTableCsv(9, legacy, null)).toContainEqual(["historical_filter_ctx", "not_recorded"]);
+  });
   it("preserves recorded results and arguments, not fabricated historical filters or freshness", () => {
     const json = resultSnapshot(9, { id: 1, question: "Which route?", messages: [message] }, "2026-09-14T00:00:00Z");
     const snapshot = JSON.parse(json);

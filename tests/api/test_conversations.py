@@ -253,11 +253,11 @@ async def test_append_message_tool_args_path(conv_app):
 
 @pytest.mark.asyncio
 async def test_append_message_persists_dispatch_conditions(conv_app):
-    """The assistant message records the dow/time_band/service the dispatch
-    actually ran under (from the conversation's filter_ctx at send time) --
-    the historical provenance record the Ask evidence card's disclosure
-    reads, distinct from `args` and from the conversation's current,
-    editable filter_ctx."""
+    """The assistant message records the scope the dispatch actually ran
+    under (the conversation's filter_ctx at send time, its period resolved
+    and its routes included) -- the historical record the Ask evidence card's
+    disclosure and its link read, distinct from `args` and from the
+    conversation's current, editable filter_ctx."""
     app, agency, uid, pool = conv_app
     async with pool.acquire() as conn:
         await conn.execute(
@@ -267,7 +267,17 @@ async def test_append_message_persists_dispatch_conditions(conv_app):
     async with _authed_client(app, uid) as c:
         cr = await c.post(
             f"/api/{agency}/conversations",
-            json={"title": "T", "filter_ctx": {"dow": "weekend", "time_band": "morning", "service": "all"}},
+            json={
+                "title": "T",
+                "filter_ctx": {
+                    "dow": "weekend",
+                    "time_band": "morning",
+                    "service": "all",
+                    "from_date": "2026-06-01",
+                    "to_date": "2026-06-07",
+                    "routes": ["R1"],
+                },
+            },
             headers=_CSRF,
         )
         conv_id = cr.json()["conversation_id"]
@@ -279,7 +289,14 @@ async def test_append_message_persists_dispatch_conditions(conv_app):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["user"]["conditions"] is None
-        assert body["assistant"]["conditions"] == {"dow": "weekend", "time_band": "morning", "service": "all"}
+        assert body["assistant"]["conditions"] == {
+            "dow": "weekend",
+            "time_band": "morning",
+            "service": "all",
+            "from_date": "2026-06-01",
+            "to_date": "2026-06-07",
+            "routes": ["R1"],
+        }
 
 
 @pytest.mark.asyncio

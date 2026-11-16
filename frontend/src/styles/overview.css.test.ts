@@ -39,21 +39,6 @@ describe("overview.css hover affordances change colour or opacity only", () => {
 });
 
 describe("overview.css living hero", () => {
-  it("the check bar slides by transform on --dur-3 and the value uses the numeric scale", () => {
-    const fill = ruleBody(css, ".ov-check-fill {");
-    expect(decl(fill, "transform")).toBe("translateX(calc((var(--bar-share, 0) - 1) * 100%))");
-    expect(decl(ruleBody(css, ".ov-check-track {"), "overflow")).toBe("hidden");
-    expect(decl(fill, "transition")).toBe("transform var(--dur-3) var(--ease-out), background-color var(--dur-3) var(--ease-out)");
-    expect(decl(fill, "width")).toBe("100%");
-    // A span: without a block box neither the width nor the transform applies.
-    expect(decl(fill, "display")).toBe("block");
-    expect(decl(ruleBody(css, ".ov-check-value {"), "font-size")).toBe("var(--text-sm)");
-    expect(decl(ruleBody(css, ".ov-check-value {"), "font-family")).toBeNull();
-  });
-  it("a re-ranked row and a band header travel by transform on --dur-3", () => {
-    expect(decl(ruleBody(css, ".ov-check-row {"), "transition")).toBe("transform var(--dur-3) var(--ease-out), background var(--transition)");
-    expect(decl(ruleBody(css, ".ov-check-band-hd {"), "transition")).toBe("transform var(--dur-3) var(--ease-out)");
-  });
   it("the breath loop lives inside the motion block, on --ease-in-out at 3 × --dur-4", () => {
     const motion = ruleBody(css, "@media (prefers-reduced-motion: no-preference)");
     expect(motion).toMatch(/\.ov-fresh-dot--live\s*\{[^}]*animation:\s*ov-breath calc\(var\(--dur-4\) \* 3\) var\(--ease-in-out\) infinite/);
@@ -131,34 +116,20 @@ describe("overview.css hero facts", () => {
   });
 });
 
-describe("overview.css peak label", () => {
-  it("a tick is placed from its top, one line tall, so it hangs below the axis", () => {
-    const tick = ruleBody(css, ".ov-peak-label--tick {");
-    expect(decl(tick, "bottom")).toBeNull();
-    expect(decl(tick, "line-height")).toBe("1");
-  });
-  it("a flipped peak label moves left and stays centred on its callout, like an unflipped one", () => {
-    expect(decl(ruleBody(css, ".ov-peak-label--flip {"), "transform")).toBe("translate(-100%, -50%)");
-  });
-});
-
 describe("overview.css route lists line their names up on one column", () => {
   const phone = ruleBody(css.slice(css.indexOf("/* ---------- Mobile ---------- */")), "@media (max-width: 640px) {");
 
-  it.each([
-    [".ov-pareto-list {", ".ov-pareto-row {", ".ov-pareto-label {"],
-    [".ov-check-list {", ".ov-check-row {", ".ov-check-name {"],
-  ])("%s gives the plate a track as wide as its widest plate, passed down to each label", (list, row, cell) => {
-    const listBody = ruleBody(css, list);
+  it("gives the plate a track as wide as its widest plate, passed down to each label", () => {
+    const listBody = ruleBody(css, ".ov-pareto-list {");
     expect(decl(listBody, "display")).toBe("grid");
     expect(decl(listBody, "grid-template-columns")).toMatch(/^\[plate\] auto \[name\] minmax\(/);
     // The plate's own margin spaces it, so a list without plates starts its
     // names flush rather than after an empty gap.
     expect(decl(listBody, "column-gap")).toBe("0");
-    const rowBody = ruleBody(css, row);
+    const rowBody = ruleBody(css, ".ov-pareto-row {");
     expect(decl(rowBody, "grid-column")).toBe("1 / -1");
     expect(decl(rowBody, "grid-template-columns")).toBe("subgrid");
-    const cellBody = ruleBody(css, cell);
+    const cellBody = ruleBody(css, ".ov-pareto-label {");
     expect(decl(cellBody, "grid-column")).toBe("plate / bar");
     expect(decl(cellBody, "grid-template-columns")).toBe("subgrid");
   });
@@ -176,10 +147,6 @@ describe("overview.css route lists line their names up on one column", () => {
 describe("overview.css phone layout (BP.sm)", () => {
   const heroPhone = ruleBody(
     css.slice(css.indexOf("Kept after the hero's base rules")),
-    "@media (max-width: 640px) {",
-  );
-  const checkPhone = ruleBody(
-    css.slice(css.indexOf("/* ---------- Mobile ---------- */")),
     "@media (max-width: 640px) {",
   );
 
@@ -208,38 +175,6 @@ describe("overview.css phone layout (BP.sm)", () => {
     expect(decl(go, "grid-row")).toBe("1 / span 2");
     expect(decl(go, "align-self")).toBe("center");
   });
-
-  it("rearranges a check row into a card at the phone breakpoint, the ends and the change on lines of their own", () => {
-    // On the list, not the row, so the rows stay its subgrids and the names
-    // still line up from card to card.
-    expect(decl(ruleBody(checkPhone, ".ov-check-list {"), "grid-template-columns")).toBe(
-      "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
-    );
-    expect(decl(ruleBody(checkPhone, ".ov-check-row {"), "grid-template-columns")).toBeNull();
-    const track = ruleBody(checkPhone, ".ov-check-row .ov-check-track {");
-    expect(decl(track, "grid-column")).toBe("plate / arrow");
-    // The desktop rule's inline-start margin would indent the bar off the badge's edge.
-    expect(decl(track, "margin-inline-start")).toBe("0");
-    const arrow = ruleBody(checkPhone, ".ov-check-row .ov-check-arrow {");
-    expect(decl(arrow, "grid-row")).toBe("1");
-    // The value is right-aligned in its box, so without this the figure touches the chevron.
-    expect(decl(arrow, "margin-inline-start")).toBe("8px");
-    expect(decl(ruleBody(checkPhone, ".ov-check-row .ov-check-value {"), "grid-column")).toBe("value");
-    const change = ruleBody(checkPhone, ".ov-check-row .ov-check-change {");
-    expect(decl(change, "grid-column")).toBe("name / arrow");
-    expect(decl(change, "grid-row")).toBe("4");
-    const ends = ruleBody(
-      checkPhone,
-      ".ov-check-row .route-label.route-label--plate-column > .route-label__ends {",
-    );
-    expect(decl(ends, "grid-row")).toBe("3");
-  });
-
-  it("puts a service-day label on its own line on a phone, so the bars get the width their scale needs", () => {
-    expect(decl(ruleBody(checkPhone, ".ov-svc-list {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto");
-    expect(decl(ruleBody(checkPhone, ".ov-svc-label,\n  .ov-svc-meta {"), "grid-column")).toBe("1 / -1");
-    expect(decl(ruleBody(checkPhone, ".ov-svc-scale {"), "grid-column")).toBe("1");
-  });
 });
 
 describe("overview.css route lists without subgrid", () => {
@@ -249,12 +184,9 @@ describe("overview.css route lists without subgrid", () => {
 
   it("gives each row back its own columns, reading across as before", () => {
     expect(decl(ruleBody(fallback, ".ov-pareto-row {"), "grid-template-columns")).toBe("minmax(160px, 1.2fr) 2.5fr 56px");
-    expect(decl(ruleBody(fallback, ".ov-check-row {"), "grid-template-columns")).toBe("minmax(0, 1fr) auto auto auto");
     // The list's named lines do not reach a row that is not a subgrid.
-    for (const cell of [".ov-pareto-label {", ".ov-check-name {"]) {
-      expect(decl(ruleBody(fallback, cell), "grid-column")).toBe("auto");
-      expect(decl(ruleBody(fallback, cell), "display")).toBe("block");
-    }
+    expect(decl(ruleBody(fallback, ".ov-pareto-label {"), "grid-column")).toBe("auto");
+    expect(decl(ruleBody(fallback, ".ov-pareto-label {"), "display")).toBe("block");
   });
 
   it("keeps a phone's name on its own line, the bar and share beneath it", () => {
@@ -263,13 +195,6 @@ describe("overview.css route lists without subgrid", () => {
     expect(decl(ruleBody(phone, ".ov-pareto-label {"), "grid-column")).toBe("1 / -1");
     expect(decl(ruleBody(phone, ".ov-pareto-track {"), "grid-column")).toBe("1");
     expect(decl(ruleBody(phone, ".ov-pareto-pct {"), "grid-column")).toBe("2");
-  });
-
-  it("names a phone check card's columns on the row itself, where the list's do not reach", () => {
-    const phone = ruleBody(fallback, "@media (max-width: 640px) {");
-    expect(decl(ruleBody(phone, ".ov-check-row {"), "grid-template-columns")).toBe(
-      "[plate] auto [name] minmax(0, 1fr) [value] auto [arrow] auto",
-    );
   });
 
   it("comes after the phone rules it overrides", () => {
