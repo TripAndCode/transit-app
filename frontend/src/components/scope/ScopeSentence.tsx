@@ -5,6 +5,7 @@ import { useAgencies, useScopeSummary } from "../../api/hooks";
 import {
   DataEndContext,
   SCOPE_EXTRAS_NONE,
+  ScopeRouteContext,
   defaultPeriod,
   presetScopePatch,
   useScope,
@@ -75,6 +76,7 @@ function Token({
   open,
   onToggle,
   onClose,
+  disabled,
   scope,
   update,
   summary,
@@ -90,6 +92,7 @@ function Token({
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
+  disabled: boolean;
   scope: Scope;
   update: (patch: ScopePatch) => void;
   summary: ScopeSummary | undefined;
@@ -124,6 +127,7 @@ function Token({
         aria-haspopup="dialog"
         title={off ? t("scope.unapplied") : undefined}
         aria-describedby={off ? describedBy : undefined}
+        disabled={disabled}
         onClick={onToggle}
       >
         {badge}
@@ -145,6 +149,13 @@ function Token({
   );
 }
 
+/** A sentence whose words differ from the default one's, for a screen the
+ *  default would misdescribe: Live counts the trips running now, over no
+ *  period, and the agencies board compares every agency, not one agency's
+ *  routes. A condition such a sentence leaves out still shows in the
+ *  not-used note whenever it is set and `applied` says it went unused. */
+export type SentenceTemplate = "live" | "board";
+
 /** The scope as one sentence. Each condition is a chip that opens its own
  *  control. A single-choice control applies each change at once; the routes
  *  control stages its picks and commits them only on Apply. A chip changed
@@ -152,18 +163,38 @@ function Token({
  *  (`applied[field] === false`) renders struck through instead; an absent
  *  `applied` means every condition was used. The saved views and the pin go
  *  on the page heading's row when the page has a ScopePageHeader, and beside
- *  the sentence otherwise. */
-export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
+ *  the sentence otherwise.
+ *
+ *  The scope is the URL's unless `source` supplies another, as a notebook
+ *  thread does with the conditions it keeps for itself. `actions={false}`
+ *  leaves out the saved views and the pin, which hold and lay out the URL's
+ *  scope. */
+export function ScopeSentence({
+  applied,
+  source,
+  template,
+  actions: showActions = true,
+  disabled = false,
+}: {
+  applied?: ScopeApplied;
+  source?: { scope: Scope; update: (patch: ScopePatch) => void };
+  template?: SentenceTemplate;
+  actions?: boolean;
+  disabled?: boolean;
+}) {
   const { t } = useTranslation();
   const id = useAgencyId();
-  const [scope, update] = useScope();
+  const urlScope = useScope();
+  const [scope, update] = source ? [source.scope, source.update] : urlScope;
+  const pageRoute = use(ScopeRouteContext);
   const { data: agencies } = useAgencies();
   const dataEnd = use(DataEndContext);
   const slot = useScopeActionsSlot();
   const names = useRouteNames(id);
   const place = usePlaceLabels(id, scope.stop != null);
   const [openKey, setOpenKey] = useState<ConditionKey | null>(null);
-  const [pinned, setPinned] = useState(readScopePinned);
+  const [pinnedPref, setPinned] = useState(readScopePinned);
+  const pinned = showActions && pinnedPref;
   const sectionRef = useRef<HTMLElement>(null);
   const unappliedId = useId();
   const agencyName = agencies?.find((a) => a.agency_id === id)?.agency_name ?? "";
@@ -179,7 +210,11 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
   // The data's last day, which ends the default period, arrives with the
   // agencies; until then the period is not judged against a guess.
   const resetPeriod = agencies ? defaultPeriod(dataEnd) : null;
-  const changed = tokens.some((tok) => tokenChanged(tok.key, scope, resetPeriod));
+  // A route's own page is about its route: that route is where the page
+  // starts, not a filter set on it.
+  const onPageRoute = pageRoute != null && scope.routes.length === 1 && scope.routes[0] === pageRoute;
+  const isChanged = (key: TokenKey) => (key === "routes" && onPageRoute ? false : tokenChanged(key, scope, resetPeriod));
+  const changed = tokens.some((tok) => isChanged(tok.key));
   const byKey = new Map(tokens.map((tok) => [tok.key, tok]));
   // A condition that was cleared from elsewhere has no popover to show.
   const open = openKey != null && byKey.has(openKey) ? openKey : null;
@@ -235,12 +270,13 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
           token={token}
           badge={badge}
           hint={key === "period" ? t("scope.period_days", { count: periodDays(scope) }) : null}
-          on={tokenChanged(key, scope, resetPeriod)}
+          on={isChanged(key)}
           off={isOff(token)}
           describedBy={unappliedId}
           open={open === key}
           onToggle={() => setOpenKey(open === key ? null : key)}
           onClose={() => setOpenKey(null)}
+          disabled={disabled}
           scope={scope}
           update={apply}
           summary={summary}
@@ -257,7 +293,8 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
   // A screen that never applies the on-time tolerance gets no clause for it
   // unless the scope sets one, which then shows greyed like any unused one.
   const omitTolerance = applied?.late === false && scope.late == null;
-  for (const part of sentenceParts(t(omitTolerance ? "scope.sentence_no_tolerance" : "scope.sentence"))) {
+  const templateKey = template ? `scope.sentence_${template}` : omitTolerance ? "scope.sentence_no_tolerance" : "scope.sentence";
+  for (const part of sentenceParts(t(templateKey))) {
     if ("text" in part) runs.push({ text: part.text });
     else if (part.slot === "extras") {
       for (const tok of tokens) if (!PLACED_KEYS.has(tok.key)) runs.push({ text: separator }, { token: tok });
@@ -280,14 +317,14 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
   }
   if (changed) {
     nodes.push(
-      <button key="reset" type="button" className="scope-reset" aria-label={t("scope.reset")} onClick={reset}>
+      <button key="reset" type="button" className="scope-reset" aria-label={t("scope.reset")} disabled={disabled} onClick={reset}>
         {t("scope.reset_short")}
       </button>,
     );
   }
 
   function togglePinned() {
-    const next = !pinned;
+    const next = !pinnedPref;
     setPinned(next);
     writeScopePinned(next);
   }
@@ -324,7 +361,7 @@ export function ScopeSentence({ applied }: { applied?: ScopeApplied }) {
         <span id={unappliedId} className="scope-sr-only">
           {t("scope.unapplied")}
         </span>
-        {slot ? createPortal(actions, slot) : <div className="scope-actions">{actions}</div>}
+        {showActions && (slot ? createPortal(actions, slot) : <div className="scope-actions">{actions}</div>)}
       </div>
       {/* The struck-through tokens' reason, in words: a title tooltip alone
           never reaches touch screens. */}

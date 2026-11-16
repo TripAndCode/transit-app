@@ -360,8 +360,6 @@
   "network": {
     "title": "事業者比較",
     "eyebrow": "全事業者 · {{range}}",
-    "from": "開始",
-    "to": "終了",
     "col_avg_delay": "平均遅延（分）",
     "col_on_time": "定時率",
     "col_delivered": "運行率",
@@ -2519,7 +2517,9 @@
     "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
     "stop_unnamed": "選択した停留所",
     "dir_unnamed": "方面{{letter}}",
-    "id_tag": "（{{id}}）"
+    "id_tag": "（{{id}}）",
+    "sentence_live": "[agency]の[routes]を、リアルタイム[extras]で、定時は[tolerance]として見る",
+    "sentence_board": "全事業者を[period]で比較する"
   },
   "print": {
     "generated_at": "作成日時 {{time}}",

@@ -360,8 +360,6 @@
   "network": {
     "title": "Compare agencies",
     "eyebrow": "Across all agencies · {{range}}",
-    "from": "From",
-    "to": "To",
     "col_avg_delay": "Avg delay (min)",
     "col_on_time": "On-time %",
     "col_delivered": "Service delivered %",
@@ -2519,7 +2517,9 @@
     "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]",
     "stop_unnamed": "selected stop",
     "dir_unnamed": "Direction {{letter}}",
-    "id_tag": "({{id}})"
+    "id_tag": "({{id}})",
+    "sentence_live": "Viewing [routes] of [agency] live[extras], counting on-time as [tolerance]",
+    "sentence_board": "Comparing every agency over [period]"
   },
   "print": {
     "generated_at": "Generated {{time}}",

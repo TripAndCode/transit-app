@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { NetworkTab } from "./NetworkTab";
 import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
@@ -821,15 +821,60 @@ describe("NetworkTab", () => {
     expect(screen.getAllByTestId("network-row").map((r) => r.dataset.flipKey)).toEqual(["7", "9"]);
   });
 
-  it("sets both range date inputs' lang attribute to the active UI language", () => {
-    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
-      data: { from: "2026-04-01", to: "2026-04-07", agencies: [], definition, comparability },
-      isPending: false, error: null, refetch: vi.fn(),
-    } as never);
-    renderTab();
-    const inputs = document.querySelectorAll("input[type='date']");
-    expect(inputs.length).toBe(2);
-    inputs.forEach((el) => expect(el.getAttribute("lang")).toBe("en"));
+  describe("scope sentence", () => {
+    const BOARD_APPLIED = {
+      from: true, to: true, dow: false, time_band: false, hour: false, service: false,
+      routes: false, stop: false, dir: false, late: false, early: false,
+    };
+
+    function Probe() {
+      const [params] = useSearchParams();
+      return <div data-testid="params">{params.toString()}</div>;
+    }
+
+    function renderBoard(search: string, applied: Record<string, boolean> = BOARD_APPLIED) {
+      vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+        data: {
+          from: "2026-04-01", to: "2026-04-07", definition, comparability, scope_applied: applied,
+          agencies: [row({ agency_id: 8, agency_name: "Aomori" })],
+        },
+        isPending: false, error: null, refetch: vi.fn(),
+      } as never);
+      renderWithProviders(
+        <MemoryRouter initialEntries={[`/agencies/7/network${search}`]}>
+          <Routes>
+            <Route path="/agencies/:agencyId/network" element={<><NetworkTab /><Probe /></>} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    }
+
+    const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+    it("states the board's scope in its own words, with the period as its one condition", () => {
+      renderBoard("?from=2026-04-01&to=2026-04-07");
+      expect(region()).toHaveTextContent("Comparing every agency over 4/1 – 4/7 7 days");
+      expect(screen.getByRole("button", { name: "4/1 – 4/7 7 days" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "all routes" })).toBeNull();
+      expect(document.querySelectorAll("input[type='date']")).toHaveLength(0);
+      expect(screen.queryByText(/Not used on this screen/)).toBeNull();
+    });
+
+    it("names every condition set elsewhere that the board does not apply", () => {
+      renderBoard("?from=2026-04-01&to=2026-04-07&dow=weekday&time_band=morning&routes=50&stop=S1&late=60");
+      expect(region()).toHaveTextContent(
+        "Not used on this screen: Routes, Days and timetable, Time of day, Stop, On-time tolerance",
+      );
+    });
+
+    it("writes the period it is given as the canonical from and to", () => {
+      renderBoard("?from=2026-04-01&to=2026-04-07");
+      fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));
+      fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-03-25" } });
+      const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
+      expect(params.get("from")).toBe("2026-03-25");
+      expect(params.get("to")).toBe("2026-04-07");
+    });
   });
 
   it("keeps a raised agency cap across a refetch of the same range and re-caps when the range changes", async () => {
@@ -861,7 +906,8 @@ describe("NetworkTab", () => {
     rerender(ui());
     expect(screen.getAllByTestId("network-row")).toHaveLength(250);
 
-    fireEvent.change(document.querySelector("input[type='date']")!, { target: { value: "2026-03-25" } });
+    fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-03-25" } });
     expect(screen.getAllByTestId("network-row")).toHaveLength(200);
     // The cap is 200 rows, so proving it renders a few hundred rows several
     // times; on a loaded machine that alone outlasts the default timeout.

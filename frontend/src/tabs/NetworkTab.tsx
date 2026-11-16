@@ -8,6 +8,7 @@ import { StillWorking } from "../components/StillWorking";
 import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { Section } from "../components/ui/Section";
 import { delayRampVar } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
@@ -283,7 +284,7 @@ function AgencyRow({
 }
 
 export function NetworkTab() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { agencyId } = useParams();
   const currentAgencyId = agencyId ? Number(agencyId) : null;
   const [ctx, update] = useScope();
@@ -360,16 +361,13 @@ export function NetworkTab() {
         </ul>
       </details>
 
-      <div className="network-controls">
-        <label>
-          {t("network.from")}{" "}
-          <input type="date" lang={i18n.language} value={ctx.from} max={ctx.to} onChange={(e) => update({ from: e.target.value })} />
-        </label>
-        <label>
-          {t("network.to")}{" "}
-          <input type="date" lang={i18n.language} value={ctx.to} min={ctx.from} onChange={(e) => update({ to: e.target.value })} />
-        </label>
-        {ridershipWeightingAvailable && (
+      {/* Its own words, since the board ranks every agency rather than one
+          agency's routes; a condition set on another screen that the board
+          does not apply is named in the sentence's not-used note. */}
+      <ScopeSentence applied={data?.scope_applied} template="board" actions={false} />
+
+      {ridershipWeightingAvailable && (
+        <div className="network-controls">
           <label>
             <input
               type="checkbox"
@@ -379,8 +377,8 @@ export function NetworkTab() {
             />
             {t("network.ridership_weighted_toggle")}
           </label>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* DefinitionMetaBlock is its own disclosure: the aggregation rules are
           what you check once a comparison has raised a question, not what you
