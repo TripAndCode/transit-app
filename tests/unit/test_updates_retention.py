@@ -435,8 +435,6 @@ def test_a_run_that_drops_nothing_does_not_wait(stores, monkeypatch):
 def test_the_live_read_budget_is_the_api_clients(monkeypatch):
     import asyncio
 
-    import clickhouse_connect
-
     from api import clickhouse as api_clickhouse
 
     seen = {}
@@ -444,7 +442,7 @@ def test_the_live_read_budget_is_the_api_clients(monkeypatch):
     async def fake_client(**kwargs):
         seen.update(kwargs)
 
-    monkeypatch.setattr(clickhouse_connect, "get_async_client", fake_client)
+    monkeypatch.setattr(api_clickhouse.clickhouse_connect, "get_async_client", fake_client)
     asyncio.run(api_clickhouse.get_ch_client())
     assert seen["settings"]["max_execution_time"] == retention.LIVE_READ_MAX_EXECUTION_SECONDS
 
