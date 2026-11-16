@@ -20,7 +20,7 @@ import {
   useMigrateAnon,
   useIsAuthenticated,
   useIsLlmApproved,
-  useUpdateConversation,
+  useThreadFilter,
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
@@ -31,13 +31,20 @@ import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
-import { FilterContextBar } from "../components/FilterContextBar";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
 import { PageHeader } from "../components/ui/PageHeader";
-import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
+import {
+  notebookScope,
+  patchThreadFilter,
+  rangeCtxToFilterCtx,
+  resolvedFilterCtx,
+  splitNotebookPatch,
+  THREAD_SCOPE_APPLIED,
+} from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
@@ -62,7 +69,7 @@ export function AskTab() {
   const { t } = useTranslation();
   const id = useAgencyId();
   const navigate = useNavigate();
-  const [rangeCtx] = useScope();
+  const [rangeCtx, updateUrlScope] = useScope();
   const routeNames = useRouteNames(id);
 
   // ── Thread state ──────────────────────────────────────────────────────────
@@ -113,7 +120,6 @@ export function AskTab() {
   const convQuery = useConversation(id ?? 0, activeId);
   const createConv = useCreateConversation(id ?? 0);
   const appendMsg = useAppendMessage(id ?? 0);
-  const updateConv = useUpdateConversation(id ?? 0);
   const followup = useFollowup(id ?? 0);
   const followupFlag = useFollowupEnabled(id);
   const llmEnabled = useFeatureOn("llm_enabled");
@@ -123,53 +129,28 @@ export function AskTab() {
   const followupEnabled = followupFlag.data?.enabled === true && llmEnabled && llmApproved;
 
   // ── Filter context (derived, no sync effects) ─────────────────────────────
-  // Single source of truth, in priority order:
-  //   1. an unsaved user edit for the *current* thread (keyed by activeId so a
-  //      thread switch never carries another thread's edit across),
-  //   2. the active conversation's stored filter_ctx,
-  //   3. the URL range context (no active thread / conversation still loading).
-  const [filterEdit, setFilterEdit] = useState<{ key: string | null; fc: FilterCtx } | null>(null);
+  // An open thread's filter is its stored one: each edit is saved as it is
+  // made and shown at once through the conversation's cached copy
+  // (`useThreadFilter`), so what the sentence shows is what the thread's saves
+  // leave it with. With no thread open, an edit stays on this screen and
+  // seeds the next new thread; before any edit, that is the URL's scope.
+  const threadFilter = useThreadFilter(id ?? 0);
+  const [newThreadFilter, setNewThreadFilter] = useState<FilterCtx | null>(null);
   const storedFc = convQuery.data?.conversation?.filter_ctx;
   const dataEnd = use(DataEndContext);
-  const filterCtx: FilterCtx =
-    filterEdit && filterEdit.key === activeId
-      ? filterEdit.fc
-      : activeId && storedFc
-        ? resolvedFilterCtx(storedFc, dataEnd)
-        : rangeCtxToFilterCtx(rangeCtx);
-
-  // User-initiated filter edit. When an active thread exists, persist the new
-  // filter to the conversation so subsequent 実行 calls dispatch with the
-  // visible filter. The save promise is tracked so handleCardSubmit can await
-  // it — without that, an edit followed by an immediate 実行 would race the
-  // PATCH and the backend would answer with the previous (stale) filter scope.
-  // Resolves to whether the save landed; it never rejects, so a failed save
-  // is reported once (as a failure banner) rather than as an unhandled
-  // rejection.
-  const pendingFilterSave = useRef<Promise<boolean> | null>(null);
-  // The filter the user applied that never reached the thread. The screen
-  // shows it, but the backend reads the persisted one, so a dispatch must save
-  // it first or it would answer under a scope the user is not looking at.
-  const unsavedFilter = useRef<{ id: string; fc: FilterCtx } | null>(null);
+  const filterCtx: FilterCtx = activeId
+    ? storedFc
+      ? resolvedFilterCtx(storedFc, dataEnd)
+      : rangeCtxToFilterCtx(rangeCtx)
+    : (newThreadFilter ?? rangeCtxToFilterCtx(rangeCtx));
   function handleFilterChange(next: FilterCtx) {
-    setFilterEdit({ key: activeId, fc: next });
-    if (activeId) {
-      const id = activeId;
-      pendingFilterSave.current = updateConv.mutateAsync({ id, patch: { filter_ctx: next } }).then(
-        () => {
-          pendingFilterSave.current = null;
-          unsavedFilter.current = null;
-          return true;
-        },
-        (error: unknown) => {
-          pendingFilterSave.current = null;
-          unsavedFilter.current = { id, fc: next };
-          setDispatchFailure({ error, retry: null });
-          return false;
-        },
-      );
-    }
+    if (activeId) threadFilter.save(activeId, next);
+    else setNewThreadFilter(next);
   }
+  // Waiting for a thread's saves before a dispatch counts as busy, so a
+  // second press cannot send the question twice.
+  const [flushing, setFlushing] = useState(false);
+  const dispatching = useRef(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -181,8 +162,7 @@ export function AskTab() {
   function handleSelectThread(threadId: string | null) {
     historyRef.current?.removeAttribute("open");
     setActiveId(threadId);
-    setFilterEdit(null);
-    unsavedFilter.current = null;
+    setNewThreadFilter(null);
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -197,8 +177,7 @@ export function AskTab() {
   function handleNewThread() {
     historyRef.current?.removeAttribute("open");
     setActiveId(null);
-    setFilterEdit(null);
-    unsavedFilter.current = null;
+    setNewThreadFilter(null);
     setFollowupDraft("");
     followup.reset();
     setDispatchFailure(null);
@@ -210,6 +189,15 @@ export function AskTab() {
   // adding the question to it failed: the retry must append to that thread,
   // not create a second one.
   async function handleCardSubmit(submission: Submission, createdConvId: string | null = null) {
+    if (id == null || dispatching.current) return;
+    dispatching.current = true;
+    // dispatchCard reports its own failures through `settle` and never throws.
+    await dispatchCard(submission, createdConvId);
+    dispatching.current = false;
+    setFlushing(false);
+  }
+
+  async function dispatchCard(submission: Submission, createdConvId: string | null) {
     if (id == null) return;
     const { tool, user_summary } = submission;
     let { args } = submission;
@@ -223,20 +211,16 @@ export function AskTab() {
     }
 
     await settle(async () => {
-      // An in-flight filter save must land before dispatch — the authed path's
-      // backend reads the *persisted* conversation.filter_ctx. A failed save
-      // has already been reported, and dispatching would answer under the
-      // previous filter scope.
-      if (pendingFilterSave.current && !(await pendingFilterSave.current)) return;
-      // A save that failed earlier is retried now; if it fails again the
-      // error surfaces with a retry that repeats this whole submission.
-      const unsaved = unsavedFilter.current;
-      if (unsaved && unsaved.id === activeId) {
-        await updateConv.mutateAsync({ id: unsaved.id, patch: { filter_ctx: unsaved.fc } });
-        unsavedFilter.current = null;
+      let convId = createdConvId ?? activeId;
+      // The authed path's backend reads the *persisted* filter_ctx, so the
+      // thread's saves land before the dispatch. If the last one failed, the
+      // error surfaces with a retry that repeats this whole submission, and
+      // nothing is asked under the old filter.
+      if (convId !== null) {
+        setFlushing(true);
+        await threadFilter.flush(convId);
       }
 
-      let convId = createdConvId ?? activeId;
       if (convId === null) {
         const created = await createConv.mutateAsync({
           title: user_summary.slice(0, 60),
@@ -244,9 +228,9 @@ export function AskTab() {
         });
         convId = created.conversation_id;
         setActiveId(convId);
-        // The new conversation was created with the visible filter; drop any
+        // The new conversation was created with the visible filter; drop the
         // no-thread edit so the derived ctx now reads from the conversation.
-        setFilterEdit(null);
+        setNewThreadFilter(null);
       }
 
       appendMsg.mutate(
@@ -256,7 +240,7 @@ export function AskTab() {
     }, failWith(createdConvId));
   }
 
-  const busy = appendMsg.isPending || createConv.isPending;
+  const busy = appendMsg.isPending || createConv.isPending || flushing;
 
   function handleChipTap(tpl: CardTemplate) {
     if (busy) return;
@@ -381,10 +365,20 @@ export function AskTab() {
       >
         {/* Filter bar */}
         <div style={{ padding: "8px 16px 0", flexShrink: 0 }}>
-          <FilterContextBar
-            value={filterCtx}
-            onChange={handleFilterChange}
-            pending={appendMsg.isPending || createConv.isPending}
+          {/* The thread's own conditions, not the URL's: a new thread starts
+              from the screen's scope, and each change saves to the thread. */}
+          <ScopeSentence
+            source={{
+              scope: notebookScope(filterCtx, activeId ? null : rangeCtx, dataEnd),
+              update: (patch) => {
+                const { thread, url } = splitNotebookPatch(patch);
+                handleFilterChange(patchThreadFilter(filterCtx, thread, dataEnd));
+                if (!activeId && Object.keys(url).length > 0) updateUrlScope(url);
+              },
+            }}
+            applied={THREAD_SCOPE_APPLIED}
+            actions={false}
+            disabled={busy}
           />
         </div>
 

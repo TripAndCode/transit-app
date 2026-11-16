@@ -360,8 +360,6 @@
   "network": {
     "title": "事業者比較",
     "eyebrow": "全事業者 · {{range}}",
-    "from": "開始",
-    "to": "終了",
     "col_avg_delay": "平均遅延（分）",
     "col_on_time": "定時率",
     "col_delivered": "運行率",
@@ -687,7 +685,6 @@
     "report_time_jst": "{{time}} JST",
     "unit_min_signed": "{{sign}}{{value}}分",
     "unit_sec_signed": "{{sign}}{{value}}秒",
-    "range_separator": "〜",
     "list_separator": "・",
     "label_value": "{{label}}：{{value}}",
     "language_aria": "言語",
@@ -1218,15 +1215,6 @@
       "delete_confirm": "この調査を削除しますか？",
       "empty": "まだ調査がありません",
       "more_options_aria": "その他のオプション"
-    },
-    "filter_bar": {
-      "edit": "編集",
-      "apply": "適用",
-      "label_date_range": "期間",
-      "label_dow": "曜日",
-      "label_time_band": "時間帯",
-      "label_routes": "路線",
-      "no_routes_selected": "路線指定なし"
     },
     "card": {
       "stop_patterns": {
@@ -2518,7 +2506,9 @@
     "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
     "stop_unnamed": "選択した停留所",
     "dir_unnamed": "方面{{letter}}",
-    "id_tag": "（{{id}}）"
+    "id_tag": "（{{id}}）",
+    "sentence_live": "[agency]の[routes]を、リアルタイム[extras]で、定時は[tolerance]として見る",
+    "sentence_board": "全事業者を[period]で比較する"
   },
   "print": {
     "generated_at": "作成日時 {{time}}",

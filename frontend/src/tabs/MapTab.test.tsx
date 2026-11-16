@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useNavigate, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import * as client from "../api/client";
@@ -193,6 +193,66 @@ function onTimeTileValue(): string | null {
 function lateTileValue(label: RegExp): string | null {
   return screen.getByText(label).closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
 }
+
+describe("MapTab scope sentence", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function Probe() {
+    const [params] = useSearchParams();
+    return <div data-testid="params">{params.toString()}</div>;
+  }
+
+  function renderLive(search: string) {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0, data: liveTrips([]), error: null, isLoading: false, isFetching: false, refetch: vi.fn(),
+    } as never);
+    renderWithProviders(
+      <MemoryRouter initialEntries={[`/agencies/1/map${search}`]}>
+        <Routes>
+          <Route path="/agencies/:agencyId/map" element={<><MapTab /><Probe /></>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+  it("says what Live counts by in the scope sentence, and names a day condition set elsewhere as unused", () => {
+    renderLive("?routes=R1&from=2026-09-01&to=2026-09-30&dow=weekday&late=120");
+    expect(region()).toHaveTextContent("Viewing R1 of");
+    expect(region()).toHaveTextContent("live, counting on-time as within 2 min");
+    expect(region()).toHaveTextContent("Not used on this screen: Days and timetable");
+    expect(screen.queryByRole("button", { name: /9\/1/ })).toBeNull();
+    // The routes control stages a pick behind its own Apply, which stays
+    // disabled until the pick differs from what the screen shows.
+    fireEvent.click(screen.getByRole("button", { name: "R1" }));
+    const picker = screen.getByRole("dialog", { name: "Routes" });
+    expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
+  });
+
+  it("asks for a route's shape over Live's own scope, not a linked period or day", () => {
+    renderLive("?routes=R1&from=2020-01-01&to=2020-01-31&dow=weekday");
+    const scopes = vi.mocked(hooks.useRouteShape).mock.calls.map((call) => call[2]);
+    expect(scopes.length).toBeGreaterThan(0);
+    for (const scope of scopes) expect(scope).toMatchObject({ dow: "all", routes: ["R1"] });
+    expect(scopes.some((scope) => scope.from === "2020-01-01")).toBe(false);
+  });
+
+  it("offers no reset for a period it does not show", () => {
+    renderLive("?from=2026-09-01&to=2026-09-30");
+    expect(screen.queryByRole("button", { name: "Reset conditions" })).toBeNull();
+  });
+
+  it("drops the map's selection in the same write as a Reset that clears the routes", () => {
+    renderLive("?routes=R1&route_focus=R1&route_focus_agency=1&direction=0&trip=T1");
+    fireEvent.click(screen.getByRole("button", { name: "Reset conditions" }));
+    const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
+    for (const key of ["routes", "route_focus", "route_focus_agency", "direction", "trip"]) expect(params.has(key)).toBe(false);
+  });
+});
 
 describe("MapTab's on-time rate", () => {
   function mockLiveDelays(delays: number[]) {

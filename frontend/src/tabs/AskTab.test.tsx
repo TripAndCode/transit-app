@@ -344,73 +344,41 @@ describe("AskTab dispatch failures", () => {
   });
 });
 
-describe("AskTab unsaved filter edits", () => {
+describe("AskTab scope sentence", () => {
   beforeEach(() => {
     mockAllHooks();
     Element.prototype.scrollTo = vi.fn();
   });
 
-  function openThreadWithFailedFilterSave(secondSave: "ok" | "fails") {
-    const updateMutateAsync = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("save failed"))
-      .mockImplementation(() => (secondSave === "ok" ? Promise.resolve(undefined) : Promise.reject(new Error("again"))));
-    const appendMutate = vi.fn();
-    vi.spyOn(hooks, "useUpdateConversation").mockReturnValue(mutationStub({ mutateAsync: updateMutateAsync }));
-    vi.spyOn(hooks, "useAppendMessage").mockReturnValue(mutationStub({ mutate: appendMutate }));
+  const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+  it("seeds a new thread's conditions from the screen's scope", () => {
+    renderAskTab("/agencies/5/ask?from=2026-09-01&to=2026-09-07&dow=weekend&time_band=morning");
+    expect(screen.getByRole("button", { name: "weekends" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toBeInTheDocument();
+  });
+
+  it("names the screen's conditions a thread would not keep as unused while no thread is open", () => {
+    renderAskTab("/agencies/5/ask?from=2026-09-01&to=2026-09-07&stop=S1&late=120");
+    expect(region()).toHaveTextContent("Not used on this screen: Stop, On-time tolerance");
+  });
+
+  it("shows an open thread's own conditions, with no tolerance clause, saved views or pin", () => {
     vi.spyOn(hooks, "useConversation").mockReturnValue({
       data: {
         conversation: {
-          conversation_id: "t1",
-          user_id: null,
-          agency_id: 5,
-          title: "T",
-          filter_ctx: {},
-          pinned: false,
-          created_at: "",
-          updated_at: "",
+          conversation_id: "t1", user_id: null, agency_id: 5, title: "T",
+          filter_ctx: { from_date: "2026-08-01", to_date: "2026-08-14", dow: "weekday" },
+          pinned: false, created_at: "", updated_at: "",
         },
         messages: [],
       },
-      isPending: false,
-      isError: false,
-      refetch: vi.fn(),
+      isPending: false, isError: false, refetch: vi.fn(),
     } as never);
-    renderAskTab("/agencies/5/ask?conversation=t1");
-    return { updateMutateAsync, appendMutate };
-  }
-
-  async function editFilterThenFailToSave() {
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
-    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-  }
-
-  function firstInstantCard() {
-    const landing = screen.getByText("Pick a ready-made analysis").parentElement!.parentElement!;
-    return landing.querySelectorAll<HTMLButtonElement>("button:not([disabled])")[0];
-  }
-
-  it("saves the filter again before dispatching, so the answer is scoped to the filter on screen", async () => {
-    const { updateMutateAsync, appendMutate } = openThreadWithFailedFilterSave("ok");
-    await editFilterThenFailToSave();
-
-    await userEvent.click(firstInstantCard());
-
-    await waitFor(() => expect(appendMutate).toHaveBeenCalledTimes(1));
-    expect(updateMutateAsync).toHaveBeenCalledTimes(2);
-    expect(updateMutateAsync.mock.calls[1][0]).toMatchObject({ id: "t1", patch: { filter_ctx: { dow: "weekday" } } });
-  });
-
-  it("does not dispatch under the previous filter when the retried save also fails", async () => {
-    const { updateMutateAsync, appendMutate } = openThreadWithFailedFilterSave("fails");
-    await editFilterThenFailToSave();
-
-    await userEvent.click(firstInstantCard());
-
-    await waitFor(() => expect(updateMutateAsync).toHaveBeenCalledTimes(2));
-    expect(appendMutate).not.toHaveBeenCalled();
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    renderAskTab("/agencies/5/ask?conversation=t1&dow=weekend");
+    expect(screen.getByRole("button", { name: "weekdays" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "weekends" })).toBeNull();
+    expect(region()).not.toHaveTextContent("counting on-time");
+    expect(screen.queryByRole("button", { name: "Show all filters" })).toBeNull();
   });
 });

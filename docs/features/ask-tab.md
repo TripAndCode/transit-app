@@ -115,8 +115,33 @@ What the user sees/does:
   path is entirely the parameterized card/chip templates
   (`frontend/src/components/askCardTemplates.ts`). Free text only appears
   in the follow-up box.
-- Filter bar: `frontend/src/components/FilterContextBar.tsx` scopes every
-  dispatch to the shared date/DOW/time-band/service/route context.
+- Conditions: the shared scope sentence (`ScopeSentence`; see
+  `analysis-tab.md` ▸ The scope sentence) shows and edits the open thread's
+  `filter_ctx`, its period, days, timetable, time band and routes, through
+  `threadScope`/`patchThreadFilter` in `frontend/src/tabs/ask/filterCtx.ts`,
+  which read a stored filter through the URL scope's own parser. With no
+  thread open it shows the screen's URL scope whole (`notebookScope`), which
+  seeds the next new thread (`rangeCtxToFilterCtx`); a stop, direction,
+  hour or tolerance in it, which a thread does not store, is named as
+  unused, and clearing one writes the URL (`splitNotebookPatch`); an edit
+  made with no thread open stays on the screen until it seeds one.
+  On an open thread each edit is saved as it is made (`useThreadFilter` in
+  `frontend/src/api/hooks.ts`) and shown at once through the conversation's
+  cached copy, which a refetch keeps while a save is pending. The saves go
+  through one coalescing saver per thread (`frontend/src/api/threadFilterSaver.ts`),
+  module state so it outlives a remount: with a save in flight, a newer edit
+  waits as the thread's single next save, replacing any earlier one, so a
+  burst of edits is at most two PATCHes, in order, ending with the latest. A
+  signed-out reader's edit is a localStorage write, made at once. A dispatch
+  awaits `flush`, which resolves once the thread's saves have landed; if the
+  last one failed it is sent again, and a second failure stops the dispatch
+  with a retry of the whole submission. While a dispatch waits, the dock and
+  the sentence count as busy, so a second press sends nothing. Deleting a
+  thread drops its queued save and ignores its running one, with no error.
+  A reload or a closed tab loses at most the save still in flight. A thread stores no on-time tolerance,
+  so its sentence has no tolerance clause, and it carries no saved views or
+  pin; its tokens, Reset and any open popover's controls are disabled while a
+  question is being sent or waits for its thread's saves.
 
 ## Request path
 
@@ -285,7 +310,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `frontend/src/components/paramPills/*.tsx` | Individual param controls (segmented/limit/route picker) |
 | `frontend/src/components/askCardTemplates.ts` | Declarative chip templates (tool + args + i18n keys) |
 | `frontend/src/components/ThreadSidebar.tsx` | Conversation list (anon localStorage ↔ server) |
-| `frontend/src/components/FilterContextBar.tsx` | Date/DOW/time-band/service/route filter strip |
+| `frontend/src/tabs/ask/filterCtx.ts` | A thread's `filter_ctx` as the scope the scope sentence reads and writes |
 | `frontend/src/api/hooks.ts` | TanStack Query hooks for all `/ask` + `/conversations` endpoints |
 | `frontend/src/api/conversationsAnon.ts` | localStorage-backed anon conversation store |
 
@@ -399,8 +424,8 @@ so it is a separate mechanism to build, not a knob to turn on.
   `ask.followup_*` (the follow-up box's placeholder and send label),
   `ask.evidence.*` (stop-evidence views and the follow-up box's
   selected-stop context), `ask.col.*` (table column headers),
-  `ask.build_labels.*` (a card's fallback user-bubble summary / builder-schema UI),
-  `ask.filter_bar.*` (the filter-context bar). New templates/params need
+  `ask.build_labels.*` (a card's fallback user-bubble summary / builder-schema UI).
+  New templates/params need
   matching keys in both locale files.
 - **Server-side**: `pipeline/query/tools.py`'s
   `_LOCALES: dict[tuple[str, str], str]` holds every user-facing string

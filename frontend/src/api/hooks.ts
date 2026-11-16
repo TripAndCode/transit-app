@@ -13,6 +13,7 @@ import { apiGet, apiPatch, apiDelete, apiPost } from "./client";
 import { requestLanguage } from "./requestLanguage";
 import { scopeToQueryString, type Scope, type TimeBand } from "./scope";
 import { conversationsAnon } from "./conversationsAnon";
+import { cancelThreadFilter, flushThreadFilter, pendingThreadFilter, saveThreadFilter, type FilterWrite } from "./threadFilterSaver";
 import { scopeSummaryQuery } from "./scopeSummaryQuery";
 import type { RouteTableSort } from "../routes/destinations";
 import type {
@@ -595,6 +596,37 @@ export function useConversations(agencyId: number): UseQueryResult<Conversation[
   });
 }
 
+/** A conversation as its filter saves will leave it: a refetch while one is
+ *  in flight or queued must not show the filter it is replacing. */
+function withPendingFilter(conversation: Conversation): Conversation {
+  const pending = pendingThreadFilter(conversation.conversation_id);
+  return pending ? { ...conversation, filter_ctx: pending } : conversation;
+}
+
+/** An open thread's filter, saved as it is edited (`api/threadFilterSaver.ts`)
+ *  and shown at once through the conversation's cached copy. `flush` resolves
+ *  once the thread's saves have landed, and rejects if the last one failed. */
+export function useThreadFilter(agencyId: number) {
+  const authed = useIsAuthenticated();
+  const qc = useQueryClient();
+  function save(threadId: string, filter: FilterCtx) {
+    qc.setQueryData<{ conversation: Conversation; messages: ConvMessage[] } | null>(
+      ["conversation", agencyId, threadId, authed ? "server" : "anon"],
+      (old) => (old ? { ...old, conversation: { ...old.conversation, filter_ctx: filter } } : old),
+    );
+    const write: FilterWrite = authed
+      ? (next) => apiPatch<Conversation>(`/api/${agencyId}/conversations/${threadId}`, { filter_ctx: next })
+      : async (next) => {
+          if (!conversationsAnon.update(threadId, { filter_ctx: next })) throw new Error("thread not found");
+        };
+    saveThreadFilter(threadId, filter, write, () => {
+      void qc.invalidateQueries({ queryKey: ["conversations", agencyId] });
+      void qc.invalidateQueries({ queryKey: ["conversation", agencyId, threadId] });
+    });
+  }
+  return { save, flush: flushThreadFilter };
+}
+
 export function useConversation(
   agencyId: number,
   conversationId: string | null,
@@ -609,11 +641,11 @@ export function useConversation(
           apiGet<Conversation>(`/api/${agencyId}/conversations/${conversationId}`, { signal }),
           apiGet<ConvMessage[]>(`/api/${agencyId}/conversations/${conversationId}/messages`, { signal }),
         ]);
-        return { conversation: conv, messages: msgs };
+        return { conversation: withPendingFilter(conv), messages: msgs };
       }
       const anon = conversationsAnon.get(conversationId, agencyId);
       if (!anon) return null;
-      return { conversation: toServerLikeConversation(anon), messages: anon.messages };
+      return { conversation: withPendingFilter(toServerLikeConversation(anon)), messages: anon.messages };
     },
     enabled: agencyId > 0 && Boolean(conversationId),
   });
@@ -661,6 +693,7 @@ export function useDeleteConversation(agencyId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
+      cancelThreadFilter(id);
       if (authed) {
         return apiDelete<{ ok: true }>(`/api/${agencyId}/conversations/${id}`);
       }

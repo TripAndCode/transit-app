@@ -58,10 +58,20 @@ but are not plotted.
   still opens on the agency's own network. Only an agency with no located
   stop is framed on its live trips instead, and a selected route frames its
   own shape rather than the agency.
-- The route filter's line options carry each line's route numbers
-  (「くすの木台線（64・64-1）」, three numbers and a count beyond that), because
-  a feed can spell two different lines alike; names are shown as the feed
-  writes them.
+- The scope sentence above the map (`ScopeSentence` with `template="live"`;
+  see `docs/features/analysis-tab.md`) holds Live's filters, in words of its
+  own: Live counts the trips reporting now, by their routes and the on-time
+  window, over no period. Its routes control is the one every screen uses:
+  each line's row carries its route number, a line expands to its service
+  patterns, and picks stay staged until **Apply**, so a half-built pick never
+  re-derives the counters. A change to the routes also drops the map's
+  focused route, direction and trip, in the same URL write
+  (`frontend/src/tabs/map/liveScope.ts`).
+- Live honours `routes`, `late` and `early` (`LIVE_SCOPE_APPLIED`). A day,
+  time, timetable, stop or direction condition carried over from another
+  screen is named in the sentence's "Not used on this screen" note rather
+  than ignored silently. The period is left out of that note: the sentence
+  says "live" where other screens name it.
 - With all routes selected, the right panel lists routes from the latest
   observation by maximum delay instead of leaving the panel empty.
 - Selecting a route groups simultaneous trips by GTFS `direction_id`, falling
@@ -108,7 +118,7 @@ but are not plotted.
 
 ## Day playback
 
-`FilterDock`'s "Play the day" toggle switches the map from current
+The map's "Play the day" toggle (`PlaybackToggle`) switches the map from current
 observations to a replay of one whole service day, one hour at a time
 (`operations.playback.toggle_on`/`toggle_off`, `Clapperboard` icon).
 
@@ -207,7 +217,8 @@ whole day, so endpoints that can be asked about either today or a past day
 | `frontend/src/tabs/map/selectedRouteDelay.ts` | Mean live delay of the selected route, which keys the route overlay's severity colour |
 | `frontend/src/tabs/map/OperationsTripPanel.tsx` | Direction picker, concurrent trips, stop timeline, and delay trend |
 | `frontend/src/tabs/map/operationsMap.css` | Desktop and mobile workspace layout |
-| `frontend/src/tabs/map/FilterDock.tsx` | Route/pattern filter control and the day-playback toggle |
+| `frontend/src/tabs/map/liveScope.ts` | Live's scope writes (a routes change drops the map selection) and the conditions it applies |
+| `frontend/src/tabs/map/PlaybackToggle.tsx` | The day-playback toggle floating on the map |
 | `frontend/src/tabs/map/useDayPlayback.ts` | Playback clock/state: frame index, play/pause, speed |
 | `frontend/src/tabs/map/playbackFrames.ts` | Pure frame-index math and the timeline GeoJSON builder |
 | `frontend/src/tabs/map/PlaybackRail.tsx` | Playback transport UI pinned to the bottom of the map |

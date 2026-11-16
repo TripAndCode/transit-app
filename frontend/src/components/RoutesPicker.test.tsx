@@ -110,7 +110,7 @@ function renderTrayPicker(initial: string[], onSubmit = vi.fn()) {
   } as never);
   function Wrapper() {
     const [selected, setSelected] = useState(initial);
-    return <RoutesPicker selected={selected} onChange={setSelected} tray onSubmit={onSubmit} />;
+    return <RoutesPicker selected={selected} onChange={setSelected} onSubmit={onSubmit} />;
   }
   renderWithProviders(
     <MemoryRouter initialEntries={["/agencies/1/routes"]}>
