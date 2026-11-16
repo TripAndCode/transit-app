@@ -15,13 +15,13 @@ function agency(over: Partial<Agency>): Agency {
   return { agency_id: 1, agency_name: "Agency", feed_url: "", static_url: null, latest_data_date: null, capability_tier: "full", ...over };
 }
 
-/** A signed-out guest on a deployment with sign-in available but not
- *  required, unless `visitor` says otherwise; `session: undefined` is a
- *  session still loading. */
-function mockVisitor(visitor: { auth_enabled?: boolean; login_required?: boolean; session?: object | null } = {}) {
-  const { auth_enabled = true, login_required = false } = visitor;
+/** A signed-out guest on a deployment with sign-in available, unless
+ *  `visitor` says otherwise; `session: undefined` is a session still loading
+ *  and `configPending` a config not yet loaded. */
+function mockVisitor(visitor: { auth_enabled?: boolean; configPending?: boolean; session?: object | null } = {}) {
+  const { auth_enabled = true, configPending = false } = visitor;
   vi.spyOn(config, "useConfig").mockReturnValue({
-    data: { auth_enabled, local_admin_enabled: false, login_required },
+    data: configPending ? undefined : { auth_enabled, local_admin_enabled: false },
   } as never);
   vi.spyOn(auth, "useSession").mockReturnValue({ data: "session" in visitor ? visitor.session : null } as never);
 }
@@ -150,7 +150,7 @@ describe("OnboardingGate", () => {
     vi.useRealTimers();
   });
 
-  it("leaves a fresh signed-out browser on the picker; RequireAuth owns sending it to /welcome", () => {
+  it("leaves a fresh signed-out browser on the picker rather than sending it to /welcome", () => {
     localStorage.clear();
     mockAgencies([agency({ agency_id: 1, agency_name: "First" }), agency({ agency_id: 2, agency_name: "Second" })]);
     renderGate();
@@ -242,6 +242,14 @@ describe("OnboardingGate", () => {
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
   });
 
+  it("tells a signed-out guest login is unneeded before the config has loaded", () => {
+    mockVisitor({ configPending: true });
+    mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
+    renderGate();
+    expect(screen.getByText(/Look up bus delays/)).toHaveTextContent("No sign-in needed.");
+    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
+  });
+
   it.each([
     ["a signed-in user", { session: { user_id: 1 } }],
     ["a deployment without sign-in", { auth_enabled: false }],
@@ -255,7 +263,6 @@ describe("OnboardingGate", () => {
 
   it.each([
     ["a signed-in user", { session: { user_id: 1 } }],
-    ["a guest on a deployment that requires login", { login_required: true, session: null }],
     ["a session still loading", { session: undefined }],
   ])("does not say login is unneeded to %s", (_, visitor) => {
     mockVisitor(visitor);

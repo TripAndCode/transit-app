@@ -17,15 +17,15 @@ the number that was handed out.
   report takes one too and prints its link ([On paper](#on-paper)). Everyone
   else sees no change on those screens.
 - **Anyone holding the link** reads it, signed in or not: the page
-  (`frontend/src/pages/SnapshotPage.tsx`) sits outside the sign-in wall and the
-  app shell, and `GET /api/snapshots/{id}` and `GET /api/snapshots/{id}/today`
-  are public even while `login_required` is on. The id is 128 random bits
+  (`frontend/src/pages/SnapshotPage.tsx`) sits outside the app shell, and
+  `GET /api/snapshots/{id}` and `GET /api/snapshots/{id}/today` need no
+  session. The id is 128 random bits
   (`secrets.token_urlsafe(16)`), and nothing lists ids to a non-admin. A
   malformed, unknown or deleted id gets the same 404 from both.
   The read also carries the agency's `capability_tier`, derived when read and
   never stored (`pipeline/reports/capability.py`; null for an agency no longer
-  on record), because a signed-out reader can't reach the agency catalogue and
-  the page words a basic agency's missing figures by its tier.
+  on record), because the page renders from that one read, without the agency
+  catalogue, and words a basic agency's missing figures by its tier.
 - **Admins** list and delete them through `/api/admin/snapshots`
   ([admin-control-room.md](admin-control-room.md#snapshots)). Each create and
   delete is in the audit log.

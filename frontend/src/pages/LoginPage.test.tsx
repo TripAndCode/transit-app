@@ -11,7 +11,7 @@ import { ApiError } from "../api/client";
 import { decl, ruleBody } from "../test/cssRules";
 
 const mockApiPost = vi.fn();
-let mockConfig: { auth_enabled: boolean; local_admin_enabled: boolean; login_required?: boolean } | undefined;
+let mockConfig: { auth_enabled: boolean; local_admin_enabled: boolean } | undefined;
 let mockConfigIsError = false;
 const mockConfigRefetch = vi.fn();
 
@@ -140,18 +140,18 @@ describe("LoginPage", () => {
     }
   });
 
-  it("lets a guest leave for the page they came for when the deployment needs no sign-in", () => {
-    mockConfig = { auth_enabled: true, local_admin_enabled: false, login_required: false };
+  it("lets a guest leave for the page they came for", () => {
+    mockConfig = { auth_enabled: true, local_admin_enabled: false };
     renderLogin("/login?next=/agencies/8/pulse");
     expect(screen.getByRole("link", { name: /Use without signing in/ })).toHaveAttribute("href", "/agencies/8/pulse");
     const css = readFileSync(resolve(process.cwd(), "src/pages/LoginPage.css"), "utf8");
     expect(decl(ruleBody(css, ".login-card__guest a {"), "text-decoration")).toBe("underline");
   });
 
-  it("offers no way past sign-in when the deployment requires it", () => {
-    mockConfig = { auth_enabled: true, local_admin_enabled: false, login_required: true };
-    renderLogin();
-    expect(screen.queryByRole("link", { name: /Use without signing in/ })).toBeNull();
+  it("offers the way past sign-in before the config has loaded", () => {
+    mockConfig = undefined;
+    renderLogin("/login?next=/agencies/8/pulse");
+    expect(screen.getByRole("link", { name: /Use without signing in/ })).toHaveAttribute("href", "/agencies/8/pulse");
   });
 
   it("gives Google and GitHub the same button weight", () => {

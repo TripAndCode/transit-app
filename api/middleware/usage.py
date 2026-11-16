@@ -1,14 +1,12 @@
 """Counts every finished ``/api/`` request, split by whether the caller is
 attributable to a user.
 
-Separate from ``LoginRequiredMiddleware``: that gate's public surface is not
-this middleware's exclusion list, and counting must keep working wherever
-the gate ends up guarding less than the whole API. Placed just inside the
-gate, so a 401 the gate itself answers is never counted, and so
-``scope["state"]`` already carries the session user or API-key owner that
-``SessionMiddleware``/``APIKeyMiddleware`` wrote earlier in the chain. A
-session user or an API key's owner is counted into ``user_activity_daily``;
-a signed-out caller is counted into ``anonymous_activity_daily``, which holds
+Placed inside ``SessionMiddleware`` and ``APIKeyMiddleware``, so
+``scope["state"]`` already carries the session user or API-key owner they
+wrote earlier in the chain. A 401 or 403 from a route's own auth dependency
+is a finished, matched request, so it is counted, as an error. A session
+user or an API key's owner is counted into ``user_activity_daily``; a
+signed-out caller is counted into ``anonymous_activity_daily``, which holds
 route templates and no identity at all.
 """
 
@@ -17,7 +15,6 @@ from __future__ import annotations
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.activity import ANONYMOUS_BUFFER, BUFFER, ActivityKey, AnonymousKey, agency_id_from, today_jst
-from api.middleware.login_gate import request_state
 
 _EXEMPT_PREFIXES = ("/api/auth/",)
 # Exact paths, not prefixes: sign-in plumbing only, so a signed-out
@@ -27,6 +24,11 @@ _EXEMPT_PREFIXES = ("/api/auth/",)
 _EXEMPT_PATHS = frozenset({"/api/config"})
 _EXEMPT_READS = frozenset({"/api/me"})
 _READ_METHODS = frozenset({"GET", "HEAD"})
+
+
+def _request_state(scope: Scope) -> dict:
+    state = scope.get("state")
+    return state if isinstance(state, dict) else {}
 
 
 def _should_count(path: str, method: str) -> bool:
@@ -77,7 +79,7 @@ def _record(scope: Scope, status_code: int) -> None:
     agency_id = agency_id_from(scope.get("path_params"))
     # status 0: the app raised before starting a response.
     is_error = status_code >= 400 or status_code == 0
-    state = request_state(scope)
+    state = _request_state(scope)
     user = state.get("user")
     if user is not None:
         BUFFER.record(ActivityKey(user.user_id, day, template, method, agency_id, False), is_error=is_error)

@@ -11,12 +11,10 @@ Requires, in order:
      running `make serve`/uvicorn backend), so the manual shows the bundle
      a deployment actually serves.
   2. Agency 1 holding real data.
-  3. `login_required` off for the run -- the manual is captured as a guest,
-     matching how a first-time visitor actually sees it. Toggling that
-     flag is a separate, human `feature_flags` admin action (the dev-
-     database guard blocks the write from an agent's own tool calls); flip
-     it via the admin flags UI/API before running this script, and back on
-     once it finishes. This script never touches that flag itself.
+
+The manual is captured signed out, matching how a first-time visitor
+actually sees it; every reader screen serves a signed-out visitor, so the
+run needs no sign-in and no flag.
 
 Usage:
     poetry run python scripts/capture_user_manual_screenshots.py [--locale ja|en|both] [--base URL]
@@ -27,7 +25,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from playwright.sync_api import Page, ViewportSize, sync_playwright
 
@@ -76,10 +74,13 @@ def shot(page: Page, name: str, locale: str) -> None:
 
 
 def assert_dashboard(page: Page) -> None:
-    """Fails loudly if the guest session landed on a login wall instead of
-    the dashboard, rather than silently capturing and shipping that as a
-    scene -- `login_required` left on is the one setup mistake that would
-    otherwise corrupt every screenshot in the same way."""
+    """Fails loudly if the signed-out session landed on the sign-in or
+    welcome page instead of the dashboard, rather than silently capturing and
+    shipping that as a scene: a server that sends a signed-out reader away
+    would corrupt every screenshot in the same way."""
+    path = urlparse(page.url).path
+    if path in ("/login", "/welcome"):
+        raise RuntimeError(f"the signed-out capture was sent to {path} instead of the dashboard")
     page.locator("[aria-label='Account menu'], [aria-label='アカウントメニュー']").first.wait_for(
         state="visible", timeout=15_000
     )
