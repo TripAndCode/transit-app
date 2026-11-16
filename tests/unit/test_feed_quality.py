@@ -29,7 +29,7 @@ _OUTAGES = {
     "poll_days": 0,
     "polls_missing": "no_service_hours",
     "outage_missing": "no_service_hours",
-    "peer_archive_rows": 0,
+    "peer_rows": 0,
 }
 
 

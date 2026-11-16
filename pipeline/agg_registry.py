@@ -215,13 +215,10 @@ def _entries() -> list[AggTable]:
             9,
             Kind.DATED,
             # A planned day no capture saved reads the loaded timetable's plan.
-            # Its poll figures read each day's service hours from the archived
-            # timetable in force (pipeline.poll_outages.in_force_hours), which
-            # nothing here tracks: in_force means rows filed under that
-            # timetable and would put its months into the refit reads. A
-            # version in force that moves without a load therefore leaves a
-            # built month's poll figures as they were until it rebuilds for
-            # another reason.
+            # The poll figures' service hours come from the archived timetable
+            # in force (poll_outages.in_force_hours), which in_force does not
+            # track: it means rows filed under it. A version in force moving
+            # without a load leaves built months as they were.
             Timetable.LOADED,
             _feed_quality,
             depends_on=("agg_route_daily", "agg_route_daily_dist", "agg_feed_health"),

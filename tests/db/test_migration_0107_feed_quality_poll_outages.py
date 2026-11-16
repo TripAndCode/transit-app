@@ -38,7 +38,7 @@ _MEASURED = {
     "collector_outage_longest_min": 0.0,
     "polls_missing": None,
     "outage_missing": None,
-    "peer_archive_rows": 1000,
+    "peer_rows": 1000,
 }
 
 
@@ -72,7 +72,7 @@ def test_a_measured_month_and_one_with_its_reasons_are_both_accepted(pg_conn, ag
         "poll_days": 0,
         "polls_missing": "no_service_hours",
         "outage_missing": "no_service_hours",
-        "peer_archive_rows": 0,
+        "peer_rows": 0,
     }
     _insert(pg_conn, agency_id, "2026-09-01", unknown)
     split_unknown = {**_MEASURED, **dict.fromkeys(poll_outages.FIGURES[5:]), "outage_missing": "no_peer"}
@@ -95,7 +95,7 @@ def test_a_measured_month_and_one_with_its_reasons_are_both_accepted(pg_conn, ag
         # One outage figure without the others.
         {**_MEASURED, "collector_outage_min": None},
         {**_MEASURED, "poll_success_pct": 100.5},
-        {**_MEASURED, "peer_archive_rows": None},
+        {**_MEASURED, "peer_rows": None},
     ],
 )
 def test_a_month_states_each_figure_exactly_when_its_reason_is_empty(pg_conn, agency_id, polls):

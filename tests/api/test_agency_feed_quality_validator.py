@@ -79,7 +79,7 @@ async def test_the_drawer_reads_the_poll_figures_as_numbers_and_a_month_before_t
         "collector_outage_longest_min": 3.5,
         "polls_missing": None,
         "outage_missing": None,
-        "peer_archive_rows": 1000,
+        "peer_rows": 1000,
     }
     await _month(aconn, agency_id, date(2026, 10, 1), measured)
     await _month(aconn, agency_id, date(2026, 9, 1), {})

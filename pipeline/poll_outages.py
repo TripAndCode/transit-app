@@ -51,7 +51,7 @@ FIGURES: tuple[str, ...] = (
     "collector_outage_longest_min",
 )
 
-COLUMNS: tuple[str, ...] = ("poll_days", *FIGURES, "polls_missing", "outage_missing", "peer_archive_rows")
+COLUMNS: tuple[str, ...] = ("poll_days", *FIGURES, "polls_missing", "outage_missing", "peer_rows")
 
 
 # Each trip of a kept content with its service and the times of its first
@@ -211,20 +211,22 @@ def _jst_day_span(day: date) -> tuple[int, int]:
     return int(start.timestamp()), int((start + timedelta(days=1)).timestamp())
 
 
-def live_held(archive: Iterable[int], live: Iterable[int]) -> set[date]:
-    """The JST calendar days that hold live polls and no archived one: the
-    unit archive ingest replaces a promoted day in (pipeline.archive_replace),
-    so a day holds one source or the other."""
-    archived = {_jst_day(instant) for instant in archive}
-    return {day for day in map(_jst_day, live) if day not in archived}
+def live_held(live: Iterable[int]) -> set[date]:
+    """The JST calendar days that hold a live poll. A live poll's instant is
+    its stored capture, and archive ingest replaces a promoted day by the
+    capture day (pipeline.archive_replace), so a day holding one was not
+    replaced: a sample of the collector's polls, or one whose replacement
+    has not settled, held as live either way. An archived poll can be
+    stored on the day before its instant's, so its instant says nothing of
+    which day its row settled."""
+    return {_jst_day(instant) for instant in live}
 
 
-def merged_polls(archive: Sequence[int], live: Sequence[int], live_held: Collection[date]) -> list[int]:
-    """The sorted distinct instants of *archive* and of those of *live* on
-    *live_held* days (:func:`live_held`). A day holding archived polls keeps
-    only those: a pushed copy of one is stamped on arrival, seconds after the
-    instant its name gives, so it would count twice."""
-    return sorted({*archive, *(instant for instant in live if _jst_day(instant) in live_held)})
+def merged_polls(archive: Iterable[int], live: Iterable[int]) -> list[int]:
+    """The sorted distinct instants of both sources. The live-held days'
+    time is out of service (:func:`counted_spans`), so their polls only
+    bound the gaps beside them."""
+    return sorted({*archive, *live})
 
 
 def poll_figures(polls: Sequence[int], spans: Sequence[tuple[int, int]], window: tuple[int, int]) -> PollFigures:
@@ -330,7 +332,7 @@ def columns(
     """The scorecard's poll columns over *counted* (:func:`counted_spans`),
     from *polls_seen* polls in the window whose instant is known and
     *undated_polls* whose is not. *split* is :func:`split` of the figures' outages, and *peer_rows*
-    the other listed agencies' archived rows in the window, without which an
+    the other listed agencies' rows around the window, without which an
     outage cannot be told apart from the collector's."""
     missing: str | None = None
     if polls_seen == 0 and not undated_polls:
@@ -344,7 +346,7 @@ def columns(
     elif figures.interval_sec is None:
         missing = "no_poll_interval"
     row: dict[str, Any] = dict.fromkeys(FIGURES)
-    row.update(poll_days=counted.days, polls_missing=missing, outage_missing=missing, peer_archive_rows=peer_rows)
+    row.update(poll_days=counted.days, polls_missing=missing, outage_missing=missing, peer_rows=peer_rows)
     if missing is not None or figures.interval_sec is None:
         return row
     expected = figures.in_service_sec / figures.interval_sec

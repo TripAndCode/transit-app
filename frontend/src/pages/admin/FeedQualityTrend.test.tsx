@@ -60,7 +60,7 @@ function month(m: string, over: Partial<AgencyFeedQualityMonth> = {}): AgencyFee
     collector_outage_longest_min: 9.5,
     polls_missing: null,
     outage_missing: null,
-    peer_archive_rows: 120000,
+    peer_rows: 120000,
     grade: "C",
     grade_failing: ["rt_completeness", "stale_polls"],
     grade_missing: [],
@@ -325,7 +325,7 @@ describe("FeedQualityTrend", () => {
       poll_success_pct: null,
       polls_missing: null,
       outage_missing: null,
-      peer_archive_rows: null,
+      peer_rows: null,
     };
     renderTrend([month("2026-10", unsplit), month("2026-09", before)]);
     const why = "no other operator was polled, so whose outage it was is unknown";

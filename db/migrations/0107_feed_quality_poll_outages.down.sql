@@ -3,7 +3,7 @@
 -- applied again, except a month before its agency's retention floor.
 ALTER TABLE feed_quality_monthly DROP CONSTRAINT IF EXISTS feed_quality_monthly_poll_outages_check;
 ALTER TABLE feed_quality_monthly
-    DROP COLUMN IF EXISTS peer_archive_rows,
+    DROP COLUMN IF EXISTS peer_rows,
     DROP COLUMN IF EXISTS outage_missing,
     DROP COLUMN IF EXISTS polls_missing,
     DROP COLUMN IF EXISTS collector_outage_longest_min,

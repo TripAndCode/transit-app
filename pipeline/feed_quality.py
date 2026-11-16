@@ -66,9 +66,9 @@ The figures:
   left out with them.
 - **Poll success and outages**: :mod:`pipeline.poll_outages`, defined in
   docs/methodology.md. Their split between the feed and the collector reads
-  the other listed agencies' polls, so ``peer_archive_rows`` stamps the
-  archived rows a month with an outage was split against, and the month is
-  rebuilt when they move (:func:`peers_moved`).
+  the other listed agencies' polls, so ``peer_rows`` stamps their rows a
+  month with an outage was split against, and the month is rebuilt when
+  they move (:func:`peers_moved`).
 - **VehiclePositions available**: not recorded anywhere the app reads.
 - **GTFS-RT validator**: over the window's days, the daily validator summaries
   ``rt_validation_daily`` holds (pipeline.rt_validation_ingest), each of one
@@ -112,8 +112,8 @@ A figure the feed or the app cannot supply is ``None`` beside a
 - ``live_sampled``: every such day with service holds the live path's polls;
 - ``no_poll_interval``: no two consecutive polls fall inside service, so the
   interval is unknown;
-- ``no_peer``: the month has an outage but no other listed agency's archive
-  holds a row in the window, so whose outage it was is unknown.
+- ``no_peer``: the month has an outage but no other listed agency holds a
+  row around the window, so whose outage it was is unknown.
 """
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ from collections.abc import Collection, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal, NamedTuple
 
-from pipeline import poll_outages, service_hours
+from pipeline import planned_trips, poll_outages, service_hours
 from pipeline.archive_replace import MEMBER_REACH
 from pipeline.clickhouse import LIVE_SOURCED, TRIP_LEVEL_STOP_SEQUENCE, UPDATES_TABLE
 from pipeline.db import plausible_delay_ch, timely_reading_ch, timetable_cancellation_ch, withdrawn_ch
@@ -286,24 +286,29 @@ MESSAGE_AGE_CH_SQL = f"""
 """
 
 # The distinct instants of the agency's polls in [lo, hi), each source's
-# apart. An archived row is stored within MEMBER_REACH of its instant, which
-# bounds the scan, so a poll stamped before the window still counts in it.
+# apart, and its nearest polls either side, which bound the gaps at the
+# window's edges. An archived row is stored within MEMBER_REACH of its
+# instant, which bounds the scan, so a poll stamped before the window still
+# counts in it.
 POLL_INSTANTS_CH_SQL = f"""
-    SELECT arraySort(groupUniqArrayIf(instant, NOT live)) AS archive_instants,
-           arraySort(groupUniqArrayIf(instant, live)) AS live_instants
+    SELECT arraySort(groupUniqArrayIf(instant, NOT live AND inside)) AS archive_instants,
+           arraySort(groupUniqArrayIf(instant, live AND inside)) AS live_instants,
+           maxIfOrNull(instant, instant < {{lo:Int64}}) AS before,
+           minIfOrNull(instant, instant >= {{hi:Int64}}) AS after
     FROM (
-        SELECT {LIVE_SOURCED} AS live, {_POLL_INSTANT} AS instant
+        SELECT {LIVE_SOURCED} AS live, {_POLL_INSTANT} AS instant,
+               instant >= {{lo:Int64}} AND instant < {{hi:Int64}} AS inside
         FROM {UPDATES_TABLE} AS u
         WHERE u.agency_id = {{agency_id:UInt16}}
           AND u.captured_at >= {{scan_from:DateTime64}} AND u.captured_at < {{scan_to:DateTime64}}
         GROUP BY u.file_name
     )
-    WHERE instant >= {{lo:Int64}} AND instant < {{hi:Int64}}
+    WHERE instant IS NOT NULL
 """
 
 # Per outage of a batch (poll_outages.peer_batches), by its index, the
-# stretches longer than the floor that no other listed agency's archive holds
-# a poll in, each bounded by such polls.
+# stretches longer than the floor no other listed agency was polled in, each
+# bounded by such polls, live or archived, at the instants message age reads.
 PEER_STRETCHES_CH_SQL = f"""
     SELECT outage,
            arrayFilter((x, y) -> y - x > {{floor:UInt32}}, arrayPopBack(xs), arrayPopFront(xs)) AS starts,
@@ -317,15 +322,16 @@ PEER_STRETCHES_CH_SQL = f"""
                        arrayEnumerate({{los:Array(Int64)}})
                    )) - 1 AS outage
             FROM (
-                SELECT DISTINCT assumeNotNull(toInt64(toUnixTimestamp({ARCHIVE_POLL_INSTANT_CH}))) AS instant
+                SELECT DISTINCT assumeNotNull(ifNull(captured, toInt64(toUnixTimestamp({ARCHIVE_POLL_INSTANT_CH}))))
+                    AS instant
                 FROM (
-                    SELECT DISTINCT u.file_name AS file_name
+                    SELECT DISTINCT u.file_name AS file_name,
+                           if({LIVE_SOURCED}, toInt64(toUnixTimestamp(u.captured_at)), NULL) AS captured
                     FROM {UPDATES_TABLE} AS u
                     WHERE u.agency_id IN {{peers:Array(UInt16)}}
                       AND u.captured_at >= {{scan_from:DateTime64}} AND u.captured_at < {{scan_to:DateTime64}}
-                      AND NOT {LIVE_SOURCED}
                 )
-                WHERE {ARCHIVE_POLL_INSTANT_CH} IS NOT NULL
+                WHERE captured IS NOT NULL OR {ARCHIVE_POLL_INSTANT_CH} IS NOT NULL
             )
         )
         GROUP BY outage
@@ -336,14 +342,19 @@ PEER_STRETCHES_CH_SQL = f"""
 # the collector's.
 PEERS_SQL = "SELECT agency_id FROM agencies WHERE deleted_at IS NULL AND agency_id <> %(agency_id)s ORDER BY 1"
 
-# Per month, those agencies' archived rows over a window ending no later than
-# *last*: the stamp a built row records as peer_archive_rows.
-PEER_STAMP_SQL = """
-    SELECT date_trunc('month', f.date)::date, COALESCE(SUM(f.archive_rows), 0)
-    FROM agg_feed_health f
-    JOIN agencies a ON a.agency_id = f.agency_id
-    WHERE a.deleted_at IS NULL AND f.agency_id <> %(agency_id)s AND f.date <= %(last)s
-    GROUP BY 1
+# Per month whose window ends at *last* (its first and last day in parallel
+# arrays), those agencies' rows on the dates the peer scan can read for it:
+# MEMBER_REACH beyond the window either side, so a peer's poll that bounds an
+# outage at the month's edge moves the stamp too. The stamp a built row
+# records as peer_rows.
+PEER_STAMP_SQL = f"""
+    SELECT w.month, COALESCE(SUM(f.total_rows), 0)
+    FROM unnest(%(months)s::date[], %(lasts)s::date[]) AS w(month, last)
+    LEFT JOIN agg_feed_health f
+      ON f.date BETWEEN w.month - {MEMBER_REACH.days} AND w.last + {MEMBER_REACH.days}
+     AND f.agency_id <> %(agency_id)s
+     AND f.agency_id IN (SELECT agency_id FROM agencies WHERE deleted_at IS NULL)
+    GROUP BY w.month
 """
 
 # The stop-event plan per planned day through the coverage day, by the board's
@@ -516,7 +527,7 @@ def plan_months(
     reporting still has its planned days counted against it, and shrink when
     the agency holding the newest day goes. So is a month of *moved*, whose
     validator summaries (:func:`validation_moved`) or other agencies'
-    archived rows (:func:`peers_moved`) changed since its row was built. A
+    rows (:func:`peers_moved`) changed since its row was built. A
     stored month outside the agency's months goes.
 
     A month that begins before *floor*, the agency's retention floor, is
@@ -560,23 +571,23 @@ def validation_moved(
 
 
 class PeerStamp(NamedTuple):
-    """What a built row records of the other agencies: their archived rows
-    it was built against, and whether it had an outage to split by them
+    """What a built row records of the other agencies: their rows it was
+    built against, and whether it had an outage to split by them
     (outage minutes, or ``no_peer``)."""
 
-    archive_rows: int | None
+    rows: int | None
     had_outage: bool
 
 
 def peers_moved(current: Mapping[date, int], stored: Mapping[date, PeerStamp], months: Iterable[date]) -> list[date]:
-    """Those of *months* with an outage whose other agencies' archived rows
-    in *current* (:data:`PEER_STAMP_SQL`) differ from those their row was
+    """Those of *months* with an outage whose other agencies' rows in
+    *current* (:data:`PEER_STAMP_SQL`) differ from those their row was
     built against in *stored*. A month with none reads 0; one without an
     outage never read them."""
     return [
         month
         for month in months
-        if month in stored and stored[month].had_outage and current.get(month, 0) != stored[month].archive_rows
+        if month in stored and stored[month].had_outage and current.get(month, 0) != stored[month].rows
     ]
 
 
@@ -779,10 +790,10 @@ def _window_params(agency_id: int, month: date, through: date, last: date) -> di
 
 
 class Peers(NamedTuple):
-    """The other listed agencies, and their archived rows in a window."""
+    """The other listed agencies, and their rows around a window."""
 
     agency_ids: list[int]
-    archive_rows: int
+    rows: int
 
 
 def poll_columns(
@@ -802,7 +813,7 @@ def poll_columns(
     day, by the in-force *hours*, over its polls' distinct instants, the
     collector's stretches read from *peers*' archives."""
     lo, hi = params["window_start"], params["window_end"]
-    archive, live = ch_client.query(
+    archive, live, before, after = ch_client.query(
         POLL_INSTANTS_CH_SQL,
         parameters={
             "agency_id": agency_id,
@@ -812,14 +823,15 @@ def poll_columns(
             "hi": int(hi.timestamp()),
         },
     ).result_rows[0]
-    held = poll_outages.live_held(archive, live)
     counted = poll_outages.counted_spans(
-        hours, first=month, through=through, observed_from=observed_from, live_held=held
+        hours, first=month, through=through, observed_from=observed_from, live_held=poll_outages.live_held(live)
     )
-    polls = poll_outages.merged_polls(archive, live, held)
-    figures = poll_outages.poll_figures(polls, counted.spans, (int(lo.timestamp()), int(hi.timestamp())))
+    polls = poll_outages.merged_polls(archive, live)
+    # The polls just outside the window bound its edge gaps, else its edges do.
+    edges = (int(lo.timestamp()) if before is None else before, int(hi.timestamp()) if after is None else after)
+    figures = poll_outages.poll_figures(polls, counted.spans, edges)
     stretches: dict[int, list[tuple[int, int]]] = {}
-    if figures.outages and peers.agency_ids and peers.archive_rows:
+    if figures.outages and peers.agency_ids and peers.rows:
         reach = int(MEMBER_REACH.total_seconds())
         for batch in poll_outages.peer_batches(figures.outages, poll_outages.PEER_REACH_SEC, reach):
             rows = ch_client.query(
@@ -841,7 +853,7 @@ def poll_columns(
         counted=counted,
         figures=figures,
         split=poll_outages.split(figures.outages, stretches),
-        peer_rows=peers.archive_rows,
+        peer_rows=peers.rows,
     )
 
 
@@ -953,7 +965,7 @@ def rebuild(
         bounds = read_month_bounds(agency_id, windows, cur)
         cur.execute(
             "SELECT month, through_date, window_days, validator_ok_days + validator_failed_days, "
-            "validator_ingested_at, peer_archive_rows, "
+            "validator_ingested_at, peer_rows, "
             "COALESCE(feed_outage_min + collector_outage_min > 0, outage_missing = 'no_peer', false) "
             f"FROM {TABLE} WHERE agency_id = %s",
             (agency_id,),
@@ -964,7 +976,10 @@ def rebuild(
         if last_day is not None:
             cur.execute(VALIDATION_STAMP_SQL, {"agency_id": agency_id, "last": last_day})
             stamps = {month: (int(count), at) for month, count, at in cur.fetchall()}
-            cur.execute(PEER_STAMP_SQL, {"agency_id": agency_id, "last": last_day})
+            cur.execute(
+                PEER_STAMP_SQL,
+                {"agency_id": agency_id, "months": list(windows), "lasts": list(windows.values())},
+            )
             peer_stamps = {month: int(rows) for month, rows in cur.fetchall()}
         cur.execute(PEERS_SQL, {"agency_id": agency_id})
         peer_ids = [row[0] for row in cur.fetchall()]
@@ -1043,24 +1058,11 @@ def render() -> list[str]:
         service_hours.ROWS_HOURS_SQL,
         inspect.getsource(poll_columns),
         inspect.getsource(peers_moved),
-        *(
-            inspect.getsource(function)
-            for function in (
-                poll_outages.in_force_hours,
-                poll_outages.counted_spans,
-                poll_outages._without,
-                poll_outages.live_held,
-                poll_outages.merged_polls,
-                poll_outages.poll_figures,
-                poll_outages.threshold_sec,
-                poll_outages.split,
-                poll_outages.columns,
-                _runs,
-            )
-        ),
-        f"OUTAGE_FLOOR_SEC={poll_outages.OUTAGE_FLOOR_SEC!r}",
-        f"OUTAGE_INTERVALS={poll_outages.OUTAGE_INTERVALS!r}",
-        f"PEER_REACH_SEC={poll_outages.PEER_REACH_SEC!r}",
+        inspect.getsource(poll_outages),
+        inspect.getsource(service_hours.hours_of),
+        inspect.getsource(planned_trips.calendar_params),
+        inspect.getsource(rebuild),
+        inspect.getsource(_runs),
         f"MEMBER_REACH={MEMBER_REACH!r}",
         inspect.getsource(validator_figures),
         inspect.getsource(validation_moved),

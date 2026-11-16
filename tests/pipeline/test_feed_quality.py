@@ -866,7 +866,7 @@ def test_outages_count_only_inside_the_timetable_in_force_and_the_collectors_are
     # before service counts nowhere.
     assert (float(april["feed_outage_min"]), float(april["feed_outage_longest_min"])) == (19.5, 19.5)
     assert (float(april["collector_outage_min"]), float(april["collector_outage_longest_min"])) == (19.5, 19.5)
-    assert april["peer_archive_rows"] == len(_archived_polls(first, last, shared))
+    assert april["peer_rows"] == len(_archived_polls(first, last, shared))
 
     # The other agency has no timetable in force.
     assert _stored(pg_conn, other)[_APRIL]["polls_missing"] == "no_service_hours"
@@ -929,4 +929,83 @@ def test_a_poll_stamped_before_the_month_still_counts_on_its_first_morning(pg_co
     april = _stored(pg_conn, agency)[_APRIL]
     assert (april["polls_missing"], april["outage_missing"]) == (None, None)
     assert (april["polls_in_service"], float(april["poll_success_pct"])) == (181, 100.0)
+    assert (float(april["feed_outage_min"]), float(april["collector_outage_min"])) == (0.0, 0.0)
+
+
+def test_a_collector_outage_across_the_month_s_first_cutover_is_ours_as_mid_month(
+    pg_conn, ch_client, closed_on_may_first
+):
+    """Service on 1 April starts at 04:00 JST, when the month's window opens.
+    No agency is polled from 03:50 to 04:20: the gap opens in March, yet it
+    is bounded by the polls before it and read as the collector's."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 1))
+    first, last = datetime(2026, 3, 31, 18, 0, tzinfo=timezone.utc), datetime(2026, 3, 31, 21, 0, tzinfo=timezone.utc)
+    shared = (datetime(2026, 3, 31, 18, 50, tzinfo=timezone.utc), datetime(2026, 3, 31, 19, 20, tzinfo=timezone.utc))
+    other = _agency(pg_conn, "other", "static_join")
+    insert_updates(ch_client, other, _archived_polls(first, last, shared))
+    analyze(other, pg_conn, ch_client)
+    agency = _agency(pg_conn, "polled", "static_join")
+    _versioned_timetable(pg_conn, agency, ("04:00:00", "06:00:00"))
+    insert_updates(ch_client, agency, _archived_polls(first, last, shared))
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert april["outage_missing"] is None
+    # From 04:00, when service starts after the next poll was due, to 04:20.
+    assert (float(april["collector_outage_min"]), float(april["feed_outage_min"])) == (20.0, 0.0)
+
+
+def test_another_agency_s_live_pushes_show_the_collector_was_up(pg_conn, ch_client, closed_on_may_first):
+    """One other agency's archive is silent with this one from 10:20 to 10:40
+    JST on 1 April, but a third agency's day is held from the live path and
+    its pushes every five minutes went on arriving: the collector was up, so
+    the outage is the feed's."""
+    first, last = datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc), datetime(2026, 4, 1, 3, 30, tzinfo=timezone.utc)
+    gap = _gap(1, 20)
+    archived = _agency(pg_conn, "archived", "static_join")
+    insert_updates(ch_client, archived, _archived_polls(first, last, gap))
+    analyze(archived, pg_conn, ch_client)
+    pushed = _agency(pg_conn, "pushed", "static_join")
+    rows, at = [], first
+    while at <= last:
+        rows.append(_row(f"oracle/{at:%Y%m%d}/TripUpdate_{at:%H%M%S}.pb", at, "ALL-0", 1, 30, 10))
+        at += timedelta(minutes=5)
+    insert_updates(ch_client, pushed, rows)
+    analyze(pushed, pg_conn, ch_client)
+    agency = _agency(pg_conn, "polled", "static_join")
+    _versioned_timetable(pg_conn, agency)
+    insert_updates(ch_client, agency, _archived_polls(first, last, gap))
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert april["outage_missing"] is None
+    assert (float(april["feed_outage_min"]), float(april["collector_outage_min"])) == (19.5, 0.0)
+
+
+def test_an_archived_poll_stored_before_midnight_leaves_the_next_live_day_out(pg_conn, ch_client, closed_on_may_first):
+    """1 April is held from the archive and 2 April from the live path's
+    pushes. The archive's first poll of the 2nd, named 00:00:10 JST, carries a
+    header from 23:59:55, so it was stored on the 1st. The 2nd stays live:
+    its pushes are a sample, not an outage."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 2))
+    agency = _agency(pg_conn, "polled", "static_join")
+    _versioned_timetable(pg_conn, agency)
+    archived = _archived_polls(
+        datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc), datetime(2026, 4, 1, 14, 59, 30, tzinfo=timezone.utc)
+    )
+    named, header = (
+        datetime(2026, 4, 1, 15, 0, 10, tzinfo=timezone.utc),
+        datetime(2026, 4, 1, 14, 59, 55, tzinfo=timezone.utc),
+    )
+    archived.append(_row(f"{named:%Y%m%d}/TripUpdate_{named:%H%M%S}.pb", header, "ALL-0", 1, 30, 0))
+    pushes, at = [], datetime(2026, 4, 1, 15, 5, tzinfo=timezone.utc)
+    while at <= datetime(2026, 4, 2, 4, 0, tzinfo=timezone.utc):
+        pushes.append(_row(f"oracle/{at:%Y%m%d}/TripUpdate_{at:%H%M%S}.pb", at, "ALL-0", 1, 30, 10))
+        at += timedelta(minutes=5)
+    insert_updates(ch_client, agency, archived + pushes)
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert april["through_date"] == date(2026, 4, 2)
+    assert (april["poll_days"], april["polls_missing"], april["outage_missing"]) == (1, None, None)
     assert (float(april["feed_outage_min"]), float(april["collector_outage_min"])) == (0.0, 0.0)

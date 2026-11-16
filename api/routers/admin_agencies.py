@@ -169,7 +169,7 @@ class FeedQualityMonth(BaseModel):
     collector_outage_longest_min: float | None
     polls_missing: str | None
     outage_missing: str | None
-    peer_archive_rows: int | None
+    peer_rows: int | None
     grade: Literal["A", "B", "C", "D", "F"] | None
     grade_failing: list[Criterion]
     grade_missing: list[FeedQualityGradeMissing]

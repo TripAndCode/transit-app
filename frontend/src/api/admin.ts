@@ -539,7 +539,7 @@ export type AgencyFeedQualityMonth = {
   collector_outage_longest_min: number | null;
   polls_missing: FeedQualityMissing | null;
   outage_missing: FeedQualityMissing | null;
-  peer_archive_rows: number | null;
+  peer_rows: number | null;
   grade: "A" | "B" | "C" | "D" | "F" | null;
   grade_failing: FeedQualityCriterion[];
   grade_missing: { criterion: FeedQualityCriterion; reason: FeedQualityMissing }[];

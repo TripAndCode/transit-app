@@ -1,7 +1,7 @@
 """Poll success and outage minutes, from poll instants and the service hours
 of the days they count, without a database."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -162,13 +162,12 @@ def _jst(day: int, hour: int, minute: int = 0) -> int:
     return int(datetime(2026, 10, day, hour, minute, tzinfo=JST).timestamp())
 
 
-def _late_service(archive: list[int], live: list[int]):
-    """5 October's service, 05:00 to 24:40 JST, over the merged polls."""
-    held = live_held(archive, live)
-    counted = counted_spans(
-        {_DAY: (5 * 3600, 24 * 3600 + 40 * 60)}, first=_DAY, through=_DAY, observed_from=None, live_held=held
-    )
-    return poll_figures(merged_polls(archive, live, held), counted.spans, (_jst(5, 4), _jst(7, 4)))
+def _late_service(archive: list[int], live: list[int], days: int = 1):
+    """*days* days' service from 5 October, 05:00 to 24:40 JST, over the merged polls."""
+    first, last = _DAY, _DAY + timedelta(days=days - 1)
+    hours = {first + timedelta(days=i): (5 * 3600, 24 * 3600 + 40 * 60) for i in range(days)}
+    counted = counted_spans(hours, first=first, through=last, observed_from=None, live_held=live_held(live))
+    return poll_figures(merged_polls(archive, live), counted.spans, (_jst(5, 4), _jst(5 + days + 1, 4)))
 
 
 def test_the_live_path_s_pushes_after_midnight_count_when_the_archive_holds_the_day_before():
@@ -176,7 +175,7 @@ def test_the_live_path_s_pushes_after_midnight_count_when_the_archive_holds_the_
     # carries the service day on past midnight.
     archive = list(range(_jst(5, 4), _jst(6, 0), 30))
     live = list(range(_jst(6, 0), _jst(7, 0), 300))
-    assert live_held(archive, live) == {date(2026, 10, 6)}
+    assert live_held(live) == {date(2026, 10, 6)}
     figures = _late_service(archive, live)
     assert figures.interval_sec == 30.0
     # The hours after midnight are the live path's sample, not the feed's gaps.
@@ -186,7 +185,7 @@ def test_the_live_path_s_pushes_after_midnight_count_when_the_archive_holds_the_
 def test_a_live_day_before_an_archived_night_leaves_only_the_archived_hours():
     live = list(range(_jst(5, 4), _jst(6, 0), 300))
     archive = list(range(_jst(6, 0), _jst(6, 4), 15))
-    assert live_held(archive, live) == {date(2026, 10, 5)}
+    assert live_held(live) == {date(2026, 10, 5)}
     figures = _late_service(archive, live)
     assert (figures.interval_sec, figures.outages) == (15.0, [])
     assert figures.in_service_sec == 40 * 60
@@ -269,18 +268,32 @@ def test_a_month_without_an_outage_needs_no_other_agency_to_say_so():
     assert (row["feed_outage_min"], row["collector_outage_min"], row["outage_missing"]) == (0.0, 0.0, None)
 
 
-def test_a_calendar_day_with_any_archived_poll_is_held_from_the_archive():
-    archive = [_OPEN]
-    pushed = [_OPEN + 3, *_every(_OPEN + 600, _OPEN + 3600, 300), _OPEN + 86400]
-    assert live_held(archive, pushed) == {_DAY + timedelta(days=1)}
-
-
-def test_a_day_held_from_the_archive_keeps_only_its_archived_polls():
+def test_a_calendar_day_holding_any_live_poll_is_live_held_whatever_archived_polls_it_holds():
+    # A day whose replacement has not settled holds both: held as live.
     archive = [_OPEN, _OPEN + 30]
-    # A pushed copy of the first poll, stamped on arrival; and the next day's pushes.
-    pushed = [_OPEN + 2, _OPEN + 86400, _OPEN + 86400 + 300]
-    held = live_held(archive, pushed)
-    assert merged_polls(archive, pushed, held) == [_OPEN, _OPEN + 30, _OPEN + 86400, _OPEN + 86400 + 300]
+    pushed = [_OPEN + 3, _OPEN + 2 * 86400]
+    assert live_held(pushed) == {_DAY, _DAY + timedelta(days=2)}
+    assert merged_polls(archive, pushed) == [_OPEN, _OPEN + 3, _OPEN + 30, _OPEN + 2 * 86400]
+
+
+@pytest.mark.parametrize(
+    "straddler",
+    [
+        # Header-stamped: its header, just before midnight, stored it on the 5th.
+        _jst(6, 0) + 10,
+        # Headerless, named 16:00 UTC: archive ingest read the name as JST, the 5th.
+        int(datetime(2026, 10, 5, 16, 0, tzinfo=timezone.utc).timestamp()),
+    ],
+)
+def test_an_archived_poll_stored_on_the_day_before_its_instant_leaves_the_live_day_live(straddler):
+    # 5 October was replaced from the archive; 6 October keeps the live path's
+    # pushes. One archived row of the 5th names an instant on the 6th.
+    archive = [*range(_jst(5, 4), _jst(6, 0), 30), straddler]
+    live = list(range(_jst(6, 0), _jst(7, 4), 300))
+    assert live_held(live) == {date(2026, 10, 6), date(2026, 10, 7)}
+    figures = _late_service(archive, live, days=2)
+    assert figures.interval_sec == 30.0
+    assert figures.outages == []
 
 
 def test_outages_whose_scans_overlap_share_one_and_the_rest_scan_only_around_their_own():
