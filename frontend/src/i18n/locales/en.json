@@ -1090,7 +1090,7 @@
     "workspace": {
       "investigations": "Your investigations",
       "new_analysis": "Start another analysis",
-      "unavailable": "This investigation could not be opened. Check your connection. An investigation is kept only in the browser where it was saved.",
+      "unavailable": "This investigation could not be opened. Check your connection. An investigation saved without signing in opens only in the browser where it was saved.",
       "retry": "Try again",
       "export_snapshot": "Download result (JSON)",
       "export_csv": "Table {{index}} CSV",

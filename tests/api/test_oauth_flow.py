@@ -729,3 +729,48 @@ async def test_a_verified_email_does_not_link_to_an_account_that_is_no_admin(aut
     assert await _footprint(aconn) == (1, 0, 0)
     assert await aconn.fetchval("SELECT role FROM users WHERE user_id=$1", uid) == "user"
     assert await _only_failure(aconn) == _NOT_ADMIN_FAILURE
+
+
+@pytest.mark.asyncio
+async def test_a_linked_identity_is_judged_by_the_account_email_not_the_reported_one(auth_client, aconn, monkeypatch):
+    """A linked identity's admission and its ADMIN_EMAILS promotion both read
+    the account's stored email, so an address that changed at the provider
+    neither locks a listed admin out nor lets an unlisted one in."""
+    from api.routers import auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "ADMIN_EMAILS", {"listed@x"})
+    uid = await aconn.fetchval("INSERT INTO users (email, role) VALUES ('listed@x', 'user') RETURNING user_id")
+    await aconn.execute(
+        "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link)"
+        " VALUES ('google', 'listed-sub', $1, 'listed@x')",
+        uid,
+    )
+    info = {"sub": "listed-sub", "email": "renamed@x", "email_verified": True, "name": "L", "avatar_url": None}
+
+    resp = await _google_callback(auth_client, monkeypatch, info)
+
+    assert resp.headers["location"] == "http://test/"
+    assert await aconn.fetchval("SELECT role FROM users WHERE user_id=$1", uid) == "admin"
+    assert await _footprint(aconn) == (1, 1, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_linked_identity_reporting_a_listed_email_is_not_admitted_for_an_unlisted_account(
+    auth_client, aconn, monkeypatch
+):
+    from api.routers import auth as auth_mod
+
+    monkeypatch.setattr(auth_mod, "ADMIN_EMAILS", {"listed@x"})
+    uid = await aconn.fetchval("INSERT INTO users (email, role) VALUES ('member@x', 'user') RETURNING user_id")
+    await aconn.execute(
+        "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link)"
+        " VALUES ('google', 'member-sub', $1, 'member@x')",
+        uid,
+    )
+    info = {"sub": "member-sub", "email": "listed@x", "email_verified": True, "name": "M", "avatar_url": None}
+
+    resp = await _google_callback(auth_client, monkeypatch, info)
+
+    assert resp.headers["location"] == "http://test/login?error=not_admin&next=%2F"
+    assert await aconn.fetchval("SELECT role FROM users WHERE user_id=$1", uid) == "user"
+    assert await _footprint(aconn) == (1, 1, 0)

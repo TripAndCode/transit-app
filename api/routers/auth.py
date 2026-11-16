@@ -335,14 +335,13 @@ async def _upsert_user(
             raise NotAdmin
         uid = linked["user_id"]
     else:
-        local_only = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM users WHERE email=lower($1) AND password_hash IS NOT NULL)",
+        existing = await conn.fetchrow(
+            "SELECT role, password_hash IS NOT NULL AS local_only FROM users WHERE email=lower($1)",
             email,
         )
-        if local_only:
+        if existing is not None and existing["local_only"]:
             raise LocalAccountConflict(email)
-        existing_role = await conn.fetchval("SELECT role FROM users WHERE email=lower($1)", email)
-        if not _may_sign_in(existing_role, email):
+        if not _may_sign_in(existing["role"] if existing else None, email):
             raise NotAdmin
         # 2. Match by verified email (auto-link). ON CONFLICT DO UPDATE is a
         # no-op write that lets us use RETURNING whether the row was new or

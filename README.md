@@ -420,8 +420,8 @@ historical baseline.
 `docs/ops-monitoring-deploy.md` says what it drops and how to turn it on.
 
 Every reader page works signed out, whether or not SSO is configured, and so
-does `POST /api/{agency_id}/delays/refresh`, under a per-address rate limit
-and a per-agency cooldown. Admin routes need an admin session; the account
+does `POST /api/{agency_id}/delays/refresh`, under a per-caller rate limit
+(per address, or per account when signed in) and a per-agency cooldown. Admin routes need an admin session; the account
 routes (`/api/me/*`, saved conversations) need a signed-in caller. Leaving all
 OAuth variables unset runs the app
 in anonymous-only mode: nobody can sign in through SSO, only the break-glass

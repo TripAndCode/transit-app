@@ -1090,7 +1090,7 @@
     "workspace": {
       "investigations": "これまでの調査",
       "new_analysis": "別の分析を始める",
-      "unavailable": "調査を開けませんでした。接続を確認してください。調査は保存したブラウザでのみ開けます。",
+      "unavailable": "調査を開けませんでした。接続を確認してください。ログインせずに保存した調査は、保存したブラウザでのみ開けます。",
       "retry": "再試行",
       "export_snapshot": "結果を保存（JSON）",
       "export_csv": "表{{index}}のCSV",

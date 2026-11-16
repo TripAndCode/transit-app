@@ -469,12 +469,13 @@ async def refresh_live_delays(
     """Fetch the agency's current GTFS-RT feed and persist it before reading.
 
     Open to every visitor. Three things bound how often it reaches the
-    collector: a per-address rate limit; a per-agency cooldown, inside which a
-    poll returns ``{"status": "recent"}`` without fetching, because the feed
-    cannot have moved far since the last successful one; and the ingest
-    advisory lock, which refuses (409) a poll that would overlap another
-    refresh or the scheduled ingest. Only a successful poll starts the
-    cooldown, so a refused or failed one can be retried at once.
+    collector: a per-caller rate limit (per address, or per account when
+    signed in); a per-agency cooldown, inside which a poll returns
+    ``{"status": "recent"}`` without fetching, because the feed cannot have
+    moved far since the last successful one; and the ingest advisory lock,
+    which refuses (409) a poll that would overlap another refresh or the
+    scheduled ingest. Only a successful poll starts the cooldown, so a
+    refused or failed one can be retried at once.
     """
     from pipeline.ingest import StaticTimetableMissing
 

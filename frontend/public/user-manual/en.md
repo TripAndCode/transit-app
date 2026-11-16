@@ -436,7 +436,7 @@ When the box is not shown, free-text follow-ups are not available to your accoun
 
 ### 11-4. Your investigations
 
-“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Investigations are kept only in the browser where you ran them.
+“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Investigations you run without signing in are kept only in the browser where you ran them.
 
 If you are not sure which report to open, picking an analysis in the Notebook is often the quickest way in.
 
