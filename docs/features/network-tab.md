@@ -18,11 +18,12 @@ defend; see [Comparability gate](#comparability-gate).
   becomes `by=agencies`), and so does a bare `/network` bookmark, via
   `frontend/src/routes/legacyRedirects.tsx: RedirectNetworkToAgencyNetwork`
   (to the last-used agency, or to `/` when none is remembered).
-- Top-level component: `frontend/src/tabs/NetworkTab.tsx`. Unlike every other
-  tab, it does **not** show the scope sentence, and the board's endpoint reads
-  only the scope's `from`/`to` date range (whole-agency comparison, per the
-  endpoint's own docstring) — the shared dow/service/time_band/route filters
-  do not change the figures. The other scope params stay in the URL.
+- Top-level component: `frontend/src/tabs/NetworkTab.tsx`. The board's
+  endpoint reads only the scope's `from`/`to` date range (whole-agency
+  comparison, per the endpoint's own docstring), and its `scope_applied`
+  says so; the shared dow/service/time_band/route, stop, direction and
+  tolerance filters do not change the figures. The other scope params stay
+  in the URL.
 
 What the user sees/does:
 
@@ -30,9 +31,13 @@ What the user sees/does:
   `<details>` explaining each column (avg delay, on-time % and its interval,
   observation coverage, the ranking rule with the gate's thresholds, samples,
   feed health, freshness, coverage).
-- **From/to date pickers** — HTML `<input type="date">` elements that read
-  and write the scope's `from`/`to` URL params through `useScope`, as every
-  scoped screen does.
+- **Scope sentence** — the shared `ScopeSentence` with `template="board"`:
+  「全事業者を[period]で比較する」 / "Comparing every agency over [period]",
+  whose one condition is the period, with the period control every screen
+  uses (presets, the daily brush and from/to dates), writing `from`/`to`.
+  Every other condition set in the URL that the endpoint's `scope_applied`
+  marks unused is named in the sentence's "Not used on this screen" note,
+  never ignored silently. It carries no saved views or pin.
 - **Agency card list** — one card per agency. The comparable agencies
   (`comparable`) come first, sorted client-side worst-avg-delay first
   (`byDelayDescending`), agencies whose data stopped after the current ones
@@ -100,8 +105,8 @@ What the user sees/does:
   agency's feed quality (observation coverage and implausible share), which
   `api/routers/network.py` states from the board's own rows
   (`pipeline/reports/network.py: board_feed_quality`).
-- **Ridership-weighted on-time toggle** — a checkbox next to the from/to date
-  pickers, present only when at least one agency in the current list has a
+- **Ridership-weighted on-time toggle** — a checkbox under the scope sentence,
+  present only when at least one agency in the current list has a
   manually-configured ridership weight (`pipeline/reports/ridership.py`,
   backed by the `ridership_weights` table — there is no IC-card/APC ridership
   source in this pipeline, so weights are entered by hand). When checked, an
@@ -232,7 +237,7 @@ default order is still by delay among the comparable agencies.
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/NetworkTab.tsx` | Network tab: date pickers, ranked card list rendering |
+| `frontend/src/tabs/NetworkTab.tsx` | Network tab: the board's scope sentence, ranked card list rendering |
 | `frontend/src/components/comparabilityReason.ts` | `unrankedReason()` — an unranked agency's reason in words, shared with the council report's comparison tile |
 | `frontend/src/tabs/CompareTab.tsx` | Compare screen: the `by` switch between this board and `compare_ranking` |
 | `frontend/src/routes/legacyRedirects.tsx` (`RedirectNetworkToAgencyNetwork`) | Bare `/network` → `/agencies/{lastAgencyId}/compare?by=agencies` redirect (or `/` with no remembered agency) |

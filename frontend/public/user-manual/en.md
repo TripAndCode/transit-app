@@ -123,7 +123,7 @@ A condition the screen does not use is struck through, and a line under the sent
 
 Each screen keeps its own conditions while this browser tab stays open, so changing the period on **Routes** does not change it on **Time**. The conditions are also part of the page address, so a copied link opens the same view.
 
-Live, the notebook, a route’s page and the agency comparison have their own filters, described in their sections.
+Live, a route’s page, the agency comparison and the notebook use the same sentence and the same controls. Their sections describe how each differs: Live and the agency comparison word the sentence for what they count, and none of the four has **Saved views** or **Show all filters**.
 
 ---
 
@@ -243,7 +243,7 @@ Clicking a route’s name — in a report, in **Routes to check** on Pulse, or i
 - Below it are the route’s mean delay (and its place among the agency’s routes, most delayed first), on-time rate, share over 5 minutes late and share of all lateness — the same figures as the **Routes** lists. “This route by time of day” and “Why this route runs late” open **Time** and **Why** for this route.
 - Under the mean delay and the on-time rate are the route’s own past 90 days and a tag saying “Better than the past 90 days”, “About the same as the past 90 days” or “Worse than the past 90 days”. They are worked out as on the **Routes** table (5-3). “About the same” is judged for the on-time rate as on that table (a difference under 1 point), and for the mean delay as on **Pulse** (chapter 4: a difference under 0.1 min, or under 5% of the past 90 days’ average). A shorter mean delay and a higher on-time rate are better. When the past 90 days cannot be compared, the line under the on-time rate says why.
 - When the route has targets, “Minimum performance standard” follows, with this route’s targets alone (5-4).
-- The filters under it — “Route”, “Service pattern”, “From”, “To”, “Days” and “Time” — take effect when you press **Apply**. Until then the page says “Changes not applied yet”.
+- The scope sentence under it (chapter 3) sets the page’s conditions. Its routes condition names this route; pick another route there and press **Apply** to move to that route’s page, or pick several to open them in the **Routes** table. A condition that nothing on the page uses, such as a stop chosen on another screen, is struck through and named under the sentence.
 - **Delay by stop** shows the mean departure delay at each stop. When the route runs more than one path, pick one under “Path”; “Other direction” switches to the path running the other way. The page says what share of the route’s observations the path holds.
 - A sentence names the segment where delay grows most, and the next largest, and the chart marks the largest. A segment’s increase is the mean change for the same trips observed at both of its stops. The segment from the first stop is left out, since most feeds report a first departure as on time.
 - Tick “Compare with the previous period” to add the same number of days just before the selected ones (for Sep 24 – Oct 23, Aug 25 – Sep 23).
@@ -316,7 +316,7 @@ Two buttons at the top switch between **Weekdays and weekends/holidays** and **A
 
 ![Compare agencies](./10-compare-agencies.en.png)
 
-“Compare agencies” lists every agency for the dates in “From” and “To”. It ranks only the agencies whose data supports a comparison, latest-running first (“Average delay — lower is better”). An agency whose data stopped reads “No updates after Oct 14” or similar, as on the agency picker, and comes after the agencies whose data is current. The agency selected in the sidebar carries a “Viewing” badge.
+“Compare agencies” lists every agency over the period in the sentence above the list, “Comparing every agency over (period)”; click the period to change it, as in chapter 3. The comparison uses the period alone, so a condition chosen on another screen, such as routes or days of the week, is named under the sentence (“Not used on this screen: …”) rather than applied. It ranks only the agencies whose data supports a comparison, latest-running first (“Average delay — lower is better”). An agency whose data stopped reads “No updates after Oct 14” or similar, as on the agency picker, and comes after the agencies whose data is current. The agency selected in the sidebar carries a “Viewing” badge.
 
 Below them, under “Not ranked: the data does not support a comparison”, the other agencies are listed by name, never by their figures. An agency is ranked only when its observation coverage is at least 70%, its on-time % interval is within ±3 points and its implausible readings are at most 5%. Each unranked row says which check it fails first, with its figure, such as “Observation coverage 41.0% (below 70%)” or “On-time % interval ±3.3 points (wider than ±3)”. Observation coverage cannot be measured for a feed whose trips can't be matched to the timetable. A short period often leaves the smaller agencies unranked, because a few hundred trips cannot pin their on-time % down closely enough. Every agency’s on-time % is counted by the industry standard, from 1 min early to 5 min late. Neither how densely a feed reports nor where a timetable puts its slack is corrected for.
 
@@ -334,7 +334,7 @@ Live shows the trips reporting now, under the heading “Current observations”
 
 - The map opens framing all of the agency’s stops, including late at night when no vehicle is reporting.
 - The map places each trip at its last reported stop, not at a GPS position. The legend explains the marks: “Latest report”, “Report trail”, “Delayed” and “Number = overlapping trips”. Hover over a trip for its details; “Pin this trip” keeps them on screen. “Fit all trips in view” moves the map to frame every trip, and **Layers** switches the map style.
-- Filters on the map: choose a “Route” and a “Service pattern”, then press **Apply**. Each “Route” option carries its route numbers, such as “くすの木台線 (64, 64-1)”: names are shown as the feed writes them, so two routes spelt alike are told apart by their numbers.
+- The sentence above the map, “Viewing (routes) of (agency) live, counting on-time as (tolerance)”, sets what Live shows (chapter 3). Click the routes to choose routes or service patterns, then press **Apply**; choosing new routes also clears the route, direction and trip selected on the map. The tolerance decides which trips count as late. Live shows the trips reporting now, so it has no period; days of the week, time of day and timetable chosen on another screen are named under the sentence (“Not used on this screen: …”) rather than applied.
 - **Play the day** replays the day’s observations on the map; “Back to current observations” returns to now.
 - **Trips to check**, on the right: “Observed”, “More than 5 min late” and “On-time rate” for the trips reporting now, **Download CSV** for those trips, and a list of the trips later than the on-time window allows (by default more than five minutes late), most delayed first. Under the figures, a note names the on-time window the rate uses and says that it counts different trips from a period’s on-time rate, and another says how many trips left earlier than the window allows, if any did (13-2). Each trip in the list links to its route’s page. “View observed trips” lets you pick a running route, a direction and a trip, and follow how its delay has developed.
 
@@ -410,7 +410,7 @@ The investigation notebook holds ready-made analyses of delay. Each one is a car
 
 ### 11-1. Running an analysis
 
-- The bar at the top shows the period and routes your analyses will cover. **Edit** changes them (“Date range”, “DOW”, “Time band”, “Routes”); press **Apply** to keep the change.
+- The sentence at the top shows the conditions your analyses will cover: routes, period, days of the week and timetable, and time of day (chapter 3). Click one to change it. A new investigation starts from the conditions of the screen you came from; once an investigation is open, each change is kept with it.
 - Under “Run at once”, a card runs immediately: “5 most delayed routes” or “5 least on-time routes”.
 - Under “More analyses”, each one needs a route first: “Explore all stops by pattern”, “Which stops have larger delays?”, “Route delay trend”, “Weekday vs Weekend/Holiday” and “Route overview”. Pick the route, adjust any other setting, and press **Run**.
 - After the first result, open **Start another analysis** at the bottom to see every analysis. Choosing one opens its settings, such as “Top” and “Service” for the most-delayed-routes analysis.
