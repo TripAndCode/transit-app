@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
-import { useSession } from "./auth";
 import type { DowFilter, ServiceFilter, TimeBand } from "./scope";
 import { screenOf } from "./screenScope";
 import { withStorage, writeStorage } from "../utils/safeStorage";
@@ -38,23 +37,19 @@ function writeStored(key: string, value: StoredFilter): void {
 }
 
 /**
- * Anonymous-only convenience: remember the last-used date range/DOW/
- * time-band/routes filter per agency and screen in localStorage, and restore
- * it on a fresh visit to that screen that has no explicit filter params in
- * the URL. Keyed by screen for the same reason the rail is (see
- * screenScope.ts): a filter set on one screen never reappears on another.
- * A page under a screen, such as a route dossier, is left alone. This targets a
- * distinct, smaller friction than PresetMenu's named saved views: a single
- * "remember what I was just looking at" slot rather than durable, named,
- * multi-slot filter sets — this only removes the friction of every anonymous
- * page load starting from a blank filter state, it doesn't let a visitor
- * save/name/switch between multiple filter sets the way a saved view does.
- *
- * Signed-in users are unaffected: this hook no-ops once `session` is
- * present.
+ * Remember the last-used date range/DOW/time-band/service/routes filter per agency
+ * and screen in localStorage, and restore it on a fresh visit to that screen
+ * that has no explicit filter params in the URL. Keyed by screen for the
+ * same reason the rail is (see screenScope.ts): a filter set on one screen
+ * never reappears on another. A page under a screen, such as a route
+ * dossier, is left alone. This targets a distinct, smaller friction than
+ * PresetMenu's named saved views: a single "remember what I was just
+ * looking at" slot rather than durable, named, multi-slot filter sets —
+ * this only removes the friction of every page load starting from a blank
+ * filter state, it doesn't let a visitor save/name/switch between multiple
+ * filter sets the way a saved view does.
  */
-export function useAnonymousFilterPersistence(agencyId: number | null): void {
-  const { data: session, isLoading } = useSession();
+export function useFilterPersistence(agencyId: number | null): void {
   const [params, setParams] = useSearchParams();
   const screenName = screenOf(useLocation().pathname)?.screen ?? null;
   // Tracks which agency and screen we've already attempted a restore for, so
@@ -63,7 +58,7 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
   const restoredFor = useRef<string | null>(null);
 
   useEffect(() => {
-    if (isLoading || session || agencyId == null || screenName == null) return;
+    if (agencyId == null || screenName == null) return;
     const key = storageKey(agencyId, screenName);
 
     const hasAnyFilterParam = Boolean(
@@ -154,5 +149,5 @@ export function useAnonymousFilterPersistence(agencyId: number | null): void {
     // memoizes useSearchParams' return value on `location.search`, so this
     // only re-runs when the URL's query string actually changes, not on every
     // unrelated render.
-  }, [agencyId, screenName, isLoading, session, params, setParams]);
+  }, [agencyId, screenName, params, setParams]);
 }
