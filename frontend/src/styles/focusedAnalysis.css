@@ -4,18 +4,6 @@
 .focus-page p { line-height: 1.7; }
 .focus-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .focus-header p, .focus-muted { color: var(--text-secondary); font-size: 13px; }
-.focus-filters { display: flex; flex-wrap: wrap; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); }
-.focus-filters label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--text-secondary); }
-.focus-filters select, .focus-filters input { max-width: 235px; min-height: 38px; padding: 6px 9px; }
-/* Present only while a change is pending, so the resting bar carries no
-   disabled button. Filled (via `.btn--primary`) and aligned to the controls'
-   baseline so it reads as the action, not as another field; the scoped
-   selector outranks `.btn`'s own single-class height rule, letting it match
-   the 38px selects beside it instead of the shared control height. */
-.focus-filters .focus-filters__apply { align-self: end; height: auto; min-height: 38px; }
-/* Visually hidden: the Apply button's appearance is the sighted signal, and
-   this is the same fact for a screen reader. */
-.focus-filters__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .focus-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 /* A fallback for plain actions such as the route page's "save" button.
    `:not(.btn)` because a class+type selector outranks every single-class

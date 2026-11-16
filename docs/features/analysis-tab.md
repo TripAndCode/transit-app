@@ -440,10 +440,29 @@ response honoured that field.
 
 ### The scope sentence
 
-Pulse, Routes, Time, Why, Compare by periods and the Reports summary state
-the scope as one sentence above their content
-(`frontend/src/components/scope/ScopeSentence.tsx`), for example
+The scope sentence (`frontend/src/components/scope/ScopeSentence.tsx`) is
+the app's one filter component. Pulse, Routes, Time, Why, Day types &
+agencies and the Reports summary state the scope as one sentence above their
+content, for example
 「青森市バスの全路線を、9/1〜9/28のすべての曜日・全時間帯で、定時は5分以内として見る」.
+The other screens with filters use the same sentence and controls:
+
+| Screen | Scope | Sentence | Saved views / pin |
+|---|---|---|---|
+| A route's page | The URL's; the page's route is its routes baseline, never marked changed | Default; greyed by what none of its sections used (`mergeScopeApplied` over the stop delays, the summary strip's on-time list and the performance standard) | No |
+| Live | The URL's; a routes change also drops the map selection | `template="live"`: routes and tolerance, no period | No |
+| Day types & agencies ▸ Agencies | The URL's | `template="board"`: the period only; everything else it ignores is named in the note, from the endpoint's `scope_applied` | No |
+| Notebook | The open thread's `filter_ctx` (`source`), seeded from the URL's for a new thread | Default, without the tolerance clause unless the screen's URL sets one, which then shows as unused | No |
+
+`source` swaps the URL's scope for another one and its writer. `template`
+picks a sentence (`scope.sentence_live`, `scope.sentence_board`) for a screen
+the default would misdescribe. A condition such a sentence leaves out still
+appears in the not-used note when it is set and `applied` marks it unused.
+`actions={false}` leaves out the saved views and the pin, which hold and lay
+out the URL's scope. A sentence with a `template` never fetches the scope
+summary: its figures are one agency's over the scope's period, which the
+board (every agency) and Live (no period) do not count by, so their
+controls show without them.
 
 - **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
   scope into one labelled token per condition, in sentence order, and names
@@ -511,8 +530,9 @@ the scope as one sentence above their content
   figures cover the whole day (and every stop and direction). The request
   carries only the fields the summary answers to (`scopeSummaryQuery`), and
   only the controls that draw its figures fetch it.
-- **Live apply.** Every change writes the URL at once with `replace`;
-  there is no Apply button.
+- **Live apply.** A single-choice change writes at once, the URL's with
+  `replace`. The days and routes controls stage their picks behind their own
+  Apply, so a half-built selection never reaches the screen.
 - **Greying.** Each screen passes its main response's `scope_applied`. A
   set condition whose field is `false` renders struck through, in the
   sentence and in the pinned strip, with 「この画面では使われない条件です」
@@ -528,8 +548,8 @@ the scope as one sentence above their content
 - **Presets and reset.** Any visitor saves and loads named views, kept in
   this browser, beside the sentence (`PresetMenu`), or on the page heading's
   row when the page has a `ScopePageHeader`. 「条件をリセット」 appears once
-  any condition, the period included, differs from the default, and resets
-  the dates too.
+  any condition the sentence shows or its note names, the period included,
+  differs from the default, and resets the dates too.
 
 ## Request path
 

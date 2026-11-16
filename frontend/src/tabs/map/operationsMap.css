@@ -67,8 +67,8 @@
 .ops-map__loading { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 6px 13px; border-radius: 999px; color: var(--text-primary); background: var(--glass); box-shadow: var(--el-2); font-size: var(--text-xs); }
 .ops-map__empty { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--bg-page) 92%, transparent); }
 /* Reference panel: what the markers mean, and what they are. Stacked under
-   the filter dock, which owns the top-left corner -- the dock is a control the
-   operator acts on, this is text they read once, so the control keeps the
+   the playback dock, which owns the top-left corner -- the dock is a control
+   the operator acts on, this is text they read once, so the control keeps the
    reachable position. The marker disclosure used to be a second floating box
    pinned at a fixed `top` on the opposite side of the map, anchored to
    nothing; it is the same kind of content, so it lives here. Padded on the
@@ -95,7 +95,7 @@
 .ops-map__last-reported button:hover { color: var(--text-primary); background: var(--bg-soft); }
 
 /* Shared floating-control chrome: one glass fill/blur/border/elevation for
-   every control docked on the map (filter dock, legend, basemap switcher,
+   every control docked on the map (playback dock, legend, basemap switcher,
    fit-all button, day-playback rail) so they read as one system regardless
    of which component defines them, plus an exported `.map-chrome` class
    other map controls can adopt directly. Glass
@@ -235,44 +235,19 @@
 .ops-other-trips button small { overflow: hidden; color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
 .ops-other-trips button b { color: var(--color-warning-text); font-size: var(--text-xs); }
 
-/* Filter dock: a floating control on the map's top-left, in the same idiom as
-   the legend and the style picker, rather than a card above the map. The
-   translucent fill keeps the map legible underneath so the dock reads as
-   sitting on the map, not as a hole punched in it; depth comes from that
-   layering plus a soft shadow, never from motion or saturated color, since
-   this screen is watched for long stretches.
+/* Playback dock: a floating control on the map's top-left, in the same idiom
+   as the legend and the style picker. The translucent fill keeps the map
+   legible underneath; depth comes from that layering plus a soft shadow,
+   never from motion or saturated color, since this screen is watched for
+   long stretches.
 
    z-index is explicit because .ops-map__empty and .ops-map__loading cover the
    same corner: DOM order already puts the dock on top, but a later reorder
    shouldn't be able to bury a control behind a decorative overlay.
 
    Fill/blur/border/shadow come from the shared `.map-chrome` rule above; this
-   rule only carries the dock's own layout and its hover/dirty transition. */
-.ops-dock { position: absolute; top: 12px; left: 12px; z-index: var(--z-map-overlay); display: flex; align-items: stretch; max-width: calc(100% - 24px); border-radius: var(--radius-xl); overflow: hidden; transition: border-color var(--transition), box-shadow var(--transition); }
-
-/* The select carries a real minimum height rather than collapsing to its
-   text: stripping its chrome left the control's own box 21px tall inside a
-   51px chip, with the caption band above it merely focusing the select
-   instead of opening it -- so on touch the visible target and the working
-   one disagreed. The chip's padding shrinks by the same amount the control
-   grows, keeping the dock's height roughly where it was.
-
-   Each filter is a chip: its label rides above the value in the same cell, so
-   the pair costs one column instead of a label column plus a control column.
-   The select keeps its native behaviour (keyboard, mobile picker) and only
-   loses its chrome -- the chip is the chrome. */
-.ops-dock label { display: flex; min-width: 0; flex-direction: column; gap: 0; padding: 4px 14px 5px; font-size: var(--text-xs); letter-spacing: .05em; color: var(--text-tertiary); cursor: pointer; }
-.ops-dock label + label { border-left: 1px solid var(--card-border); }
-/* Capped because a native select sizes itself to its widest option, and the
-   pattern list carries full route names -- left alone, one long name sets the
-   dock's width for every state. The value truncates instead. */
-.ops-dock select { max-width: 150px; min-height: 28px; padding: 0 16px 0 0; border: 0; border-radius: 0; color: var(--text-primary); background: transparent; font-size: var(--text-sm); font-weight: 600; text-overflow: ellipsis; appearance: none; -webkit-appearance: none; cursor: pointer;
-  /* Caret drawn here rather than left to the native control, which reserves
-     its own wider gutter and would reintroduce the chrome this chip removes. */
-  background-image: linear-gradient(45deg, transparent 50%, var(--text-tertiary) 50%), linear-gradient(135deg, var(--text-tertiary) 50%, transparent 50%);
-  background-position: right 5px center, right 1px center; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
-.ops-dock select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
-.ops-dock select:disabled { color: var(--text-tertiary); cursor: default; }
+   rule only carries the dock's own layout. */
+.ops-dock { position: absolute; top: 12px; left: 12px; z-index: var(--z-map-overlay); display: flex; align-items: center; max-width: calc(100% - 24px); padding: 6px; border-radius: var(--radius-xl); }
 
 @keyframes ops-spin { to { transform: rotate(360deg); } }
 
@@ -321,36 +296,12 @@
      paint over the zoom buttons. */
   .ops-map-ref { right: 48px; left: 8px; max-width: none; }
   .ops-map-ref__peek { left: 8px; }
-  /* The chips share the width that's left instead of keeping their desktop
-     size and being clipped by the dock's own overflow: at this width the
-     dock plus the zoom buttons no longer both fit at natural size. Captions
-     stay on one line and playback keeps only its icon, so the dock keeps the
-     one-row height the reference panel below it is placed against. */
-  .ops-dock { right: 48px; left: 8px; }
-  .ops-dock label { flex: 1 1 0; padding: 4px 10px 5px; white-space: nowrap; overflow: hidden; }
-  .ops-dock select { max-width: none; width: 100%; }
+  /* Playback keeps only its icon, leaving the row to the reference panel
+     and the zoom buttons. */
+  .ops-dock { left: 8px; }
   .ops-dock__playback-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
-/* Present only while a change is pending, so the resting dock carries no
-   disabled button. Full-height and filled, flush with the dock's edge, so it
-   never reads as a third dropdown. Two classes outrank .btn's one whatever
-   the chunk order, and the flush edge takes no lift. */
-.ops-dock .ops-dock__apply { flex: 0 0 auto; height: auto; padding: 0 17px; border-left: 1px solid var(--card-border); border-radius: 0; box-shadow: none; }
-.ops-dock .ops-dock__apply:hover { background: var(--accent-strong); }
-.ops-dock .ops-dock__apply:hover,
-.ops-dock .ops-dock__apply:active {
-  box-shadow: none;
-  transform: none;
-}
-
-/* Pending state: the dock's own edge carries the signal alongside the Apply
-   button's appearance, so the operator sees that the screen and the controls
-   disagree without a banner elbowing the layout around. */
-.ops-dock--dirty { border-color: var(--accent); box-shadow: var(--el-2), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
-/* Visually hidden, not displayed: the Apply button's appearance is the sighted
-   signal, and this is the same fact for a screen reader. */
-.ops-dock__pending { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* Export lives with the counts it exports, in the queue panel, not among the
    filters: narrowing the view and taking the data away are different actions,
@@ -389,7 +340,7 @@
 .ops-playback__clock small { font-size: var(--text-xs); color: var(--text-tertiary); }
 .ops-playback__status { flex: 1 1 200px; margin: 0; font-size: var(--text-sm); color: var(--text-tertiary); }
 
-.ops-dock__playback { align-self: center; margin-right: 10px; }
+.ops-dock__playback { margin: 0; }
 
 /* BP.sm */
 @media (max-width: 640px) {

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import en from "./locales/en.json";
 import ja from "./locales/ja.json";
-import { design } from "./design";
 
 // The compare ranking and the dow reports split days by the agency's day
 // types, so their weekend side is 土日祝: public holidays and any other day the
@@ -23,12 +22,10 @@ const DAY_TYPE_STRINGS: Record<string, string> = {
   "overview.service_split.see_compare": ja.overview.service_split.see_compare,
 };
 
-// The dow=weekend filter, on the scope sentence and Ask's filter bar alike,
-// keeps ISO Saturday and Sunday only, so its weekend side is 土日.
+// The dow=weekend filter keeps ISO Saturday and Sunday only, so its weekend side is 土日.
 const SAT_SUN_STRINGS: Record<string, string> = {
   "scope.control.weekend": ja.scope.control.weekend,
   "scope.days_weekend": ja.scope.days_weekend,
-  "design.weekend": design.ja.weekend,
 };
 
 describe("ja day-group wording", () => {
@@ -49,6 +46,5 @@ describe("en day-group wording", () => {
     expect(en.reports.desc.dow_weekday).toMatch(/holiday/i);
     expect(en.ask.card.param.service.weekend).toMatch(/holiday/i);
     expect(en.scope.control.weekend).not.toMatch(/holiday/i);
-    expect(design.en.weekend).not.toMatch(/holiday/i);
   });
 });

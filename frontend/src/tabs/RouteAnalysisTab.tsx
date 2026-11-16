@@ -4,7 +4,7 @@ import { RouteTitleTransition } from "../components/RouteTitleTransition";
 import { RouteLabel } from "../components/RouteLabel";
 import { useTranslation } from "react-i18next";
 import { rangeNotRetainedFloor } from "../api/client";
-import { useRouteShape, useRouteTrips } from "../api/hooks";
+import { usePerformanceStandards, useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { ScopeRouteContext, scopeToQueryString, useScope, isoDaysBefore } from "../api/scope";
 import { useIsAdmin } from "../api/useIsAdmin";
@@ -16,10 +16,11 @@ import { PinRouteButton } from "../components/PinRouteButton";
 import { ExportMenu } from "../components/ExportMenu";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import type { RouteShapeStop } from "../api/types";
-import { AnalysisFilters } from "../components/analysis/AnalysisFilters";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { RiseHeadline, SelectedStopAside, StopDelayTable, StopDelayTrend } from "../components/analysis/RouteStopDelay";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
+import { useAgencyOnTime } from "../components/analysis/agencyOnTime";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { RouteVariantPicker } from "../components/analysis/RouteVariantPicker";
 import { initialStop, largestRises, pickableVariants, previousWindow, windowDays } from "../components/analysis/routeDossier";
@@ -28,7 +29,7 @@ import { scrubMapPositions, type ScrubMapPosition } from "../components/charts/m
 import { timeWindowForBand } from "../components/charts/mareyLayout";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
-import { scopeTitle } from "../components/scope/scopePhrases";
+import { mergeScopeApplied, scopeTitle, type ScopeApplied } from "../components/scope/scopePhrases";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
@@ -83,6 +84,19 @@ export function RouteAnalysisTab() {
   // picked shape that isn't the route's, and the two windows must agree.
   const previousShape = query.data?.shape_id ?? (variantParam || null);
   const previous = useRouteShape(id, compare && (variantParam || query.data) ? route : null, prevCtx, previousShape);
+  // The same requests the summary strip and the performance standard make,
+  // read here for the conditions their figures used.
+  const onTimeList = useAgencyOnTime(route == null ? null : id, ctx);
+  const standards = usePerformanceStandards(id, ctx, route != null, route ?? undefined);
+  // A section that failed used nothing. While a section reloads, the last
+  // complete answer stands, so the strike-through does not flicker off and
+  // back on with every change.
+  const sectionApplied = (section: { data?: { scope_applied?: ScopeApplied }; error: unknown }) =>
+    section.error ? {} : section.data?.scope_applied;
+  const mergedApplied = mergeScopeApplied(sectionApplied(query), sectionApplied(onTimeList), sectionApplied(standards));
+  const [heldApplied, setHeldApplied] = useState<ScopeApplied>(undefined);
+  if (mergedApplied != null && JSON.stringify(mergedApplied) !== JSON.stringify(heldApplied)) setHeldApplied(mergedApplied);
+  const scopeApplied = mergedApplied ?? heldApplied;
   const names = useRouteNames(id);
   const { stopName, settled: stopNamesSettled } = usePlaceLabels(id, ctx.stop != null);
   const isAdmin = useIsAdmin();
@@ -200,8 +214,8 @@ export function RouteAnalysisTab() {
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
     {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
-    <AnalysisFilters agencyId={id} />
-    {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
+    <ScopeSentence applied={scopeApplied} actions={false} />
+    {!route ? <EmptyState title={t("choose")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t, names.format)}
       recoveries={buildFilterCtxRecoveries({
         ctx: pageRoute == null ? ctx : { ...ctx, routes: [] },

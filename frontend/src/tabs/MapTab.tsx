@@ -1,9 +1,11 @@
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
-import { Link } from "react-router-dom";
+import { use, useEffect, useEffectEvent, useRef, useState, type CSSProperties } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { routeHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
-import { FilterDock } from "./map/FilterDock";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { applyLiveScopePatch, LIVE_SCOPE_APPLIED, liveShapeScope } from "./map/liveScope";
+import { PlaybackToggle } from "./map/PlaybackToggle";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { Tooltip } from "../components/Tooltip";
 import { BottomSheet, type SnapPoint } from "../components/BottomSheet";
@@ -16,7 +18,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
-import { useScope } from "../api/scope";
+import { DataEndContext, useScope, type ScopePatch } from "../api/scope";
 import { scopeWindow, windowSide } from "../api/onTimeDefault";
 import { durationLabel, windowLabels } from "../components/scope/scopePhrases";
 import { useUrlPatch, useUrlState, type UrlPatch } from "../api/useUrlState";
@@ -154,6 +156,11 @@ export function MapTab() {
   const { t, i18n } = useTranslation();
   const { t: td } = useTranslation("design");
   const [ctx] = useScope();
+  const dataEnd = use(DataEndContext);
+  const [, setParams] = useSearchParams();
+  function updateScope(patch: ScopePatch) {
+    setParams((prev) => applyLiveScopePatch(prev, patch), { replace: true });
+  }
   const [now, setNow] = useState(Date.now);
   // The URL is the source of truth for the *current* view (so copy-link
   // reproduces it), but localStorage stays the source of truth for a fresh
@@ -188,7 +195,6 @@ export function MapTab() {
     route?: string | null;
     direction?: string | null;
     trip?: string | null;
-    routes?: string[];
   }) {
     const patch: UrlPatch = {};
     if ("route" in next) {
@@ -197,7 +203,6 @@ export function MapTab() {
     }
     if ("direction" in next) patch.direction = next.direction ?? null;
     if ("trip" in next) patch.trip = next.trip ?? null;
-    if ("routes" in next) patch.routes = next.routes ?? null;
     patchUrl(patch);
   }
   const [queueWidth, setQueueWidth] = useState(readQueueWidth);
@@ -318,7 +323,7 @@ export function MapTab() {
   const directionTrips = directions.find((direction) => direction.key === effectiveDirection)?.trips ?? [];
   const effectiveTrip = directionTrips.find((trip) => trip.trip_id === selectedTripId) ?? directionTrips[0] ?? null;
   const progressQuery = useLiveTripProgress(id, effectiveTrip?.trip_id ?? null);
-  const shapeQuery = useRouteShape(id, effectiveRoute, ctx);
+  const shapeQuery = useRouteShape(id, effectiveRoute, liveShapeScope(ctx, dataEnd));
   const stopBoundsQuery = useStopBounds(id);
   const stopProfileQuery = useRouteStopProfile(id, effectiveRoute);
   // The live table keeps only the last few days, so a feed stalled longer has
@@ -703,6 +708,8 @@ export function MapTab() {
         )}
       </header>
 
+      <ScopeSentence source={{ scope: ctx, update: updateScope }} applied={LIVE_SCOPE_APPLIED} template="live" actions={false} />
+
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner
           error={liveQuery.error ?? summaryQuery.error}
@@ -812,14 +819,7 @@ export function MapTab() {
           {/* Rendered after the overlays that cover this corner
               (.ops-map__empty, .ops-map__loading) so a control is never
               buried behind decoration; the CSS pins that with a z-index too. */}
-          <FilterDock
-            agencyId={id}
-            applied={ctx.routes}
-            onApply={(routes) => {
-              patchSelection({ routes, route: null, trip: null, direction: null });
-            }}
-            playback={{ active: playbackOn, onToggle: () => setPlaybackOn(!playbackOn) }}
-          />
+          <PlaybackToggle active={playbackOn} onToggle={() => setPlaybackOn(!playbackOn)} />
           {playbackOn && (
             <PlaybackRail
               controller={playback}

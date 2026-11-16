@@ -4,6 +4,7 @@ import { SCOPE_EXTRAS_NONE, type Scope } from "../../api/scope";
 import {
   durationLabel,
   isScopeConditionOff,
+  mergeScopeApplied,
   periodDays,
   routeTokenPlates,
   scopeTitle,
@@ -301,5 +302,19 @@ describe("durationLabel", () => {
     const ja = i18n.getFixedT("ja");
     expect([45, 60, 90, 300].map((sec) => durationLabel(sec, en))).toEqual(["45\u00a0s", "1\u00a0min", "1.5\u00a0min", "5\u00a0min"]);
     expect([45, 60, 90, 300].map((sec) => durationLabel(sec, ja))).toEqual(["45秒", "1分", "1.5分", "5分"]);
+  });
+});
+
+describe("mergeScopeApplied", () => {
+  it("counts a condition as used when any section used it", () => {
+    expect(mergeScopeApplied({ late: false, stop: false, routes: true }, { late: true, stop: false })).toEqual({
+      late: true,
+      stop: false,
+      routes: true,
+    });
+  });
+
+  it("knows nothing until every section has answered", () => {
+    expect(mergeScopeApplied({ late: false }, undefined)).toBeUndefined();
   });
 });

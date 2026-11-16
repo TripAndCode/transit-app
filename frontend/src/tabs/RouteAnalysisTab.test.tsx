@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { ApiError } from "../api/client";
@@ -635,5 +635,107 @@ describe("RouteAnalysisTab where delay grows", () => {
     const previousCall = useRouteShape.mock.calls.find((call) => call[2].from === "2026-08-25");
     expect(previousCall?.[2]).toMatchObject({ from: "2026-08-25", to: "2026-09-23" });
     expect(previousCall?.[3]).toBe("out");
+  });
+
+  describe("scope sentence", () => {
+    function Probe() {
+      const [params] = useSearchParams();
+      return <div data-testid="params">{params.toString()}</div>;
+    }
+
+    const ROUTE_SHAPE_APPLIED = {
+      from: true, to: true, dow: true, time_band: true, service: true, routes: true,
+      hour: false, stop: false, dir: false, late: false, early: false,
+    };
+    // The on-time list's own conditions; the route's on-time rate is read from it.
+    const ON_TIME_APPLIED = {
+      from: true, to: true, dow: true, time_band: true, service: true, routes: true,
+      hour: false, stop: false, dir: false, late: true, early: true,
+    };
+    // An agency with no on-time target: its standards use the dates alone.
+    const STANDARDS_APPLIED = {
+      from: true, to: true, dow: false, time_band: false, service: false, routes: false,
+      hour: false, stop: false, dir: false, late: false, early: false,
+    };
+
+    const SHAPE_ANSWERED = {
+      data: { ...shape([]), scope_applied: ROUTE_SHAPE_APPLIED }, isPending: false, error: null, refetch: vi.fn(),
+    };
+
+    function renderRoutePage(search: string, routeShape: () => unknown = () => SHAPE_ANSWERED) {
+      mockSupportHooks();
+      vi.spyOn(hooks, "useRouteShape").mockImplementation((() => routeShape()) as never);
+      vi.spyOn(hooks, "useReport").mockImplementation(((_id: number | null, type: string) => ({
+        data: type === "on_time" ? { report_type: "on_time", rows: [], definition: { late_tolerance_sec: 300, early_tolerance_sec: 60 }, scope_applied: ON_TIME_APPLIED } : undefined,
+        isPending: false, error: null, refetch: vi.fn(),
+      })) as never);
+      vi.spyOn(hooks, "usePerformanceStandards").mockReturnValue({
+        data: { scope_applied: STANDARDS_APPLIED, rows: [], ctx: {}, disclaimer: "", on_time_definition: null },
+        error: null, refetch: vi.fn(),
+      } as never);
+      const tree = () => (
+        <MemoryRouter initialEntries={[`/agencies/1/routes/R1${search}`]}>
+          <Routes>
+            <Route
+              path="/agencies/:agencyId/routes/:routeCode"
+              element={
+                <ScopeRouteContext value="R1">
+                  <RouteAnalysisTab />
+                  <Probe />
+                </ScopeRouteContext>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      );
+      const { rerender } = renderWithProviders(tree());
+      return () => rerender(tree());
+    }
+
+    const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+    it("opens an old link's conditions in the scope sentence, its own route not marked as a change", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23&dow=weekday&time_band=morning");
+      expect(region()).toHaveTextContent("Viewing R1 of");
+      expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--on");
+      expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--on");
+      expect(screen.getByRole("button", { name: "R1" })).not.toHaveClass("scope-token--on");
+      // The routes control stages a pick behind its own Apply, which stays
+      // disabled until the pick differs from what the screen shows.
+      fireEvent.click(screen.getByRole("button", { name: "R1" }));
+      const picker = screen.getByRole("dialog", { name: "Routes" });
+      expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
+    });
+
+    it("strikes through only what no section of the page uses", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1&late=120");
+      expect(screen.getByRole("button", { name: "within 2 min" })).not.toHaveClass("scope-token--off");
+      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+    });
+
+    it("counts a section that failed as using nothing, so the others still name what went unused", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => ({
+        data: undefined, isPending: false, error: new Error("route-shape failed"), refetch: vi.fn(),
+      }));
+      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+    });
+
+    it("keeps naming an unused condition while a section reloads", () => {
+      let shapeResult: unknown = SHAPE_ANSWERED;
+      const rerender = renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => shapeResult);
+      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+      shapeResult = { data: undefined, isPending: true, error: null, refetch: vi.fn() };
+      rerender();
+      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+    });
+
+    it("writes a changed time band as the canonical param", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23");
+      fireEvent.click(screen.getByRole("button", { name: "all hours" }));
+      fireEvent.click(screen.getByRole("radio", { name: "Evening (17–20)" }));
+      const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
+      expect(params.get("time_band")).toBe("evening");
+      expect(params.has("routes")).toBe(false);
+    });
   });
 });

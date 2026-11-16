@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { REPORT_ROWS_MAX, useOverviewSummary, useReport } from "../../api/hooks";
+import { useOverviewSummary, useReport } from "../../api/hooks";
+import { useAgencyOnTime, WHOLE_LIST } from "./agencyOnTime";
 import { scopeToQueryString, type Scope } from "../../api/scope";
 import type { OverviewConcentration, ReportFigures } from "../../api/types";
 import { reportHref } from "../../routes/destinations";
@@ -11,8 +12,6 @@ import { routeStanding } from "./routeDossier";
 import { RouteReferenceNote } from "./RouteReference";
 import "../../styles/focusedAnalysis.css";
 
-/** Every route the lists rank, so this route's place among them is known. */
-const WHOLE_LIST = { limit: REPORT_ROWS_MAX } as const;
 
 function Figure({
   label,
@@ -62,7 +61,7 @@ export function RouteSummaryStrip({ agencyId, route, ctx }: { agencyId: number; 
   const { t } = useTranslation("design");
   const agencyWide = { ...ctx, routes: [] };
   const ranking = useReport(agencyId, "ranking", agencyWide, WHOLE_LIST);
-  const onTime = useReport(agencyId, "on_time", agencyWide, WHOLE_LIST);
+  const onTime = useAgencyOnTime(agencyId, ctx);
   const worst = useReport(agencyId, "worst_5min", agencyWide, WHOLE_LIST);
   const overview = useOverviewSummary(agencyId, agencyWide);
   const routeQuery = scopeToQueryString({ ...ctx, routes: [route] });

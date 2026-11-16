@@ -46,6 +46,7 @@ export function PeriodBrush({
   from,
   to,
   onCommit,
+  disabled = false,
 }: {
   days: ScopeSummary["days"];
   windowFrom: string | null;
@@ -53,6 +54,9 @@ export function PeriodBrush({
   from: string;
   to: string;
   onCommit: (from: string, to: string) => void;
+  /** No drag starts on the track. Its handles are buttons, which a disabled
+   *  fieldset around the brush already disables. */
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const titleId = useId();
@@ -82,7 +86,7 @@ export function PeriodBrush({
   }
 
   function onPointerDown(e: PointerEvent<HTMLDivElement>) {
-    if (e.button !== 0) return;
+    if (disabled || e.button !== 0) return;
     const edge = ((e.target as HTMLElement).dataset?.edge as Edge | undefined) ?? null;
     const i = dayAt(e.clientX);
     const anchor = edge === "start" ? end : edge === "end" ? start : i;

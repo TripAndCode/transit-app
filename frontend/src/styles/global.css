@@ -1233,7 +1233,7 @@ summary::-webkit-details-marker { display: none; }
 @media print {
   body { background: white; }
   .app-shell { display: block !important; height: auto !important; }
-  .app-shell > aside, nav, .focus-filters, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
+  .app-shell > aside, nav, .focus-actions, .focus-tabs, .app-notice-stack, .export-menu { display: none !important; }
   main { overflow: visible !important; }
   /* An admin's raw ids are working text, not part of the paper. */
   .scope-id { display: none !important; }

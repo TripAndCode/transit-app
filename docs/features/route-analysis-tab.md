@@ -38,7 +38,18 @@ saved-analysis bookmarks — scoped to exactly one selected route.
 
 What the user sees/does:
 
-- **Route/keito filter** — `frontend/src/components/analysis/AnalysisFilters.tsx`.
+- **Scope sentence** — the shared `ScopeSentence` (see `analysis-tab.md` ▸
+  The scope sentence), without saved views or the pin, since the page has
+  its own browser-local save. Its routes token names the page's route and is
+  never marked as a change; picking one route there moves the page to it,
+  and picking several hands them to the Routes list (`RouteDossier`).
+  Period, days and timetable, time band and the on-time tolerance apply as
+  on every other screen. A condition is struck through only when none of
+  the stop delays (`route-shape`), the summary strip's on-time list
+  (`useAgencyOnTime` in `components/analysis/agencyOnTime.ts`) and the performance standard used it, so
+  a stop, direction or hour carried over from another screen is named as
+  unused. A section that failed counts as using nothing, and while a section
+  reloads the last complete answer stands.
   Inside the dossier the scope always holds the path's one route (see
   `ScopeRouteContext` above), and the empty state offers no "clear the
   route filter" recovery there, since the route is the page rather than a
@@ -131,7 +142,6 @@ What the user sees/does:
 |---|---|
 | `frontend/src/tabs/RouteDossier.tsx` | Dossier route: provides the path's route through `ScopeRouteContext`, follows a different single route, hands several to the Routes list |
 | `frontend/src/tabs/RouteAnalysisTab.tsx` | Tab shell: compare toggle, stop selection, sub-tab state, scrub second |
-| `frontend/src/components/analysis/AnalysisFilters.tsx` | Route/keito filter UI |
 | `frontend/src/components/analysis/StopChart.tsx` | Per-stop delay chart (current + optional previous-week overlay) |
 | `frontend/src/components/charts/MareyDiagram.tsx` | Time-distance diagram of one day's trips, with optional previous-week ghost trips |
 | `frontend/src/components/charts/mareyLayout.ts` | Pure layout/geometry math (axes, time windows, trip polylines) behind the Marey diagram |
@@ -185,8 +195,8 @@ What the user sees/does:
    route name in the ranking → URL `/agencies/:agencyId/routes/<route_code>`.
 3. Expect the stop chart, Marey diagram, map, and by-stop table to
    populate; switch between the four sub-tabs. Pick one different route in
-   the filter — expect the path to move to that route; pick several —
-   expect the Routes list.
+   the scope sentence's routes control and press Apply — expect the path to
+   move to that route; pick several — expect the Routes list.
 4. Toggle "Compare with the previous period" — expect a second series on the
    trend chart for the equal-length window before the selected one, and ghost
    trips behind the Marey diagram, or a "no comparison data" message where

@@ -77,6 +77,28 @@ describe("ScopeSentence", () => {
     expect(screen.queryByRole("button", { name: "Aomori" })).toBeNull();
   });
 
+  it("disables its tokens, Reset and an already open popover's controls", () => {
+    function Disabling() {
+      const [disabled, setDisabled] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setDisabled(true)}>
+            disable
+          </button>
+          <ScopeSentence disabled={disabled} />
+        </>
+      );
+    }
+    mount("?from=2026-09-01&to=2026-09-30&dow=weekday", undefined, <Disabling />);
+    fireEvent.click(screen.getByRole("button", { name: "all hours" }));
+    const popover = screen.getByRole("dialog", { name: "Time of day" });
+    fireEvent.click(screen.getByRole("button", { name: "disable" }));
+    expect(screen.getByRole("dialog", { name: "Time of day" })).toBe(popover);
+    for (const radio of within(popover).getAllByRole("radio")) expect(radio).toBeDisabled();
+    expect(screen.getByRole("button", { name: "weekdays" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reset conditions" })).toBeDisabled();
+  });
+
   it("opens a condition's popover, moves focus in, and returns it on Escape", async () => {
     mount();
     const token = screen.getByRole("button", { name: "every day" });
