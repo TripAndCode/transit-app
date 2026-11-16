@@ -5,6 +5,7 @@ import tarfile
 import zlib
 from datetime import date
 
+import psycopg2
 import pytest
 
 from pipeline.ingest import IngestReport
@@ -19,6 +20,7 @@ from pipeline.ingest import IngestReport
         tarfile.ReadError("corrupt"),
         EOFError(),
         zlib.error(),
+        psycopg2.DataError("invalid input syntax for type integer"),
     ],
 )
 def test_bytes_that_never_decode_are_permanent(exc):
@@ -33,5 +35,6 @@ def test_a_store_or_io_failure_is_transient_on_its_utc_day(exc):
     report.record(exc, "20260401")
     report.record(exc, None)
     assert report.transient_days == {date(2026, 4, 1)}
+    assert report.errors == {date(2026, 4, 1): f"{type(exc).__name__}: {exc}"}
     assert report.transient_unplaced == 1
     assert report.permanent == 0

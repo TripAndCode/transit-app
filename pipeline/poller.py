@@ -44,8 +44,9 @@ Feed URLs come only from the agencies table, and are fetched through
 `pipeline.url_guard.safe_urlopen` (http(s) only, every redirect hop vetted,
 body capped). A failed fetch, archive write or push is logged and counted, and
 the next poll goes ahead. SIGTERM ends the loop once the cycle in flight has
-archived what arrived; a fetch still running ends at its deadline. The
-tarballs stay in the archive volume; nothing uploads or prunes them.
+archived what arrived; a fetch still running ends by its deadline, counted
+from its start. The tarballs stay in the archive volume; nothing uploads or
+prunes them.
 """
 
 from __future__ import annotations
@@ -86,6 +87,12 @@ FETCH_WORKERS = 4
 POLL_CH_TIMEOUT_SEC = 15
 REPROBE_INTERVAL_SEC = 60 * 60
 INGESTED_MARKER = ".ingested-through"
+# Beside the marker: the day a transient failure holds it at, how many UTC
+# days' steps have held it there, and the last such day.
+HELD_MARKER = ".ingest-held"
+# A day held this many UTC days running is passed over, so one file failing
+# the same way every time cannot pin the marker and grow the window forever.
+MAX_HOLDS = 3
 
 _STAGE_ORDER = ("promote", "ingest", "analyze")
 _DAY_DIR = re.compile(r"[0-9]{8}")
@@ -173,6 +180,26 @@ def mark_ingested_through(agency_rt_dir: Path, day: str) -> None:
     os.replace(part, marker)
 
 
+def _record_hold(agency_rt_dir: Path, day: str, utc_today: date) -> int:
+    """Count one more UTC day holding the marker at *day* (a rerun on the
+    same UTC day counts once) and return the count."""
+    held = agency_rt_dir / HELD_MARKER
+    try:
+        prev_day, prev_count, counted_on = held.read_text().split()
+        count = int(prev_count)
+    except (FileNotFoundError, ValueError):
+        prev_day, count, counted_on = "", 0, ""
+    today = f"{utc_today:%Y%m%d}"
+    if prev_day != day:
+        count, counted_on = 0, ""
+    if counted_on != today:
+        count += 1
+    part = held.with_name(held.name + ".part")
+    part.write_text(f"{day} {count} {today}\n")
+    os.replace(part, held)
+    return count
+
+
 def ingest_window(agency_rt_dir: Path) -> list[Path]:
     """The tarballs the next ingest reads: every one after the marker, plus
     the newest at or before it, whose UTC day holds the first hours of the
@@ -219,9 +246,10 @@ def _stage(conn, stage: str, agency_id: int, work: Callable[[], Any]) -> str:
     return OK
 
 
-def _ingest_stage(conn, ch_client, archive_root: Path, agency_id: int) -> str:
+def _ingest_stage(conn, ch_client, archive_root: Path, agency_id: int, *, utc_today: date | None = None) -> str:
     """Ingest the agency's window and move its marker as far as the run
     allows. Any OSError here is this agency's failed ingest, not the step's."""
+    utc_today = utc_today or datetime.now(timezone.utc).date()
     from pipeline.ingest import IngestReport, ingest
 
     agency_rt = rt_dir(archive_root, agency_id)
@@ -251,7 +279,23 @@ def _ingest_stage(conn, ch_client, archive_root: Path, agency_id: int) -> str:
             logger.warning("poller: agency %s ingest left files a rerun may store; its marker stays", agency_id)
             return FAILED
         if report.transient_days:
-            hold = f"{min(report.transient_days) - timedelta(days=1):%Y%m%d}"
+            first = min(report.transient_days)
+            hold = f"{first - timedelta(days=1):%Y%m%d}"
+            held = _record_hold(agency_rt, hold, utc_today)
+            if held >= MAX_HOLDS:
+                logger.error(
+                    "poller: agency %s ingest has failed on day %s in %d UTC days' steps (%s); its marker moves "
+                    "past it, and `gtfs_pipeline.py ingest %s --agency-id %s` reads it again by hand",
+                    agency_id,
+                    f"{first:%Y%m%d}",
+                    held,
+                    report.errors.get(first, "no error recorded"),
+                    agency_rt,
+                    agency_id,
+                )
+                mark_ingested_through(agency_rt, _tarball_day(tarballs[-1]))
+                (agency_rt / HELD_MARKER).unlink(missing_ok=True)
+                return OK
             mark_ingested_through(agency_rt, hold)
             logger.warning(
                 "poller: agency %s ingest failed on day(s) %s for a reason a rerun may clear; ingested through %s",
@@ -261,6 +305,7 @@ def _ingest_stage(conn, ch_client, archive_root: Path, agency_id: int) -> str:
             )
             return FAILED
         mark_ingested_through(agency_rt, _tarball_day(tarballs[-1]))
+        (agency_rt / HELD_MARKER).unlink(missing_ok=True)
         return OK
     except OSError:
         logger.exception("poller: agency %s ingest could not stage its archive", agency_id)
@@ -449,9 +494,10 @@ class Poller:
 
     def _collect(self, roster: list[tuple[int, str]], stores: Stores | None) -> None:
         """Fetch every feed on the pool, and archive then push each poll as it
-        arrives. A fetch not back by the cycle's deadline is dropped and never
-        written, so once this returns no later write lands in a day directory
-        the daily step may be packing."""
+        arrives. When the loop ends (the cycle's deadline, or a stop), a fetch
+        already back is archived, unpushed; one still running is dropped and
+        never written, so once this returns no later write lands in a day
+        directory the daily step may be packing."""
         if self._pool is None:
             self._pool = ThreadPoolExecutor(max_workers=self._fetch_workers, thread_name_prefix="poller-fetch")
         futures: dict[Future, tuple[int, str]] = {
@@ -470,8 +516,11 @@ class Poller:
                 aid, url = futures[fut]
                 pushing = self._take(aid, url, fut.result(), stores if pushing else None) and pushing
         for fut in remaining:
-            fut.cancel()
             aid, url = futures[fut]
+            if fut.done() and not fut.cancelled():
+                self._take(aid, url, fut.result(), None)
+                continue
+            fut.cancel()
             self.fetch_failures[aid] += 1
             logger.warning("poller: agency %s fetch of %s dropped, past its deadline", aid, redact_url(url))
         if stores is None:

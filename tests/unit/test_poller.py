@@ -389,26 +389,26 @@ def test_each_poll_is_archived_then_pushed_under_its_member_name(tmp_path, polle
 
 def test_a_fetch_error_is_counted_and_the_loop_keeps_polling(tmp_path, caplog):
     stop = threading.Event()
-    calls = Counter()
-    lock = threading.Lock()
+    pushes = Counter()
 
     def fetch(url):
-        with lock:
-            calls[url] += 1
-            if sum(calls.values()) >= 6:
-                stop.set()
         if "broken" in url:
             raise OSError(f"connection refused fetching {url}")
         return b"poll"
 
+    def push(agency_id, raw, captured_at, source_file, stores):
+        pushes[agency_id] += 1
+        if pushes[agency_id] == 3:
+            stop.set()
+        return 1
+
     agencies = [(1, "https://broken.example/feed?key=SECRET"), (2, "https://feed.example/2.pb")]
     p = _poller(tmp_path, agencies=agencies, fetch=fetch, interval_sec=0.001, stop=stop)
-    with patch("pipeline.poller.ingest_pushed_poll", return_value=1) as push:
+    with patch("pipeline.poller.ingest_pushed_poll", side_effect=push):
         p.run()
 
     assert p.fetch_failures[1] == 3
     assert p.pushed[2] == 3
-    assert push.call_count == 3
     assert "SECRET" not in caplog.text
 
 
@@ -585,3 +585,64 @@ def test_a_failing_re_probe_does_not_stop_the_loop(tmp_path):
     p = _poller(tmp_path, reprobe=broken)
     p.maybe_start_reprobe()
     p.join_background()
+
+
+def test_a_fetch_back_when_the_cycle_stops_is_still_archived(tmp_path, pollers):
+    first_pushing = threading.Event()
+    stop = threading.Event()
+
+    def fetch(url):
+        if url.endswith("/2.pb"):
+            assert first_pushing.wait(5)
+        return b"poll"
+
+    def push(agency_id, raw, captured_at, source_file, stores):
+        first_pushing.set()
+        time.sleep(0.3)
+        stop.set()
+        return 1
+
+    p = _poller(tmp_path, agencies=_TWO, fetch=fetch, stop=stop)
+    pollers.append(p)
+    with patch("pipeline.poller.ingest_pushed_poll", side_effect=push) as pushed:
+        p.poll_cycle()
+    assert pushed.call_count == 1
+    assert (tmp_path / "2" / "rt" / "20260402" / "TripUpdate_100000.pb").read_bytes() == b"poll"
+    assert p.fetch_failures == {}
+
+
+def test_a_day_held_on_three_utc_days_is_passed_over(tmp_path, caplog):
+    rt = tmp_path / "1" / "rt"
+    _tarballs(rt, "20260331", "20260401", "20260402")
+    poller.mark_ingested_through(rt, "20260331")
+
+    def fill(report):
+        report.transient_days.add(date(2026, 4, 1))
+        report.errors[date(2026, 4, 1)] = "KeyError: 'route_42'"
+
+    outcomes = []
+    with _ingest_reporting(fill), patch("pipeline.runs.record_run", _run_row):
+        for today in (date(2026, 4, 3), date(2026, 4, 3), date(2026, 4, 4), date(2026, 4, 5)):
+            outcomes.append(poller._ingest_stage(MagicMock(), MagicMock(), tmp_path, 1, utc_today=today))
+            if len(outcomes) < 4:
+                assert poller.ingested_through(rt) == "20260331"
+    assert outcomes == [poller.FAILED, poller.FAILED, poller.FAILED, poller.OK]
+    assert poller.ingested_through(rt) == "20260402"
+    assert "20260401" in caplog.text and "KeyError: 'route_42'" in caplog.text
+    assert not (rt / poller.HELD_MARKER).exists()
+
+
+def test_a_hold_on_a_new_day_starts_counting_again(tmp_path):
+    rt = tmp_path / "1" / "rt"
+    _tarballs(rt, "20260331", "20260401", "20260402")
+    held_day = iter([date(2026, 4, 1), date(2026, 4, 1), date(2026, 4, 2), date(2026, 4, 2)])
+
+    def fill(report):
+        report.transient_days.add(next(held_day))
+
+    with _ingest_reporting(fill), patch("pipeline.runs.record_run", _run_row):
+        outcomes = [
+            poller._ingest_stage(MagicMock(), MagicMock(), tmp_path, 1, utc_today=date(2026, 4, n))
+            for n in (3, 4, 5, 6)
+        ]
+    assert outcomes == [poller.FAILED] * 4

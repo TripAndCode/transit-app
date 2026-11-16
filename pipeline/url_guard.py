@@ -220,19 +220,38 @@ def _check_deadline(deadline: float | None, url: str) -> None:
         raise FeedURLError(f"fetching {redact_url(url)} ran past its deadline")
 
 
+def _socket_of(resp) -> socket.socket | None:
+    """The socket under an ``http.client`` response, when it can be reached."""
+    sock = getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
+    return sock if isinstance(sock, socket.socket) else None
+
+
 def _read_capped(resp, max_bytes: int, deadline: float | None, url: str) -> bytes:
-    """The body, capped. With a *deadline* it is read in chunks, so the
-    deadline is checked between reads rather than once at the end."""
+    """The body, capped. With a *deadline*, each read takes only what has
+    arrived (``read1``) and the socket waits no longer than the time left, so
+    a body sent a byte at a time cannot outlast the deadline: a plain
+    ``read(n)`` blocks until n bytes come, and each byte restarts the socket's
+    own timeout."""
     if deadline is None:
         body = resp.read(max_bytes + 1)
         if len(body) > max_bytes:
             raise FeedURLError(f"response from {redact_url(url)} exceeded the {max_bytes}-byte cap")
         return body
+    read = getattr(resp, "read1", None) or resp.read
+    sock = _socket_of(resp)
+    per_read = sock.gettimeout() if sock is not None else None
     chunks: list[bytes] = []
     total = 0
     while True:
+        left = deadline - time.monotonic()
         _check_deadline(deadline, url)
-        chunk = resp.read(min(_READ_CHUNK, max_bytes + 1 - total))
+        if sock is not None:
+            sock.settimeout(left if per_read is None else min(left, per_read))
+        try:
+            chunk = read(min(_READ_CHUNK, max_bytes + 1 - total))
+        except TimeoutError:
+            _check_deadline(deadline, url)
+            raise
         if not chunk:
             return b"".join(chunks)
         chunks.append(chunk)
@@ -287,7 +306,8 @@ def safe_urlopen(
         _check_deadline(deadline, current)
         req = urllib.request.Request(current, data=data, headers=headers, method=method)
         try:
-            resp = _opener.open(req, timeout=timeout)
+            hop_timeout = timeout if deadline is None else max(0.001, min(timeout, deadline - time.monotonic()))
+            resp = _opener.open(req, timeout=hop_timeout)
         except urllib.error.HTTPError as exc:
             if exc.code not in _REDIRECT_CODES:
                 raise

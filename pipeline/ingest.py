@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Iterator
 from zoneinfo import ZoneInfo
 
+import psycopg2
 from clickhouse_connect.driver.exceptions import DataError
 from psycopg2.extensions import TRANSACTION_STATUS_INTRANS
 
@@ -41,7 +42,7 @@ from pipeline.strategies.aomori_regex import (
     _TRIP_RE_DEFAULT,
     parse_trip_id,
 )
-from pipeline.url_guard import redact_url, safe_urlopen
+from pipeline.url_guard import redact_url, redact_urls_in_text, safe_urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +63,9 @@ _DATE_DIR_RE = re.compile(r"\d{8}")
 
 # Bytes that do not decode fail the same way however often they are read.
 _UNDECODABLE = (IndexError, ValueError, struct.error, UnicodeDecodeError)
-# So does an archive that cannot be unpacked, and a row ClickHouse's client
-# cannot serialize.
-_PERMANENT = (*_UNDECODABLE, tarfile.TarError, EOFError, zlib.error, DataError)
+# So does an archive that cannot be unpacked, and a value either store
+# refuses as data.
+_PERMANENT = (*_UNDECODABLE, tarfile.TarError, EOFError, zlib.error, DataError, psycopg2.DataError)
 
 
 @dataclass
@@ -81,15 +82,20 @@ class IngestReport:
     transient_days: set[date] = field(default_factory=set)
     transient_unplaced: int = 0
     permanent: int = 0
+    # The first transient failure on each day, as `<type>: <message>`.
+    errors: dict[date, str] = field(default_factory=dict)
 
     def record(self, exc: BaseException, utc_day: str | None) -> None:
         if isinstance(exc, _PERMANENT):
             self.permanent += 1
             return
         try:
-            self.transient_days.add(datetime.strptime(utc_day or "", "%Y%m%d").date())
+            day = datetime.strptime(utc_day or "", "%Y%m%d").date()
         except ValueError:
             self.transient_unplaced += 1
+            return
+        self.transient_days.add(day)
+        self.errors.setdefault(day, redact_urls_in_text(f"{type(exc).__name__}: {exc}")[:300])
 
 
 def _key_day(file_key: str) -> str | None:
