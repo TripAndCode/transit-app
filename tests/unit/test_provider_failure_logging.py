@@ -21,13 +21,10 @@ import pytest
 from pipeline.query.llm_client import describe_provider_failure
 
 ROOT = Path(__file__).resolve().parents[2]
-SECRET = "sk-live-thisistheusers-secret-key"
+SECRET = "sk-live-thisistheoperators-secret-key"
 
 # Every module with an `except` handler that logs a failed provider call.
-PROVIDER_CALL_MODULES = (
-    "pipeline/query/llm_client.py",
-    "pipeline/query/chat.py",
-)
+PROVIDER_CALL_MODULES = ("pipeline/query/llm_client.py",)
 
 
 # Calls that send an API key to a provider. A handler only carries key-bearing

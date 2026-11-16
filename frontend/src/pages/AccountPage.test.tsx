@@ -92,7 +92,7 @@ describe("AccountPage for a guest", () => {
 });
 
 describe("AccountPage composition", () => {
-  it("links to the privacy policy that describes this data, and the terms", () => {
+  it("links to the privacy policy and the terms", () => {
     renderAccount();
     expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
     expect(screen.getByRole("link", { name: "Terms of Service" })).toHaveAttribute("href", "/terms");
