@@ -41,11 +41,16 @@ SELECT u.user_id
         WHERE e.actor_id = u.user_id AND e.user_id IS DISTINCT FROM u.user_id
    );
 
--- login_events.user_id is ON DELETE SET NULL, which would keep each event's
--- address and browser with no account left to erase them through, so a
--- reader's events go first. Deleting the account cascades to its sessions,
--- OAuth identities, usage counts and investigations.
-DELETE FROM login_events WHERE user_id IN (SELECT user_id FROM reader_users);
+-- login_events.user_id is ON DELETE SET NULL, which would keep the address
+-- and browser of a reader's own events with no account left to erase them
+-- through, so those go first. An event an admin recorded about the reader
+-- holds the admin's client and belongs to the admin action trail, which
+-- outlives a deleted account; it stays, unattributed. Deleting the account
+-- cascades to its sessions, OAuth identities, usage counts and
+-- investigations.
+DELETE FROM login_events
+ WHERE user_id IN (SELECT user_id FROM reader_users)
+   AND (actor_id IS NULL OR actor_id = user_id);
 DELETE FROM users WHERE user_id IN (SELECT user_id FROM reader_users);
 
 -- via_api_key is part of the usage counts' unique key, so a day's requests

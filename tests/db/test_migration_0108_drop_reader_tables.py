@@ -150,6 +150,13 @@ def test_up_removes_the_reader_platform_and_keeps_admin_attribution(pg_conn):
             other_reader = _user(cur, "other-reader@x")
             named = _seed_demoted_admins(cur, agency_id, other_reader)
             _seed_usage(cur, admin)
+            # The admin's record about the reader stays with the admin action
+            # trail; the actor-less one goes with the reader's own events.
+            cur.execute(
+                "INSERT INTO login_events (user_id, actor_id, kind, ip) VALUES (%s, %s, 'suspended', '198.51.100.1'),"
+                " (%s, NULL, 'role_changed', NULL)",
+                (reader, admin, reader),
+            )
             cur.execute(
                 "INSERT INTO feature_flags (key, value)"
                 " VALUES ('login_required', true), ('copilot_insight_enabled', false)"
@@ -167,7 +174,7 @@ def test_up_removes_the_reader_platform_and_keeps_admin_attribution(pg_conn):
                 cur.execute(f"SELECT count(*) FROM {table}")
                 assert cur.fetchone() == (0,), table
             cur.execute("SELECT user_id, actor_id, kind FROM login_events")
-            assert cur.fetchall() == [(None, named["login_events"], "suspended")]
+            assert set(cur.fetchall()) == {(None, named["login_events"], "suspended"), (None, admin, "suspended")}
             cur.execute(
                 "SELECT user_id, route, agency_id, requests, errors FROM user_activity_daily ORDER BY route, agency_id"
             )
