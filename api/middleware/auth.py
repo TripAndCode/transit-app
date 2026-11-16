@@ -51,8 +51,8 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     401, and the pro bucket in ``api/middleware/ratelimit.py`` is unreachable.
     Both are correct for a deployment that has sold nothing.
 
-    A usable key also marks the request as authenticated for the login gate
-    and records its owner, the account usage is counted against.
+    A usable key also marks the request as authenticated and records its
+    owner, the account usage is counted against.
     """
 
     async def dispatch(self, request: Request, call_next):

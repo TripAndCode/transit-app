@@ -127,10 +127,20 @@ async def test_a_signed_out_snapshot_read_is_counted(client, aconn):
 
 
 @pytest.mark.asyncio
-async def test_a_signed_out_401_from_the_gate_is_counted_in_neither(client, sso_on):
+async def test_a_signed_out_read_is_counted_while_sso_is_configured(client, sso_on):
     BUFFER.drain()
     ANONYMOUS_BUFFER.drain()
     r = await client.get("/api/agencies")
-    assert r.status_code == 401
+    assert r.status_code == 200
+    assert _anonymous_counts() == {("/api/agencies", "GET", None): [1, 0]}
     assert BUFFER.drain() == {}
-    assert ANONYMOUS_BUFFER.drain() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_signed_out_401_from_an_admin_route_is_counted_as_an_error(client, sso_on):
+    BUFFER.drain()
+    ANONYMOUS_BUFFER.drain()
+    r = await client.get("/api/admin/flags")
+    assert r.status_code == 401
+    assert _anonymous_counts() == {("/api/admin/flags", "GET", None): [1, 1]}
+    assert BUFFER.drain() == {}

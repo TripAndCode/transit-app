@@ -20,12 +20,10 @@ async def test_config_exposes_both_auth_switches(client):
     assert set(body) == {
         "auth_enabled",
         "local_admin_enabled",
-        "login_required",
         "feedback_url",
         "llm_enabled",
         "weather_enabled",
     }
-    assert isinstance(body["login_required"], bool)
     assert isinstance(body["auth_enabled"], bool)
     assert isinstance(body["local_admin_enabled"], bool)
     assert isinstance(body["llm_enabled"], bool)
