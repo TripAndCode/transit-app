@@ -3389,7 +3389,7 @@ async def test_council_summary_prints_one_implausible_share_for_its_quality_note
 
     body = (await client.get(_council_url(agency_id))).json()
     assert body["comparability"]["reason"] == "clamp_high"
-    shares = set(re.findall(r"観測値の([0-9.]+)%|異常値 ([0-9.]+)%", body["text"]))
+    shares = set(re.findall(r"受信データの([0-9.]+)%|異常値 ([0-9.]+)%", body["text"]))
     printed = {float(share) for pair in shares for share in pair if share}
     assert printed == {10.0}
 

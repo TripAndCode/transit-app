@@ -37,7 +37,7 @@ def _headline(payload, locale):
     ("locale", "expected"),
     [
         ("en", "On-time rate 23.6%, mean delay 2.5 min (608,834 stop-level observations), service delivered 75.0%"),
-        ("ja", "定時率 23.6%、平均遅延 2.5分（観測データ608,834件・停留所単位）、運行率 75.0%"),
+        ("ja", "定時率 23.6%、平均遅延 2.5分（観測数 608,834件・停留所単位）、運行率 75.0%"),
     ],
 )
 def test_headline_groups_the_sample_count(locale, expected):
@@ -55,7 +55,7 @@ def test_headline_groups_the_sample_count(locale, expected):
         (
             "ja",
             "定時率 23.6%、早発率 4.2%（1分を超える早発）、"
-            "平均遅延 2.5分（観測データ608,834件・停留所単位）、運行率 75.0%",
+            "平均遅延 2.5分（観測数 608,834件・停留所単位）、運行率 75.0%",
         ),
     ],
 )
@@ -87,7 +87,7 @@ def test_a_limited_early_tolerance_is_the_early_departure_threshold(locale, word
     ("locale", "expected"),
     [
         ("en", "On-time rate 23.6%, mean delay 2.5 min (608,834 stop-level observations)"),
-        ("ja", "定時率 23.6%、平均遅延 2.5分（観測データ608,834件・停留所単位）"),
+        ("ja", "定時率 23.6%、平均遅延 2.5分（観測数 608,834件・停留所単位）"),
     ],
 )
 def test_headline_leaves_out_a_rate_the_feed_cannot_measure(locale, expected):
@@ -156,7 +156,7 @@ def test_header_names_the_document_as_the_page_does(locale, header):
             "On-time rate 23.6%, mean delay 2.5 min (608,834 stop-level observations), "
             "service delivered 75.0% (whole agency)",
         ),
-        ("ja", "定時率 23.6%、平均遅延 2.5分（観測データ608,834件・停留所単位）、運行率 75.0%（事業者全体）"),
+        ("ja", "定時率 23.6%、平均遅延 2.5分（観測数 608,834件・停留所単位）、運行率 75.0%（事業者全体）"),
     ],
 )
 def test_headline_labels_the_delivered_rate_agency_wide_under_a_narrower_filter(locale, expected):
@@ -450,13 +450,13 @@ _STAMPED_QUALITY = FeedQuality(
         (
             "ja",
             "※フィード品質（事業者全体）: 観測カバー率 90.0%（計画1,000便中900便）、異常値 1.5%",
-            "※データ品質: 観測値の1.5%が異常値として除外されています。",
+            "※データ品質: 受信データの1.5%が異常値として除外されています。",
         ),
         (
             "en",
             "* Feed quality (whole agency): observation coverage 90.0% (900 of 1,000 planned trips), "
             "implausible readings 1.5%",
-            "* Data quality: 1.5% of observations were excluded as implausible.",
+            "* Data quality: 1.5% of readings were excluded as implausible.",
         ),
     ],
 )

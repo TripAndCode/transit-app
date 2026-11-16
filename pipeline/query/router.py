@@ -63,7 +63,7 @@ _RULES: list[Rule] = [
         args={"kind": "routes"},
         # An on-time list is ranking-on-time's to answer, a sample-count list
         # meta-sample-counts'.
-        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数"),
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率|サンプル数|観測数"),
     ),
     Rule(
         name="meta-date-range",
@@ -105,11 +105,21 @@ _RULES: list[Rule] = [
         tool="describe_data",
         args={"kind": "metrics"},
     ),
+    # An analytic question that names the count as a filter ("観測数が多い路線の
+    # 定時率ランキング") belongs to its ranking rule, so both count listings skip it.
     Rule(
         name="meta-sample-counts",
-        pattern=re.compile(r"サンプル数.*?(多い|TOP|ランキング)"),
+        pattern=re.compile(r"(サンプル数|観測数).*?(多い|TOP|ランキング)"),
         tool="describe_data",
         args={"kind": "sample_counts"},
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率"),
+    ),
+    Rule(
+        name="meta-sample-counts-least",
+        pattern=re.compile(r"(サンプル数|観測数).*?少な"),
+        tool="describe_data",
+        args={"kind": "sample_counts", "order": "asc"},
+        unless=re.compile(rf"{_ANALYTIC_WORDS}|定時率"),
     ),
     # ---- top_n ----
     # More-specific rules precede `ranking-worst` (first match wins), so e.g.

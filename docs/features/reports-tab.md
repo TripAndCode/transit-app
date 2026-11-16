@@ -122,8 +122,8 @@ combined CSV always carries it.
   stay uncounted: the reload that replaced their timetable had already erased
   their plan.
 - The council document's tiles are 定時率, 早発率 (naming the threshold it counts
-  past, the definition's `early_departure_sec`), 平均遅延, 観測データ数（停留所単位）
-  (one reading per trip per stop, so far larger than the planned trips), 計画便数,
+  past, the definition's `early_departure_sec`), 平均遅延, 観測数（停留所単位）
+  (one observation per trip per stop, so far larger than the planned trips), 計画便数,
   運行率 and 他事業者との比較 (`frontend/src/components/analysis/CouncilSummaryBlock.tsx`). A
   missing 運行率 shows 「—」 with the response's `delivered_missing` reason in
   the agencies board's words (`network.delivered_missing.*`), and the server's

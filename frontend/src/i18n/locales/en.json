@@ -298,12 +298,12 @@
     "overview_grid_caption": "When the agency tends to run late — darker = more delay.",
     "overview_routes_title": "Routes that ran late",
     "overview_routes_caption": "Click a route for its breakdown.",
-    "overview_no_data": "No measurements yet.",
+    "overview_no_data": "No observations yet.",
     "detail_show_grid": "Show day × hour detail",
     "detail_hide_grid": "Hide day × hour detail",
-    "low_confidence_note": "Few measurements — indicative",
+    "low_confidence_note": "Few observations — indicative",
     "lowSamples": "Low data ({{count}} obs.)",
-    "no_data": "No delay measurements for this route yet.",
+    "no_data": "No delay observations for this route yet.",
     "axis_min": "min",
     "click_hint": "Click a card to expand it.",
     "heatmap_caption": "When this route is late — darker = more delay.",
@@ -321,7 +321,7 @@
     "expand_named": "Expand {{title}}",
     "stat_mean": "All days and hours, average",
     "stat_mean_expected": "All days and hours, expected",
-    "stat_samples": "Measurements",
+    "stat_samples": "Observations",
     "stat_samples_history": "Past observations",
     "ml_source": "ML forecast",
     "route_picker_label": "Route",
@@ -332,12 +332,12 @@
     "expected_early": "{{min}} min early expected",
     "dow_dated": "{{day}} {{date}}",
     "period_forecast": "Forecast for {{dates}}.",
-    "period_rest_history": "Days and times without a forecast show the average of measurements over {{period}}.",
-    "period_rest_history_undated": "Days and times without a forecast show the average of past measurements.",
-    "period_typical": "Not a forecast for particular dates: the average by day and time of day of measurements over {{period}}.",
-    "history_heading": "Past measurements ({{period}})",
-    "history_heading_undated": "Past measurements",
-    "history_routes_note": "Each route's figure is the average of its measurements in this period.",
+    "period_rest_history": "Days and times without a forecast show the average of observations over {{period}}.",
+    "period_rest_history_undated": "Days and times without a forecast show the average of past observations.",
+    "period_typical": "Not a forecast for particular dates: the average by day and time of day of observations over {{period}}.",
+    "history_heading": "Past observations ({{period}})",
+    "history_heading_undated": "Past observations",
+    "history_routes_note": "Each route's figure is the average of its observations in this period.",
     "history_recent_note": "The small line traces its daily average on the days with data over {{period}}.",
     "range_sentence": "8 runs in 10 within {{range}}",
     "range_late": "{{low}}–{{high}} min late",
@@ -364,7 +364,7 @@
     "col_avg_delay": "Avg delay (min)",
     "col_on_time": "On-time %",
     "col_delivered": "Service delivered %",
-    "col_samples": "Samples",
+    "col_samples": "Observations",
     "col_feed": "Feed (implausible %)",
     "col_freshness": "Freshness",
     "stale_badge": "Behind",
@@ -372,7 +372,7 @@
     "help": "Average delay — lower is better",
     "howto_title": "How to read this",
     "help_avg_delay": "Typical lateness in minutes over the window; the dot shows severity.",
-    "help_on_time": "Share of readings within the on-time threshold. The range shown with it is its 95% interval, counted over trips rather than readings, since the stops of one trip run late together.",
+    "help_on_time": "Share of observations within the on-time threshold. The range shown with it is its 95% interval, counted over trips rather than observations, since the stops of one trip run late together.",
     "help_delivered": "Share of planned trips that ran without being reported cancelled. Shown only for agencies whose feed a check has confirmed can carry cancellations and that reported at least one in the period or the 90 days up to its end; otherwise \"—\" with the reason.",
     "help_samples": "Number of delay observations behind the figures.",
     "help_feed": "Percent of readings dropped as implausible — high means a stuck or frozen feed.",
@@ -1157,7 +1157,7 @@
       "avg_min": "Avg (min)",
       "p50_min": "Median (min)",
       "p90_min": "p90 (min)",
-      "samples": "Samples",
+      "samples": "Observations",
       "on_time_pct": "On-time %",
       "late5_count": "Over 5 min late",
       "heijitsu_min": "Weekday (min)",
@@ -1227,7 +1227,7 @@
         "routes": "Routes",
         "stops": "Stops",
         "date_range": "Date range",
-        "sample_counts": "Sample counts"
+        "sample_counts": "Observation counts"
       }
     },
     "sidebar": {
@@ -1344,7 +1344,7 @@
     "col": {
       "service": "Service",
       "avg": "Avg",
-      "samples": "Samples",
+      "samples": "Observations",
       "on_time_pct": "On-time %",
       "early_share": "Early (> {{early}})",
       "over_5min_count": "Over 5 min (count)",
@@ -1450,11 +1450,11 @@
         "dwell_avg": "Dwell avg",
         "dwell_p50": "Dwell p50",
         "dwell_p90": "Dwell p90",
-        "dwell_samples": "Dwell samples",
+        "dwell_samples": "Dwell-time observations",
         "run_avg": "Running avg",
         "run_p50": "Running p50",
         "run_p90": "Running p90",
-        "run_samples": "Running samples"
+        "run_samples": "Running-time observations"
       },
       "see_when": "See when delay happens",
       "compare_day_types": "Compare weekdays with weekends and holidays"
@@ -1476,7 +1476,7 @@
         "ewt": "Excess wait",
         "cov": "Spacing CoV",
         "long_gap_rate": "Long-gap rate",
-        "samples": "Samples"
+        "samples": "Observations"
       }
     },
     "performance_standard": {
@@ -1520,7 +1520,7 @@
         "condition": "Condition",
         "avg_delay": "Average delay",
         "days": "Days",
-        "samples": "Samples"
+        "samples": "Observations"
       },
       "row": {
         "wet": "Rainy days",
@@ -1531,8 +1531,8 @@
       "buckets": {
         "title": "Delay by rainfall amount",
         "no_data": "No data",
-        "sample_count": "{{count}} samples",
-        "bar_aria": "{{label}}: {{value}}, {{count}} samples"
+        "sample_count": "{{count}} observations",
+        "bar_aria": "{{label}}: {{value}}, {{count}} observations"
       }
     },
     "coverage": {
@@ -2449,7 +2449,7 @@
       "readings": "Readings, last 7 analyzed days",
       "set_aside": "Set aside as implausible",
       "set_aside_note": "The figures shown already exclude them.",
-      "note": "Days without readings are left out, not counted as on time."
+      "note": "Days without observations are left out, not counted as on time."
     }
   },
   "scope": {

@@ -133,7 +133,7 @@ describe("AnalysisTab", () => {
     } as never);
     renderAnalysis("/agencies/1/analysis/when?report=dow_weekend", ["dow_weekend"]);
     expect(screen.getByRole("checkbox", { name: "Show statistics" })).not.toBeChecked();
-    expect(screen.queryByRole("columnheader", { name: "Samples" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Observations" })).toBeNull();
     expect(screen.getByText("few data")).toHaveClass("caveat-badge");
   });
 
@@ -835,7 +835,7 @@ describe("AnalysisTab council report", () => {
     expect(figure("Early departures (more than 1 min early)")).toHaveTextContent("4.2%");
   });
 
-  it("names the observation count as stop-level readings, not departures", () => {
+  it("names the observation count as stop-level observations, not departures", () => {
     showCouncil();
     expect(figure("Observations (stop level)")).toHaveTextContent("540,357");
     expect(screen.queryByText("Departures observed")).toBeNull();

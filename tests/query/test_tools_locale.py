@@ -99,7 +99,7 @@ def test_render_tool_result_table_en():
 
 
 def test_render_tool_result_series_en():
-    """Series rendering uses the EN 'mean / samples / worst' decorations."""
+    """Series rendering uses the EN 'mean / observations / worst' decorations."""
     result = ToolResult(
         kind="series",
         summary="Daily trend (2025-01-01 to 2025-01-02): mean 1.50 min",
@@ -114,7 +114,7 @@ def test_render_tool_result_series_en():
     )
     out = render_tool_result(result, locale="en")
     assert "mean 1.50 min" in out
-    assert "100 samples" in out
+    assert "100 observations" in out
     assert "worst:" in out
     assert "route 16071" in out
 
