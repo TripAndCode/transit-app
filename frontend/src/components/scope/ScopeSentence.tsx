@@ -214,7 +214,6 @@ export function ScopeSentence({
   // starts, not a filter set on it.
   const onPageRoute = pageRoute != null && scope.routes.length === 1 && scope.routes[0] === pageRoute;
   const isChanged = (key: TokenKey) => (key === "routes" && onPageRoute ? false : tokenChanged(key, scope, resetPeriod));
-  const changed = tokens.some((tok) => isChanged(tok.key));
   const byKey = new Map(tokens.map((tok) => [tok.key, tok]));
   // A condition that was cleared from elsewhere has no popover to show.
   const open = openKey != null && byKey.has(openKey) ? openKey : null;
@@ -303,6 +302,15 @@ export function ScopeSentence({
       if (tok) runs.push({ token: tok });
     }
   }
+  const unused = tokens.filter(
+    (tok): tok is ScopeToken & { key: ConditionKey } => tok.key !== "agency" && isOff({ ...tok, key: tok.key }),
+  );
+  // Reset is offered for what the reader can see: a token in the sentence,
+  // or a condition its note names. A template that leaves the period out
+  // never offers to reset a period it does not show.
+  const shown = new Set<TokenKey>(unused.map((tok) => tok.key));
+  for (const run of runs) if ("token" in run) shown.add(run.token.key);
+  const changed = tokens.some((tok) => shown.has(tok.key) && isChanged(tok.key));
   const nodes: ReactNode[] = [];
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i];
@@ -331,9 +339,6 @@ export function ScopeSentence({
 
   const inline = tokens.filter(
     (tok): tok is ScopeToken & { key: ConditionKey } => tok.key !== "agency" && tok.key !== "service",
-  );
-  const unused = tokens.filter(
-    (tok): tok is ScopeToken & { key: ConditionKey } => tok.key !== "agency" && isOff({ ...tok, key: tok.key }),
   );
 
   const actions = (

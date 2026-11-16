@@ -204,7 +204,7 @@ export function RouteAnalysisTab() {
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
     {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
     <ScopeSentence applied={mergeScopeApplied(query.data?.scope_applied, standards.data?.scope_applied)} actions={false} />
-    {!route ? <EmptyState title={t("choose")} hint={t("filterNote")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
+    {!route ? <EmptyState title={t("choose")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t, names.format)}
       recoveries={buildFilterCtxRecoveries({
         ctx: pageRoute == null ? ctx : { ...ctx, routes: [] },
