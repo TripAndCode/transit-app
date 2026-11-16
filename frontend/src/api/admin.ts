@@ -749,6 +749,36 @@ export function useUserActivity(uid: number) {
   });
 }
 
+export type AdminUsageRoute = {
+  route: string;
+  method: string;
+  signed_out: number;
+  signed_in: number;
+  api_key: number;
+  errors: number;
+};
+
+export type AdminUsageDay = { day: string; signed_out: number; signed_in: number; api_key: number };
+
+export type AdminUsage = {
+  from: string;
+  to: string;
+  routes: AdminUsageRoute[];
+  days: AdminUsageDay[];
+};
+
+/** Requests per route template, split signed-out/signed-in/API-key, over the
+ *  trailing window -- the cookie-free reader signal, since readers never
+ *  sign in and the server keeps no visitor identity to count by. */
+export function useAdminUsage(params: { days: number; agencyId?: number }) {
+  const qs = new URLSearchParams({ days: String(params.days) });
+  if (params.agencyId != null) qs.set("agency_id", String(params.agencyId));
+  return useQuery({
+    queryKey: ["adminUsage", params],
+    queryFn: ({ signal }) => apiGet<AdminUsage>(`/api/admin/usage?${qs}`, { signal }),
+  });
+}
+
 /** Mutation: revoke one session by its prefix; refetches the session list
  *  either way, since a failure is usually a 404 for a session that already
  *  ended (expired, signed out, or ended by a suspend). */

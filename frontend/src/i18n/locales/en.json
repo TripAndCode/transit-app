@@ -1856,7 +1856,8 @@
         "governance": "Governance",
         "reference": "Reference"
       },
-      "ask_ops": "Ask ops"
+      "ask_ops": "Ask ops",
+      "usage": "Usage"
     },
     "ops": {
       "title": "Ops",
@@ -2358,6 +2359,28 @@
         },
         "unknown_tool": "No matching tool (unrecognised card name, or follow-up on an answer from no tool)",
         "title_loading": "Notebook usage by tool"
+      }
+    },
+    "usage": {
+      "title": "Usage",
+      "days_label": "Window",
+      "days_option": "{{count}} days",
+      "by_day": {
+        "title": "Requests per day",
+        "empty": "No requests on any day in this window."
+      },
+      "by_route": {
+        "title": "Requests per route",
+        "table_label": "Requests per route",
+        "empty": "No routes recorded in this window."
+      },
+      "col": {
+        "route": "Route",
+        "method": "Method",
+        "signed_out": "Signed out",
+        "signed_in": "Signed in",
+        "api_key": "API key",
+        "errors": "Errors"
       }
     }
   },

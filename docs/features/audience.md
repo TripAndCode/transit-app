@@ -83,10 +83,11 @@ Admins also see the admin pages and **Model evaluation**.
 ## Knowing whether it works
 
 Readers are anonymous, so signed-in activity (`user_activity_daily`) counts admins,
-not readers. The reader signal is a cookie-free count kept on the server: distinct
-visitors per day and page by a salted hash of the address, or requests per report
-type. Until that count exists, the closest signal is the report endpoints' request
-volume in the server logs.
+not readers. The reader signal is a cookie-free count kept on the server:
+`anonymous_activity_daily` holds requests per route template per day, with no
+address, hash, cookie or caller identity attached. The admin **Usage** page
+(`/admin/usage`, `GET /api/admin/usage`) reads it alongside signed-in and
+API-key traffic.
 
 The other signal is what readers say. The sidebar's **Send feedback** link opens the
 address the deployment sets in `FEEDBACK_URL` (an https form or a `mailto:` address);
