@@ -10,8 +10,8 @@ Idempotent: a second `configure()` call clears existing handlers
 before installing a fresh one, so test fixtures + app startup can
 both call it without duplicating output. `_RateLimitAddressFilter`
 strips the client address slowapi logs on a 429, so server logs
-never carry a client address; `addFilter` ignores a duplicate
-instance of it, so re-running `configure()` doesn't attach it twice.
+never carry a client address. `configure()` always attaches the same
+module-level instance, which `addFilter` skips once it is present.
 """
 
 import logging
@@ -33,8 +33,8 @@ class _RequestIdFilter(logging.Filter):
 class _RateLimitAddressFilter(logging.Filter):
     """Strip the client address slowapi logs on every 429.
 
-    Server logs never carry a client address: rate limiting counts requests
-    per IP in memory and the address itself is never stored or printed.
+    Server logs never carry a client address: rate limiting holds the address
+    only as an in-memory counter key, and never persists or logs it.
     """
 
     _SLOWAPI_FORMAT = "ratelimit %s (%s) exceeded at endpoint: %s"
