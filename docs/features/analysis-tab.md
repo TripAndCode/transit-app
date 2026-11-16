@@ -525,10 +525,11 @@ the scope as one sentence above their content
   the one on screen.
 - **Pinned strip.** 「すべての条件を表示」 shows every control inline under the
   sentence; the choice is kept in localStorage `transit.scopePinned`.
-- **Presets and reset.** Signed-in users save and load presets beside the
-  sentence (`PresetMenu`), or on the page heading's row when the page has a
-  `ScopePageHeader`. 「条件をリセット」 appears once any condition, the
-  period included, differs from the default, and resets the dates too.
+- **Presets and reset.** Any visitor saves and loads named views, kept in
+  this browser, beside the sentence (`PresetMenu`), or on the page heading's
+  row when the page has a `ScopePageHeader`. 「条件をリセット」 appears once
+  any condition, the period included, differs from the default, and resets
+  the dates too.
 
 ## Request path
 

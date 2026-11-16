@@ -44,16 +44,15 @@ function writeStored(key: string, value: StoredFilter): void {
  * the URL. Keyed by screen for the same reason the rail is (see
  * screenScope.ts): a filter set on one screen never reappears on another.
  * A page under a screen, such as a route dossier, is left alone. This targets a
- * distinct, smaller friction than PresetMenu's login-gated named presets
- * (`/api/me/presets`): a single "remember what I was just looking at" slot
- * rather than durable, named, multi-slot filter sets —
- * this only removes the friction of every anonymous page load starting from
- * a blank filter state, it doesn't let an anonymous user save/name/switch
- * between multiple filter sets the way signing in does.
+ * distinct, smaller friction than PresetMenu's named saved views: a single
+ * "remember what I was just looking at" slot rather than durable, named,
+ * multi-slot filter sets — this only removes the friction of every anonymous
+ * page load starting from a blank filter state, it doesn't let a visitor
+ * save/name/switch between multiple filter sets the way a saved view does.
  *
  * Logged-in users are intentionally unaffected (this hook no-ops once
- * `session` is present) — their filters already benefit from the explicit,
- * durable presets feature instead.
+ * `session` is present); PresetMenu's saved views cover them the same as
+ * anyone else.
  */
 export function useAnonymousFilterPersistence(agencyId: number | null): void {
   const { data: session, isLoading } = useSession();
