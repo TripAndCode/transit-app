@@ -970,12 +970,11 @@ TOP_DELAYED_MIN_SAMPLES = RANKING_MIN_SAMPLES
 #: which a test holds at or above this one.
 MOVER_MIN_SAMPLES = 10
 
-#: The routes-to-check list's bands, worst first, each with its lower bound
+#: The routes-to-check bands, worst first, each with its lower bound
 #: (minutes): a route belongs to the first band whose bound its average
-#: reaches, and to none below the last. The client bands the listed routes
-#: itself, with BAND_BOUNDS in frontend/src/components/routesToCheckBands.ts;
-#: a test on each side pins the same bounds, so neither side can move alone.
-#: Each count carries its bound, as ``delayed_threshold_min`` does.
+#: reaches, and to none below the last. Each count carries its bound, as
+#: ``delayed_threshold_min`` does, so a client prints the bound it is given
+#: and keeps no copy of these.
 ROUTE_BAND_MIN = {"severe": 5.0, "moderate": 3.0, "mild": 1.5}
 
 

@@ -79,12 +79,9 @@ async def test_no_routes_still_states_the_thresholds():
     }
 
 
-def test_the_band_bounds_are_the_frontends():
-    # The routes-to-check list bands its listed routes on the client with
-    # BAND_BOUNDS (frontend/src/components/routesToCheckBands.ts), and its
-    # headers, and the Pulse hero, print these counts beside those bands.
-    # routesToCheckBands.test.ts pins the same bounds, so moving either side
-    # alone fails a test.
+def test_the_band_bounds_run_worst_first():
+    # The Pulse hero prints the severe band's count beside the bound the
+    # count carries, so a move here changes what the hero states.
     assert ROUTE_BAND_MIN == {"severe": 5.0, "moderate": 3.0, "mild": 1.5}
     assert list(ROUTE_BAND_MIN) == ["severe", "moderate", "mild"]  # worst first
 

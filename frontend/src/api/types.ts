@@ -200,19 +200,6 @@ export type RouteShapeResponse = {
   unobserved_stops?: UnobservedStop[];
 };
 
-/** One route at the hour, pooled across every service id it ran under. */
-type PeakHourBreakdownRoute = {
-  route_code: string;
-  avg_min: number;
-  samples: number;
-};
-
-export type PeakHourBreakdown = {
-  hour: number;
-  dow: number | null;
-  routes: PeakHourBreakdownRoute[];
-};
-
 type ResponseCtx = {
   from: string;
   to: string;
@@ -1188,7 +1175,7 @@ export type OverviewConcentration = {
   rest_route_count?: number;
 };
 
-export type OverviewTopDelayedRoute = {
+type OverviewTopDelayedRoute = {
   route_code: string;
   route_short_name: string | null;
   avg_min: number;
@@ -1205,7 +1192,7 @@ type OverviewBandCount = {
 
 /** Routes in each routes-to-check band, over every route rather than only
  *  the listed ones. */
-export type OverviewBandCounts = {
+type OverviewBandCounts = {
   severe: OverviewBandCount;
   moderate: OverviewBandCount;
   mild: OverviewBandCount;
@@ -1265,13 +1252,9 @@ export type OverviewSummary = {
   concentration: OverviewConcentration;
   top_delayed: OverviewTopDelayed;
   peak_hour: OverviewPeakHour | null;
-  /** Weekday-only hour-by-hour profile, used by the peak-hour modal split. */
-  peak_hour_weekday?: OverviewPeakHour | null;
-  /** Weekend-only hour-by-hour profile, used by the peak-hour modal split. */
-  peak_hour_weekend?: OverviewPeakHour | null;
   /** Every bucket the agency is split into, in display order. */
   service_split: OverviewServiceSplitEntry[];
-  /** One row per date with data, tagged with its day type; used by the service-split modal. */
+  /** One row per date with data, tagged with its day type: where the headline's last day stands. */
   service_split_daily?: OverviewServiceSplitDay[];
   sparkline_points: number[];
   /** The window's sample-weighted mean delay; null without observations. */

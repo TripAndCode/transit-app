@@ -17,9 +17,10 @@ type WrapperProps = {
   args?: Record<string, unknown> | null;
   conditions?: { dow?: string; time_band?: string; service?: string } | null;
   onChip?: (action: NextStepAction) => void;
+  agencyId?: number | null;
 };
 
-function Wrapper({ result, tool = "top_n", args = {}, conditions = null, onChip }: WrapperProps) {
+function Wrapper({ result, tool = "top_n", args = {}, conditions = null, onChip, agencyId = null }: WrapperProps) {
   const { t } = useTranslation();
   return (
     <RichResult
@@ -31,6 +32,7 @@ function Wrapper({ result, tool = "top_n", args = {}, conditions = null, onChip 
       args={args}
       conditions={conditions}
       onChip={onChip}
+      agencyId={agencyId}
     />
   );
 }
@@ -332,5 +334,42 @@ describe("RichResult evidence card", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("img", { name: t("reports.daily.svg_aria_week") })).toBeInTheDocument();
+  });
+});
+
+describe("RichResult's link to the screen answering the card's question", () => {
+  it("links a ranking card to the Routes table over the card's own scope", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper
+          result={tableResult}
+          tool="top_n"
+          args={{ metric: "avg_delay", from_date: "2026-06-01", to_date: "2026-06-07" }}
+          conditions={{ dow: "weekend", time_band: "all", service: "all" }}
+          agencyId={8}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Open on Routes →" })).toHaveAttribute(
+      "href",
+      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekend&sort=avg",
+    );
+  });
+
+  it("links a trend card to Time over the card's own scope", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper result={seriesResult} tool="time_series" args={{ from_date: "2026-06-01", to_date: "2026-06-07" }} agencyId={8} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Open on Time →" })).toHaveAttribute(
+      "href",
+      "/agencies/8/time?from=2026-06-01&to=2026-06-07&report=trend",
+    );
+  });
+
+  it("shows no link without an agency to link into", () => {
+    renderWithProviders(<Wrapper result={tableResult} tool="top_n" args={{ metric: "avg_delay" }} />);
+    expect(screen.queryByRole("link", { name: /^Open on / })).toBeNull();
   });
 });

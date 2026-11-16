@@ -171,8 +171,7 @@ async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples, 
     pair would back, so pooling via SUM(sum_delay_sec)/SUM(samples) (
     _peak_hour_by_dow's fast path) agrees with the plain avg_min this helper's
     callers assert on, unless a test explicitly passes a mismatched value to
-    prove the exact-vs-reweighted divergence -- mirrors _seed_agg_route_hour_dow's
-    identical pattern.
+    prove the exact-vs-reweighted divergence.
     """
     if sum_delay_sec is None:
         sum_delay_sec = round(float(avg_min) * 60 * int(samples))
@@ -185,33 +184,6 @@ async def _seed_agg_hour_daily(aconn, agency_id, date_, hour, avg_min, samples, 
         agency_id,
         iso,
         int(hour),
-        float(avg_min),
-        int(samples),
-        int(sum_delay_sec),
-    )
-
-
-async def _seed_agg_route_hour_dow(
-    aconn, agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec=None
-):
-    # sum_delay_sec defaults to the exact seconds-sum an unrounded avg_min/samples
-    # pair would back, so pooling via SUM(sum_delay_sec)/SUM(samples) (peak_hour_
-    # breakdown's dow=None path) agrees with the plain avg_min this helper's
-    # callers assert on, unless a test explicitly passes a mismatched value to
-    # prove the exact-vs-reweighted divergence.
-    if sum_delay_sec is None:
-        sum_delay_sec = round(float(avg_min) * 60 * int(samples))
-    await aconn.execute(
-        "INSERT INTO agg_route_hour_dow "
-        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
-        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8) "
-        "ON CONFLICT (agency_id, route_code, service_type, dow, hour) DO UPDATE "
-        "SET avg_min=EXCLUDED.avg_min, samples=EXCLUDED.samples, sum_delay_sec=EXCLUDED.sum_delay_sec",
-        agency_id,
-        route_code,
-        service_type,
-        dow,
-        hour,
         float(avg_min),
         int(samples),
         int(sum_delay_sec),
@@ -1420,9 +1392,8 @@ async def test_peak_hour_by_dow_pools_exact_sum_delay_sec_not_reweighted_avg(aco
     """_peak_hour_by_dow's fast path pools multiple agg_hour_daily days for the
     same hour. Pooling must use SUM(sum_delay_sec)/SUM(samples) (exact), not
     a SUM(avg_min * samples)/SUM(samples) reweighting of an
-    already-rounded per-day average -- the same rule peak_hour_breakdown
-    applies to agg_route_hour_dow (agg_hour_daily's sum_delay_sec comes from
-    migration 0030)."""
+    already-rounded per-day average (agg_hour_daily's sum_delay_sec comes
+    from migration 0030)."""
     # Two weekday Tuesdays at hour 15, with non-round per-row avg_min values
     # whose sum_delay_sec is seeded to the TRUE underlying sum rather than
     # backed out from the rounded avg_min, so the two pooling formulas diverge.
@@ -1812,203 +1783,6 @@ async def test_route_summary_late5_pct_null_when_no_stats(client, aconn, aagency
     k99 = next((x for x in routes if x["route_code"] == "K99"), None)
     assert k99 is not None
     assert k99["late5_pct"] is None
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_returns_top_routes(client, aconn, aagency_id):
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "K31", "平日", 5, 8, 6.5, 50)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "K37", "平日", 5, 8, 5.2, 30)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "C12", "平日", 5, 8, 4.1, 10)
-    # Different hour — must not appear
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "W53", "平日", 5, 9, 9.0, 100)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8, "dow": 5})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["hour"] == 8
-    assert body["dow"] == 5
-    codes = [x["route_code"] for x in body["routes"]]
-    assert codes == ["K31", "K37", "C12"]
-    assert body["routes"][0]["avg_min"] == pytest.approx(6.5, rel=1e-4)
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_answers_an_hour_past_midnight(client, aconn, aagency_id):
-    """A service day's hour 24 (a 24:10 departure) is a row of its own."""
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "N1", "平日", 5, 24, 4.0, 12)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 24, "dow": 5})
-    assert r.status_code == 200
-    assert r.json()["routes"] == [{"route_code": "N1", "avg_min": 4.0, "samples": 12}]
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_takes_every_hour_ingest_can_store(client, aconn, aagency_id):
-    """GTFS writes an hour in at most two digits, so ingest stores hours up to 99."""
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "N1", "平日", 5, 99, 4.0, 12)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 99, "dow": 5})
-    assert r.status_code == 200
-    assert r.json()["routes"] == [{"route_code": "N1", "avg_min": 4.0, "samples": 12}]
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 100, "dow": 5})
-    assert r.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_lists_a_route_once_across_raw_service_ids(client, aconn, aagency_id):
-    """A route's observations split across raw service ids (and the '' of an
-    unmatched trip) are one route: one entry, pooled, with no raw id in it.
-    Each fragment alone is under the sample floor and would be dropped."""
-    for service_id in ("11_平日(共通)", "1_土曜(共通)", ""):
-        await _seed_agg_route_hour_dow(aconn, aagency_id, "K40", service_id, 2, 8, 6.0, 2)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "K41", "11_平日(共通)", 2, 8, 3.0, 10)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8, "dow": 2})
-    assert r.status_code == 200
-    assert r.json()["routes"] == [
-        {"route_code": "K40", "avg_min": 6.0, "samples": 6},
-        {"route_code": "K41", "avg_min": 3.0, "samples": 10},
-    ]
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_excludes_low_samples(client, aconn, aagency_id):
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "X1", "平日", 1, 7, 8.0, 2)  # samples < 3
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "X2", "平日", 1, 7, 7.0, 3)  # samples == 3, included
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 7, "dow": 1})
-    assert r.status_code == 200
-    codes = [x["route_code"] for x in r.json()["routes"]]
-    assert "X1" not in codes
-    assert "X2" in codes
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_with_dow_pools_exact_sum_delay_sec(client, aconn, aagency_id):
-    """With a dow, peak_hour_breakdown must derive avg_min from
-    sum_delay_sec/samples exactly as the dow=None path does, not echo the
-    stored per-row avg_min -- the two paths answer the same question and must
-    not disagree on the arithmetic behind it. Seeds a stored avg_min that
-    contradicts the summed columns so only the derived value can pass."""
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "D1", "平日", 6, 16, 9.99, 100, sum_delay_sec=6000)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 16, "dow": 6})
-    assert r.status_code == 200
-    d1 = {x["route_code"]: x for x in r.json()["routes"]}["D1"]
-    assert d1["avg_min"] == pytest.approx(1.0, abs=1e-9)
-    assert d1["samples"] == 100
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_no_dow_floor_applies_to_the_pooled_total(client, aconn, aagency_id):
-    """The sample floor gates the pooled group, not the individual rows that
-    feed it: a route seen twice on each of two days clears three observations
-    once pooled, and dropping its rows first would both hide it and bias the
-    average left behind."""
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "P1", "平日", 1, 21, 4.0, 2)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "P1", "平日", 2, 21, 4.0, 2)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 21})
-    assert r.status_code == 200
-    p1 = {x["route_code"]: x for x in r.json()["routes"]}["P1"]
-    assert p1["samples"] == 4
-    assert p1["avg_min"] == pytest.approx(4.0, abs=1e-9)
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_no_dow_aggregates_all(client, aconn, aagency_id):
-    # Without dow param: routes from any DOW at that hour should appear
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "Z1", "平日", 1, 12, 5.0, 10)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "Z1", "平日", 2, 12, 3.0, 10)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 12})
-    assert r.status_code == 200
-    codes = [x["route_code"] for x in r.json()["routes"]]
-    assert "Z1" in codes
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_no_dow_pools_exact_sum_delay_sec_not_reweighted_avg(client, aconn, aagency_id):
-    """Without dow, peak_hour_breakdown pools multiple dow rows for the same
-    route/service/hour. Pooling must use SUM(sum_delay_sec)/SUM(samples)
-    (exact), not a SUM(avg_min * samples)/SUM(samples) reweighting of
-    an already-rounded per-row average -- the same rule forecast_heatmap
-    applies (the sum_delay_sec column from migration 0028)."""
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 3, 15, 1.61, 3, sum_delay_sec=290)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "Q1", "平日", 4, 15, 2.0, 1000, sum_delay_sec=100000)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 15})
-    assert r.status_code == 200
-    routes = {x["route_code"]: x for x in r.json()["routes"]}
-    q1 = routes["Q1"]
-    assert q1["samples"] == 1003
-    # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
-    # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
-    assert q1["avg_min"] == pytest.approx(1.67, abs=1e-9)
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_no_dow_skips_all_null_sum_delay_sec_group(client, aconn, aagency_id):
-    """A (route, service_type) group at this hour whose every contributing
-    row has sum_delay_sec NULL (migration 0028's column is nullable on every
-    table) still passes the unfiltered ``HAVING SUM(samples) >= 3`` gate, so
-    the FILTER-guarded exact-sum SQL returns avg_min=NULL for that group.
-    Pre-fix, rounding that NULL into a non-optional Pydantic field raised an
-    unhandled TypeError; the group must instead be omitted, while a normal
-    group at the same hour still comes through.
-
-    Seeds 20 distinct all-NULL groups -- one per LIMIT 20 slot -- so this
-    also proves ``ORDER BY avg_min DESC NULLS LAST``: without NULLS LAST,
-    Postgres's default NULLS FIRST for DESC would let these NULL groups fill
-    the entire LIMIT and push R_OK out entirely, which a single-NULL-group
-    seed can't distinguish from "correctly excluded" since both rows would
-    fit under the limit regardless of sort order."""
-    await aconn.executemany(
-        "INSERT INTO agg_route_hour_dow "
-        "(agency_id, route_code, service_type, dow, hour, avg_min, samples, sum_delay_sec) "
-        "VALUES ($1, $2, '平日', 1, 20, 0.5, 5, NULL)",
-        [(aagency_id, f"R_NULL{i}") for i in range(20)],
-    )
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "R_OK", "平日", 1, 20, 4.0, 10)
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 20})
-    assert r.status_code == 200
-    codes = [x["route_code"] for x in r.json()["routes"]]
-    assert "R_OK" in codes
-    assert not any(c.startswith("R_NULL") for c in codes)
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_leaves_out_retired_and_zero_delay_routes(client, aconn, aagency_id):
-    """The breakdown pools every analysed day, so it judges the codes a route
-    list leaves out over the agency's whole analysed span: a renumbered route's
-    old code and a route whose feed reports no delay are not listed, and the
-    twenty it lists are still twenty."""
-    from tests.fixtures.observed_route import seed_observed_route
-
-    current = [f"C{i:02d}" for i in range(20)]
-    for code in [*current, "ECHO"]:
-        await aconn.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, $2)", aagency_id, code)
-    await seed_observed_route(aconn, aagency_id, "C00", "2026-06-01", "2026-10-23", delay=300)
-    await seed_observed_route(aconn, aagency_id, "OLD", "2026-06-01", "2026-06-30", delay=900)
-    await seed_observed_route(aconn, aagency_id, "ECHO", "2026-10-01", "2026-10-23", delay=0)
-
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "OLD", "平日", 1, 8, 9.0, 50)
-    for i, code in enumerate(current):
-        await _seed_agg_route_hour_dow(aconn, aagency_id, code, "平日", 1, 8, 8.0 - i * 0.1, 50)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "ECHO", "平日", 1, 8, 0.0, 50)
-
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8})
-    assert r.status_code == 200
-    assert [x["route_code"] for x in r.json()["routes"]] == current
-
-
-@pytest.mark.asyncio
-async def test_peak_hour_breakdown_leaves_out_a_code_retired_over_a_year_ago(client, aconn, aagency_id):
-    """The breakdown's aggregate keeps a code's rows however long ago it was
-    last seen, so retirement is judged on every code it holds, not only on
-    the codes seen within the bounded window the zero-delay judgement reads."""
-    from tests.fixtures.observed_route import seed_observed_route
-
-    await aconn.execute("INSERT INTO static_routes (agency_id, route_id) VALUES ($1, 'C00')", aagency_id)
-    await seed_observed_route(aconn, aagency_id, "C00", "2026-10-01", "2026-10-23", delay=300)
-    await seed_observed_route(aconn, aagency_id, "LONG_AGO", "2025-06-01", "2025-06-07", delay=900)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "LONG_AGO", "平日", 1, 8, 9.0, 50)
-    await _seed_agg_route_hour_dow(aconn, aagency_id, "C00", "平日", 1, 8, 8.0, 50)
-
-    r = await client.get(f"/api/{aagency_id}/peak-hour-breakdown", params={"hour": 8})
-    assert r.status_code == 200
-    assert [x["route_code"] for x in r.json()["routes"]] == ["C00"]
 
 
 async def _seed_left_out_routes(aconn, agency_id):

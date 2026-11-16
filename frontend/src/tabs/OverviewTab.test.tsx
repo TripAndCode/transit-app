@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { OverviewTab } from "./OverviewTab";
 import * as hooks from "../api/hooks";
-import type { OverviewSummary } from "../api/types";
+import type { OverviewSummary, ReportResponse } from "../api/types";
 
 function bandCounts(severe: number, moderate: number, mild: number) {
   return {
@@ -34,6 +34,23 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
   };
 }
 
+/** The Routes table's first rows, as the preview's request returns them. */
+function routeTable(rows: unknown[][] = [["R1", "7.20", "61.0", "30.0", 120, 400, "1.0", false, 2.0]], rows_total = 163): ReportResponse {
+  return {
+    report_type: "route_table",
+    rendered_at: "2026-06-08T00:00:00Z",
+    text: "",
+    rows,
+    ctx: { from: "2026-06-01", to: "2026-06-07", dow: "all", time_band: "all", service: "all", routes: [] },
+    definition: { early_departure_sec: 60 },
+    scope_applied: {},
+    sort: "avg",
+    order: "worst",
+    rows_total,
+    reliable_min_samples: 100,
+  } as unknown as ReportResponse;
+}
+
 function SearchProbe() {
   const [params] = useSearchParams();
   return <span data-testid="search">{params.toString()}</span>;
@@ -50,7 +67,7 @@ function renderOverview(
   if (tour === "fresh") localStorage.removeItem("transit.pulseTourSeen");
   else if (tour === "seen") localStorage.setItem("transit.pulseTourSeen", "1");
   vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data, isPending: false, error: null, refetch: vi.fn() } as never);
-  vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
+  vi.spyOn(hooks, "useReport").mockReturnValue({ data: routeTable(), error: null, refetch: vi.fn() } as never);
   // The jump-to-latest-data recovery reads the agency's latest_data_date.
   vi.spyOn(hooks, "useAgencies").mockReturnValue({
     data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
@@ -134,55 +151,6 @@ describe("OverviewTab", () => {
     expect(document.querySelector("canvas")).not.toBeInTheDocument();
   });
 
-  // Selecting an hour writes two query keys. Written as two per-key setters
-  // they would not compose -- the second navigation starts from the same
-  // params snapshot as the first and drops it -- so the hour would never
-  // reach the URL and the breakdown would never open.
-  it("writes the peak hour to the URL when an hour is picked", () => {
-    renderOverview(
-      summary({
-        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
-        peak_hour: { by_hour: Array.from({ length: 24 }, (_, i) => i / 10), peak_hour: 8, peak_avg_min: 2.3 },
-      }),
-    );
-    // jsdom reports a zero-size rect, and the ribbon maps a click to an hour
-    // through its own width, so the geometry has to be supplied here.
-    const ribbon = screen.getByRole("img", { name: "Worst hour of day" });
-    ribbon.getBoundingClientRect = () =>
-      ({ width: 660, height: 90, left: 0, top: 0, right: 660, bottom: 90, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
-    fireEvent.click(ribbon, { clientX: 8 * (660 / 24) + 1 });
-    const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
-    expect(search.has("peak_hour")).toBe(true);
-    // The range the tab was opened with must survive the selection write.
-    expect(search.get("from")).toBe("2030-01-01");
-  });
-
-  it.each([
-    ["a non-numeric hour", "peak_hour=abc"],
-    ["an hour past any ingest can store", "peak_hour=100"],
-    ["a negative hour", "peak_hour=-1"],
-    ["a fractional hour", "peak_hour=7.5"],
-    ["a weekday past 7", "peak_hour=8&peak_dow=9"],
-    ["a weekday of 0", "peak_hour=8&peak_dow=0"],
-    ["a non-numeric weekday", "peak_hour=8&peak_dow=mon"],
-  ])("opens no breakdown for %s in the URL", (_label, query) => {
-    renderOverview(summary(), `/agencies/8/overview?from=2030-01-01&to=2030-01-07&${query}`);
-    const breakdown = vi.mocked(hooks.usePeakHourBreakdown);
-    expect(breakdown).toHaveBeenCalled();
-    for (const call of breakdown.mock.calls) expect(call.slice(1)).toEqual([null, null]);
-    expect(document.querySelector("dialog")).not.toBeInTheDocument();
-  });
-
-  it("opens the breakdown for an in-range hour and weekday in the URL", () => {
-    renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07&peak_hour=8&peak_dow=3");
-    expect(vi.mocked(hooks.usePeakHourBreakdown)).toHaveBeenLastCalledWith(8, 8, 3);
-  });
-
-  it.each([24, 99])("opens the breakdown for hour %i, past midnight on the service day's clock", (hour) => {
-    renderOverview(summary(), `/agencies/8/overview?from=2030-01-01&to=2030-01-07&peak_hour=${hour}&peak_dow=3`);
-    expect(vi.mocked(hooks.usePeakHourBreakdown)).toHaveBeenLastCalledWith(8, hour, 3);
-  });
-
   it("renders peak-hour, concentration, and service-split content inline, with nothing to disclose", () => {
     renderOverview(
       summary({
@@ -204,6 +172,75 @@ describe("OverviewTab", () => {
     expect(document.querySelector("summary")).not.toBeInTheDocument();
   });
 
+  describe("the questions another screen answers in full", () => {
+    // Every figure below is counted over the screen's filters on the days the
+    // payload names for it, so each link carries exactly that scope.
+    const SCOPED = "/agencies/8/overview?from=2026-05-01&to=2026-06-09&dow=weekday&time_band=morning&routes=R1,R2";
+    const figures = () =>
+      summary({
+        headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+        concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
+        peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
+        service_split: [
+          { day_type: "weekday", avg_min: 3.1, days: 5, samples: 4000, insufficient: false },
+          { day_type: "saturday", avg_min: 2.4, days: 2, samples: 900, insufficient: false },
+          { day_type: "sunday_holiday", avg_min: 2.0, days: 2, samples: 800, insufficient: false },
+        ],
+        sparkline_points: [2.1, 2.8, 3.3],
+        period_avg_min: 2.7,
+      });
+    const PERIOD_SCOPE = "from=2026-05-11&to=2026-06-09&dow=weekday&time_band=morning&routes=R1%2CR2";
+
+    it("draws the routes to check as the Routes table's own first rows, over the headline's days and the screen's filters", () => {
+      renderOverview(figures(), SCOPED);
+      const call = vi.mocked(hooks.useReport).mock.calls.find((c) => c[1] === "route_table")!;
+      expect(call[0]).toBe(8);
+      expect(call[2]).toMatchObject({ from: "2026-06-01", to: "2026-06-07", dow: "weekday", time_band: "morning", routes: ["R1", "R2"] });
+      expect(call[3]).toEqual({ sort: "avg", limit: 5 });
+      const anchor = document.querySelector<HTMLElement>(".ov-routes-anchor")!;
+      expect(within(anchor).getByRole("table")).toBeInTheDocument();
+      expect(within(anchor).getByText("Covers the 163 routes observed 100 or more times.")).toBeInTheDocument();
+    });
+
+    it("links the routes to check to the Routes table with the same days, filters and sort", () => {
+      renderOverview(figures(), SCOPED);
+      expect(screen.getByRole("link", { name: "See all 163 routes →" })).toHaveAttribute(
+        "href",
+        "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekday&time_band=morning&routes=R1%2CR2&sort=avg",
+      );
+    });
+
+    it("links the heaviest hour to Time's trend over the period and the screen's filters", () => {
+      renderOverview(figures(), SCOPED);
+      expect(screen.getByRole("link", { name: "See every hour by day on Time →" })).toHaveAttribute(
+        "href",
+        `/agencies/8/time?${PERIOD_SCOPE}&report=trend`,
+      );
+    });
+
+    it("links the sparkline to Time's trend over the period and the screen's filters", () => {
+      renderOverview(figures(), SCOPED);
+      expect(screen.getByRole("link", { name: "See the trend on Time →" })).toHaveAttribute(
+        "href",
+        `/agencies/8/time?${PERIOD_SCOPE}&report=trend`,
+      );
+    });
+
+    it("links the day-type split to Day types & agencies over the period and the screen's filters", () => {
+      renderOverview(figures(), SCOPED);
+      expect(screen.getByRole("link", { name: "Compare weekdays and weekends/holidays route by route →" })).toHaveAttribute(
+        "href",
+        `/agencies/8/compare?${PERIOD_SCOPE}&by=periods`,
+      );
+    });
+
+    it("draws no hour chart, day-type chart or hour breakdown of its own", () => {
+      renderOverview(figures(), SCOPED);
+      expect(screen.queryByRole("img", { name: "Worst hour of day" })).toBeNull();
+      expect(document.querySelector(".ov-svc-list")).toBeNull();
+    });
+  });
+
   describe("the hero's fact rows", () => {
     const delayed = (route_code: string, avg_min: number) => ({ route_code, route_short_name: null, avg_min });
     const withFacts = (routes = [delayed("R1", 7.2), delayed("R2", 5.0), delayed("R3", 4.1), delayed("R4", 2.2)], bands = bandCounts(2, 1, 1)) =>
@@ -216,10 +253,12 @@ describe("OverviewTab", () => {
       });
     const lateRow = () => screen.getByRole("button", { name: /Averaging 5 min or more late/ });
 
-    it("opens the peak-hour card's modal from the heaviest-hour row", async () => {
+    it("leads from the heaviest-hour row to Time's trend over the period", () => {
       renderOverview(withFacts());
-      await userEvent.click(screen.getByRole("button", { name: /Heaviest hour/ }));
-      expect(screen.getByRole("dialog", { name: "Worst hour (Weekday vs Weekend)" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /Heaviest hour/ })).toHaveAttribute(
+        "href",
+        "/agencies/8/time?from=2026-05-11&to=2026-06-09&report=trend",
+      );
     });
 
     it("opens the concentration card's modal from the share row", async () => {
@@ -228,42 +267,21 @@ describe("OverviewTab", () => {
       expect(screen.getByRole("dialog", { name: "Delay concentration (top 20)" })).toBeInTheDocument();
     });
 
-    // The row scrolls to the routes-to-check list, so its count is the one
-    // the reader finds in that list's top-band header, and not the payload's
-    // delayed_count.
-    it("agrees with the routes-to-check list's top-band header", () => {
+    it("prints the top band's count in ink like the facts beside it, not the payload's delayed_count", () => {
       renderOverview(withFacts());
-      expect(screen.getByText("2 routes averaging 5 min or more late")).toBeInTheDocument();
       expect(within(lateRow()).getByText("2")).toBeInTheDocument();
-      // A count, printed in ink like the facts beside it: the list below
-      // carries the delay colours.
       expect(lateRow()).toHaveClass("ov-hero-fact", { exact: true });
     });
 
-    it("counts out of the same routes the list says it ranks", () => {
-      const facts = withFacts();
-      renderOverview({ ...facts, top_delayed: { ...facts.top_delayed, route_count: 163 } });
-      expect(lateRow()).toHaveTextContent("/ 163 routes");
-      expect(screen.getByText("Covers the 163 routes observed 100 or more times.")).toBeInTheDocument();
-    });
-
-    it("agrees with that header past the five routes the list holds", () => {
-      const worst = [delayed("R1", 9.1), delayed("R2", 8.4), delayed("R3", 7.7), delayed("R4", 6.2), delayed("R5", 5.3)];
-      renderOverview(withFacts(worst, bandCounts(12, 3, 0)));
-      expect(screen.getByText("12 routes averaging 5 min or more late (top 5 shown)")).toBeInTheDocument();
-      expect(within(lateRow()).getByText("12")).toBeInTheDocument();
-    });
-
-    it("shows a neutral zero when no route reaches the top band, while the list still lists the rest", () => {
+    it("shows a neutral zero when no route reaches the top band", () => {
       renderOverview(withFacts([delayed("R3", 4.1), delayed("R4", 2.2)], bandCounts(0, 1, 1)));
-      expect(screen.getByText("1 route averaging 3–5 min late")).toBeInTheDocument();
       expect(within(lateRow()).getByText("0")).toBeInTheDocument();
       expect(lateRow()).toHaveClass("ov-hero-fact", { exact: true });
     });
 
-    // The routes-to-check list is inline, with no modal of its own: the row
-    // takes the reader, and keyboard focus, to it.
-    it("brings the routes-to-check list into view from the late-routes row", async () => {
+    // The routes-to-check preview is inline, with no modal of its own: the
+    // row takes the reader, and keyboard focus, to it.
+    it("brings the routes-to-check preview into view from the late-routes row", async () => {
       const scrollIntoView = vi.fn();
       Element.prototype.scrollIntoView = scrollIntoView;
       try {
@@ -372,7 +390,6 @@ describe("OverviewTab for an agency never collected", () => {
 
   it("waits for the agency list before saying the range is empty", () => {
     vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
     vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: undefined, isPending: true } as never);
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/8/overview"]}>
@@ -387,7 +404,6 @@ describe("OverviewTab for an agency never collected", () => {
   it("says no data was ever collected and offers another agency", async () => {
     localStorage.setItem("transit.lastAgency", "8");
     vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: summary(), isPending: false, error: null, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
     vi.spyOn(hooks, "useAgencies").mockReturnValue({
       data: [{ agency_id: 8, agency_name: "Hiroden", feed_url: "", static_url: null, latest_data_date: null }],
       isPending: false,

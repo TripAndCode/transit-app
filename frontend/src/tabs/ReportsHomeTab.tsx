@@ -46,7 +46,10 @@ const rankingColumns: CsvColumn<RankingRow>[] = [
 /** The API's longest ranking, so the exported CSV is not cut at the default first page. */
 const RANKING_OPTIONS = { limit: REPORT_ROWS_MAX };
 
-/** How many routes the printable page lists; every route is on the Routes table. */
+/** How many routes the printable page lists. The period document keeps its
+ *  own short list and chart, because it is printed and filed as it stands;
+ *  each links to the screen that answers the question in full (the Routes
+ *  table, Time's trend) over the same scope. */
 const SUMMARY_ROUTES = 10;
 
 /** The day whose mean rose furthest above its 7-day moving average: the
@@ -135,7 +138,8 @@ export function ReportsHomeTab() {
           {spike && <p>
             {t("spike", { date: formatDate(spike.date, { weekday: true }), avg: formatMinutes(spike.avg_min), label: tt(t, "reports.daily.smoothed_label"), smoothed: formatMinutes(spike.avg_min_smoothed) })}
             {spike.top_offenders.length > 0 && <> {t("spikeRoutes", { routes: spike.top_offenders.map((o) => tt(t, "reports.daily.offender", { route: names.format(o.route_code), min: formatMinutes(o.avg_min) })).join(tt(t, "common.list_separator")) })}</>}
-          </p>}</>}
+          </p>}
+          <p className="focus-muted"><Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("trendOnTime")}</Link></p></>}
       </AsyncSection></section>
       <section><h2>{t("routesToCheck")}</h2>
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
@@ -145,16 +149,15 @@ export function ReportsHomeTab() {
           </td></tr>)}
         </tbody></table></div></>}
       </AsyncSection>
-      {routesTotal > shownRows.length && shownRows.length > 0 && <p className="focus-muted">
-        {t("topRoutes", { shown: shownRows.length, total: formatNumber(routesTotal) })}{" "}
-        <Link to={routesHref(String(id), `?${queryString}`)}>{t("allRoutes")}</Link>
+      {shownRows.length > 0 && <p className="focus-muted">
+        {routesTotal > shownRows.length && <>{t("topRoutes", { shown: shownRows.length, total: formatNumber(routesTotal) })}{" "}</>}
+        <Link to={reportHref(String(id), "ranking", `?${queryString}`)}>{t("allRoutes")}</Link>
       </p>}
       {ranking.data?.reliable_min_samples != null && <p className="focus-muted">{t("routesFloor", { floor: ranking.data.reliable_min_samples })}</p>}
       </section>
       <p className="focus-muted">{t("reportNote")}</p>
       {trend.data && <DefinitionMetaBlock definition={trend.data.definition} />}
       <details><summary>{t("definitions")}</summary><p>{formatDateRange(ctx.from, ctx.to)}{FILTER_SEPARATOR}{ctx.routes.map(names.format).join(tt(t, "common.list_separator")) || t("allPatterns")}</p>
-        <Link to={reportHref(String(id), "trend", `?${queryString}`)}>{t("advanced")} →</Link>
       </details>
     </>}
   </div>;

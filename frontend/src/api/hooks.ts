@@ -35,7 +35,6 @@ import type {
   LiveTripsResponse,
   NetworkSummary,
   OverviewSummary,
-  PeakHourBreakdown,
   PerformanceStandardsResponse,
   ReplayResponse,
   ReportMeta,
@@ -372,25 +371,6 @@ export function useOverviewSummary(
     queryFn: ({ signal }) =>
       apiGet<OverviewSummary>(`/api/${agencyId}/overview/summary?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null,
-  });
-}
-
-export function usePeakHourBreakdown(
-  agencyId: number | null,
-  hour: number | null,
-  dow: number | null,
-): UseQueryResult<PeakHourBreakdown> {
-  return useQuery({
-    queryKey: ["peak-hour-breakdown", agencyId, hour, dow],
-    enabled: agencyId != null && hour != null,
-    queryFn: ({ signal }) => {
-      const params = new URLSearchParams({ hour: String(hour) });
-      if (dow != null) params.set("dow", String(dow));
-      return apiGet<PeakHourBreakdown>(
-        `/api/${agencyId}/peak-hour-breakdown?${params}`,
-        { signal },
-      );
-    },
   });
 }
 

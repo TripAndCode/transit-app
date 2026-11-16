@@ -20,17 +20,14 @@ const DAY_TYPE_STRINGS: Record<string, string> = {
   "palette.nav_compare_sublabel": ja.palette.nav_compare_sublabel,
   "ask.col.kyujitsu_min": ja.ask.col.kyujitsu_min,
   "ask.card.param.service.weekend": ja.ask.card.param.service.weekend,
+  "overview.service_split.see_compare": ja.overview.service_split.see_compare,
 };
 
 // The dow=weekend filter, on the scope sentence and Ask's filter bar alike,
-// and the Overview's peak-hour pair built on it, keep ISO Saturday and Sunday
-// only, so their weekend side is 土日.
+// keeps ISO Saturday and Sunday only, so its weekend side is 土日.
 const SAT_SUN_STRINGS: Record<string, string> = {
   "scope.control.weekend": ja.scope.control.weekend,
   "scope.days_weekend": ja.scope.days_weekend,
-  "overview.peak_hour.weekend_empty": ja.overview.peak_hour.weekend_empty,
-  "overview.modal.peak_hour": ja.overview.modal.peak_hour,
-  "overview.peak_explainer": ja.overview.peak_explainer,
   "design.weekend": design.ja.weekend,
 };
 
@@ -52,7 +49,6 @@ describe("en day-group wording", () => {
     expect(en.reports.desc.dow_weekday).toMatch(/holiday/i);
     expect(en.ask.card.param.service.weekend).toMatch(/holiday/i);
     expect(en.scope.control.weekend).not.toMatch(/holiday/i);
-    expect(en.overview.peak_explainer).not.toMatch(/weekend\/holiday/i);
     expect(design.en.weekend).not.toMatch(/holiday/i);
   });
 });

@@ -65,6 +65,17 @@ What the user sees/does:
   bubbles; assistant bubbles render `frontend/src/tabs/ask/RichResult.tsx`
   (table / kv / chart depending on `result.kind`), with a collapsible
   "details" JSON dump of tool/args/result.
+- **Link to the question's home** — a ranking, on-time, trend or
+  weekday/weekend card ends with "Open on Routes / Time / Day types &
+  agencies" (`frontend/src/tabs/ask/cardHome.ts`), the screen that answers
+  its question in full (`analysis-tab.md` ▸ One home per question). The link
+  carries the card's own scope as it was answered: its persisted
+  `from_date`/`to_date` and route, and the `conditions` its dispatch ran
+  under, not the thread's current filters. A ranking card keeps its order
+  (`best_first`), and an on-time card's `threshold_min` becomes the scope's
+  late tolerance with every early departure on time, which is how the tool
+  counts it. The per-day-type split of one route
+  (`compare_segments`, `dimension="service_type"`) has no home and no link.
 - **Result exports** — `frontend/src/tabs/ask/ResultExports.tsx`: the
   selected step as JSON, and a CSV for each table answer (`resultTableCsv`
   in `resultSnapshot.ts`). The CSV opens with key/value rows recording what

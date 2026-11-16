@@ -23,8 +23,8 @@ import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
 import { quietFor } from "../tabs/map/format";
 import { EM_DASH, fixedTenth, formatDate, formatHourRange, formatReportTime } from "../utils/format";
 
-/** A hero fact row, named for the card that explains it. */
-export type HeroFact = "peak_hour" | "concentration" | "late_routes";
+/** A hero fact row that opens something on Pulse, named for what it opens. */
+export type HeroFact = "concentration" | "late_routes";
 
 type Props = {
   headline: OverviewHeadline;
@@ -53,6 +53,9 @@ type Props = {
   /** The period's days with data, oldest first: where the headline's last
    *  day stands among them. */
   daily: OverviewServiceSplitDay[];
+  /** Time's trend over the period's scope: where the sparkline and the
+   *  heaviest hour are drawn in full. */
+  trendHref: string;
   /** Opens the card behind a fact row. Each row exists only while that card
    *  has something to show. */
   onOpenFact: (fact: HeroFact) => void;
@@ -118,6 +121,7 @@ export function OverviewHeroRow({
   peakHour,
   concentration,
   daily,
+  trendHref,
   onOpenFact,
 }: Props) {
   const { t } = useTranslation();
@@ -231,6 +235,9 @@ export function OverviewHeroRow({
               {t("overview.hero_row.sparkline_baseline", { range: periodRange, value: fixedTenth(sparklineMean) })}
             </div>
           )}
+          <Link className="ov-hero-trend-link" to={trendHref}>
+            {t("overview.hero_row.see_trend")}
+          </Link>
           <div className="ov-hero-feed">
             {/* Green only for a live feed; a quiet or never-reporting one
                 keeps a neutral dot, and an unread status shows none.
@@ -254,7 +261,7 @@ export function OverviewHeroRow({
               <FactRow
                 label={t("overview.hero_row.fact_peak_hour")}
                 period={periodRange}
-                onClick={() => onOpenFact("peak_hour")}
+                to={trendHref}
                 definition={
                   <MetricDefinition
                     title={t("overview.definition.peak_hour.title")}
@@ -311,31 +318,42 @@ export function OverviewHeroRow({
 }
 
 /** One fact, dated: the facts count different windows, so each says which.
- *  Its definition sits beside the button, never inside it: a control nested
- *  in a button would open the fact's card as well. */
+ *  It opens something on Pulse (`onClick`) or leads to another screen (`to`).
+ *  Its definition sits beside the control, never inside it: a control nested
+ *  in another would trigger both. */
 function FactRow({
   label,
   period,
-  onClick,
   definition,
   children,
+  ...action
 }: {
   label: string;
   period: string;
-  onClick: () => void;
   definition: ReactNode;
   children: ReactNode;
-}) {
+} & ({ onClick: () => void } | { to: string })) {
+  const content = (
+    <>
+      <span className="ov-hero-fact-label">
+        {label}{" "}
+        <span className="ov-hero-fact-period">{period}</span>
+      </span>
+      <span className="ov-hero-fact-value num">{children}</span>
+      <span className="ov-hero-fact-go" aria-hidden="true">›</span>
+    </>
+  );
   return (
     <li>
-      <button type="button" className="ov-hero-fact" onClick={onClick}>
-        <span className="ov-hero-fact-label">
-          {label}{" "}
-          <span className="ov-hero-fact-period">{period}</span>
-        </span>
-        <span className="ov-hero-fact-value num">{children}</span>
-        <span className="ov-hero-fact-go" aria-hidden="true">›</span>
-      </button>
+      {"to" in action ? (
+        <Link className="ov-hero-fact" to={action.to}>
+          {content}
+        </Link>
+      ) : (
+        <button type="button" className="ov-hero-fact" onClick={action.onClick}>
+          {content}
+        </button>
+      )}
       {definition}
     </li>
   );

@@ -232,20 +232,25 @@ What the user sees/does:
     whose mean rose furthest above its 7-day moving average
     (`avg_min_smoothed`), with that day's `top_offenders`: the spike a
     reader of the chart asks about. No day is named when none rose above it.
+    A link under it opens Time's `trend` report (`time?report=trend`), the
+    home of the trend and day × hour questions, over the same scope.
   - **Routes-to-check section** — the ten slowest patterns (pattern, mean
     delay, samples), each row's "Open analysis →" link opening that route's
     dossier (`/agencies/:agencyId/routes/<route_code>`) with the active
     scope's query string, `service` included when one is set. When there are
-    more, a line says how many of how many are shown and links every route
-    on the Routes table, so the page stays one printable sheet.
+    more, a line says how many of how many are shown. A link under it always
+    opens the Routes table, the home of "which routes are worst", over the
+    same scope and sorted by mean delay (`routes?sort=avg`), so its first
+    rows are this list.
+  - The chart and the list are part of the printable period document, so
+    they stay on the page as it is printed and filed rather than becoming
+    links; each points to its home instead.
   - The Export menu is the page's only export; its CSV still holds every
     ranked route the API returned.
   - A `DefinitionMetaBlock`, its own collapsed disclosure (on-time/late
     tolerance, measurement point, dedup rule, exclusion threshold) from the
     trend report's `definition` field, then a **definitions** `<details>`
-    showing the active filter window and a **"Detailed reports →"** link to
-    Time's `trend` report (`/agencies/:agencyId/time?report=trend`) carrying
-    the same filter.
+    showing the active filter window.
 - **Saved view** (`?doc=saved`) — lists this browser's saved analyses for
   the current agency (`frontend/src/components/analysis/savedAnalyses.ts`),
   each opening with its saved filter query through `routesHref`: one saved
@@ -307,7 +312,7 @@ than issuing their own requests.
   `ReportsHomeTab` and `RouteAnalysisTab` together on their real routes,
   including a saved analysis opening its route's dossier),
   `frontend/src/tabs/ReportsHomeTab.test.tsx` (the routes-to-check →
-  dossier and "Detailed reports" → Time links),
+  dossier link, and the scoped links to the Routes table and Time's trend),
   `frontend/src/tabs/SavedExportTab.test.tsx` (the `doc` views and the
   `view` → `doc` replacement).
 - Backend: `tests/api/test_reports.py`, `tests/unit/test_reports_rounding.py`
@@ -327,8 +332,10 @@ than issuing their own requests.
 4. Click a row's "Open analysis →" link in the routes-to-check table —
    expect navigation to that route's dossier,
    `/agencies/:agencyId/routes/<route_code>`, carrying the same filter.
-5. Click "Detailed reports →" — expect navigation to
-   `/agencies/:agencyId/time?report=trend` carrying the same filter.
+5. Click "The trend by day and hour on Time →" under the chart — expect
+   navigation to `/agencies/:agencyId/time?report=trend` carrying the same
+   filter; click "Every route on the Routes table →" — expect the Routes table
+   with the same filter, its first rows this list.
 6. Confirm the sections carry no download buttons of their own; open the
    header's "Export" menu and choose "Download CSV" — expect one combined
    file holding every ranked route, and "Download PNG" — expect an image of
