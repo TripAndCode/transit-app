@@ -7,7 +7,7 @@ import type { Destination } from "./destinations";
 
 vi.mock("../tabs/RoutesIndex", () => ({ RoutesIndex: () => null }));
 vi.mock("../tabs/TimeTab", () => ({ TimeTab: () => null }));
-vi.mock("../tabs/AnalysisTab", () => ({ AnalysisTab: () => null }));
+vi.mock("../tabs/AnalysisTab", () => ({ AnalysisTab: () => null, SingleReportScreen: () => null }));
 vi.mock("../tabs/SavedExportTab", () => ({ SavedExportTab: () => null }));
 vi.mock("../tabs/ReportsHomeTab", () => ({ ReportsHomeTab: () => null }));
 vi.mock("../tabs/CompareTab", () => ({ CompareTab: () => null }));
@@ -68,12 +68,12 @@ describe("ROUTE_CHUNK_LOADERS", () => {
     expect(loaded).toEqual([{ default: SavedExportTab }, { default: ReportsHomeTab }]);
   });
 
-  it("warms the agencies board and the analysis board along with the Compare host", async () => {
+  it("warms the agencies board and the report along with the Compare host", async () => {
     const { CompareTab } = await import("../tabs/CompareTab");
-    const { AnalysisTab } = await import("../tabs/AnalysisTab");
+    const { SingleReportScreen } = await import("../tabs/AnalysisTab");
     const { NetworkTab } = await import("../tabs/NetworkTab");
     const loaded = await ROUTE_CHUNK_LOADERS.compare();
-    expect(loaded).toEqual([{ default: CompareTab }, { default: AnalysisTab }, { default: NetworkTab }]);
+    expect(loaded).toEqual([{ default: CompareTab }, { default: SingleReportScreen }, { default: NetworkTab }]);
   });
 
   it("is the only place the routed tabs are dynamically imported", () => {

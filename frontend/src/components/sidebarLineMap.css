@@ -105,10 +105,9 @@
 
 .rail-name {
   position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--text-base);
   font-weight: 700;
   white-space: nowrap;

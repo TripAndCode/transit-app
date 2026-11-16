@@ -175,7 +175,7 @@ describe("CommandPalette", () => {
     renderPalette();
     fireEvent.keyDown(document, { key: "?" });
     const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
-    for (const name of ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports", "Notebook"]) {
+    for (const name of ["Pulse", "Routes", "Time", "Why", "Day types & agencies", "Live", "Reports", "Notebook"]) {
       expect(within(dialog).getByText(`Go to ${name}`)).toBeInTheDocument();
     }
     expect(within(dialog).getByText("Show this shortcut list")).toBeInTheDocument();
@@ -246,7 +246,7 @@ describe("CommandPalette", () => {
     await user.click(screen.getByText("Dwell/running time"));
     expect(screen.getByTestId("pathname").textContent).toBe("/agencies/1/why");
     const search = new URLSearchParams(screen.getByTestId("search").textContent ?? "");
-    expect(search.get("report")).toBe("dwell_run");
+    expect(search.has("report")).toBe(false);
     expect(search.has("from")).toBe(false);
   });
 

@@ -17,7 +17,7 @@
     "routes": "路線",
     "time": "時間",
     "why": "要因",
-    "compare": "比較",
+    "compare": "日種別・事業者の比較",
     "reports": "レポート",
     "destinations_label": "画面",
     "other": "その他",
@@ -31,7 +31,8 @@
     "pin_route_full": "ピン留めは{{max}}系統まで",
     "station_figure_mean": "今日の平均 {{delay}}",
     "station_figure_unusual": "今日の要注意 {{n}}",
-    "bus-town": "バスタウン"
+    "bus-town": "バスタウン",
+    "compare_short": "日種別・事業者"
   },
   "compare": {
     "mode_periods": "平日と土日祝",
@@ -1907,7 +1908,7 @@
       "age_hours": "{{h}} 時間前",
       "age_minutes": "{{m}} 分前",
       "unknown": "不明",
-      "network_link": "事業者どうしの遅延比較は「比較」→「事業者どうし」で確認できます。"
+      "network_link": "事業者どうしの遅延比較は「日種別・事業者の比較」→「事業者どうし」で確認できます。"
     },
     "agencies": {
       "title": "事業者管理",
