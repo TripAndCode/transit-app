@@ -1885,7 +1885,8 @@
         "governance": "統制",
         "reference": "参照"
       },
-      "ask_ops": "Ask 運用"
+      "ask_ops": "Ask 運用",
+      "usage": "利用状況"
     },
     "ops": {
       "title": "運用状況",
@@ -2387,6 +2388,28 @@
         },
         "unknown_tool": "該当ツールなし(未対応のカード名、またはツールを使わない回答へのフォローアップ)",
         "title_loading": "ツール別ノート利用状況"
+      }
+    },
+    "usage": {
+      "title": "利用状況",
+      "days_label": "期間",
+      "days_option": "{{count}}日間",
+      "by_day": {
+        "title": "日別リクエスト数",
+        "empty": "この期間はいずれの日もリクエストがありません。"
+      },
+      "by_route": {
+        "title": "ルート別リクエスト数",
+        "table_label": "ルート別リクエスト数",
+        "empty": "この期間に記録されたルートはありません。"
+      },
+      "col": {
+        "route": "ルート",
+        "method": "メソッド",
+        "signed_out": "未ログイン",
+        "signed_in": "ログイン",
+        "api_key": "APIキー",
+        "errors": "エラー"
       }
     }
   },

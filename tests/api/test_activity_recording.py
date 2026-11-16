@@ -1,14 +1,36 @@
-"""Authenticated API requests are counted per user, route template and agency."""
+"""API requests are counted per route template and agency: a session user or
+an API-key owner into ``user_activity_daily``, a signed-out caller into
+``anonymous_activity_daily``."""
 
 import pytest
 
-from api.activity import BUFFER
+from api.activity import ANONYMOUS_BUFFER, BUFFER
 from api.security import token_hash
+from pipeline.flags import invalidate as invalidate_flags
 from tests.fixtures.users import seed_session
+
+_SSO = {
+    "SESSION_SIGNING_KEY": "test-signing-key",
+    "GOOGLE_CLIENT_ID": "g",
+    "GOOGLE_CLIENT_SECRET": "gs",
+    "GITHUB_CLIENT_ID": "h",
+    "GITHUB_CLIENT_SECRET": "hs",
+}
+
+
+@pytest.fixture
+def sso_on(monkeypatch):
+    for key, value in _SSO.items():
+        monkeypatch.setenv(key, value)
+    invalidate_flags()
 
 
 def _counts_for(uid):
     return {(k.route, k.method, k.agency_id, k.via_api_key): v for k, v in BUFFER.drain().items() if k.user_id == uid}
+
+
+def _anonymous_counts():
+    return {(k.route, k.method, k.agency_id): v for k, v in ANONYMOUS_BUFFER.drain().items()}
 
 
 @pytest.mark.asyncio
@@ -36,10 +58,79 @@ async def test_an_api_key_request_is_counted_against_the_key_owner(client, aconn
 
 
 @pytest.mark.asyncio
-async def test_signed_out_public_and_unmatched_requests_are_not_counted(client, aconn):
+async def test_a_signed_out_request_lands_in_the_anonymous_buffer_not_the_user_one(client, aconn):
     BUFFER.drain()
-    sid = (await seed_session(aconn)).sid
+    ANONYMOUS_BUFFER.drain()
     await client.get("/api/agencies")
+    assert _anonymous_counts() == {("/api/agencies", "GET", None): [1, 0]}
+    assert BUFFER.drain() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_request_with_an_ownerless_api_key_is_counted_in_neither(client, aconn):
+    BUFFER.drain()
+    ANONYMOUS_BUFFER.drain()
+    raw = "key-rec-ownerless"
+    await aconn.execute(
+        "INSERT INTO api_keys (key_hash, owner_email, tier) VALUES ($1, 'o@x', 'pro')",
+        token_hash(raw),
+    )
+    r = await client.get("/api/agencies", headers={"X-API-Key": raw})
+    assert r.status_code == 200
+    assert BUFFER.drain() == {}
+    assert ANONYMOUS_BUFFER.drain() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_signed_out_request_keeps_its_agency_only_when_it_succeeded(client, aagency_id):
+    ANONYMOUS_BUFFER.drain()
+    assert (await client.get(f"/api/agencies/{aagency_id}")).status_code == 200
+    assert (await client.get("/api/agencies/987654")).status_code == 404
+    assert (await client.get("/api/987654/overview/summary")).status_code == 404
+    assert _anonymous_counts() == {
+        ("/api/agencies/{agency_id}", "GET", aagency_id): [1, 0],
+        ("/api/agencies/{agency_id}", "GET", None): [1, 1],
+        ("/api/{agency_id}/overview/summary", "GET", None): [1, 1],
+    }
+
+
+@pytest.mark.asyncio
+async def test_sign_in_plumbing_and_unmatched_requests_are_not_counted(client, aconn):
+    BUFFER.drain()
+    ANONYMOUS_BUFFER.drain()
+    sid = (await seed_session(aconn)).sid
     await client.get("/api/config", cookies={"sid": sid})
+    await client.get("/api/me", cookies={"sid": sid})
+    await client.post("/api/auth/logout")
     await client.get("/api/no-such-route", cookies={"sid": sid})
     assert BUFFER.drain() == {}
+    assert ANONYMOUS_BUFFER.drain() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_method_the_route_does_not_serve_is_not_counted(client, aconn):
+    BUFFER.drain()
+    ANONYMOUS_BUFFER.drain()
+    sid = (await seed_session(aconn)).sid
+    assert (await client.request("FOOBAR", "/api/agencies")).status_code == 405
+    assert (await client.request("PUT", "/api/agencies", cookies={"sid": sid})).status_code == 405
+    assert BUFFER.drain() == {}
+    assert ANONYMOUS_BUFFER.drain() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_signed_out_snapshot_read_is_counted(client, aconn):
+    ANONYMOUS_BUFFER.drain()
+    await client.get("/api/snapshots/abcdefghijklmnopqrstuv")
+    counts = _anonymous_counts()
+    assert ("/api/snapshots/{snapshot_id}", "GET", None) in counts
+
+
+@pytest.mark.asyncio
+async def test_a_signed_out_401_from_the_gate_is_counted_in_neither(client, sso_on):
+    BUFFER.drain()
+    ANONYMOUS_BUFFER.drain()
+    r = await client.get("/api/agencies")
+    assert r.status_code == 401
+    assert BUFFER.drain() == {}
+    assert ANONYMOUS_BUFFER.drain() == {}
