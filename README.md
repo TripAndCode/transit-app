@@ -93,16 +93,21 @@ poetry run python gtfs_pipeline.py add_agency \
   --feed-url "https://example.test/trip_updates.pb" --static-url "https://example.test/gtfs.zip"
 ```
 
-It reads the agency's name from the zip's `agency.txt` (`--name` when the zip
-lists several), polls the feed for `--probe-seconds` (default 120), and adds
-the agency only when at least 80% of the feed's trip_ids are in `trips.txt`.
-It then records the feed's RT field-coverage verdict and loads the timetable.
-A refusal prints the reason with the probe report, exits nonzero and adds
-nothing. `--dry-run` prints the same report and never writes. A feed that sends
-nothing during the probe is refused until it is in service, or added anyway
-with `--accept-empty`. Without `--static-url`, `add_agency --name …
---feed-url …` inserts the row with no strategies, so its feed is read as
-`aomori_regex`.
+It names the agency and sets its timezone from the zip's `agency.txt`; pass
+`--name` when `agency.txt` lists several agencies or names none. It polls the
+feed every `POLL_INTERVAL_SEC` for `--probe-seconds` (default 120) and adds the
+agency only when at least 80% of the feed's StopTimeUpdates join `stop_times.txt`
+on `(trip_id, stop_sequence)`, the join `static_join` ingest makes. It then
+loads the timetable it measured and, when the busiest poll holds enough
+StopTimeUpdates, records the feed's RT field-coverage verdict; otherwise the
+poller's hourly re-probe records it. A refusal prints the reason with the probe
+report, exits nonzero and adds nothing. `--dry-run` prints the same report and
+never writes. A feed that sends nothing during the probe is refused until it is
+in service, or added anyway with `--accept-empty`. If the agency is added but
+its timetable fails to load, the agency stays, the command exits 1, and ingest
+refuses the agency until `refresh-static --agency-id <id>` loads it. Without
+`--static-url`, `add_agency --name … --feed-url …` inserts the row with no
+strategies, so its feed is read as `aomori_regex`.
 
 ### Disaster tools
 
@@ -466,8 +471,9 @@ renews the RT field-coverage verdicts that are due.
 
 Add an agency from its TripUpdates feed and GTFS(-JP) static zip. `add_agency`
 probes the feed against the timetable, chooses the `static_join` and
-`direct_url` strategies when the feed's trip_ids are in `trips.txt`, records
-the coverage verdict and loads the timetable, or refuses with the reason:
+`direct_url` strategies when the feed's StopTimeUpdates join the timetable,
+loads the timetable and records the coverage verdict, or refuses with the
+reason ("Load Data" above has the details):
 
 ```bash
 docker compose --profile standalone exec app python gtfs_pipeline.py add_agency \

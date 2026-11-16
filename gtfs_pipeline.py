@@ -274,74 +274,51 @@ def _add_agency_unprobed(args) -> None:
 
 
 def _add_agency_probed(args) -> None:
-    import asyncio
     import pathlib
-
-    import asyncpg
 
     from pipeline import feed_probe
     from pipeline.clickhouse import get_client
-    from pipeline.static_fetcher import DEFAULT_STATIC_DEST, refresh_static_recorded
+    from pipeline.poller import configured_interval_sec
+    from pipeline.static_fetcher import DEFAULT_STATIC_DEST
     from pipeline.url_guard import redact_url
 
+    seconds = feed_probe.DEFAULT_PROBE_SECONDS if args.probe_seconds is None else args.probe_seconds
+    interval = configured_interval_sec()
+    logger.info(f"add_agency: probing {redact_url(args.feed_url)} for {seconds:.0f}s, every {interval:.0f}s")
     conn = _get_conn()
     try:
-        with conn.cursor() as cur:
-            # UNIQUE (feed_url) covers disabled agencies too.
-            cur.execute("SELECT agency_id, deleted_at IS NOT NULL FROM agencies WHERE feed_url = %s", (args.feed_url,))
-            holder = cur.fetchone()
-        conn.rollback()
-        if holder is not None:
-            state = " (disabled)" if holder[1] else ""
-            logger.error(f"add_agency: agency {holder[0]}{state} already has this feed URL; nothing was added.")
-            sys.exit(1)
-
-        seconds = feed_probe.DEFAULT_PROBE_SECONDS if args.probe_seconds is None else args.probe_seconds
-        interval = float(os.environ.get("POLL_INTERVAL_SEC") or feed_probe.DEFAULT_PROBE_INTERVAL_SEC)
-        logger.info(f"add_agency: probing {redact_url(args.feed_url)} for {seconds:.0f}s, every {interval:.0f}s")
-        outcome = feed_probe.probe(
+        result = feed_probe.onboard(
+            conn,
+            DATABASE_URL,
             args.feed_url,
             args.static_url,
+            dest_dir=pathlib.Path(DEFAULT_STATIC_DEST),
+            ch_client=get_client,
+            dry_run=args.dry_run,
             name=args.name,
             seconds=seconds,
             interval=interval,
             accept_empty=args.accept_empty,
         )
-        sys.stdout.write("\n".join(feed_probe.report_lines(outcome)) + "\n")
-        if args.dry_run:
-            logger.info("add_agency: dry run; nothing was written.")
-            sys.exit(0 if outcome.decision.accepted else 1)
-
-        async def _insert() -> int:
-            aconn = await asyncpg.connect(DATABASE_URL)
-            try:
-                return await feed_probe.add_probed_agency(aconn, outcome)
-            finally:
-                await aconn.close()
-
-        try:
-            aid = asyncio.run(_insert())
-        except ValueError as refused:
-            logger.error(f"add_agency: nothing was added: {refused}")
-            sys.exit(1)
-        except asyncpg.UniqueViolationError:
-            logger.error("add_agency: another agency took this feed URL during the probe; nothing was added.")
-            sys.exit(1)
-        logger.info(f"add_agency: added agency {aid}: {outcome.decision.name}")
-
-        try:
-            refresh_static_recorded(aid, conn, pathlib.Path(DEFAULT_STATIC_DEST), ch_client=get_client())
-        except Exception as exc:
-            conn.rollback()
-            logger.error(
-                f"add_agency: agency {aid} was added, but its timetable did not load ({exc}). Until it does, "
-                f"ingest refuses the agency; load it with `refresh-static --agency-id {aid}`."
-            )
-            sys.exit(1)
     finally:
         conn.close()
+    sys.stdout.write("\n".join(feed_probe.report_lines(result.outcome)) + "\n")
+    accepted = result.outcome.decision.accepted
+    if args.dry_run:
+        logger.info("add_agency: dry run; nothing was written.")
+        sys.exit(0 if accepted else 1)
+    if result.agency_id is None:
+        logger.error("add_agency: nothing was added.")
+        sys.exit(1)
+    if result.load_error is not None:
+        logger.error(
+            f"add_agency: agency {result.agency_id} was added, but its timetable did not load "
+            f"({result.load_error}). Until it does, ingest refuses the agency; load it with "
+            f"`refresh-static --agency-id {result.agency_id}`."
+        )
+        sys.exit(1)
     sys.stdout.write(
-        f"agency_id: {aid}\n"
+        f"agency_id: {result.agency_id}\n"
         "Next: the poller picks the agency up on its next cycle and Pulse shows its polls as they arrive. "
         "Each JST day reaches history at the following JST midnight, and the archive replaces it once the "
         "UTC day has closed.\n"
@@ -863,9 +840,9 @@ def cmd_poll(args):
     import pathlib
     import threading
 
-    from pipeline.poller import DEFAULT_INTERVAL_SEC, Poller, install_stop_handlers
+    from pipeline.poller import Poller, configured_interval_sec, install_stop_handlers
 
-    interval = args.interval or float(os.environ.get("POLL_INTERVAL_SEC") or DEFAULT_INTERVAL_SEC)
+    interval = args.interval or configured_interval_sec()
     archive_dir = pathlib.Path(args.archive_dir or os.environ.get("POLLER_ARCHIVE_DIR") or "archive")
     if os.environ.get("OBJECT_STORE_BUCKET"):
         logger.warning("poll: OBJECT_STORE_BUCKET is set, but the poller keeps its tarballs on %s only", archive_dir)
@@ -1165,7 +1142,7 @@ def main():
         "--probe-seconds",
         type=float,
         default=None,
-        help="how long to poll the feed (default 120), once every $POLL_INTERVAL_SEC, else 30, seconds",
+        help="how long to poll the feed (default 120), once every $POLL_INTERVAL_SEC, else 60, seconds",
     )
     p_add.add_argument("--accept-empty", action="store_true", help="add a feed that sent nothing during the probe")
     p_add.add_argument("--dry-run", action="store_true", help="probe and report; write nothing")

@@ -110,6 +110,12 @@ DailyStep = Callable[[Path, Plan], Plan]
 OK, SKIPPED, FAILED = "ok", "skipped", "failed"
 
 
+def configured_interval_sec() -> float:
+    """``$POLL_INTERVAL_SEC``, else ``DEFAULT_INTERVAL_SEC``: the pace of the
+    poller and of ``add_agency``'s probe of a new feed."""
+    return float(os.environ.get("POLL_INTERVAL_SEC") or DEFAULT_INTERVAL_SEC)
+
+
 def fetch_feed(url: str) -> bytes:
     deadline = time.monotonic() + FETCH_DEADLINE_SEC
     with safe_urlopen(url, timeout=FETCH_TIMEOUT_SEC, max_bytes=MAX_POLL_BYTES, deadline=deadline) as resp:

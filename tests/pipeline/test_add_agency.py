@@ -7,6 +7,7 @@ import pathlib
 import sys
 import urllib.error
 import urllib.request
+import zipfile
 
 import pytest
 
@@ -37,8 +38,8 @@ class FakeWeb:
     """Serves one static zip at STATIC and recorded polls at FEED; any other
     URL (direct_url's derived latest.zip among them) is a 404."""
 
-    def __init__(self, static_zip: str, *polls: str):
-        self.static = (FIXTURES / static_zip).read_bytes()
+    def __init__(self, static_zip: str | bytes, *polls: str):
+        self.static = static_zip if isinstance(static_zip, bytes) else (FIXTURES / static_zip).read_bytes()
         self.polls = [(FIXTURES / p).read_bytes() for p in polls]
         self.fetched: list[str] = []
 
@@ -59,7 +60,7 @@ def web(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("pipeline.feed_probe.validate_feed_url", lambda _url: None)
 
-    def install(static_zip: str, *polls: str) -> FakeWeb:
+    def install(static_zip: str | bytes, *polls: str) -> FakeWeb:
         fake = FakeWeb(static_zip, *polls)
         monkeypatch.setattr("pipeline.strategies.direct_url.safe_urlopen", fake.urlopen)
         monkeypatch.setattr("pipeline.rt_coverage_reprobe.safe_urlopen", fake.urlopen)
@@ -106,8 +107,9 @@ def _agency(pg_conn):
 def test_an_accepted_feed_is_added_with_its_strategies_verdict_and_timetable(
     pg_conn, ch_client, web, monkeypatch, capsys
 ):
-    web("hirobus_static.zip", "hirobus_tu.bin")
+    fake = web("hirobus_static.zip", "hirobus_tu.bin")
     assert _probed(monkeypatch) == 0
+    assert fake.fetched.count(STATIC) == 1
 
     [(aid, name, feed, static, ingest, static_strategy)] = _agency(pg_conn)
     assert (name, feed, static) == ("広島バス", FEED, STATIC)
@@ -120,7 +122,7 @@ def test_an_accepted_feed_is_added_with_its_strategies_verdict_and_timetable(
     assert _count(pg_conn, f"SELECT count(*) FROM static_trips WHERE agency_id = {aid}") > 0
     out = capsys.readouterr().out
     assert f"agency_id: {aid}" in out
-    assert "trip_id join: 59 of 59" in out
+    assert "100% of 871 StopTimeUpdates join stop_times.txt" in out
 
 
 def test_a_feed_whose_trip_ids_miss_the_timetable_is_refused_and_writes_nothing(
@@ -130,7 +132,7 @@ def test_a_feed_whose_trip_ids_miss_the_timetable_is_refused_and_writes_nothing(
     assert _probed(monkeypatch) == 1
     _nothing_written(pg_conn, tmp_path)
     out = capsys.readouterr().out
-    assert "verdict: low_join: 0% of 34 trip_ids are in trips.txt" in out
+    assert "verdict: low_join: 0% of 34 StopTimeUpdates join stop_times.txt" in out
     assert "aomori_regex" in out
 
 
@@ -186,3 +188,46 @@ def test_the_unprobed_form_still_inserts_the_row_as_given(pg_conn, web, monkeypa
 def test_the_unprobed_form_still_needs_a_name(pg_conn, monkeypatch):
     assert _run(monkeypatch, "--feed-url", FEED) == 2
     assert _count(pg_conn, "SELECT count(*) FROM agencies") == 0
+
+
+def _with_agency_txt(static_zip: str, agency_txt: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(FIXTURES / static_zip) as src, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            body = agency_txt.encode() if info.filename == "agency.txt" else src.read(info)
+            dst.writestr(info.filename, body)
+    return buf.getvalue()
+
+
+def test_the_measured_zip_is_the_one_loaded_with_its_timezone_and_manifest(
+    pg_conn, ch_client, web, monkeypatch, tmp_path
+):
+    web(
+        _with_agency_txt("hirobus_static.zip", "agency_id,agency_name,agency_timezone\n1,Paris Bus,Europe/Paris\n"),
+        "hirobus_tu.bin",
+    )
+    assert _probed(monkeypatch) == 0
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT agency_id, agency_name, timezone FROM agencies")
+        [(aid, name, tz)] = cur.fetchall()
+        cur.execute("SELECT DISTINCT static_version_id FROM static_trips WHERE agency_id = %s", (aid,))
+        [(version,)] = cur.fetchall()
+    assert (name, tz) == ("Paris Bus", "Europe/Paris")
+    agency_dir = tmp_path / "raw_archives_static" / str(aid)
+    assert (agency_dir / f"{version}.zip").exists()
+    assert (agency_dir / "_manifest.json").exists()
+
+
+def test_a_timetable_that_fails_to_load_keeps_the_agency_and_says_what_to_run(
+    pg_conn, ch_client, web, monkeypatch, caplog
+):
+    web("hirobus_static.zip", "hirobus_tu.bin")
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr("pipeline.static_fetcher.load_static", broken)
+    assert _probed(monkeypatch) == 1
+    [(aid, *_rest)] = _agency(pg_conn)
+    assert f"refresh-static --agency-id {aid}" in caplog.text and "disk full" in caplog.text
+    assert _count(pg_conn, "SELECT count(*) FROM static_trips") == 0

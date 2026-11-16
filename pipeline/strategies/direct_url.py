@@ -24,6 +24,7 @@ import json
 import logging
 import pathlib
 import secrets
+import shutil
 import time
 import urllib.error
 import urllib.parse
@@ -125,14 +126,17 @@ def fetch(
     dest_dir: pathlib.Path,
     *,
     force: bool = False,
+    label: str | None = None,
 ) -> Optional[pathlib.Path]:
     """Fetch and persist the freshest GTFS zip for this agency.
 
     Returns the path of the zip ready for load_static, or None when nothing
     is newer. With ``force``, every variant that answers 200 counts as newer.
     Raises StaticFetchError when static_url is not a valid http(s) URL or the
-    fetch failed.
+    fetch failed. *label* names the fetch in the log in place of the agency,
+    for a fetch made before the agency exists (:func:`adopt_staged`).
     """
+    who = label or f"agency={agency_id}"
     require_http_url(static_url, "the timetable URL")
     agency_dir = dest_dir / str(agency_id)
     agency_dir.mkdir(parents=True, exist_ok=True)
@@ -160,7 +164,7 @@ def fetch(
         cur_got, cur_failed = _try_cond_get(static_url, validators.get("current", {}), tmp_current)
         lat_got, lat_failed = _try_cond_get(latest_url, validators.get("latest", {}), tmp_latest)
         if lat_failed is not None:
-            logger.warning(f"[direct_url] agency={agency_id} latest.zip failed, going on without it: {lat_failed}")
+            logger.warning(f"[direct_url] {who} latest.zip failed, going on without it: {lat_failed}")
         if cur_failed is not None and lat_got is None:
             raise StaticFetchError("; ".join(str(e) for e in (cur_failed, lat_failed) if e is not None))
         cur_lm, cur_et = cur_got or (None, None)
@@ -179,10 +183,10 @@ def fetch(
             if cur_failed is not None:
                 # latest.zip answered, but only with what already loaded.
                 raise cur_failed
-            logger.info(f"[direct_url] agency={agency_id} no change")
+            logger.info(f"[direct_url] {who} no change")
             return None
         if cur_failed is not None:
-            logger.warning(f"[direct_url] agency={agency_id} static URL failed, loading latest.zip: {cur_failed}")
+            logger.warning(f"[direct_url] {who} static URL failed, loading latest.zip: {cur_failed}")
 
         # Something changed, so at least one variant downloaded this run.
         # latest.zip wins when it downloaded and differs from current
@@ -213,7 +217,7 @@ def fetch(
     # Staged, not written: the manifest is what the next fetch's conditional
     # GET and "no change" both read, so it may describe only a zip that loaded.
     _pending_path(agency_dir).write_text(json.dumps(manifest, indent=2))
-    logger.info(f"[direct_url] agency={agency_id} persisted {final.name}")
+    logger.info(f"[direct_url] {who} persisted {final.name}")
     return final
 
 
@@ -223,6 +227,22 @@ def record_loaded(agency_id: int, dest_dir: pathlib.Path, zip_path: pathlib.Path
     pending = _pending_path(agency_dir)
     if pending.exists():
         pending.replace(_manifest_path(agency_dir))
+
+
+def adopt_staged(staged_zip: pathlib.Path, agency_id: int, dest_dir: pathlib.Path) -> pathlib.Path:
+    """Move a zip :func:`fetch` persisted into another directory, with the
+    manifest it staged, to where *agency_id*'s own fetch would have put them,
+    and return its new path. :func:`record_loaded` then promotes the manifest
+    once the zip loads, so the next fetch is conditional on it."""
+    agency_dir = dest_dir / str(agency_id)
+    agency_dir.mkdir(parents=True, exist_ok=True)
+    final = agency_dir / staged_zip.name
+    # shutil.move, not a rename: the staging directory may be on another filesystem.
+    shutil.move(staged_zip, final)
+    pending = _pending_path(staged_zip.parent)
+    if pending.exists():
+        shutil.move(pending, _pending_path(agency_dir))
+    return final
 
 
 def _manifest_path(agency_dir: pathlib.Path) -> pathlib.Path:
