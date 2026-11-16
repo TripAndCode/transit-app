@@ -35,7 +35,7 @@ We also handle the following:
 | Information | When | Why |
 |---|---|---|
 | Email address, display name, avatar image URL | When an administrator signs in with Google or GitHub | To identify the administrator and show their account |
-| Sign-in history (time, method, IP address, browser type) | When an administrator signs in and out | To investigate misuse and keep the Service secure |
+| Sign-in and key-action history (time, sign-in method or kind of action, IP address, browser type) | When an administrator signs in or out, or takes an action that manages accounts or transit operators | To investigate misuse and keep the Service secure |
 | Sessions (IP address, browser type, last used) | While an administrator is signed in | To keep them signed in, and to let them sign out other devices |
 | Daily usage counts (requests and errors per screen or API route, and the transit operator being viewed) | While an administrator is signed in | To understand usage and manage load |
 | Investigations recorded in the Notebook | When the administrator saves them | To provide that feature |
@@ -56,9 +56,9 @@ The Service shows no ads and uses no analytics tools. Cookies are used only for 
 | Information | Period |
 |---|---|
 | Questions | 90 days after a question was last asked |
-| Sign-in history, including failed administrator password sign-ins | 25 months |
+| Sign-in and key-action history, including failed administrator password sign-ins | 25 months |
 | An administrator's account | Until the account is deleted |
-| Investigations an administrator recorded in the Notebook | Until the administrator deletes them |
+| Investigations an administrator recorded in the Notebook | Until the administrator deletes them or the account is deleted |
 | Sessions | Up to 30 days |
 | An administrator's daily usage counts | 25 months |
 | The admin action log | 400 days |
@@ -87,14 +87,14 @@ Your browser loads map images, the glyphs for map labels, and the page fonts dir
 
 - **Delete what your browser keeps:** clearing this site's data in your browser removes everything listed under “What stays in your browser”.
 - **Questions:** because we don't record who asked a question, we can't find or delete one person's questions.
-- **Deleting an administrator account:** the operator deletes administrator accounts. Deleting one removes its email address, display name and avatar image, and deletes its sessions and its link to Google or GitHub. Its sign-in history and the admin action log remain until their periods above pass.
+- **Deleting an administrator account:** the operator deletes administrator accounts. Deleting one removes its email address, display name and avatar image, and deletes its sessions, its link to Google or GitHub, and the investigations it recorded in the Notebook. Its sign-in and key-action history and the admin action log remain until their periods above pass.
 - **Other requests:** requests for disclosure, correction, suspension of use and the like go to the contact above.
 
 ## How we keep it safe
 
 - Connections are encrypted with HTTPS.
 - Administrator sign-in is handled by Google and GitHub. The only password the Service holds is the administrator password, stored as a one-way hash.
-- Only the operator can see personal information.
+- Only the operator and the administrators the operator appoints can see personal information.
 - The country where the servers and database are located will be stated with their provider, under “Sending information to service providers”.
 
 ## Changes to this policy
