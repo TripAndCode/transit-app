@@ -86,12 +86,23 @@ a folder holding both of that day's tarballs with
 `static_join` agency whose timetable changed since that day, load the timetable
 in force on it first, or its rows join the newer one.
 
-Add a one-off agency with:
+Add an agency from its GTFS-RT TripUpdates feed and GTFS static zip:
 
 ```bash
 poetry run python gtfs_pipeline.py add_agency \
-  --name "My Agency" --feed-url "https://example.test/feed.pb"
+  --feed-url "https://example.test/trip_updates.pb" --static-url "https://example.test/gtfs.zip"
 ```
+
+It reads the agency's name from the zip's `agency.txt` (`--name` when the zip
+lists several), polls the feed for `--probe-seconds` (default 120), and adds
+the agency only when at least 80% of the feed's trip_ids are in `trips.txt`.
+It then records the feed's RT field-coverage verdict and loads the timetable.
+A refusal prints the reason with the probe report, exits nonzero and adds
+nothing. `--dry-run` prints the same report and never writes. A feed that sends
+nothing during the probe is refused until it is in service, or added anyway
+with `--accept-empty`. Without `--static-url`, `add_agency --name …
+--feed-url …` inserts the row with no strategies, so its feed is read as
+`aomori_regex`.
 
 ### Disaster tools
 
@@ -453,9 +464,18 @@ then promotes, ingests the tarballs not yet ingested (the archive replaces the
 promoted day), analyzes and checks the aggregates are fresh. Once an hour it
 renews the RT field-coverage verdicts that are due.
 
-Add an agency. A standard GTFS-RT TripUpdates feed with a GTFS(-JP) static zip
-needs the `static_join` and `direct_url` strategies, which `add_agency` does
-not set, so seed it from a one-row CSV with the same columns as
+Add an agency from its TripUpdates feed and GTFS(-JP) static zip. `add_agency`
+probes the feed against the timetable, chooses the `static_join` and
+`direct_url` strategies when the feed's trip_ids are in `trips.txt`, records
+the coverage verdict and loads the timetable, or refuses with the reason:
+
+```bash
+docker compose --profile standalone exec app python gtfs_pipeline.py add_agency \
+  --feed-url https://example.test/trip_updates.pb --static-url https://example.test/gtfs.zip
+```
+
+To set the columns yourself instead (another strategy, a `trip_id_pattern`,
+a fixed `agency_id`), seed the agency from a CSV with the same columns as
 `agencies.csv`, then load its timetable:
 
 ```bash
@@ -484,7 +504,6 @@ docker compose --profile standalone exec poller python gtfs_pipeline.py ingest /
 ```
 
 Not automated yet:
-- choosing the strategy from the feed itself (probing it);
 - reloading a timetable the agency republishes (run `refresh-static` again);
 - the weather and ML forecast passes the cron poke runs;
 - uploading the tarballs anywhere off the machine.

@@ -247,7 +247,16 @@ def _require_agency(args, conn) -> int:
 
 
 def cmd_add_agency(args):
-    """Insert a new agency row and print the assigned agency_id."""
+    """Add an agency. With ``--static-url``, probe the feed against the
+    timetable first (``pipeline.feed_probe``) and add it only when the probe
+    accepts it; without, insert the row as given, with no strategies."""
+    if args.static_url is None:
+        _add_agency_unprobed(args)
+        return
+    _add_agency_probed(args)
+
+
+def _add_agency_unprobed(args) -> None:
     conn = _get_conn()
     with conn.cursor() as cur:
         cur.execute(
@@ -257,7 +266,86 @@ def cmd_add_agency(args):
         aid = cur.fetchone()[0]
     conn.commit()
     logger.info(f"Added agency {aid}: {args.name}")
+    logger.warning(
+        "It has no ingest strategy, so its feed is read as aomori_regex. Pass --static-url to probe the feed "
+        "and choose the strategies instead."
+    )
     conn.close()
+
+
+def _add_agency_probed(args) -> None:
+    import asyncio
+    import pathlib
+
+    import asyncpg
+
+    from pipeline import feed_probe
+    from pipeline.clickhouse import get_client
+    from pipeline.static_fetcher import DEFAULT_STATIC_DEST, refresh_static_recorded
+    from pipeline.url_guard import redact_url
+
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            # UNIQUE (feed_url) covers disabled agencies too.
+            cur.execute("SELECT agency_id, deleted_at IS NOT NULL FROM agencies WHERE feed_url = %s", (args.feed_url,))
+            holder = cur.fetchone()
+        conn.rollback()
+        if holder is not None:
+            state = " (disabled)" if holder[1] else ""
+            logger.error(f"add_agency: agency {holder[0]}{state} already has this feed URL; nothing was added.")
+            sys.exit(1)
+
+        seconds = feed_probe.DEFAULT_PROBE_SECONDS if args.probe_seconds is None else args.probe_seconds
+        interval = float(os.environ.get("POLL_INTERVAL_SEC") or feed_probe.DEFAULT_PROBE_INTERVAL_SEC)
+        logger.info(f"add_agency: probing {redact_url(args.feed_url)} for {seconds:.0f}s, every {interval:.0f}s")
+        outcome = feed_probe.probe(
+            args.feed_url,
+            args.static_url,
+            name=args.name,
+            seconds=seconds,
+            interval=interval,
+            accept_empty=args.accept_empty,
+        )
+        sys.stdout.write("\n".join(feed_probe.report_lines(outcome)) + "\n")
+        if args.dry_run:
+            logger.info("add_agency: dry run; nothing was written.")
+            sys.exit(0 if outcome.decision.accepted else 1)
+
+        async def _insert() -> int:
+            aconn = await asyncpg.connect(DATABASE_URL)
+            try:
+                return await feed_probe.add_probed_agency(aconn, outcome)
+            finally:
+                await aconn.close()
+
+        try:
+            aid = asyncio.run(_insert())
+        except ValueError as refused:
+            logger.error(f"add_agency: nothing was added: {refused}")
+            sys.exit(1)
+        except asyncpg.UniqueViolationError:
+            logger.error("add_agency: another agency took this feed URL during the probe; nothing was added.")
+            sys.exit(1)
+        logger.info(f"add_agency: added agency {aid}: {outcome.decision.name}")
+
+        try:
+            refresh_static_recorded(aid, conn, pathlib.Path(DEFAULT_STATIC_DEST), ch_client=get_client())
+        except Exception as exc:
+            conn.rollback()
+            logger.error(
+                f"add_agency: agency {aid} was added, but its timetable did not load ({exc}). Until it does, "
+                f"ingest refuses the agency; load it with `refresh-static --agency-id {aid}`."
+            )
+            sys.exit(1)
+    finally:
+        conn.close()
+    sys.stdout.write(
+        f"agency_id: {aid}\n"
+        "Next: the poller picks the agency up on its next cycle and Pulse shows its polls as they arrive. "
+        "Each JST day reaches history at the following JST midnight, and the archive replaces it once the "
+        "UTC day has closed.\n"
+    )
 
 
 def cmd_seed_agencies(args):
@@ -1061,10 +1149,26 @@ def main():
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
 
-    p_add = sub.add_parser("add_agency")
-    p_add.add_argument("--name", required=True)
+    p_add = sub.add_parser(
+        "add_agency",
+        help="Probe a GTFS-RT feed against its static zip and add it with the strategies the probe chooses",
+    )
     p_add.add_argument("--feed-url", required=True)
-    p_add.add_argument("--static-url", default=None)
+    p_add.add_argument(
+        "--static-url",
+        default=None,
+        help="GTFS static zip; given, the feed is probed first. Without it, --name is required and the row is "
+        "added with no strategies",
+    )
+    p_add.add_argument("--name", default=None, help="default: the static zip's agency.txt name")
+    p_add.add_argument(
+        "--probe-seconds",
+        type=float,
+        default=None,
+        help="how long to poll the feed (default 120), once every $POLL_INTERVAL_SEC, else 30, seconds",
+    )
+    p_add.add_argument("--accept-empty", action="store_true", help="add a feed that sent nothing during the probe")
+    p_add.add_argument("--dry-run", action="store_true", help="probe and report; write nothing")
 
     p_seed = sub.add_parser("seed_agencies", help="Upsert agencies from a CSV (idempotent)")
     p_seed.add_argument("csv", help="Path to agencies CSV (default: ./agencies.csv)", nargs="?", default="agencies.csv")
@@ -1196,6 +1300,13 @@ def main():
 
     args = parser.parse_args()
     if args.command == "add_agency":
+        if args.static_url is None:
+            if not args.name:
+                p_add.error("--name is required without --static-url")
+            if args.dry_run or args.accept_empty or args.probe_seconds is not None:
+                p_add.error("--probe-seconds, --accept-empty and --dry-run need --static-url")
+        if args.probe_seconds is not None and args.probe_seconds < 0:
+            p_add.error("--probe-seconds must be >= 0")
         cmd_add_agency(args)
     elif args.command == "seed_agencies":
         cmd_seed_agencies(args)

@@ -110,7 +110,7 @@ DESTRUCTIVE_TARGETS = {
     "seed-agencies": {"pg"},
 }
 DESTRUCTIVE_SUBCOMMANDS = {
-    "add_agency": {"pg"},
+    "add_agency": {"pg", "ch"},
     "analyze": {"pg", "ch"},
     "analyze_all": {"pg", "ch"},
     "ingest": {"pg", "ch"},
