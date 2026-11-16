@@ -4,9 +4,11 @@ The login handler kicks off the Authlib redirect to the provider; the
 callback verifies a signed ``oauth_tx`` cookie (state + PKCE verifier +
 post-login next URL + provider) we set on the way out, exchanges the
 authorization code, normalizes user info, upserts the user + identity,
-mints a session row, and sets the long-lived ``sid`` cookie. A suspended
-account is refused before any session exists, on every sign-in path. Logout
-deletes the session row and clears the cookie.
+mints a session row, and sets the long-lived ``sid`` cookie. Only an
+administrator signs in: any other identity is refused before anything about
+it is written (see :class:`NotAdmin`). A suspended account is refused before
+any session exists, on every sign-in path. Logout deletes the session row
+and clears the cookie.
 
 State for the OAuth handshake lives in a short-lived signed cookie
 (``oauth_tx``) rather than the Starlette session, so we don't depend on
@@ -42,7 +44,6 @@ from api.security import (
     token_hash,
     verify_local_login_password,
 )
-from pipeline.admin_users import invite_is_usable
 from pipeline.audit import record_event
 
 _log = logging.getLogger(__name__)
@@ -284,43 +285,21 @@ class LocalAccountConflict(Exception):
     """
 
 
-async def _consume_pending_invite(conn: asyncpg.Connection, uid: int, email: str) -> None:
-    """Apply the most recent still-usable ``user_invites`` row for ``email``
-    (admin-created via ``POST /api/admin/invites``) onto the just-created
-    user, then mark it consumed. Caller owns the transaction; the row is
-    locked with ``FOR UPDATE`` so two first-time logins racing on the same
-    email can't both consume it.
+class NotAdmin(Exception):
+    """Raised when a verified OAuth identity belongs to no administrator.
 
-    A no-op when there is no pending invite, or the newest one has already
-    expired -- an expired invite is left un-consumed (never applied, but
-    also never silently marked used).
+    Sign-in exists only for this deployment's administrators. Raised before
+    anything is written, so a refused visitor leaves no ``users``,
+    ``oauth_identities`` or ``sessions`` row and no ``account_created`` event.
     """
-    invite = await conn.fetchrow(
-        "SELECT invite_id, role, llm_approved, consumed_at, expires_at FROM user_invites "
-        "WHERE lower(email) = lower($1) AND consumed_at IS NULL "
-        "ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
-        email,
-    )
-    if invite is None or not invite_is_usable(invite["consumed_at"], invite["expires_at"], datetime.now(timezone.utc)):
-        return
-    await conn.execute(
-        "UPDATE users SET role=$1, llm_approved=$2 WHERE user_id=$3",
-        invite["role"],
-        invite["llm_approved"],
-        uid,
-    )
-    await conn.execute(
-        "UPDATE user_invites SET consumed_at=now(), consumed_user_id=$1 WHERE invite_id=$2",
-        uid,
-        invite["invite_id"],
-    )
-    await record_event(
-        conn,
-        user_id=uid,
-        actor_id=uid,
-        kind="invite_consumed",
-        meta={"invite_id": invite["invite_id"], "role": invite["role"], "llm_approved": invite["llm_approved"]},
-    )
+
+
+def _may_sign_in(role: str | None, email: str | None) -> bool:
+    """An account may sign in through OAuth when it is already an admin, or
+    when its email is in ``ADMIN_EMAILS``. ``email`` is the address the
+    ``ADMIN_EMAILS`` promotion below reads (the stored one for an existing
+    account), so every admitted account ends the sign-in as an admin."""
+    return role == "admin" or (email or "").lower() in ADMIN_EMAILS
 
 
 async def _upsert_user(
@@ -331,24 +310,30 @@ async def _upsert_user(
     ip: str | None = None,
     user_agent: str | None = None,
 ) -> tuple[int, str]:
-    """Returns (user_id, role). Auto-links by verified email; promotes per ADMIN_EMAILS.
-    ``ip`` / ``user_agent`` are forwarded onto the account_created audit row when
-    a fresh user is created.
+    """Returns (user_id, role) for an administrator's verified identity.
+    Auto-links by verified email to an existing admin account; creates or
+    promotes the account of an ``ADMIN_EMAILS`` address. ``ip`` /
+    ``user_agent`` are forwarded onto the account_created audit row when a
+    fresh account is created.
 
     Raises :class:`LocalAccountConflict` instead of auto-linking when the
-    email belongs to an existing password-only account.
+    email belongs to an existing password-only account, and :class:`NotAdmin`
+    before any write when the identity belongs to no administrator.
     """
     sub = info["sub"]
     email = info["email"]
 
     # 1. Match by (provider, sub)
-    row = await conn.fetchrow(
-        "SELECT user_id FROM oauth_identities WHERE provider=$1 AND provider_sub=$2",
+    linked = await conn.fetchrow(
+        "SELECT u.user_id, u.email, u.role FROM oauth_identities oi JOIN users u ON u.user_id = oi.user_id "
+        "WHERE oi.provider=$1 AND oi.provider_sub=$2",
         provider,
         sub,
     )
-    if row:
-        uid = row["user_id"]
+    if linked:
+        if not _may_sign_in(linked["role"], linked["email"]):
+            raise NotAdmin
+        uid = linked["user_id"]
     else:
         local_only = await conn.fetchval(
             "SELECT EXISTS(SELECT 1 FROM users WHERE email=lower($1) AND password_hash IS NOT NULL)",
@@ -356,6 +341,9 @@ async def _upsert_user(
         )
         if local_only:
             raise LocalAccountConflict(email)
+        existing_role = await conn.fetchval("SELECT role FROM users WHERE email=lower($1)", email)
+        if not _may_sign_in(existing_role, email):
+            raise NotAdmin
         # 2. Match by verified email (auto-link). ON CONFLICT DO UPDATE is a
         # no-op write that lets us use RETURNING whether the row was new or
         # existing — race-tolerant against concurrent first-time logins for
@@ -383,7 +371,6 @@ async def _upsert_user(
                 ip=ip,
                 user_agent=user_agent,
             )
-            await _consume_pending_invite(conn, uid, email)
         await conn.execute(
             "INSERT INTO oauth_identities (provider, provider_sub, user_id, email_at_link) "
             "VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
@@ -491,16 +478,21 @@ async def _fail_login(
 ) -> RedirectResponse:
     """Audit + redirect helper for OAuth callback failure paths. ``next_url``,
     when the transaction cookie was readable, rides along so the retry from
-    /login still returns to the page the visitor was headed for. ``user_id``
-    names the account when the provider identified one that may not sign in."""
+    /login still returns to the page the visitor was headed for.
+
+    ``user_id`` names the account when the provider identified one that may
+    not sign in (a suspended admin). Only then are the address and user agent
+    recorded: any other failure belongs to a visitor not known to be an
+    administrator, and sign-in keeps no personal data about anyone else."""
+    identified = user_id is not None
     await record_event(
         conn,
         user_id=user_id,
         actor_id=user_id,
         kind="login_failed",
         provider=provider,
-        ip=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if identified and request.client else None,
+        user_agent=request.headers.get("user-agent") if identified else None,
         meta={"reason": reason},
     )
     url = f"/login?error={reason}"
@@ -564,6 +556,8 @@ async def callback(provider: str, request: Request, conn: asyncpg.Connection = D
             sid = await _mint_session_and_log_login(conn, uid, ua, ip, provider)
     except LocalAccountConflict:
         return await _fail_login(conn, request, provider, "local_account_conflict", tx.get("next"))
+    except NotAdmin:
+        return await _fail_login(conn, request, provider, "not_admin", tx.get("next"))
     except AccountSuspended as exc:
         return await _fail_login(conn, request, provider, "suspended", tx.get("next"), user_id=exc.user_id)
 

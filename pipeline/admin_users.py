@@ -1,4 +1,4 @@
-"""Pure logic behind the admin user drawer (sessions, API keys, invites) and
+"""Pure logic behind the admin user drawer (sessions, API keys) and
 the self-service session revoke.
 
 Kept dependency-free of asyncpg so it's unit-testable without a database --
@@ -8,7 +8,6 @@ shared with the rest of the auth stack rather than duplicated here.
 """
 
 from collections.abc import Awaitable, Callable, Iterable
-from datetime import datetime
 
 SESSION_PREFIX_MIN_LENGTH = 12
 _HEX_DIGITS = frozenset("0123456789abcdef")
@@ -58,14 +57,3 @@ async def resolve_session_prefix(prefix: str, scoped_hashes: Callable[[], Awaita
     if len(matches) > 1:
         raise SessionPrefixError(409, "prefix matches multiple sessions")
     return matches[0]
-
-
-def invite_is_usable(consumed_at: datetime | None, expires_at: datetime | None, now: datetime) -> bool:
-    """Whether a pending ``user_invites`` row can still be honored: not
-    already consumed, and not past its expiry (an invite with no expiry
-    never expires)."""
-    if consumed_at is not None:
-        return False
-    if expires_at is not None and expires_at <= now:
-        return False
-    return True

@@ -939,7 +939,7 @@ async def test_a_bulk_patch_records_the_admins_address_and_browser_on_every_even
 
 
 @pytest.mark.asyncio
-async def test_session_key_invite_and_delete_actions_record_the_admins_address_and_browser(admin_client, aconn):
+async def test_session_key_and_delete_actions_record_the_admins_address_and_browser(admin_client, aconn):
     sid_admin, uid_admin, _ = await _seed(aconn, role="admin")
     sid, uid, _ = await _seed(aconn)
     kw = {"cookies": {"sid": sid_admin}, "headers": _ACTOR_HEADERS}
@@ -948,13 +948,10 @@ async def test_session_key_invite_and_delete_actions_record_the_admins_address_a
     r = await admin_client.post("/api/admin/api-keys", json={"owner_user_id": uid}, **kw)
     assert r.status_code == 201
     assert (await admin_client.delete(f"/api/admin/api-keys/{r.json()['id']}", **kw)).status_code == 204
-    r = await admin_client.post("/api/admin/invites", json={"email": "invitee@example.com"}, **kw)
-    assert r.status_code == 201
     assert (await admin_client.delete(f"/api/admin/users/{uid}", **kw)).status_code == 204
     assert await _actor_trail(aconn, uid_admin) == [
         (uid, "session_revoked", "127.0.0.1", _ACTOR_UA),
         (uid, "api_key_issued", "127.0.0.1", _ACTOR_UA),
         (uid, "api_key_revoked", "127.0.0.1", _ACTOR_UA),
-        (None, "invite_created", "127.0.0.1", _ACTOR_UA),
         (uid, "deleted", "127.0.0.1", _ACTOR_UA),
     ]
