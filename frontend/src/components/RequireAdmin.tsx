@@ -4,8 +4,8 @@ import { GuardPlaceholder, ProbeError } from "./guardStates";
 
 /** Route guard: sends unauthenticated callers to ``/login`` (keeping their URL as ``next``) and signed-in
  *  non-admins to ``/``. Only ``role=admin`` reaches the wrapped children. A session probe that fails
- *  before producing any value is shown with a retry, as RequireAuth shows it, rather than read as
- *  signed out: with sign-in not enforced, RequireAuth lets this guard meet that failure first. */
+ *  before producing any value is shown with a retry rather than read as signed out, so a transient
+ *  failure never sends an admin to sign in again. */
 export function RequireAdmin({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const session = useSession();

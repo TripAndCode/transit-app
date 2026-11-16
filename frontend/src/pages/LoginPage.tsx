@@ -226,16 +226,15 @@ export function LoginPage() {
           </form>
         )}
 
-        {/* Only a deployment that serves signed-out visitors offers the way
-            past sign-in; `next` is already a same-origin path. */}
-        {config != null && !config.login_required && (
-          <p className="login-card__guest">
-            <Link to={next}>
-              {t("account.login.guest_link")}
-              <span aria-hidden="true"> →</span>
-            </Link>
-          </p>
-        )}
+        {/* Every reader screen serves a signed-out visitor, so the guest link
+            always shows. A guarded `next` (/admin, /me) leads back here.
+            `next` is already a same-origin path. */}
+        <p className="login-card__guest">
+          <Link to={next}>
+            {t("account.login.guest_link")}
+            <span aria-hidden="true"> →</span>
+          </Link>
+        </p>
 
         {/* One sentence per language, so each locale keeps its own word order
             and spacing around the two links. */}

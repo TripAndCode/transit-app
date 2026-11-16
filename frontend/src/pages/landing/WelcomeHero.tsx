@@ -12,7 +12,7 @@ const CHECK_KEYS = [
 
 export function WelcomeHero() {
   const { t } = useTranslation();
-  const { kind, authEnabled } = useCtaKind();
+  const { offerSignIn } = useCtaKind();
   return (
     <section id="top" className="landing-hero">
       <div className="landing-hero__text">
@@ -28,7 +28,7 @@ export function WelcomeHero() {
             {t("landing.hero.secondary_cta")}
           </a>
         </div>
-        {kind === "guest" && authEnabled && (
+        {offerSignIn && (
           <p className="landing-hero__note">
             <Trans t={t} i18nKey="landing.hero.login_note" components={{ login: <Link to="/login" /> }} />
           </p>

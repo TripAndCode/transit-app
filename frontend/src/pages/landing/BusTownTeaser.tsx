@@ -1,6 +1,5 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useCtaKind } from "./useCtaKind";
 import { busTownHref } from "./busTownLink";
 import { readLastAgency } from "../../api/lastAgency";
 import { BUS_TOWN_SAMPLE } from "./welcomeSample";
@@ -37,16 +36,13 @@ const STOPS = [
   { x: 400, y: 280 },
 ] as const;
 
-/** The one real, non-decorative CTA on this page: a visitor who would reach
- *  the signed-in app goes straight into Bus Town for their last-chosen
- *  agency (or "/" to pick one); anyone else goes to sign-in first. The mini
- *  route map is purely illustrative playback chrome, presentational via the
- *  SVG's own role="img". */
+/** The one real, non-decorative CTA on this page: it goes straight into Bus
+ *  Town for the visitor's last-chosen agency (or "/" to pick one), signed in
+ *  or not. The mini route map is purely illustrative playback chrome,
+ *  presentational via the SVG's own role="img". */
 export function BusTownTeaser() {
   const { t } = useTranslation();
-  const { kind } = useCtaKind();
-  const reachesApp = kind !== "signed_out";
-  const href = busTownHref(reachesApp, readLastAgency());
+  const href = busTownHref(readLastAgency());
   return (
     <section id="bus-town" className="landing-section landing-section--dark">
       <div className="landing-stage landing-bustown">

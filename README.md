@@ -349,8 +349,8 @@ Configuration below).
 Example:
 
 ```bash
-# While sign-in is required, pass a session cookie from a signed-in browser
-# (or an X-API-Key header issued from the admin console).
+# A signed-out call gets the rules-stage answer. An LLM-grounded answer needs
+# the session cookie of a signed-in account that an admin approved for it.
 curl -X POST http://localhost:8000/api/1/ask \
   -H 'Content-Type: application/json' \
   -H 'Origin: http://localhost:8000' \
@@ -400,7 +400,6 @@ value when neither an override nor the env var is set.
 | `weather_ingest_enabled` | `WEATHER_INGEST_ENABLED` | off |
 | `openapi_docs_enabled` | `OPENAPI_DOCS_ENABLED` | off |
 | `perf_debug_enabled` | `PERF_DEBUG_ENABLED` | off |
-| `login_required` | `LOGIN_REQUIRED` | on |
 | `ml_forecast` | `ML_FORECAST_ENABLED` | off |
 | `updates_prune_enabled` | `UPDATES_PRUNE_ENABLED` | off |
 
@@ -409,11 +408,6 @@ Why: with it off the panel is not mounted and `/weather_delay` is not requested.
 
 `openapi_docs_enabled` gates `/docs`, `/redoc`, and `/openapi.json`;
 `.env.example` turns it on for local dev.
-
-`login_required` makes every `/api/*` route and the OpenAPI docs refuse a
-signed-out caller with `401 {"detail": "auth required"}`, except the sign-in
-flow (`/api/auth/*`) and `/api/config`. It is enforced only while SSO is
-configured.
 
 `ml_forecast` lets `GET /api/{agency_id}/forecast/heatmap` and
 `/forecast/overview` fill a cell from the ML model's fresh forecasts in
@@ -424,10 +418,13 @@ historical baseline.
 `updates` months past the horizon. The retention table in
 `docs/ops-monitoring-deploy.md` says what it drops and how to turn it on.
 
-Leaving all OAuth variables unset runs the app in anonymous-only mode: nobody
-can sign in through SSO (only the break-glass account, when it is set), so the
-login gate stays open and every page works signed out. Do not
-commit `.env`, API keys, OAuth secrets, database passwords, or private keys.
+Every reader page works signed out, whether or not SSO is configured. Admin
+routes need an admin session; the account routes (`/api/me/*`, saved
+conversations) and, while SSO is configured, `POST /api/{agency_id}/delays/refresh`
+need a signed-in caller. Leaving all OAuth variables unset runs the app
+in anonymous-only mode: nobody can sign in through SSO, only the break-glass
+account when it is set. Do not commit `.env`, API keys, OAuth secrets, database
+passwords, or private keys.
 
 ### Secret scanning
 

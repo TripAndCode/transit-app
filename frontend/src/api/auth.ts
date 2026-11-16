@@ -14,8 +14,7 @@ type Session = {
 };
 
 /** GET /api/me; null for a signed-out caller, so callers can treat anonymous as a normal
- *  state. The API answers one with a `null` body, sign-in required or not; a 401 also
- *  reads as signed out. */
+ *  state. The API answers one with a `null` body; a 401 also reads as signed out. */
 async function fetchMe(signal?: AbortSignal): Promise<Session | null> {
   return apiGetOrNull<Session>("/api/me", { signal });
 }
