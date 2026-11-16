@@ -493,7 +493,13 @@
     "feed_quality_no_data": "no analyzed observations in the period",
     "feed_quality_clamp": "Implausible readings {{pct}}%",
     "feed_quality_clamp_missing": "Implausible readings — (no analyzed observations in the period)",
-    "sentence_separator": " "
+    "sentence_separator": " ",
+    "pre_floor": "Figures for dates whose detailed readings are no longer kept stay as analyzed then: {{spans}}.",
+    "pre_floor_heading": "Figures for dates whose detailed readings are no longer kept stay as analyzed then",
+    "pre_floor_agency": "{{agency}} — {{spans}}",
+    "pre_floor_span": "{{range}} under method {{version}}",
+    "pre_floor_span_unrecorded": "{{range}} under a method not recorded",
+    "pre_floor_separator": ", "
   },
   "app": {
     "data_stale": {

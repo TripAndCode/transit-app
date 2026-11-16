@@ -5,12 +5,14 @@ method is not the current one or was not recorded."""
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 
 from api.range import jst_today
 from pipeline.agg_registry import METHOD_VERSION
+from pipeline.reports import definition
+from pipeline.reports.definition import PreFloorMethod
 from pipeline.retention import floor_after, partition_span
 
 _OLD_METHOD = "2026.11.0"
@@ -114,3 +116,49 @@ async def test_a_report_from_the_floor_on_names_no_frozen_method(client, agency_
     resp = await client.get(url, headers=EN)
     assert resp.json()["definition"]["pre_floor_methods"] is None
     assert "保存期間を過ぎた日" not in _preamble(await client.get(f"{url}&format=csv"))
+
+
+def _agency(pg_conn, name: str, *, deleted: bool = False) -> int:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, deleted_at) VALUES (%s, %s, CASE WHEN %s THEN now() END) "
+            "RETURNING agency_id",
+            (name, f"http://example.com/{name}.pb", deleted),
+        )
+        agency = cur.fetchone()[0]
+    pg_conn.commit()
+    return agency
+
+
+def _drop(pg_conn, agency_ids: list[int], floor: date, method: str | None) -> None:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO updates_pruned_months "
+            "(partition_id, agency_ids, retention_floor, rows, bytes, method_version) "
+            "VALUES ('202412', %s, %s, 1, 1, %s)",
+            (agency_ids, floor, method),
+        )
+    pg_conn.commit()
+
+
+@pytest.mark.asyncio
+async def test_the_board_names_each_listed_agencys_frozen_spans_and_no_deleted_agencys(aconn, pg_conn, agency_id):
+    """Drops recorded across agencies interleave by id, so each agency's spans
+    are read apart; a soft-deleted agency the board does not list is left out."""
+    other = _agency(pg_conn, "b")
+    deleted = _agency(pg_conn, "c", deleted=True)
+    _drop(pg_conn, [agency_id], date(2025, 2, 1), _OLD_METHOD)
+    _drop(pg_conn, [other], date(2025, 2, 1), None)
+    _drop(pg_conn, [agency_id, deleted], date(2025, 4, 1), "2026.11.15")
+
+    spans = await definition._read_pre_floor(aconn, None, date(2025, 1, 1), date(2025, 6, 30))
+
+    assert spans == [
+        PreFloorMethod(
+            agency_id=agency_id, from_date=date(2025, 1, 1), to_date=date(2025, 1, 31), method_version=_OLD_METHOD
+        ),
+        PreFloorMethod(
+            agency_id=agency_id, from_date=date(2025, 2, 1), to_date=date(2025, 3, 31), method_version="2026.11.15"
+        ),
+        PreFloorMethod(agency_id=other, from_date=date(2025, 1, 1), to_date=date(2025, 1, 31), method_version=None),
+    ]

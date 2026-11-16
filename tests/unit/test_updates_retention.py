@@ -549,6 +549,12 @@ def test_each_recorded_drop_names_the_method_in_force():
     verdict = retention.PartitionVerdict(_partition("202501", 1, 2), date(2025, 3, 1), None)
     retention._record_drops(conn, 7, [verdict])
     ((sql, params),) = conn.log
-    assert "method_version" in sql
-    assert params[-1] == retention.METHOD_VERSION
+    columns = [name.strip() for name in sql[sql.index("(") + 1 : sql.index(")")].split(",")]
+    recorded = dict(zip(columns, params, strict=True))
+    assert recorded["method_version"] == retention.METHOD_VERSION
+    assert (recorded["partition_id"], recorded["retention_floor"], recorded["run_id"]) == (
+        "202501",
+        date(2025, 3, 1),
+        7,
+    )
     assert conn.commits == 1

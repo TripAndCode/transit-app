@@ -613,9 +613,10 @@ the scope as one sentence above their content
 - `method_version` covers the dates analyze may still rebuild. Beside
   aggregates, `pre_floor_methods` lists the request's dates before each
   agency's retention floor, with the method the drop that froze them
-  recorded, or null when it recorded none. The CSV preamble and the footnotes
-  add a line for them (保存期間を過ぎた日の算出方法) only when that method is
-  not the current one, or was not recorded. `docs/ops-monitoring-deploy.md`,
+  recorded, or null when it recorded none. The CSV preamble, the footnotes
+  and `DefinitionMetaBlock` add a line for them (保存期間を過ぎた日の算出方法)
+  only when that method is not the current one, or was not recorded, naming
+  each agency on a stamp whose scope lists several. `docs/ops-monitoring-deploy.md`,
   "The retention floor and the `updates` prune", covers the floor.
 - The stamp also says what the figures are made from and which timetables
   were in force. `value_basis` is `feed_prediction`: every figure is computed

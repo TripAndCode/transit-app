@@ -314,12 +314,14 @@ async def stamp_build(
 ) -> DefinitionMeta:
     """*meta* with the timetables in force over *schedule*'s dates, each named
     one with its content's short hash, the source of each of those days'
-    observations, and ``built_at``: the newest time analyze rewrote any
-    aggregate, all for *agency_id*, or for every agency the board lists when it
-    is None. *schedule* is that scope's
+    observations, ``built_at``: the newest time analyze rewrote any
+    aggregate, and ``pre_floor_methods``: the method each of its dates before a
+    retention floor was frozen under (:func:`_read_pre_floor`), all for
+    *agency_id*, or for every agency the board lists when it is None.
+    *schedule* is that scope's
     :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
-    gets its timetables and sources and no build. Nothing is read from
-    ClickHouse.
+    gets its timetables and sources, and no build or pre-floor methods.
+    Nothing is read from ClickHouse.
 
     One agency's stamp also states its completeness and clamp share over the
     range (:func:`pipeline.reports.network.compute_agency_feed_quality`), read
@@ -800,14 +802,30 @@ def _feed_quality_text(meta: DefinitionMeta, locale: str, *, grouped: bool = Tru
     cell leaves out, as it keeps no ASCII comma."""
     if not meta.feed_quality:
         return None
-    several = len(meta.feed_quality) > 1
-    parts = []
-    for quality in meta.feed_quality:
-        part = _feed_quality_part(quality, locale, grouped)
-        if several:
-            part = f"agency {quality.agency_id}: {part}" if locale == "en" else f"事業者{quality.agency_id}：{part}"
-        parts.append(part)
-    return ("; " if locale == "en" else "／").join(parts)
+    return _by_agency(
+        meta,
+        [(quality.agency_id, _feed_quality_part(quality, locale, grouped)) for quality in meta.feed_quality],
+        locale,
+    )
+
+
+def _stamp_agencies(meta: DefinitionMeta) -> set[int]:
+    """The agencies *meta*'s scope lists, as its per-agency parts name them:
+    an agency's own stamp names that one, and the board's every agency it
+    lists, in its timetables at least (:func:`stamp_build`)."""
+    parts = (meta.timetable_versions, meta.source_mix, meta.feed_quality, meta.pre_floor_methods)
+    return {item.agency_id for items in parts for item in items or []}
+
+
+def _by_agency(meta: DefinitionMeta, parts: list[tuple[int, str]], locale: str) -> str:
+    """Each agency's text of *parts* joined, named by its agency when *meta*'s
+    scope lists several, so a figure is never read as another agency's."""
+    several = len(_stamp_agencies(meta)) > 1
+    named = [
+        (f"agency {agency}: {text}" if locale == "en" else f"事業者{agency}：{text}") if several else text
+        for agency, text in parts
+    ]
+    return ("; " if locale == "en" else "／").join(named)
 
 
 def _feed_quality_part(quality: FeedQuality, locale: str, grouped: bool) -> str:
@@ -866,20 +884,18 @@ _PRE_FLOOR_CSV_LABEL = "保存期間を過ぎた日の算出方法"
 def _pre_floor_text(meta: DefinitionMeta, locale: str) -> str | None:
     """The range's dates before a retention floor frozen under a method other
     than the one *meta* names, each with that method or that none was
-    recorded, named by agency when there are several. None when every such
-    date's method is the current one, which the method line already says, or
-    when the range reaches none."""
+    recorded, by agency (:func:`_by_agency`). None when every such date's
+    method is the current one, which the method line already says, or when
+    the range reaches none."""
     spans = [span for span in meta.pre_floor_methods or [] if span.method_version != meta.method_version]
     if not spans:
         return None
-    several = len({span.agency_id for span in spans}) > 1
-    parts = []
-    for span in spans:
-        part = _pre_floor_part(span, locale)
-        if several:
-            part = f"agency {span.agency_id}: {part}" if locale == "en" else f"事業者{span.agency_id}：{part}"
-        parts.append(part)
-    return ("; " if locale == "en" else "、").join(parts)
+    joiner = ", " if locale == "en" else "、"
+    parts = [
+        (agency, joiner.join(_pre_floor_part(span, locale) for span in own))
+        for agency, own in groupby(spans, key=lambda span: span.agency_id)
+    ]
+    return _by_agency(meta, parts, locale)
 
 
 def _pre_floor_part(span: PreFloorMethod, locale: str) -> str:

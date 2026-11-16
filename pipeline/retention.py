@@ -261,8 +261,8 @@ def retention_floor(conn, agency_id: int) -> date | None:
     while `updates` still holds their rows. The floor date's own rows can
     still file a stop event under the day before it, which is final, so the
     prune requires that date to be current as well (plan_updates_prune).
-    floor_after rounds the floor a drop records, and retention_floors rounds
-    whatever floor it reads back.
+    floor_after rounds the floor a drop records, and every read of a
+    recorded floor rounds it to a month's first day as well.
 
     Read from the drops prune_updates records rather than from its switch:
     turning the switch off stops further drops, and must not let the next
@@ -541,9 +541,8 @@ def _record_drops(conn, run_id: int | None, verdicts: list[PartitionVerdict]) ->
     analyze leaves those dates alone, whether or not the drop follows.
 
     Each row names the method in force, which the dates it makes final keep
-    (frozen_methods): the plan holds an agency's month until analyze has
-    applied every builder and clamp change, and METHOD_VERSION versions those
-    together."""
+    (frozen_methods), since plan_updates_prune holds a month while
+    pipeline.analyze.unapplied finds a change analyze has not applied."""
     with conn.cursor() as cur:
         for verdict in verdicts:
             partition = verdict.partition
