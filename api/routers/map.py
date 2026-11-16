@@ -26,6 +26,7 @@ import os
 import pathlib
 import re
 import subprocess
+import time
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date as CalendarDate
@@ -55,7 +56,7 @@ from api.range import (
     time_band_clause_ch_for,
 )
 from api.scope_applied import ALL_SIX, scope_applied
-from api.security import User, csrf_guard, require_user_when_sign_in_exists
+from api.security import csrf_guard
 from api.triage import COHORT_LOW_CONFIDENCE_SAMPLES, LOW_CONFIDENCE_SAMPLES, classify_route
 from pipeline import retained_reads
 from pipeline.cache import async_lru_cache
@@ -453,23 +454,35 @@ async def live_delays(
     }
 
 
+# Monotonic time of each agency's last successful manual poll, per process.
+# A poll inside the cooldown answers from the data that poll already wrote.
+_LAST_LIVE_POLL: dict[int, float] = {}
+LIVE_POLL_COOLDOWN_S = 30.0
+
+
 @router.post("/delays/refresh", response_model=None)
 @limiter.limit("5/minute", key_func=user_key)
 async def refresh_live_delays(
     request: Request,
     agency_id: int = Depends(get_agency),
-    _user: User | None = Depends(require_user_when_sign_in_exists),
 ) -> dict[str, Any]:
     """Fetch the agency's current GTFS-RT feed and persist it before reading.
 
-    A write against the live table, so while sign-in exists it needs a
-    signed-in caller and is metered per account: an anonymous loop against it
-    would otherwise re-poll the collector on every request. In anonymous-only
-    mode it stays open under the per-address limit.
+    Open to every visitor. Three things bound how often it reaches the
+    collector: a per-caller rate limit (per address, or per account when
+    signed in); a per-agency cooldown, inside which a poll returns
+    ``{"status": "recent"}`` without fetching, because the feed cannot have
+    moved far since the last successful one; and the ingest advisory lock,
+    which refuses (409) a poll that would overlap another refresh or the
+    scheduled ingest. Only a successful poll starts the cooldown, so a
+    refused or failed one can be retried at once.
     """
     from pipeline.ingest import StaticTimetableMissing
 
     csrf_guard(request)
+    last = _LAST_LIVE_POLL.get(agency_id)
+    if last is not None and time.monotonic() - last < LIVE_POLL_COOLDOWN_S:
+        return {"status": "recent", "inserted": 0}
     try:
         inserted = await asyncio.to_thread(_ingest_live_agency, agency_id)
     except HTTPException:
@@ -480,6 +493,7 @@ async def refresh_live_delays(
     except Exception as exc:
         _log.exception("manual live refresh failed for agency %s", agency_id)
         raise HTTPException(status_code=502, detail="Live feed refresh failed") from exc
+    _LAST_LIVE_POLL[agency_id] = time.monotonic()
     return {"status": "updated", "inserted": inserted}
 
 

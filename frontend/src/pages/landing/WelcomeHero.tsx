@@ -1,6 +1,4 @@
-import { Link } from "react-router-dom";
-import { Trans, useTranslation } from "react-i18next";
-import { useCtaKind } from "./useCtaKind";
+import { useTranslation } from "react-i18next";
 import { CtaLink } from "./CtaLink";
 import { ObservatoryStage } from "./ObservatoryStage";
 
@@ -12,7 +10,6 @@ const CHECK_KEYS = [
 
 export function WelcomeHero() {
   const { t } = useTranslation();
-  const { offerSignIn } = useCtaKind();
   return (
     <section id="top" className="landing-hero">
       <div className="landing-hero__text">
@@ -28,11 +25,6 @@ export function WelcomeHero() {
             {t("landing.hero.secondary_cta")}
           </a>
         </div>
-        {offerSignIn && (
-          <p className="landing-hero__note">
-            <Trans t={t} i18nKey="landing.hero.login_note" components={{ login: <Link to="/login" /> }} />
-          </p>
-        )}
         <div className="landing-hero__checks">
           {CHECK_KEYS.map((key) => (
             <span className="landing-check landing-check--sm" key={key}>

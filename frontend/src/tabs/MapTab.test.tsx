@@ -872,7 +872,6 @@ describe("MapTab delayed-trips cap", () => {
   });
 
   it.each([
-    [401, "Sign in to fetch the latest live observation"],
     [429, "Too many refreshes; please try again shortly"],
     [500, "Reload failed"],
   ])("explains a refused refresh (%i) without inviting a retry it cannot win", async (status, message) => {
@@ -947,6 +946,30 @@ describe("MapTab manual refresh", () => {
     vi.setSystemTime(mounted + 30_000);
     fireEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
     expect(await screen.findByText("Live data loaded: 3 rows (just now)")).toBeInTheDocument();
+  });
+
+  it("shows the data a moment-old poll already fetched instead of polling again", async () => {
+    mockCommonHooks();
+    const refetchLive = vi.fn().mockResolvedValue({ isError: false, data: { latest_captured_at: null, rows: [] } });
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: refetchLive,
+    } as never);
+    vi.spyOn(hooks, "useTodayRouteSummary").mockReturnValue({
+      data: todaySummary(),
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ isError: false }),
+    } as never);
+    vi.spyOn(client, "apiPost").mockResolvedValue({ status: "recent", inserted: 0 } as never);
+    renderMap();
+    fireEvent.click(screen.getByRole("button", { name: "Fetch the latest live observation" }));
+    expect(await screen.findByText("Live data was fetched moments ago; showing it now")).toBeInTheDocument();
+    expect(refetchLive).toHaveBeenCalled();
   });
 });
 

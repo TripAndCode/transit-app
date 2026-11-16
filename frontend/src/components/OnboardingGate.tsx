@@ -257,7 +257,7 @@ export function OnboardingGate() {
                 ·
               </span>
               <Link to="/login" style={FOOTER_LINK}>
-                {t("common.login")}
+                {t("common.admin_login")}
               </Link>
             </>
           )}

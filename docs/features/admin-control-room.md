@@ -226,14 +226,18 @@ Endpoints:
   active sessions, identified by a display-safe hash prefix.
 - `GET /api/admin/api-keys`, `POST /api/admin/api-keys`,
   `DELETE /api/admin/api-keys/{key_id}` — API keys scoped to one user.
-- `POST /api/admin/invites` — invite a new user. The invite applies when
-  sign-in creates the account, so an email that already has one is refused
-  with 409 `account_exists`.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
 and one at a time), `oauth_identities`, `user_llm_keys` (read-only,
-for the drawer's provider indicator), `api_keys`, `user_invites`. Every
-mutation records an `admin_audit` entry.
+for the drawer's provider indicator), `api_keys`. Every mutation records an
+`admin_audit` entry.
+
+Sign-in is for administrators only, and there is no invite. An admin is an
+address listed in `ADMIN_EMAILS`, created or promoted at its first OAuth
+sign-in, or the break-glass local account (`DEFAULT_ADMIN_USERNAME` /
+`DEFAULT_ADMIN_PASSWORD`). An existing account made admin here can sign in
+too. Any other OAuth identity is refused with `not_admin` before anything is
+written.
 
 `DELETE /api/admin/users/{uid}` is a soft-delete. It anonymizes the row,
 sets `users.deleted_at`, revokes the user's API keys and replaces the owner
@@ -299,9 +303,8 @@ timeline merging `admin_audit` (every admin mutation across this whole
 surface, written through `api.admin_audit.record_admin_action`) with the
 login/login-failure rows of `login_events` (mapped to `login.ok`/
 `login.fail`). Admin mutations are recorded directly into `admin_audit`; the
-other `login_events` kinds (a user's own logout, account creation and invite
-use, and a role granted by seeding or `ADMIN_EMAILS`) are not part of this
-timeline.
+other `login_events` kinds (a user's own logout, account creation, and a role
+granted by seeding or `ADMIN_EMAILS`) are not part of this timeline.
 
 ## Feature flags
 

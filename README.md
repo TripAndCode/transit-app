@@ -337,7 +337,7 @@ The main endpoints are:
 | `/api/admin/snapshots*`, `GET /api/snapshots/{id}`, `GET /api/snapshots/{id}/today` | Frozen snapshots: admins create, list and delete; anyone with the link reads one and today's figures for its query ([guide](docs/features/snapshots.md)) |
 | `/api/admin/ask/*` | Ask query log and funnel |
 | `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
-| `/api/admin/api-keys`, `/api/admin/invites` | Issue/revoke API keys, invite new users |
+| `/api/admin/api-keys` | Issue/revoke API keys |
 | `/api/me/export` | Download everything the app holds about you (JSON) |
 | `DELETE /api/me` | Delete your own account and its personal data (confirm with your email) |
 
@@ -368,8 +368,9 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   features are disabled and `/api/config` reports `llm_enabled: false`.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
 - `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
-  `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`, `ADMIN_EMAILS`: optional
-  authentication and admin setup.
+  `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`, `ADMIN_EMAILS`: optional admin
+  sign-in. Sign-in is for administrators only: `ADMIN_EMAILS` is the one way
+  to make a new admin through SSO, and any other account is refused.
 - `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`: break-glass local-admin
   account, seeded (and re-seeded on every boot) only when both are set.
   Rotating it is editing `.env` and restarting — the same mental model as
@@ -418,10 +419,11 @@ historical baseline.
 `updates` months past the horizon. The retention table in
 `docs/ops-monitoring-deploy.md` says what it drops and how to turn it on.
 
-Every reader page works signed out, whether or not SSO is configured. Admin
-routes need an admin session; the account routes (`/api/me/*`, saved
-conversations) and, while SSO is configured, `POST /api/{agency_id}/delays/refresh`
-need a signed-in caller. Leaving all OAuth variables unset runs the app
+Every reader page works signed out, whether or not SSO is configured, and so
+does `POST /api/{agency_id}/delays/refresh`, under a per-caller rate limit
+(per address, or per account when signed in) and a per-agency cooldown. Admin routes need an admin session; the account
+routes (`/api/me/*`, saved conversations) need a signed-in caller. Leaving all
+OAuth variables unset runs the app
 in anonymous-only mode: nobody can sign in through SSO, only the break-glass
 account when it is set. Do not commit `.env`, API keys, OAuth secrets, database
 passwords, or private keys.

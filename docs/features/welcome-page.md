@@ -8,10 +8,8 @@ reaches; only the wording follows the session:
 
 - **Signed in:** "Open the dashboard".
 - **Anyone else, a session still loading included:** "View the dashboard (no
-  sign-in needed)". Once the visitor is known to be signed out, a note under
-  the hero says that signing in keeps notebook investigations with the
-  account. The note's "Sign in" links to `/login`, and the note is left out
-  when no provider is configured.
+  sign-in needed)". The page asks nothing else of a reader: sign-in is for the
+  site's administrators, so the hero carries no sign-in note.
 
 Below 720px the header hides its copy of the CTA, since the hero's sits in the
 first screen.
@@ -121,13 +119,13 @@ duplicating them: `header.app_title`/`header.app_tagline` for the brand, and
 ## How to verify manually
 
 1. With SSO configured, sign out and open `/welcome` — expect "View the
-   dashboard (no sign-in needed)" in the header and in the hero, and the
-   sign-in note under the hero.
+   dashboard (no sign-in needed)" in the header and in the hero, and no
+   sign-in note or link in the hero.
 2. Signed out, open a deep link such as
    `/agencies/1/routes?routes=12&sort=on_time` — expect that view at that
    exact URL, with no detour through `/login` or `/welcome`.
-3. Sign in, then choose "About this app" in the rail — expect `/welcome`
-   with "Open the dashboard" and no sign-in note.
+3. Sign in as an admin, then choose "About this app" in the rail — expect
+   `/welcome` with "Open the dashboard".
 4. Sign out from the account page — expect `/welcome`.
 5. Click the header's pause toggle — expect every looping animation on the
    page (the stage dots, the Bus Town markers, the method flow pulse) to

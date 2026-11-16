@@ -108,7 +108,7 @@ export function SidebarUserMenu({ onOpenSettings }: { onOpenSettings: () => void
               </Link>
             ) : (
               <Link role="menuitem" to="/login" onClick={() => setOpen(false)} className="sidebar-user-menu-item" style={popItemStyle}>
-                <span>{t("common.login")}</span>
+                <span>{t("common.admin_login")}</span>
               </Link>
             ))}
           <div role="group" aria-labelledby={languageLabelId}>

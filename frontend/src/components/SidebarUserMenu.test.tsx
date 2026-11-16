@@ -208,7 +208,16 @@ describe("SidebarUserMenu", () => {
     renderMenu();
     const trigger = await screen.findByRole("button", { name: "Account menu" });
     await user.click(trigger);
-    expect(screen.queryByRole("menuitem", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Admin sign-in" })).toBeNull();
+  });
+
+  it("offers a signed-out visitor the admin sign-in when the backend has sign-in", async () => {
+    vi.spyOn(config, "useConfig").mockReturnValue({ data: { auth_enabled: true }, isLoading: false } as never);
+    vi.spyOn(auth, "useSession").mockReturnValue({ data: null, isLoading: false } as never);
+    const user = userEvent.setup();
+    renderMenu();
+    await user.click(await screen.findByRole("button", { name: "Account menu" }));
+    expect(screen.getByRole("menuitem", { name: "Admin sign-in" })).toHaveAttribute("href", "/login");
   });
 
   it("shows both languages under a visible label, the current one checked", async () => {

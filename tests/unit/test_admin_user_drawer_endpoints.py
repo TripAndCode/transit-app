@@ -1,6 +1,6 @@
-"""Router-shape tests for the admin user drawer's sessions/API-keys/invites
-endpoints: request validation, the exact-prefix session lookup, hash-only API
-key storage, and invite-role validation.
+"""Router-shape tests for the admin user drawer's sessions/API-keys
+endpoints: request validation, the exact-prefix session lookup, and hash-only
+API key storage.
 
 Exercised through a minimal standalone app (not ``api.main``) with
 ``require_admin``/``get_conn`` overridden to a fake in-memory connection, so
@@ -38,7 +38,6 @@ class _FakeConn:
         self._next_api_key_id = (max((k["id"] for k in self.api_keys), default=0)) + 1
         self.events: list[tuple] = []
         self.audit: list[tuple] = []
-        self.invites: list[tuple] = []
 
     def transaction(self):
         """The handlers wrap their write and its audit entry together; this
@@ -69,9 +68,6 @@ class _FakeConn:
         raise AssertionError(f"unexpected fetch: {sql}")
 
     async def fetchval(self, sql, *args):
-        if "FROM users WHERE email = lower($1)" in sql:
-            (email,) = args
-            return 1 if email.lower() in self.users.values() else None
         raise AssertionError(f"unexpected fetchval: {sql}")
 
     async def fetchrow(self, sql, *args):
@@ -100,17 +96,6 @@ class _FakeConn:
                     r["revoked_at"] = datetime.now(timezone.utc)
                     return {"id": r["id"], "owner_user_id": r["owner_user_id"]}
             return None
-        if "INSERT INTO user_invites" in sql:
-            email, role, llm_approved, _invited_by = args
-            self.invites.append(args)
-            return {
-                "invite_id": 1,
-                "email": email,
-                "role": role,
-                "llm_approved": llm_approved,
-                "created_at": datetime.now(timezone.utc),
-                "expires_at": datetime.now(timezone.utc),
-            }
         raise AssertionError(f"unexpected fetchrow: {sql}")
 
     async def execute(self, sql, *args):
@@ -378,46 +363,6 @@ def test_revoke_already_revoked_api_key_404s():
     )
     r = _client(conn).delete("/api/admin/api-keys/5", headers=_ORIGIN)
     assert r.status_code == 404
-
-
-# ── Invites ──────────────────────────────────────────────────────────────
-
-
-def test_create_invite_happy_path():
-    conn = _FakeConn()
-    r = _client(conn).post(
-        "/api/admin/invites",
-        json={"email": "new@example.com", "role": "admin", "llm_approved": True},
-        headers=_ORIGIN,
-    )
-    assert r.status_code == 201
-    body = r.json()
-    assert body["email"] == "new@example.com"
-    assert body["role"] == "admin"
-    assert body["llm_approved"] is True
-
-
-def test_create_invite_rejects_invalid_role():
-    conn = _FakeConn()
-    r = _client(conn).post("/api/admin/invites", json={"email": "x@example.com", "role": "superadmin"}, headers=_ORIGIN)
-    assert r.status_code == 400
-
-
-def test_create_invite_refuses_an_email_that_already_has_an_account():
-    """An invite is applied only when sign-in creates a new account, so one
-    for an existing account could never take effect. The admin is told so,
-    and nothing is written."""
-    conn = _FakeConn(users={1: "admin@example.com", 2: "member@example.com"})
-    r = _client(conn).post(
-        "/api/admin/invites",
-        json={"email": "Member@Example.com", "role": "admin", "llm_approved": True},
-        headers=_ORIGIN,
-    )
-    assert r.status_code == 409
-    assert r.json()["detail"] == "account_exists"
-    assert conn.invites == []
-    assert conn.events == []
-    assert conn.audit == []
 
 
 def test_issuing_a_key_audits_the_action_without_the_key_itself():

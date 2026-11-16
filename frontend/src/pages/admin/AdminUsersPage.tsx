@@ -17,7 +17,6 @@ import { Z_INDEX } from "../../styles/zIndex";
 import { AdminAvatar, AdminButton, AdminSearchInput, StatusChip } from "./adminControls";
 import { DataTable, type DataTableColumn } from "../../components/admin/DataTable";
 import { Modal } from "../../components/Modal";
-import { InviteDialog } from "./InviteDialog";
 import { pageItems } from "./pageItems";
 import { PENDING_APPROVAL_FILTER, usePendingApprovalCount } from "./pendingApprovals";
 import { isTypingTarget } from "../../utils/isTypingTarget";
@@ -122,7 +121,6 @@ function AdminUserSearchBox({
 export function AdminUsersPage() {
   const { t } = useTranslation();
   const toast = useToast();
-  const [inviteOpen, setInviteOpen] = useState(false);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get("q") ?? "";
@@ -500,14 +498,7 @@ export function AdminUsersPage() {
     // nested users/:uid route below) to this page's content area, so it
     // docks inside the admin main area rather than covering the sidebar.
     <div style={{ padding: 24, position: "relative" }}>
-      <PageHeader
-        title={t("admin.users.title")}
-        actions={
-          <AdminButton variant="primary" onClick={() => setInviteOpen(true)}>
-            {t("admin.invite.trigger")}
-          </AdminButton>
-        }
-      />
+      <PageHeader title={t("admin.users.title")} />
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <AdminUserSearchBox
           q={q}
@@ -689,7 +680,6 @@ export function AdminUsersPage() {
           </AdminButton>
         </div>
       </Modal>
-      <InviteDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
       <Outlet />
     </div>
   );
