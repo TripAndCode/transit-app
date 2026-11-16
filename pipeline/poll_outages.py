@@ -13,13 +13,15 @@ from __future__ import annotations
 import bisect
 import statistics
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from itertools import pairwise
 from typing import Any, NamedTuple
 
 from pipeline import static_archive
-from pipeline.service_day import service_date_of, service_day_moment_utc, service_day_start_utc
+from pipeline.service_day import service_day_moment_utc, service_day_start_utc
 from pipeline.service_hours import TripEnds, hours_of
+
+JST = timezone(timedelta(hours=9))
 
 #: A gap shorter than this is never an outage, however fast the feed is polled:
 #: a few missed polls in a row are a slow vendor response or a fetch retry, not
@@ -31,8 +33,9 @@ OUTAGE_FLOOR_SEC = 300
 OUTAGE_INTERVALS = 3
 
 #: How far beyond an outage's own gap another agency's poll is looked for to
-#: bound a stretch no agency was polled in: longer than any agency's interval,
-#: so the polls either side of a collector outage are found.
+#: bound a stretch no agency was polled in. It assumes every agency is polled
+#: at least this often, so the polls either side of a collector outage fall
+#: within it; one polled less often leaves the stretch unbounded, the feed's.
 PEER_REACH_SEC = OUTAGE_FLOOR_SEC
 
 #: The figures, each None beside ``polls_missing`` or ``outage_missing``.
@@ -76,8 +79,8 @@ def in_force_hours(conn, ch, agency_id: int, first: date, last: date) -> dict[da
     """The hours (:func:`pipeline.service_hours.hours_of`) of each day of
     [first, last] by the timetable in force on it
     (pipeline.timetable_in_force), read from the archive. A day with none in
-    force, or whose timetable's calendar is not kept or does not cover it, is
-    absent: its hours are unknown."""
+    force, or whose timetable's calendar or trips are not kept or whose
+    calendar does not cover it, is absent: its hours are unknown."""
     join = static_archive.schedule_join(ch, agency_id, None, by_service_date=True)
     hours: dict[date, tuple[int, int] | None] = {}
     trips: dict[str, list[TripEnds]] = {}
@@ -91,6 +94,9 @@ def in_force_hours(conn, ch, agency_id: int, first: date, last: date) -> dict[da
         if content not in trips:
             rows = ch.query(TRIP_ENDS_CH_SQL, parameters={"agency": agency_id, "content": content}).result_rows
             trips[content] = [TripEnds(*row) for row in rows]
+        if not trips[content]:
+            # Kept without a stop time to read, which says nothing of its hours.
+            continue
         hours.update(
             hours_of(
                 conn,
@@ -129,74 +135,110 @@ def threshold_sec(interval_sec: float) -> float:
     return max(OUTAGE_FLOOR_SEC, OUTAGE_INTERVALS * interval_sec)
 
 
+class CountedSpans(NamedTuple):
+    """What :func:`counted_spans` counts over: the in-service *spans*, the
+    service *days* with any time left in them, the days whose hours are
+    *known*, and whether any known day had service before the live path's
+    days were taken out (*serviced*)."""
+
+    spans: list[tuple[int, int]]
+    days: int
+    known: int
+    serviced: bool
+
+
 def counted_spans(
     hours: Mapping[date, tuple[int, int] | None],
     *,
     first: date,
     through: date,
     observed_from: date | None,
-    live_days: Collection[date],
-) -> tuple[list[tuple[int, int]], int]:
-    """The in-service spans the figures count, one per day, and how many days
-    of the range have known hours.
+    live_held: Collection[date],
+) -> CountedSpans:
+    """The in-service spans the figures count.
 
-    The days run from *first*, or *observed_from*, the agency's first observed
-    day, if later, through *through*. *hours* gives each day whose timetable in
-    force is known its first departure and last arrival in service-day
-    seconds, or None when nothing timed runs. A day of *live_days* holds the
-    live path's polls, a sample of the collector's, so its gaps say nothing
-    about the feed. Each span is kept within its own service day, so a trip
-    timed past the next cutover never counts twice.
+    The service days run from *first*, or *observed_from*, the agency's first
+    observed day, if later, through *through*. *hours* gives each day whose
+    timetable in force is known its first departure and last arrival in
+    service-day seconds, or None when nothing timed runs. Each span is kept
+    within its own service day, so a trip timed past the next cutover never
+    counts twice. The JST calendar days of *live_held* (:func:`live_held`)
+    are cut out of the spans: their polls are the live path's sample of the
+    collector's, so their gaps say nothing about the feed.
     """
     start = max(first, observed_from) if observed_from else first
-    spans, known = [], 0
+    held = sorted(_jst_day_span(day) for day in live_held)
+    spans: list[tuple[int, int]] = []
+    days = known = 0
+    serviced = False
     day = start
     while day <= through:
         if day in hours:
             known += 1
             span = hours[day]
-            if span is not None and day not in live_days:
+            if span is not None:
                 lo = max(service_day_moment_utc(day, span[0]), service_day_start_utc(day))
                 hi = min(service_day_moment_utc(day, span[1]), service_day_start_utc(day + timedelta(days=1)))
                 if lo < hi:
-                    spans.append((int(lo.timestamp()), int(hi.timestamp())))
+                    serviced = True
+                    left = _without((int(lo.timestamp()), int(hi.timestamp())), held)
+                    days += bool(left)
+                    spans += left
         day += timedelta(days=1)
-    return spans, known
+    return CountedSpans(spans, days, known, serviced)
 
 
-def live_days(archive: Iterable[int], live: Iterable[int]) -> set[date]:
-    """The service days most of whose polls came through the live path; a tie
-    reads live, as :func:`pipeline.clickhouse.majority_source` calls a day."""
-    from pipeline.clickhouse import majority_source
+def _without(span: tuple[int, int], cuts: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    """*span* less the sorted disjoint *cuts*."""
+    pieces, lo = [], span[0]
+    for cut_lo, cut_hi in cuts:
+        if cut_hi <= lo or cut_lo >= span[1]:
+            continue
+        if cut_lo > lo:
+            pieces.append((lo, cut_lo))
+        lo = max(lo, cut_hi)
+    if lo < span[1]:
+        pieces.append((lo, span[1]))
+    return pieces
 
-    counts: dict[date, list[int]] = {}
-    for index, instants in enumerate((archive, live)):
-        for instant in instants:
-            counts.setdefault(_service_date(instant), [0, 0])[index] += 1
-    return {day for day, (a, b) in counts.items() if majority_source(a, b) == "live"}
+
+def _jst_day(instant: int) -> date:
+    return datetime.fromtimestamp(instant, tz=JST).date()
 
 
-def merged_polls(archive: Sequence[int], live: Sequence[int], live_days: Collection[date]) -> list[int]:
+def _jst_day_span(day: date) -> tuple[int, int]:
+    start = datetime.combine(day, time(0), tzinfo=JST)
+    return int(start.timestamp()), int((start + timedelta(days=1)).timestamp())
+
+
+def live_held(archive: Iterable[int], live: Iterable[int]) -> set[date]:
+    """The JST calendar days that hold live polls and no archived one: the
+    unit archive ingest replaces a promoted day in (pipeline.archive_replace),
+    so a day holds one source or the other."""
+    archived = {_jst_day(instant) for instant in archive}
+    return {day for day in map(_jst_day, live) if day not in archived}
+
+
+def merged_polls(archive: Sequence[int], live: Sequence[int], live_held: Collection[date]) -> list[int]:
     """The sorted distinct instants of *archive* and of those of *live* on
-    *live_days* (:func:`live_days`). A day held from the archive keeps only
-    its archived polls: a pushed copy of one of them is stamped on arrival,
-    seconds after the instant its name gives, so it would count twice."""
-    return sorted({*archive, *(instant for instant in live if _service_date(instant) in live_days)})
-
-
-def _service_date(instant: int) -> date:
-    from datetime import datetime, timezone
-
-    return service_date_of(datetime.fromtimestamp(instant, tz=timezone.utc))
+    *live_held* days (:func:`live_held`). A day holding archived polls keeps
+    only those: a pushed copy of one is stamped on arrival, seconds after the
+    instant its name gives, so it would count twice."""
+    return sorted({*archive, *(instant for instant in live if _jst_day(instant) in live_held)})
 
 
 def poll_figures(polls: Sequence[int], spans: Sequence[tuple[int, int]], window: tuple[int, int]) -> PollFigures:
     """The figures of sorted distinct poll instants *polls* over the disjoint
     in-service *spans*. A gap before the first poll or after the last runs
-    from or to the edge of *window*."""
+    from or to the edge of *window*.
+
+    An outage counts from one interval after the poll that opened its gap,
+    when that falls inside service, else from the start of service: the next
+    poll was due one interval after the last."""
     in_service = sum(hi - lo for lo, hi in spans)
     counted, gaps = 0, []
-    pieces: list[tuple[int, int, int, int]] = []
+    # (gap start, gap end, piece start, piece end, whether the piece starts at a poll)
+    pieces: list[tuple[int, int, int, int, bool]] = []
     for lo, hi in spans:
         first, last = bisect.bisect_left(polls, lo), bisect.bisect_right(polls, hi)
         inside = list(polls[first:last])
@@ -209,13 +251,15 @@ def poll_figures(polls: Sequence[int], spans: Sequence[tuple[int, int]], window:
         # a poll; a poll on the edge leaves an empty piece there.
         for i, (a, b) in enumerate(pairwise(points)):
             if b > a:
-                pieces.append((a if i > 0 else before, b if i < len(points) - 2 else after, a, b))
+                pieces.append((a if i > 0 else before, b if i < len(points) - 2 else after, a, b, i > 0))
     if not gaps:
         return PollFigures(in_service, counted, None, [])
     interval = float(statistics.median(gaps))
     over = threshold_sec(interval)
     outages = [
-        Outage(gap_start, gap_end, round(a + interval), b) for gap_start, gap_end, a, b in pieces if b - a > over
+        Outage(gap_start, gap_end, round(a + interval) if at_poll else max(a, round(gap_start + interval)), b)
+        for gap_start, gap_end, a, b, at_poll in pieces
+        if b - a > over
     ]
     return PollFigures(in_service, counted, interval, outages)
 
@@ -236,40 +280,71 @@ def split(outages: Sequence[Outage], stretches: Mapping[int, Sequence[tuple[int,
     return feed_total, feed_longest, collector_total, collector_longest
 
 
+class PeerBatch(NamedTuple):
+    """Outages whose peer scans overlap, read in one query: the scan's
+    ``captured_at`` range, and per outage (its index in *outages*) the
+    instants other agencies' polls are looked for in."""
+
+    scan_from: int
+    scan_to: int
+    outages: list[int]
+    los: list[int]
+    his: list[int]
+
+
+def peer_batches(outages: Sequence[Outage], reach: int, stored_reach: int) -> list[PeerBatch]:
+    """The scans that find other agencies' polls around *outages*: each
+    outage's gap *reach* either side, and its rows stored up to
+    *stored_reach* from their instants, overlapping scans merged, so the scan
+    covers only the time around the outages."""
+    batches: list[PeerBatch] = []
+    for index in sorted(range(len(outages)), key=lambda i: outages[i].gap_start):
+        lo, hi = outages[index].gap_start - reach, outages[index].gap_end + reach
+        scan_from, scan_to = lo - stored_reach, hi + stored_reach
+        if batches and scan_from <= batches[-1].scan_to:
+            last = batches[-1]
+            batches[-1] = last._replace(
+                scan_to=max(last.scan_to, scan_to),
+                outages=[*last.outages, index],
+                los=[*last.los, lo],
+                his=[*last.his, hi],
+            )
+        else:
+            batches.append(PeerBatch(scan_from, scan_to, [index], [lo], [hi]))
+    return batches
+
+
 def _minutes(seconds: float) -> float:
     return round(seconds / 60, 1)
 
 
 def columns(
     *,
-    total_rows: int,
+    polls_seen: int,
     undated_polls: int,
-    known_days: int,
-    spans: Sequence[tuple[int, int]],
-    all_live: bool,
+    counted: CountedSpans,
     figures: PollFigures,
     split: tuple[int, int, int, int],
     peer_rows: int,
 ) -> dict[str, Any]:
-    """The scorecard's poll columns. *spans* are the counted days' and
-    *known_days* the days with known hours (:func:`counted_spans`);
-    *all_live* whether every known day with service holds the live path's
-    polls; *split* is :func:`split` of the figures' outages, and *peer_rows*
+    """The scorecard's poll columns over *counted* (:func:`counted_spans`),
+    from *polls_seen* polls in the window whose instant is known and
+    *undated_polls* whose is not. *split* is :func:`split` of the figures' outages, and *peer_rows*
     the other listed agencies' archived rows in the window, without which an
     outage cannot be told apart from the collector's."""
     missing: str | None = None
-    if total_rows == 0:
+    if polls_seen == 0 and not undated_polls:
         missing = "no_data"
     elif undated_polls:
         missing = "undated_polls"
-    elif known_days == 0:
+    elif counted.known == 0:
         missing = "no_service_hours"
-    elif not spans:
-        missing = "live_sampled" if all_live else "no_plan"
+    elif not counted.spans:
+        missing = "live_sampled" if counted.serviced else "no_plan"
     elif figures.interval_sec is None:
         missing = "no_poll_interval"
     row: dict[str, Any] = dict.fromkeys(FIGURES)
-    row.update(poll_days=len(spans), polls_missing=missing, outage_missing=missing, peer_archive_rows=peer_rows)
+    row.update(poll_days=counted.days, polls_missing=missing, outage_missing=missing, peer_archive_rows=peer_rows)
     if missing is not None or figures.interval_sec is None:
         return row
     expected = figures.in_service_sec / figures.interval_sec

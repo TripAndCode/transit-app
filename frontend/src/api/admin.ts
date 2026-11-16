@@ -534,7 +534,7 @@ export type AgencyFeedQualityMonth = {
   /** Outage minutes inside service the feed is answerable for. */
   feed_outage_min: number | null;
   feed_outage_longest_min: number | null;
-  /** Outage minutes no agency was polled in: the collector's, not the feed's. */
+  /** Outage minutes no agency was polled in for more than 5 minutes: the collector's, not the feed's. */
   collector_outage_min: number | null;
   collector_outage_longest_min: number | null;
   polls_missing: FeedQualityMissing | null;

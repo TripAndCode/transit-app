@@ -7,6 +7,7 @@ import pytest
 from pipeline import feed_quality, poll_outages
 from pipeline.feed_quality import (
     COLUMNS,
+    PeerStamp,
     ValidationDay,
     last_counted_day,
     month_bounds,
@@ -515,11 +516,16 @@ def test_a_row_carries_the_poll_columns_of_its_window():
     assert {column: row[column] for column in poll_outages.COLUMNS} == outages
 
 
-def test_a_month_moves_when_the_other_agencies_archives_it_was_split_against_move():
+def test_a_month_with_an_outage_moves_when_the_other_agencies_archives_it_was_split_against_move():
     sep, octo = date(2026, 9, 1), _OCT
-    stored = {sep: 500, octo: 0}
+    stored = {sep: PeerStamp(500, True), octo: PeerStamp(0, True)}
     assert peers_moved({sep: 500}, stored, [sep, octo]) == []
     assert peers_moved({sep: 800}, stored, [sep, octo]) == [sep]
     assert peers_moved({sep: 500, octo: 10}, stored, [sep, octo]) == [octo]
     # A row built before the stamp existed records none.
-    assert peers_moved({}, {sep: None}, [sep]) == [sep]
+    assert peers_moved({}, {sep: PeerStamp(None, True)}, [sep]) == [sep]
+
+
+def test_a_month_without_an_outage_never_read_the_other_agencies_so_does_not_move_with_them():
+    sep = date(2026, 9, 1)
+    assert peers_moved({sep: 800}, {sep: PeerStamp(500, False)}, [sep]) == []

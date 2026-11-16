@@ -792,9 +792,10 @@ def test_a_summary_ingested_after_its_closed_month_was_built_reaches_that_month(
 _SERVICE = (datetime(2026, 4, 1, 1, 0, tzinfo=timezone.utc), datetime(2026, 4, 1, 3, 0, tzinfo=timezone.utc))
 
 
-def _versioned_timetable(pg_conn, agency_id: int) -> None:
-    """One trip every day of April, from 10:00 at its first stop to 12:00 at
-    its last, under a version name analyze archives and puts in force."""
+def _versioned_timetable(pg_conn, agency_id: int, hours: tuple[str, str] = ("10:00:00", "12:00:00")) -> None:
+    """One trip every day of April, from *hours*' first at its first stop to
+    their last at its last, under a version name analyze archives and puts in
+    force."""
     with pg_conn.cursor() as cur:
         # A loaded stop is what analyze takes as a timetable to archive.
         for seq in (1, 2):
@@ -813,7 +814,7 @@ def _versioned_timetable(pg_conn, agency_id: int) -> None:
             "VALUES (%s, 'ALL-0', 'R1', 'ALL', 'gtfs_static_20260401')",
             (agency_id,),
         )
-        for seq, at in ((1, "10:00:00"), (2, "12:00:00")):
+        for seq, at in enumerate(hours, start=1):
             cur.execute(
                 "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, "
                 "departure_time) VALUES (%s, 'ALL-0', %s, %s, %s, %s)",
@@ -906,3 +907,26 @@ def test_a_day_the_live_path_holds_counts_no_poll(pg_conn, ch_client, closed_on_
 
     april = _stored(pg_conn, agency)[_APRIL]
     assert (april["polls_missing"], april["poll_days"], april["poll_success_pct"]) == ("live_sampled", 0, None)
+
+
+def test_a_poll_stamped_before_the_month_still_counts_on_its_first_morning(pg_conn, ch_client, closed_on_may_first):
+    """Service on 1 April runs from 04:30 to 06:00 JST. Its polls carry no
+    header, so archive ingest stamps each with its UTC name read as JST, nine
+    hours early: before the month's window opens. Their instants are still
+    the 1st's, so the morning is polled, not an outage."""
+    _observed_elsewhere(pg_conn, ch_client, date(2026, 4, 1))
+    agency = _agency(pg_conn, "polled", "static_join")
+    _versioned_timetable(pg_conn, agency, ("04:30:00", "06:00:00"))
+    named, last = datetime(2026, 3, 31, 19, 30, tzinfo=timezone.utc), datetime(2026, 3, 31, 21, 0, tzinfo=timezone.utc)
+    rows = []
+    while named <= last:
+        rows += _archive_poll(named, 0)
+        named += timedelta(seconds=30)
+    assert min(row[1] for row in rows) < datetime(2026, 3, 31, 19, 0, tzinfo=timezone.utc)
+    insert_updates(ch_client, agency, rows)
+    analyze(agency, pg_conn, ch_client)
+
+    april = _stored(pg_conn, agency)[_APRIL]
+    assert (april["polls_missing"], april["outage_missing"]) == (None, None)
+    assert (april["polls_in_service"], float(april["poll_success_pct"])) == (181, 100.0)
+    assert (float(april["feed_outage_min"]), float(april["collector_outage_min"])) == (0.0, 0.0)

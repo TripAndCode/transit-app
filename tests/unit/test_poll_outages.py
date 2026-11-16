@@ -1,18 +1,21 @@
 """Poll success and outage minutes, from poll instants and the service hours
 of the days they count, without a database."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 
 from pipeline import poll_outages
 from pipeline.poll_outages import (
+    JST,
     OUTAGE_FLOOR_SEC,
+    CountedSpans,
     Outage,
     columns,
     counted_spans,
-    live_days,
+    live_held,
     merged_polls,
+    peer_batches,
     poll_figures,
     split,
     threshold_sec,
@@ -56,11 +59,18 @@ def test_only_the_part_of_a_gap_inside_service_counts():
     assert (outage.gap_start, outage.gap_end) == (_CLOSE - 3600, _WINDOW[1])
 
 
-def test_a_gap_from_service_start_to_the_first_poll_is_an_outage():
+def test_a_gap_from_service_start_to_the_first_poll_is_an_outage_from_the_start_of_service():
     polls = [_OPEN - 3600, *_every(_OPEN + 1800, _CLOSE)]
     [outage] = poll_figures(polls, [(_OPEN, _CLOSE)], _WINDOW).outages
-    assert (outage.start, outage.end) == (_OPEN + 30, _OPEN + 1800)
+    # The next poll was due long before service began, so all of it counts.
+    assert (outage.start, outage.end) == (_OPEN, _OPEN + 1800)
     assert (outage.gap_start, outage.gap_end) == (_OPEN - 3600, _OPEN + 1800)
+
+
+def test_a_gap_opened_just_before_service_counts_from_when_the_next_poll_was_due():
+    polls = [_OPEN - 10, *_every(_OPEN + 1800, _CLOSE)]
+    [outage] = poll_figures(polls, [(_OPEN, _CLOSE)], _WINDOW).outages
+    assert (outage.start, outage.end) == (_OPEN + 20, _OPEN + 1800)
 
 
 def test_a_day_without_a_poll_is_one_outage_over_its_service():
@@ -68,7 +78,7 @@ def test_a_day_without_a_poll_is_one_outage_over_its_service():
         [*_every(_OPEN - 86400, _CLOSE - 86400)], [(_OPEN - 86400, _CLOSE - 86400), (_OPEN, _CLOSE)], _WINDOW
     )
     assert figures.interval_sec == 30.0
-    assert [(o.start, o.end) for o in figures.outages] == [(_OPEN + 30, _CLOSE)]
+    assert [(o.start, o.end) for o in figures.outages] == [(_OPEN, _CLOSE)]
 
 
 def test_a_gap_counts_only_beyond_the_threshold_and_only_its_time_beyond_one_interval():
@@ -126,34 +136,68 @@ def test_spans_count_the_days_whose_hours_are_known_from_the_first_observed_day_
     days = [_DAY + timedelta(days=i) for i in range(5)]
     hours = {**_hours(*days), days[2]: None}
     del hours[days[3]]
-    spans, known = counted_spans(hours, first=days[0], through=days[3], observed_from=days[1], live_days=set())
+    counted = counted_spans(hours, first=days[0], through=days[3], observed_from=days[1], live_held=set())
     # Day 0 is before the agency was first observed, day 2 runs nothing, day 3's
     # hours are unknown and day 4 is past the coverage day.
-    assert known == 2
+    assert (counted.known, counted.days, counted.serviced) == (2, 1, True)
     start = int(service_day_start_utc(days[1]).timestamp())
-    assert spans == [(start + 2 * 3600, start + 18 * 3600)]
+    assert counted.spans == [(start + 2 * 3600, start + 18 * 3600)]
 
 
-def test_a_day_the_live_path_holds_is_left_out():
+def test_a_calendar_day_the_live_path_holds_is_cut_out_of_service():
     days = [_DAY, _DAY + timedelta(days=1)]
-    spans, known = counted_spans(_hours(*days), first=days[0], through=days[1], observed_from=None, live_days={days[1]})
-    assert (len(spans), known) == (1, 2)
+    counted = counted_spans(_hours(*days), first=days[0], through=days[1], observed_from=None, live_held={days[1]})
+    assert (len(counted.spans), counted.days, counted.known) == (1, 1, 2)
+    gone = counted_spans(_hours(_DAY), first=_DAY, through=_DAY, observed_from=None, live_held={_DAY})
+    assert (gone.spans, gone.serviced) == ([], True)
 
 
 def test_hours_past_the_next_cutover_stay_on_their_own_service_day():
     hours = {_DAY: (5 * 3600, 29 * 3600)}
-    [span] = counted_spans(hours, first=_DAY, through=_DAY, observed_from=None, live_days=set())[0]
+    [span] = counted_spans(hours, first=_DAY, through=_DAY, observed_from=None, live_held=set()).spans
     assert span == (_DAY_START + 3600, _DAY_START + 86400)
+
+
+def _jst(day: int, hour: int, minute: int = 0) -> int:
+    return int(datetime(2026, 10, day, hour, minute, tzinfo=JST).timestamp())
+
+
+def _late_service(archive: list[int], live: list[int]):
+    """5 October's service, 05:00 to 24:40 JST, over the merged polls."""
+    held = live_held(archive, live)
+    counted = counted_spans(
+        {_DAY: (5 * 3600, 24 * 3600 + 40 * 60)}, first=_DAY, through=_DAY, observed_from=None, live_held=held
+    )
+    return poll_figures(merged_polls(archive, live, held), counted.spans, (_jst(5, 4), _jst(7, 4)))
+
+
+def test_the_live_path_s_pushes_after_midnight_count_when_the_archive_holds_the_day_before():
+    # 5 October is held from the archive, 6 October from the live path, which
+    # carries the service day on past midnight.
+    archive = list(range(_jst(5, 4), _jst(6, 0), 30))
+    live = list(range(_jst(6, 0), _jst(7, 0), 300))
+    assert live_held(archive, live) == {date(2026, 10, 6)}
+    figures = _late_service(archive, live)
+    assert figures.interval_sec == 30.0
+    # The hours after midnight are the live path's sample, not the feed's gaps.
+    assert figures.outages == []
+
+
+def test_a_live_day_before_an_archived_night_leaves_only_the_archived_hours():
+    live = list(range(_jst(5, 4), _jst(6, 0), 300))
+    archive = list(range(_jst(6, 0), _jst(6, 4), 15))
+    assert live_held(archive, live) == {date(2026, 10, 5)}
+    figures = _late_service(archive, live)
+    assert (figures.interval_sec, figures.outages) == (15.0, [])
+    assert figures.in_service_sec == 40 * 60
 
 
 def _columns(**over):
     full = poll_figures(_every(_OPEN, _CLOSE), [(_OPEN, _CLOSE)], _WINDOW)
     args = {
-        "total_rows": 100,
+        "polls_seen": 100,
         "undated_polls": 0,
-        "known_days": 1,
-        "spans": [(_OPEN, _CLOSE)],
-        "all_live": False,
+        "counted": CountedSpans([(_OPEN, _CLOSE)], 1, 1, True),
         "figures": full,
         "split": (0, 0, 0, 0),
         "peer_rows": 10,
@@ -189,15 +233,16 @@ def test_outage_minutes_are_split_into_the_feeds_and_the_collectors():
 @pytest.mark.parametrize(
     ("over", "reason"),
     [
-        ({"total_rows": 0}, "no_data"),
+        ({"polls_seen": 0}, "no_data"),
         ({"undated_polls": 1}, "undated_polls"),
-        ({"known_days": 0, "spans": []}, "no_service_hours"),
-        ({"spans": []}, "no_plan"),
-        ({"spans": [], "all_live": True}, "live_sampled"),
+        ({"counted": CountedSpans([], 0, 0, False)}, "no_service_hours"),
+        ({"counted": CountedSpans([], 0, 1, False)}, "no_plan"),
+        ({"counted": CountedSpans([], 0, 1, True)}, "live_sampled"),
     ],
 )
 def test_a_month_without_poll_figures_says_why_and_never_reads_zero(over, reason):
-    empty = poll_figures([], over.get("spans", [(_OPEN, _CLOSE)]), _WINDOW)
+    spans = over["counted"].spans if "counted" in over else [(_OPEN, _CLOSE)]
+    empty = poll_figures([], spans, _WINDOW)
     row = _columns(figures=empty, **over)
     assert row["polls_missing"] == row["outage_missing"] == reason
     for column in poll_outages.FIGURES:
@@ -224,15 +269,45 @@ def test_a_month_without_an_outage_needs_no_other_agency_to_say_so():
     assert (row["feed_outage_min"], row["collector_outage_min"], row["outage_missing"]) == (0.0, 0.0, None)
 
 
-def test_a_day_most_of_whose_polls_came_through_the_live_path_is_a_live_day():
-    archive = _every(_OPEN, _OPEN + 300)
-    pushed = [_OPEN + 86400, _OPEN + 86400 + 300, _OPEN + 3]
-    assert live_days(archive, pushed) == {_DAY + timedelta(days=1)}
+def test_a_calendar_day_with_any_archived_poll_is_held_from_the_archive():
+    archive = [_OPEN]
+    pushed = [_OPEN + 3, *_every(_OPEN + 600, _OPEN + 3600, 300), _OPEN + 86400]
+    assert live_held(archive, pushed) == {_DAY + timedelta(days=1)}
 
 
 def test_a_day_held_from_the_archive_keeps_only_its_archived_polls():
     archive = [_OPEN, _OPEN + 30]
     # A pushed copy of the first poll, stamped on arrival; and the next day's pushes.
     pushed = [_OPEN + 2, _OPEN + 86400, _OPEN + 86400 + 300]
-    days = live_days(archive, pushed)
-    assert merged_polls(archive, pushed, days) == [_OPEN, _OPEN + 30, _OPEN + 86400, _OPEN + 86400 + 300]
+    held = live_held(archive, pushed)
+    assert merged_polls(archive, pushed, held) == [_OPEN, _OPEN + 30, _OPEN + 86400, _OPEN + 86400 + 300]
+
+
+def test_outages_whose_scans_overlap_share_one_and_the_rest_scan_only_around_their_own():
+    first = Outage(_OPEN, _OPEN + 900, _OPEN + 30, _OPEN + 900)
+    second = Outage(_OPEN + 4000, _OPEN + 5000, _OPEN + 4030, _OPEN + 5000)
+    later = Outage(_OPEN + 20 * 86400, _OPEN + 20 * 86400 + 600, _OPEN + 20 * 86400 + 30, _OPEN + 20 * 86400 + 600)
+    batches = peer_batches([later, first, second], reach=300, stored_reach=3600)
+    assert [(b.scan_from, b.scan_to, b.outages) for b in batches] == [
+        (_OPEN - 3900, _OPEN + 8900, [1, 2]),
+        (later.gap_start - 3900, later.gap_end + 3900, [0]),
+    ]
+    assert (batches[0].los, batches[0].his) == ([_OPEN - 300, _OPEN + 3700], [_OPEN + 1200, _OPEN + 5300])
+
+
+def test_a_kept_timetable_without_trips_to_read_leaves_its_days_unknown(monkeypatch):
+    from pipeline import static_archive
+    from pipeline.static_archive import ArchivedCalendar, ScheduleJoin
+    from pipeline.timetable_in_force import Segment
+
+    join = ScheduleJoin(["v1"], ["c1"], "", (Segment(_DAY, _DAY, "v1"),))
+    calendar = ArchivedCalendar([("ALL", *([True] * 7), _DAY, _DAY)], [])
+    monkeypatch.setattr(static_archive, "schedule_join", lambda *a, **k: join)
+    monkeypatch.setattr(static_archive, "archived_calendar", lambda *a: calendar)
+    monkeypatch.setattr(poll_outages, "hours_of", lambda *a, **k: pytest.fail("no trips, no hours to read"))
+
+    class _NoTrips:
+        def query(self, sql, parameters):
+            return type("Result", (), {"result_rows": []})()
+
+    assert poll_outages.in_force_hours(None, _NoTrips(), 8, _DAY, _DAY) == {}

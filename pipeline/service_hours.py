@@ -59,8 +59,9 @@ _SERVICE_HOURS_SQL = (
 
 # The same hours of each day a timetable given as rows covers: its calendar
 # (planned_trips.ROWS_CALENDAR_CTES) and each trip's first and last stop
-# times, as hours_of takes them. A covered day nothing timed runs on reads NULL.
-_ROWS_HOURS_SQL = (
+# times, as hours_of takes them, each service's span taken before it meets
+# the running days. A covered day nothing timed runs on reads NULL.
+ROWS_HOURS_SQL = (
     """WITH
     rows_trips AS (
         SELECT %(agency_id)s AS agency_id, a.*
@@ -77,15 +78,18 @@ _ROWS_HOURS_SQL = (
     )
     + f""",
     trip_ends AS (
-        SELECT r.day,
+        SELECT t.service_id,
                COALESCE({hms_to_sec_sql("t.first_departure")}, {hms_to_sec_sql("t.first_arrival")}) AS starts,
                COALESCE({hms_to_sec_sql("t.last_arrival")}, {hms_to_sec_sql("t.last_departure")}) AS ends
-        FROM running r
-        JOIN rows_trips t ON t.service_id = r.service_id
+        FROM rows_trips t
+    ),
+    service_hours AS (
+        SELECT service_id, {_HOURS} FROM trip_ends GROUP BY service_id
     )
-    SELECT cv.day, {_HOURS}
+    SELECT cv.day, MIN(sh.first_departure), MAX(sh.last_arrival)
     FROM covered cv
-    LEFT JOIN trip_ends te ON te.day = cv.day
+    LEFT JOIN running r ON r.agency_id = cv.agency_id AND r.day = cv.day
+    LEFT JOIN service_hours sh ON sh.service_id = r.service_id
     GROUP BY cv.day
     """
 )
@@ -133,7 +137,7 @@ def hours_of(
         **calendar_params(calendar, calendar_dates),
     }
     with conn.cursor() as cur:
-        cur.execute(_ROWS_HOURS_SQL, params)
+        cur.execute(ROWS_HOURS_SQL, params)
         return {
             day: None if starts is None or ends is None else (int(starts), int(ends))
             for day, starts, ends in cur.fetchall()
