@@ -328,26 +328,28 @@ next run drops them under a new row. So an empty `dropped_at` means only that
 the run which wrote the row did not confirm the drop; ClickHouse's
 `system.parts` says whether `updates` still holds the month.
 
-No code prerequisite remains before the prune is switched on in production.
-Turning it on is the operator steps below.
-
 To turn it on in production:
 
-1. Check that Railway's deployed ingest job runs no `ALTER TABLE updates
+1. Promote `main`, at or past the commit that adds `pipeline/retained_reads.py`,
+   to `production` (`docs/deploy-railway.md`, "Point every Railway service at
+   the `production` branch"). An older build already has the prune command
+   but not the re-check that keeps a live read from answering over a month it
+   is dropping.
+2. Check that Railway's deployed ingest job runs no `ALTER TABLE updates
    DELETE`, such as one driven by `RETENTION_DAYS`. A delete like that sets no
    floor, so the next analyze purges the aggregates of the rows it removed.
-2. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
+3. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
    `analyze_all` in the daily ingest job (`docs/deploy-railway.md`, step 5).
    The job leaves it out until this step adds it, so the switch alone never
    arms a drop.
-3. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
+4. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
    writes nothing, whatever the switch says. It lists each month past the
    horizon: the ones it would drop, with the floor each sets, and the ones it
    keeps, with the agency and date that keep each. Analyze any agency it names
    first.
-4. Turn on `updates_prune_enabled` from `/admin/flags`, or set
+5. Turn on `updates_prune_enabled` from `/admin/flags`, or set
    `UPDATES_PRUNE_ENABLED=true` on the job that runs the command.
-5. After the first run, check its `retention` row on the board, and that the
+6. After the first run, check its `retention` row on the board, and that the
    run's rows in `updates_pruned_months` have `dropped_at` set.
 
 A dropped month's rows come back only by a replay from R2. Its aggregates need

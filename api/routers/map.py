@@ -1178,8 +1178,10 @@ async def route_trips(
     # on this anonymous, reachable endpoint must cost ~0 ClickHouse work, not
     # just a bounded-but-still-huge scan. See `_latest_route_observation` for
     # the full existence-check and bound rationale.
-    # Its own computation (pipeline.retained_reads.checked): a floor raised mid-probe
-    # re-runs it from the new floor rather than refusing a day the request never named.
+    # Its own computation (pipeline.retained_reads.checked): a floor raised during
+    # the probe re-runs it from the new floor. The day it picks is then read as
+    # the request's own, so a floor that passes that day during the main read is
+    # refused like any other.
     latest_ts = await retained_reads.checked(lambda: _latest_route_observation(conn, ch, agency_id, route_code), conn)
     empty = RouteTripsResponse(
         date=None, time_band=time_band, truncated=False, trips=[], scope_applied=_ROUTE_TRIPS_SCOPE
@@ -1321,8 +1323,10 @@ async def route_stop_profile(
     # `_latest_route_observation` for the full rationale (same
     # fabricated-route-code / unbounded-scan vulnerability, same fix, shared
     # with route_trips above).
-    # Its own computation (pipeline.retained_reads.checked): a floor raised mid-probe
-    # re-runs it from the new floor rather than refusing a day the request never named.
+    # Its own computation (pipeline.retained_reads.checked): a floor raised during
+    # the probe re-runs it from the new floor. The day it picks is then read as
+    # the request's own, so a floor that passes that day during the main read is
+    # refused like any other.
     latest_ts = await retained_reads.checked(lambda: _latest_route_observation(conn, ch, agency_id, route_code), conn)
     if latest_ts is None:
         return {"date": None, "stops": []}
