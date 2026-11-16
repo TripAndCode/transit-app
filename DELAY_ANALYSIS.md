@@ -277,10 +277,10 @@ and the implausible share over its own period, by the same rules (see "Method ve
 above).
 
 **Grade.** The admin drawer grades each month A to F from its stored figures alone
-(`pipeline/feed_quality_grade.py`, whose constants are the thresholds). The criteria,
-their thresholds and why each was chosen are stated once, in the methodology's "Feed
-quality" section ([en](docs/methodology.en.md#feed-quality),
-[ja](docs/methodology.md#フィードの品質)). In code terms: implausible readings reuse
+(`pipeline/feed_quality_grade.py`). The criteria, their thresholds and why each was
+chosen are stated once, in the methodology's "Feed quality" section
+([en](docs/methodology.en.md#feed-quality), [ja](docs/methodology.md#フィードの品質)).
+In code terms: implausible readings reuse
 the comparability gate's `clamp_is_high`, and field coverage reuses the RT
 field-coverage probe's `assess_field_coverage`, so the grade, the gate and the probe
 cannot disagree. The drawer names each criterion a month fails with the figure it was

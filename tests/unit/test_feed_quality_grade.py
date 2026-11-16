@@ -1,13 +1,10 @@
 """The feed-quality scorecard's monthly grade, from a month's stored figures alone."""
 
-from typing import get_args
-
 import pytest
 
 from pipeline import feed_quality_grade
 from pipeline.feed_quality_grade import CRITERIA, GRADES, grade_month
 from pipeline.reports.comparability import MAX_CLAMP_PCT
-from pipeline.strategies.static_join import RT_COVERAGE_FIELDS
 
 
 def _month(**over):
@@ -92,10 +89,6 @@ def test_field_coverage_passes_only_as_the_rt_field_probe_would_confirm_it(over)
     """arr_delay is the sparse arrival estimate the app reads it as only when
     some but fewer than half of the updates carry it."""
     assert grade_month(_month(**over)).failing == ("field_coverage",)
-
-
-def test_the_field_type_names_the_fields_the_probe_judges():
-    assert get_args(feed_quality_grade.RtCoverageField) == RT_COVERAGE_FIELDS
 
 
 @pytest.mark.parametrize(

@@ -41,9 +41,10 @@ from api.deps import get_conn
 from api.middleware.ratelimit import ADMIN_ACTION_LIMIT, limiter
 from api.range import current_service_date
 from api.security import User, csrf_guard, require_admin
-from pipeline.feed_quality_grade import Criterion, RtCoverageField
+from pipeline.feed_quality_grade import Criterion
 from pipeline.locks import AGENCY_RUN_REQUEST_LOCK_KEY
 from pipeline.reports.network import invalidate_network_summary
+from pipeline.strategies.static_join import RtCoverageField
 
 router = APIRouter(prefix="/api/admin/agencies", tags=["admin"])
 
