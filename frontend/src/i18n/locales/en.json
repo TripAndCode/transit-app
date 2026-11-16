@@ -768,35 +768,10 @@
       "user": "User"
     },
     "linked_providers": "Linked providers",
-    "llm_key": {
-      "title": "AI key for notebook follow-ups",
-      "status_shared": "Using the shared free tier",
-      "status_own": "Using your own {{provider}} key · ****{{suffix}}",
-      "input_label": "API key",
-      "remove": "Remove",
-      "rejected": "Key rejected — check it and try again.",
-      "remove_error": "Couldn't remove the key. Please check your connection and try again.",
-      "save_error": "Couldn't save the key. Please check your connection and try again.",
-      "status_unavailable": "Couldn't load your key status."
-    },
     "active_sessions": "Active sessions",
     "session_last_seen": "Last seen: {{when}}",
     "logout": "Sign out",
     "logout_error": "Couldn't sign out. Please check your connection and try again.",
-    "data": {
-      "title": "Your data",
-      "description": "Download the data this app holds about you.",
-      "export": "Download my data",
-      "delete": "Delete account",
-      "delete_title": "Delete your account?",
-      "delete_body": "This permanently deletes your account, sign-in history, saved filters, notebook investigations, AI key and usage history. It can't be undone.",
-      "delete_confirm_label": "Type {{email}} to confirm",
-      "delete_confirm": "Delete permanently",
-      "error_last_admin": "You're the only admin, so this account can't be deleted. Make someone else an admin first.",
-      "error_managed": "This is the operator's built-in account and can't be deleted here.",
-      "error_generic": "Couldn't delete the account. Please check your connection and try again.",
-      "delete_description": "Deletes your account and everything saved with it. This can't be undone."
-    },
     "login": {
       "error": {
         "state": "Your sign-in request has expired. Please try again.",
@@ -1796,9 +1771,6 @@
       "back_to_users": "Back to users",
       "actions_title": "Actions",
       "self_hint": "You can't modify your own account here.",
-      "byok_label": "BYOK",
-      "byok_configured": "{{provider}} key configured",
-      "byok_not_configured": "Not configured",
       "sessions_title": "Sessions",
       "sessions_empty": "No active sessions.",
       "session_revoke": "Revoke",

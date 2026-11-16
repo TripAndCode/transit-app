@@ -59,7 +59,6 @@ async def test_ask_endpoint_returns_answer(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         return {
@@ -333,7 +332,6 @@ async def test_ask_router_fallthrough_does_not_force_a_tool_call(ask_client, mon
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
@@ -367,7 +365,6 @@ async def test_follow_up_reroutes_to_llm_with_history(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         captured["history"] = history
@@ -424,7 +421,6 @@ async def test_follow_up_phrasing_after_free_text_answer_does_not_force_tool(ask
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
@@ -471,7 +467,6 @@ async def test_follow_up_multiturn_history_only_looks_at_last_turn(ask_client, m
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
@@ -520,7 +515,6 @@ async def test_follow_up_non_paginatable_prior_tool_does_not_force_tool(ask_clie
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         captured["force_tool_call"] = force_tool_call
@@ -751,7 +745,6 @@ async def test_unrelated_question_with_unrelated_history_gets_fresh_tool_call(as
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         captured["history"] = history
@@ -890,7 +883,6 @@ async def test_ask_writes_query_log_row(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         return {"answer": "ok", "tool_call": {"name": "top_n", "arguments": {}}, "result": None, "success": True}
@@ -934,7 +926,6 @@ async def test_ask_logs_numeric_guard_verdict(ask_client, monkeypatch):
         history=None,
         ch=None,
         force_tool_call=False,
-        user_id=None,
         llm_approved=True,
     ):
         return {

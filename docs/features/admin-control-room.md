@@ -231,8 +231,7 @@ Endpoints:
   with 409 `account_exists`.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
-and one at a time), `oauth_identities`, `user_llm_keys` (read-only,
-for the drawer's provider indicator), `api_keys`, `user_invites`. Every
+and one at a time), `oauth_identities`, `api_keys`, `user_invites`. Every
 mutation records an `admin_audit` entry.
 
 `DELETE /api/admin/users/{uid}` is a soft-delete. It anonymizes the row,

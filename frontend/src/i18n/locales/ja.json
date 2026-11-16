@@ -768,35 +768,10 @@
       "user": "ユーザー"
     },
     "linked_providers": "連携プロバイダ",
-    "llm_key": {
-      "title": "調査ノートの追質問用AIキー",
-      "status_shared": "無料の共有枠を使用中",
-      "status_own": "ご自身の{{provider}}キーを使用中・****{{suffix}}",
-      "input_label": "APIキー",
-      "remove": "削除",
-      "rejected": "キーが拒否されました。確認して再度お試しください。",
-      "remove_error": "キーを削除できませんでした。接続を確認して再度お試しください。",
-      "save_error": "キーを保存できませんでした。接続を確認して再度お試しください。",
-      "status_unavailable": "キーの状態を読み込めませんでした。"
-    },
     "active_sessions": "アクティブなセッション",
     "session_last_seen": "最終: {{when}}",
     "logout": "ログアウト",
     "logout_error": "ログアウトできませんでした。接続を確認して再度お試しください。",
-    "data": {
-      "title": "あなたのデータ",
-      "description": "このアプリが保持するあなたのデータをダウンロードできます。",
-      "export": "データをダウンロード",
-      "delete": "アカウントを削除",
-      "delete_title": "アカウントを削除しますか？",
-      "delete_body": "アカウント、ログイン履歴、保存したフィルター、調査ノートの調査、AIキー、利用履歴を完全に削除します。元に戻せません。",
-      "delete_confirm_label": "確認のため {{email}} と入力してください",
-      "delete_confirm": "完全に削除",
-      "error_last_admin": "唯一の管理者のため、このアカウントは削除できません。先に別のユーザーを管理者にしてください。",
-      "error_managed": "運営者の組み込みアカウントのため、ここでは削除できません。",
-      "error_generic": "アカウントを削除できませんでした。接続を確認して再度お試しください。",
-      "delete_description": "アカウントと、保存したすべてのデータを削除します。元に戻せません。"
-    },
     "login": {
       "error": {
         "state": "ログインのリクエストが期限切れです。もう一度お試しください。",
@@ -1796,9 +1771,6 @@
       "back_to_users": "ユーザー一覧に戻る",
       "actions_title": "操作",
       "self_hint": "自分自身のアカウントはここでは変更できません。",
-      "byok_label": "BYOK",
-      "byok_configured": "{{provider}} キー設定済み",
-      "byok_not_configured": "未設定",
       "sessions_title": "セッション",
       "sessions_empty": "有効なセッションはありません。",
       "session_revoke": "失効",

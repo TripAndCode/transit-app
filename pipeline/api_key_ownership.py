@@ -4,8 +4,7 @@ A key belongs to the account it was issued to (``owner_user_id``), or, for a
 legacy ownerless key inserted by hand with only an address, to the account
 holding that address. The address comparison ignores case: an address is one
 identity whatever its case, and an ownerless key keeps the casing it was
-inserted with. Account erasure, account export and the admin soft-delete all
-act on this one set.
+inserted with. The admin soft-delete acts on this one set.
 """
 
 #: SQL predicate over ``api_keys``. ``$1`` is the user's ``user_id`` and ``$2``

@@ -112,16 +112,6 @@ export async function apiPatch<T>(path: string, body: unknown, opts?: { signal?:
   }) as Promise<T>;
 }
 
-/** PUT — same JSON-or-204 contract as apiPost. Used for idempotent
- * replace-the-whole-resource endpoints, e.g. `/api/me/llm-key`. */
-export async function apiPut<T>(path: string, body: unknown, opts?: { signal?: AbortSignal }): Promise<T> {
-  return requestMaybeEmpty<T>(path, {
-    method: "PUT",
-    body: JSON.stringify(body),
-    signal: opts?.signal,
-  }) as Promise<T>;
-}
-
 /** DELETE — handles 204 No Content (returns undefined when no JSON body). ``body``,
  *  when given, is sent as JSON (e.g. a typed confirmation). */
 export async function apiDelete<T = void>(
