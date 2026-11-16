@@ -244,11 +244,12 @@ The list and drawer label the row Deleted and offer no Resume control.
 The drawer's "Usage (last 30 days)" section reads
 `GET /api/admin/users/{uid}/activity?days=30` (`days` 1–365): per route
 template and agency, the requests and errors summed from
-`user_activity_daily`. The API counts every authenticated request to a gated
-`/api/*` route into that table (the sign-in flow, `/api/config` and the
-who-am-I read `GET /api/me` are not counted) (`api/activity.py`, flushed every 30 s), attributing
-API-key requests to the key's owner. It stores route templates and days
-only — never raw paths, query text, or finer timestamps.
+`user_activity_daily`. `UsageCountMiddleware` (`api/middleware/usage.py`)
+counts every finished `/api/` request that matched a route, except the
+sign-in flow, `/api/config` and the who-am-I read `GET /api/me`; a session
+user or an API key's owner lands here, attributed to the key's owner for an
+API-key request (`api/activity.py`, flushed every 30 s). It stores route
+templates and days only — never raw paths, query text, or finer timestamps.
 
 ## Ops
 
@@ -372,3 +373,23 @@ arguments or text; whether a card ran signed in or out is the only fact kept
 about its caller, and a follow-up row carries only its context tool, latency and
 numeric-guard verdict. They fall under the table's 90-day
 retention (`pipeline/retention.py`).
+
+## Usage
+
+Route: `/admin/usage`, backed by `AdminUsagePage`.
+
+Endpoint: `GET /api/admin/usage` (`days` 1–400, default 30; optional
+`agency_id`) — requests per route template per day over the trailing `days`
+JST days ending today, split by whether the caller was signed out, signed in,
+or an API key. The response gives the window (`from`/`to`), the per-route
+totals (`route`, `method`, `signed_out`, `signed_in`, `api_key`, `errors`,
+ordered by total requests descending), and the per-day totals, zero-filled for
+every day in the window. Either source table missing (a deployment behind on
+migrations) degrades to an empty contribution rather than a 500.
+
+Tables: `signed_out` reads `anonymous_activity_daily`; `signed_in` and
+`api_key` read `user_activity_daily`, summed over every user. This is the
+reader signal from `docs/features/audience.md`: readers never sign in, so
+`anonymous_activity_daily` is the only server-side count of how much the
+notebook itself is used, and it holds no caller identity at all, only route
+templates and counts.
