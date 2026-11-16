@@ -51,6 +51,7 @@ function month(m: string, over: Partial<AgencyFeedQualityMonth> = {}): AgencyFee
     grade: "C",
     grade_failing: ["rt_completeness", "stale_polls"],
     grade_missing: [],
+    grade_failing_fields: [],
     ...over,
   };
 }
@@ -121,7 +122,9 @@ describe("FeedQualityTrend", () => {
   it("shows the newest month's grade and the criteria it misses, in the trend too", async () => {
     await i18n.changeLanguage("en");
     renderTrend([month("2026-10"), month("2026-09", { grade: "A", grade_failing: [] })]);
-    expect(screen.getByText("below threshold: trips reported, polls over 65 s")).toBeInTheDocument();
+    expect(
+      screen.getByText("below threshold: trips reported 69.3%, 12.50% of polls older than 65 s"),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Shown to admins only/)).toBeInTheDocument();
     expect(screen.getByText("12.50%")).toBeInTheDocument();
     expect(screen.getByText("2 of 16 polls measured")).toBeInTheDocument();
@@ -144,13 +147,64 @@ describe("FeedQualityTrend", () => {
       }),
     ]);
     expect(screen.getByText("not graded: trips reported (trip IDs are not the timetable's)")).toBeInTheDocument();
-    expect(screen.getByText("below threshold: polls over 65 s")).toBeInTheDocument();
+    expect(screen.getByText("below threshold: 12.50% of polls older than 65 s")).toBeInTheDocument();
     const row = within(screen.getByRole("table")).getAllByRole("row")[1] as HTMLTableRowElement;
     const cell = row.cells[row.cells.length - 1];
     expect(cell.textContent).toBe("—");
     expect(cell.getAttribute("title")).toBe(
-      "not graded: trips reported (trip IDs are not the timetable's) · below threshold: polls over 65 s",
+      "not graded: trips reported (trip IDs are not the timetable's) · below threshold: 12.50% of polls older than 65 s",
     );
+  });
+
+  it("names each failing criterion with the figure it was judged on", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([
+      month("2026-10", {
+        rt_completeness_pct: 99.1,
+        message_age_stale_pct: 1.2,
+        clamp_pct: 6.14,
+        arr_delay_pct: 100,
+        schedule_relationship_stop_pct: 98.9,
+        grade: "C",
+        grade_failing: ["clamp", "field_coverage"],
+        grade_failing_fields: ["arr_delay", "schedule_relationship_stop"],
+      }),
+    ]);
+    // The clamp share is judged to a tenth, so it is stated to a tenth.
+    expect(
+      screen.getByText(
+        "below threshold: implausible readings 6.1%, field coverage (arrival 100.0%, stop status 98.9%)",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("states a clamp share failing at its boundary as the tenth the gate judged", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([month("2026-10", { clamp_pct: 5.05, grade: "B", grade_failing: ["clamp"] })]);
+    expect(screen.getByText("below threshold: implausible readings 5.1%")).toBeInTheDocument();
+  });
+
+  it("names the failing fields with their figures in Japanese too", async () => {
+    await i18n.changeLanguage("ja");
+    renderTrend([
+      month("2026-10", {
+        grade_failing: ["clamp", "field_coverage"],
+        clamp_pct: 7,
+        grade_failing_fields: ["stop_id", "arr_delay"],
+        stop_id_pct: 0,
+        arr_delay_pct: 0,
+      }),
+    ]);
+    expect(
+      screen.getByText("基準に届かない項目：異常値の割合 7.0%、項目の充足（stop_id 0.0%、到着 0.0%）"),
+    ).toBeInTheDocument();
+    await i18n.changeLanguage("en");
+  });
+
+  it("names field coverage alone when no field is singled out", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([month("2026-10", { stop_time_updates: 0, grade: "B", grade_failing: ["field_coverage"] })]);
+    expect(screen.getByText("below threshold: field coverage")).toBeInTheDocument();
   });
 
   it("says a month built before the share of polls over 65 s was stored has it not recorded", async () => {
@@ -230,7 +284,7 @@ describe("FeedQualityTrend", () => {
     expect(screen.getByText("計画 1,000 便のうち 693 便")).toBeInTheDocument();
     expect(screen.getByText("計測した取得 16 回")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "直近6か月" })).toBeInTheDocument();
-    expect(screen.getByText("基準に届かない項目：便の充足率、65秒を超えた取得")).toBeInTheDocument();
+    expect(screen.getByText("基準に届かない項目：便の充足率 69.3%、65秒を超えた取得 12.50%")).toBeInTheDocument();
     expect(screen.getByText("30 日中 28 日を検証")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem")[0].textContent).toBe(
       "E022 Times are not increasing、28 日の取得 1,624 回で 3,360 件",

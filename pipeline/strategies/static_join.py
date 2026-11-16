@@ -35,7 +35,7 @@ import logging
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, get_args
 from zoneinfo import ZoneInfo
 
 from pipeline.clickhouse import TRIP_CANCELED, TRIP_LEVEL_STOP_SEQUENCE
@@ -98,12 +98,8 @@ VERSION_STAMPING_STRATEGIES = frozenset({"static_join"})
 # delivered, dwell/running time, schedule-realism padding, headway quality)
 # collectively need all four, and a partial verdict means the feed was never
 # fully vetted, not that the unrecorded fields are fine.
-RT_COVERAGE_FIELDS = (
-    "stop_id",
-    "arr_delay",
-    "schedule_relationship_trip",
-    "schedule_relationship_stop",
-)
+RtCoverageField = Literal["stop_id", "arr_delay", "schedule_relationship_trip", "schedule_relationship_stop"]
+RT_COVERAGE_FIELDS: tuple[RtCoverageField, ...] = get_args(RtCoverageField)
 
 # How long a recorded probe verdict is trusted before it must be re-run. A
 # feed's field population is a property of a vendor deployment that can
@@ -296,7 +292,7 @@ async def rt_field_coverage_gap(agency_id: int, conn) -> CoverageGap | None:
     return state.gap()
 
 
-def assess_field_coverage(cov: dict) -> dict[str, bool] | None:
+def assess_field_coverage(cov: dict) -> dict[RtCoverageField, bool] | None:
     """Turn a ``field_coverage`` result into a per-field confirm/refute
     verdict keyed by ``RT_COVERAGE_FIELDS`` name.
 
@@ -332,7 +328,7 @@ async def record_field_coverage_probe(
     cov: dict,
     source_feed: str,
     ttl_days: int | None = DEFAULT_PROBE_TTL_DAYS,
-) -> dict[str, bool]:
+) -> dict[RtCoverageField, bool]:
     """Persist one probe run's per-field verdicts for *agency_id*, and
     return them.
 

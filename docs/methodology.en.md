@@ -76,6 +76,7 @@ Each month is graded A to F from these figures by four criteria, each passing or
 | Field coverage | the stop ID and both statuses on at least 99% of reports, and the arrival delay on some but fewer than half of them | The rule the Service uses to confirm that a feed carries the fields its figures need. A feed sending the arrival delay on every report is not sending the sparse arrival estimate the Service reads it as, so it does not pass |
 
 - A month meeting all four criteria is an A. Each criterion missed costs one letter: B, C, D, and F for all four.
+- Each criterion a month misses is shown with the figure it was judged on, and for field coverage, each field that fell short.
 - A month missing a figure that a criterion needs is not graded rather than given a guessed grade, and the reason is shown.
 - Stop events reported and the message-age median and percentile are shown beside the grade, but do not affect it.
 - The thresholds start from those of Cal-ITP, the California programme that publishes a monthly GTFS quality report per operator. The grade is recomputed from the stored figures, under the current thresholds, each time it is shown. Changing a threshold changes no aggregate, so it is not a new method version. A change is announced by amending this section.

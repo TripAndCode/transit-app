@@ -277,28 +277,23 @@ and the implausible share over its own period, by the same rules (see "Method ve
 above).
 
 **Grade.** The admin drawer grades each month A to F from its stored figures alone
-(`pipeline/feed_quality_grade.py`). Four criteria each pass or fail on the figure as
-stored. Every threshold is inclusive except field coverage's `arr_delay` band, which
-excludes both its ends: 0% and 50% fail.
-
-| Criterion | Passes when | Why this threshold |
-|---|---|---|
-| Trips reported | at least 95% of the trips planned | Cal-ITP's realtime completeness bar: no more than 5% missing. More than 100% passes, since a feed naming trips the plan doesn't is not a shortfall. The comparability gate's 70% is a different question: whether delays can be ranked at all. |
-| Polls over 65 s | at most 5% of the polls measured | Cal-ITP's freshness threshold, the validator's W008, with Cal-ITP's 5% as the tolerance. |
-| Implausible readings | not over 5% as printed to a tenth | The comparability gate's own `clamp_high` check (`MAX_CLAMP_PCT`). |
-| Field coverage | `stop_id` and both `schedule_relationship` fields on at least 99% of stop_time_updates, and `arr_delay` on more than 0% but under 50% | The RT field-coverage probe's confirmation rule (`assess_field_coverage`): the fields the app's readers need, carried as they read them. `arr_delay` on every update fails, because the app reads it as the sparse arrival estimate. |
-
-A month passing all four is an A. Each criterion failed costs one letter: B, C, D, and F
-for all four. A month without the figure a criterion needs has no grade rather than a
-guessed one. It names each such criterion with the figure's reason, and still names the
-criteria its other figures fail. A month built before the share of polls over 65 s was
-stored reads `not_recorded` for it until analyze rebuilds it. Stop-event completeness and
-the message-age quantiles are shown beside the grade but decide none of it. Stop events
-count only the days whose stop plan was saved, and a quantile hides a frozen run shorter
-than its tail. The grade is recomputed under the current thresholds whenever it is read,
-so it is not part of the method version. It is shown to admins only. Publishing it to
-operators waits on the methodology's advance notice and right of reply
-(`docs/methodology.md`, "Publication process").
+(`pipeline/feed_quality_grade.py`). The criteria, their thresholds and why each was
+chosen are stated once, in the methodology's "Feed quality" section
+([en](docs/methodology.en.md#feed-quality), [ja](docs/methodology.md#フィードの品質)).
+In code terms: implausible readings reuse
+the comparability gate's `clamp_is_high`, and field coverage reuses the RT
+field-coverage probe's `assess_field_coverage`, so the grade, the gate and the probe
+cannot disagree. The drawer names each criterion a month fails with the figure it was
+judged on, and for field coverage each field that fell short (`grade_failing_fields`).
+A month without the figure a criterion needs has no grade and names each such
+criterion with the figure's reason. A month built before the share of polls over 65 s
+was stored reads `not_recorded` for it until analyze rebuilds it. Stop-event
+completeness and the message-age quantiles are shown beside the grade but decide none of
+it: stop events count only the days whose stop plan was saved, and a quantile hides a
+frozen run shorter than its tail. The grade is recomputed under the current thresholds
+whenever it is read, so it is not part of the method version. It is shown to admins
+only; publishing it to operators waits on the methodology's advance notice and right of
+reply (`docs/methodology.md`, "Publication process").
 
 ## Service delivered per route
 
