@@ -17,6 +17,12 @@ describe("stop evidence", () => {
       { sequence: 2, name: "Park", minutes: -1, samples: 8 },
     ]);
   });
+  it("names a stop the feed leaves unnamed neutrally, never by its id", () => {
+    const rows = [[3, null, 1.5, 4]];
+    expect(stopEvidence({ ...message, result: { ...message.result!, rows } })).toEqual([
+      { sequence: 3, name: "Unnamed stop", minutes: 1.5, samples: 4 },
+    ]);
+  });
   it("does not interpret unrelated tables as stop observations", () => {
     expect(stopEvidence({ ...message, tool: "top_n" })).toBeNull();
     expect(stopEvidence({ ...message, result: { ...message.result!, columns: ["stop_name"] } })).toBeNull();

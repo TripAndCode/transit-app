@@ -145,7 +145,7 @@ describe("ScopeSentence", () => {
 
   it("keeps focus in the section when a condition clears itself", async () => {
     mount("?from=2026-09-01&to=2026-09-30&stop=S1");
-    await userEvent.click(screen.getByRole("button", { name: "stop S1" }));
+    await userEvent.click(screen.getByRole("button", { name: "selected stop" }));
     await userEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(params().has("stop")).toBe(false);
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -168,7 +168,7 @@ describe("ScopeSentence", () => {
   it("lists the optional conditions in the order the words give them", () => {
     mount("?from=2026-09-01&to=2026-09-30&service=%E5%B9%B3%E6%97%A5&stop=S1&dir=0&early=60");
     expect(region().textContent).toContain(
-      "all hours, Weekday timetable, stop S1, direction 0, early by up to 1 min, counting on-time",
+      "all hours, Weekday timetable, selected stop, Direction A, early by up to 1 min, counting on-time",
     );
   });
 

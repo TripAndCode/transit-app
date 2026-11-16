@@ -58,7 +58,9 @@ def assemble_patterns(observations: list, scheduled: list) -> list:
     rows = []
     for key, pattern in sorted(patterns.items()):
         stops = pattern.stops
-        label = f"{stops[0]['stop_name']} → {stops[-1]['stop_name']} ({len(stops)})"
+        # An unnamed stop stays null in its row; the label dashes it rather than show an id.
+        first, last = (stops[0]["stop_name"] or "—"), (stops[-1]["stop_name"] or "—")
+        label = f"{first} → {last} ({len(stops)})"
         for stop in stops:
             seq = stop["stop_sequence"]
             count = pattern.counts[seq]
@@ -86,7 +88,7 @@ async def query_stop_patterns(agency_id: int, ctx: RangeCtx, conn, ch=None, *, r
         raise PatternWindowTooLarge
     scheduled = await conn.fetch(
         "SELECT st.trip_id, t.route_id, st.stop_sequence, st.stop_id, "
-        "COALESCE(s.stop_name, st.stop_id) AS stop_name "
+        "s.stop_name AS stop_name "
         "FROM static_stop_times st JOIN static_trips t "
         "ON t.agency_id = st.agency_id AND t.trip_id = st.trip_id "
         "LEFT JOIN static_stops s ON s.agency_id = st.agency_id AND s.stop_id = st.stop_id "

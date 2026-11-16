@@ -49,8 +49,6 @@ import type {
   ServiceHoursResponse,
   StopBounds,
   StopBoundsResponse,
-  Suggestion,
-  SuggestionEnvelope,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -362,25 +360,6 @@ export function useWeatherDelay(
     queryFn: ({ signal }) =>
       apiGet<WeatherDelayResponse>(`/api/${agencyId}/weather_delay?${scopeToQueryString(ctx)}`, { signal }),
     enabled: agencyId != null && enabled,
-  });
-}
-
-export function useSuggestion(
-  agencyId: number | null,
-  exclude: string[],
-): UseQueryResult<Suggestion | null> {
-  const excludeKey = exclude.join(",");
-  return useLocalizedQuery({
-    queryKey: ["reports-suggest", agencyId, excludeKey],
-    queryFn: ({ signal }) => {
-      const qs = exclude.map((e) => `exclude=${encodeURIComponent(e)}`).join("&");
-      return apiGet<SuggestionEnvelope>(`/api/${agencyId}/reports/suggest${qs ? `?${qs}` : ""}`, {
-        signal,
-      }).then((r) => r.suggestion);
-    },
-    enabled: agencyId != null,
-    staleTime: 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
   });
 }
 

@@ -939,7 +939,6 @@
       "eyebrow": "方面・便を選択",
       "trip_count": "{{count}}便",
       "direction_label": "方面",
-      "direction_number": "方向 {{direction}}",
       "unknown_direction": "方面不明",
       "departure": "{{time}}発",
       "reported": "最新報告 {{when}}",
@@ -957,7 +956,9 @@
       "chart_label": "停留所ごとの遅延推移",
       "growth": "{{stop}}で {{delay}}拡大",
       "recovery": "{{stop}}で {{delay}}分回復",
-      "none_reporting": "走行中の便が報告し始めると、ここに表示されます。"
+      "none_reporting": "走行中の便が報告し始めると、ここに表示されます。",
+      "direction_unnamed": "方面{{letter}}",
+      "direction_unnamed_admin": "方面{{letter}}（direction_id {{id}}）"
     },
     "queue": {
       "location_unavailable": "停留所位置を解決できません"
@@ -1080,7 +1081,8 @@
         "llm": "生成AIによる要約（既存の取得結果のみを参照）"
       },
       "row_count_one": "{{count}}行",
-      "row_count_other": "{{count}}行"
+      "row_count_other": "{{count}}行",
+      "stop_unnamed": "名称未設定の停留所"
     },
     "workspace": {
       "investigations": "これまでの調査",
@@ -1506,7 +1508,8 @@
       "feed_unsupported": "この事業者のフィードからは到着時刻などの記録を取り込めないため、表示できません。",
       "probe_refuted": "最終確認（{{date}}）で、この事業者のフィードがこの分析に必要な項目を送っていないと分かったため、表示していません。",
       "probe_expired": "到着時刻などのデータの確認期限が切れているため、再確認が済むまで表示していません（最終確認：{{date}}）。",
-      "never_probed": "この事業者のフィードが到着時刻などを送っているかをまだ確認していないため、表示していません。"
+      "never_probed": "この事業者のフィードが到着時刻などを送っているかをまだ確認していないため、表示していません。",
+      "reader_unavailable": "この事業者のフィードでは、現在この分析を表示できません。"
     },
     "status": {
       "unsupported": "非対応",
@@ -1514,7 +1517,8 @@
       "unchecked": "未確認",
       "not_set": "未設定",
       "not_applicable": "対象外",
-      "no_observations": "観測なし"
+      "no_observations": "観測なし",
+      "unavailable": "表示できません"
     },
     "why": {
       "not_shown_title": "表示できない分析"
@@ -1704,14 +1708,6 @@
     "route_table": {
       "panels_not_frozen": "このスナップショットに含まれないもの：路線一覧の横に表示するパネル（事業者の運行基準、定時性の並べ替え時の運行間隔の品質）。このスナップショットは、これらを保存する前に作成されたものです。"
     }
-  },
-  "insight_panel": {
-    "title": "注目ポイント",
-    "no_signal": "今は特に注目すべき動きはありません。",
-    "load_error": "読み込みに失敗しました。",
-    "view_button": "路線の詳細を開く",
-    "collapse_aria": "注目ポイントパネルを閉じる",
-    "expand_aria": "注目ポイントパネルを開く"
   },
   "errors": {
     "rate_limited": "アクセスが集中しています。少し待って再試行してください。",
@@ -2160,7 +2156,7 @@
         "askHistoryEnabled": "Ask: 会話履歴",
         "askIntentCacheEnabled": "Ask: インテントキャッシュ",
         "askQueryLogEnabled": "Ask: クエリログ",
-        "weatherIngestEnabled": "気象: 観測データ取り込み",
+        "weatherIngestEnabled": "気象: 観測データ取り込みと、要因画面の降雨パネル",
         "openapiDocsEnabled": "API: OpenAPI ドキュメント",
         "perfDebugEnabled": "API: パフォーマンスデバッグ面",
         "loginRequired": "アクセス: ログイン必須",
@@ -2437,8 +2433,6 @@
     "hours": "{{from}}時〜{{to}}時台",
     "hour_single": "{{h}}時台",
     "service": "{{value}}ダイヤ",
-    "stop": "停留所 {{id}}",
-    "dir": "方向 {{dir}}",
     "duration_min": "{{n}}分",
     "duration_sec": "{{n}}秒",
     "tolerance_min": "{{n}}分以内",
@@ -2495,7 +2489,10 @@
       "tolerance": "定時の幅"
     },
     "unapplied_note": "この画面では使いません：{{list}}",
-    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る"
+    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
+    "stop_unnamed": "選択した停留所",
+    "dir_unnamed": "方面{{letter}}",
+    "id_tag": "（{{id}}）"
   },
   "print": {
     "generated_at": "作成日時 {{time}}",

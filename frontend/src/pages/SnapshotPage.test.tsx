@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import i18n from "../i18n";
@@ -236,6 +236,25 @@ describe("SnapshotPage", () => {
     const unused = within(scope).getByText("Morning (05–09)");
     expect(unused.closest("s")).not.toBeNull();
     expect(unused.closest("s")).toHaveAttribute("title", "This screen doesn't use this condition");
+  });
+
+  it("names a stored stop condition from the static stops, with no id and without asking a report endpoint", async () => {
+    const params = { from: "2026-10-01", to: "2026-10-31", dow: "all", time_band: "all", service: "all", routes: [], hour: null, stop: "S9", dir: 1, late: null, early: null };
+    const report = routeTable("Route table");
+    const stored = snapshot({ params, payloads: { report: { en: report }, routes: ROUTES, credit: {} } });
+    const fetchMock = vi.fn((url: RequestInfo | URL) => {
+      const body = String(url).includes("/stops") ? { rows: [{ stop_id: "S9", stop_name: "Harbour Gate" }] } : stored;
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    const scope = await screen.findByTestId("snapshot-scope");
+    await waitFor(() => expect(scope).toHaveTextContent("Harbour Gate"));
+    expect(scope).toHaveTextContent("Direction B");
+    expect(scope).not.toHaveTextContent("S9");
+    expect(scope).not.toHaveTextContent("direction_id");
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.filter((u) => !u.includes("/stops"))).toEqual([expect.stringMatching(new RegExp(`/api/snapshots/${ID}$`))]);
   });
 
   it("states the stored table's floor and left-out routes without offering to change them", async () => {

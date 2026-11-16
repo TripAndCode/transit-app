@@ -10,6 +10,7 @@ import * as client from "../api/client";
 import { ApiError } from "../api/client";
 import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
+import * as config from "../api/config";
 import * as snapshots from "../api/snapshots";
 import { AnalysisTab } from "./AnalysisTab";
 import { PrintFootProvider, PrintFrame } from "../components/PrintFrame";
@@ -26,6 +27,10 @@ beforeEach(() => {
   const loading = { data: undefined, isLoading: true, error: null, refetch: vi.fn() } as never;
   vi.spyOn(hooks, "useWeatherDelay").mockReturnValue(loading);
   vi.spyOn(hooks, "useHeadwayQuality").mockReturnValue(loading);
+  // Weather is flag-gated and the probe wording is admin-only; the tests below
+  // read the full-featured screen unless one says otherwise.
+  vi.spyOn(config, "useFeatureOn").mockReturnValue(true);
+  vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(true);
 });
 
 const DEFINITION: DefinitionMeta = {
@@ -58,7 +63,6 @@ function mockSupportHooks() {
   // The agency catalogue answered without a tier for this agency, unless a test set one.
   if (!vi.isMockFunction(hooks.useAgencies)) vi.spyOn(hooks, "useAgencies").mockReturnValue({ data: [], isPending: false } as never);
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data: [], isLoading: false } as never);
-  vi.spyOn(hooks, "useSuggestion").mockReturnValue({ data: null, isLoading: false } as never);
 }
 
 function renderAnalysis(
@@ -1350,10 +1354,9 @@ describe("AnalysisTab delay record", () => {
     expect(summary.closest("details")).toContainElement(screen.getByRole("alert"));
   });
 
-  it("prints a report without the list, the insights or the staff list", () => {
+  it("prints a report without the list or the staff list", () => {
     const print = ruleBody(readFileSync(resolve(__dirname, "./analysisTab.css"), "utf8"), "@media print");
     expect(decl(ruleBody(print, ".analysis-report-list"), "display")).toBe("none !important");
-    expect(decl(ruleBody(print, ".analysis-insights"), "display")).toBe("none !important");
     expect(decl(ruleBody(print, ".cert-staff"), "display")).toBe("none");
   });
 });

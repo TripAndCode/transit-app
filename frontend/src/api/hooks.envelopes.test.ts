@@ -2,8 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { createElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useRoutes, useSuggestion } from "./hooks";
-import type { Route, RoutesResponse, SuggestionEnvelope } from "./types";
+import { useRoutes } from "./hooks";
+import type { Route, RoutesResponse } from "./types";
 
 const mockApiGet = vi.fn();
 vi.mock("./client", () => ({
@@ -46,40 +46,5 @@ describe("useRoutes (object envelope)", () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual([]);
-  });
-});
-
-describe("useSuggestion (object envelope)", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    mockApiGet.mockReset();
-  });
-
-  it("unwraps the server's { suggestion } envelope", async () => {
-    const suggestion = {
-      report_type: "on_time",
-      route_code: "BAD",
-      reason_text: "遅れが目立ちます",
-      severity: "notable",
-      from_date: "2026-08-25",
-      to_date: "2026-08-31",
-    } as const;
-    mockApiGet.mockResolvedValue({ suggestion } satisfies SuggestionEnvelope);
-    const { result } = renderHook(() => useSuggestion(1, []), { wrapper: wrapper() });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toEqual(suggestion);
-  });
-
-  it("maps the 'no signal' envelope to null rather than an object with a null field", async () => {
-    mockApiGet.mockResolvedValue({ suggestion: null } satisfies SuggestionEnvelope);
-    const { result } = renderHook(() => useSuggestion(1, ["on_time:BAD"]), { wrapper: wrapper() });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data).toBeNull();
-    expect(mockApiGet).toHaveBeenCalledWith(
-      "/api/1/reports/suggest?exclude=on_time%3ABAD",
-      expect.anything(),
-    );
   });
 });

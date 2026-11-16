@@ -15,7 +15,6 @@ import {
   useReport,
   useRouteShape,
   useServiceHours,
-  useSuggestion,
   useWeatherDelay,
 } from "./hooks";
 import type { Scope } from "./scope";
@@ -251,7 +250,6 @@ describe("hooks for endpoints that write text in the request's language", () => 
     ["useReport", () => useReport(1, "trend", baseCtx()), report()],
     ["usePerformanceStandards", () => usePerformanceStandards(1, baseCtx(), true), {}],
     ["useWeatherDelay", () => useWeatherDelay(1, baseCtx(), true), {}],
-    ["useSuggestion", () => useSuggestion(1, []), { suggestion: null }],
     ["useRouteShape", () => useRouteShape(1, "R1", baseCtx()), { route: "R1", geometry: null, stops: [], unobserved_stops: [] }],
   ])("%s fetches again after a language switch", async (_name, useHook, response) => {
     mockApiGet.mockResolvedValue(response);

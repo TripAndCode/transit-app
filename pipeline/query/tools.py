@@ -330,26 +330,6 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("mt_metrics_summary", "en"): "available metrics",
     ("mt_capabilities_summary", "ja"): "答えられる質問の例（カテゴリ別）",
     ("mt_capabilities_summary", "en"): "example questions I can answer (by category)",
-    # The Insight Panel's reasons. The card names the route with the app's own
-    # label above the text, so the text names only the day or days the rule
-    # judged ({day}/{span}, from suggest_day/suggest_span): the agency's last
-    # analyzed day, which lags the wall clock, so never "today".
-    ("suggest_reason_anomaly", "ja"): (
-        "{day}の平均遅延が、その前の7日間と比べて大幅に悪化しています（平均{avg_min}分）。"
-    ),
-    ("suggest_reason_anomaly", "en"): (
-        "Average delay on {day} was much worse than over the 7 days before (avg {avg_min} min)."
-    ),
-    ("suggest_reason_trend_worsened", "ja"): "{span}の途中から遅延が悪化しています（{delta_min}分の変化）。",
-    ("suggest_reason_trend_worsened", "en"): "Delays worsened partway through {span} ({delta_min} min change).",
-    ("suggest_reason_trend_improved", "ja"): "{span}の途中から遅延が改善しています（{delta_min}分の変化）。",
-    ("suggest_reason_trend_improved", "en"): "Delays improved partway through {span} ({delta_min} min change).",
-    ("suggest_reason_on_time_fallback", "ja"): "{span}で最も定時率が低い路線です（定時率{pct}%）。",
-    ("suggest_reason_on_time_fallback", "en"): "The lowest on-time rate of any route over {span} ({pct}% on time).",
-    ("suggest_day", "ja"): "{month}/{day}（{dow}）",
-    ("suggest_day", "en"): "{dow} {month}/{day}",
-    ("suggest_span", "ja"): "{first}〜{last}",
-    ("suggest_span", "en"): "{first} – {last}",
     # Shown in place of an LLM-authored free-text answer whose numeric claims
     # don't trace back to the grounding data it was given (see
     # pipeline.query.hallucination_guard.verify_numeric_claims).

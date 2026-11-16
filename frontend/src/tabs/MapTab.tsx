@@ -14,6 +14,7 @@ import * as maplibregl from "maplibre-gl";
 import type { Map as MLMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map/operationsMap.css";
+import { useIsAdmin } from "../api/useIsAdmin";
 import { useLiveTripProgress, useLiveTrips, useRouteShape, useRouteStopProfile, useServiceHours, useStopBounds, useTodayRouteSummary } from "../api/hooks";
 import { useScope } from "../api/scope";
 import { scopeWindow, windowSide } from "../api/onTimeDefault";
@@ -35,7 +36,8 @@ import { EmptyState } from "../components/EmptyState";
 import { MapReference } from "./map/MapReference";
 import { StatTile } from "../components/StatTile";
 import { signedMin } from "./live/signedMin";
-import { OperationsTripPanel, type ActiveRouteOption, type DirectionOption } from "./map/OperationsTripPanel";
+import { directionKey, directionOptions } from "./map/directionOptions";
+import { OperationsTripPanel, type ActiveRouteOption } from "./map/OperationsTripPanel";
 import { useBasemapDim } from "./map/useBasemapDim";
 import { QueueResizer } from "./map/QueueResizer";
 import { readQueueWidth, storeQueueWidth } from "./map/queueWidth";
@@ -71,29 +73,6 @@ const STALENESS_SAFETY_TICK_MS = 60_000;
 
 type Freshness = "normal" | "delayed" | "stale" | "unknown";
 type RouteSelection = { agencyId: number | null; route: string | "all" | null };
-
-function directionKey(trip: LiveTrip): string {
-  if (trip.direction_id != null) return `direction:${trip.direction_id}`;
-  if (trip.headsign) return `headsign:${trip.headsign}`;
-  return "unknown";
-}
-
-function directionOptions(trips: LiveTrip[], t: ReturnType<typeof useTranslation>["t"]): DirectionOption[] {
-  const grouped = new Map<string, LiveTrip[]>();
-  for (const trip of trips) {
-    const key = directionKey(trip);
-    grouped.set(key, [...(grouped.get(key) ?? []), trip]);
-  }
-  return [...grouped].map(([key, rows]) => ({
-    key,
-    label: rows.find((trip) => trip.headsign)?.headsign ?? (
-      rows[0]?.direction_id != null
-        ? t("operations.trip_panel.direction_number", { direction: rows[0].direction_id })
-        : t("operations.trip_panel.unknown_direction")
-    ),
-    trips: rows.sort((a, b) => (a.scheduled_time ?? "").localeCompare(b.scheduled_time ?? "")),
-  }));
-}
 
 function freshnessFor(timestamp: string | null | undefined, now: number): Freshness {
   if (!timestamp) return "unknown";
@@ -171,6 +150,7 @@ async function refreshFeed(
 
 export function MapTab() {
   const id = useAgencyId();
+  const isAdmin = useIsAdmin();
   const { t, i18n } = useTranslation();
   const { t: td } = useTranslation("design");
   const [ctx] = useScope();
@@ -321,14 +301,14 @@ export function MapTab() {
   const routeTrips = effectiveRoute
     ? liveRows.filter((trip) => trip.route_code === effectiveRoute)
     : [];
-  const directions = directionOptions(routeTrips, t);
+  const directions = directionOptions(routeTrips, t, isAdmin);
   const activeRouteOptions: ActiveRouteOption[] = [...activeRouteCodes].map((routeCode) => {
     const trips = liveRows.filter((trip) => trip.route_code === routeCode);
     return {
       code: routeCode,
       label: routeNames.format(routeCode),
       trips: trips.length,
-      directions: directionOptions(trips, t).length,
+      directions: directionOptions(trips, t, isAdmin).length,
       maxDelay: trips.reduce((maximum, trip) => Math.max(maximum, trip.dep_delay), 0),
     };
   }).sort((a, b) => b.maxDelay - a.maxDelay);

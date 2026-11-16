@@ -3,6 +3,7 @@ import { screen } from "@testing-library/react";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { HeadwayQualityPanel } from "./HeadwayQualityPanel";
 import * as hooks from "../api/hooks";
+import * as isAdmin from "../api/useIsAdmin";
 import type { HeadwayQualityResponse } from "../api/types";
 
 const CTX = { from: "2026-04-01", to: "2026-04-02", dow: "all", time_band: "all", service: "all", routes: [] } as const;
@@ -127,8 +128,20 @@ describe("HeadwayQualityPanel", () => {
     expect(screen.getByText(/no high-frequency route/i)).toBeInTheDocument();
   });
 
+  it("tells a reader a lapsed check only as an unavailable analysis, with no probe state or date", () => {
+    mockRoutes();
+    vi.spyOn(isAdmin, "useIsAdmin").mockReturnValue(false);
+    mockHeadwayQuality({
+      data: { rows: [], ctx: CTX, unavailable_reason: "probe_expired", last_checked: "2026-09-11" },
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} />);
+    expect(screen.getByText("This can't be shown for this agency's feed right now.")).toBeInTheDocument();
+    expect(screen.queryByText(/re-checked|Sep 11, 2026/)).not.toBeInTheDocument();
+  });
+
   it("says the feed check has lapsed, with its day, rather than blaming the data", () => {
     mockRoutes();
+    vi.spyOn(isAdmin, "useIsAdmin").mockReturnValue(true);
     mockHeadwayQuality({
       data: { rows: [], ctx: CTX, unavailable_reason: "probe_expired", last_checked: "2026-09-11" },
     });

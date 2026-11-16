@@ -24,7 +24,7 @@ import {
   useFollowup,
   useFollowupEnabled,
 } from "../api/hooks";
-import { useConfig } from "../api/config";
+import { useFeatureOn } from "../api/config";
 import { DataEndContext, isoDaysBefore, useScope } from "../api/scope";
 import { useRouteNames } from "../api/useRouteNames";
 import { useAgencyId } from "../api/useAgencyId";
@@ -116,7 +116,7 @@ export function AskTab() {
   const updateConv = useUpdateConversation(id ?? 0);
   const followup = useFollowup(id ?? 0);
   const followupFlag = useFollowupEnabled(id);
-  const llmEnabled = useConfig().data?.llm_enabled === true;
+  const llmEnabled = useFeatureOn("llm_enabled");
   // All three must hold: the deployment flag, a usable LLM provider, and this
   // caller's own approval. Without the last, an unapproved caller (the default
   // for every new account) is offered chips whose every submission 403s.

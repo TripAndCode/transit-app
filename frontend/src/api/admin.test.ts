@@ -8,10 +8,12 @@ import {
   useAckBoardAlert,
   useAgencyDiagnostics,
   useBulkPatchUsers,
+  useClearFeatureFlag,
   useCreateAgencyAdmin,
   useDeleteAgency,
   useDeleteUser,
   usePatchAgency,
+  usePatchFeatureFlag,
   usePatchUser,
   useRefreshAgencyStatic,
   useRestoreAgency,
@@ -342,5 +344,33 @@ describe("useAgencyDiagnostics", () => {
 
     rerender({ id: 2, finished: "2026-10-13T05:04:28Z" });
     expect(result.current.data).toBeUndefined();
+  });
+});
+
+describe("feature flag mutations", () => {
+  afterEach(() => vi.clearAllMocks());
+
+  function client() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const wrapper = ({ children }: { children: React.ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
+    return { invalidate, wrapper };
+  }
+
+  it("re-reads the public config after a flag is patched, since the SPA gates screens on it", async () => {
+    mockApiPatch.mockResolvedValue({});
+    const { invalidate, wrapper } = client();
+    const { result } = renderHook(() => usePatchFeatureFlag(), { wrapper });
+    await act(async () => result.current.mutate({ key: "weather_ingest_enabled", value: true, reason: "r" }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["config"] }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["adminFlags"] });
+  });
+
+  it("re-reads the public config after an override is cleared", async () => {
+    mockApiDelete.mockResolvedValue({});
+    const { invalidate, wrapper } = client();
+    const { result } = renderHook(() => useClearFeatureFlag(), { wrapper });
+    await act(async () => result.current.mutate({ key: "weather_ingest_enabled" }));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["config"] }));
   });
 });

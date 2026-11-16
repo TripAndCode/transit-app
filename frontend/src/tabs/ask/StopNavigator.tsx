@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { StopEvidence } from "./stopEvidence";
+import { useIsAdmin } from "../../api/useIsAdmin";
 import { searchKey } from "../../utils/searchText";
 
 export function StopNavigator({ points, start, size, low, high, onStart, onSize, onPick }: {
@@ -8,10 +9,11 @@ export function StopNavigator({ points, start, size, low, high, onStart, onSize,
   onStart: (start: number) => void; onSize: (size: number) => void; onPick: (index: number) => void;
 }) {
   const { t } = useTranslation();
+  const isAdmin = useIsAdmin();
   const [search, setSearch] = useState("");
   const query = searchKey(search);
   const matches = points.map((point, index) => ({ point, index })).filter(({ point }) =>
-    searchKey(`${point.name} ${point.stopId ?? ""} ${point.sequence}`).includes(query));
+    searchKey(`${point.name} ${isAdmin ? (point.stopId ?? "") : ""} ${point.sequence}`).includes(query));
   const total = points.length;
   const end = Math.min(total, start + size);
   return <div className="stop-navigator">
