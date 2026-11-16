@@ -338,6 +338,52 @@ async def test_soft_delete_anonymizes(admin_client, aconn):
 
 
 @pytest.mark.asyncio
+async def test_soft_delete_removes_the_users_notebook_investigations(admin_client, aconn, aagency_id):
+    """A deleted admin's Ask conversations (and their messages) must not
+    survive the soft delete; another user's conversation is untouched."""
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    _, uid_target, _ = await _seed(aconn, email="investigator@x")
+    _, uid_other, _ = await _seed(aconn, email="other-investigator@x")
+    target_conv = await aconn.fetchval(
+        "INSERT INTO ask_conversations (user_id, agency_id, title) VALUES ($1, $2, 'target') RETURNING conversation_id",
+        uid_target,
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO ask_conversation_messages (conversation_id, role, rendered_summary) VALUES ($1, 'user', 'hi')",
+        target_conv,
+    )
+    other_conv = await aconn.fetchval(
+        "INSERT INTO ask_conversations (user_id, agency_id, title) VALUES ($1, $2, 'other') RETURNING conversation_id",
+        uid_other,
+        aagency_id,
+    )
+    await aconn.execute(
+        "INSERT INTO ask_conversation_messages (conversation_id, role, rendered_summary) VALUES ($1, 'user', 'hi')",
+        other_conv,
+    )
+    r = await admin_client.delete(
+        f"/api/admin/users/{uid_target}",
+        cookies={"sid": sid_admin},
+        headers={"Origin": "http://test"},
+    )
+    assert r.status_code == 204
+    assert await aconn.fetchval("SELECT count(*) FROM ask_conversations WHERE conversation_id=$1", target_conv) == 0
+    assert (
+        await aconn.fetchval("SELECT count(*) FROM ask_conversation_messages WHERE conversation_id=$1", target_conv)
+        == 0
+    )
+    assert await aconn.fetchval("SELECT count(*) FROM ask_conversations WHERE conversation_id=$1", other_conv) == 1
+    assert (
+        await aconn.fetchval("SELECT count(*) FROM ask_conversation_messages WHERE conversation_id=$1", other_conv) == 1
+    )
+    after = await aconn.fetchval(
+        "SELECT after::text FROM admin_audit WHERE action = 'user.deleted' AND target_id = $1", str(uid_target)
+    )
+    assert json.loads(after)["ask_conversations_deleted"] == 1
+
+
+@pytest.mark.asyncio
 async def test_user_detail(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid_target, _ = await _seed(aconn, email="detail@x")
