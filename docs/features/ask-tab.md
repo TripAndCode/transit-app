@@ -279,8 +279,8 @@ one structural reason:
 The regex rules answer many
 questions with no LLM at all, and those stay open to every caller, signed in or not. So the flag
 travels into the orchestrator and short-circuits only the LLM call,
-returning `error_kind="not_approved"` before any provider or BYOK key is
-touched. Anonymous callers have no user row, so the router passes
+returning `error_kind="not_approved"` before any provider is touched.
+Anonymous callers have no user row, so the router passes
 `llm_approved=False` for them — they get the rules and nothing more.
 
 Admins toggle the flag from `PATCH /api/admin/users/{uid}`, which writes an

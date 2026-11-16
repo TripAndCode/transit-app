@@ -13,11 +13,6 @@ paths = [
     # Placeholder values only (gsk_..., empty strings). gitleaks would
     # otherwise flag the variable names + placeholder shape.
     '''\.env\.example$''',
-    # Test fixtures for BYOK / key-storage flows intentionally mention
-    # secret-shaped strings in assertions and docstrings.
-    '''tests/api/test_api_me_llm_key\.py$''',
-    '''tests/db/test_user_llm_keys_db\.py$''',
-    '''tests/unit/test_user_llm_keys\.py$''',
     # Positive/negative control fixtures for the gitleaks hook itself
     # (tests/unit/test_gitleaks_fixtures.py). Both intentionally contain a
     # real-shaped example credential (AWS's own published, non-functional

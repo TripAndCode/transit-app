@@ -229,8 +229,7 @@ Endpoints:
   `DELETE /api/admin/api-keys/{key_id}` — API keys scoped to one user.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
-and one at a time), `oauth_identities`, `user_llm_keys` (read-only,
-for the drawer's provider indicator), `api_keys`. Every mutation records an
+and one at a time), `oauth_identities`, `api_keys`. Every mutation records an
 `admin_audit` entry.
 
 Sign-in is for administrators only, and there is no invite. An admin is an

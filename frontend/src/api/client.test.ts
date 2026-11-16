@@ -270,12 +270,12 @@ describe("apiUrl", () => {
 
   it("puts a path on the API's origin when VITE_API_BASE_URL names one", () => {
     vi.stubEnv("VITE_API_BASE_URL", "https://api.example.test");
-    expect(apiUrl("/api/me/export")).toBe("https://api.example.test/api/me/export");
+    expect(apiUrl("/api/me/sessions")).toBe("https://api.example.test/api/me/sessions");
   });
 
   it("leaves a path on the page's own origin when the API shares it", () => {
     vi.stubEnv("VITE_API_BASE_URL", "");
-    expect(apiUrl("/api/me/export")).toBe("/api/me/export");
+    expect(apiUrl("/api/me/sessions")).toBe("/api/me/sessions");
   });
 
   it("is where every request goes", async () => {

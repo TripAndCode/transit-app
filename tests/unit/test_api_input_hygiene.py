@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from api.routers.admin import ApiKeyCreate
 from api.routers.auth import ProviderRejected, _fetch_userinfo
 from api.routers.conversations import _MAX_FILTER_CTX_BYTES, CreateConversation, UpdateConversation
+from tests.fixtures.routes import api_routes
 
 
 # ── ApiKeyCreate ─────────────────────────────────────────────────────────────
@@ -43,11 +44,14 @@ def test_api_key_create_rejects_loose_input(payload):
 
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
-def test_cors_allows_put_for_the_llm_key_route():
+def test_cors_allows_every_method_a_mounted_route_uses():
     import api.main
 
     cors = next(m for m in api.main.app.user_middleware if m.cls is CORSMiddleware)
-    assert set(cors.kwargs["allow_methods"]) >= {"GET", "POST", "PUT", "DELETE", "PATCH"}
+    used_methods: set[str] = set()
+    for route in api_routes(api.main.app.routes):
+        used_methods |= route.methods - {"HEAD", "OPTIONS"}
+    assert used_methods <= set(cors.kwargs["allow_methods"])
 
 
 # ── conversations filter_ctx ─────────────────────────────────────────────────
