@@ -43,7 +43,7 @@ function Swatch({ opacity }: { opacity: number }) {
   );
 }
 
-/** One day's three counts as a stacked bar, scaled to the window's busiest
+/** One day's two counts as a stacked bar, scaled to the window's busiest
  *  day, with the day's total beside it. */
 function DayBar({ day, maxTotal }: { day: AdminUsageDay; maxTotal: number }) {
   const total = day.signed_out + day.signed_in;

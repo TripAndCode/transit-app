@@ -31,7 +31,7 @@ type AdminUserDetail = {
 };
 
 /** Admin user drawer: identity, role/LLM-approval status, sessions,
- * API keys, login history, and a danger zone -- rendered as a right-hand
+ * login history, and a danger zone -- rendered as a right-hand
  * panel over `AdminUsersPage` (mounted via the nested `users/:uid` route;
  * see main.tsx). Escape and the back link both navigate to `/admin/users`,
  * which unmounts this route and closes the drawer. There is no overlay to

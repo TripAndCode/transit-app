@@ -233,7 +233,6 @@ function anySignal(signals: AbortSignal[]): AbortSignal {
 }
 
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
-  // One timeout for the request, retry included.
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const signal = init.signal ? anySignal([init.signal, timeout]) : timeout;
   return sendOnce(path, init, signal);

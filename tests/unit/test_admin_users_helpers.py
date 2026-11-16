@@ -1,10 +1,10 @@
-"""Pure-logic helpers behind the admin user drawer (sessions/api-keys):
+"""Pure-logic helpers behind the admin user drawer's sessions section:
 deriving a display-safe session prefix, and resolving the prefix both session
 revoke routes accept to one session without ever pattern-matching a raw
 secret.
 
-API key hashing itself is ``api.security.token_hash`` (shared with session id
-hashing) and is tested in ``tests/unit/test_token_hash.py``.
+Session id hashing itself is ``api.security.token_hash`` and is tested in
+``tests/unit/test_token_hash.py``.
 """
 
 import pytest

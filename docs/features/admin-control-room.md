@@ -227,8 +227,9 @@ Endpoints:
   active sessions, identified by a display-safe hash prefix.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
-and one at a time), `oauth_identities`. Every mutation records an
-`admin_audit` entry.
+and one at a time), `oauth_identities`, `api_keys` (revoked and
+reattributed on delete; no route issues or lists them any more). Every
+mutation records an `admin_audit` entry.
 
 Sign-in is for administrators only, and there is no invite. An admin is an
 address listed in `ADMIN_EMAILS`, created or promoted at its first OAuth
