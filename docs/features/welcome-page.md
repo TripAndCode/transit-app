@@ -59,8 +59,9 @@ whether or not reduced motion is already in effect.
 
 ## Who gets sent here
 
-Nobody is sent here. The app shell renders for every visitor, signed in or
-not, and no guard in front of it waits on the session or the config: a shared
+No guard sends a visitor here; only signing out and the links above do. The
+app shell renders for every visitor, signed in or not, and no guard in front
+of it waits on the session or the config: a shared
 link opens the same view for anyone. A signed-out visitor at `/` gets the
 same landing decision as anyone (`OnboardingGate`); its agency picker says
 that no sign-in is needed and links back to this page.
