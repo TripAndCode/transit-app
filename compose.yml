@@ -4,6 +4,39 @@
 # and make the second `docker compose up` silently attach to the first's
 # containers and its data volume -- the same collision `container_name` caused,
 # one level up.
+# The `standalone` profile is a separate stack: its own Postgres and ClickHouse
+# on their own volumes, published on no host port, so a checkout whose project
+# name matches the dev stack's still never reaches the dev data.
+x-standalone-env: &standalone-env
+  DATABASE_URL: postgresql://transit:${POSTGRES_PASSWORD:-transit}@standalone-db:5432/transit
+  CLICKHOUSE_HOST: standalone-clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_USER: transit
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-transit}
+  CLICKHOUSE_DATABASE: transit
+  CLICKHOUSE_SECURE: "false"
+  POLLER_ARCHIVE_DIR: /app/archive
+
+x-standalone-app: &standalone-app
+  build: .
+  # One image for every app-image service, named per project like the rest.
+  image: ${COMPOSE_PROJECT_NAME}-standalone-app
+  profiles: [standalone]
+  restart: unless-stopped
+  # `.env` supplies everything else (keys, SSO, POLL_INTERVAL_SEC); the
+  # database settings above are this stack's own and override it.
+  env_file:
+    - path: .env
+      required: false
+  environment: *standalone-env
+  depends_on:
+    standalone-db:
+      condition: service_healthy
+    standalone-clickhouse:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+
 services:
   db:
     build:
@@ -56,11 +89,91 @@ services:
       timeout: 5s
       retries: 10
 
-# This compose file is for LOCAL DEVELOPMENT only — it brings up the
-# PostGIS+pgvector database (`make db`) and ClickHouse that `make serve` connects to.
-# Production runs on Railway (app + separate DB services built from the
-# same `db/Dockerfile`), push-to-deploy — see docs/deploy-railway.md.
+  # The `standalone` profile runs the whole app from this file: its own two
+  # databases, a one-shot schema step (`schema-up`, as railway.json runs it),
+  # the API and the in-repo poller (`gtfs_pipeline.py poll`). Without the
+  # profile none of them starts, so `docker compose up` and `make db` bring up
+  # the two dev databases only.
+  standalone-db:
+    build:
+      context: db
+    profiles: [standalone]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: transit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-transit}
+      POSTGRES_DB: transit
+    volumes:
+      - standalone_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U transit -d transit"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  standalone-clickhouse:
+    image: clickhouse/clickhouse-server:26.8
+    profiles: [standalone]
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: transit
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-transit}
+      CLICKHOUSE_DB: transit
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - standalone_chdata:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    <<: *standalone-app
+    restart: "no"
+    command: ["python", "gtfs_pipeline.py", "schema-up"]
+    depends_on:
+      standalone-db:
+        condition: service_healthy
+      standalone-clickhouse:
+        condition: service_healthy
+
+  app:
+    <<: *standalone-app
+    environment:
+      <<: *standalone-env
+      # Nothing proxies this port, so no X-Forwarded-For entry is trusted.
+      FORWARDED_HOPS: "0"
+    ports:
+      - "127.0.0.1:${STANDALONE_PORT:-8000}:8000"
+
+  poller:
+    <<: *standalone-app
+    # Exec form: the poller is PID 1 and receives SIGTERM itself. It stops
+    # once the cycle in flight has archived what arrived; a fetch still running
+    # ends by its deadline (pipeline.poller.FETCH_DEADLINE_SEC, 30 s from its
+    # start), which this grace period leaves 15 s beyond.
+    command: ["python", "gtfs_pipeline.py", "poll"]
+    stop_grace_period: 45s
+    healthcheck:
+      disable: true
+    volumes:
+      # /app/archive exists in the image, owned by the app user, so a fresh
+      # volume mounted there takes that owner.
+      - standalone_archive:/app/archive
+
+# Without the profile this compose file is for LOCAL DEVELOPMENT only — it
+# brings up the PostGIS+pgvector database (`make db`) and ClickHouse that
+# `make serve` connects to. Production runs on Railway (app + separate DB
+# services built from the same `db/Dockerfile`), push-to-deploy — see
+# docs/deploy-railway.md.
 
 volumes:
   transit_pgdata:
   transit_chdata:
+  standalone_pgdata:
+  standalone_chdata:
+  standalone_archive:

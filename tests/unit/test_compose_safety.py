@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
+
+import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -66,3 +70,78 @@ def test_env_example_has_no_bare_ipv4_literal():
         if ipv4.search(code_part):
             offending.append((lineno, line))
     assert not offending, f".env.example must not carry a real IP literal in a value: {offending}"
+
+
+_DEV_SERVICES = {"db", "clickhouse"}
+
+
+def _services(text: str) -> dict:
+    """The parsed services, `<<` merges resolved."""
+    return yaml.safe_load(text)["services"]
+
+
+def _standalone_violations(text: str) -> list[str]:
+    """How any `standalone`-profile service could reach the dev stack: a
+    database URL or ClickHouse host that is not the profile's own, the host's
+    network, a dev volume, or a dependency outside the profile."""
+    services = _services(text)
+    standalone = {name for name, svc in services.items() if "standalone" in (svc.get("profiles") or [])}
+    found = []
+    for name in sorted(standalone):
+        svc = services[name]
+        env = svc.get("environment") or {}
+        if svc.get("build") == ".":
+            if urlsplit(str(env.get("DATABASE_URL", ""))).hostname != "standalone-db":
+                found.append(f"{name}: DATABASE_URL is not on standalone-db")
+            if env.get("CLICKHOUSE_HOST") != "standalone-clickhouse":
+                found.append(f"{name}: CLICKHOUSE_HOST is not standalone-clickhouse")
+        if "network_mode" in svc:
+            found.append(f"{name}: sets network_mode")
+        for volume in svc.get("volumes") or []:
+            source = volume.split(":", 1)[0] if isinstance(volume, str) else volume.get("source", "")
+            if source.startswith("transit_"):
+                found.append(f"{name}: mounts {source}")
+        for dependency in svc.get("depends_on") or {}:
+            if dependency not in standalone:
+                found.append(f"{name}: depends on {dependency}")
+    return found
+
+
+def test_the_dev_services_keep_no_profile():
+    services = _services(_COMPOSE_TEXT)
+    for name in _DEV_SERVICES:
+        assert "profiles" not in services[name], f"{name} must stay in the default profile"
+
+
+def test_the_standalone_stack_never_reaches_the_dev_databases():
+    services = _services(_COMPOSE_TEXT)
+    assert {"app", "poller", "migrate", "standalone-db", "standalone-clickhouse"} <= {
+        name for name, svc in services.items() if "standalone" in (svc.get("profiles") or [])
+    }
+    assert _standalone_violations(_COMPOSE_TEXT) == []
+
+
+def test_the_standalone_databases_publish_no_port():
+    services = _services(_COMPOSE_TEXT)
+    for name in ("standalone-db", "standalone-clickhouse"):
+        assert "ports" not in services[name], f"{name} must not publish a host port"
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ("CLICKHOUSE_HOST: standalone-clickhouse", 'CLICKHOUSE_HOST: "clickhouse"'),
+        ("@standalone-db:5432", "@db:5432"),
+        ("@standalone-db:5432", "@host.docker.internal:5433"),
+        ("    stop_grace_period: 45s", "    stop_grace_period: 45s\n    network_mode: host"),
+        ("      - standalone_pgdata:/var/lib/postgresql/data", "      - transit_pgdata:/var/lib/postgresql/data"),
+        ("    migrate:\n      condition", "    db:\n      condition: service_healthy\n    migrate:\n      condition"),
+    ],
+    ids=["quoted-dev-clickhouse", "dev-db-url", "host-gateway-db", "host-network", "dev-volume", "dev-dependency"],
+)
+def test_each_way_to_reach_the_dev_stack_is_caught(old, new):
+    assert old in _COMPOSE_TEXT
+    assert _standalone_violations(_COMPOSE_TEXT.replace(old, new, 1))
+
+
+_COMPOSE_TEXT = (ROOT / "compose.yml").read_text()

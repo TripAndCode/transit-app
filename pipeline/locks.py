@@ -29,9 +29,11 @@ Two lock domains, distinguished by what the caller is about to write:
    reads, and take no per-agency key.
    This is analyze's own exclusion against promotion's copy landing
    mid-run, independent of whether a caller also holds domain 1. Current
-   callers hold both: the cron sweep takes domain 1 once around its whole
-   per-agency loop, and promotion/analyze each still take domain 2 per
-   agency inside it -- domain 1 alone cannot stand in for domain 2.
+   callers hold both: the cron sweep and the standalone poller's daily step
+   (pipeline.poller) each take domain 1 once around their whole per-agency
+   loop. Inside it, promotion and analyze each still take domain 2 per
+   agency, as does the poller step's archive ingest; the sweep's
+   `ingest_live` takes none. Domain 1 alone cannot stand in for domain 2.
 
 Domain 2 covers analyze() as well as promotion's copy precisely BECAUSE
 Postgres keeps single-argument and two-argument advisory locks in separate

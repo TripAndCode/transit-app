@@ -101,3 +101,4 @@ client_secret_*.json
 # above; broaden the same way if that ever changes.
 scripts/review-*-pass*/
 scripts/.review-scratch/
+/archive/

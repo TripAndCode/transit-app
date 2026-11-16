@@ -770,6 +770,22 @@ def cmd_ingest_live(args):
     logger.info(f"ingest-live: all {len(agency_ids)} agencies ingested.")
 
 
+def cmd_poll(args):
+    """Run the standalone GTFS-RT poller until SIGTERM (pipeline.poller)."""
+    import pathlib
+    import threading
+
+    from pipeline.poller import DEFAULT_INTERVAL_SEC, Poller, install_stop_handlers
+
+    interval = args.interval or float(os.environ.get("POLL_INTERVAL_SEC") or DEFAULT_INTERVAL_SEC)
+    archive_dir = pathlib.Path(args.archive_dir or os.environ.get("POLLER_ARCHIVE_DIR") or "archive")
+    if os.environ.get("OBJECT_STORE_BUCKET"):
+        logger.warning("poll: OBJECT_STORE_BUCKET is set, but the poller keeps its tarballs on %s only", archive_dir)
+    stop = threading.Event()
+    install_stop_handlers(stop)
+    Poller(archive_dir, interval_sec=interval, stop=stop).run()
+
+
 def cmd_migrate(args):
     """Apply or roll back schema migrations."""
     from db.migrate import DestructiveMigrationError, allowed_destructive_ups, migrate_down, migrate_up
@@ -786,6 +802,21 @@ def cmd_migrate(args):
         sys.exit(f"migrate {args.direction}: {refused}")
     finally:
         conn.close()
+
+
+def cmd_schema_up(args):
+    """Bring both stores' schemas up to date: `migrate up` for Postgres, then
+    the ClickHouse schema (db.clickhouse.bootstrap). What a deployment runs
+    before it starts."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import get_client
+
+    cmd_migrate(argparse.Namespace(direction="up", allow_destructive_up=args.allow_destructive_up))
+    client = get_client()
+    try:
+        apply_schema(client)
+    finally:
+        client.close()
 
 
 def cmd_prune_query_log(args):
@@ -1084,6 +1115,19 @@ def main():
     p_live = sub.add_parser("ingest_live", help="Fetch and ingest live GTFS-RT from each agency's feed_url")
     p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
 
+    p_schema = sub.add_parser("schema-up", help="migrate up, then apply the ClickHouse schema")
+    p_schema.add_argument(
+        "--allow-destructive-up",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="as for `migrate up`",
+    )
+
+    p_poll = sub.add_parser("poll", help="Poll every enabled agency's GTFS-RT feed, archive it and ingest it")
+    p_poll.add_argument("--archive-dir", default=None, help="default: $POLLER_ARCHIVE_DIR, else ./archive")
+    p_poll.add_argument("--interval", type=float, default=None, help="seconds; default: $POLL_INTERVAL_SEC, else 60")
+
     p_migrate = sub.add_parser("migrate", help="Apply or roll back schema migrations")
     p_migrate.add_argument("direction", choices=["up", "down"], nargs="?", default="up")
     p_migrate.add_argument(
@@ -1175,6 +1219,10 @@ def main():
         cmd_ingest_live(args)
     elif args.command == "refresh-static":
         cmd_refresh_static(args)
+    elif args.command == "schema-up":
+        cmd_schema_up(args)
+    elif args.command == "poll":
+        cmd_poll(args)
     elif args.command == "migrate":
         cmd_migrate(args)
     elif args.command == "prune_query_log":

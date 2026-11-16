@@ -3,12 +3,13 @@
 ``POST /internal/cron/ingest`` is the daily history path as well as a live
 fallback. Per agency it fetches the feed into ``updates_live`` (``ingest_live``),
 promotes every closed JST day from ``updates_live`` into ``updates``
-(:mod:`pipeline.promote`), then runs ``analyze``. Nothing else promotes, so a
-deployment must poke it at least once a day after JST midnight;
-``updates_live``'s TTL drops a day that is never promoted. A poke that lands
-in service hours also renews lapsing RT field-coverage verdicts
-(:mod:`pipeline.rt_coverage_reprobe`), so a deployment needs one daytime poke
-as well. Every endpoint is gated by :envvar:`CRON_SECRET` passed via the
+(:mod:`pipeline.promote`), then runs ``analyze``. A poke that lands in service
+hours also renews lapsing RT field-coverage verdicts
+(:mod:`pipeline.rt_coverage_reprobe`). A deployment that pokes this needs one
+poke a day after JST midnight, since ``updates_live``'s TTL drops a day never
+promoted, and one in the daytime. The standalone poller (:mod:`pipeline.poller`)
+does both itself, so a deployment running it needs no poke; an admin run
+promotes too. Every endpoint is gated by :envvar:`CRON_SECRET` passed via the
 ``X-Cron-Secret`` header — anything without the matching header gets 401.
 
 The actual ingest + analyze work runs as a FastAPI ``BackgroundTask`` so
@@ -21,7 +22,6 @@ import hmac
 import logging
 import os
 import pathlib
-import re
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import Any, NamedTuple
@@ -29,6 +29,12 @@ from typing import Any, NamedTuple
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
+from pipeline.collector_push import (
+    MAX_POLL_BYTES,
+    SOURCE_FILE_RE,
+    UnknownAgency,
+    ingest_pushed_poll,
+)
 from pipeline.locks import try_lock_ingest_analyze_timed
 from pipeline.ml_evaluation_ingest import ingest_evaluations, ingest_live_evaluations
 from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env, store_configured
@@ -39,12 +45,6 @@ router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema
 collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], include_in_schema=False)
 
 _log = logging.getLogger(__name__)
-_SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
-_MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
-
-
-class UnknownAgency(ValueError):
-    """A push for an agency that does not exist or is disabled."""
 
 
 class SweepOutcome(NamedTuple):
@@ -73,47 +73,20 @@ def _check_collector_secret(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid collector secret")
 
 
-def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file_name: str) -> int:
-    import psycopg2
-
-    from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest_live_payload
+def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, source_file: str) -> int:
+    from pipeline.stores import open_stores
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         raise RuntimeError("DATABASE_URL is not configured")
-    conn = None
-    ch_client = None
-    try:
-        conn = psycopg2.connect(db_url)
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            cur.execute("SET TIME ZONE 'Asia/Tokyo'")
-            cur.execute(
-                "SELECT 1 FROM agencies WHERE agency_id = %s AND deleted_at IS NULL",
-                (agency_id,),
-            )
-            if cur.fetchone() is None:
-                raise UnknownAgency(f"Unknown or deleted agency_id={agency_id}")
+    with open_stores(db_url) as stores:
         # No advisory lock: a push writes updates_live, which analyze never
         # reads (pipeline/locks.py). ingest_live_payload's check-then-insert
         # over the last 10 minutes of captured_at absorbs a sequential
         # second arrival of the same file_name within that window; two
         # pushes that overlap in flight can both insert, and analyze's
         # argMax dedup on captured_at absorbs the duplicate from there.
-        ch_client = get_client()
-        return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
-    finally:
-        # Nested try/finally: if conn.close() raises, ch_client.close() must
-        # still run -- an unguarded `conn.close(); ch_client.close()` would
-        # skip the ClickHouse close on a Postgres close error, leaking the
-        # client + its HTTP pool inside this long-lived API process.
-        try:
-            if conn is not None:
-                conn.close()
-        finally:
-            if ch_client is not None:
-                ch_client.close()
+        return ingest_pushed_poll(agency_id, raw, captured_at, source_file, stores)
 
 
 @collector_router.post("/updates/{agency_id}")
@@ -126,7 +99,7 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     """
     _check_collector_secret(request)
     source_file = request.headers.get("X-Source-File") or ""
-    if not _SOURCE_FILE_RE.fullmatch(source_file):
+    if not SOURCE_FILE_RE.fullmatch(source_file):
         raise HTTPException(status_code=400, detail="Invalid X-Source-File")
     captured_header = request.headers.get("X-Captured-At") or ""
     try:
@@ -141,26 +114,25 @@ async def collector_update(agency_id: int, request: Request) -> dict:
             declared_length = int(content_length)
         except ValueError:
             declared_length = None
-        if declared_length is not None and declared_length > _MAX_COLLECTOR_PAYLOAD:
+        if declared_length is not None and declared_length > MAX_POLL_BYTES:
             raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     chunks = bytearray()
     async for chunk in request.stream():
         chunks.extend(chunk)
-        if len(chunks) > _MAX_COLLECTOR_PAYLOAD:
+        if len(chunks) > MAX_POLL_BYTES:
             raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     raw = bytes(chunks)
     if not raw:
         raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
-    file_name = f"oracle/{source_file}"
     try:
         inserted = await asyncio.to_thread(
             _ingest_collector_payload,
             agency_id,
             raw,
             captured.astimezone(timezone.utc).isoformat(),
-            file_name,
+            source_file,
         )
     # 404 and 422 tell the collector that resending the same request cannot
     # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither
