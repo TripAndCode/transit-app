@@ -1,13 +1,12 @@
 """Counts every finished ``/api/`` request, split by whether the caller is
 attributable to a user.
 
-Placed inside ``SessionMiddleware`` and ``APIKeyMiddleware``, so
-``scope["state"]`` already carries the session user or API-key owner they
-wrote earlier in the chain. A 401 or 403 from a route's own auth dependency
-is a finished, matched request, so it is counted, as an error. A session
-user or an API key's owner is counted into ``user_activity_daily``; a
-signed-out caller is counted into ``anonymous_activity_daily``, which holds
-route templates and no identity at all.
+Placed inside ``SessionMiddleware``, so ``scope["state"]`` already carries
+the session user it wrote earlier in the chain. A 401 or 403 from a route's
+own auth dependency is a finished, matched request, so it is counted, as an
+error. A signed-in caller is counted into ``user_activity_daily``; everyone
+else is counted into ``anonymous_activity_daily``, which holds route
+templates and no identity at all.
 """
 
 from __future__ import annotations
@@ -82,13 +81,7 @@ def _record(scope: Scope, status_code: int) -> None:
     state = _request_state(scope)
     user = state.get("user")
     if user is not None:
-        BUFFER.record(ActivityKey(user.user_id, day, template, method, agency_id, False), is_error=is_error)
-    elif state.get("api_key_owner_id") is not None:
-        BUFFER.record(ActivityKey(state["api_key_owner_id"], day, template, method, agency_id, True), is_error=is_error)
-    elif state.get("api_key_authenticated"):
-        # A key with no owner row: credentialed, so not a reader, and no
-        # account to count it against.
-        return
+        BUFFER.record(ActivityKey(user.user_id, day, template, method, agency_id), is_error=is_error)
     else:
         # A signed-out caller can name any agency id in the path, and every
         # distinct one would add a permanent row. Every agency-scoped route a

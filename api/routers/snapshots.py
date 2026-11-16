@@ -43,7 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from api.admin_audit import record_admin_action
 from api.deps import get_ch, get_conn, get_locale
 from api.middleware.locale import SUPPORTED_LOCALES
-from api.middleware.ratelimit import SNAPSHOT_TODAY_LIMIT, limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, SNAPSHOT_TODAY_LIMIT, limiter
 from api.range import RangeCtx, clamp_range_ctx, ctx_payload, resolve_service_dates
 from api.routers.map import render_route_shape
 from api.routers.overview import render_overview_summary
@@ -610,7 +610,7 @@ async def delete_snapshot(
 
 
 @router.get("/{snapshot_id}", response_model=SnapshotOut)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def read_snapshot(
     request: Request,
     snapshot_id: str,

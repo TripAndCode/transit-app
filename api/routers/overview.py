@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_ch
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.day_types import DayType
@@ -205,7 +205,7 @@ class OverviewSummary(BaseModel):
 
 
 @router.get("/overview/summary", response_model=OverviewSummary)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def overview_summary(
     request: Request,
     agency_id: int = Depends(get_agency),

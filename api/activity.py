@@ -1,9 +1,11 @@
 """Daily usage counts, buffered in process and written in batches.
 
-Two tables share this module: ``user_activity_daily`` (a session user or an
-API key's owner, keyed by ``ActivityKey``) and ``anonymous_activity_daily``
-(a signed-out caller, keyed by ``AnonymousKey`` and holding no identity at
-all). ``ActivityBuffer.record`` runs on the request path, so it only bumps an
+Two tables share this module: ``user_activity_daily`` (a signed-in user,
+keyed by ``ActivityKey``) and ``anonymous_activity_daily`` (everyone else,
+keyed by ``AnonymousKey`` and holding no identity at all). ``via_api_key``
+on ``user_activity_daily`` is always written ``false``: part of the table's
+unique key until it is dropped, but no longer a distinction this app draws.
+``ActivityBuffer.record`` runs on the request path, so it only bumps an
 in-memory counter; ``flush``/``flush_anonymous`` turn the accumulated counts
 into one additive upsert per table. Additive, so several workers or replicas
 flushing the same key simply sum. A flush that fails logs and drops its
@@ -45,7 +47,6 @@ class ActivityKey:
     route: str
     method: str
     agency_id: int | None
-    via_api_key: bool
 
 
 @dataclass(frozen=True)
@@ -100,9 +101,9 @@ def agency_id_from(path_params: dict | None) -> int | None:
 # the same batch.
 _USER_UPSERT_SQL = """
     INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
-    SELECT u.user_id, u.day, u.route, u.method, u.agency_id, u.via_api_key, u.requests, u.errors
-    FROM unnest($1::int[], $2::date[], $3::text[], $4::text[], $5::int[], $6::boolean[], $7::int[], $8::int[])
-        AS u(user_id, day, route, method, agency_id, via_api_key, requests, errors)
+    SELECT u.user_id, u.day, u.route, u.method, u.agency_id, false, u.requests, u.errors
+    FROM unnest($1::int[], $2::date[], $3::text[], $4::text[], $5::int[], $6::int[], $7::int[])
+        AS u(user_id, day, route, method, agency_id, requests, errors)
     WHERE EXISTS (SELECT 1 FROM users WHERE users.user_id = u.user_id)
     ON CONFLICT (user_id, day, route, method, (COALESCE(agency_id, 0)), via_api_key) DO UPDATE SET
         requests = user_activity_daily.requests + EXCLUDED.requests,
@@ -134,7 +135,6 @@ async def flush(buffer: ActivityBuffer[ActivityKey], pool: Any) -> int:
             [k.route for k in keys],
             [k.method for k in keys],
             [k.agency_id for k in keys],
-            [k.via_api_key for k in keys],
             [batch[k][0] for k in keys],
             [batch[k][1] for k in keys],
         )
