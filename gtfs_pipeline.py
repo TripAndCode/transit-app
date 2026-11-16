@@ -622,12 +622,13 @@ def cmd_check_aggs(args):
     """Report agencies whose aggregates lag their newest completed day, and
     list the analyzed days whose rows came mostly from the live path.
 
-    Exits nonzero if any agency is stale — the post-merge / monitoring guard.
-    A live-sourced day is listed but does not fail it: it is history the
+    Exits nonzero if any agency is stale, or holds a day with both sources,
+    which analyze counts twice — the post-merge / monitoring guard. A
+    live-sourced day is listed but does not fail it: it is history the
     archive has yet to replace, not a stale aggregate.
     """
     from pipeline.clickhouse import get_client
-    from pipeline.freshness import check_agg_freshness, day_ranges, live_sourced_days
+    from pipeline.freshness import check_agg_freshness, day_ranges, live_sourced_days, two_source_days
 
     conn = _get_conn()
     with conn.cursor() as cur:
@@ -636,17 +637,22 @@ def cmd_check_aggs(args):
     ch_client = get_client()
     stale = check_agg_freshness(conn, ch_client, agency_ids)
     live = live_sourced_days(conn, agency_ids)
+    both = two_source_days(conn, ch_client, agency_ids)
     conn.close()
     for days in live:
-        final = f"; {days.final} more before its retention floor are final" if days.final else ""
+        final = f"; {days.final} more on or before its retention floor are final" if days.final else ""
         listed = f": {day_ranges(days.open)}" if days.open else ""
         logger.warning(f"LIVE-SOURCED agency {days.agency_id}: {len(days.open)} day(s){listed}{final}")
-    if stale:
-        for s in stale:
-            logger.error(
-                f"STALE agency {s.agency_id}: aggs cover {s.agg_max_day}, "
-                f"live completed through {s.live_max_completed_day}"
-            )
+    for agency_id, mixed in both.items():
+        logger.error(
+            f"TWO SOURCES agency {agency_id}: {day_ranges(mixed)} hold archive and live rows at once, which analyze "
+            "counts twice; an archive ingest whose folder reaches the day settles it"
+        )
+    for s in stale:
+        logger.error(
+            f"STALE agency {s.agency_id}: aggs cover {s.agg_max_day}, live completed through {s.live_max_completed_day}"
+        )
+    if stale or both:
         sys.exit(1)
     logger.info(f"check-aggs: all {len(agency_ids)} agencies fresh.")
 

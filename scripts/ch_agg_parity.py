@@ -140,7 +140,7 @@ def parity(ch, conn, agency_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute("SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
         stored = {day: (raw, total) for day, raw, total in cur.fetchall()}
-    live = {day: counts[:2] for day, counts in _ledger_counts(agency_id, ch).items()}
+    live = _ledger_counts(agency_id, ch)
     dates = comparable_dates(stored, live)
     print(f"agency {agency_id}: {len(dates)} of {len(stored)} ledger dates are current")
     if not dates:

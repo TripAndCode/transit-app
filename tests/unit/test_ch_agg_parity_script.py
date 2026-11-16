@@ -157,9 +157,7 @@ def test_parity_leaves_the_static_joined_tables_until_the_timetable_is_archived(
     it, every row Postgres holds would read as missing from ClickHouse."""
     day = date(2026, 9, 1)
     # A date ClickHouse has and the ledger lacks keeps the whole-history tables out of it.
-    monkeypatch.setattr(
-        ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5, 0), date(2026, 9, 2): (1, 1, 0)}
-    )
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     ch = _ClickHouse()
     parity(ch, _OnePerTable(day, TIMETABLE), 1)
     assert [sql for sql in ch.queries if _joins_the_archive(sql)] == []
@@ -182,9 +180,7 @@ class _Archived(_ClickHouse):
 
 def test_parity_compares_the_static_joined_tables_once_the_timetable_is_archived(monkeypatch):
     day = date(2026, 9, 1)
-    monkeypatch.setattr(
-        ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5, 0), date(2026, 9, 2): (1, 1, 0)}
-    )
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     ch = _Archived()
     parity(ch, _OnePerTable(day, TIMETABLE), 1)
     joined = [t for t in ch_aggregates.TABLES if t in ch_aggregates.STATIC_JOINED_TABLES]
@@ -216,9 +212,7 @@ class _Unmigrated(_ClickHouse):
 
 def test_both_modes_run_before_the_schema_adds_the_timetable_archive(monkeypatch):
     day = date(2026, 9, 1)
-    monkeypatch.setattr(
-        ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5, 0), date(2026, 9, 2): (1, 1, 0)}
-    )
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     monkeypatch.setattr(ch_aggregates, "source_months", lambda ch, agency_id: [202609])
     parity(_Unmigrated(), _OnePerTable(day, TIMETABLE), 1)
     assert timing(_Unmigrated(), _Conn([], TIMETABLE), 1) == 0
@@ -227,7 +221,7 @@ def test_both_modes_run_before_the_schema_adds_the_timetable_archive(monkeypatch
 def test_parity_leaves_agg_stop_routes_until_the_timetable_is_archived(monkeypatch):
     """Every date is current, so the whole-history tables are compared, all but this one."""
     day = date(2026, 9, 1)
-    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5, 0)})
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5)})
     ch = _ClickHouse()
     parity(ch, _Conn([(day, 5, 5)]), 1)
     assert [sql for sql in ch.queries if _joins_the_archive(sql)] == []
@@ -265,9 +259,7 @@ def test_parity_compares_each_table_on_its_own_date_column(capsys, monkeypatch):
     """agg_stop_daily keeps its date third and agg_route_stop_daily fourth: read
     from the second column, their rows would never be on a compared date."""
     day = date(2026, 9, 1)
-    monkeypatch.setattr(
-        ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5, 0), date(2026, 9, 2): (1, 1, 0)}
-    )
+    monkeypatch.setattr(ch_agg_parity, "_ledger_counts", lambda agency_id, ch: {day: (5, 5), date(2026, 9, 2): (1, 1)})
     assert parity(_Archived(), _OnePerTable(day, TIMETABLE), 1) == 1
     out = capsys.readouterr().out
     for table in ch_aggregates.TABLES:

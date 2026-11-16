@@ -295,7 +295,11 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     the folder holds its complete archive: then the archive's rows replace
     the live ones (pipeline.archive_replace). The whole run holds the
     agency's `updates` lock, which analyze takes too, so analyze never reads
-    a day between the two.
+    a day between the two while the run lasts. A run that dies between them
+    leaves the day with both sources; the next run whose folder reaches near
+    that day settles it. A day this run cannot settle raises
+    :class:`pipeline.archive_replace.ReplacementIncomplete` once every other
+    day is settled.
 
     Raises :class:`StaticTimetableMissing`, having read and marked nothing,
     when the agency's strategy needs a timetable it does not have loaded.
@@ -374,8 +378,10 @@ def _ingest_folder(
     today = jst_date(now or datetime.now(timezone.utc))
     unclosed: set[date] = set()
     promoted: dict[date, bool] = {}
-    covered = archive_replace.covered_days(archive_replace.tarball_days(tarballs), today)
-    replacing = archive_replace.candidates(ch_client, agency_id, covered, retention_floor(conn, agency_id))
+    floor = retention_floor(conn, agency_id)
+    utc_days = archive_replace.tarball_days(tarballs)
+    covered = archive_replace.covered_days(utc_days, today)
+    replacing = archive_replace.candidates(ch_client, agency_id, covered, floor)
     # The JST day each admitted file's rows land on, and the days a failed
     # file could have held rows of: a day among them is not replaced.
     stamped: dict[str, date] = {}
@@ -406,12 +412,15 @@ def _ingest_folder(
         stamped[file_key] = day
         return False
 
-    def _failed(file_key: str | None, utc_day: str) -> None:
+    def _failed(file_key: str | None, utc_day: str | None) -> None:
         """Record the days a failed file could hold rows of: the one it was
-        stamped on, else both JST days its UTC day directory spans, else
-        every day this run would replace."""
+        stamped on, else both JST days its UTC day directory spans. With
+        neither known, every day this run would replace."""
         if file_key in stamped:
             failed_days.add(stamped[file_key])
+            return
+        if utc_day is None:
+            failed_days.update(replacing)
             return
         try:
             day = datetime.strptime(utc_day, "%Y%m%d").date()
@@ -504,7 +513,7 @@ def _ingest_folder(
                         n_inserted += insert_updates(ch_client, agency_id, file_rows)
                         done.add(file_name)
                     except Exception as e2:
-                        _failed(file_name, "")
+                        _failed(file_name, None)
                         # Broad catch is safe here (unlike the top-level gate
                         # above): this is a single one-shot attempt per file,
                         # never itself retried, so there's no risk of
@@ -526,7 +535,7 @@ def _ingest_folder(
                 logger.error(f"  [ERROR] inserting batch of {len(pending_files)} files: {e}")
                 n_errors += len(pending_files)
                 for file_name in pending_files:
-                    _failed(file_name, "")
+                    _failed(file_name, None)
         finally:
             pending_rows.clear()
             pending_files.clear()
@@ -577,7 +586,7 @@ def _ingest_folder(
                         except Exception as e:
                             logger.error(f"  [ERROR] {pb_name}: {e}")
                             n_errors += 1
-                            _failed(f"{d}/{pb_name}", d)
+                            _failed(f"{d}/{pb_name}", d or None)
                             continue
                         _buffer_parsed(f"{d}/{pb_name}", rows)
                         if j % 300 == 0 and j > 0:
@@ -592,7 +601,7 @@ def _ingest_folder(
             except Exception as e:
                 logger.error(f"  [ERROR] {e}")
                 n_errors += 1
-                _failed(None, date_dir)
+                _failed(None, date_dir or None)
                 conn.rollback()
             conn.commit()
 
@@ -618,7 +627,7 @@ def _ingest_folder(
                 except Exception as e:
                     logger.error(f"  [ERROR] {path.name}: {e}")
                     n_errors += 1
-                    _failed(f"{d}/{path.name}", d)
+                    _failed(f"{d}/{path.name}", d or None)
                     continue
                 _buffer_parsed(f"{d}/{path.name}", rows)
                 if j % 500 == 0:
@@ -632,12 +641,23 @@ def _ingest_folder(
     # or marked `done` at all.
     _flush()
 
-    for day in sorted(replacing):
-        archive_replace.settle(ch_client, agency_id, day, intact=day not in failed_days)
+    # A day left holding both sources by a run that died before settling it
+    # is settled here too, by the first run whose folder reaches near it.
+    span = {d for u in utc_days for d in (u, u + timedelta(days=1))} | set(stamped.values())
+    unfinished = archive_replace.residue(ch_client, agency_id, span, floor, today) - replacing
+    rolled_back, unsettled = archive_replace.settle_all(ch_client, agency_id, replacing | unfinished, failed_days)
+    # The rows rolled back can include an earlier run's, on an unfinished day.
+    n_inserted = max(0, n_inserted - rolled_back)
 
     if n_errors:
         logger.warning(f"Skipped {n_errors} files due to parse or insert errors — see log above for detail")
+    if rolled_back:
+        logger.warning(f"Rolled back {rolled_back} archive rows of days that keep their live copy")
     logger.info(f"\nDone: {n_inserted} new rows inserted")
+    if unsettled:
+        raise archive_replace.ReplacementIncomplete(
+            f"agency {agency_id}: days left unsettled, holding both sources: {'; '.join(unsettled)}"
+        )
     if strict and n_errors:
         raise IngestIncomplete(n_inserted, n_errors)
     return n_inserted

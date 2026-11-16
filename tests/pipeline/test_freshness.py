@@ -389,12 +389,12 @@ def test_cron_path_jst_boundary_is_fresh(pg_conn, agency_id, monkeypatch, caplog
 
 def test_check_aggs_lists_the_days_most_of_whose_rows_came_from_the_live_path(pg_conn, agency_id):
     """A tie reads live; a day counted before the source columns has no source
-    and is not listed; days before the retention floor are only counted."""
+    and is not listed; days on or before the retention floor are only counted."""
     from pipeline.freshness import LiveSourcedDays, live_sourced_days
 
     days = {
         date(2026, 3, 30): (0, 50),  # live, before the floor
-        date(2026, 4, 1): (100, 0),
+        date(2026, 4, 1): (0, 30),  # live, the floor day: never replaceable
         date(2026, 4, 2): (0, 40),
         date(2026, 4, 3): (40, 40),
         date(2026, 4, 4): (None, None),
@@ -415,5 +415,5 @@ def test_check_aggs_lists_the_days_most_of_whose_rows_came_from_the_live_path(pg
     pg_conn.commit()
 
     assert live_sourced_days(pg_conn, [agency_id]) == [
-        LiveSourcedDays(agency_id, [date(2026, 4, 2), date(2026, 4, 3)], final=1)
+        LiveSourcedDays(agency_id, [date(2026, 4, 2), date(2026, 4, 3)], final=2)
     ]

@@ -56,7 +56,7 @@ class FakeClickHouse:
         # The per-date ledger, not agg_feed_health's own build — the two read
         # the same rows and differ only in what they project.
         if "raw_samples" in sql and "clamp_count" not in sql:
-            return _FakeResult([(*row, 0) for row in self._ledger])
+            return _FakeResult(self._ledger)
         if "FROM system.tables" in sql:
             return _FakeResult([(name,) for name in self._tables])
         if sql.startswith("SELECT count(), sum("):

@@ -216,11 +216,9 @@ pushes, one every `COLLECTOR_INGEST_INTERVAL_SEC`. Without streaming it holds on
 archive zips and uploads them once a day to S3-compatible object storage
 (Cloudflare R2 or AWS S3). The **daily Railway scheduled job** (step 4) pulls
 them over HTTPS and runs `ingest → analyze_all` into the private
-`clickhouse` and `db` services. A day in `updates` has one source, and the
-archive is the one that stays: the job stores a day the live path never
-promoted, and replaces a promoted day once it holds the day's complete
-archive (`pipeline/archive_replace.py`). The DB is never exposed and Oracle
-never accepts inbound connections.
+`clickhouse` and `db` services. It replaces a day the live path promoted
+once it holds the day's complete archive (`pipeline/archive_replace.py`).
+The DB is never exposed and Oracle never accepts inbound connections.
 
 To kick the first load by hand, from your Mac through the app service so it
 executes on the private network, load the agency's timetable (below), then run
@@ -307,18 +305,14 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
    same `CLICKHOUSE_*` variables as `app` (step 2.4), the `OBJECT_STORE_*`
    creds, and `AGENCY_IDS` (see `.env.example`).
 
-> **This job writes closed JST days only, and replaces a day the live path
-> promoted once it holds that day's complete archive.** An archive is named
-> for a UTC day, so it runs to 09:00 JST the next day. `ingest` skips any
-> file whose rows would land on a JST day that has not ended yet, and reads
-> it on a later run once that day has closed. An archive reaches the bucket
-> only after its UTC day ends, so pull the last two archived days, not just
-> the newest one: a JST day is complete only with both of its UTC days'
-> archives. Once the live-table promotion cron (below) has copied a day's
-> rows into `updates`, this job skips that day's archive files unless both
-> archives are in its folder, read without error, and hold at least as many
-> polls as the promoted copy. Then the archive's rows go in first and the
-> promoted rows are deleted, so a day never holds both sources.
+> **This job writes closed JST days only.** An archive is named for a UTC
+> day, so it runs to 09:00 JST the next day. `ingest` skips any file whose
+> rows would land on a JST day that has not ended yet, and reads it on a
+> later run once that day has closed. An archive reaches the bucket only
+> after its UTC day ends, so pull the last two archived days, not just the
+> newest one: a day the live-table promotion cron (below) promoted is
+> replaced only once both of its UTC days' archives are in the folder
+> (`pipeline/archive_replace.py` says what else that takes).
 
 > **A `static_join` agency's timetable must be loaded before this job runs.**
 > `ingest` exits `EX_CONFIG` (78) for one with none loaded, having read none
@@ -415,9 +409,8 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > `/internal/collector`, generate a shared `COLLECTOR_INGEST_SECRET` on both
 > Oracle and `app`, and restart the Oracle poller units. The cron poke
 > (above) then promotes each closed JST day from what the collector pushed,
-> one poll every `COLLECTOR_INGEST_INTERVAL_SEC` (default 300 s), and the
-> daily batch job above replaces that day with its archive, which holds every
-> poll, once both of the day's archives are in the bucket.
+> one poll every `COLLECTOR_INGEST_INTERVAL_SEC` (default 300 s), until the
+> daily batch job above replaces it with its archive, which holds every poll.
 
 ---
 

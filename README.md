@@ -55,8 +55,9 @@ returns to `:5173` instead of `:8000`.
 History and live data each have one command:
 
 ```bash
-make catch-up-from-r2 APPLY=1 ANALYZE=1           # history: closed days from the R2 archive
-poetry run python gtfs_pipeline.py ingest_live    # live: a sample of each agency's feed into updates_live
+make catch-up-from-r2 APPLY=1 ANALYZE=1               # history: closed days from the R2 archive
+make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1   # the same, for an empty database: its last 3 days
+poetry run python gtfs_pipeline.py ingest_live        # live: a sample of each agency's feed into updates_live
 ```
 
 **History** comes from the collector's daily archives in R2 (the four
@@ -65,9 +66,8 @@ ingests each agency's archived days after its newest row in `updates`, loading
 R2's newer timetables between them so each day joins the timetable in force on
 it, then builds the aggregates. Without `APPLY=1` it prints the plan (days,
 timetable loads, download size) and changes nothing; `scripts/catch_up_from_r2.py`'s
-docstring has its rules. The bootstrap database is empty, so start it with
-`SEED_DAYS=3` for the last three days. `AGENCY="1 9"` narrows it to some
-agencies. An agency the plan marks `REFUSED` stops the whole apply, so leave it
+docstring has its rules. The bootstrap database is empty, so the first run
+needs `SEED_DAYS`. `AGENCY="1 9"` narrows it to some agencies. An agency the plan marks `REFUSED` stops the whole apply, so leave it
 out with `AGENCY=` or follow its refusal first. `make check-aggs` then confirms
 the aggregates reach the newest day.
 
@@ -80,8 +80,10 @@ polls the collector pushed, so an archive ingest that reads the day's complete
 archive later replaces it (`pipeline/archive_replace.py` defines complete).
 `make check-aggs` lists the days still held from the live copy. The catch-up
 starts after the newest row, so it does not reach back to a promoted day: ingest
-a folder holding both of that day's tarballs (`make ingest FOLDER=...`), then
-`make analyze-all`.
+a folder holding both of that day's tarballs with
+`make ingest FOLDER=<dir> AGENCY_ID=<id>`, then `make analyze-all`. For a
+`static_join` agency whose timetable changed since that day, load the timetable
+in force on it first, or its rows join the newer one.
 
 Add a one-off agency with:
 

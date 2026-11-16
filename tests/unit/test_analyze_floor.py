@@ -60,6 +60,45 @@ def test_a_floor_date_that_shrank_reports_no_date_before_the_floor(monkeypatch):
     floor is final."""
     stored = [(date(2025, 1, 31), 5, 5, 0), (BEFORE, 5, 5, 0), (FLOOR, 5, 5, 0), (date(2025, 2, 3), 5, 5, 0)]
     monkeypatch.setattr(
-        analyze, "_ledger_counts", lambda agency_id, ch, floor=None: {FLOOR: (3, 3, 0), date(2025, 2, 3): (5, 5, 0)}
+        analyze, "_ledger_counts", lambda agency_id, ch, floor=None: {FLOOR: (3, 3), date(2025, 2, 3): (5, 5)}
     )
     assert analyze._dates_needing_rebuild(1, _Conn(stored), None, FLOOR) == [FLOOR, date(2025, 2, 3)]
+
+
+class _Ch:
+    """Answers archive_replace.live_rows_moved's query with *rows*."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.queries = 0
+
+    def query(self, sql, parameters=None):
+        self.queries += 1
+
+        class _Result:
+            result_rows = self.rows
+
+        return _Result()
+
+
+def test_a_date_whose_live_rows_left_rebuilds_with_its_neighbours_down_to_the_floor(monkeypatch):
+    """The archive replaced the live rows one for one: both counts held."""
+    later = FLOOR + timedelta(days=5)
+    stored = [(BEFORE, 5, 5, 0), (FLOOR, 5, 5, 3), (later, 5, 5, 3)]
+    monkeypatch.setattr(analyze, "_ledger_counts", lambda agency_id, ch, floor=None: {FLOOR: (5, 5), later: (5, 5)})
+    ch = _Ch([(FLOOR, 0), (later, 0)])
+    assert analyze._dates_needing_rebuild(1, _Conn(stored), ch, FLOOR) == [
+        FLOOR,
+        FLOOR + timedelta(days=1),
+        later - timedelta(days=1),
+        later,
+        later + timedelta(days=1),
+    ]
+
+
+def test_a_date_built_before_live_rows_were_counted_is_taken_to_match(monkeypatch):
+    stored = [(FLOOR, 5, 5, None)]
+    monkeypatch.setattr(analyze, "_ledger_counts", lambda agency_id, ch, floor=None: {FLOOR: (5, 5)})
+    ch = _Ch([(FLOOR, 0)])
+    assert analyze._dates_needing_rebuild(1, _Conn(stored), ch, FLOOR) == []
+    assert ch.queries == 0

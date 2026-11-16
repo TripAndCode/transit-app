@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from pipeline.clickhouse import majority_source, newest_filed_date_before
+from pipeline.clickhouse import days_with_source, jst_date, majority_source, newest_filed_date_before
 from pipeline.retention import retention_floors
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -90,9 +90,9 @@ def check_agg_freshness(conn, ch_client, agency_ids: Iterable[int]) -> list[Stal
 @dataclass(frozen=True)
 class LiveSourcedDays:
     """An agency's analyzed dates whose rows came mostly from the live path
-    (pipeline.clickhouse.majority_source): *open* from its retention floor
-    on, which an archive ingest can still replace (pipeline.archive_replace),
-    and how many *final* ones lie before it."""
+    (pipeline.clickhouse.majority_source): *open* after its retention floor,
+    which an archive ingest can still replace (pipeline.archive_replace), and
+    how many *final* ones lie on or before it."""
 
     agency_id: int
     open: list[date]
@@ -118,7 +118,7 @@ def live_sourced_days(conn, agency_ids: Iterable[int]) -> list[LiveSourcedDays]:
     found = []
     for agency_id, days in by_agency.items():
         floor = floors.get(agency_id)
-        open_days = [day for day in days if floor is None or day >= floor]
+        open_days = [day for day in days if floor is None or day > floor]
         found.append(LiveSourcedDays(agency_id, open_days, len(days) - len(open_days)))
     return found
 
@@ -132,3 +132,37 @@ def day_ranges(days: list[date]) -> str:
         else:
             runs.append([day])
     return ", ".join(str(run[0]) if len(run) == 1 else f"{run[0]}..{run[-1]}" for run in runs)
+
+
+_EARLIEST_ROW_SQL = "SELECT captured_at FROM updates WHERE agency_id = {agency_id:UInt16} ORDER BY captured_at LIMIT 1"
+
+
+def two_source_days(
+    conn, ch_client, agency_ids: Iterable[int], *, now: datetime | None = None
+) -> dict[int, list[date]]:
+    """Each agency's closed JST days after its retention floor on which
+    `updates` holds rows from both the archive and the live path: a
+    replacement an ingest left unfinished (pipeline.archive_replace), which
+    analyze counts twice. Judged from `updates` itself, by JST day, since a
+    service date in agg_feed_health legitimately straddles a replaced day
+    and a live one. Read-only."""
+    ids = sorted(set(agency_ids))
+    floors = retention_floors(conn, ids)
+    yesterday = jst_date(now or datetime.now(ZoneInfo("UTC"))) - timedelta(days=1)
+    found: dict[int, list[date]] = {}
+    for agency_id in ids:
+        rows = ch_client.query(_EARLIEST_ROW_SQL, parameters={"agency_id": agency_id}).result_rows
+        if not rows:
+            continue
+        earliest = rows[0][0] if rows[0][0].tzinfo else rows[0][0].replace(tzinfo=ZoneInfo("UTC"))
+        first = jst_date(earliest)
+        floor = floors.get(agency_id)
+        if floor is not None:
+            first = max(first, floor + timedelta(days=1))
+        days = [first + timedelta(days=i) for i in range((yesterday - first).days + 1)]
+        both = days_with_source(ch_client, agency_id, days, live_sourced=True) & days_with_source(
+            ch_client, agency_id, days, live_sourced=False
+        )
+        if both:
+            found[agency_id] = sorted(both)
+    return found

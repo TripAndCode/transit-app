@@ -166,14 +166,15 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     is still needed for agency N.
 
     Waiting cannot deadlock. Promotion, archive ingest and analyze take one
-    agency's key at a time, never nesting, while holding at most INGEST_ANALYZE_LOCK_KEY's
-    single-argument lock, which no holder of this key waits on. The restamp
-    and the `updates` prune are the holders of several keys: each takes them
-    in ascending agency_id while holding that single-argument lock, so no
-    other holder of several keys can be running and no cycle can form. A load_static that remaps a timetable
-    version name takes one agency's key to clear its archive-joined tables'
-    states (pipeline.static_archive), holding no other lock and no open
-    transaction, so it only waits out that agency's analyze.
+    agency's key at a time, never nesting, while holding at most
+    INGEST_ANALYZE_LOCK_KEY's single-argument lock, which no holder of this
+    key waits on. The restamp and the `updates` prune are the holders of
+    several keys: each takes them in ascending agency_id while holding that
+    single-argument lock, so no other holder of several keys can be running
+    and no cycle can form. A load_static that remaps a timetable version name
+    takes one agency's key to clear its archive-joined tables' states
+    (pipeline.static_archive), holding no other lock and no open transaction,
+    so it only waits out that agency's analyze, archive ingest or promotion.
     """
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_lock(%s, %s)", (INGEST_ANALYZE_LOCK_KEY, agency_id))
