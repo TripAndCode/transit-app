@@ -191,9 +191,11 @@ async def append_message(
     conditions: dict[str, Any] | None = None,
     definition: DefinitionMeta | None = None,
 ) -> dict[str, Any]:
-    """``conditions`` is the dow/time_band/service RangeCtx the dispatch (if
-    any) actually ran under -- the historical record for the Ask evidence
-    card's provenance disclosure. ``None`` for user messages and for
+    """``conditions`` is the scope the dispatch (if any) actually ran under --
+    its dow/time_band/service and, for a card answered since they were
+    recorded, its period (``from_date``/``to_date``) and ``routes``: the
+    historical record for the Ask evidence card's provenance disclosure and
+    its link to the screen answering the same question. ``None`` for user messages and for
     assistant messages with no dispatch (e.g. an LLM-grounded follow-up).
     ``definition`` is the method stamp of the figures in ``result``, ``None``
     when no report computes them."""

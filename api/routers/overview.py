@@ -13,69 +13,20 @@ from __future__ import annotations
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_ch, get_conn
+from api.deps import get_agency, get_ch
 from api.middleware.ratelimit import limiter, tier_limit
 from api.range import RangeCtx, get_range_ctx
 from api.scope_applied import ALL_SIX, scope_applied
 from pipeline.day_types import DayType
 from pipeline.reports import compute_overview_summary
 from pipeline.reports.reference import ReferenceReason
-from pipeline.route_catalog import pooled_left_out_codes, route_list, rows_to_fetch
-from pipeline.strategies._time import MAX_SERVICE_HOUR
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["overview"])
 
 _SUMMARY_SCOPE = scope_applied(*ALL_SIX)
-# The breakdown takes its own hour/dow integers over an all-time aggregate.
-_BREAKDOWN_SCOPE = scope_applied()
-
-# Minimum observations behind a route's peak-hour figure before it is shown.
-_PEAK_HOUR_MIN_SAMPLES = 3
-# How many routes the breakdown lists.
-_PEAK_HOUR_ROUTES = 20
-
-
-def _peak_hour_breakdown_sql(*, by_dow: bool) -> str:
-    """Routes ranked by pooled average delay for one hour of ``agg_route_hour_dow``, worst first.
-
-    One row per route: its rows for every raw service id it matched (the
-    table's ``service_type``, a GTFS ``service_id``) pool together, as do its
-    rows for every DOW when no DOW is given. ``avg_min`` is always re-derived
-    from ``sum_delay_sec``/``samples`` over the grouped rows, never read from
-    the stored per-row ``avg_min``, so the single-DOW and the all-DOW answer
-    are the same statistic computed the same way. The sample floor is applied to the group total alone: a route whose
-    observations are spread thinly across the rows being pooled is still
-    well-evidenced once pooled, and dropping its rows first would both hide it
-    and bias the average that remains.
-
-    ``by_dow`` selects the parameter shape: ``$1`` agency, ``$2`` hour, then
-    ``$3`` day-of-week only when scoping to one DOW, and last the row limit.
-    """
-    dow_clause = "AND dow = $3 " if by_dow else ""
-    limit = "$4" if by_dow else "$3"
-    return f"""
-        SELECT route_code,
-               (SUM(sum_delay_sec) FILTER (WHERE sum_delay_sec IS NOT NULL)::numeric
-                   / NULLIF(SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL), 0) / 60.0) AS avg_min,
-               SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) AS samples
-        FROM agg_route_hour_dow
-        WHERE agency_id = $1 AND hour = $2 {dow_clause}
-        GROUP BY route_code
-        HAVING SUM(samples) FILTER (WHERE sum_delay_sec IS NOT NULL) >= {_PEAK_HOUR_MIN_SAMPLES}
-        ORDER BY avg_min DESC NULLS LAST, route_code
-        LIMIT {limit}
-    """
-
-
-async def _all_time_left_out(conn: asyncpg.Connection, agency_id: int) -> dict[str, frozenset[str]]:
-    """The codes the breakdown leaves out: of every code ``agg_route_hour_dow``
-    pools for the agency, those :func:`pipeline.route_catalog.pooled_left_out_codes`
-    names."""
-    rows = await conn.fetch("SELECT DISTINCT route_code FROM agg_route_hour_dow WHERE agency_id = $1", agency_id)
-    return await pooled_left_out_codes(conn, agency_id, [r["route_code"] for r in rows])
 
 
 class HeadlineReference(BaseModel):
@@ -167,42 +118,26 @@ class Concentration(BaseModel):
     rest_route_count: int = 0
 
 
-class TopDelayedRoute(BaseModel):
-    """One route's absolute avg delay in the headline's window, and its
-    change (minutes) from the same-width window before; ``delta_min`` is None
-    when the route was too thinly observed there to compare."""
-
-    route_code: str
-    route_short_name: str | None
-    avg_min: float
-    delta_min: float | None = None
-
-
 class RouteBandCount(BaseModel):
-    """Routes in one routes-to-check band, and the band's lower bound."""
+    """Routes averaging at least ``threshold_min`` minutes late, and that bound."""
 
     count: int
     threshold_min: float
 
 
 class RouteBandCounts(BaseModel):
-    """One count per band the routes-to-check list shows, worst first."""
+    """The late-route count the Pulse hero prints beside its bound."""
 
     severe: RouteBandCount
-    moderate: RouteBandCount
-    mild: RouteBandCount
 
 
 class TopDelayed(BaseModel):
-    """Top-5 routes by absolute avg delay, plus a count of routes averaging at
-    least ``delayed_threshold_min`` late and one per routes-to-check band, all
-    over the same window the headline covers. The counts cover every route the
-    list may show, not only the five listed: the ``route_count`` routes
-    observed at least ``min_samples`` times in the window."""
+    """The Pulse hero's late-route count over the headline's window: of the
+    ``route_count`` routes observed at least ``min_samples`` times there, how
+    many averaged at least the severe bound late. ``route_count`` is counted
+    over the same window, scope, floor and left-out routes as the Routes
+    table, so it matches the total the routes-to-check preview states."""
 
-    routes: list[TopDelayedRoute]
-    delayed_count: int
-    delayed_threshold_min: float
     band_counts: RouteBandCounts
     route_count: int
     min_samples: int
@@ -244,9 +179,8 @@ class ServiceSplitDay(BaseModel):
 class OverviewSummary(BaseModel):
     """Magazine payload — 5 modules + sparkline + range echo.
 
-    ``peak_hour_weekday`` / ``peak_hour_weekend`` and
-    ``service_split_daily`` are additive fields used by the modal
-    drill-downs; existing card consumers ignore them.
+    ``service_split_daily`` is each day's mean with its day type, which the
+    headline's latest-day standing reads.
 
     ``movers`` is None, like the headline's baseline, when the window before
     the period could not be read: a time-band request whose ClickHouse grain
@@ -259,8 +193,6 @@ class OverviewSummary(BaseModel):
     concentration: Concentration
     top_delayed: TopDelayed
     peak_hour: PeakHour | None
-    peak_hour_weekday: PeakHour | None = None
-    peak_hour_weekend: PeakHour | None = None
     # Every bucket the agency is split into, in display order: 平日 / 土曜 /
     # 日祝, or 平日 / 土日祝 for a feed with one weekend timetable.
     service_split: list[ServiceSplitEntry]
@@ -270,64 +202,6 @@ class OverviewSummary(BaseModel):
     period_from: str
     period_to: str
     scope_applied: dict[str, bool]
-
-
-class RouteHourEntry(BaseModel):
-    route_code: str
-    avg_min: float
-    samples: int
-
-
-class PeakHourBreakdown(BaseModel):
-    hour: int
-    dow: int | None
-    routes: list[RouteHourEntry]
-    scope_applied: dict[str, bool]
-
-
-@router.get("/peak-hour-breakdown", response_model=PeakHourBreakdown)
-@limiter.limit(tier_limit)
-async def peak_hour_breakdown(
-    request: Request,
-    agency_id: int = Depends(get_agency),
-    conn: asyncpg.Connection = Depends(get_conn),
-    # An hour of the service day's clock, which runs past 23 for a departure
-    # after midnight (24:10 is hour 24).
-    hour: int = Query(ge=0, le=MAX_SERVICE_HOUR),
-    dow: int | None = Query(default=None, ge=1, le=7),
-) -> PeakHourBreakdown:
-    """Top routes by average delay for a given hour (and optionally day-of-week).
-
-    Reads from ``agg_route_hour_dow``. When ``dow`` is omitted, pools all DOWs
-    for the requested hour; either way the average is pooled from the summed
-    delay and sample columns. A route whose pooled observations for the hour
-    number fewer than ``_PEAK_HOUR_MIN_SAMPLES`` is excluded to suppress noise
-    from rarely observed routes, as is every code a route list leaves out
-    (:func:`_all_time_left_out`). Returns at most ``_PEAK_HOUR_ROUTES`` routes
-    worst-first, ties by route_code.
-    """
-    left_out = await _all_time_left_out(conn, agency_id)
-    params: list[object] = [agency_id, hour]
-    if dow is not None:
-        params.append(dow)
-    params.append(rows_to_fetch(_PEAK_HOUR_ROUTES, left_out))
-    rows, _ = route_list(
-        await conn.fetch(_peak_hour_breakdown_sql(by_dow=dow is not None), *params), _PEAK_HOUR_ROUTES, left_out, ()
-    )
-    return PeakHourBreakdown(
-        hour=hour,
-        dow=dow,
-        routes=[
-            RouteHourEntry(
-                route_code=r["route_code"],
-                avg_min=round(float(r["avg_min"]), 2),
-                samples=int(r["samples"]),
-            )
-            for r in rows
-            if r["avg_min"] is not None
-        ],
-        scope_applied=_BREAKDOWN_SCOPE,
-    )
 
 
 @router.get("/overview/summary", response_model=OverviewSummary)

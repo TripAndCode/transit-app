@@ -176,6 +176,9 @@ async def _route_table_live(
         "       count(*) AS samples,\n"
         "       countIf(dep_delay < {rt_early:Int32}) AS early_count\n"
         "FROM deduped\n"
+        # An observation the feed sent without a route is no route to list
+        # or count, as the aggregates' path never holds one.
+        "WHERE route_code IS NOT NULL\n"
         "GROUP BY route_code\n"
         "HAVING count(*) >= {rt_min:UInt32}",
         parameters=params,

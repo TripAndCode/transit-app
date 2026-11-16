@@ -21,7 +21,6 @@ describe("two-line CJK clamp", () => {
 
   it.each([
     ["styles/overview.css", ".ov-pareto-label {"],
-    ["styles/overview.css", ".ov-check-name {"],
     ["components/paramPills/RoutePickerPill.css", ".rp-opt-where {"],
     ["tabs/ask/investigation.css", ".investigation-steps button {"],
   ])("%s %s neither truncates to one line nor repeats the utility", (file, selector) => {

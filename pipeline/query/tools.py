@@ -62,7 +62,7 @@ from pipeline.reports import (
     compute_worst_5min,
 )
 from pipeline.reports.definition import DefinitionMeta
-from pipeline.reports.rankings import _weighted_avg_min, on_time_window, threshold_aggregates_serve
+from pipeline.reports.rankings import MIN_GROUP_SAMPLES, _weighted_avg_min, on_time_window, threshold_aggregates_serve
 from pipeline.reports.report_stamp import report_definition
 from pipeline.reports.savepoint import savepoint
 from pipeline.retained_reads import RangeNotRetained
@@ -452,7 +452,7 @@ TOOLS: list[dict] = [
                 "longest average delay first, with p50/p90 minutes), on_time_rate (highest on-time "
                 "% first, always under the industry standard: no more than 1 minute early and 5 "
                 "minutes late), worst_5min (most "
-                "departures more than 5 minutes late first). avg_delay and on_time_rate leave out "
+                "departures more than 5 minutes late first). Every metric leaves out "
                 "routes with 20 or fewer samples. " + _LEFT_OUT_NOTE + " For an on-time ranking at another "
                 "threshold use on_time_rate (best_first=false lists the lowest first). Use for "
                 "'worst N', 'best N', 'most 5-minute delays'."
@@ -1145,7 +1145,9 @@ async def _tool_top_n(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: s
         cols = ["route_code", "on_time_pct", "avg_min", "samples", "low_confidence"]
         label = _summary("label_ranking_ontime_rate", lang=locale)
     else:
-        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n_fetch)
+        # The other rankings' floor, so the card lists what the Routes table
+        # lists at it (route_table with sparse=1).
+        rows = await compute_worst_5min(agency_id, ctx, conn, ch=ch, limit=n_fetch, min_samples=MIN_GROUP_SAMPLES)
         cols = ["route_code", "late5_count", "avg_min", "samples"]
         label = _summary("label_ranking_late5", lang=locale)
 

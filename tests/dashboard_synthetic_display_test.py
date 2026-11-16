@@ -31,14 +31,12 @@ this test checks — the Overview headline's agency-wide `avg_min`
 combined expectation this test and the aggregate e2e test could then
 silently disagree about.
 
-Why Overview's "Routes to check" list and headline DELTA are NOT the check
-target here:
-- "Routes to check" (`RoutesToCheckList.tsx`) excludes the "ok" severity
-  band (< 1.5 min, `frontend/src/styles/tokens.ts`'s `delayBand`) from its
-  rendered groups entirely (`routesToCheckBands.ts`'s `groupBySeverityBand`)
-  — ALL THREE synthetic patterns (0.5 / 0.88 / 1.0 min) fall under 1.5,
-  so this list always renders empty for this fixture regardless of
-  correctness. Not a usable check target.
+Why Overview's "Routes to check" preview and headline DELTA are NOT the
+check target here:
+- "Routes to check" (`RoutesPreview.tsx`) lists only routes observed at
+  least 100 times in the window (the Routes table's default floor), which no
+  pattern of this single-day fixture reaches, so it always reads "No routes
+  need attention" regardless of correctness. Not a usable check target.
 - The headline's delta against the window before it (`hasBaseline` in
   `OverviewHeroRow.tsx`) needs data in the same-width window just before the
   period, which this single-day fixture doesn't have, so it always renders

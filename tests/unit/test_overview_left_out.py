@@ -2,7 +2,8 @@
 
 Retired codes and routes whose feed reports no delay at all
 (:mod:`pipeline.route_catalog`) are neither listed nor counted in the
-concentration card or the movers, and each payload reads one left-out set.
+concentration card or the movers, which read one left-out set per payload;
+the late-route count leaves out what the Routes table does over its window.
 Fake connections answer the reads, so no database is involved.
 """
 
@@ -91,7 +92,7 @@ class _Pool:
 
 
 @pytest.mark.parametrize("pool", [None, _Pool()], ids=["one connection", "pooled"])
-async def test_every_route_list_reads_the_payloads_one_left_out_set(monkeypatch, pool):
+async def test_the_route_lists_read_the_payloads_one_left_out_set(monkeypatch, pool):
     """The set is judged over the payload's period, whichever window a list
     ranks over, so the lists agree on which codes they leave out."""
     asked: list[RangeCtx] = []
@@ -116,7 +117,7 @@ async def test_every_route_list_reads_the_payloads_one_left_out_set(monkeypatch,
         "_reference": {"avg_min": None},
         "_movers": {"worse": [], "better": []},
         "_concentration": {},
-        "_top_delayed_routes": {},
+        "_top_delayed": {},
         "_peak_hour_by_dow": None,
         "_service_day_split": ([], []),
         "_daily_sparkline": ([], None),
@@ -125,4 +126,21 @@ async def test_every_route_list_reads_the_payloads_one_left_out_set(monkeypatch,
 
     await ov.compute_overview_summary(1, _CTX, None, pool=pool)
     assert asked == [_CTX]
-    assert received == {"_movers": _LEFT_OUT, "_concentration": _LEFT_OUT, "_top_delayed_routes": _LEFT_OUT}
+    assert received == {"_movers": _LEFT_OUT, "_concentration": _LEFT_OUT}
+
+
+async def test_the_late_route_count_leaves_out_what_the_routes_table_does_over_its_window(monkeypatch):
+    """Judged over the count's own window, whatever routes the scope names,
+    as the Routes table judges it for the routes-to-check preview."""
+    window = RangeCtx(date(2026, 10, 1), date(2026, 10, 23), routes=("OLD", "C1"))
+    asked: list[RangeCtx] = []
+
+    async def left_out_route_codes(conn, agency_id, ctx):
+        asked.append(ctx)
+        return _LEFT_OUT
+
+    monkeypatch.setattr(ov, "left_out_route_codes", left_out_route_codes)
+    rows = [{"route_code": "OLD", "avg_min": 9.0, "samples": 500}, {"route_code": "C1", "avg_min": 6.0, "samples": 500}]
+    out = await ov._top_delayed(1, window, _Conn(rows))
+    assert asked == [window]
+    assert out["route_count"] == 1

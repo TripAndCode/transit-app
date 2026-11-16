@@ -554,8 +554,24 @@ async def _run_card(
             "pairs": result.pairs,
         },
         "rendered_summary": render_tool_result(result, locale=locale),
-        "conditions": {"dow": ctx_obj.dow, "time_band": ctx_obj.time_band, "service": ctx_obj.service},
+        "conditions": _card_conditions(ctx_obj),
         "definition": result.definition,
+    }
+
+
+def _card_conditions(ctx: RangeCtx) -> dict[str, Any]:
+    """The scope a card's dispatch ran under, as its message records it: the
+    thread's resolved period and routes beside its dow/time_band/service. A
+    card's own ``from_date``/``to_date`` args override the period at dispatch
+    (``pipeline.query.tools._apply_date_overrides``), so a reader of this
+    record lets them win too."""
+    return {
+        "dow": ctx.dow,
+        "time_band": ctx.time_band,
+        "service": ctx.service,
+        "from_date": ctx.from_date.isoformat(),
+        "to_date": ctx.to_date.isoformat(),
+        "routes": list(ctx.routes),
     }
 
 
@@ -590,7 +606,7 @@ class CardAnswer(BaseModel):
     signature_hash: str
     result: dict[str, Any] | None = None
     rendered_summary: str
-    conditions: dict[str, str] | None = None
+    conditions: dict[str, Any] | None = None
     definition: DefinitionMeta | None = None
 
     @field_serializer("result")

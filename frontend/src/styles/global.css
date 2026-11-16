@@ -239,10 +239,9 @@
   --delay-text-moderate: var(--p-clay-725);
   /* Overview trend accents + generic track/hover accents.
      trend-* pairs are the "good/bad/neutral" semantic colors used by
-     ConcentrationBar, PeakHourRibbon, ServiceSplit, and InlineSparkline
-     (fills/strokes) plus overview.css's pareto/peak/service-split hover and
-     fill rules; track-bg is a background fill for bar/rail tracks (pareto,
-     service-split); hover-tint is a bare (non-brand) hover feedback tint;
+     ConcentrationBar and InlineSparkline (fills/strokes) plus overview.css's
+     pareto hover and fill rules; track-bg is a background fill for bar/rail
+     tracks (pareto); hover-tint is a bare (non-brand) hover feedback tint;
      skeleton-* feed .skeleton's shimmer gradient. All theme-aware — light
      values below match the pre-existing hardcoded overview.css hex exactly;
      dark values are lifted to pass contrast / stay visible on the dark

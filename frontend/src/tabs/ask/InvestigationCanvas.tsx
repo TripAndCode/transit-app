@@ -88,7 +88,7 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
           message={message} onFocus={(next) => setFocusEdit({ stepId: selected.id, focus: next })} />;
         return points ? <StopEvidenceChart key={`${selected.id}:${message.message_id}`} messageId={message.message_id} points={points}
           message={message} onFocus={(next) => setFocusEdit({ stepId: selected.id, focus: next })} />
-          : <MessageList key={message.message_id} messages={[message]} formatRoute={formatRoute} t={t} onChip={onChip} />;
+          : <MessageList key={message.message_id} messages={[message]} formatRoute={formatRoute} t={t} onChip={onChip} agencyId={agencyId} />;
       })}
       <details
         className="investigation-log"
@@ -96,7 +96,7 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
         onToggle={(event) => setRecordedOpen(event.currentTarget.open)}
       >
         <summary>{t("ask.evidence.recorded")}</summary>
-        {recordedOpen && <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} onChip={onChip} />}
+        {recordedOpen && <MessageList messages={selected.messages.filter((message) => message.role !== "user")} formatRoute={formatRoute} t={t} onChip={onChip} agencyId={agencyId} />}
       </details>
       <ResultExports key={selected.id} agencyId={agencyId} step={selected} />
       {isLatest && (typeof children === "function" ? children({ messages, focus }) : children)}
@@ -106,7 +106,7 @@ export function InvestigationCanvas({ agencyId, messages, formatRoute, onStepCha
         onToggle={(event) => setLogOpen(event.currentTarget.open)}
       >
         <summary>{t("ask.workspace.full_log")}</summary>
-        {logOpen && <MessageList messages={messages} formatRoute={formatRoute} t={t} onChip={onChip} />}
+        {logOpen && <MessageList messages={messages} formatRoute={formatRoute} t={t} onChip={onChip} agencyId={agencyId} />}
       </details>
     </section>
   );

@@ -200,19 +200,6 @@ export type RouteShapeResponse = {
   unobserved_stops?: UnobservedStop[];
 };
 
-/** One route at the hour, pooled across every service id it ran under. */
-type PeakHourBreakdownRoute = {
-  route_code: string;
-  avg_min: number;
-  samples: number;
-};
-
-export type PeakHourBreakdown = {
-  hour: number;
-  dow: number | null;
-  routes: PeakHourBreakdownRoute[];
-};
-
 type ResponseCtx = {
   from: string;
   to: string;
@@ -973,17 +960,28 @@ export type ConvMessage = {
     pairs: unknown | null;
   } | null;
   rendered_summary: string | null;
-  /** The dow/time_band/service the message's dispatch actually ran under —
-   *  distinct from `args` (the tool's own arguments) and from the live,
-   *  editable conversation `filter_ctx`, which can change after this
-   *  message was sent. `null` for user messages and for a dispatch-free
-   *  assistant reply (e.g. an LLM-grounded follow-up). */
-  conditions?: { dow: string; time_band: string; service: string } | null;
+  /** The scope the message's dispatch actually ran under — distinct from
+   *  `args` (the tool's own arguments) and from the live, editable
+   *  conversation `filter_ctx`, which can change after this message was
+   *  sent. `null` for user messages and for a dispatch-free assistant reply
+   *  (e.g. an LLM-grounded follow-up). */
+  conditions?: CardConditions | null;
   /** The method stamp the report computing this card's figures carries, as
    *  the card was answered. `null` when no report computes them, and absent
    *  from a card saved before cards carried one: neither shows a stamp. */
   definition?: DefinitionMeta | null;
   created_at: string;
+};
+
+/** A card's recorded scope. The period and routes are recorded only for a card
+ *  answered since they were, so a reader must allow for their absence. */
+export type CardConditions = {
+  dow?: string;
+  time_band?: string;
+  service?: string;
+  from_date?: string;
+  to_date?: string;
+  routes?: string[];
 };
 
 export type AppendMessageResult = { user: ConvMessage; assistant: ConvMessage };
@@ -1188,44 +1186,25 @@ export type OverviewConcentration = {
   rest_route_count?: number;
 };
 
-export type OverviewTopDelayedRoute = {
-  route_code: string;
-  route_short_name: string | null;
-  avg_min: number;
-  /** Change (minutes) from the same-length window before; null when the
-   *  route was too thinly observed there to compare. */
-  delta_min?: number | null;
-};
-
 type OverviewBandCount = {
   count: number;
-  /** The band's lower bound, in minutes. */
+  /** The bound, in minutes, the count is of routes averaging at least. */
   threshold_min: number;
 };
 
-/** Routes in each routes-to-check band, over every route rather than only
- *  the listed ones. */
-export type OverviewBandCounts = {
-  severe: OverviewBandCount;
-  moderate: OverviewBandCount;
-  mild: OverviewBandCount;
-};
-
+/** The Pulse hero's late-route count over the headline's window. */
 type OverviewTopDelayed = {
-  routes: OverviewTopDelayedRoute[];
-  delayed_count: number;
-  /** The average delay (minutes) at or above which a route was counted. */
-  delayed_threshold_min: number;
-  band_counts: OverviewBandCounts;
-  /** The routes every count is out of: those observed at least
-   *  `min_samples` times in the headline's window. */
+  band_counts: { severe: OverviewBandCount };
+  /** The routes the count is out of, those observed at least `min_samples`
+   *  times: counted over the same window, scope, floor and left-out routes as
+   *  the Routes table. */
   route_count: number;
   min_samples: number;
 };
 
 export type OverviewPeakHour = {
   /** Hours 0..23, and on through the latest hour past midnight (24, 25, …)
-   *  any of the summary's three profiles has; the three share one length. */
+   *  the profile has. */
   by_hour: (number | null)[];
   peak_hour: number;
   peak_avg_min: number;
@@ -1265,13 +1244,9 @@ export type OverviewSummary = {
   concentration: OverviewConcentration;
   top_delayed: OverviewTopDelayed;
   peak_hour: OverviewPeakHour | null;
-  /** Weekday-only hour-by-hour profile, used by the peak-hour modal split. */
-  peak_hour_weekday?: OverviewPeakHour | null;
-  /** Weekend-only hour-by-hour profile, used by the peak-hour modal split. */
-  peak_hour_weekend?: OverviewPeakHour | null;
   /** Every bucket the agency is split into, in display order. */
   service_split: OverviewServiceSplitEntry[];
-  /** One row per date with data, tagged with its day type; used by the service-split modal. */
+  /** One row per date with data, tagged with its day type: where the headline's last day stands. */
   service_split_daily?: OverviewServiceSplitDay[];
   sparkline_points: number[];
   /** The window's sample-weighted mean delay; null without observations. */

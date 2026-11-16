@@ -87,11 +87,9 @@ def test_parse_departure_time_never_raises_on_pathological_input():
     parse_departure_time(":" * 10_000)
 
 
-def test_the_latest_hour_ingest_can_store_is_the_bound_readers_accept():
-    """An hour reader bounds its input by MAX_SERVICE_HOUR, so it has to be
-    the latest hour this parse can yield, and no earlier."""
-    from pipeline.strategies._time import MAX_SERVICE_HOUR
-
-    _, status, seconds = parse_departure_time(f"{MAX_SERVICE_HOUR}:59:59")
-    assert status == "extended" and seconds is not None and seconds // 3600 == MAX_SERVICE_HOUR
-    assert parse_departure_time(f"{MAX_SERVICE_HOUR + 1}:00:00")[1] == "bad"
+def test_the_latest_hour_the_parse_yields_has_two_digits():
+    """GTFS writes an hour in at most two digits, so 99 is the latest hour
+    ingest can store and 100 is refused."""
+    _, status, seconds = parse_departure_time("99:59:59")
+    assert status == "extended" and seconds is not None and seconds // 3600 == 99
+    assert parse_departure_time("100:00:00")[1] == "bad"

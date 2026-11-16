@@ -28,6 +28,7 @@ const concentration: OverviewConcentration = {
   rest_share_pct: 40,
 };
 const emptyConcentration: OverviewConcentration = { top_routes: [], rest_share_pct: 0 };
+const TREND_HREF = "/agencies/1/time?from=2026-05-11&to=2026-06-09&report=trend";
 
 function mockFeed(feedAgeHours: number | null) {
   const capturedAt =
@@ -79,6 +80,7 @@ function renderHero(overrides: {
       peakHour={overrides.peakHour === undefined ? peakHour : overrides.peakHour}
       concentration={overrides.concentration ?? concentration}
       daily={overrides.daily ?? []}
+      trendHref={TREND_HREF}
       onOpenFact={overrides.onOpenFact ?? (() => {})}
     />
     </MemoryRouter>,
@@ -302,21 +304,25 @@ describe("OverviewHeroRow", () => {
     // late-route count, like the headline, counts the headline's window.
     const period = formatDateRange("2026-05-11", "2026-06-09", { year: false });
     const week = formatDateRange("2026-06-03", "2026-06-09", { year: false });
-    expect(screen.getByRole("button", { name: /Heaviest hour/ })).toHaveTextContent(period);
+    expect(screen.getByRole("link", { name: /Heaviest hour/ })).toHaveTextContent(period);
     expect(screen.getByRole("button", { name: /Share of delay/ })).toHaveTextContent(period);
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent(
       `Observed 100+ times, ${week}`,
     );
   });
 
-  it("lists the heaviest hour as a fact row that opens the peak-hour card", async () => {
+  it("lists the heaviest hour as a fact row that leads to Time's trend", () => {
     mockFeed(0.1);
-    const onOpenFact = vi.fn();
-    renderHero({ onOpenFact });
-    const row = screen.getByRole("button", { name: /Heaviest hour/ });
+    renderHero();
+    const row = screen.getByRole("link", { name: /Heaviest hour/ });
     expect(within(row).getByText("17:00–18:00")).toHaveClass("num");
-    await userEvent.click(row);
-    expect(onOpenFact).toHaveBeenCalledWith("peak_hour");
+    expect(row).toHaveAttribute("href", TREND_HREF);
+  });
+
+  it("links the sparkline's trend to Time", () => {
+    mockFeed(0.1);
+    renderHero();
+    expect(screen.getByRole("link", { name: "See the trend on Time →" })).toHaveAttribute("href", TREND_HREF);
   });
 
   it("lists the top route's share of delay as a fact row that opens the concentration card", async () => {
@@ -373,9 +379,9 @@ describe("OverviewHeroRow", () => {
     expect(late).toHaveClass("ov-hero-fact", { exact: true });
   });
 
-  // The routes-to-check list holds five routes; the count is the server's,
-  // over every route the list ranks, not only the listed ones.
-  it("prints a count past the five routes the list holds", () => {
+  // The routes-to-check preview holds five routes; the count is the server's,
+  // over every ranked route, not only the listed ones.
+  it("prints a count past the five routes the preview holds", () => {
     mockFeed(0.1);
     renderHero({ severeCount: 12 });
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("12/ 38 routes");
@@ -392,7 +398,7 @@ describe("OverviewHeroRow", () => {
   it("omits the heaviest-hour row without an hourly profile, keeping the others", () => {
     mockFeed(0.1);
     renderHero({ peakHour: null });
-    expect(screen.queryByRole("button", { name: /Heaviest hour/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Heaviest hour/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Share of delay/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
   });
@@ -401,7 +407,7 @@ describe("OverviewHeroRow", () => {
     mockFeed(0.1);
     renderHero({ concentration: emptyConcentration });
     expect(screen.queryByRole("button", { name: /Share of delay/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /Heaviest hour/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Heaviest hour/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toBeInTheDocument();
   });
 
@@ -432,7 +438,7 @@ describe("OverviewHeroRow", () => {
     );
   });
 
-  it("defines every fact row beside its button, without opening the fact's card", async () => {
+  it("defines every fact row beside its control, without opening the fact's card", async () => {
     mockFeed(0.1);
     const onOpenFact = vi.fn();
     renderHero({ onOpenFact });

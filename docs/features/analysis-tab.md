@@ -52,8 +52,8 @@ section, each scoped to the shared date/dow/time-band/service/route filter.
   scheduled `nightly-extended` workflow fails once it has passed.
 - Reach it from the Time, Why and Compare rail entries, the command
   palette's report items (through `reportHref`, which opens the screen
-  hosting the type), or the Reports period summary's "Detailed reports →"
-  link (`time?report=trend`).
+  hosting the type), or the links on Pulse, the Reports period summary and
+  the Notebook's cards, each carrying its scope (see ▸ One home per question).
 - Top-level component: `frontend/src/tabs/AnalysisTab.tsx`, which takes
   `reportTypes` and an optional `defaultReport`, and reads the selected one
   from the `report` search param: the param when the screen hosts that type,
@@ -155,6 +155,46 @@ What the user sees/does:
   `frontend/src/hooks/useMediaQuery.ts`) the columns stack vertically
   instead of side-by-side — this tab otherwise stays desktop-oriented by
   design (see the comment in `frontend/src/tabs/analysisTab.css`).
+
+## One home per question
+
+Four questions are each drawn in full on one screen. Everywhere else they
+appear, they are a short form with a link to that screen, built with
+`reportHref` from the scope the short form was counted over, so the
+destination opens on the same figures.
+
+| Question | Home | Short forms that link to it |
+|---|---|---|
+| Which routes are worst? | Routes table (`route_table`) | Pulse's routes to check (the table's own first rows, `RoutesPreview`); the Reports period summary's list; the Notebook's ranking and on-time cards |
+| Weekday against weekend | Day types & agencies (`compare_ranking`) | Pulse's day-type figures; the Notebook's weekday/weekend card (`compare_segments` with `dimension=dow`) |
+| At which days and hours? | Time's `trend` (its day × hour surface and hourly heatmap) | Pulse's heaviest-hour card and fact row |
+| The trend | Time's `trend` (its daily chart) | Pulse's sparkline; the Reports period summary's chart; the Notebook's trend card |
+
+Kept on purpose, because each answers a different question:
+
+- Time's `dow_weekday` / `dow_weekend` rank routes on one day type each
+  ("which routes are worst on weekdays"); `compare_ranking` keeps only routes
+  observed enough on both sides, so neither list is a copy of it.
+- The route forecast's day × time-of-day grid pools every past week into a
+  forecast for the coming days, not the scope's period.
+- Live's mean delay by hour is one vehicle's trip today.
+- Pulse's delay concentration ranks routes by their share of the period's
+  total delay, which no Routes sort offers.
+- The Reports period summary keeps its chart and ten-row list, because it is
+  the printable period document; each links to its home.
+- The Notebook's cards stay answers in a saved thread, each linking to its
+  home. The per-day-type split of one route (`compare_segments` with
+  `dimension=service_type`) has no home and no link.
+
+Given up with the second renderings, accepted as such:
+
+- Each listed route's change from the window before, on Pulse's preview.
+  The movers still show the routes that changed most.
+- The moderate and mild band counts beside the preview. The hero keeps the
+  count of routes averaging 5 minutes or more late.
+- The routes of one hour of the day, which Pulse's hour chart opened. The
+  Routes table has no single-hour scope; a time band narrows it to the band
+  around an hour.
 
 ## The Routes table
 
