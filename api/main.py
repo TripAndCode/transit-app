@@ -29,7 +29,6 @@ from api import activity, retention
 from api.aggregate_errors import aggregate_not_ready_handler
 from api.clickhouse import get_ch_client
 from api.logging_config import configure as configure_logging
-from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.forwarded import ForwardedClientMiddleware, forwarded_hops
 from api.middleware.locale import LocaleMiddleware
@@ -309,7 +308,6 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 #   CORSMiddleware                 (cross-origin SSO headers)
 #   StarletteSessionMiddleware     (Authlib needs request.session)
 #   SessionMiddleware              (loads request.state.user from sid cookie)
-#   APIKeyMiddleware               (loads request.state.tier from X-API-Key)
 #   UsageCountMiddleware           (counts each finished /api/ request, signed in or out)
 #   LocaleMiddleware               (parses Accept-Language → request.state.locale)
 #   CancelGETOnDisconnectMiddleware (cancels GET handler tasks when the client
@@ -322,7 +320,6 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
 app.add_middleware(UsageCountMiddleware)
-app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
     StarletteSessionMiddleware,
@@ -345,7 +342,7 @@ app.add_middleware(
     allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allow_headers=["Content-Type", "X-API-Key"],
+    allow_headers=["Content-Type"],
 )
 # Sees the final status after every inner middleware ran. Assigns
 # request_id, times the request, emits one INFO log to 'api.access' per

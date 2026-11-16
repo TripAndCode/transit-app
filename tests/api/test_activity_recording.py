@@ -1,16 +1,15 @@
-"""API requests are counted per route template and agency: a session user or
-an API-key owner into ``user_activity_daily``, a signed-out caller into
+"""API requests are counted per route template and agency: a signed-in
+caller into ``user_activity_daily``, everyone else into
 ``anonymous_activity_daily``."""
 
 import pytest
 
 from api.activity import ANONYMOUS_BUFFER, BUFFER
-from api.security import token_hash
 from tests.fixtures.users import seed_session
 
 
 def _counts_for(uid):
-    return {(k.route, k.method, k.agency_id, k.via_api_key): v for k, v in BUFFER.drain().items() if k.user_id == uid}
+    return {(k.route, k.method, k.agency_id): v for k, v in BUFFER.drain().items() if k.user_id == uid}
 
 
 def _anonymous_counts():
@@ -23,22 +22,8 @@ async def test_a_signed_in_request_is_counted_by_route_template_and_agency(clien
     sid, uid, _ = await seed_session(aconn)
     await client.get("/api/7/overview/summary", cookies={"sid": sid})
     counts = _counts_for(uid)
-    assert list(counts) == [("/api/{agency_id}/overview/summary", "GET", 7, False)]
-    assert counts[("/api/{agency_id}/overview/summary", "GET", 7, False)][0] == 1
-
-
-@pytest.mark.asyncio
-async def test_an_api_key_request_is_counted_against_the_key_owner(client, aconn):
-    BUFFER.drain()
-    uid = (await seed_session(aconn)).user_id
-    raw = f"key-rec-{uid}"
-    await aconn.execute(
-        "INSERT INTO api_keys (key_hash, owner_email, tier, owner_user_id) VALUES ($1, 'o@x', 'pro', $2)",
-        token_hash(raw),
-        uid,
-    )
-    await client.get("/api/agencies", headers={"X-API-Key": raw})
-    assert ("/api/agencies", "GET", None, True) in _counts_for(uid)
+    assert list(counts) == [("/api/{agency_id}/overview/summary", "GET", 7)]
+    assert counts[("/api/{agency_id}/overview/summary", "GET", 7)][0] == 1
 
 
 @pytest.mark.asyncio
@@ -51,18 +36,16 @@ async def test_a_signed_out_request_lands_in_the_anonymous_buffer_not_the_user_o
 
 
 @pytest.mark.asyncio
-async def test_a_request_with_an_ownerless_api_key_is_counted_in_neither(client, aconn):
+async def test_a_request_carrying_an_arbitrary_api_key_header_is_served_and_counted_anonymously(client, aconn):
+    """No API-key credential exists any more: the header rides along like any
+    other, buys no tier, and is served -- a 200, not a 401 -- and counted the
+    same as a signed-out request."""
     BUFFER.drain()
     ANONYMOUS_BUFFER.drain()
-    raw = "key-rec-ownerless"
-    await aconn.execute(
-        "INSERT INTO api_keys (key_hash, owner_email, tier) VALUES ($1, 'o@x', 'pro')",
-        token_hash(raw),
-    )
-    r = await client.get("/api/agencies", headers={"X-API-Key": raw})
+    r = await client.get("/api/agencies", headers={"X-API-Key": "whatever-arbitrary-value"})
     assert r.status_code == 200
+    assert _anonymous_counts() == {("/api/agencies", "GET", None): [1, 0]}
     assert BUFFER.drain() == {}
-    assert ANONYMOUS_BUFFER.drain() == {}
 
 
 @pytest.mark.asyncio

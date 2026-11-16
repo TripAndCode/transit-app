@@ -255,8 +255,8 @@ figures, while a route's page is several responses, not all of them reports.
   data. A count of the differences, or that every figure matches, follows.
 - **Cost.** The endpoint computes on a public path, so every caller is held
   to `SNAPSHOT_TODAY_LIMIT` (`api/middleware/ratelimit.py`, 10 a minute),
-  stricter than the snapshot read's per-tier budget (60 a minute on the free
-  tier). A repeated query reuses the compute caches behind it: the Routes
+  stricter than the snapshot read's generic budget (`DEFAULT_LIMIT`, 60 a
+  minute). A repeated query reuses the compute caches behind it: the Routes
   table's computation and the agencies board behind the council verdict are
   each cached for five minutes. The council report's pooled on-time figures
   are read from the aggregates each time, or scanned live for a scope the

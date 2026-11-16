@@ -45,7 +45,6 @@ beforeEach(() => {
           method: "GET",
           signed_out: 12,
           signed_in: 3,
-          api_key: 1,
           errors: 0,
         },
         {
@@ -53,13 +52,12 @@ beforeEach(() => {
           method: "GET",
           signed_out: 8,
           signed_in: 1,
-          api_key: 0,
           errors: 2,
         },
       ],
       days: [
-        { day: "2026-11-14", signed_out: 5, signed_in: 1, api_key: 0 },
-        { day: "2026-11-15", signed_out: 7, signed_in: 2, api_key: 1 },
+        { day: "2026-11-14", signed_out: 5, signed_in: 1 },
+        { day: "2026-11-15", signed_out: 7, signed_in: 3 },
       ],
     },
     error: null,
@@ -73,25 +71,24 @@ describe("AdminUsagePage", () => {
     expect(screen.getByText(/2026/)).toBeTruthy();
   });
 
-  it("renders a route row with its signed-out, signed-in and API-key counts", () => {
+  it("renders a route row with its signed-out and signed-in counts", () => {
     wrap(<AdminUsagePage />);
     const row = screen.getByText("/api/agencies").closest("tr") as HTMLElement;
     const cells = Array.from(row.querySelectorAll("td, th")).map(
       (cell) => cell.textContent,
     );
-    expect(cells).toEqual(["/api/agencies", "GET", "12", "3", "1", "0"]);
+    expect(cells).toEqual(["/api/agencies", "GET", "12", "3", "0"]);
   });
 
-  it("stacks each day's signed-out, signed-in and API-key counts against the busiest day", () => {
+  it("stacks each day's signed-out and signed-in counts against the busiest day", () => {
     const { container } = wrap(<AdminUsagePage />);
     const widths = (segment: string) =>
       Array.from(
         container.querySelectorAll<HTMLElement>(`[data-segment="${segment}"]`),
       ).map((el) => el.style.width);
-    // 2026-11-15 is the busiest day (10): 7 / 2 / 1 of it.
+    // 2026-11-15 is the busiest day (10): 7 / 3 of it.
     expect(widths("signed_out")).toEqual(["50%", "70%"]);
-    expect(widths("signed_in")).toEqual(["10%", "20%"]);
-    expect(widths("api_key")).toEqual(["0%", "10%"]);
+    expect(widths("signed_in")).toEqual(["10%", "30%"]);
   });
 
   it("defaults the window to 30 days", () => {

@@ -184,20 +184,10 @@ describe("stacked over another trapped surface", () => {
 });
 
 describe("stacking", () => {
-  it("puts a drawer on the drawer rungs and a modal on the modal rungs", () => {
-    // The ladder separates the two so a modal opened over a drawer layers
-    // above it. Pinning both variants to the modal rungs leaves DOM order
-    // to decide, which is the thing the ladder exists to stop.
-    const { unmount } = render(
-      <Modal open onClose={() => {}} ariaLabel="drawer" variant="drawer">
-        <p>body</p>
-      </Modal>,
-    );
-    const drawerPanel = screen.getByRole("dialog");
-    expect(drawerPanel.style.zIndex).toBe(String(Z_INDEX.drawer));
-    expect((drawerPanel.parentElement as HTMLElement).style.zIndex).toBe(String(Z_INDEX.drawerBackdrop));
-    unmount();
-
+  it("puts a modal on the modal rungs, above the drawer rungs", () => {
+    // A modal opened over the mobile sheet must layer above it; leaving both
+    // on one rung would hand that to DOM order, which the ladder exists to stop.
+    expect(Z_INDEX.modalBackdrop).toBeGreaterThan(Z_INDEX.drawer);
     render(
       <Modal open onClose={() => {}} ariaLabel="modal">
         <p>body</p>

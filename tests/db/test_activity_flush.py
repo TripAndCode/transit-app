@@ -11,7 +11,7 @@ from tests.conftest import _test_pool
 @pytest.mark.asyncio
 async def test_two_flushes_of_the_same_key_add_up(aconn):
     uid = await aconn.fetchval("INSERT INTO users (email) VALUES ('flush1@x') RETURNING user_id")
-    key = ActivityKey(uid, date(2026, 1, 5), "/api/me", "GET", None, False)
+    key = ActivityKey(uid, date(2026, 1, 5), "/api/me", "GET", None)
     pool = await _test_pool()
     try:
         for _ in range(2):
@@ -21,8 +21,9 @@ async def test_two_flushes_of_the_same_key_add_up(aconn):
             assert await flush(buf, pool) == 1
     finally:
         await pool.close()
-    row = await aconn.fetchrow("SELECT requests, errors FROM user_activity_daily WHERE user_id = $1", uid)
+    row = await aconn.fetchrow("SELECT requests, errors, via_api_key FROM user_activity_daily WHERE user_id = $1", uid)
     assert (row["requests"], row["errors"]) == (4, 2)
+    assert row["via_api_key"] is False
 
 
 @pytest.mark.asyncio
@@ -30,8 +31,8 @@ async def test_a_deleted_user_does_not_sink_everyone_elses_counts(aconn):
     kept = await aconn.fetchval("INSERT INTO users (email) VALUES ('flush2@x') RETURNING user_id")
     gone = await aconn.fetchval("INSERT INTO users (email) VALUES ('flush3@x') RETURNING user_id")
     buf = ActivityBuffer()
-    buf.record(ActivityKey(kept, date(2026, 1, 5), "/api/me", "GET", None, False), is_error=False)
-    buf.record(ActivityKey(gone, date(2026, 1, 5), "/api/me", "GET", None, False), is_error=False)
+    buf.record(ActivityKey(kept, date(2026, 1, 5), "/api/me", "GET", None), is_error=False)
+    buf.record(ActivityKey(gone, date(2026, 1, 5), "/api/me", "GET", None), is_error=False)
     await aconn.execute("DELETE FROM users WHERE user_id = $1", gone)
     pool = await _test_pool()
     try:
@@ -83,7 +84,7 @@ async def test_a_failed_anonymous_flush_does_not_stop_the_user_flush_in_stop(aco
     uid = await aconn.fetchval("INSERT INTO users (email) VALUES ('flush4@x') RETURNING user_id")
     activity.BUFFER.drain()
     activity.ANONYMOUS_BUFFER.drain()
-    activity.BUFFER.record(ActivityKey(uid, date(2026, 1, 5), "/api/me", "GET", None, False), is_error=False)
+    activity.BUFFER.record(ActivityKey(uid, date(2026, 1, 5), "/api/me", "GET", None), is_error=False)
     activity.ANONYMOUS_BUFFER.record(AnonymousKey(date(2026, 1, 5), "/api/agencies", "GET", None), is_error=False)
     pool = await _test_pool()
     wrapped = _FailingAnonymousPool(pool)
