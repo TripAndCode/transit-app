@@ -44,6 +44,7 @@ from api.security import User, csrf_guard, require_admin
 from pipeline.feed_quality_grade import Criterion
 from pipeline.locks import AGENCY_RUN_REQUEST_LOCK_KEY
 from pipeline.reports.network import invalidate_network_summary
+from pipeline.strategies.static_join import RtCoverageField
 
 router = APIRouter(prefix="/api/admin/agencies", tags=["admin"])
 
@@ -157,6 +158,8 @@ class FeedQualityMonth(BaseModel):
     grade: Literal["A", "B", "C", "D", "F"] | None
     grade_failing: list[Criterion]
     grade_missing: list[FeedQualityGradeMissing]
+    #: The fields ``field_coverage`` fails on, when it fails on any.
+    grade_failing_fields: list[RtCoverageField]
 
 
 class WeatherStation(BaseModel):

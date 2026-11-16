@@ -2044,7 +2044,20 @@
       "quality_validator_failed": "could not run on {{failed, number}} days",
       "quality_validator_none": "no rule fired",
       "quality_validator_note": "MobilityData's GTFS-RT validator. Its counts are recorded, not graded: a shared vendor platform fires some rules on every feed it serves. Rule names are the validator's own English wording.",
-      "quality_validator_rule_counts": "{{occurrences, number}} in {{polls, number}} polls on {{days, number}} days"
+      "quality_validator_rule_counts": "{{occurrences, number}} in {{polls, number}} polls on {{days, number}} days",
+      "quality_failing_value": {
+        "rt_completeness": "trips reported {{value}}",
+        "stale_polls": "{{value}} of polls older than 65 s",
+        "clamp": "implausible readings {{value}}",
+        "field_coverage": "field coverage ({{fields}})"
+      },
+      "quality_failing_field": "{{field}} {{value}}",
+      "quality_field": {
+        "stop_id": "stop_id",
+        "arr_delay": "arrival",
+        "schedule_relationship_trip": "trip status",
+        "schedule_relationship_stop": "stop status"
+      }
     },
     "architecture": {
       "title": "Architecture",

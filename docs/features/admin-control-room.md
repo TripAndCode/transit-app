@@ -144,11 +144,12 @@ and the implausible share are the agencies board's own figures over the same
 days.
 
 The newest month's figures include the share of polls whose message was more
-than 65 s old when captured. Above them sits the month's A–F grade, with the
-criteria it misses, and, for a month without a grade, each criterion whose
-figure is missing and why. The diagnostics endpoint computes the grade
-from the stored figures as it reads them (`pipeline/feed_quality_grade.py`);
-the thresholds and bands are in `docs/methodology.md` and `DELAY_ANALYSIS.md`.
+than 65 s old when captured. Above them sits the month's A–F grade, with each
+criterion it misses and the figure that criterion was judged on (for field
+coverage, each field that fell short, from `grade_failing_fields`), and, for a
+month without a grade, each criterion whose figure is missing and why. The
+diagnostics endpoint computes the grade from the stored figures as it reads them
+(`pipeline/feed_quality_grade.py`); the thresholds are in `docs/methodology.md`.
 No other endpoint carries the grade: `tests/unit/test_agency_feed_quality.py`
 fails if any other route's declared `response_model` schema has a grade, or if
 that route stops requiring an admin. It stays admin-only

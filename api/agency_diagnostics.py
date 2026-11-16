@@ -386,6 +386,7 @@ def build_feed_quality(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
         month["grade"] = graded.grade
         month["grade_failing"] = list(graded.failing)
         month["grade_missing"] = [{"criterion": criterion, "reason": reason} for criterion, reason in graded.missing]
+        month["grade_failing_fields"] = list(graded.failing_fields)
         out.append(month)
     return out
 

@@ -473,6 +473,9 @@ type ValidatorRule = {
 /** A criterion of the month's grade (pipeline/feed_quality_grade.py's `CRITERIA`). */
 type FeedQualityCriterion = "rt_completeness" | "stale_polls" | "clamp" | "field_coverage";
 
+/** A field the RT field-coverage probe judges (pipeline/strategies/static_join.py's `RT_COVERAGE_FIELDS`). */
+type RtCoverageField = "stop_id" | "arr_delay" | "schedule_relationship_trip" | "schedule_relationship_stop";
+
 /** One month of an agency's feed-quality scorecard. Each figure is null
  *  exactly when its `*_missing` reason is set. The grade is null exactly
  *  when `grade_missing` names a criterion whose figure the month lacks. The
@@ -520,6 +523,8 @@ export type AgencyFeedQualityMonth = {
   grade: "A" | "B" | "C" | "D" | "F" | null;
   grade_failing: FeedQualityCriterion[];
   grade_missing: { criterion: FeedQualityCriterion; reason: FeedQualityMissing }[];
+  /** The fields `field_coverage` fails on, when it fails on any. */
+  grade_failing_fields: RtCoverageField[];
 };
 
 type AgencyDiagnostics = {
