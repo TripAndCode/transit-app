@@ -12,7 +12,7 @@ import * as hooks from "../api/hooks";
 import * as adminHook from "../api/useIsAdmin";
 import * as config from "../api/config";
 import * as snapshots from "../api/snapshots";
-import { AnalysisTab } from "./AnalysisTab";
+import { AnalysisTab, SingleReportScreen } from "./AnalysisTab";
 import { PrintFootProvider, PrintFrame } from "../components/PrintFrame";
 import { STILL_WORKING_AFTER_MS } from "../components/StillWorking";
 import type { DefinitionMeta, ReportMeta, ReportResponse, ReportType, TrendPayload } from "../api/types";
@@ -77,6 +77,15 @@ function renderAnalysis(
         element: <AnalysisTab reportTypes={reportTypes} defaultReport={defaultReport} />,
       },
     ],
+    { initialEntries: [initialPath] },
+  );
+  renderWithProviders(<RouterProvider router={router} />);
+  return { router };
+}
+
+function renderSingleReport(initialPath: string, reportType: string) {
+  const router = createMemoryRouter(
+    [{ path: "/agencies/:agencyId/analysis/:lens", element: <SingleReportScreen reportType={reportType} /> }],
     { initialEntries: [initialPath] },
   );
   renderWithProviders(<RouterProvider router={router} />);
@@ -253,15 +262,15 @@ describe("AnalysisTab", () => {
   it("falls back to its first report when the report param belongs to another screen", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({
-      data: [reportMeta("trend"), reportMeta("dwell_run")],
+      data: [reportMeta("dow_weekday"), reportMeta("dow_weekend")],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
     } as never);
     const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
-    renderAnalysis("/agencies/1/analysis/why?report=trend", ["dwell_run"]);
-    expect(screen.getByRole("button", { name: /^Dwell\/running time/ })).toHaveAttribute("aria-pressed", "true");
-    expect(useReport.mock.calls.at(-1)?.[1]).toBe("dwell_run");
+    renderAnalysis("/agencies/1/analysis/when?report=dwell_run", ["dow_weekday", "dow_weekend"]);
+    expect(screen.getByRole("button", { name: /^Routes on weekdays/ })).toHaveAttribute("aria-pressed", "true");
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe("dow_weekday");
   });
 
   it("selecting a report sets the report param, keeps the filters, and adds a history entry", async () => {
@@ -433,7 +442,7 @@ describe("AnalysisTab empty state recoveries", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07&routes=A05"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<SingleReportScreen reportType="dwell_run" />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -484,7 +493,7 @@ describe("AnalysisTab dwell_run route cap", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07&service=平日"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<SingleReportScreen reportType="dwell_run" />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -534,7 +543,7 @@ describe("AnalysisTab dwell_run route cap", () => {
       <MemoryRouter initialEntries={["/agencies/8/analysis/why?report=dwell_run&from=2020-01-01&to=2020-01-07"]}>
         <SwitchAgency />
         <Routes>
-          <Route path="/agencies/:agencyId/analysis/:lens" element={<AnalysisTab reportTypes={["dwell_run"]} />} />
+          <Route path="/agencies/:agencyId/analysis/:lens" element={<SingleReportScreen reportType="dwell_run" />} />
         </Routes>
       </MemoryRouter>
     );
@@ -721,7 +730,7 @@ describe("AnalysisTab Why without arrival times", () => {
       error: null,
       refetch: vi.fn(),
     } as never);
-    return renderAnalysis("/agencies/1/analysis/why?report=dwell_run&from=2026-09-01&to=2026-09-07", ["dwell_run"]);
+    return renderSingleReport("/agencies/1/analysis/why?report=dwell_run&from=2026-09-01&to=2026-09-07", "dwell_run");
   }
 
   it("says why the split can't be shown and where to look instead", async () => {
@@ -1393,5 +1402,53 @@ describe("AnalysisTab slow reports", () => {
     fireEvent.click(screen.getByRole("button", { name: "Narrow to the last 7 days of the period" }));
     const params = new URLSearchParams(router.state.location.search);
     expect([params.get("from"), params.get("to")]).toEqual(["2026-09-24", "2026-09-30"]);
+  });
+});
+
+describe("SingleReportScreen", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function setup(path: string, reportType: ReportType) {
+    mockSupportHooks();
+    const useReports = vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta(reportType)], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({ data: reportResponse(reportType), isFetching: false, error: null, refetch: vi.fn() } as never);
+    renderSingleReport(path, reportType);
+    return { useReports, useReport };
+  }
+
+  it.each([
+    ["dwell_run", "/agencies/1/analysis/why"],
+    ["compare_ranking", "/agencies/1/analysis/compare"],
+  ] as const)("renders %s as the page itself, with no report list beside it", (reportType, path) => {
+    const { useReports, useReport } = setup(path, reportType);
+    expect(document.querySelector(".analysis-report-list")).toBeNull();
+    expect(screen.queryByText("Reports")).toBeNull();
+    expect(screen.queryByRole("button", { name: /^(Dwell\/running time|Weekday and weekend\/holiday gap)/ })).toBeNull();
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe(reportType);
+    expect(useReports).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["dwell_run", "report=dwell_run"],
+    ["compare_ranking", "report=compare_ranking"],
+    ["dwell_run", "report=trend"],
+  ] as const)("opens %s for the link ?%s", (reportType, query) => {
+    const { useReport } = setup(`/agencies/1/analysis/x?${query}`, reportType);
+    expect(useReport.mock.calls.at(-1)?.[1]).toBe(reportType);
+  });
+
+  it("keeps the report's heading, export and controls", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...emptyReport("dwell_run"), rows: [{ available: true, time_band_supported: true, routes: [] }] },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderSingleReport("/agencies/1/analysis/why", "dwell_run");
+    expect(screen.getByRole("heading", { level: 2, name: "Dwell/running time" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /CSV/ })).toBeInTheDocument();
   });
 });

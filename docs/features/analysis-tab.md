@@ -6,9 +6,12 @@ section, each scoped to the shared date/dow/time-band/service/route filter.
 
 ## How a user reaches it
 
-- Hosted by three of the rail's destinations. Each passes AnalysisTab the
-  report types it hosts (the per-screen lists in
-  `frontend/src/routes/destinations.ts`):
+- Hosted by three of the rail's destinations. Time passes AnalysisTab the
+  report types it hosts (`TIME_REPORT_TYPES` in
+  `frontend/src/routes/destinations.ts`); Why and Compare each have one
+  report and render it through `SingleReportScreen`, full width with no
+  report list, whatever `report` a link carries (`WHY_REPORT`,
+  `COMPARE_REPORT`):
   - Time (`/agencies/:agencyId/time`, `frontend/src/tabs/TimeTab.tsx`) —
     `trend`, `dow_weekday`, `dow_weekend`, `route_forecast`;
   - Why (`/agencies/:agencyId/why`, `frontend/src/tabs/WhyTab.tsx`) —
@@ -19,7 +22,8 @@ section, each scoped to the shared date/dow/time-band/service/route filter.
     be shown once in a closing 「表示できない分析」 list, with a status chip and
     the sentence giving its cause (`components/analysis/notShown.ts`), not
     as an empty card;
-  - Compare (`/agencies/:agencyId/compare`, `frontend/src/tabs/CompareTab.tsx`)
+  - Compare, labelled "Day types & agencies" (日種別・事業者の比較) in the
+    rail (`/agencies/:agencyId/compare`, `frontend/src/tabs/CompareTab.tsx`)
     for any `by` other than `agencies` (default `periods`) —
     `compare_ranking`.
 
@@ -54,7 +58,8 @@ section, each scoped to the shared date/dow/time-band/service/route filter.
   `reportTypes` and an optional `defaultReport`, and reads the selected one
   from the `report` search param: the param when the screen hosts that type,
   else `defaultReport` when the screen hosts it, else the screen's first
-  type. It composes the report list and the selected report's body.
+  type. It composes the report list and the selected report's body;
+  `SingleReportScreen` (same file) renders one report's body with no list.
 
 What the user sees/does:
 
@@ -567,8 +572,9 @@ the scope as one sentence above their content
    no-data empty state.
 2. Click "Time" in the rail -> URL `/agencies/:agencyId/time`; expect its
    first report (`trend`) to be selected.
-3. Click each report-type button in the left column, and repeat on the
-   Why and Compare rail entries - expect the URL's `report` param to
+3. Click each report-type button in the left column on Time. Why and the
+   Compare entry ("Day types & agencies") show their one report across
+   the page with no list. Expect the URL's `report` param to
    update and the body to show either a table (with a working CSV download
    link) or, for `trend`, the daily chart + hourly heatmap + day x hour surface.
    Open `/agencies/:agencyId/routes?report=on_time` - expect the Routes table

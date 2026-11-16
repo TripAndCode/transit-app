@@ -15,7 +15,7 @@ import * as hooks from "../api/hooks";
 import { togglePinnedRoute } from "../api/pinnedRoutes";
 import { blockStorage } from "../test/blockStorage";
 
-const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Compare", "Live", "Reports"];
+const RAIL_ORDER = ["Pulse", "Routes", "Time", "Why", "Day types & agencies", "Live", "Reports"];
 
 function mockMatchMedia(matches: boolean) {
   vi.spyOn(window, "matchMedia").mockReturnValue({
@@ -452,7 +452,7 @@ describe("Sidebar", () => {
       ["/agencies/8/routes?sort=late5_share", "Routes views", "Share over 5 min"],
       ["/agencies/8/routes?sort=worst_5min", "Routes views", "Impact (count)"],
       ["/agencies/8/time", "Time views", "Trend"],
-      ["/agencies/8/compare?by=agencies", "Compare views", "Agencies"],
+      ["/agencies/8/compare?by=agencies", "Day types & agencies views", "Agencies"],
       ["/agencies/8/reports?doc=saved", "Reports views", "Saved analyses"],
     ])("on %s marks the stop the page shows", (path, group, current) => {
       renderSidebar(path);
@@ -478,7 +478,7 @@ describe("Sidebar", () => {
       const user = userEvent.setup();
       renderSidebar("/agencies/8/compare");
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-      const stops = within(screen.getByRole("group", { name: "Compare views" })).getAllByRole("link");
+      const stops = within(screen.getByRole("group", { name: "Day types & agencies views" })).getAllByRole("link");
       expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends/holidays", "Agencies"]);
     });
 
@@ -674,7 +674,7 @@ describe("Sidebar", () => {
       expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual([
         "Time",
         "Why",
-        "Compare",
+        "Day types & agencies",
         "Reports",
         "Bus Town",
       ]);

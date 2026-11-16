@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { CompareTab } from "./CompareTab";
 import { TimeTab } from "./TimeTab";
@@ -22,6 +23,10 @@ vi.mock("../routes/lazyTabs", () => ({
     Promise.resolve({
       default: ({ reportTypes }: { reportTypes: readonly string[] }) => <div>analysis-tab:{reportTypes.join(",")}</div>,
     }),
+  loadSingleReportScreen: () =>
+    Promise.resolve({
+      default: ({ reportType }: { reportType: string }) => <div>single-report:{reportType}</div>,
+    }),
 }));
 
 function open(path: string, route: string, element: React.ReactNode) {
@@ -38,22 +43,22 @@ describe("destination screens", () => {
 
   it("hosts dwell vs run on Why", async () => {
     open("/agencies/9/why", "agencies/:agencyId/why", <WhyTab />);
-    expect(await screen.findByText("analysis-tab:dwell_run")).toBeInTheDocument();
+    expect(await screen.findByText("single-report:dwell_run")).toBeInTheDocument();
   });
 
   it.each([
     ["/agencies/9/time", "agencies/:agencyId/time", <TimeTab key="time" />, "Time"],
     ["/agencies/9/why", "agencies/:agencyId/why", <WhyTab key="why" />, "Why"],
-    ["/agencies/9/compare", "agencies/:agencyId/compare", <CompareTab key="compare" />, "Compare"],
+    ["/agencies/9/compare", "agencies/:agencyId/compare", <CompareTab key="compare" />, "Day types & agencies"],
   ] as const)("titles %s with one level-1 heading", async (path, route, element, title) => {
     open(path, route, element);
-    await screen.findByText(/^analysis-tab/);
+    await screen.findByText(/^(analysis-tab|single-report)/);
     expect(screen.getByRole("heading", { level: 1, name: title })).toBeInTheDocument();
   });
 
   it.each([
-    ["?by=periods", /^analysis-tab/, "Compare"],
-    ["?by=agencies", /network-tab/, "Compare"],
+    ["?by=periods", /^single-report/, "Day types & agencies"],
+    ["?by=agencies", /network-tab/, "Day types & agencies"],
   ])("has exactly one level-1 heading on Compare%s", async (search, content, title) => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
     await screen.findByText(content);
@@ -63,13 +68,13 @@ describe("destination screens", () => {
   });
 
   it.each([
-    ["?by=periods", /^analysis-tab/],
+    ["?by=periods", /^single-report/],
     ["?by=agencies", /network-tab/],
   ])("keeps the same title directly above the mode toggle on Compare%s, so switching modes does not move it", async (search, content) => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
     await screen.findByText(content);
-    const heading = screen.getByRole("heading", { level: 1, name: "Compare" });
-    const toggle = screen.getByRole("group", { name: "Compare" });
+    const heading = screen.getByRole("heading", { level: 1, name: "Day types & agencies" });
+    const toggle = screen.getByRole("group", { name: "Day types & agencies" });
     expect(heading.closest("header")?.nextElementSibling).toBe(toggle);
   });
 
@@ -81,7 +86,7 @@ describe("destination screens", () => {
     expect(agencies).toHaveAttribute("aria-pressed", "true");
     expect(periods).toHaveAttribute("aria-pressed", "false");
     await userEvent.click(periods);
-    expect(await screen.findByText("analysis-tab:compare_ranking")).toBeInTheDocument();
+    expect(await screen.findByText("single-report:compare_ranking")).toBeInTheDocument();
     const search = new URLSearchParams(router.state.location.search);
     expect(search.get("by")).toBe("periods");
     expect(search.get("from")).toBe("2026-09-01");
@@ -89,7 +94,13 @@ describe("destination screens", () => {
 
   it.each(["", "?by=service", "?by=periods"])("shows the period comparison on Compare%s", async (search) => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
-    expect(await screen.findByText("analysis-tab:compare_ranking")).toBeInTheDocument();
+    expect(await screen.findByText("single-report:compare_ranking")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Weekdays and weekends/holidays" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("names the Compare screen for what it compares in both languages", async () => {
+    const en = i18n.getFixedT("en");
+    const ja = i18n.getFixedT("ja");
+    expect([en("nav.compare"), ja("nav.compare")]).toEqual(["Day types & agencies", "日種別・事業者の比較"]); // i18n-ignore: wording under test
   });
 });

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { REPORT_TYPE_IDS } from "../tabs/reportTypes";
 import {
-  COMPARE_REPORT_TYPES,
+  COMPARE_REPORT,
   DESTINATIONS,
   ROUTES_REPORT_TYPES,
   SAVED_REPORT_TYPES,
   TIME_REPORT_TYPES,
-  WHY_REPORT_TYPES,
+  WHY_REPORT,
   agencySwitchHref,
   destHref,
   compareMode,
@@ -30,8 +30,8 @@ describe("destinations", () => {
     const homes = [
       ...ROUTES_REPORT_TYPES,
       ...TIME_REPORT_TYPES,
-      ...WHY_REPORT_TYPES,
-      ...COMPARE_REPORT_TYPES,
+      WHY_REPORT,
+      COMPARE_REPORT,
       ...SAVED_REPORT_TYPES,
     ];
     expect([...homes].sort()).toEqual([...REPORT_TYPE_IDS].sort());

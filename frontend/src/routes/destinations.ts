@@ -11,8 +11,9 @@ type ReportTypeId = (typeof REPORT_TYPE_IDS)[number];
  *  way that list was ordered. */
 export const ROUTES_REPORT_TYPES = ["ranking", "ranking_best", "on_time", "worst_5min"] as const satisfies readonly ReportTypeId[];
 export const TIME_REPORT_TYPES = ["trend", "dow_weekday", "dow_weekend", "route_forecast"] as const satisfies readonly ReportTypeId[];
-export const WHY_REPORT_TYPES = ["dwell_run"] as const satisfies readonly ReportTypeId[];
-export const COMPARE_REPORT_TYPES = ["compare_ranking"] as const satisfies readonly ReportTypeId[];
+/** The one report each single-report screen shows, in full, with no list. */
+export const WHY_REPORT = "dwell_run" satisfies ReportTypeId;
+export const COMPARE_REPORT = "compare_ranking" satisfies ReportTypeId;
 export const SAVED_REPORT_TYPES = ["council_summary", "delay_certificate"] as const satisfies readonly ReportTypeId[];
 
 /** The figures the Routes table sorts by, in the order its control lists

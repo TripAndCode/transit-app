@@ -22,6 +22,8 @@ export const loadMapTab: TabLoader = () => import("../tabs/MapTab").then((m) => 
 export const loadAskTab: TabLoader = () => import("../tabs/AskTab").then((m) => ({ default: m.AskTab }));
 export const loadAnalysisTab = () =>
   import("../tabs/AnalysisTab").then((m) => ({ default: m.AnalysisTab }));
+export const loadSingleReportScreen = () =>
+  import("../tabs/AnalysisTab").then((m) => ({ default: m.SingleReportScreen }));
 export const loadRouteAnalysisTab: TabLoader = () =>
   import("../tabs/RouteAnalysisTab").then((m) => ({ default: m.RouteAnalysisTab }));
 export const loadReportsHomeTab: TabLoader = () =>
@@ -51,9 +53,9 @@ export const ROUTE_CHUNK_LOADERS: Record<Destination | "ask", () => Promise<unkn
   routes: loadRoutesIndex,
   // A thin destination only hosts a report screen, which is a chunk of its own.
   time: () => Promise.all([loadTimeTab(), loadAnalysisTab()]),
-  why: () => Promise.all([loadWhyTab(), loadAnalysisTab()]),
+  why: () => Promise.all([loadWhyTab(), loadSingleReportScreen()]),
   // Compare hosts either board: the agencies one renders NetworkTab.
-  compare: () => Promise.all([loadCompareTab(), loadAnalysisTab(), loadNetworkTab()]),
+  compare: () => Promise.all([loadCompareTab(), loadSingleReportScreen(), loadNetworkTab()]),
   live: loadMapTab,
   // The Reports host lazy-loads its default view, so warm both.
   reports: () => Promise.all([loadSavedExportTab(), loadReportsHomeTab()]),
