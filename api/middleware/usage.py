@@ -58,13 +58,19 @@ class UsageCountMiddleware:
 
 def _record(scope: Scope, status_code: int) -> None:
     """Count one finished request. Skipped for sign-in plumbing, for requests
-    no API route matched (the SPA fallback answers unknown /api paths), and
-    for anything outside /api/."""
+    no API route matched (the SPA fallback answers unknown /api paths) or
+    whose method the matched route doesn't serve, and for anything outside
+    /api/."""
     if not _should_count(scope["path"], scope["method"]):
         return
     route = scope.get("route")
     template = getattr(route, "path", None)
     if template is None or getattr(route, "name", None) == "spa_fallback":
+        return
+    # A method the route doesn't serve still matches it (and is answered 405);
+    # counting it would make the caller's method string part of the key.
+    methods = getattr(route, "methods", None)
+    if methods is not None and scope["method"] not in methods:
         return
     day = today_jst()
     method = scope["method"]

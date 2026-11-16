@@ -76,9 +76,10 @@ describe("AdminUsagePage", () => {
   it("renders a route row with its signed-out, signed-in and API-key counts", () => {
     wrap(<AdminUsagePage />);
     const row = screen.getByText("/api/agencies").closest("tr") as HTMLElement;
-    expect(row.textContent).toContain("12");
-    expect(row.textContent).toContain("3");
-    expect(row.textContent).toContain("1");
+    const cells = Array.from(row.querySelectorAll("td, th")).map(
+      (cell) => cell.textContent,
+    );
+    expect(cells).toEqual(["/api/agencies", "GET", "12", "3", "1", "0"]);
   });
 
   it("stacks each day's signed-out, signed-in and API-key counts against the busiest day", () => {

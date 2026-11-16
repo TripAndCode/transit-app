@@ -246,7 +246,8 @@ The drawer's "Usage (last 30 days)" section reads
 template and agency, the requests and errors summed from
 `user_activity_daily`. `UsageCountMiddleware` (`api/middleware/usage.py`)
 counts every finished `/api/` request that matched a route, except the
-sign-in flow, `/api/config` and the who-am-I read `GET /api/me`; a session
+sign-in flow, `/api/config`, the who-am-I read (`GET`/`HEAD` `/api/me`) and a
+method the matched route doesn't serve (a 405); a session
 user or an API key's owner lands here, attributed to the key's owner for an
 API-key request (`api/activity.py`, flushed every 30 s). It stores route
 templates and days only — never raw paths, query text, or finer timestamps.
@@ -379,7 +380,7 @@ retention (`pipeline/retention.py`).
 Route: `/admin/usage`, backed by `AdminUsagePage`.
 
 Endpoint: `GET /api/admin/usage` (`days` 1–400, default 30; optional
-`agency_id`) — requests per route template per day over the trailing `days`
+`agency_id`, 1 to the int4 maximum) — requests per route template per day over the trailing `days`
 JST days ending today, split by whether the caller was signed out, signed in,
 or an API key. The response gives the window (`from`/`to`), the per-route
 totals (`route`, `method`, `signed_out`, `signed_in`, `api_key`, `errors`,

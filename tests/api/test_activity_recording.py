@@ -108,6 +108,17 @@ async def test_sign_in_plumbing_and_unmatched_requests_are_not_counted(client, a
 
 
 @pytest.mark.asyncio
+async def test_a_method_the_route_does_not_serve_is_not_counted(client, aconn):
+    BUFFER.drain()
+    ANONYMOUS_BUFFER.drain()
+    sid = (await seed_session(aconn)).sid
+    assert (await client.request("FOOBAR", "/api/agencies")).status_code == 405
+    assert (await client.request("PUT", "/api/agencies", cookies={"sid": sid})).status_code == 405
+    assert BUFFER.drain() == {}
+    assert ANONYMOUS_BUFFER.drain() == {}
+
+
+@pytest.mark.asyncio
 async def test_a_signed_out_snapshot_read_is_counted(client, aconn):
     ANONYMOUS_BUFFER.drain()
     await client.get("/api/snapshots/abcdefghijklmnopqrstuv")
