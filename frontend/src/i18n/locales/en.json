@@ -2193,7 +2193,6 @@
         "weatherIngestEnabled": "Weather: observed-data ingest, and the rain panel on Why",
         "openapiDocsEnabled": "API: OpenAPI docs",
         "perfDebugEnabled": "API: perf debug surface",
-        "loginRequired": "Access: sign-in required",
         "mlForecast": "ML forecast",
         "updatesPruneEnabled": "Retention: drop raw ClickHouse updates past the horizon"
       }

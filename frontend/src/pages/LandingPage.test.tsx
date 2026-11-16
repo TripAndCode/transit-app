@@ -12,11 +12,10 @@ void i18n.changeLanguage("en");
 const mockUseSession = vi.fn<() => { data: unknown; isLoading: boolean }>(() => ({ data: null, isLoading: false }));
 vi.mock("../api/auth", () => ({ useSession: () => mockUseSession() }));
 
-type Config = { auth_enabled: boolean; local_admin_enabled: boolean; login_required?: boolean };
+type Config = { auth_enabled: boolean; local_admin_enabled: boolean };
 const mockUseConfig = vi.fn<() => { data: Config | undefined }>();
 vi.mock("../api/config", () => ({ useConfig: () => mockUseConfig() }));
-const OPEN: Config = { auth_enabled: true, local_admin_enabled: false, login_required: false };
-const GATED: Config = { auth_enabled: true, local_admin_enabled: false, login_required: true };
+const SSO: Config = { auth_enabled: true, local_admin_enabled: false };
 
 function renderLanding() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -36,12 +35,12 @@ function renderLanding() {
 describe("LandingPage", () => {
   beforeEach(() => {
     mockUseSession.mockReturnValue({ data: null, isLoading: false });
-    mockUseConfig.mockReturnValue({ data: OPEN });
+    mockUseConfig.mockReturnValue({ data: SSO });
     clearLastAgency();
   });
 
   describe("the one CTA decision, shared by the header button and the hero's primary CTA", () => {
-    it("opens the dashboard without sign-in when the deployment needs none, and says what sign-in adds", () => {
+    it("opens the dashboard to a signed-out visitor without sign-in, and says what sign-in adds", () => {
       renderLanding();
       const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
@@ -60,18 +59,8 @@ describe("LandingPage", () => {
       expect(screen.queryByText(/to keep your saved views/)).toBeNull();
     });
 
-    it("offers sign-in as the way in when the deployment requires it", () => {
-      mockUseConfig.mockReturnValue({ data: GATED });
-      renderLanding();
-      const ctas = screen.getAllByRole("link", { name: "Sign in" });
-      expect(ctas).toHaveLength(2);
-      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/login");
-      expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
-      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
-    });
-
     it("leaves out the sign-in note on a deployment with nothing to sign in with", () => {
-      mockUseConfig.mockReturnValue({ data: { ...OPEN, auth_enabled: false } });
+      mockUseConfig.mockReturnValue({ data: { ...SSO, auth_enabled: false } });
       renderLanding();
       const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
@@ -79,23 +68,23 @@ describe("LandingPage", () => {
       expect(screen.queryByText(/to keep your saved views/)).toBeNull();
     });
 
-    it("offers sign-in, not the guest entry, while the session is still loading", () => {
+    it("opens the dashboard while the session is still loading, with no sign-in note yet", () => {
       mockUseSession.mockReturnValue({ data: undefined, isLoading: true });
       renderLanding();
-      const ctas = screen.getAllByRole("link", { name: "Sign in" });
+      const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
-      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/login");
-      expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
+      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
+      expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
       expect(screen.queryByText(/to keep your saved views/)).toBeNull();
     });
 
-    it("promises no sign-in-free entry before the configuration says so", () => {
+    it("opens the dashboard before the configuration has loaded, with no sign-in note yet", () => {
       mockUseConfig.mockReturnValue({ data: undefined });
       renderLanding();
-      const ctas = screen.getAllByRole("link", { name: "Sign in" });
+      const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
-      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/login");
-      expect(screen.queryByRole("link", { name: /no sign-in needed/ })).toBeNull();
+      for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
+      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
     });
   });
 
@@ -119,29 +108,22 @@ describe("LandingPage", () => {
   });
 
   describe("the Bus Town teaser's one real CTA", () => {
-    it("sends a visitor who reaches the app straight to their last-chosen agency's Bus Town", () => {
+    it("sends a visitor straight to their last-chosen agency's Bus Town", () => {
       writeLastAgency(7);
       renderLanding();
       expect(screen.getByRole("link", { name: "Open Bus Town" })).toHaveAttribute("href", "/agencies/7/bus-town");
     });
 
-    it("sends a visitor who reaches the app but has no stored agency to the app root to choose one", () => {
+    it("sends a visitor with no stored agency to the app root to choose one", () => {
       renderLanding();
       expect(screen.getByRole("link", { name: "Open Bus Town" })).toHaveAttribute("href", "/");
     });
 
-    it("sends a visitor who would not reach the app to sign-in first, regardless of a stored agency", () => {
-      writeLastAgency(7);
-      mockUseConfig.mockReturnValue({ data: GATED });
-      renderLanding();
-      expect(screen.getByRole("link", { name: "Open Bus Town" })).toHaveAttribute("href", "/login");
-    });
-
-    it("sends a visitor whose session is still loading to sign-in first, regardless of a stored agency", () => {
+    it("sends a visitor whose session is still loading to Bus Town too", () => {
       writeLastAgency(7);
       mockUseSession.mockReturnValue({ data: undefined, isLoading: true });
       renderLanding();
-      expect(screen.getByRole("link", { name: "Open Bus Town" })).toHaveAttribute("href", "/login");
+      expect(screen.getByRole("link", { name: "Open Bus Town" })).toHaveAttribute("href", "/agencies/7/bus-town");
     });
   });
 

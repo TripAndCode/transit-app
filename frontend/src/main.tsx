@@ -28,7 +28,6 @@ import { refreshAuthStateOn401, retryTransientOnce } from "./api/authExpiry";
 import App from "./App";
 import { OnboardingGate } from "./components/OnboardingGate";
 import { RequireAdmin } from "./components/RequireAdmin";
-import { RequireAuth } from "./components/RequireAuth";
 import { LocaleUnavailable } from "./components/LocaleUnavailable";
 import { RouteError } from "./components/RouteError";
 import { ToastProvider } from "./components/ui/Toast";
@@ -114,18 +113,17 @@ const onAuthError = refreshAuthStateOn401(queryClient);
 
 const router = createBrowserRouter([
   // /welcome, /login and the two legal pages render outside <App /> so they
-  // own the full viewport (no Header or sidebar), and outside RequireAuth so a
-  // signed-out visitor can reach them.
+  // own the full viewport (no Header or sidebar).
   { path: "/welcome", element: el(<LandingPage />), errorElement: <RouteError /> },
   { path: "/login", element: el(<LoginPage />), errorElement: <RouteError /> },
   { path: "/privacy", element: el(<LegalPage doc="privacy" />), errorElement: <RouteError /> },
   { path: "/terms", element: el(<LegalPage doc="terms" />), errorElement: <RouteError /> },
   // A frozen snapshot is read by whoever holds its link, an account or not,
-  // so it stands outside RequireAuth and the app shell like the pages above.
+  // and stands outside the app shell like the pages above.
   { path: "/s/:snapshotId", element: el(<SnapshotPage />), errorElement: <RouteError /> },
   {
     path: "/",
-    element: <RequireAuth><App /></RequireAuth>,
+    element: <App />,
     // Catches render errors from any child route — a broken tab degrades to
     // an inline message instead of white-screening the whole app.
     errorElement: <RouteError />,

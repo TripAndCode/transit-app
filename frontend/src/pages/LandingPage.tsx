@@ -20,13 +20,13 @@ const NAV_LINKS = [
   { href: "#method", key: "landing.nav.method" },
 ] as const;
 
-/** Pre-authentication marketing page: a structured walk through what the
- *  product actually shows (nationwide observatory, council reports, feed
- *  grades, Bus Town playback, the calculation method), every figure a
- *  labelled sample fixture, never a live read. It stays reachable after
- *  sign-in and from the app's "about" link, so its one real CTA is the way
- *  in this visitor actually has -- see useCtaKind. The pause toggle is the
- *  one control for every looping animation on the page (WCAG 2.2.2). */
+/** The welcome page: a structured walk through what the product actually
+ *  shows (nationwide observatory, council reports, feed grades, Bus Town
+ *  playback, the calculation method), every figure a labelled sample
+ *  fixture, never a live read. It stays reachable after sign-in and from the
+ *  app's "about" link, so its CTA wording follows the visitor's session --
+ *  see useCtaKind. The pause toggle is the one control for every looping
+ *  animation on the page (WCAG 2.2.2). */
 export function LandingPage() {
   const { t } = useTranslation();
   const [paused, setPaused] = useState(false);
