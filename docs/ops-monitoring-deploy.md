@@ -294,9 +294,25 @@ or `MIGRATE_ALLOW_DESTRUCTIVE_UP=V1,V2` in the environment of the deploy that
 runs it. `migrate down` refuses such a down migration, marked or not, without
 `--force-destructive`.
 
+A live report never returns or caches an answer missing rows a drop took
+mid-read. Each live read checks the floor before it scans, and again once
+the report's last scan has ended (`pipeline.retained_reads`). A drop always
+comes after its floor is recorded, so a report that sees the old floor on
+the second check finished reading before any rows went. One that sees the
+new floor past its start does not answer:
+
+- A cached report, an Ask tool and the map's look for an undated route
+  view's day check before they keep or return the answer. On a refusal they
+  compute once more, so a window they derived starts at the new floor. A
+  requested period that now starts before it is refused.
+- A snapshot checks before it is stored.
+- Any other API request checks before its response is sent, and is refused
+  like any read before the floor.
+
 A run that drops a month records the new floors, then waits
-`pipeline.retention.LIVE_REQUEST_DRAIN_SECONDS` before the first drop, so a
-live report that checked the old floor finishes before its rows go. It holds
+`pipeline.retention.LIVE_REQUEST_DRAIN_SECONDS` before the first drop. A
+live report that checked the old floor nearly always finishes in that time,
+so the refusal above stays rare; the wait does not decide correctness. It holds
 the affected agencies' ingest locks for that wait, so an analyze or promotion
 that meets it is turned away rather than queued: the cron poke is recorded
 `skipped` and the CLIs exit. Schedule `prune-updates` clear of the 00:05 JST
@@ -312,29 +328,28 @@ next run drops them under a new row. So an empty `dropped_at` means only that
 the run which wrote the row did not confirm the drop; ClickHouse's
 `system.parts` says whether `updates` still holds the month.
 
-Before the prune is switched on in production, this must hold:
-
-- A live read re-reads the floor after its last scan and refuses if the floor
-  moved past its start, so no partial answer is returned or cached. Until
-  then, the drain wait above bounds it by time.
-
 To turn it on in production:
 
-1. Check that Railway's deployed ingest job runs no `ALTER TABLE updates
+1. Promote `main`, at or past the commit that adds `pipeline/retained_reads.py`,
+   to `production` (`docs/deploy-railway.md`, "Point every Railway service at
+   the `production` branch"). An older build already has the prune command
+   but not the re-check that keeps a live read from answering over a month it
+   is dropping.
+2. Check that Railway's deployed ingest job runs no `ALTER TABLE updates
    DELETE`, such as one driven by `RETENTION_DAYS`. A delete like that sets no
    floor, so the next analyze purges the aggregates of the rows it removed.
-2. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
+3. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
    `analyze_all` in the daily ingest job (`docs/deploy-railway.md`, step 5).
-   The job leaves it out until every condition above holds, so the switch
-   alone never arms a drop.
-3. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
+   The job leaves it out until this step adds it, so the switch alone never
+   arms a drop.
+4. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
    writes nothing, whatever the switch says. It lists each month past the
    horizon: the ones it would drop, with the floor each sets, and the ones it
    keeps, with the agency and date that keep each. Analyze any agency it names
    first.
-4. Turn on `updates_prune_enabled` from `/admin/flags`, or set
+5. Turn on `updates_prune_enabled` from `/admin/flags`, or set
    `UPDATES_PRUNE_ENABLED=true` on the job that runs the command.
-5. After the first run, check its `retention` row on the board, and that the
+6. After the first run, check its `retention` row on the board, and that the
    run's rows in `updates_pruned_months` have `dropped_at` set.
 
 A dropped month's rows come back only by a replay from R2. Its aggregates need

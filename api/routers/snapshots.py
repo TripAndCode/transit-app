@@ -58,6 +58,7 @@ from api.routers.reports import (
 )
 from api.routers.static import fetch_static_routes
 from api.security import User, csrf_guard, require_admin
+from pipeline import retained_reads
 from pipeline.data_sources import credit_line
 from pipeline.reports import ROUTE_TABLE_SORTS, simulation_disclaimer
 from pipeline.reports.capability import CapabilityTier, capability_tiers
@@ -420,6 +421,8 @@ async def create_snapshot(
     if len(encoded.encode()) > MAX_PAYLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"snapshot payload exceeds {MAX_PAYLOAD_BYTES} bytes")
 
+    # A stored snapshot outlives any request, so its live reads are settled first.
+    await retained_reads.checkpoint(conn)
     snapshot_id = secrets.token_urlsafe(16)
     async with conn.transaction():
         created_at = await conn.fetchval(
