@@ -34,7 +34,8 @@ deploys — pick this if you'd rather not manage a Linux box yourself.
 - A [Railway](https://railway.com) account (Hobby plan, $5/mo minimum, covers this).
 - The repo pushed to GitHub.
 - `railway.json` (in repo root) — pins the app service to the Dockerfile
-  builder, the `/health` healthcheck, and runs `migrate up` as a
+  builder, the `/health` healthcheck, and runs `gtfs_pipeline.py schema-up`
+  (`migrate up`, then the ClickHouse schema) as a
   **pre-deploy command** before every release. Railway's equivalent of
   Fly's `release_command`; `migrate up` is idempotent (tracked in
   `schema_migrations`), so re-running is a no-op. Once the `updates` prune has

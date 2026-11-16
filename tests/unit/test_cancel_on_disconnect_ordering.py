@@ -1,6 +1,6 @@
 """CancelGETOnDisconnectMiddleware sits inside LocaleMiddleware (a
 BaseHTTPMiddleware) in production - see api/main.py's add_middleware order,
-which nests it under Locale/APIKey/Session. BaseHTTPMiddleware's call_next
+which nests it under Locale/Session. BaseHTTPMiddleware's call_next
 requires the wrapped app to eventually send a response; the cancel-on-
 disconnect path must not return without ever calling send(), or every
 legitimate client disconnect crashes with RuntimeError: No response

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.deps import get_agency, get_conn
-from api.middleware.ratelimit import limiter, tier_limit
+from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from pipeline.route_catalog import route_code_sql
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["static"])
@@ -50,7 +50,7 @@ class StopBoundsResponse(BaseModel):
 
 
 @router.get("/routes", response_model=StaticRoutesResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def list_routes(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -100,7 +100,7 @@ async def fetch_static_routes(conn: asyncpg.Connection, agency_id: int) -> list[
 
 
 @router.get("/stops", response_model=StaticStopsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def list_stops(
     request: Request,
     agency_id: int = Depends(get_agency),
@@ -125,7 +125,7 @@ _STOP_BOUNDS_SQL = """
 
 
 @router.get("/stops/bounds", response_model=StopBoundsResponse)
-@limiter.limit(tier_limit)
+@limiter.limit(DEFAULT_LIMIT)
 async def stop_bounds(
     request: Request,
     agency_id: int = Depends(get_agency),

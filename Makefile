@@ -184,8 +184,7 @@ db:
 	docker compose up -d --build
 	docker compose exec db sh -c 'until pg_isready -h localhost -U transit -d transit; do sleep 1; done'
 	docker compose exec clickhouse sh -c 'until wget --spider -q http://localhost:8123/ping; do sleep 1; done'
-	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py migrate up
-	@$(MAKE) ch-bootstrap
+	DATABASE_URL=$(db_url) poetry run python gtfs_pipeline.py schema-up
 
 db-down:
 	docker compose down

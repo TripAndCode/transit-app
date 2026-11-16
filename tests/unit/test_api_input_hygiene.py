@@ -4,43 +4,13 @@ setting; no database."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
-from api.routers.admin import ApiKeyCreate
 from api.routers.auth import ProviderRejected, _fetch_userinfo
 from api.routers.conversations import _MAX_FILTER_CTX_BYTES, CreateConversation, UpdateConversation
 from tests.fixtures.routes import api_routes
-
-
-# ── ApiKeyCreate ─────────────────────────────────────────────────────────────
-def test_api_key_create_accepts_the_pro_tier_and_a_datetime_expiry():
-    body = ApiKeyCreate(owner_user_id=1, label="a" * 120, expires_at=datetime(2027, 1, 1, tzinfo=timezone.utc))
-    assert body.tier == "pro"
-    assert isinstance(body.expires_at, datetime)
-
-
-def test_api_key_create_reads_an_expiry_without_an_offset_as_utc():
-    body = ApiKeyCreate(owner_user_id=1, expires_at="2027-01-01T09:00:00")
-    assert body.expires_at == datetime(2027, 1, 1, 9, tzinfo=timezone.utc)
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"owner_user_id": 1, "tier": "free"},
-        {"owner_user_id": 1, "label": "a" * 121},
-        {"owner_user_id": 1, "expires_at": "not-a-date"},
-        {"owner_user_id": 1, "expires_at": {"year": 2027}},
-    ],
-    ids=["unknown-tier", "label-over-120", "expiry-garbage", "expiry-object"],
-)
-def test_api_key_create_rejects_loose_input(payload):
-    with pytest.raises(ValidationError):
-        ApiKeyCreate(**payload)
 
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
