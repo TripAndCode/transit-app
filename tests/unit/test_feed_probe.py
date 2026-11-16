@@ -196,7 +196,8 @@ def test_coverage_is_recorded_only_from_a_poll_big_enough_to_count():
         ((fp.StaticAgency("Test Bus", "Europe/Paris"),), None, "Europe/Paris"),
         ((fp.StaticAgency("Test Bus", "Mars/Olympus"),), None, None),
         ((fp.StaticAgency("Test Bus", None),), None, None),
-        (TWO_AGENCIES, "North", None),
+        (TWO_AGENCIES, "North", "Asia/Tokyo"),
+        ((fp.StaticAgency("North Bus", "Asia/Tokyo"), fp.StaticAgency("Paris Bus", "Europe/Paris")), "North", None),
     ],
 )
 def test_the_timezone_comes_from_a_single_valid_agency_txt_row(agencies, name, timezone):
@@ -264,16 +265,55 @@ GOOD = {
 
 
 def test_read_static_summary_reads_values_as_the_loader_stores_them(tmp_path):
-    s = fp.read_static_summary(_zip(tmp_path / "g.zip", GOOD), wanted={("t1", 1), ("t1", 2), ("t2", 3), ("t1", 9)})
+    s = fp.read_static_summary(_zip(tmp_path / "g.zip", GOOD))
     assert s.agencies == (fp.StaticAgency("Test Bus", "Asia/Tokyo"),)
     assert s.rows == {"trips.txt": 2, "stops.txt": 1, "stop_times.txt": 3}
-    # Postgres casts "01" and " 2" to 1 and 2; trip_ids are stored unstripped.
-    assert s.trip_ids == {"t1", " t2"}
-    assert s.stop_time_keys == {("t1", 1), ("t1", 2)}
+    assert s.trip_ids == {"t1", " t2"}  # stored unstripped
+    assert s.stop_time_keys == frozenset()
 
 
-def test_read_static_summary_keeps_only_the_keys_asked_for(tmp_path):
-    assert fp.read_static_summary(_zip(tmp_path / "g.zip", GOOD)).stop_time_keys == frozenset()
+def test_read_stop_time_keys_keeps_only_the_wanted_keys_as_postgres_reads_them(tmp_path):
+    # Postgres reads "01" and " 2" as 1 and 2; trip_ids stay unstripped.
+    wanted = {("t1", 1), ("t1", 2), ("t2", 3), ("t1", 9)}
+    assert fp.read_stop_time_keys(_zip(tmp_path / "g.zip", GOOD), wanted) == {("t1", 1), ("t1", 2)}
+
+
+@pytest.mark.parametrize(
+    ("raw", "value"),
+    [("1", 1), ("01", 1), (" 2\t", 2), ("+3", 3), ("-4", -4), ("2147483647", 2147483647)],
+)
+def test_stop_sequence_reads_what_postgres_int4_reads(raw, value):
+    assert fp._stop_sequence(raw) == value
+
+
+@pytest.mark.parametrize("raw", ["1_0", "", None, "\u30001", "\u0661", "1.0", "2147483648", "0x10"])
+def test_stop_sequence_refuses_what_postgres_int4_refuses(raw):
+    with pytest.raises(fp.StaticZipError) as err:
+        fp._stop_sequence(raw)
+    assert (err.value.verdict, err.value.file) == (fp.Verdict.STATIC_UNREADABLE, "stop_times.txt")
+
+
+@pytest.mark.parametrize("bad", ["1_0", ""])
+def test_a_stop_sequence_the_loader_cannot_store_refuses_the_zip(tmp_path, bad):
+    files = {**GOOD, "stop_times.txt": f"trip_id,stop_sequence\nt1,1\nt1,{bad}\n"}
+    with pytest.raises(fp.StaticZipError) as err:
+        fp.read_static_summary(_zip(tmp_path / "g.zip", files))
+    assert (err.value.verdict, err.value.file) == (fp.Verdict.STATIC_UNREADABLE, "stop_times.txt")
+    assert f"stop_sequence {bad!r} is not an integer" in err.value.detail
+
+
+def test_a_member_that_fails_its_crc_cannot_be_decompressed(tmp_path):
+    path = tmp_path / "g.zip"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
+        for name, body in GOOD.items():
+            zf.writestr(name, body.encode())
+    data = bytearray(path.read_bytes())
+    data[data.index(b"r,s,t1")] ^= 0x01
+    path.write_bytes(bytes(data))
+    with pytest.raises(fp.StaticZipError) as err:
+        fp.read_static_summary(path)
+    assert (err.value.verdict, err.value.file) == (fp.Verdict.STATIC_UNREADABLE, "trips.txt")
+    assert "cannot be decompressed" in err.value.detail
 
 
 def test_read_static_summary_marks_missing_and_empty_files(tmp_path):

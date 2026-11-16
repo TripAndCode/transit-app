@@ -63,7 +63,7 @@ def web(monkeypatch, tmp_path):
     def install(static_zip: str | bytes, *polls: str) -> FakeWeb:
         fake = FakeWeb(static_zip, *polls)
         monkeypatch.setattr("pipeline.strategies.direct_url.safe_urlopen", fake.urlopen)
-        monkeypatch.setattr("pipeline.rt_coverage_reprobe.safe_urlopen", fake.urlopen)
+        monkeypatch.setattr("pipeline.poller.safe_urlopen", fake.urlopen)
         return fake
 
     return install
@@ -231,3 +231,15 @@ def test_a_timetable_that_fails_to_load_keeps_the_agency_and_says_what_to_run(
     [(aid, *_rest)] = _agency(pg_conn)
     assert f"refresh-static --agency-id {aid}" in caplog.text and "disk full" in caplog.text
     assert _count(pg_conn, "SELECT count(*) FROM static_trips") == 0
+
+
+def test_a_clickhouse_that_cannot_take_the_load_adds_nothing(pg_conn, ch_client, web, monkeypatch, tmp_path, caplog):
+    web("hirobus_static.zip", "hirobus_tu.bin")
+
+    def missing(_ch):
+        raise RuntimeError("ClickHouse has no static_archive")
+
+    monkeypatch.setattr("pipeline.static_archive.require_tables", missing)
+    assert _probed(monkeypatch) == 1
+    _nothing_written(pg_conn, tmp_path)
+    assert "cannot take a timetable load (ClickHouse has no static_archive)" in caplog.text

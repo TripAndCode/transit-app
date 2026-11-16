@@ -307,6 +307,9 @@ def _add_agency_probed(args) -> None:
     if args.dry_run:
         logger.info("add_agency: dry run; nothing was written.")
         sys.exit(0 if accepted else 1)
+    if result.store_error is not None:
+        logger.error(f"add_agency: nothing was added: the stores cannot take a timetable load ({result.store_error}).")
+        sys.exit(1)
     if result.agency_id is None:
         logger.error("add_agency: nothing was added.")
         sys.exit(1)

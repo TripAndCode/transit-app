@@ -696,6 +696,19 @@ ALLOWED = [
         "gtfs_pipeline.py refresh-static",
         id="cli-refresh-static-pointed-at-both-test-stores",
     ),
+    *[
+        pytest.param(
+            "DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test CLICKHOUSE_PORT=8124 poetry run "
+            f"python gtfs_pipeline.py {sub}",
+            id=f"cli-{sub.split()[0]}-pointed-at-both-test-stores",
+        )
+        for sub in ("load_static x.zip", "add_agency --feed-url u --static-url s")
+    ],
+    pytest.param(
+        "make load_static STATIC_PATH=x.zip DATABASE_URL=postgresql://transit:transit@localhost:5544/transit_test "
+        "CLICKHOUSE_PORT=8124",
+        id="make-load-static-pointed-at-both-test-stores",
+    ),
     pytest.param("psql -h localhost -p 5433 -U transit -c 'SELECT 1' < /dev/null", id="dev-read-with-null-stdin"),
     pytest.param(
         "psql -h localhost -p 5433 -U transit -c 'SELECT 1' > out.txt && wc -l < out.txt",

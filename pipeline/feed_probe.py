@@ -10,8 +10,8 @@ StopTimeUpdate, decoded by ``decode_trip_updates``, joins the timetable on
 ``(trip_id, stop_sequence)`` in ``stop_times.txt`` and on its trip in
 ``trips.txt``, read through the loader's own row reader. The static zip is
 fetched once, by ``direct_url.fetch``, and the zip measured is the zip
-loaded. The feed is fetched by the coverage re-probe's own fetch, and its
-coverage judged by ``static_join.assess_field_coverage``, so this verdict
+loaded. The feed is fetched by the poller's own fetch, deadline and size cap
+included, and its coverage judged by ``static_join.assess_field_coverage``, so this verdict
 and the scorecard's cannot disagree. An accepted feed gets
 ``static_join``/``direct_url`` written explicitly: an agency whose
 ``ingest_strategy`` is NULL is read as ``aomori_regex``
@@ -26,9 +26,11 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import re
 import tempfile
 import time
 import zipfile
+import zlib
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
@@ -38,7 +40,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pipeline import rt_coverage_reprobe
+from pipeline import poller, rt_coverage_reprobe
 from pipeline.poller import DEFAULT_INTERVAL_SEC
 from pipeline.static_loader import iter_static_rows
 from pipeline.strategies import aomori_regex, direct_url
@@ -117,7 +119,7 @@ class StaticSummary:
 
     ``rows`` maps each of ``REQUIRED_FILES`` to its data-row count, None when
     the zip lacks it. ``stop_time_keys`` holds only the ``(trip_id,
-    stop_sequence)`` keys a caller asked :func:`read_static_summary` for.
+    stop_sequence)`` keys the probe's polls asked :func:`read_stop_time_keys` for.
     """
 
     agencies: tuple[StaticAgency, ...] | None
@@ -280,6 +282,10 @@ def _reading(name: str) -> Iterator[None]:
         raise StaticZipError(Verdict.STATIC_UNREADABLE, name, detail) from None
     except csv.Error as exc:
         raise StaticZipError(Verdict.STATIC_UNREADABLE, name, f"is not readable CSV ({exc})") from None
+    except (zipfile.BadZipFile, zlib.error, EOFError, RuntimeError, NotImplementedError) as exc:
+        # A bad CRC or truncated stream, an encrypted member (RuntimeError),
+        # or a compression method zipfile lacks such as Deflate64.
+        raise StaticZipError(Verdict.STATIC_UNREADABLE, name, f"cannot be decompressed ({exc})") from None
 
 
 def _agency_rows(zf: zipfile.ZipFile) -> Iterator[dict[str, str]]:
@@ -287,38 +293,56 @@ def _agency_rows(zf: zipfile.ZipFile) -> Iterator[dict[str, str]]:
         yield from csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
 
 
-def _stop_sequence(raw: str | None) -> int | None:
-    """*raw* as ``static_stop_times.stop_sequence`` stores it: Postgres casts
-    the text, surrounding blanks allowed, as Python's ``int`` does."""
-    try:
-        return int(raw) if raw is not None else None
-    except ValueError:
-        return None
+_INT4_MIN, _INT4_MAX = -(2**31), 2**31 - 1
+_PG_BLANKS = " \t\n\v\f\r"
+_PG_INTEGER = re.compile(r"[+-]?[0-9]+")
 
 
-def read_static_summary(zip_path: Path, wanted: Iterable[tuple[str, int]] = ()) -> StaticSummary:
-    """The agencies, the required files' row counts, trip_ids, stop_ids and
-    those of the *wanted* ``(trip_id, stop_sequence)`` keys ``stop_times.txt``
-    holds. Every row is read through ``static_loader.iter_static_rows``, so a
-    value matches here exactly when it matches the loaded table.
+def _stop_sequence(raw: str | None) -> int:
+    """*raw* as Postgres 14's ``int4`` input reads it into
+    ``static_stop_times.stop_sequence``: ASCII blanks around optional sign and
+    ASCII digits, within int4. Anything else, an empty or missing value
+    included, makes the loader's insert fail, so it raises
+    :class:`StaticZipError` rather than letting the probe accept a timetable
+    that cannot load. Python's ``int`` is laxer (``'1_0'``, full-width blanks,
+    non-ASCII digits), so it is not used alone."""
+    text = (raw or "").strip(_PG_BLANKS)
+    if _PG_INTEGER.fullmatch(text) and _INT4_MIN <= (value := int(text)) <= _INT4_MAX:
+        return value
+    raise StaticZipError(Verdict.STATIC_UNREADABLE, "stop_times.txt", f"stop_sequence {raw!r} is not an integer")
 
-    Raises :class:`StaticZipError` for a file that is not a zip, a member
-    that would decompress past ``MAX_MEMBER_BYTES``, and a member that is not
-    UTF-8 CSV.
-    """
-    wanted_keys = frozenset(wanted)
+
+def _open_zip(zip_path: Path) -> zipfile.ZipFile:
+    """*zip_path* opened, once no member would decompress past
+    ``MAX_MEMBER_BYTES``: ``ZipExtFile`` stops at a member's declared size,
+    so the declared sizes bound every read that follows."""
     try:
         zf = zipfile.ZipFile(zip_path)
     except zipfile.BadZipFile:
         raise StaticZipError(Verdict.STATIC_UNAVAILABLE, None, "the static URL sent a file that is not a zip") from None
-    with zf:
-        for info in zf.infolist():
-            if info.file_size > MAX_MEMBER_BYTES:
-                raise StaticZipError(
-                    Verdict.STATIC_UNAVAILABLE,
-                    info.filename,
-                    f"decompresses to {info.file_size} bytes, over the {MAX_MEMBER_BYTES}-byte limit",
-                )
+    for info in zf.infolist():
+        if info.file_size > MAX_MEMBER_BYTES:
+            zf.close()
+            raise StaticZipError(
+                Verdict.STATIC_UNAVAILABLE,
+                info.filename,
+                f"decompresses to {info.file_size} bytes, over the {MAX_MEMBER_BYTES}-byte limit",
+            )
+    return zf
+
+
+def read_static_summary(zip_path: Path) -> StaticSummary:
+    """The agencies, the required files' row counts, trip_ids and stop_ids of
+    a GTFS zip. Every row is read through ``static_loader.iter_static_rows``,
+    so a value matches here exactly when it matches the loaded table, and
+    every ``stop_sequence`` is checked as the loader's insert would take it.
+
+    Raises :class:`StaticZipError` for a file that is not a zip, a member
+    that would decompress past ``MAX_MEMBER_BYTES`` or cannot be
+    decompressed, a member that is not UTF-8 CSV, and a ``stop_sequence``
+    the loader cannot store.
+    """
+    with _open_zip(zip_path) as zf:
         names = set(zf.namelist())
         agencies = None
         if "agency.txt" in names:
@@ -330,7 +354,6 @@ def read_static_summary(zip_path: Path, wanted: Iterable[tuple[str, int]] = ()) 
         rows: dict[str, int | None] = dict.fromkeys(REQUIRED_FILES)
         trip_ids: set[str] = set()
         stop_ids: set[str] = set()
-        keys: set[tuple[str, int]] = set()
         for name in REQUIRED_FILES:
             if name not in names:
                 continue
@@ -342,12 +365,24 @@ def read_static_summary(zip_path: Path, wanted: Iterable[tuple[str, int]] = ()) 
                         trip_ids.add(row[0])
                     elif name == "stops.txt" and row[0]:
                         stop_ids.add(row[0])
-                    elif name == "stop_times.txt" and wanted_keys and row[0]:
-                        seq = _stop_sequence(row[1])
-                        if seq is not None and (row[0], seq) in wanted_keys:
-                            keys.add((row[0], seq))
+                    elif name == "stop_times.txt":
+                        _stop_sequence(row[1])
             rows[name] = n
-    return StaticSummary(agencies, rows, frozenset(trip_ids), frozenset(stop_ids), frozenset(keys))
+    return StaticSummary(agencies, rows, frozenset(trip_ids), frozenset(stop_ids))
+
+
+def read_stop_time_keys(zip_path: Path, wanted: Iterable[tuple[str, int]]) -> frozenset[tuple[str, int]]:
+    """Those of the *wanted* ``(trip_id, stop_sequence)`` keys ``stop_times.txt``
+    holds, read the way :func:`read_static_summary` reads it. Only the wanted
+    keys are kept, so memory follows the probe's polls, not the timetable."""
+    wanted_keys = frozenset(wanted)
+    keys: set[tuple[str, int]] = set()
+    with _open_zip(zip_path) as zf, _reading("stop_times.txt"):
+        for row in iter_static_rows(zf, "stop_times.txt"):
+            key = (row[0], _stop_sequence(row[1]))
+            if key in wanted_keys:
+                keys.add(key)
+    return frozenset(keys)
 
 
 def measure_poll(raw: bytes) -> Poll:
@@ -402,7 +437,7 @@ def poll_feed(
 ) -> RtProbe:
     """Poll *feed_url* once now and once every *interval* seconds within
     *seconds*. A failed fetch is kept as an errored poll, not raised."""
-    fetch = fetch or rt_coverage_reprobe.fetch_feed
+    fetch = fetch or poller.fetch_feed
     n_polls = 1 + int(seconds // interval) if interval > 0 else 1
     polls: list[Poll] = []
     for i in range(n_polls):
@@ -474,7 +509,8 @@ def decide(static: StaticSummary, rt: RtProbe, *, name: str | None, accept_empty
         return refused
     only = static.agencies[0] if static.agencies and len(static.agencies) == 1 else None
     agency_name = name or (only.name if only else None)
-    timezone = _valid_timezone(only.timezone) if only else None
+    zones = {a.timezone for a in static.agencies or ()}
+    timezone = _valid_timezone(zones.pop()) if len(zones) == 1 else None
 
     def named(verdict: Verdict, **facts: Any) -> Decision:
         return Decision(verdict, name=agency_name, timezone=timezone, **facts)
@@ -539,7 +575,7 @@ def probe(
         if refused is not None:
             return outcome(refused, static=static, zip_path=zip_path)
         rt = poll_feed(feed_url, seconds=seconds, interval=interval, fetch=fetch, sleep=sleep)
-        static = replace(static, stop_time_keys=read_static_summary(zip_path, rt.keys).stop_time_keys)
+        static = replace(static, stop_time_keys=read_stop_time_keys(zip_path, rt.keys))
     except StaticZipError as exc:
         return outcome(Decision(exc.verdict, file=exc.file, detail=exc.detail), zip_path=zip_path)
     return outcome(decide(static, rt, name=name, accept_empty=accept_empty), static=static, rt=rt, zip_path=zip_path)
@@ -584,11 +620,13 @@ async def add_probed_agency(conn, o: ProbeOutcome) -> int:
 
 @dataclass(frozen=True)
 class Onboarding:
-    """What :func:`onboard` did: the probe, the agency it added, and why its
-    timetable did not load when it did not."""
+    """What :func:`onboard` did: the probe, the agency it added, why the
+    stores could not take a timetable load (``store_error``, and then nothing
+    was added), and why its timetable did not load when it did not."""
 
     outcome: ProbeOutcome
     agency_id: int | None = None
+    store_error: str | None = None
     load_error: str | None = None
 
 
@@ -624,12 +662,15 @@ def onboard(
     *conn* is a psycopg2 connection, *db_url* the database the asyncpg insert
     opens, *ch_client* builds the ClickHouse client the load needs. The zip is
     staged in a temporary directory and moved under *dest_dir* only once the
-    agency exists, so a dry run or a refusal leaves nothing there. When the
-    load fails the agency stays, ``load_error`` says why, and ingest refuses
-    it until a ``refresh-static`` loads one.
+    agency exists, so a dry run or a refusal leaves nothing there. Before the
+    insert, both stores are checked for what the load needs, so a store that
+    cannot take it adds nothing (``store_error``). When the load still fails
+    the agency stays, ``load_error`` says why, and ingest refuses it until a
+    ``refresh-static`` loads one.
     """
     import asyncpg
 
+    from pipeline import static_archive
     from pipeline.static_fetcher import load_fetched_recorded
 
     def taken() -> Onboarding | None:
@@ -654,6 +695,14 @@ def onboard(
         )
         if dry_run or not outcome.decision.accepted or outcome.zip_path is None:
             return Onboarding(outcome)
+        try:
+            ch = ch_client()
+            static_archive.require_tables(ch)
+            static_archive.require_mirror(conn)
+        except Exception as exc:
+            return Onboarding(outcome, store_error=str(exc))
+        finally:
+            conn.rollback()
 
         async def insert() -> int:
             aconn = await asyncpg.connect(db_url)
@@ -668,7 +717,7 @@ def onboard(
             return taken() or Onboarding(outcome)
         try:
             zip_path = direct_url.adopt_staged(outcome.zip_path, agency_id, dest_dir)
-            load_fetched_recorded(agency_id, conn, dest_dir, zip_path, STATIC_STRATEGY, ch_client=ch_client())
+            load_fetched_recorded(agency_id, conn, dest_dir, zip_path, STATIC_STRATEGY, ch_client=ch)
         except Exception as exc:
             conn.rollback()
             return Onboarding(outcome, agency_id, load_error=str(exc))
