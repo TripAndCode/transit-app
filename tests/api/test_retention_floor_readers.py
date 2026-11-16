@@ -444,7 +444,7 @@ async def test_a_cached_report_whose_floor_rises_mid_read_is_refused(
 
 
 @pytest.mark.asyncio
-async def test_an_ask_card_whose_floor_rises_mid_read_gives_the_refusal(
+async def test_an_ask_card_whose_cached_report_loses_its_floor_mid_read_gives_the_refusal(
     client, agency_id, pg_conn, floor_app, monkeypatch
 ):
     from pipeline.reports import filters
@@ -461,6 +461,22 @@ async def test_an_ask_card_whose_floor_rises_mid_read_gives_the_refusal(
     )
     assert resp.status_code == 200, resp.text
     assert f"Detailed readings before {FLOOR.isoformat()} are no longer kept" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_an_ask_tool_reading_live_itself_whose_floor_rises_mid_read_gives_the_refusal(
+    aconn, agency_id, pg_conn, ch_async_client, monkeypatch
+):
+    from pipeline.query.tools import dispatch
+    from pipeline.reports import filters
+
+    _dropping_after_check(monkeypatch, filters, pg_conn, agency_id)
+    ctx = RangeCtx(from_date=BEFORE, to_date=FLOOR)
+    result = await dispatch(
+        "describe_data", {"kind": "sample_counts"}, ctx, aconn, agency_id, locale="en", ch=ch_async_client
+    )
+    assert result.kind == "empty"
+    assert result.summary.startswith(f"Detailed readings before {FLOOR.isoformat()} are no longer kept")
 
 
 @pytest.mark.asyncio

@@ -116,8 +116,8 @@ async def checked(compute: Callable[[], Awaitable[T]], conn: Any = None) -> T:
     reader derived itself, such as a baseline or a look-back, starts no earlier
     than the floor it read, so the second run starts it at the new floor,
     while a period the request named that now starts before it is refused by
-    that run's own check. Either way the refusal names only a period the
-    request asked for."""
+    that run's own check. Unless the floor rises again during that run, a
+    refusal names only a period the request asked for."""
     with recording() as reads:
         value = await compute()
     try:
