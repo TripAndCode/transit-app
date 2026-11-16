@@ -658,11 +658,13 @@ describe("RouteAnalysisTab where delay grows", () => {
       hour: false, stop: false, dir: false, late: false, early: false,
     };
 
-    function renderRoutePage(search: string) {
+    const SHAPE_ANSWERED = {
+      data: { ...shape([]), scope_applied: ROUTE_SHAPE_APPLIED }, isPending: false, error: null, refetch: vi.fn(),
+    };
+
+    function renderRoutePage(search: string, routeShape: () => unknown = () => SHAPE_ANSWERED) {
       mockSupportHooks();
-      vi.spyOn(hooks, "useRouteShape").mockReturnValue({
-        data: { ...shape([]), scope_applied: ROUTE_SHAPE_APPLIED }, isPending: false, error: null, refetch: vi.fn(),
-      } as never);
+      vi.spyOn(hooks, "useRouteShape").mockImplementation((() => routeShape()) as never);
       vi.spyOn(hooks, "useReport").mockImplementation(((_id: number | null, type: string) => ({
         data: type === "on_time" ? { report_type: "on_time", rows: [], definition: { late_tolerance_sec: 300, early_tolerance_sec: 60 }, scope_applied: ON_TIME_APPLIED } : undefined,
         isPending: false, error: null, refetch: vi.fn(),
@@ -671,7 +673,7 @@ describe("RouteAnalysisTab where delay grows", () => {
         data: { scope_applied: STANDARDS_APPLIED, rows: [], ctx: {}, disclaimer: "", on_time_definition: null },
         error: null, refetch: vi.fn(),
       } as never);
-      renderWithProviders(
+      const tree = () => (
         <MemoryRouter initialEntries={[`/agencies/1/routes/R1${search}`]}>
           <Routes>
             <Route
@@ -684,8 +686,10 @@ describe("RouteAnalysisTab where delay grows", () => {
               }
             />
           </Routes>
-        </MemoryRouter>,
+        </MemoryRouter>
       );
+      const { rerender } = renderWithProviders(tree());
+      return () => rerender(tree());
     }
 
     const region = () => screen.getByRole("region", { name: "What you're viewing" });
@@ -702,6 +706,22 @@ describe("RouteAnalysisTab where delay grows", () => {
     it("strikes through only what no section of the page uses", () => {
       renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1&late=120");
       expect(screen.getByRole("button", { name: "within 2 min" })).not.toHaveClass("scope-token--off");
+      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+    });
+
+    it("counts a section that failed as using nothing, so the others still name what went unused", () => {
+      renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => ({
+        data: undefined, isPending: false, error: new Error("route-shape failed"), refetch: vi.fn(),
+      }));
+      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+    });
+
+    it("keeps naming an unused condition while a section reloads", () => {
+      let shapeResult: unknown = SHAPE_ANSWERED;
+      const rerender = renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => shapeResult);
+      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+      shapeResult = { data: undefined, isPending: true, error: null, refetch: vi.fn() };
+      rerender();
       expect(region()).toHaveTextContent("Not used on this screen: Stop");
     });
 

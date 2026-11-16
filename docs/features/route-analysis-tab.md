@@ -48,7 +48,8 @@ What the user sees/does:
   the stop delays (`route-shape`), the summary strip's on-time list
   (`useAgencyOnTime` in `components/analysis/agencyOnTime.ts`) and the performance standard used it, so
   a stop, direction or hour carried over from another screen is named as
-  unused.
+  unused. A section that failed counts as using nothing, and while a section
+  reloads the last complete answer stands.
   Inside the dossier the scope always holds the path's one route (see
   `ScopeRouteContext` above), and the empty state offers no "clear the
   route filter" recovery there, since the route is the page rather than a

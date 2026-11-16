@@ -29,7 +29,7 @@ import { scrubMapPositions, type ScrubMapPosition } from "../components/charts/m
 import { timeWindowForBand } from "../components/charts/mareyLayout";
 import { SkeletonChart } from "../components/Skeleton";
 import { saveAnalysis } from "../components/analysis/savedAnalyses";
-import { mergeScopeApplied, scopeTitle } from "../components/scope/scopePhrases";
+import { mergeScopeApplied, scopeTitle, type ScopeApplied } from "../components/scope/scopePhrases";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
 import { AsyncSection } from "../components/AsyncSection";
 import { EmptyState } from "../components/EmptyState";
@@ -88,6 +88,15 @@ export function RouteAnalysisTab() {
   // read here for the conditions their figures used.
   const onTimeList = useAgencyOnTime(route == null ? null : id, ctx);
   const standards = usePerformanceStandards(id, ctx, route != null, route ?? undefined);
+  // A section that failed used nothing. While a section reloads, the last
+  // complete answer stands, so the strike-through does not flicker off and
+  // back on with every change.
+  const sectionApplied = (section: { data?: { scope_applied?: ScopeApplied }; error: unknown }) =>
+    section.error ? {} : section.data?.scope_applied;
+  const mergedApplied = mergeScopeApplied(sectionApplied(query), sectionApplied(onTimeList), sectionApplied(standards));
+  const [heldApplied, setHeldApplied] = useState<ScopeApplied>(undefined);
+  if (mergedApplied != null && JSON.stringify(mergedApplied) !== JSON.stringify(heldApplied)) setHeldApplied(mergedApplied);
+  const scopeApplied = mergedApplied ?? heldApplied;
   const names = useRouteNames(id);
   const { stopName, settled: stopNamesSettled } = usePlaceLabels(id, ctx.stop != null);
   const isAdmin = useIsAdmin();
@@ -205,7 +214,7 @@ export function RouteAnalysisTab() {
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
     {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
-    <ScopeSentence applied={mergeScopeApplied(query.data?.scope_applied, onTimeList.data?.scope_applied, standards.data?.scope_applied)} actions={false} />
+    <ScopeSentence applied={scopeApplied} actions={false} />
     {!route ? <EmptyState title={t("choose")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t, names.format)}
       recoveries={buildFilterCtxRecoveries({
