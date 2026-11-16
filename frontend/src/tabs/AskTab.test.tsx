@@ -344,6 +344,40 @@ describe("AskTab dispatch failures", () => {
   });
 });
 
+describe("AskTab scope sentence", () => {
+  beforeEach(() => {
+    mockAllHooks();
+    Element.prototype.scrollTo = vi.fn();
+  });
+
+  const region = () => screen.getByRole("region", { name: "What you're viewing" });
+
+  it("seeds a new thread's conditions from the screen's scope", () => {
+    renderAskTab("/agencies/5/ask?from=2026-09-01&to=2026-09-07&dow=weekend&time_band=morning");
+    expect(screen.getByRole("button", { name: "weekends" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toBeInTheDocument();
+  });
+
+  it("shows an open thread's own conditions, with no tolerance clause, saved views or pin", () => {
+    vi.spyOn(hooks, "useConversation").mockReturnValue({
+      data: {
+        conversation: {
+          conversation_id: "t1", user_id: null, agency_id: 5, title: "T",
+          filter_ctx: { from_date: "2026-08-01", to_date: "2026-08-14", dow: "weekday" },
+          pinned: false, created_at: "", updated_at: "",
+        },
+        messages: [],
+      },
+      isPending: false, isError: false, refetch: vi.fn(),
+    } as never);
+    renderAskTab("/agencies/5/ask?conversation=t1&dow=weekend");
+    expect(screen.getByRole("button", { name: "weekdays" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "weekends" })).toBeNull();
+    expect(region()).not.toHaveTextContent("counting on-time");
+    expect(screen.queryByRole("button", { name: "Show all filters" })).toBeNull();
+  });
+});
+
 describe("AskTab unsaved filter edits", () => {
   beforeEach(() => {
     mockAllHooks();
@@ -381,9 +415,8 @@ describe("AskTab unsaved filter edits", () => {
   }
 
   async function editFilterThenFailToSave() {
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await userEvent.click(screen.getByRole("button", { name: "Weekdays" }));
-    await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await userEvent.click(screen.getByRole("button", { name: "every day" }));
+    await userEvent.click(screen.getByRole("radio", { name: "Weekdays" }));
     expect(await screen.findByRole("alert")).toBeInTheDocument();
   }
 

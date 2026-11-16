@@ -158,11 +158,10 @@ it("the header export menu's CSV item exports the report data, not just the filt
   expect(payload.flat()).toContain("median_minutes");
 });
 
-it("defers the analysis filters until Apply instead of querying mid-selection", async () => {
-  // This screen renders only while exactly one pattern is selected, and
-  // narrowing to one passes through a multi-code state, so committing each
-  // step dropped it into its empty state mid-selection. The selection must
-  // therefore not reach the shape query until Apply.
+it("stages a route pick in the scope sentence until Apply instead of querying mid-selection", async () => {
+  // This screen renders only while exactly one route is selected, and moving
+  // from one route to another passes through a state with both or neither,
+  // so the routes control must not commit until Apply.
   show("routes/101");
   const user = setupUser();
   // The tab calls useRouteShape twice per render -- once for the period and
@@ -172,11 +171,16 @@ it("defers the analysis filters until Apply instead of querying mid-selection", 
     vi.mocked(useRouteShape).mock.calls.filter((c) => c[1] != null).at(-1)?.[1];
   expect(lastRequestedRoute()).toBe("101");
 
-  await user.selectOptions(screen.getByRole("combobox", { name: "Service pattern" }), "999");
+  const sentence = screen.getByRole("region", { name: "What you're viewing" });
+  await user.click(within(sentence).getAllByRole("button")[0]);
+  const picker = screen.getByRole("dialog", { name: "Routes" });
+  const [first, second] = within(picker).getAllByRole("checkbox");
+  await user.click(first);
+  await user.click(second);
   expect(lastRequestedRoute()).toBe("101");
   expect(screen.queryByText("Choose a route and service pattern")).toBeNull();
 
-  await user.click(screen.getByRole("button", { name: "Apply" }));
+  await user.click(within(picker).getByRole("button", { name: /^Apply/ }));
   expect(lastRequestedRoute()).toBe("999");
 });
 

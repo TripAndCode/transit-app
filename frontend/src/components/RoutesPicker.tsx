@@ -103,8 +103,7 @@ export function RoutesPicker({
   renderDelay?: (minutes: number) => ReactNode;
   /** Shows the picked routes as removable chips above the list, with a
    *  Clear button, for a caller that stages edits behind its own Apply
-   *  step. Off by default so a caller that applies every tick at once
-   *  (FilterContextBar's own draft) is unchanged. */
+   *  step. */
   tray?: boolean;
   /** Enter in the search field submits the caller's own pending change
    *  (only meaningful together with `tray`). */

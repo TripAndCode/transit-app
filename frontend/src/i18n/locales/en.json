@@ -685,7 +685,6 @@
     "report_time_jst": "{{time}} JST",
     "unit_min_signed": "{{sign}}{{value}} min",
     "unit_sec_signed": "{{sign}}{{value}} s",
-    "range_separator": "–",
     "list_separator": ", ",
     "label_value": "{{label}}: {{value}}",
     "language_aria": "Language",
@@ -1216,15 +1215,6 @@
       "delete_confirm": "Delete this investigation?",
       "empty": "No investigations yet",
       "more_options_aria": "More options"
-    },
-    "filter_bar": {
-      "edit": "Edit",
-      "apply": "Apply",
-      "label_date_range": "Date range",
-      "label_dow": "Day of week",
-      "label_time_band": "Time band",
-      "label_routes": "Routes",
-      "no_routes_selected": "No specific routes"
     },
     "card": {
       "stop_patterns": {

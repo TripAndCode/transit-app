@@ -31,13 +31,13 @@ import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
-import { FilterContextBar } from "../components/FilterContextBar";
+import { ScopeSentence } from "../components/scope/ScopeSentence";
 import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { Skeleton } from "../components/Skeleton";
 import { PageHeader } from "../components/ui/PageHeader";
-import { rangeCtxToFilterCtx, resolvedFilterCtx } from "./ask/filterCtx";
+import { patchThreadFilter, rangeCtxToFilterCtx, resolvedFilterCtx, threadScope, THREAD_SCOPE_APPLIED } from "./ask/filterCtx";
 import { InvestigationCanvas } from "./ask/InvestigationCanvas";
 import { FollowupChipsRow } from "./ask/FollowupChipsRow";
 import { AskLandingCards } from "./ask/AskLandingCards";
@@ -381,10 +381,16 @@ export function AskTab() {
       >
         {/* Filter bar */}
         <div style={{ padding: "8px 16px 0", flexShrink: 0 }}>
-          <FilterContextBar
-            value={filterCtx}
-            onChange={handleFilterChange}
-            pending={appendMsg.isPending || createConv.isPending}
+          {/* The thread's own conditions, not the URL's: a new thread starts
+              from the screen's scope, and each change saves to the thread. */}
+          <ScopeSentence
+            source={{
+              scope: threadScope(filterCtx, dataEnd),
+              update: (patch) => handleFilterChange(patchThreadFilter(filterCtx, patch, dataEnd)),
+            }}
+            applied={THREAD_SCOPE_APPLIED}
+            actions={false}
+            disabled={appendMsg.isPending || createConv.isPending}
           />
         </div>
 
