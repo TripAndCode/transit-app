@@ -122,6 +122,21 @@ describe("AnalysisTab", () => {
     expect(useReport.mock.calls.at(-1)?.[1]).toBe(opened);
   });
 
+  it("marks a thin route on a day-type report by the ranking floor, the report naming none", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekend")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekend"), rows: [["R1", null, "土日祝", 4.2, 40]] }, // i18n-ignore: query contract
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderAnalysis("/agencies/1/analysis/when?report=dow_weekend", ["dow_weekend"]);
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).not.toBeChecked();
+    expect(screen.queryByRole("columnheader", { name: "Samples" })).toBeNull();
+    expect(screen.getByText("few data")).toHaveClass("caveat-badge");
+  });
+
   it("greys the scope conditions the open report did not use", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);

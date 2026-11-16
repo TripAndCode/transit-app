@@ -415,7 +415,47 @@ describe("OverviewHeroRow", () => {
   it("renders an inline info hint next to the verdict", () => {
     mockFeed(0.1);
     renderHero();
-    expect(screen.getByRole("button", { name: "Hint" })).toBeInTheDocument();
+    const verdict = document.querySelector<HTMLElement>(".ov-hero-verdict")!;
+    expect(within(verdict).getByRole("button", { name: "Hint" })).toBeInTheDocument();
+  });
+
+  it("defines the average delay beside its figure, with the manual as a secondary link", async () => {
+    mockFeed(0.1);
+    renderHero();
+    const label = document.querySelector<HTMLElement>(".ov-hero-label")!;
+    await userEvent.click(within(label).getByRole("button", { name: "Hint" }));
+    const popover = screen.getByRole("dialog", { name: "Average delay" });
+    expect(popover).toHaveTextContent("Early departures stay in the mean as negative delays.");
+    expect(within(popover).getByRole("link", { name: "More in the user manual" })).toHaveAttribute(
+      "href",
+      "/help#13-2-delay-figures",
+    );
+  });
+
+  it("defines every fact row beside its button, without opening the fact's card", async () => {
+    mockFeed(0.1);
+    const onOpenFact = vi.fn();
+    renderHero({ onOpenFact });
+    const rows = [...document.querySelectorAll<HTMLElement>(".ov-hero-facts > li")];
+    expect(rows).toHaveLength(3);
+    const titles: string[] = [];
+    const bodies: string[] = [];
+    for (const row of rows) {
+      const hint = within(row).getByRole("button", { name: "Hint" });
+      expect(hint.closest(".ov-hero-fact")).toBeNull();
+      await userEvent.click(hint);
+      const popover = screen.getByRole("dialog");
+      titles.push(document.getElementById(popover.getAttribute("aria-labelledby")!)?.textContent ?? "");
+      bodies.push(popover.textContent ?? "");
+      expect(within(popover).getByRole("link", { name: "More in the user manual" })).toHaveAttribute(
+        "href",
+        "/help#4-pulse--the-period-at-a-glance",
+      );
+      await userEvent.keyboard("{Escape}");
+    }
+    expect(titles).toEqual(["Heaviest hour", "Share of delay", "Routes averaging late"]);
+    expect(bodies[2]).toContain("at least 5 min late over the period, out of the routes observed 100 or more times");
+    expect(onOpenFact).not.toHaveBeenCalled();
   });
 
   it("counts a long-quiet feed in days", () => {
@@ -518,7 +558,8 @@ describe("OverviewHeroRow", () => {
     expect(figure.findIndex((el) => el.matches(".ov-pulse-ribbon"))).toBeLessThan(
       figure.findIndex((el) => el.matches(".ov-hero-label")),
     );
-    expect(document.querySelector(".ov-hero-text svg")).toBeNull();
+    // The facts' definition icons are the only drawings there.
+    expect(document.querySelector(".ov-hero-text svg:not(.lucide-info)")).toBeNull();
   });
 
   it("draws no ribbon without an hourly profile", () => {

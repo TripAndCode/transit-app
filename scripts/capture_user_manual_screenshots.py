@@ -52,7 +52,6 @@ LABELS = {
         "route_label": "路線",
         "route_placeholder": "路線を検索",
         "playback_toggle": "1日の動きを再生",
-        "later": "後で",
     },
     "en": {
         "hint": "Hint",
@@ -66,7 +65,6 @@ LABELS = {
         "route_label": "Route",
         "route_placeholder": "Search routes",
         "playback_toggle": "Play the day",
-        "later": "Later",
     },
 }
 
@@ -109,7 +107,7 @@ def first_route_code(page: Page, agency: str) -> str:
 
 
 def new_capture_context(browser, locale: str):
-    """A browser context in *locale*, with the help hint already dismissed and
+    """A browser context in *locale*, with the help hint and Pulse's tour already dismissed and
     the data-freshness and feed-health banners hidden: they reflect the capture
     data's state, not the screen being documented. Their dismissal lives in page
     state, so they are hidden by their `data-shell-banner` attribute instead."""
@@ -117,6 +115,7 @@ def new_capture_context(browser, locale: str):
     ctx.add_init_script(
         f"window.localStorage.setItem('app.locale', '{locale}');"
         "window.localStorage.setItem('help_hint_dismissed', '1');"
+        "window.localStorage.setItem('transit.pulseTourSeen', '1');"
         "document.addEventListener('DOMContentLoaded', () => {"
         "  const style = document.createElement('style');"
         "  style.textContent = '[data-shell-banner] { display: none !important; }';"
@@ -210,10 +209,6 @@ def capture(base: str, locale: str) -> None:
         page.goto(f"{agency}/live")
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(1000)
-        tour_dismiss = page.get_by_text(L["later"], exact=True)
-        if tour_dismiss.count() > 0:
-            tour_dismiss.first.click()
-            page.wait_for_timeout(300)
         empty_state = page.locator(".ops-map__empty")
         if empty_state.count() > 0:
             empty_state.get_by_text(L["playback_toggle"], exact=False).first.click()

@@ -40,9 +40,10 @@ function filterSummary(
   // which shows nothing for a conversation with no range set).
   parts.push(rangeLabel(fc, t, anchorDay) ?? t("filters.range.last_30d"));
 
-  // Day-of-week
+  // Day-of-week, in the scope sentence's words: the groups are ISO weekdays
+  // and Saturday-Sunday, so public holidays fall on their own weekday.
   if (fc.dow === "weekday" || fc.dow === "weekend") {
-    parts.push(t(fc.dow === "weekday" ? "ask.filter_bar.dow_weekday" : "ask.filter_bar.dow_weekend"));
+    parts.push(t(fc.dow === "weekday" ? "scope.control.weekday" : "scope.control.weekend"));
   } else if (fc.dow && fc.dow !== "all") {
     parts.push(dowValueLabel(fc.dow, t));
   }
@@ -113,9 +114,9 @@ export function FilterContextBar({ value, onChange, pending }: Props) {
   }));
 
   const dowOptions: { value: DowFilter; label: string }[] = [
-    { value: "all", label: t("ask.filter_bar.dow_all") },
-    { value: "weekday", label: t("ask.filter_bar.dow_weekday") },
-    { value: "weekend", label: t("ask.filter_bar.dow_weekend") },
+    { value: "all", label: t("scope.control.days_all") },
+    { value: "weekday", label: t("scope.control.weekday") },
+    { value: "weekend", label: t("scope.control.weekend") },
   ];
 
   const timeBandOptions = buildTimeBandOptions(t);

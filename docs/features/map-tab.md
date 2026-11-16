@@ -62,9 +62,6 @@ but are not plotted.
   (「くすの木台線（64・64-1）」, three numbers and a count beyond that), because
   a feed can spell two different lines alike; names are shown as the feed
   writes them.
-- The first-run tour's first step sits below both the filter dock and the
-  map legend under it (a step's `clear` element), so it never covers the
-  legend.
 - With all routes selected, the right panel lists routes from the latest
   observation by maximum delay instead of leaving the panel empty.
 - Selecting a route groups simultaneous trips by GTFS `direction_id`, falling

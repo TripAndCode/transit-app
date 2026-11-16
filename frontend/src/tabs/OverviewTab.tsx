@@ -9,10 +9,12 @@ import { useAgencyId } from "../api/useAgencyId";
 import { useRouteNames } from "../api/useRouteNames";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
+import { scopeWindow } from "../api/onTimeDefault";
 import { LAST_SERVICE_HOUR } from "../api/timeBands";
 import { useUrlPatch, useUrlState } from "../api/useUrlState";
 import { ConcentrationBar } from "../components/ConcentrationBar";
 import { EmptyState } from "../components/EmptyState";
+import { FirstRunTour } from "../components/FirstRunTour";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { AsyncSection } from "../components/AsyncSection";
 import { OverviewHeroRow, type HeroFact } from "../components/OverviewHeroRow";
@@ -69,6 +71,10 @@ export function OverviewTab() {
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
+  // The tour's place for this visit, kept here because the figures it is
+  // mounted with are replaced while a changed scope loads.
+  const [tourStep, setTourStep] = useState(0);
+  const [tourLater, setTourLater] = useState(false);
   // Two string keys rather than one JSON-shaped one, consistent with the
   // route-analysis stop selection: `peak_dow` is only ever written alongside
   // `peak_hour`, so its presence/absence stays a plain empty-string default.
@@ -159,7 +165,7 @@ export function OverviewTab() {
     <ScopeHeaderProvider>
       {/* The heading and the sentence share the page's column, so they line
           up with each other and with the cards below. */}
-      <div className="ov-page-head">
+      <div className="ov-page-head" data-tour="pulse-scope">
         <ScopePageHeader title={t("nav.pulse")} />
         <ScopeSentence applied={query.data?.scope_applied} />
       </div>
@@ -180,6 +186,17 @@ export function OverviewTab() {
         >
           {(data) => (
           <>
+            {/* Inside the figures' branch, so every step's anchor is on the
+                page whenever the tour is: an anchor that never appears would
+                leave its focus trap holding Tab on a page showing no tour. */}
+            {!tourLater && (
+              <FirstRunTour
+                onTime={scopeWindow(ctx)}
+                step={tourStep}
+                onStep={setTourStep}
+                onLater={() => setTourLater(true)}
+              />
+            )}
             <OverviewHeroRow
               headline={data.headline}
               severeCount={data.top_delayed.band_counts.severe.count}

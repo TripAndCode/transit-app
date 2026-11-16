@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
+import i18n from "../../i18n";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
@@ -74,7 +75,11 @@ function show(
   payload: DwellRunPayload,
   weather: WeatherDelayResponse,
   headway: HeadwayQualityResponse,
-  { admin = true, weatherOn = true }: { admin?: boolean; weatherOn?: boolean } = {},
+  {
+    admin = true,
+    weatherOn = true,
+    showStatistics = false,
+  }: { admin?: boolean; weatherOn?: boolean; showStatistics?: boolean } = {},
 ) {
   vi.spyOn(config, "useFeatureOn").mockReturnValue(weatherOn);
   vi.spyOn(isAdmin, "useIsAdmin").mockReturnValue(admin);
@@ -84,7 +89,7 @@ function show(
   vi.spyOn(hooks, "useWeatherDelay").mockReturnValue({ data: weather, isLoading: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "useHeadwayQuality").mockReturnValue({ data: headway, isLoading: false, error: null, refetch: vi.fn() } as never);
   const router = createMemoryRouter(
-    [{ path: "/agencies/:agencyId/why", element: <WhyAnalyses aid={1} payload={payload} /> }],
+    [{ path: "/agencies/:agencyId/why", element: <WhyAnalyses aid={1} payload={payload} showStatistics={showStatistics} /> }],
     { initialEntries: ["/agencies/1/why?from=2026-09-01&to=2026-09-07"] },
   );
   renderWithProviders(<RouterProvider router={router} />);
@@ -104,6 +109,48 @@ afterEach(() => {
 });
 
 describe("WhyAnalyses", () => {
+  it("marks a thinly observed average with few data while the counts are hidden, and a solid one not", () => {
+    const thick = { ...DWELL.routes[0], route_code: "8", dwell_samples: 400, run_samples: 12 };
+    show({ ...DWELL, routes: [DWELL.routes[0], thick] }, WEATHER, HEADWAY);
+    const table = screen.getByRole("columnheader", { name: i18n.t("reports.dwell_run.col.dwell_avg") }).closest("table")!;
+    const [thin, solid] = within(table).getAllByRole("row").slice(1);
+    const cells = (row: HTMLElement) => within(row).getAllByRole("cell");
+    // Columns: #, route, dwell avg, running avg.
+    expect(within(cells(thin)[2]).getByText("few data")).toHaveClass("caveat-badge");
+    expect(within(cells(thin)[3]).getByText("few data")).toBeInTheDocument();
+    expect(within(cells(solid)[2]).queryByText("few data")).toBeNull();
+    expect(within(cells(solid)[3]).getByText("few data")).toBeInTheDocument();
+  });
+
+  it("marks no average the feed gave no observations for", () => {
+    const runOnly = { ...DWELL.routes[0], dwell_samples: 0, dwell_avg_sec: null, dwell_p50_sec: null, dwell_p90_sec: null, run_samples: 400 };
+    show({ ...DWELL, routes: [runOnly] }, WEATHER, HEADWAY);
+    const table = screen.getByRole("columnheader", { name: i18n.t("reports.dwell_run.col.dwell_avg") }).closest("table")!;
+    const row = within(table).getAllByRole("row")[1];
+    expect(within(row).getAllByRole("cell")[2]).toHaveTextContent("—");
+    expect(within(row).queryByText("few data")).toBeNull();
+  });
+
+  it("offers the statistics toggle only where a table it changes is drawn", () => {
+    show(DWELL, WEATHER, HEADWAY);
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeInTheDocument();
+    cleanup();
+    show(unavailableDwell("feed_unsupported"), NO_STATION, { ...HEADWAY, rows: [] }, { weatherOn: false });
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
+  });
+
+  it("shows the dwell and running averages, and their statistics only on request", () => {
+    show(DWELL, WEATHER, HEADWAY);
+    const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers()).toContain(i18n.t("reports.dwell_run.col.dwell_avg"));
+    expect(headers()).not.toContain(i18n.t("reports.dwell_run.col.dwell_p90"));
+    expect(headers()).not.toContain(i18n.t("reports.dwell_run.col.run_samples"));
+    cleanup();
+    show(DWELL, WEATHER, HEADWAY, { showStatistics: true });
+    expect(headers()).toContain(i18n.t("reports.dwell_run.col.dwell_p90"));
+    expect(headers()).toContain(i18n.t("reports.dwell_run.col.run_samples"));
+  });
+
   it("lists what it can't show, each with a status and its true cause, instead of three empty cards", () => {
     show(unavailableDwell(EXPIRED, "2026-09-11"), NO_STATION, { rows: [], ctx: CTX, unavailable_reason: EXPIRED, last_checked: "2026-09-11" });
 

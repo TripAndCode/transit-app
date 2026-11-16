@@ -277,17 +277,18 @@
     "done": "Got it",
     "later": "Later",
     "dismiss": "Dismiss this tour",
-    "filters": {
-      "title": "Narrow what you're looking at",
-      "body": "Filter by route or service pattern — everything below updates to match."
+    "delay": {
+      "title": "What a delay is here",
+      "body": "A delay is how many minutes after its timetable a bus left a stop, as the operator's own real-time feed reports it. Each departure from a stop counts once, and an early departure counts as a negative delay. The large figure is the average of those departures over the period."
     },
-    "map": {
-      "title": "Inspect what's running now",
-      "body": "Every observed trip is listed here — open one to see its live progress."
+    "on_time": {
+      "title": "What on time means",
+      "body": "A departure is on time when it leaves between {{early}} early and {{late}} late. Leaving earlier than that is not on time. This screen shows average delay; the on-time rate is on Routes and on each route's page.",
+      "body_any_early": "A departure is on time when it leaves no more than {{late}} late, and every early departure counts as on time too. This screen shows average delay; the on-time rate is on Routes and on each route's page."
     },
-    "ask": {
-      "title": "Search and open the notebook",
-      "body": "Find routes, reports and screens from here. The same field opens the notebook, which holds ready-made analyses of delay as tables and charts."
+    "scope": {
+      "title": "What this screen covers",
+      "body": "This sentence says which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any part marked ▼ to change it."
     }
   },
   "forecast": {
@@ -637,7 +638,30 @@
     "peak_explainer": "Average delay by hour (0–23) across the selected range, split by day of week into weekdays (Mon–Fri) and weekends (Sat–Sun); a public holiday counts as its day of week. Compare commute peaks against weekend patterns.",
     "service_split_explainer": "Average delay by day type (weekdays, Saturdays, and Sundays & holidays; or weekdays and weekends & holidays) across the selected range. Each day's type is the timetable the agency's schedule ran that day. A day type with too few days or observations is marked “Not enough data” and left out of the comparison. The daily series below shows whether a gap is persistent or a one-off.",
     "never_collected": "We haven't collected any data for {{agency}} yet.",
-    "choose_another_agency": "Choose another agency"
+    "choose_another_agency": "Choose another agency",
+    "definition": {
+      "more": "More in the user manual",
+      "avg_delay": {
+        "title": "Average delay",
+        "body": "The mean of every departure delay in the period, in minutes: how late each bus left each stop against its timetable. Early departures stay in the mean as negative delays."
+      },
+      "peak_hour": {
+        "title": "Heaviest hour",
+        "body": "The hour of the day whose departures had the highest average delay over the period, under the conditions above. Click the row to see every hour."
+      },
+      "concentration": {
+        "title": "Share of delay",
+        "body": "Of all the minutes departures left late in the period, the share these routes account for. Early departures count as zero. The higher the share, the more the delay sits with a few routes."
+      },
+      "late_routes": {
+        "title": "Routes averaging late",
+        "body": "How many routes averaged at least {{min}} min late over the period, out of the routes observed {{floor}} or more times. A route observed fewer times is left out, since a handful of trips can swing its average, as are the routes Routes leaves out by default: retired route codes and feeds that always report zero delay."
+      },
+      "routes_to_check": {
+        "title": "Routes to check",
+        "body": "The most delayed routes in the period, grouped by their average delay, among the routes observed {{floor}} or more times, leaving out the routes Routes leaves out by default (retired route codes and feeds that always report zero delay). Each row's change compares it with the same number of days just before the period. Click a route to open its page."
+      }
+    }
   },
   "markdownMermaid": {
     "diagram_fallback_label": "Diagram"
@@ -756,7 +780,11 @@
     "hint_cta": "View Help",
     "hint_dismiss_aria": "Dismiss help hint",
     "search_result_count_one": "{{count}} section found",
-    "search_result_count_other": "{{count}} sections found"
+    "search_result_count_other": "{{count}} sections found",
+    "anchor": {
+      "pulse": "4-pulse--the-period-at-a-glance",
+      "delay_figures": "13-2-delay-figures"
+    }
   },
   "account": {
     "admin_link": "Admin",
@@ -1217,12 +1245,9 @@
       "edit": "Edit",
       "apply": "Apply",
       "label_date_range": "Date range",
-      "label_dow": "DOW",
+      "label_dow": "Day of week",
       "label_time_band": "Time band",
       "label_routes": "Routes",
-      "dow_all": "All",
-      "dow_weekday": "Weekdays only",
-      "dow_weekend": "Weekends only",
       "no_routes_selected": "No specific routes"
     },
     "card": {
@@ -1249,7 +1274,7 @@
         "service": {
           "all": "All",
           "weekday": "Weekday",
-          "weekend": "Weekend"
+          "weekend": "Weekend/holiday"
         }
       },
       "top_delay": {
@@ -1634,7 +1659,8 @@
       "reading_note": "The delay is the last departure delay the real-time data reported for this stop.",
       "unmatched_note": "This trip couldn't be matched to the timetable for this day, so its stop names and start time can't be shown.",
       "late_list_basis": "This list picks late trips by their delay at the first stop the real-time data recorded for each. The delay at the stop a passenger boarded is found with the steps above."
-    }
+    },
+    "statistics_toggle": "Show statistics"
   },
   "routeTable": {
     "title": "Delays by route",

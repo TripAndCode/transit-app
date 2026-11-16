@@ -30,7 +30,17 @@ function fmtDeltaSec(v: number | null, t: TFunction): string {
   return t("common.unit_sec_signed", { sign: r < 0 ? "-" : "+", value: fixedTenth(Math.abs(r)) });
 }
 
-export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
+export function WeatherDelayPanel({
+  aid,
+  ctx,
+  showStatistics,
+}: {
+  aid: number;
+  ctx: Scope;
+  /** Whether the observation counts show. The panel's low-confidence badge
+   *  stays either way. */
+  showStatistics: boolean;
+}) {
   const { t } = useTranslation();
   const { data, isLoading, error, refetch } = useWeatherDelay(aid, ctx, true);
 
@@ -67,7 +77,7 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
                   <th style={th({ align: "left" })}>{t("reports.weather_delay.col.condition")}</th>
                   <th style={th({ align: "right" })}>{t("reports.weather_delay.col.avg_delay")}</th>
                   <th style={th({ align: "right" })}>{t("reports.weather_delay.col.days")}</th>
-                  <th style={th({ align: "right" })}>{t("reports.weather_delay.col.samples")}</th>
+                  {showStatistics && <th style={th({ align: "right" })}>{t("reports.weather_delay.col.samples")}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -75,13 +85,13 @@ export function WeatherDelayPanel({ aid, ctx }: { aid: number; ctx: Scope }) {
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.wet")}</td>
                   <td style={td({ align: "right" })}>{fmtDelaySec(data.wet.avg_delay_sec, t)}</td>
                   <td style={td({ align: "right" })}>{formatNumber(data.wet.days)}</td>
-                  <td style={td({ align: "right" })}>{formatNumber(data.wet.samples)}</td>
+                  {showStatistics && <td style={td({ align: "right" })}>{formatNumber(data.wet.samples)}</td>}
                 </tr>
                 <tr style={{ borderTop: "1px solid var(--border-soft)" }}>
                   <td style={{ ...td(), fontWeight: 500 }}>{t("reports.weather_delay.row.dry")}</td>
                   <td style={td({ align: "right" })}>{fmtDelaySec(data.dry.avg_delay_sec, t)}</td>
                   <td style={td({ align: "right" })}>{formatNumber(data.dry.days)}</td>
-                  <td style={td({ align: "right" })}>{formatNumber(data.dry.samples)}</td>
+                  {showStatistics && <td style={td({ align: "right" })}>{formatNumber(data.dry.samples)}</td>}
                 </tr>
               </tbody>
             </table>

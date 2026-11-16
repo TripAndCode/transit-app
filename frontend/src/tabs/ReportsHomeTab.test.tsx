@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -7,6 +7,13 @@ import * as hooks from "../api/hooks";
 import * as csv from "../components/analysis/csv";
 import { ReportsHomeTab } from "./ReportsHomeTab";
 import type { Agency, DefinitionMeta, RankingRow, ReportResponse, TrendDay } from "../api/types";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 const DEFINITION: DefinitionMeta = {
   preset: null,
@@ -98,9 +105,12 @@ describe("ReportsHomeTab", () => {
     );
     renderTab("/agencies/1/reports?service=平日");
     expect(screen.getAllByRole("link", { name: "Open analysis →" })).toHaveLength(2);
-    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
     expect(screen.queryByRole("cell", { name: "Weekday" })).toBeNull();
+    // The observation count is a statistic, shown on request.
+    expect(screen.queryByRole("cell", { name: "12,345" })).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
+    expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
   });
 
   it("shows how the figures are made as its own disclosure, not nested in another", () => {
@@ -115,6 +125,8 @@ describe("ReportsHomeTab", () => {
     mockReports(trendResponse([]), rankingResponse([]));
     renderTab();
     expect(screen.getAllByText("No observations match these filters")).toHaveLength(2);
+    // No table, so nothing for the statistics toggle to change.
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
   });
 
   it("shows the saved-analyses view and its local-only note from the doc param", () => {
