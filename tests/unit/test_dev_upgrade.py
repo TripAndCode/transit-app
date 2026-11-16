@@ -181,7 +181,7 @@ def test_a_retention_floor_on_dev_stops_a_run_whose_migration_only_rebuilds_an_a
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
     monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], True))
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main([]) == 3
     assert ran == []
     assert "0099_purge" in capsys.readouterr().err
@@ -219,7 +219,7 @@ def test_a_pending_migration_that_changes_rows_stops_a_real_run_before_any_step(
         dev_upgrade, "destructive_pending", lambda pending, *, retention_floor: {"0099_drop": ["users"]}
     )
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main([]) == 3
     assert ran == []
     assert "0099_drop" in capsys.readouterr().err
@@ -235,7 +235,7 @@ def test_the_owner_naming_the_version_lets_it_run(monkeypatch, tmp_path):
     monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: contextlib.nullcontext())
     monkeypatch.setattr(dev_upgrade, "LOG_DIR", tmp_path)
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main(["--allow-destructive-up", "0099"]) == 0
     assert ran == list(dev_upgrade.STEPS)
 
@@ -245,7 +245,7 @@ def test_check_writes_nothing(monkeypatch, capsys):
     monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://x")
     monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState([], False))
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main(["--check"]) == 0
     assert ran == []
     assert "plan: migrate -> ch-bootstrap -> analyze-all -> check-aggs" in capsys.readouterr().out
@@ -258,7 +258,7 @@ def test_a_resumed_run_starts_at_its_step(monkeypatch, tmp_path):
     monkeypatch.setattr(dev_upgrade, "upgrade_lock", lambda: contextlib.nullcontext())
     monkeypatch.setattr(dev_upgrade, "LOG_DIR", tmp_path)
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main(["--start", "3"]) == 0
     assert ran == ["analyze-all", "check-aggs"]
 
@@ -270,7 +270,7 @@ def test_a_resumed_run_with_pending_migrations_is_refused(monkeypatch, capsys, d
     monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], False))
     monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending, *, retention_floor: destructive)
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main(["--start", "2", "--allow-destructive-up", "0099"]) == 3
     assert ran == []
     assert "pending migrations; start from step 1" in capsys.readouterr().err
@@ -282,7 +282,7 @@ def test_check_reports_that_a_resumed_run_with_pending_migrations_refuses(monkey
     monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0099"], False))
     monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending, *, retention_floor: {})
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main(["--check", "--start", "2"]) == 0
     assert ran == []
     assert "a real run refuses: pending migrations; start from step 1" in capsys.readouterr().out
@@ -294,7 +294,7 @@ def test_a_refused_checkout_writes_nothing(monkeypatch, capsys):
 
     monkeypatch.setattr(dev_upgrade, "check_checkout", refuse)
     ran = []
-    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log: ran.append(step))
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): ran.append(step))
     assert dev_upgrade.main([]) == 3
     assert ran == []
     assert "linked worktree" in capsys.readouterr().err
@@ -332,3 +332,25 @@ def test_a_step_runs_in_the_stripped_environment(monkeypatch, tmp_path):
     with (tmp_path / "log").open("w") as log:
         dev_upgrade._run("check-aggs", log)
     assert "CLICKHOUSE_PORT" not in seen["env"]
+
+
+def test_the_owners_named_versions_reach_the_migrate_step_alone():
+    caller = {"PATH": "/bin", dev_upgrade.ALLOW_DESTRUCTIVE_UP_ENV: "9999", "DATABASE_URL": "x"}
+    migrate = dev_upgrade.step_env(caller, "migrate", ["0102", "0103"])
+    assert migrate[dev_upgrade.ALLOW_DESTRUCTIVE_UP_ENV] == "0102,0103"
+    assert "DATABASE_URL" not in migrate
+    assert dev_upgrade.ALLOW_DESTRUCTIVE_UP_ENV not in dev_upgrade.step_env(caller, "analyze-all", ["0102"])
+    assert dev_upgrade.ALLOW_DESTRUCTIVE_UP_ENV not in dev_upgrade.step_env(caller, "migrate")
+
+
+def test_a_real_run_hands_the_named_versions_to_each_step(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(dev_upgrade, "check_checkout", lambda: None)
+    monkeypatch.setattr(dev_upgrade, "dev_database_url", lambda: "postgresql://dev")
+    monkeypatch.setattr(dev_upgrade, "migration_state", lambda url: dev_upgrade.MigrationState(["0102"], True))
+    monkeypatch.setattr(dev_upgrade, "destructive_pending", lambda pending, **kw: {"0102_x": ["agg_route_daily"]})
+    monkeypatch.setattr(dev_upgrade, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(dev_upgrade, "upgrade_lock", contextlib.nullcontext)
+    monkeypatch.setattr(dev_upgrade, "_run", lambda step, log, allowed=(): seen.append((step, list(allowed))))
+    assert dev_upgrade.main(["--allow-destructive-up", "0102"]) == 0
+    assert seen and all(allowed == ["0102"] for _, allowed in seen)

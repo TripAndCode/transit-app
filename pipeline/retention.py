@@ -598,7 +598,8 @@ LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES = 20
 #: before the first DROP PARTITION: by then every live request that checked
 #: the old floor has run its last query or out its time budget
 #: (LIVE_READ_MAX_EXECUTION_SECONDS per query). The run holds the agencies'
-#: ingest locks throughout, so their analyze and promotion wait behind it.
+#: ingest locks throughout, so an analyze or promotion that meets the wait is
+#: turned away (a cron poke is recorded skipped, a CLI exits), not queued.
 LIVE_REQUEST_DRAIN_SECONDS = LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES * LIVE_READ_MAX_EXECUTION_SECONDS
 
 

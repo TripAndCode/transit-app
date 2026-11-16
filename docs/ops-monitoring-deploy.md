@@ -293,8 +293,13 @@ runs it. `migrate down` refuses such a down migration, marked or not, without
 A run that drops a month records the new floors, then waits
 `pipeline.retention.LIVE_REQUEST_DRAIN_SECONDS` before the first drop, so a
 live report that checked the old floor finishes before its rows go. It holds
-the affected agencies' ingest locks for that wait, so their analyze and
-promotion queue behind it. A run that drops nothing does not wait.
+the affected agencies' ingest locks for that wait, so an analyze or promotion
+that meets it is turned away rather than queued: the cron poke is recorded
+`skipped` and the CLIs exit. Schedule `prune-updates` clear of the 00:05 JST
+poke. A run that drops nothing does not wait.
+
+`migrate up` reads whether a floor exists once, before it applies anything,
+so the first prune that ever records a floor must not overlap a deploy.
 
 A run that fails part-way leaves a `retention` row in `pipeline_runs` with the
 rows dropped so far. The months it did not reach stay in

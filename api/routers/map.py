@@ -68,7 +68,7 @@ from pipeline.db import (
     stop_event_filter_ch,
 )
 from pipeline.histogram import N_BUCKETS, percentile_from_hist
-from pipeline.live_filing import Filing, filing
+from pipeline.live_filing import Filing, RangeNotRetained, filing
 from pipeline.reports.map import compute_route_shape, route_exists
 from pipeline.reports.timeline import ALLOWED_STEP_MINUTES, compute_delay_timeline, playback_day_for
 from pipeline.retention import retention_floor_async
@@ -261,7 +261,12 @@ async def _latest_route_observation(
         params = {"agency_id": agency_id, "route": route_code, "bound": bound}
         result = await ch.query(_latest_route_observation_sql(table, Stamp.INGESTED), parameters=params)
         if not result.result_rows:
-            filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
+            try:
+                filed = await _live_filing(conn, ch, agency_id, bound, agency_latest, table=table)
+            except RangeNotRetained:
+                # A prune raised the floor after it was read above: the
+                # window the request never named now reaches below it.
+                continue
             if filed.stamp.refiles:
                 result = await ch.query(
                     _latest_route_observation_sql(table, filed.stamp), parameters={**params, **filed.params}

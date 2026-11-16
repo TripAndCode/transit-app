@@ -418,7 +418,11 @@ def migrate_up(conn, *, allow_destructive: Collection[str] = ()) -> None:
             "refusing to migrate up: this database has a retention floor, and "
             + "; ".join(refused)
             + " loses data below it that no analyze restores. Nothing has been applied. The owner names each "
-            f"version with --allow-destructive-up VERSION, or in {ALLOW_DESTRUCTIVE_UP_ENV}=V1,V2 for a deploy."
+            "version with --allow-destructive-up VERSION or, for a deploy, sets "
+            + ALLOW_DESTRUCTIVE_UP_ENV
+            + "="
+            + ",".join(v for v, p in paths.items() if p.name in losing and v not in allow_destructive)
+            + "."
         )
     for v in pending:
         _run_up(v, conn)

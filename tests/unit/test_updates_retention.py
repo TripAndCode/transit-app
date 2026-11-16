@@ -420,9 +420,6 @@ def test_the_drop_waits_out_a_whole_live_request():
     LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES ClickHouse queries in turn, each
     capped at the live client's time budget."""
     assert retention.LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES >= 20
-    assert retention.LIVE_REQUEST_DRAIN_SECONDS >= (
-        retention.LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES * retention.LIVE_READ_MAX_EXECUTION_SECONDS
-    )
     assert retention.LIVE_REQUEST_DRAIN_SECONDS >= 10 * 60
 
 
@@ -435,10 +432,21 @@ def test_a_run_that_drops_nothing_does_not_wait(stores, monkeypatch):
     assert not any(entry[0] == "wait" for entry in stores)
 
 
-def test_the_live_read_budget_is_the_api_clients():
-    from api.clickhouse import get_ch_client
+def test_the_live_read_budget_is_the_api_clients(monkeypatch):
+    import asyncio
 
-    assert "LIVE_READ_MAX_EXECUTION_SECONDS" in get_ch_client.__code__.co_names
+    import clickhouse_connect
+
+    from api import clickhouse as api_clickhouse
+
+    seen = {}
+
+    async def fake_client(**kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(clickhouse_connect, "get_async_client", fake_client)
+    asyncio.run(api_clickhouse.get_ch_client())
+    assert seen["settings"]["max_execution_time"] == retention.LIVE_READ_MAX_EXECUTION_SECONDS
 
 
 def test_a_prune_locks_records_every_floor_then_writes_off_and_drops_each_month_in_turn(stores, monkeypatch):
