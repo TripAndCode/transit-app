@@ -41,6 +41,14 @@
   margin-bottom: var(--space-4);
 }
 
+/* Only groups a popover's controls so they disable together; no frame. */
+.scope-fieldset {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .scope:focus {
   outline: none;
 }

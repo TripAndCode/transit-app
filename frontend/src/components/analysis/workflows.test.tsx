@@ -172,11 +172,10 @@ it("stages a route pick in the scope sentence until Apply instead of querying mi
   expect(lastRequestedRoute()).toBe("101");
 
   const sentence = screen.getByRole("region", { name: "What you're viewing" });
-  await user.click(within(sentence).getAllByRole("button")[0]);
+  await user.click(within(sentence).getByRole("button", { name: "1 Coast" }));
   const picker = screen.getByRole("dialog", { name: "Routes" });
-  const [first, second] = within(picker).getAllByRole("checkbox");
-  await user.click(first);
-  await user.click(second);
+  await user.click(within(picker).getByRole("checkbox", { name: "1 Coast" }));
+  await user.click(within(picker).getByRole("checkbox", { name: "9 Coast" }));
   expect(lastRequestedRoute()).toBe("101");
   expect(screen.queryByText("Choose a route and service pattern")).toBeNull();
 

@@ -226,7 +226,11 @@ describe("MapTab scope sentence", () => {
     expect(region()).toHaveTextContent("live, counting on-time as within 2 min");
     expect(region()).toHaveTextContent("Not used on this screen: Days and timetable");
     expect(screen.queryByRole("button", { name: /9\/1/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+    // The routes control stages a pick behind its own Apply, which stays
+    // disabled until the pick differs from what the screen shows.
+    fireEvent.click(screen.getByRole("button", { name: "R1" }));
+    const picker = screen.getByRole("dialog", { name: "Routes" });
+    expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
   });
 
   it("asks for a route's shape over Live's own scope, not a linked period or day", () => {

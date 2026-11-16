@@ -133,7 +133,8 @@ What the user sees/does:
   late never touches a newer edit. A failed save before a dispatch stops the
   dispatch and offers a retry of the whole submission. A thread stores no on-time tolerance,
   so its sentence has no tolerance clause, and it carries no saved views or
-  pin; its tokens are disabled while a question is being sent.
+  pin; its tokens, Reset and any open popover's controls are disabled while a
+  question is being sent.
 
 ## Request path
 

@@ -142,7 +142,12 @@ function Token({
       </button>
       {open && (
         <ScopePopover label={t(`scope.popover.${token.key}`)} onClose={onClose} returnFocusTo={ref}>
-          <Control scope={scope} update={update} summary={summary} close={closeAndFocus} />
+          {/* A popover open when the sentence is disabled stays on screen,
+              its controls disabled with it, rather than closing on the
+              reader mid-pick. */}
+          <fieldset className="scope-fieldset" disabled={disabled}>
+            <Control scope={scope} update={update} summary={summary} close={closeAndFocus} />
+          </fieldset>
         </ScopePopover>
       )}
     </span>

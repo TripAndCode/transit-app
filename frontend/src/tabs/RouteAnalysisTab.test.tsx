@@ -700,7 +700,11 @@ describe("RouteAnalysisTab where delay grows", () => {
       expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--on");
       expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--on");
       expect(screen.getByRole("button", { name: "R1" })).not.toHaveClass("scope-token--on");
-      expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+      // The routes control stages a pick behind its own Apply, which stays
+      // disabled until the pick differs from what the screen shows.
+      fireEvent.click(screen.getByRole("button", { name: "R1" }));
+      const picker = screen.getByRole("dialog", { name: "Routes" });
+      expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
     });
 
     it("strikes through only what no section of the page uses", () => {
