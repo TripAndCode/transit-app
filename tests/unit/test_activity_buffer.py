@@ -81,6 +81,10 @@ def test_stopping_during_a_periodic_flush_lets_that_write_finish(monkeypatch):
                 written.append(args[5])
 
         app = SimpleNamespace(state=SimpleNamespace(pool=_SlowPool()))
+        # Both module buffers outlive a test, and requests from earlier tests
+        # in the process leave counts in them. Only this test's one user count
+        # may reach the pool.
+        activity.ANONYMOUS_BUFFER.drain()
         activity.BUFFER.drain()
         activity.BUFFER.record(_KEY, is_error=False)
         activity.start(app)
