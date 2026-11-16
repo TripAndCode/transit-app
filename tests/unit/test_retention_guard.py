@@ -11,21 +11,26 @@ from datetime import date
 import pytest
 
 from api.range_not_retained import range_not_retained_handler
-from pipeline import live_filing
+from pipeline import live_filing, recorded_floor
 from pipeline.clickhouse import LIVE_TABLE, UPDATES_TABLE
-from pipeline.live_filing import RANGE_NOT_RETAINED_CODE, RangeNotRetained, require_retained
+from pipeline.live_filing import require_retained
+from pipeline.retained_reads import RANGE_NOT_RETAINED_CODE, RangeNotRetained
 
 FLOOR = date(2025, 3, 1)
 
 
 class _Floors:
-    """Stands in for pipeline.retention.retention_floor_async, counting reads."""
+    """Stands in for pipeline.recorded_floor's reads of a database that
+    records drops, counting the floor reads."""
 
     def __init__(self, floors: dict[int, date]) -> None:
         self.floors = floors
         self.reads: list[tuple[object, int]] = []
 
-    async def __call__(self, conn, agency_id: int) -> date | None:
+    async def exists(self, conn) -> bool:
+        return True
+
+    async def floor(self, conn, agency_id: int) -> date | None:
         self.reads.append((conn, agency_id))
         return self.floors.get(agency_id)
 
@@ -33,7 +38,8 @@ class _Floors:
 @pytest.fixture
 def floors(monkeypatch):
     fake = _Floors({1: FLOOR})
-    monkeypatch.setattr(live_filing.retention, "retention_floor_async", fake)
+    monkeypatch.setattr(recorded_floor, "pruned_table_exists", fake.exists)
+    monkeypatch.setattr(recorded_floor, "recorded_floor_async", fake.floor)
     return fake
 
 

@@ -1,4 +1,4 @@
-"""pipeline.retention.retention_floor_async reads the floor the live readers
+"""pipeline.recorded_floor.retention_floor_async reads the floor the live readers
 refuse before (pipeline.live_filing.require_retained) on an asyncpg
 connection, exactly as retention_floor reads it."""
 
@@ -6,7 +6,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from pipeline.retention import retention_floor, retention_floor_async
+from pipeline.recorded_floor import retention_floor_async
+from pipeline.retention import retention_floor
 
 
 async def _record_drop(aconn, agency_id: int, floor: date) -> None:

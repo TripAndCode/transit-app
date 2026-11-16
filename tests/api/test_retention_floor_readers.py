@@ -13,7 +13,7 @@ import pytest
 
 from api.range import RangeCtx, jst_today
 from pipeline.clickhouse import insert_updates
-from pipeline.live_filing import RANGE_NOT_RETAINED_CODE
+from pipeline.retained_reads import RANGE_NOT_RETAINED_CODE
 from pipeline.retention import floor_after, partition_span
 from tests.api.test_delay_record import _reading
 from tests.conftest import TEST_ORIGIN
@@ -399,3 +399,117 @@ async def test_describe_data_without_a_floor_is_unchanged(aconn, agency_id, ch_c
     )
     assert result.summary == f"observation window: {FLOOR} – {FLOOR}"
     assert not any(key == "raw_readings_kept_from" for key, _ in result.pairs)
+
+
+def _dropping_after_check(monkeypatch, module, pg_conn, agency_id: int) -> None:
+    """Make *module*'s filing record a drop once its floor check has passed,
+    as a prune that commits its floor while the read is scanning."""
+    checked = module.filing
+
+    async def filing_then_drop(*args, **kwargs):
+        filed = await checked(*args, **kwargs)
+        if not pg_conn.closed:
+            with pg_conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM updates_pruned_months WHERE partition_id = %s", (PARTITION,))
+                recorded = cur.fetchone() is not None
+            if not recorded:
+                _record_drop(pg_conn, agency_id)
+        return filed
+
+    monkeypatch.setattr(module, "filing", filing_then_drop)
+
+
+@pytest.mark.asyncio
+async def test_an_uncached_reader_whose_floor_rises_mid_read_is_refused(
+    client, agency_id, pg_conn, ch_client, floor_app, monkeypatch
+):
+    from pipeline.reports import delay_record
+
+    _seed_route(pg_conn, agency_id)
+    _observe(ch_client, agency_id, BEFORE)
+    _dropping_after_check(monkeypatch, delay_record, pg_conn, agency_id)
+    resp = await client.get(f"/api/{agency_id}/delay_record/trips?date={BEFORE}&route=R1", headers=EN)
+    _assert_not_retained(resp)
+
+
+@pytest.mark.asyncio
+async def test_a_cached_report_whose_floor_rises_mid_read_is_refused(
+    client, agency_id, pg_conn, floor_app, monkeypatch
+):
+    from pipeline.reports import filters
+
+    _dropping_after_check(monkeypatch, filters, pg_conn, agency_id)
+    resp = await client.get(f"/api/{agency_id}/reports/ranking?from={BEFORE}&to={FLOOR}&time_band=evening", headers=EN)
+    _assert_not_retained(resp)
+
+
+@pytest.mark.asyncio
+async def test_an_ask_card_whose_cached_report_loses_its_floor_mid_read_gives_the_refusal(
+    client, agency_id, pg_conn, floor_app, monkeypatch
+):
+    from pipeline.reports import filters
+
+    _dropping_after_check(monkeypatch, filters, pg_conn, agency_id)
+    resp = await client.post(
+        f"/api/{agency_id}/ask/card",
+        json={
+            "tool": "top_n",
+            "args": {"metric": "avg_delay"},
+            "filter_ctx": {"from_date": BEFORE.isoformat(), "to_date": FLOOR.isoformat(), "time_band": "evening"},
+        },
+        headers={**EN, "Origin": TEST_ORIGIN},
+    )
+    assert resp.status_code == 200, resp.text
+    assert f"Detailed readings before {FLOOR.isoformat()} are no longer kept" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_an_ask_tool_reading_live_itself_whose_floor_rises_mid_read_gives_the_refusal(
+    aconn, agency_id, pg_conn, ch_async_client, monkeypatch
+):
+    from pipeline.query.tools import dispatch
+    from pipeline.reports import filters
+
+    _dropping_after_check(monkeypatch, filters, pg_conn, agency_id)
+    ctx = RangeCtx(from_date=BEFORE, to_date=FLOOR)
+    result = await dispatch(
+        "describe_data", {"kind": "sample_counts"}, ctx, aconn, agency_id, locale="en", ch=ch_async_client
+    )
+    assert result.kind == "empty"
+    assert result.summary.startswith(f"Detailed readings before {FLOOR.isoformat()} are no longer kept")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "unobserved"),
+    [
+        ("/today/route/R1/stop-profile", {"date": None, "stops": []}),
+        ("/today/route/R1/trips", {"date": None, "trips": []}),
+    ],
+)
+async def test_an_undated_route_view_whose_floor_rises_mid_probe_probes_again_from_the_floor(
+    client, agency_id, pg_conn, ch_client, floor_app, monkeypatch, path, unobserved
+):
+    """The request names no day, so a floor raised while it looks for the
+    route's latest day re-runs the look from the new floor rather than refuse
+    a day the reader never chose. The agency's newest reading, another
+    route's, is past the floor, so its 30-day window crosses it until the
+    look starts again."""
+    from api.routers import map as map_router
+
+    _seed_route(pg_conn, agency_id)
+    _observe(ch_client, agency_id, FLOOR + timedelta(days=2), route="R2")
+    _dropping_after_check(monkeypatch, map_router, pg_conn, agency_id)
+    resp = await client.get(f"/api/{agency_id}" + path, headers=EN)
+    assert resp.status_code == 200, resp.text
+    assert {key: resp.json()[key] for key in unobserved} == unobserved
+
+
+@pytest.mark.asyncio
+async def test_without_a_floor_a_live_reader_is_served_after_its_recheck(
+    client, agency_id, pg_conn, ch_client, floor_app
+):
+    _seed_route(pg_conn, agency_id)
+    _observe(ch_client, agency_id, BEFORE)
+    resp = await client.get(f"/api/{agency_id}/delay_record/trips?date={BEFORE}&route=R1", headers=EN)
+    assert resp.status_code == 200, resp.text

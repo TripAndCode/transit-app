@@ -836,3 +836,35 @@ async def test_route_table_standards_differ_between_languages_only_in_the_discla
     assert {k: v for k, v in standards["ja"].items() if k != "disclaimer"} == {
         k: v for k, v in standards["en"].items() if k != "disclaimer"
     }
+
+
+@pytest.mark.asyncio
+async def test_a_route_page_snapshot_whose_floor_rises_after_its_reads_is_refused_and_nothing_is_stored(
+    route_page_client, aconn, ch_client, monkeypatch
+):
+    """The route's delay by stop reads `updates` live, outside any cached
+    compute. A prune that commits a floor past the page's day after that read
+    passed its check may drop rows the read was still scanning, so the
+    snapshot is refused before it is stored, not after. The floor is raised
+    once every panel has been read (the route catalogue comes last), so no
+    later panel's own check refuses first."""
+    from api.routers import snapshots
+
+    client, agency_id, pool = route_page_client
+    await _seed_route_page(pool, ch_client, agency_id)
+    sid = (await seed_session(aconn, role="admin")).sid
+    catalogue = snapshots.fetch_static_routes
+
+    async def catalogue_then_drop(conn, agency):
+        await conn.execute(
+            "INSERT INTO updates_pruned_months (partition_id, agency_ids, retention_floor, rows, bytes, dropped_at) "
+            "VALUES ('202605', $1, '2026-07-01', 10, 100, now())",
+            [agency],
+        )
+        return await catalogue(conn, agency)
+
+    monkeypatch.setattr(snapshots, "fetch_static_routes", catalogue_then_drop)
+    created = await _create(client, sid, agency_id, "route_page", query=_PAGE_QUERIES["default"], title="Route A")
+    assert created.status_code == 422, created.text
+    assert created.json()["floor"] == "2026-07-01"
+    assert await aconn.fetchval("SELECT count(*) FROM snapshots WHERE agency_id = $1", agency_id) == 0

@@ -35,6 +35,7 @@ from pipeline.agg_sql import EARLIEST_CAPTURE, LEDGER_COUNTS_CH_SQL
 from pipeline.clickhouse import LIVE_READ_MAX_EXECUTION_SECONDS, UPDATES_TABLE
 from pipeline.flags import get_flag_state
 from pipeline.locks import agency_ingest_lock
+from pipeline.recorded_floor import FLOORS_SQL, PRUNED_TABLE, month_start_on_or_after
 from pipeline.service_day import filed_capture_span, filed_dates_reached, service_day_start_utc
 
 if TYPE_CHECKING:
@@ -121,9 +122,6 @@ def policy_prune_sql() -> list[str]:
 
 UPDATES_PRUNE_FLAG = "updates_prune_enabled"
 
-#: One row per `updates` month the prune drops, which every retention floor is read from (migration 0104).
-PRUNED_TABLE = "updates_pruned_months"
-
 _MONTH_PARTITION = re.compile(r"(\d{4})(0[1-9]|1[0-2])")
 
 #: A service date's (raw_samples, total_rows): the pair agg_feed_health keeps
@@ -170,23 +168,10 @@ def updates_cutoff(now: datetime, days: int) -> datetime:
     return now - timedelta(days=int(days))
 
 
-def _month_start_on_or_after(day: date) -> date:
-    if day.day == 1:
-        return day
-    return (day.replace(day=1) + timedelta(days=32)).replace(day=1)
-
-
 def floor_after(dropped_before: datetime) -> date:
     """The retention floor once every `updates` row captured before
     *dropped_before* is gone (retention_floor says where it lies)."""
-    return _month_start_on_or_after(filed_dates_reached(dropped_before, dropped_before)[1] + timedelta(days=1))
-
-
-# The newest floor recorded for each agency of a list, bound as {ids}.
-_FLOORS_SQL = (
-    f"SELECT agency_id, max(retention_floor) FROM {PRUNED_TABLE}, unnest(agency_ids) AS agency_id "
-    "WHERE agency_id = ANY({ids}) GROUP BY agency_id"
-)
+    return month_start_on_or_after(filed_dates_reached(dropped_before, dropped_before)[1] + timedelta(days=1))
 
 
 def retention_floors(conn, agency_ids: Iterable[int]) -> dict[int, date]:
@@ -195,19 +180,8 @@ def retention_floors(conn, agency_ids: Iterable[int]) -> dict[int, date]:
     if not ids:
         return {}
     with conn.cursor() as cur:
-        cur.execute(_FLOORS_SQL.format(ids="%s"), (ids,))
-        return {agency_id: _month_start_on_or_after(floor) for agency_id, floor in cur.fetchall()}
-
-
-async def retention_floor_async(conn, agency_id: int) -> date | None:
-    """retention_floor on an asyncpg connection, read fresh on every call. A
-    database not yet migrated to record drops has had none, so it has no
-    floor; the table is looked up first, since a statement naming a missing
-    one fails before it runs, and inside a transaction would abort it."""
-    if not await conn.fetchval("SELECT to_regclass($1) IS NOT NULL", PRUNED_TABLE):
-        return None
-    row = await conn.fetchrow(_FLOORS_SQL.format(ids="$1::int[]"), [agency_id])
-    return None if row is None else _month_start_on_or_after(row[1])
+        cur.execute(FLOORS_SQL.format(ids="%s"), (ids,))
+        return {agency_id: month_start_on_or_after(floor) for agency_id, floor in cur.fetchall()}
 
 
 # Every drop recorded for one agency, or with $1 NULL for each agency the
@@ -238,7 +212,7 @@ def frozen_methods(drops: Iterable[tuple[date, str | None]]) -> list[FrozenSpan]
     spans: list[FrozenSpan] = []
     reached: date | None = None
     for floor, method in drops:
-        floor = _month_start_on_or_after(floor)
+        floor = month_start_on_or_after(floor)
         if reached is None or floor > reached:
             spans.append(FrozenSpan(reached, floor, method))
             reached = floor
@@ -600,10 +574,10 @@ def prune_updates(
     that lock, so it sees the floor before a drop with every row of it, or
     the floor after.
 
-    Every drop is recorded first (_record_drops), and the run then *sleep*s
-    for LIVE_REQUEST_DRAIN_SECONDS, so no live request that checked the old
-    floor is still reading; a run that drops nothing does not wait. Then each
-    partition in turn
+    Every drop is recorded (_record_drops) before any partition goes, which
+    pipeline.retained_reads relies on. The run then *sleep*s for
+    LIVE_REQUEST_DRAIN_SECONDS; a run that drops nothing does not wait. Then
+    each partition in turn
     has its refiled dates written off, goes, and is stamped dropped, so a
     failure part-way leaves the months it reached on record and their rows on
     the run.
@@ -637,11 +611,11 @@ def prune_updates(
 LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES = 20
 
 #: How long a run that drops something waits once its floors are committed,
-#: before the first DROP PARTITION: by then every live request that checked
-#: the old floor has run its last query or out its time budget
-#: (LIVE_READ_MAX_EXECUTION_SECONDS per query). The run holds the agencies'
-#: ingest locks throughout, so an analyze or promotion that meets the wait is
-#: turned away (a cron poke is recorded skipped, a CLI exits), not queued.
+#: before the first DROP PARTITION. Defence in depth that keeps
+#: pipeline.retained_reads' refusals rare, not what keeps an answer whole.
+#: The run holds the agencies' ingest locks throughout, so an analyze or
+#: promotion that meets the wait is turned away (a cron poke is recorded
+#: skipped, a CLI exits), not queued.
 LIVE_REQUEST_DRAIN_SECONDS = LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES * LIVE_READ_MAX_EXECUTION_SECONDS
 
 
