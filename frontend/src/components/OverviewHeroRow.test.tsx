@@ -379,9 +379,9 @@ describe("OverviewHeroRow", () => {
     expect(late).toHaveClass("ov-hero-fact", { exact: true });
   });
 
-  // The routes-to-check list holds five routes; the count is the server's,
-  // over every route the list ranks, not only the listed ones.
-  it("prints a count past the five routes the list holds", () => {
+  // The routes-to-check preview holds five routes; the count is the server's,
+  // over every ranked route, not only the listed ones.
+  it("prints a count past the five routes the preview holds", () => {
     mockFeed(0.1);
     renderHero({ severeCount: 12 });
     expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("12/ 38 routes");

@@ -28,9 +28,9 @@ export type HeroFact = "concentration" | "late_routes";
 
 type Props = {
   headline: OverviewHeadline;
-  /** Routes over the routes-to-check list's top-band bound, out of every
-   *  route the list ranks (`routeCount`), not only the listed ones: the
-   *  figure that list's top-band header prints. */
+  /** Routes averaging at least the top band's bound, out of every route
+   *  ranked over the headline's window (`routeCount`), not only the five the
+   *  routes-to-check preview lists. */
   severeCount: number;
   /** That bound, in minutes. */
   severeThresholdMin: number;
