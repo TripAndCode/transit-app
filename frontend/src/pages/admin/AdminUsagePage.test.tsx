@@ -26,7 +26,7 @@ function wrapAt(ui: React.ReactElement, path: string) {
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={[path]}>{ui}</MemoryRouter>
       </QueryClientProvider>
-    </I18nextProvider>
+    </I18nextProvider>,
   );
 }
 
@@ -40,8 +40,22 @@ beforeEach(() => {
       from: "2026-10-17",
       to: "2026-11-15",
       routes: [
-        { route: "/api/agencies", method: "GET", signed_out: 12, signed_in: 3, api_key: 1, errors: 0 },
-        { route: "/api/{agency_id}/overview/summary", method: "GET", signed_out: 8, signed_in: 1, api_key: 0, errors: 2 },
+        {
+          route: "/api/agencies",
+          method: "GET",
+          signed_out: 12,
+          signed_in: 3,
+          api_key: 1,
+          errors: 0,
+        },
+        {
+          route: "/api/{agency_id}/overview/summary",
+          method: "GET",
+          signed_out: 8,
+          signed_in: 1,
+          api_key: 0,
+          errors: 2,
+        },
       ],
       days: [
         { day: "2026-11-14", signed_out: 5, signed_in: 1, api_key: 0 },
@@ -67,6 +81,18 @@ describe("AdminUsagePage", () => {
     expect(row.textContent).toContain("1");
   });
 
+  it("stacks each day's signed-out, signed-in and API-key counts against the busiest day", () => {
+    const { container } = wrap(<AdminUsagePage />);
+    const widths = (segment: string) =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(`[data-segment="${segment}"]`),
+      ).map((el) => el.style.width);
+    // 2026-11-15 is the busiest day (10): 7 / 2 / 1 of it.
+    expect(widths("signed_out")).toEqual(["50%", "70%"]);
+    expect(widths("signed_in")).toEqual(["10%", "20%"]);
+    expect(widths("api_key")).toEqual(["0%", "10%"]);
+  });
+
   it("defaults the window to 30 days", () => {
     wrap(<AdminUsagePage />);
     expect(lastArgs).toMatchObject({ days: 30 });
@@ -75,7 +101,10 @@ describe("AdminUsagePage", () => {
   it("reads the days selector from the URL so a chosen window is linkable", () => {
     wrapAt(<AdminUsagePage />, "/admin/usage?days=7");
     expect(lastArgs).toMatchObject({ days: 7 });
-    expect(screen.getByRole("button", { name: /7/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /7/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("falls back to 30 days for a days value the selector does not offer", () => {
@@ -84,7 +113,11 @@ describe("AdminUsagePage", () => {
   });
 
   it("shows an error, not an empty table, when the usage query failed", () => {
-    usageReturn = { data: undefined, error: new Error("boom"), refetch: vi.fn() };
+    usageReturn = {
+      data: undefined,
+      error: new Error("boom"),
+      refetch: vi.fn(),
+    };
     wrap(<AdminUsagePage />);
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(screen.queryByText(i18n.t("admin.usage.by_route.empty"))).toBeNull();
@@ -98,7 +131,11 @@ describe("AdminUsagePage", () => {
   });
 
   it("shows the empty state once a settled response has no routes or days", () => {
-    usageReturn = { data: { from: "2026-11-01", to: "2026-11-15", routes: [], days: [] }, error: null, refetch: vi.fn() };
+    usageReturn = {
+      data: { from: "2026-11-01", to: "2026-11-15", routes: [], days: [] },
+      error: null,
+      refetch: vi.fn(),
+    };
     wrap(<AdminUsagePage />);
     expect(screen.getByText(i18n.t("admin.usage.by_route.empty"))).toBeTruthy();
     expect(screen.getByText(i18n.t("admin.usage.by_day.empty"))).toBeTruthy();

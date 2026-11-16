@@ -392,4 +392,7 @@ Tables: `signed_out` reads `anonymous_activity_daily`; `signed_in` and
 reader signal from `docs/features/audience.md`: readers never sign in, so
 `anonymous_activity_daily` is the only server-side count of how much the
 notebook itself is used, and it holds no caller identity at all, only route
-templates and counts.
+templates and counts. A signed-out caller can put any agency id in the path,
+so a signed-out request that failed is counted under no agency; the `agency_id`
+filter therefore leaves out signed-out errors. A request made with an API key
+that has no owner is counted in neither table.

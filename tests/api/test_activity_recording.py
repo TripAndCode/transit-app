@@ -67,6 +67,34 @@ async def test_a_signed_out_request_lands_in_the_anonymous_buffer_not_the_user_o
 
 
 @pytest.mark.asyncio
+async def test_a_request_with_an_ownerless_api_key_is_counted_in_neither(client, aconn):
+    BUFFER.drain()
+    ANONYMOUS_BUFFER.drain()
+    raw = "key-rec-ownerless"
+    await aconn.execute(
+        "INSERT INTO api_keys (key_hash, owner_email, tier) VALUES ($1, 'o@x', 'pro')",
+        token_hash(raw),
+    )
+    r = await client.get("/api/agencies", headers={"X-API-Key": raw})
+    assert r.status_code == 200
+    assert BUFFER.drain() == {}
+    assert ANONYMOUS_BUFFER.drain() == {}
+
+
+@pytest.mark.asyncio
+async def test_a_signed_out_request_keeps_its_agency_only_when_it_succeeded(client, aagency_id):
+    ANONYMOUS_BUFFER.drain()
+    assert (await client.get(f"/api/agencies/{aagency_id}")).status_code == 200
+    assert (await client.get("/api/agencies/987654")).status_code == 404
+    assert (await client.get("/api/987654/overview/summary")).status_code == 404
+    assert _anonymous_counts() == {
+        ("/api/agencies/{agency_id}", "GET", aagency_id): [1, 0],
+        ("/api/agencies/{agency_id}", "GET", None): [1, 1],
+        ("/api/{agency_id}/overview/summary", "GET", None): [1, 1],
+    }
+
+
+@pytest.mark.asyncio
 async def test_sign_in_plumbing_and_unmatched_requests_are_not_counted(client, aconn):
     BUFFER.drain()
     ANONYMOUS_BUFFER.drain()

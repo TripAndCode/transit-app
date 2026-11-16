@@ -7,9 +7,9 @@ the gate ends up guarding less than the whole API. Placed just inside the
 gate, so a 401 the gate itself answers is never counted, and so
 ``scope["state"]`` already carries the session user or API-key owner that
 ``SessionMiddleware``/``APIKeyMiddleware`` wrote earlier in the chain. A
-session user or an API key's owner is counted into ``user_activity_daily``
-(as before); a signed-out caller is counted into ``anonymous_activity_daily``,
-which holds route templates and no identity at all.
+session user or an API key's owner is counted into ``user_activity_daily``;
+a signed-out caller is counted into ``anonymous_activity_daily``, which holds
+route templates and no identity at all.
 """
 
 from __future__ import annotations
@@ -22,14 +22,17 @@ from api.middleware.login_gate import request_state
 _EXEMPT_PREFIXES = ("/api/auth/",)
 # Exact paths, not prefixes: sign-in plumbing only, so a signed-out
 # /api/snapshots/... read (and everything else matched under /api/) is still
-# counted.
-_EXEMPT_PATHS = frozenset({"/api/config", "/api/me"})
+# counted. /api/me is exempt only as the who-am-I read; a change to the
+# account through it is real use.
+_EXEMPT_PATHS = frozenset({"/api/config"})
+_EXEMPT_READS = frozenset({"/api/me"})
+_READ_METHODS = frozenset({"GET", "HEAD"})
 
 
-def _should_count(path: str) -> bool:
-    if not path.startswith("/api/"):
+def _should_count(path: str, method: str) -> bool:
+    if not path.startswith("/api/") or path in _EXEMPT_PATHS or path.startswith(_EXEMPT_PREFIXES):
         return False
-    return path not in _EXEMPT_PATHS and not path.startswith(_EXEMPT_PREFIXES)
+    return not (path in _EXEMPT_READS and method in _READ_METHODS)
 
 
 class UsageCountMiddleware:
@@ -57,7 +60,7 @@ def _record(scope: Scope, status_code: int) -> None:
     """Count one finished request. Skipped for sign-in plumbing, for requests
     no API route matched (the SPA fallback answers unknown /api paths), and
     for anything outside /api/."""
-    if not _should_count(scope["path"]):
+    if not _should_count(scope["path"], scope["method"]):
         return
     route = scope.get("route")
     template = getattr(route, "path", None)
@@ -74,5 +77,15 @@ def _record(scope: Scope, status_code: int) -> None:
         BUFFER.record(ActivityKey(user.user_id, day, template, method, agency_id, False), is_error=is_error)
     elif state.get("api_key_owner_id") is not None:
         BUFFER.record(ActivityKey(state["api_key_owner_id"], day, template, method, agency_id, True), is_error=is_error)
+    elif state.get("api_key_authenticated"):
+        # A key with no owner row: credentialed, so not a reader, and no
+        # account to count it against.
+        return
     else:
-        ANONYMOUS_BUFFER.record(AnonymousKey(day, template, method, agency_id), is_error=is_error)
+        # A signed-out caller can name any agency id in the path, and every
+        # distinct one would add a permanent row. Every agency-scoped route a
+        # signed-out caller can reach answers an unknown agency with an error,
+        # so only a request that succeeded keeps its agency.
+        ANONYMOUS_BUFFER.record(
+            AnonymousKey(day, template, method, agency_id if not is_error else None), is_error=is_error
+        )

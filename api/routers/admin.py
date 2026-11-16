@@ -777,7 +777,7 @@ _USAGE_USER_DAYS_SQL = """
 @router.get("/usage", response_model=AdminUsageOut)
 async def admin_usage(
     days: int = Query(30, ge=1, le=400),
-    agency_id: int | None = Query(None),
+    agency_id: int | None = Query(None, ge=1, le=2**31 - 1),
     _admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> AdminUsageOut:

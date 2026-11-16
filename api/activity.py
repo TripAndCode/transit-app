@@ -29,13 +29,12 @@ _log = logging.getLogger(__name__)
 _JST = ZoneInfo("Asia/Tokyo")
 FLUSH_INTERVAL_SECONDS = 30.0
 
-# asyncpg encodes an ``int[]`` parameter as Postgres ``int4``; a value outside
-# this range raises client-side before any row is written, which would drop
-# the whole batch for every other key in it. A signed-out caller supplies the
-# path value directly, so this guard -- harmless for the authenticated path,
-# where an agency id already comes from a real agency -- now also stands
-# between a scanner's arbitrary path segment and that batch.
-_MIN_PG_INT = -(2**31)
+# The path segment is the caller's raw string, signed in or not, and one bad
+# key fails the whole batch's upsert. asyncpg encodes an ``int[]`` parameter
+# as ``int4`` and raises on a value outside it; and 0 is the ``COALESCE``
+# sentinel both tables' unique keys use for "no agency", so a 0 and a NULL
+# for the same route in one batch would hit the same row twice. Agency ids
+# start at 1, so anything outside 1..int4 max counts as no agency.
 _MAX_PG_INT = 2**31 - 1
 
 
@@ -91,7 +90,7 @@ def agency_id_from(path_params: dict | None) -> int | None:
         value = int(raw)
     except (TypeError, ValueError):
         return None
-    if not (_MIN_PG_INT <= value <= _MAX_PG_INT):
+    if not (1 <= value <= _MAX_PG_INT):
         return None
     return value
 

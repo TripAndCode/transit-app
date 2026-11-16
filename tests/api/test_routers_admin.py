@@ -11,6 +11,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.activity import today_jst
 from api.security import token_hash
 from tests.conftest import _test_pool
 from tests.fixtures.users import add_session, add_session_digest
@@ -593,21 +594,32 @@ async def test_usage_is_unauthenticated_401_and_non_admin_403(admin_client, acon
 
 
 @pytest.mark.asyncio
+async def test_usage_refuses_an_agency_id_postgres_cannot_hold(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    for bad in ("0", "99999999999"):
+        r = await admin_client.get(f"/api/admin/usage?agency_id={bad}", cookies={"sid": sid_admin})
+        assert r.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_usage_splits_signed_in_api_key_and_signed_out_and_zero_fills_days(admin_client, aconn):
     sid_admin, uid, _ = await _seed(aconn, role="admin")
+    day = today_jst()
     await aconn.execute(
         """
         INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
-        VALUES ($1, current_date, '/api/agencies', 'GET', NULL, false, 2, 1),
-               ($1, current_date, '/api/agencies', 'GET', NULL, true,  5, 0)
+        VALUES ($1, $2, '/api/agencies', 'GET', NULL, false, 2, 1),
+               ($1, $2, '/api/agencies', 'GET', NULL, true,  5, 0)
         """,
         uid,
+        day,
     )
     await aconn.execute(
         """
         INSERT INTO anonymous_activity_daily (day, route, method, agency_id, requests, errors)
-        VALUES (current_date, '/api/agencies', 'GET', NULL, 7, 2)
-        """
+        VALUES ($1, '/api/agencies', 'GET', NULL, 7, 2)
+        """,
+        day,
     )
     r = await admin_client.get("/api/admin/usage?days=3", cookies={"sid": sid_admin})
     assert r.status_code == 200
@@ -617,7 +629,7 @@ async def test_usage_splits_signed_in_api_key_and_signed_out_and_zero_fills_days
     ]
     assert len(body["days"]) == 3
     assert body["days"][-1] == {
-        "day": datetime.now(timezone.utc).date().isoformat(),
+        "day": day.isoformat(),
         "signed_out": 7,
         "signed_in": 2,
         "api_key": 5,
@@ -628,13 +640,15 @@ async def test_usage_splits_signed_in_api_key_and_signed_out_and_zero_fills_days
 @pytest.mark.asyncio
 async def test_usage_filters_by_agency_and_excludes_the_window_boundary_day(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
+    day = today_jst()
     await aconn.execute(
         """
         INSERT INTO anonymous_activity_daily (day, route, method, agency_id, requests, errors)
-        VALUES (current_date,      '/api/{agency_id}/overview/summary', 'GET', 1, 3, 0),
-               (current_date,      '/api/{agency_id}/overview/summary', 'GET', 2, 9, 0),
-               (current_date - 30, '/api/{agency_id}/overview/summary', 'GET', 1, 4, 0)
-        """
+        VALUES ($1::date,      '/api/{agency_id}/overview/summary', 'GET', 1, 3, 0),
+               ($1::date,      '/api/{agency_id}/overview/summary', 'GET', 2, 9, 0),
+               ($1::date - 30, '/api/{agency_id}/overview/summary', 'GET', 1, 4, 0)
+        """,
+        day,
     )
     r = await admin_client.get("/api/admin/usage?days=30&agency_id=1", cookies={"sid": sid_admin})
     assert r.status_code == 200
