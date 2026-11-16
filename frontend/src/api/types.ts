@@ -1195,8 +1195,9 @@ type OverviewBandCount = {
 /** The Pulse hero's late-route count over the headline's window. */
 type OverviewTopDelayed = {
   band_counts: { severe: OverviewBandCount };
-  /** The routes the count is out of: the Routes table's own count for the
-   *  headline's window and scope, those observed at least `min_samples` times. */
+  /** The routes the count is out of, those observed at least `min_samples`
+   *  times: counted over the same window, scope, floor and left-out routes as
+   *  the Routes table. */
   route_count: number;
   min_samples: number;
 };

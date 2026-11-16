@@ -422,7 +422,7 @@ The investigation notebook holds ready-made analyses of delay. Each one is a car
 - The analysis name heads the result, with the table or chart under it.
 - “Where this result comes from” names the route, the conditions and how the figures were made. A “SQL only” badge means they were computed directly from the data; “LLM” marks a summary written by a language model from a result already fetched.
 - Buttons under the result suggest next steps, such as “View morning peak only”, “View on the map”, “Compare with two weeks ago” and “Save as PNG”.
-- A ranking, trend or weekday-against-weekend result ends with “Open on …”, which opens the screen that shows the same figures in full (**Routes**, **Time** or **Day types & agencies**) for the result’s own period and conditions.
+- A ranking or weekday-against-weekend result ends with “Open on …”, and a trend result with “See the daily trend on Time”: each opens the screen that shows the same figures in full (**Routes**, **Day types & agencies** or **Time**) for the result’s own period and conditions. A result kept from before these links were added has none.
 - “Download result (JSON)”, and a CSV for each table, save the result.
 - Each analysis you run becomes a step of the investigation. “Investigation steps” lists them so you can look back; “Return to latest” brings you back to the newest.
 

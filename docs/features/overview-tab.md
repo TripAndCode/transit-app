@@ -127,8 +127,9 @@ What the user sees/does:
     period's scope, the home of the day × hour question. Pulse draws no hour
     chart of its own.
   - `frontend/src/components/ServiceSplit.tsx` — one sentence comparing the
-    period's day types (slowest against fastest), and a link to Day types &
-    agencies (`compare?by=periods`) over the period's scope, the home of the
+    period's day types (slowest against fastest), each day type's mean on a
+    line under it ("not enough data" or "no data" where it has none), and a
+    link to Day types & agencies (`compare?by=periods`) over the period's scope, the home of the
     weekday-against-weekend question, compared route by route. Pulse draws no
     day-type chart of its own. Each date is filed under the
     timetable class its agency's calendar runs that day
@@ -164,7 +165,7 @@ What the user sees/does:
 | `frontend/src/components/overview/RoutesPreview.tsx` | The Routes table's first five rows and the link to the table |
 | `frontend/src/components/ConcentrationBar.tsx` | Pareto bar (card/modal variants) + movers list |
 | `frontend/src/components/PeakHourSummary.tsx` | The heaviest hour and the link to Time |
-| `frontend/src/components/ServiceSplit.tsx` | The day-type sentence and the link to Day types & agencies |
+| `frontend/src/components/ServiceSplit.tsx` | The day-type sentence, each day type's mean, and the link to Day types & agencies |
 | `frontend/src/components/OverviewModal.tsx` | Modal chrome the concentration card opens into |
 | `frontend/src/components/overview/RevealSection.tsx` | Scroll-triggered, staggered entrance for each module section; content stays visible at rest |
 | `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |

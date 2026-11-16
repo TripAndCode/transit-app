@@ -134,9 +134,9 @@ class RouteBandCounts(BaseModel):
 class TopDelayed(BaseModel):
     """The Pulse hero's late-route count over the headline's window: of the
     ``route_count`` routes observed at least ``min_samples`` times there, how
-    many averaged at least the severe bound late. ``route_count`` is the
-    Routes table's own count for that window and scope, with the same routes
-    left out, so it is the total the routes-to-check preview states."""
+    many averaged at least the severe bound late. ``route_count`` is counted
+    over the same window, scope, floor and left-out routes as the Routes
+    table, so it matches the total the routes-to-check preview states."""
 
     band_counts: RouteBandCounts
     route_count: int

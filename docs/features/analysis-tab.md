@@ -166,7 +166,7 @@ destination opens on the same figures.
 | Question | Home | Short forms that link to it |
 |---|---|---|
 | Which routes are worst? | Routes table (`route_table`) | Pulse's routes to check (the table's own first rows, `RoutesPreview`); the Reports period summary's list; the Notebook's ranking and on-time cards |
-| Weekday against weekend | Day types & agencies (`compare_ranking`) | Pulse's day-type sentence; the Notebook's weekday/weekend card (`compare_segments` with `dimension=dow`) |
+| Weekday against weekend | Day types & agencies (`compare_ranking`) | Pulse's day-type figures; the Notebook's weekday/weekend card (`compare_segments` with `dimension=dow`) |
 | At which days and hours? | Time's `trend` (its day × hour surface and hourly heatmap) | Pulse's heaviest-hour card and fact row |
 | The trend | Time's `trend` (its daily chart) | Pulse's sparkline; the Reports period summary's chart; the Notebook's trend card |
 

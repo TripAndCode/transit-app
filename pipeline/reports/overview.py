@@ -982,8 +982,9 @@ async def _top_delayed_routes(
     least ``SEVERE_ROUTE_MIN`` late, with that bound.
 
     ``cur_ctx`` is the headline's window and ``left_out`` the codes the Routes
-    table leaves out over it (:func:`_top_delayed`), so ``route_count`` is the
-    Routes table's own count of routes for the routes-to-check preview's scope.
+    table leaves out over it (:func:`_top_delayed`), so ``route_count`` is
+    counted over the same window, floor and left-out codes as the Routes table
+    the routes-to-check preview draws, from this module's own aggregate.
 
     Fast path reads agg_daily_trend for each route's true weighted average
     (SUM(sum_delay_sec)/SUM(samples), dividing once at the end rather than
