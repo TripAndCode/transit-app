@@ -122,6 +122,15 @@ describe("WhyAnalyses", () => {
     expect(within(cells(solid)[3]).getByText("few data")).toBeInTheDocument();
   });
 
+  it("marks no average the feed gave no observations for", () => {
+    const runOnly = { ...DWELL.routes[0], dwell_samples: 0, dwell_avg_sec: null, dwell_p50_sec: null, dwell_p90_sec: null, run_samples: 400 };
+    show({ ...DWELL, routes: [runOnly] }, WEATHER, HEADWAY);
+    const table = screen.getByRole("columnheader", { name: i18n.t("reports.dwell_run.col.dwell_avg") }).closest("table")!;
+    const row = within(table).getAllByRole("row")[1];
+    expect(within(row).getAllByRole("cell")[2]).toHaveTextContent("—");
+    expect(within(row).queryByText("few data")).toBeNull();
+  });
+
   it("offers the statistics toggle only where a table it changes is drawn", () => {
     show(DWELL, WEATHER, HEADWAY);
     expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeInTheDocument();

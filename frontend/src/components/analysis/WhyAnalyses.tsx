@@ -182,7 +182,7 @@ function DwellRunBlock({ payload, showStatistics }: { payload: DwellRunPayload |
                   the few-data mark: on its count while shown, else on itself. */}
               <td style={td({ align: "right" })}>
                 {fmtSec(r.dwell_avg_sec)}
-                {!showStatistics && <FewDataMark samples={r.dwell_samples} />}
+                {!showStatistics && <FewDataMark figure={r.dwell_avg_sec} samples={r.dwell_samples} />}
               </td>
               {showStatistics && (
                 <>
@@ -190,13 +190,13 @@ function DwellRunBlock({ payload, showStatistics }: { payload: DwellRunPayload |
                   <td style={td({ align: "right" })}>{fmtSec(r.dwell_p90_sec)}</td>
                   <td style={td({ align: "right" })}>
                     {fmtSamples(r.dwell_samples)}
-                    <FewDataMark samples={r.dwell_samples} />
+                    <FewDataMark figure={r.dwell_samples} samples={r.dwell_samples} />
                   </td>
                 </>
               )}
               <td style={td({ align: "right" })}>
                 {fmtSec(r.run_avg_sec)}
-                {!showStatistics && <FewDataMark samples={r.run_samples} />}
+                {!showStatistics && <FewDataMark figure={r.run_avg_sec} samples={r.run_samples} />}
               </td>
               {showStatistics && (
                 <>
@@ -204,7 +204,7 @@ function DwellRunBlock({ payload, showStatistics }: { payload: DwellRunPayload |
                   <td style={td({ align: "right" })}>{fmtSec(r.run_p90_sec)}</td>
                   <td style={td({ align: "right" })}>
                     {fmtSamples(r.run_samples)}
-                    <FewDataMark samples={r.run_samples} />
+                    <FewDataMark figure={r.run_samples} samples={r.run_samples} />
                   </td>
                 </>
               )}

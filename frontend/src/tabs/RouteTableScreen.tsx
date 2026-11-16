@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { REPORT_ROWS_MAX, reportQueryString, useReport, type ReportOptions } from "../api/hooks";
+import { REPORT_ROWS_MAX, reportQueryString, useHeadwayQuality, useReport, type ReportOptions } from "../api/hooks";
 import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { useScope } from "../api/scope";
@@ -82,6 +82,10 @@ export function RouteTableScreen() {
   // loads, the rows held are still in the order they arrived in.
   const shown: RouteTableView = data?.sort ? { sort: data.sort, order: data.order ?? "worst" } : view;
   const reference = data?.reference ?? null;
+  // The toggle only where a table it changes is drawn: the routes, or
+  // headway quality under the on-time sort (the panel's own query, shared).
+  const headway = useHeadwayQuality(id, ctx, view.sort === "on_time" && id != null);
+  const headwayTable = view.sort === "on_time" && (headway.data?.rows.length ?? 0) > 0;
 
   /** Writes the table's params. The current sort and order go into `sort`
    *  and `order` first, in place of a former list's `report`, so changing one
@@ -168,7 +172,7 @@ export function RouteTableScreen() {
               kept={kept}
               onChange={(reason, on) => setTableParams({ [reason]: on ? "1" : null })}
             />
-            <StatisticsToggle />
+            {(data.rows.length > 0 || headwayTable) && <StatisticsToggle />}
           </div>
         )}
         {report.error && <ErrorBanner error={report.error} onRetry={() => report.refetch()} />}

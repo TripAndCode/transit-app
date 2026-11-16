@@ -185,8 +185,9 @@ per route over the scope:
   (`reliable_min_samples`). The day-type reports, dwell and running, and
   headway quality name none, so they use `FEW_DATA_MIN_SAMPLES`, the frontend
   twin of `RANKING_MIN_SAMPLES` that a test ties to the server. While the count
-  is hidden, the mark sits on the sorted figure (else the first figure), or on
-  each figure the count qualifies. The 「誤差大」 badge stays on the on-time
+  is hidden, each count marks one figure: the sorted figure (else the first)
+  in a `ReportTable`, each dwell or running average by its own count, and
+  headway quality's excess wait. A missing figure ("—") carries no mark. The 「誤差大」 badge stays on the on-time
   cell, and rain against dry keeps its low-confidence badge. CSV exports are
   built from the rows, not the screen, and keep every column. A browser print
   shows what the screen shows, without the toggle.

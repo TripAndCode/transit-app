@@ -138,13 +138,12 @@ export function ReportsHomeTab() {
           </p>}</>}
       </AsyncSection></section>
       <section><h2>{t("routesToCheck")}</h2>
-      <StatisticsToggle />
       <AsyncSection loading={ranking.isPending} error={ranking.error} onRetry={() => void ranking.refetch()} data={ranking.data} hasContent={() => rows.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>
-        {() => <div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("mean")}</th>{showStatistics && <th style={th()}>{t("samples")}</th>}<th style={th()} /></tr></thead><tbody>
+        {() => <><StatisticsToggle /><div className="focus-table-wrap"><table style={SHARED_TABLE}><thead><tr><th style={th()}>{t("pattern")}</th><th style={th()}>{t("mean")}</th>{showStatistics && <th style={th()}>{t("samples")}</th>}<th style={th()} /></tr></thead><tbody>
           {shownRows.map((row) => <tr key={row[0]}><td style={td()}><RouteLabel code={String(row[0])} names={names} /></td><td style={td()}>{row[2] == null ? "—" : fixedTenth(Number(row[2]))}</td>{showStatistics && <td style={td()}>{row[5] == null ? "—" : formatNumber(Number(row[5]))}</td>}<td style={td()}>
             <Link to={routeHref(String(id), String(row[0]), `?${queryString}`)}>{t("open")}</Link>
           </td></tr>)}
-        </tbody></table></div>}
+        </tbody></table></div></>}
       </AsyncSection>
       {routesTotal > shownRows.length && shownRows.length > 0 && <p className="focus-muted">
         {t("topRoutes", { shown: shownRows.length, total: formatNumber(routesTotal) })}{" "}

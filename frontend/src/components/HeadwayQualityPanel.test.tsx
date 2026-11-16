@@ -79,10 +79,20 @@ describe("HeadwayQualityPanel", () => {
     renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics={false} />);
     const [thin, solid] = screen.getAllByRole("row").slice(1);
     const cells = within(thin).getAllByRole("cell");
-    // Columns: route, excess wait, long-gap rate.
+    // Columns: route, excess wait, long-gap rate. One count, one mark, on
+    // the headline figure.
+    expect(within(thin).getAllByText("few data")).toHaveLength(1);
     expect(within(cells[1]).getByText("few data")).toHaveClass("caveat-badge");
-    expect(within(cells[2]).getByText("few data")).toBeInTheDocument();
     expect(within(solid).queryByText("few data")).toBeNull();
+  });
+
+  it("marks no excess wait the panel could not work out", () => {
+    mockRoutes();
+    mockHeadwayQuality({
+      data: { rows: [{ route_code: "100", ewt_sec: null, cov: null, long_gap_rate: 0.1, samples: 12 }], ctx: CTX } as never,
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics={false} />);
+    expect(screen.queryByText("few data")).toBeNull();
   });
 
   it("names the timetable each route is compared on", () => {

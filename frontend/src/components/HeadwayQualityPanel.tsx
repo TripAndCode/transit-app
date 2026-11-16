@@ -127,21 +127,20 @@ export function HeadwayQualityView({
                       <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 400, color: "var(--text-tertiary)" }}>{t(DAY_TYPE_KEY[r.day_type])}</span>
                     )}
                   </td>
-                  {/* No floor upstream: a thin route's figures carry the few-data
-                      mark, on the count while it shows, else on each figure. */}
+                  {/* No floor upstream: a thin route carries the few-data mark, on
+                      the count while it shows, else on its headline figure. */}
                   <td style={td({ align: "right" })}>
                     {fmtSignedMin(r.ewt_sec, t)}
-                    {!showStatistics && <FewDataMark samples={r.samples} />}
+                    {!showStatistics && <FewDataMark figure={r.ewt_sec} samples={r.samples} />}
                   </td>
                   {showStatistics && <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>}
                   <td style={td({ align: "right" })}>
                     {fmtRatioPct(r.long_gap_rate)}
-                    {!showStatistics && <FewDataMark samples={r.samples} />}
                   </td>
                   {showStatistics && (
                     <td style={td({ align: "right" })}>
                       {formatNumber(r.samples)}
-                      <FewDataMark samples={r.samples} />
+                      <FewDataMark figure={r.samples} samples={r.samples} />
                     </td>
                   )}
                 </tr>

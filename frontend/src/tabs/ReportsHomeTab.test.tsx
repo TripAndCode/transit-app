@@ -125,6 +125,8 @@ describe("ReportsHomeTab", () => {
     mockReports(trendResponse([]), rankingResponse([]));
     renderTab();
     expect(screen.getAllByText("No observations match these filters")).toHaveLength(2);
+    // No table, so nothing for the statistics toggle to change.
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
   });
 
   it("shows the saved-analyses view and its local-only note from the doc param", () => {

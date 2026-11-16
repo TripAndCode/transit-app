@@ -246,6 +246,7 @@ describe("RouteTableScreen", () => {
     setup("/agencies/1/routes", tableResponse({ rows: [], rows_total: 0 }));
     expect(screen.getByText("No matching data")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Include routes observed fewer than 100 times" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
   });
 
   it("marks the rows it holds by the sort they arrived in while another sort loads", () => {

@@ -374,7 +374,7 @@ function RouteTableSnapshot({
           <SparseToggle checked={params.include_sparse === true} floor={report.reliable_min_samples} />
         )}
         <LeftOutLine counts={{ retired: report.retired_rows, zero_delay: report.zero_delay_rows }} kept={kept} />
-        <StatisticsToggle />
+        {(report.rows.length > 0 || (headway?.rows.length ?? 0) > 0) && <StatisticsToggle />}
       </div>
       {report.rows.length > 0 ? (
         <>
