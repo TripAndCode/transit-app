@@ -1,17 +1,17 @@
 # Welcome page (`/welcome`)
 
-Public landing page, rendered outside `<App />` and outside `RequireAuth`
-(`frontend/src/main.tsx`) so a signed-out visitor can reach it. One CTA
-decision (`frontend/src/pages/landing/useCtaKind.ts`) drives both the header
-button and the hero's primary CTA, the way in this visitor has:
+Public landing page, rendered outside `<App />` (`frontend/src/main.tsx`) so
+it owns the full viewport. One CTA decision
+(`frontend/src/pages/landing/useCtaKind.ts`) drives both the header button and
+the hero's primary CTA. Both go to the dashboard (`/`), which every visitor
+reaches; only the wording follows the session:
 
-- **Signed in:** "Open the dashboard" (`/`).
-- **Signed out, and `GET /api/config` says `login_required` is off:** "View
-  the dashboard (no sign-in needed)" (`/`), with a note that signing in keeps
-  saved views and notebook investigations with the account. The note's "Sign in"
-  links to `/login`, and the note is left out when no provider is configured.
-- **Signed out otherwise** (sign-in required, or the config not loaded yet):
-  "Sign in" (`/login`). `/` would only bounce such a visitor back here.
+- **Signed in:** "Open the dashboard".
+- **Anyone else, a session still loading included:** "View the dashboard (no
+  sign-in needed)". Once the visitor is known to be signed out, a note under
+  the hero says that signing in keeps saved views and notebook investigations
+  with the account. The note's "Sign in" links to `/login`, and the note is
+  left out when no provider is configured.
 
 Below 720px the header hides its copy of the CTA, since the hero's sits in the
 first screen.
@@ -31,11 +31,9 @@ label (`SampleTag`, or the council report's own `landing.report.badge`), so
 it reads as illustrative rather than live.
 
 The one link that leaves the page for a real destination is the Bus Town
-section's own CTA (`BusTownTeaser.tsx`): a visitor who would reach the
-signed-in app (a session, or a guest-enabled deployment) goes straight to
-Bus Town for their last-chosen agency (`readLastAgency`), or to `/` to choose
-one when none is stored yet; anyone else goes to sign-in first
-(`busTownLink.ts`). Every other link on the page — the header nav, the three
+section's own CTA (`BusTownTeaser.tsx`): it goes straight to Bus Town for
+the visitor's last-chosen agency (`readLastAgency`), or to `/` to choose one
+when none is stored yet, signed in or not (`busTownLink.ts`). Every other link on the page — the header nav, the three
 "who it's for" cards, each section's own in-page link — points at an anchor
 (`#councils`, `#observatory`, `#bus-town`, `#method`) on this same page, never
 a destination the product doesn't have.
@@ -54,39 +52,37 @@ whether or not reduced motion is already in effect.
 
 ## Ways back to it
 
-- **Signing out** (`AccountPage`) reloads onto `/welcome`, whether or not
-  sign-in is required.
+- **Signing out** (`AccountPage`) reloads onto `/welcome`.
 - **The rail's Other section** (and the mobile More sheet, which shares it)
   links "About this app" to `/welcome`.
 - **The login card's wordmark** links to `/welcome`.
 
 ## Who gets sent here
 
-`RequireAuth` (`frontend/src/components/RequireAuth.tsx`) wraps the app
-shell. It reads `login_required` from `GET /api/config`:
+No guard sends a visitor here; only signing out and the links above do. The
+app shell renders for every visitor, signed in or not, and no guard in front
+of it waits on the session or the config: a shared
+link opens the same view for anyone. A signed-out visitor at `/` gets the
+same landing decision as anyone (`OnboardingGate`); its agency picker says
+that no sign-in is needed and links back to this page.
 
-- **Off or absent** (SSO not configured, the kill switch off, or a backend
-  without the login gate): the app renders for everyone, signed in or not.
-- **On, and the visitor is signed out:** `/` goes to `/welcome`, and any
-  other app URL goes to `/login?next=<path+query+fragment>`, so a shared link
-  returns to the same view after sign-in.
-- **A probe that fails before producing any value** shows an error with a
-  retry instead of guessing.
+Two guards remain, and both send a signed-out visitor to
+`/login?next=<path+query+fragment>`, so signing in returns them to the page
+they asked for:
+
+- `RequireAdmin` (`frontend/src/components/RequireAdmin.tsx`) on `/admin/*`;
+  a signed-in non-admin goes to `/` instead.
+- The account page, `/me`.
 
 A request the API refuses with `401 {"detail": "auth required"}` (a session
-that expired in an open tab) refetches the session and the config
-(`frontend/src/api/authExpiry.ts`), so the guard decides again on fresh
-values.
+that expired in an open tab) refetches the session
+(`frontend/src/api/authExpiry.ts`), so those guards decide again on a fresh
+value.
 
 The session probe itself, `GET /api/me`, answers a signed-out caller with
-`200` and a `null` body, whether or not sign-in is required: the login gate
-lets that one read through, so no page logs a refused request. `fetchMe`
+`200` and a `null` body, so no page logs a refused request. `fetchMe`
 (`frontend/src/api/auth.ts`) reads `null` (or a `401`) as signed out. Every
-other `/api/me/*` route, and `DELETE /api/me`, still refuses a signed-out
-caller.
-
-A signed-out visitor who opens `/me` while sign-in is not required goes to
-`/login?next=/me`, so signing in returns them to their account page.
+other `/api/me/*` route, and `DELETE /api/me`, refuses a signed-out caller.
 
 ## Key files
 
@@ -107,8 +103,7 @@ A signed-out visitor who opens `/me` while sign-in is not required goes to
 | `frontend/src/pages/landing/PauseToggle.tsx` | The page's one motion control |
 | `frontend/src/pages/landing/welcomeSample.ts` | Every static fixture value the page draws |
 | `frontend/src/pages/landing/severityStyle.ts` | Maps a fixture band to the app's shared delay-severity ramp |
-| `frontend/src/components/RequireAuth.tsx` | Sends signed-out visitors here or to `/login` when sign-in is required |
-| `frontend/src/api/authExpiry.ts` | Refetches session and config on an auth-required 401 |
+| `frontend/src/api/authExpiry.ts` | Refetches the session on an auth-required 401 |
 
 ## i18n
 
@@ -125,14 +120,14 @@ duplicating them: `header.app_title`/`header.app_tagline` for the brand, and
 
 ## How to verify manually
 
-1. With SSO configured and `login_required` on, sign out and open `/` —
-   expect `/welcome` with a single "Sign in" button, in the header and in
-   the hero.
-2. Open a deep link such as `/agencies/1/routes?routes=12&sort=on_time` —
-   expect `/login?next=…`; sign in and expect to land on that exact URL.
+1. With SSO configured, sign out and open `/welcome` — expect "View the
+   dashboard (no sign-in needed)" in the header and in the hero, and the
+   sign-in note under the hero.
+2. Signed out, open a deep link such as
+   `/agencies/1/routes?routes=12&sort=on_time` — expect that view at that
+   exact URL, with no detour through `/login` or `/welcome`.
 3. Sign in, then choose "About this app" in the rail — expect `/welcome`
-   with "Open the dashboard" in place of "Sign in". With `login_required`
-   off and signed out, expect "View the dashboard (no sign-in needed)".
+   with "Open the dashboard" and no sign-in note.
 4. Sign out from the account page — expect `/welcome`.
 5. Click the header's pause toggle — expect every looping animation on the
    page (the stage dots, the Bus Town markers, the method flow pulse) to
@@ -143,7 +138,7 @@ duplicating them: `header.app_title`/`header.app_tagline` for the brand, and
    hero.
 7. Click the Bus Town section's button — expect it to land on that agency's
    Bus Town tab when a last-chosen agency is stored, or on `/` to choose one
-   otherwise, or on `/login` when the deployment requires sign-in.
+   otherwise, signed in or not.
 8. Automated coverage: `frontend/src/pages/LandingPage.test.tsx`,
    `frontend/src/pages/LandingPage.css.test.ts`,
    `frontend/src/pages/landing/busTownLink.test.ts`,
@@ -151,5 +146,6 @@ duplicating them: `header.app_title`/`header.app_tagline` for the brand, and
    `frontend/src/pages/AccountPage.test.tsx`,
    `frontend/src/pages/LoginPage.test.tsx`,
    `frontend/src/components/Sidebar.test.tsx`,
-   `frontend/src/components/RequireAuth.test.tsx`,
+   `frontend/src/components/OnboardingGate.test.tsx`,
+   `frontend/src/main.readerAccess.test.tsx`,
    `frontend/src/api/authExpiry.test.ts`.

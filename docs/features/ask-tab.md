@@ -129,7 +129,7 @@ What the user sees/does:
 `pipeline.query.tools.dispatch` directly — no router/LLM stages at all,
 since the frontend template already supplies `tool`/`args`.
 
-**Anonymous user (anonymous-only mode), same templates:** `useAppendMessage`'s anon branch
+**Signed-out reader, same templates:** `useAppendMessage`'s anon branch
 calls `POST /api/{agency_id}/ask/card` (`api/routers/conversations.py:
 run_card_endpoint`) with `{tool, args, filter_ctx}`. It runs the same card
 dispatch as the signed-in path (`_run_card`, without the intent-cache write),
@@ -252,7 +252,7 @@ one structural reason:
 
 `/ask` cannot reject the whole request upfront the way the follow-up does:
 The regex rules answer many
-questions with no LLM at all, and those stay open to every caller the login gate admits (everyone in anonymous-only mode). So the flag
+questions with no LLM at all, and those stay open to every caller, signed in or not. So the flag
 travels into the orchestrator and short-circuits only the LLM call,
 returning `error_kind="not_approved"` before any provider or BYOK key is
 touched. Anonymous callers have no user row, so the router passes
@@ -375,8 +375,8 @@ so it is a separate mechanism to build, not a knob to turn on.
    current template-only UI), call the API directly:
    ```bash
    # `csrf_guard` rejects a POST with no Origin header (403 "origin required").
-   # While sign-in is required, also pass a session cookie from a signed-in
-   # browser; see the README's API example.
+   # The session cookie is needed only for an LLM-grounded answer; see the
+   # README's API example.
    curl -X POST localhost:8000/api/1/ask \
      -H 'Content-Type: application/json' \
      -H 'Origin: http://localhost:8000' \

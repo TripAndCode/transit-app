@@ -312,7 +312,6 @@ def test_registry_covers_every_known_gated_env_var():
         "WEATHER_INGEST_ENABLED",
         "OPENAPI_DOCS_ENABLED",
         "PERF_DEBUG_ENABLED",
-        "LOGIN_REQUIRED",
         "ML_FORECAST_ENABLED",
         "UPDATES_PRUNE_ENABLED",
     }
@@ -358,7 +357,6 @@ def test_registry_env_defaults_match_prior_hardcoded_defaults():
         "weather_ingest_enabled": False,
         "openapi_docs_enabled": False,
         "perf_debug_enabled": False,
-        "login_required": True,
         "ml_forecast": False,
         "updates_prune_enabled": False,
     }

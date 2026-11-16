@@ -5,9 +5,8 @@ re-analyze.
 Admins create, list and delete snapshots under ``/api/admin/snapshots``.
 Anyone holding a snapshot's id reads it at ``GET /api/snapshots/{id}``, and
 today's figures for its stored query at ``GET /api/snapshots/{id}/today``,
-both of which the sign-in gate leaves public (``api.middleware.login_gate``):
-council material reaches readers who have no account. The id is the
-capability, 128 random bits, and nothing lists ids to a non-admin.
+signed in or not: council material reaches readers who have no account. The
+id is the capability, 128 random bits, and nothing lists ids to a non-admin.
 
 The figures are never the client's. A create names the screen and the query
 that screen's own endpoint was asked, and the payload is computed by that

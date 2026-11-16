@@ -6,7 +6,7 @@ import { isAuthRequired, refreshAuthStateOn401, retryTransientOnce } from "./aut
 const authRequired = () => new ApiError(401, JSON.stringify({ detail: "auth required" }));
 
 describe("isAuthRequired", () => {
-  it("matches the 401 the login gate and require_user return", () => {
+  it("matches the 401 require_user returns", () => {
     expect(isAuthRequired(authRequired())).toBe(true);
   });
 
@@ -18,15 +18,15 @@ describe("isAuthRequired", () => {
 });
 
 describe("refreshAuthStateOn401", () => {
-  it("refetches the session and the forever-cached config on an auth-required 401", () => {
+  it("refetches only the session on an auth-required 401", () => {
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries").mockResolvedValue();
     refreshAuthStateOn401(qc)(authRequired());
+    expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith({ queryKey: ["me"] });
-    expect(spy).toHaveBeenCalledWith({ queryKey: ["config"] });
   });
 
-  it("leaves both alone for any other error", () => {
+  it("leaves the session alone for any other error", () => {
     const qc = new QueryClient();
     const spy = vi.spyOn(qc, "invalidateQueries").mockResolvedValue();
     refreshAuthStateOn401(qc)(new ApiError(500, ""));

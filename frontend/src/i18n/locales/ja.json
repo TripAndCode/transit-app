@@ -2164,7 +2164,6 @@
         "weatherIngestEnabled": "気象: 観測データ取り込みと、要因画面の降雨パネル",
         "openapiDocsEnabled": "API: OpenAPI ドキュメント",
         "perfDebugEnabled": "API: パフォーマンスデバッグ面",
-        "loginRequired": "アクセス: ログイン必須",
         "mlForecast": "ML予測",
         "updatesPruneEnabled": "保持期間: 期限を過ぎた ClickHouse の生データ updates を削除"
       }

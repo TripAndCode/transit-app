@@ -470,9 +470,11 @@ def mirror_updates_to_ch(ch_client, agency_id, *, table: str = "updates") -> Non
 
 @pytest.fixture(autouse=True)
 def _sso_off_unless_a_test_turns_it_on(monkeypatch):
-    """The login gate enforces only while SSO is configured. A shell that
-    exports the OAuth block would otherwise gate every anonymous read in the
-    suite; a test that needs SSO sets the variables itself."""
+    """Whether SSO is configured changes what a signed-out caller may do
+    (``require_user_when_sign_in_exists``) and whether ``/api/auth/*``
+    answers at all. A shell that exports the OAuth block would otherwise
+    change that for the whole suite; a test that needs SSO sets the
+    variables itself."""
     from api.sso import SSO_ENV
 
     for var in SSO_ENV:

@@ -33,7 +33,6 @@ from api.middleware.auth import APIKeyMiddleware
 from api.middleware.cancel_on_disconnect import CancelGETOnDisconnectMiddleware
 from api.middleware.forwarded import ForwardedClientMiddleware, forwarded_hops
 from api.middleware.locale import LocaleMiddleware
-from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_active
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
@@ -115,13 +114,6 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
             "CORS_ORIGINS contains '*' but allow_credentials=True. "
             "The CORS spec forbids the combination — list explicit origins."
         )
-
-
-def _warn_if_login_gate_inactive(sso_enabled: bool) -> None:
-    """A deployment that asks for sign-in but has no SSO configured is open to
-    everyone; say so at boot rather than let it pass silently."""
-    if not sso_enabled and flag("login_required", True):
-        _log.warning("login_required is on but SSO is not configured: the API is open to signed-out callers")
 
 
 def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
@@ -222,7 +214,6 @@ async def lifespan(app: FastAPI):
         # that would otherwise land on the event loop -- inside whichever
         # request happened to touch a flag first.
         await asyncio.to_thread(warm_flags)
-        _warn_if_login_gate_inactive(enabled)
         # Non-fatal: ClickHouse only backs a subset of routes (live and
         # per-day reads, narrowed-filter report fallbacks, and the admin
         # board/ops freshness probe, which degrades without it). Postgres-only
@@ -319,7 +310,6 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 #   StarletteSessionMiddleware     (Authlib needs request.session)
 #   SessionMiddleware              (loads request.state.user from sid cookie)
 #   APIKeyMiddleware               (loads request.state.tier from X-API-Key)
-#   LoginRequiredMiddleware        (401s a signed-out caller while sign-in is required)
 #   UsageCountMiddleware           (counts each finished /api/ request, signed in or out)
 #   LocaleMiddleware               (parses Accept-Language → request.state.locale)
 #   CancelGETOnDisconnectMiddleware (cancels GET handler tasks when the client
@@ -332,7 +322,6 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
 app.add_middleware(UsageCountMiddleware)
-app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
@@ -412,7 +401,6 @@ class HealthStatus(BaseModel):
 class ClientConfig(BaseModel):
     auth_enabled: bool
     local_admin_enabled: bool
-    login_required: bool
     feedback_url: str | None
     llm_enabled: bool
     weather_enabled: bool
@@ -438,9 +426,8 @@ async def health():
 @app.get("/api/config", response_model=ClientConfig)
 async def config():
     """Public client config. Lets the SPA hide login UI when SSO is unconfigured,
-    show/hide the break-glass local-admin password form, send signed-out
-    visitors to sign in while ``login_required`` says the API refuses them, and
-    link to the deployment's feedback address when it has one. ``llm_enabled`` is
+    show/hide the break-glass local-admin password form, and link to the
+    deployment's feedback address when it has one. ``llm_enabled`` is
     False when no LLM provider is usable or the operator's kill switch is off, so
     the SPA hides LLM-only affordances instead of offering ones that cannot answer.
     ``weather_enabled`` carries the one feature flag a screen must know before it
@@ -450,7 +437,6 @@ async def config():
     return {
         "auth_enabled": enabled,
         "local_admin_enabled": local_admin_enabled(),
-        "login_required": await enforcement_active(),
         "feedback_url": feedback_url(),
         "llm_enabled": llm_available() and await aflag("ask_llm_enabled"),
         "weather_enabled": await aflag("weather_ingest_enabled"),
