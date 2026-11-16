@@ -2,19 +2,14 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, useNavigate, useSearchParams } from "react-router-dom";
 import * as hooks from "./hooks";
-import { useAnonymousFilterPersistence } from "./anonymousFilterPersistence";
+import * as auth from "./auth";
+import { useFilterPersistence } from "./filterPersistence";
 import { blockStorage } from "../test/blockStorage";
-
-const useSessionMock = vi.fn();
-vi.mock("./auth", () => ({
-  useSession: () => useSessionMock(),
-}));
-
 
 // Probe shares the same router context as the hook so it reactively sees
 // whatever setSearchParams call the hook makes.
 function Probe({ agencyId }: { agencyId: number | null }) {
-  useAnonymousFilterPersistence(agencyId);
+  useFilterPersistence(agencyId);
   const [params] = useSearchParams();
   return <div data-testid="params">{params.toString()}</div>;
 }
@@ -30,7 +25,7 @@ function renderProbe(agencyId: number | null, initialPath: string) {
 // Mirrors AgencyPicker's `selectAgency`, which navigates to the same or a
 // different agency without preserving any filter query params.
 function NavigatingProbe({ agencyId }: { agencyId: number }) {
-  useAnonymousFilterPersistence(agencyId);
+  useFilterPersistence(agencyId);
   const navigate = useNavigate();
   return (
     <button type="button" onClick={() => navigate(`/agencies/${agencyId}/pulse`)}>
@@ -45,7 +40,7 @@ function NavigatingProbe({ agencyId }: { agencyId: number }) {
 // component instance (so `restoredFor`'s ref state persists across it),
 // unlike remounting with a different `initialEntries`.
 function ClearParamProbe({ agencyId, paramToClear }: { agencyId: number; paramToClear: string }) {
-  useAnonymousFilterPersistence(agencyId);
+  useFilterPersistence(agencyId);
   const [, setParams] = useSearchParams();
   return (
     <button
@@ -63,10 +58,9 @@ function ClearParamProbe({ agencyId, paramToClear }: { agencyId: number; paramTo
   );
 }
 
-describe("useAnonymousFilterPersistence", () => {
+describe("useFilterPersistence", () => {
   beforeEach(() => {
     localStorage.clear();
-    useSessionMock.mockReturnValue({ data: null, isLoading: false });
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -95,24 +89,13 @@ describe("useAnonymousFilterPersistence", () => {
     expect(JSON.parse(localStorage.getItem("transit.lastFilter.1.routes") ?? "{}")).toEqual({ dow: "weekend" });
   });
 
-  it("does nothing while logged in", () => {
-    useSessionMock.mockReturnValue({ data: { user_id: 1 }, isLoading: false });
-    localStorage.setItem(
-      "transit.lastFilter.1.pulse",
-      JSON.stringify({ dow: "weekend" }),
-    );
+  it("persists and restores a filter with a signed-in session present", () => {
+    vi.spyOn(auth, "useSession").mockReturnValue({ data: { user_id: 1 }, isLoading: false } as never);
+    const first = renderProbe(1, "/agencies/1/pulse?dow=weekend");
+    expect(JSON.parse(localStorage.getItem("transit.lastFilter.1.pulse") ?? "{}").dow).toBe("weekend");
+    first.unmount();
     renderProbe(1, "/agencies/1/pulse");
-    expect(screen.getByTestId("params")).toHaveTextContent("");
-  });
-
-  it("does nothing while the session is still loading", () => {
-    useSessionMock.mockReturnValue({ data: null, isLoading: true });
-    localStorage.setItem(
-      "transit.lastFilter.1.pulse",
-      JSON.stringify({ dow: "weekend" }),
-    );
-    renderProbe(1, "/agencies/1/pulse");
-    expect(screen.getByTestId("params")).toHaveTextContent("");
+    expect(screen.getByTestId("params")).toHaveTextContent("dow=weekend");
   });
 
   it("restores a stored filter on a fresh visit with no explicit filter params", () => {
