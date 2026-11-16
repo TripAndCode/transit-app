@@ -8,11 +8,12 @@ back keeps those older credentials working. Invariant for the follow-up
 migration that drops them: it may run once no row holding a raw value is still
 resolvable, since until then a rollback still has live credentials to preserve.
 
-"Resolvable" mirrors what the auth middleware accepts: a session whose
-`expires_at` is in the future (`api/middleware/session.py`), an API key that
-is neither revoked nor past its expiry (`api/middleware/auth.py`). A
-suspended user does not exclude a row: suspension is reversible, and lifting
-it makes that user's credentials work again.
+"Resolvable" mirrors the acceptance rule still enforced for a session (a
+session whose `expires_at` is in the future, `api/middleware/session.py`)
+and the one no code authenticates against any more but this script's own
+SQL still encodes for a legacy API key (neither revoked nor past its
+expiry). A suspended user does not exclude a row: suspension is
+reversible, and lifting it makes that user's credentials work again.
 
 "Due" answers only whether the credentials may go. The drop migration must
 also remove what `0062_hash_tokens_legacy_compat` installed on those columns --
