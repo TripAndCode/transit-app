@@ -119,6 +119,7 @@ DESTRUCTIVE_SUBCOMMANDS = {
     "ingest_weather": {"pg"},
     "load_static": {"pg"},
     "migrate": {"pg"},
+    "poll": {"pg", "ch"},
     "prune-admin-audit": {"pg"},
     "prune-personal-data": {"pg"},
     "prune-pipeline-runs": {"pg"},

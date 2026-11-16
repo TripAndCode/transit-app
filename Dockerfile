@@ -30,8 +30,10 @@ RUN poetry config virtualenvs.create false \
 # because layer diffs are file-granular that duplicates the whole tree's bytes
 # in the image for a metadata-only change. /app itself is chowned too, so the
 # ingest strategies can still create their per-agency directories under it.
+# /app/archive is where the standalone poller's volume mounts (compose.yml).
 RUN adduser --system --group --no-create-home app \
-    && chown app:app /app
+    && chown app:app /app \
+    && install -d -o app -g app /app/archive
 
 COPY --chown=app:app . .
 COPY --from=frontend --chown=app:app /fe/dist /app/api/static

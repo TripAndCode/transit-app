@@ -4,6 +4,35 @@
 # and make the second `docker compose up` silently attach to the first's
 # containers and its data volume -- the same collision `container_name` caused,
 # one level up.
+x-standalone-env: &standalone-env
+  DATABASE_URL: postgresql://transit:${POSTGRES_PASSWORD:-transit}@db:5432/transit
+  CLICKHOUSE_HOST: clickhouse
+  CLICKHOUSE_PORT: "8123"
+  CLICKHOUSE_USER: transit
+  CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-transit}
+  CLICKHOUSE_DATABASE: transit
+  CLICKHOUSE_SECURE: "false"
+  POLLER_ARCHIVE_DIR: /app/archive
+
+x-standalone-app: &standalone-app
+  build: .
+  image: transit-app-standalone
+  profiles: [standalone]
+  restart: unless-stopped
+  # `.env` supplies everything else (keys, SSO, POLL_INTERVAL_SEC); the
+  # database settings above are this stack's own and override it.
+  env_file:
+    - path: .env
+      required: false
+  environment: *standalone-env
+  depends_on:
+    db:
+      condition: service_healthy
+    clickhouse:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+
 services:
   db:
     build:
@@ -56,11 +85,56 @@ services:
       timeout: 5s
       retries: 10
 
-# This compose file is for LOCAL DEVELOPMENT only — it brings up the
-# PostGIS+pgvector database (`make db`) and ClickHouse that `make serve` connects to.
-# Production runs on Railway (app + separate DB services built from the
-# same `db/Dockerfile`), push-to-deploy — see docs/deploy-railway.md.
+  # The `standalone` profile runs the whole app from this file: the API, a
+  # one-shot schema step (railway.json's preDeployCommand), and the in-repo
+  # poller (`gtfs_pipeline.py poll`), all from the app image. Without the
+  # profile none of them starts, so `docker compose up` and `make db` bring up
+  # the two databases only.
+  migrate:
+    <<: *standalone-app
+    restart: "no"
+    command:
+      - sh
+      - -c
+      - >-
+        python gtfs_pipeline.py migrate up &&
+        python -c "from pipeline.clickhouse import get_client;
+        from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())"
+    depends_on:
+      db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  app:
+    <<: *standalone-app
+    environment:
+      <<: *standalone-env
+      # Nothing proxies this port, so no X-Forwarded-For entry is trusted.
+      FORWARDED_HOPS: "0"
+    ports:
+      - "127.0.0.1:${STANDALONE_PORT:-8000}:8000"
+
+  poller:
+    <<: *standalone-app
+    # Exec form: the poller is PID 1 and receives SIGTERM itself, which ends
+    # its loop after the poll in flight.
+    command: ["python", "gtfs_pipeline.py", "poll"]
+    stop_grace_period: 30s
+    healthcheck:
+      disable: true
+    volumes:
+      # /app/archive exists in the image, owned by the app user, so a fresh
+      # volume mounted there takes that owner.
+      - transit_archive:/app/archive
+
+# Without the profile this compose file is for LOCAL DEVELOPMENT only — it
+# brings up the PostGIS+pgvector database (`make db`) and ClickHouse that
+# `make serve` connects to. Production runs on Railway (app + separate DB
+# services built from the same `db/Dockerfile`), push-to-deploy — see
+# docs/deploy-railway.md.
 
 volumes:
   transit_pgdata:
   transit_chdata:
+  transit_archive:

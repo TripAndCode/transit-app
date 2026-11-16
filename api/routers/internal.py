@@ -21,7 +21,6 @@ import hmac
 import logging
 import os
 import pathlib
-import re
 from contextlib import AbstractContextManager
 from datetime import datetime, timezone
 from typing import Any, NamedTuple
@@ -29,6 +28,7 @@ from typing import Any, NamedTuple
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
 from pipeline import runs as pipeline_runs
+from pipeline.collector_push import SOURCE_FILE_RE, UnknownAgency, ingest_pushed_poll
 from pipeline.locks import try_lock_ingest_analyze_timed
 from pipeline.ml_evaluation_ingest import ingest_evaluations, ingest_live_evaluations
 from pipeline.ml_forecast_ingest import ingest_forecast, s3_client_from_env, store_configured
@@ -39,12 +39,7 @@ router = APIRouter(prefix="/internal/cron", tags=["internal"], include_in_schema
 collector_router = APIRouter(prefix="/internal/collector", tags=["internal"], include_in_schema=False)
 
 _log = logging.getLogger(__name__)
-_SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
 _MAX_COLLECTOR_PAYLOAD = 10 * 1024 * 1024
-
-
-class UnknownAgency(ValueError):
-    """A push for an agency that does not exist or is disabled."""
 
 
 class SweepOutcome(NamedTuple):
@@ -73,11 +68,10 @@ def _check_collector_secret(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid collector secret")
 
 
-def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file_name: str) -> int:
+def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, source_file: str) -> int:
     import psycopg2
 
     from pipeline.clickhouse import get_client
-    from pipeline.ingest import ingest_live_payload
 
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -89,12 +83,6 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
         conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute("SET TIME ZONE 'Asia/Tokyo'")
-            cur.execute(
-                "SELECT 1 FROM agencies WHERE agency_id = %s AND deleted_at IS NULL",
-                (agency_id,),
-            )
-            if cur.fetchone() is None:
-                raise UnknownAgency(f"Unknown or deleted agency_id={agency_id}")
         # No advisory lock: a push writes updates_live, which analyze never
         # reads (pipeline/locks.py). ingest_live_payload's check-then-insert
         # over the last 10 minutes of captured_at absorbs a sequential
@@ -102,7 +90,7 @@ def _ingest_collector_payload(agency_id: int, raw: bytes, captured_at: str, file
         # pushes that overlap in flight can both insert, and analyze's
         # argMax dedup on captured_at absorbs the duplicate from there.
         ch_client = get_client()
-        return ingest_live_payload(agency_id, raw, captured_at, file_name, conn, ch_client)
+        return ingest_pushed_poll(agency_id, raw, captured_at, source_file, conn, ch_client)
     finally:
         # Nested try/finally: if conn.close() raises, ch_client.close() must
         # still run -- an unguarded `conn.close(); ch_client.close()` would
@@ -126,7 +114,7 @@ async def collector_update(agency_id: int, request: Request) -> dict:
     """
     _check_collector_secret(request)
     source_file = request.headers.get("X-Source-File") or ""
-    if not _SOURCE_FILE_RE.fullmatch(source_file):
+    if not SOURCE_FILE_RE.fullmatch(source_file):
         raise HTTPException(status_code=400, detail="Invalid X-Source-File")
     captured_header = request.headers.get("X-Captured-At") or ""
     try:
@@ -153,14 +141,13 @@ async def collector_update(agency_id: int, request: Request) -> dict:
         raise HTTPException(status_code=413, detail="Collector payload is empty or too large")
     from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
-    file_name = f"oracle/{source_file}"
     try:
         inserted = await asyncio.to_thread(
             _ingest_collector_payload,
             agency_id,
             raw,
             captured.astimezone(timezone.utc).isoformat(),
-            file_name,
+            source_file,
         )
     # 404 and 422 tell the collector that resending the same request cannot
     # help: its curl --retry resends on a 5xx, a 408 or a 429, and on neither

@@ -135,7 +135,7 @@ async def test_happy_path_calls_ingest_once(client):
     args = mock_ingest.call_args.args
     assert args[0] == 1
     assert args[1] == b"protobuf-bytes"
-    assert args[3] == "oracle/20260919/TripUpdate_120000.pb"
+    assert args[3] == "20260919/TripUpdate_120000.pb"
 
 
 @pytest.mark.parametrize(
