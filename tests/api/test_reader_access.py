@@ -3,23 +3,7 @@ the admin routes still answer only an admin."""
 
 import pytest
 
-from pipeline.flags import invalidate as invalidate_flags
 from tests.fixtures.users import seed_session
-
-_SSO = {
-    "SESSION_SIGNING_KEY": "test-signing-key",
-    "GOOGLE_CLIENT_ID": "g",
-    "GOOGLE_CLIENT_SECRET": "gs",
-    "GITHUB_CLIENT_ID": "h",
-    "GITHUB_CLIENT_SECRET": "hs",
-}
-
-
-@pytest.fixture
-def sso_on(monkeypatch):
-    for key, value in _SSO.items():
-        monkeypatch.setenv(key, value)
-    invalidate_flags()
 
 
 @pytest.mark.asyncio

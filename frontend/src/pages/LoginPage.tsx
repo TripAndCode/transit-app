@@ -226,8 +226,9 @@ export function LoginPage() {
           </form>
         )}
 
-        {/* Every reader screen serves a signed-out visitor, so sign-in is
-            never the only way on; `next` is already a same-origin path. */}
+        {/* Every reader screen serves a signed-out visitor, so the guest link
+            always shows. A guarded `next` (/admin, /me) leads back here.
+            `next` is already a same-origin path. */}
         <p className="login-card__guest">
           <Link to={next}>
             {t("account.login.guest_link")}

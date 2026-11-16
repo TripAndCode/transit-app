@@ -1,6 +1,15 @@
 import pytest
 
+from pipeline.flags import invalidate as invalidate_flags
 from pipeline.query import llm_client
+
+_SSO = {
+    "SESSION_SIGNING_KEY": "test-signing-key",
+    "GOOGLE_CLIENT_ID": "g",
+    "GOOGLE_CLIENT_SECRET": "gs",
+    "GITHUB_CLIENT_ID": "h",
+    "GITHUB_CLIENT_SECRET": "hs",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -22,3 +31,10 @@ def no_llm_key(monkeypatch):
     llm_client.reset_client_for_tests()
     yield
     llm_client.reset_client_for_tests()
+
+
+@pytest.fixture
+def sso_on(monkeypatch):
+    for key, value in _SSO.items():
+        monkeypatch.setenv(key, value)
+    invalidate_flags()

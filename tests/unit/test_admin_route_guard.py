@@ -47,8 +47,9 @@ def _served_routes() -> dict[tuple[str, str], set[Callable]]:
             continue
         calls = set(_calls(getattr(ctx, "dependant", None)))
         for method in ctx.methods or ():
+            # The first registration of a method and path is the one served.
             if method != "HEAD":
-                routes[(method, ctx.path)] = calls
+                routes.setdefault((method, ctx.path), calls)
     return routes
 
 
@@ -58,7 +59,7 @@ def _is_admin_path(path: str) -> bool:
 
 def test_every_admin_route_requires_an_admin():
     admin = {route: calls for route, calls in _served_routes().items() if _is_admin_path(route[1])}
-    assert len(admin) > 30, "the walk found too few admin routes to be looking at the real route table"
+    assert ("GET", "/api/admin/flags") in admin, "the walk did not reach the included admin routers"
     unguarded = sorted(route for route, calls in admin.items() if require_admin not in calls)
     assert unguarded == []
 
