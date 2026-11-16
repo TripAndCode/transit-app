@@ -188,6 +188,20 @@ export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
  *  (api/scope_applied.py). */
 export type ScopeApplied = Partial<Record<ScopeField | (string & {}), boolean>> | null | undefined;
 
+/** What a page whose sections each report their own `scope_applied` used:
+ *  a condition any section used counts as used. Until every section has
+ *  answered nothing is known, and the result is undefined (every condition
+ *  shown as used) rather than a partial answer that would strike through a
+ *  condition a section still loading is about to use. */
+export function mergeScopeApplied(...sections: ScopeApplied[]): ScopeApplied {
+  if (sections.some((applied) => applied == null)) return undefined;
+  const merged: Record<string, boolean> = {};
+  for (const applied of sections) {
+    for (const [field, used] of Object.entries(applied!)) merged[field] = merged[field] === true || used === true;
+  }
+  return merged;
+}
+
 /** Whether a condition narrows anything. A condition at its default filters
  *  nothing, so a screen ignoring it is not worth striking through. */
 function conditionIsSet(key: TokenKey, scope: Scope): boolean {
