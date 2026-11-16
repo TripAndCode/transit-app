@@ -1,10 +1,10 @@
 """A failed provider call must be diagnosable without logging key material.
 
-These calls carry an API key — the user's own on the BYOK paths, the
-operator's on the shared ladder — and a provider's error body routinely
-echoes part of it back ("Incorrect API key provided: sk-..."). The exception's
-message is therefore the one field that must never reach a log, which rules
-out `exc_info=True`, `%s`/`%r` on the exception, `str(exc)`, and `exc.args`.
+These calls carry the operator's API key, and a provider's error body
+routinely echoes part of it back ("Incorrect API key provided: sk-...").
+The exception's message is therefore the one field that must never reach a
+log, which rules out `exc_info=True`, `%s`/`%r` on the exception, `str(exc)`,
+and `exc.args`.
 
 `describe_provider_failure` is the single sanctioned way to render one, so the
 functional test below pins its behaviour and the AST check pins that no
@@ -21,19 +21,16 @@ import pytest
 from pipeline.query.llm_client import describe_provider_failure
 
 ROOT = Path(__file__).resolve().parents[2]
-SECRET = "sk-live-thisistheusers-secret-key"
+SECRET = "sk-live-thisistheoperators-secret-key"
 
 # Every module with an `except` handler that logs a failed provider call.
-PROVIDER_CALL_MODULES = (
-    "pipeline/query/llm_client.py",
-    "pipeline/query/chat.py",
-)
+PROVIDER_CALL_MODULES = ("pipeline/query/llm_client.py",)
 
 
 # Calls that send an API key to a provider. A handler only carries key-bearing
 # error text if its own `try` made one of these; other handlers in these
 # modules catch ordinary application errors whose messages are safe to log.
-_PROVIDER_CALLS = {"_completion_with_key", "create", "chat_completions"}
+_PROVIDER_CALLS = {"create", "chat_completions"}
 
 
 def _provider_call_handlers(tree: ast.AST):

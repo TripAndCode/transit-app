@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nextProvider } from "react-i18next";
@@ -40,7 +40,6 @@ afterEach(() => vi.restoreAllMocks());
 
 function renderPage() {
   vi.spyOn(client, "apiGet").mockImplementation(async (path: string) => {
-    if (path === "/api/me/llm-key") return { configured: false };
     if (path === "/api/me/sessions") return SESSIONS;
     if (path === "/api/agencies") return [{ agency_id: 8, agency_name: "Aomori City Bus", feed_url: "", static_url: null, latest_data_date: null }];
     return [];
@@ -97,13 +96,5 @@ describe("AccountPage context", () => {
     await screen.findByText("Safari on iOS");
     await userEvent.click(screen.getByRole("button", { name: "Sign out this session" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't sign out that session. Please try again.");
-  });
-
-  it("keeps account deletion apart from the data download, in its own warning section", () => {
-    renderPage();
-    const exportSection = screen.getByRole("link", { name: "Download my data" }).closest("section");
-    const deleteButton = screen.getByRole("button", { name: "Delete account" });
-    expect(exportSection).not.toContainElement(deleteButton);
-    expect(within(deleteButton.closest("section")!).getByRole("heading", { name: "Delete account" })).toBeInTheDocument();
   });
 });

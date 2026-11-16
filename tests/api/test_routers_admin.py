@@ -350,7 +350,7 @@ async def test_user_detail(admin_client, aconn):
     body = r.json()
     assert body["email"] == "detail@x"
     assert any(i["provider"] == "google" for i in body["identities"])
-    assert body["byok_provider"] is None
+    assert "byok_provider" not in body
 
 
 @pytest.mark.asyncio
@@ -538,23 +538,6 @@ async def test_bulk_patch_records_nothing_for_an_id_the_patch_does_not_change(ad
     assert r.status_code == 200
     count = await aconn.fetchval("SELECT count(*) FROM login_events WHERE user_id=$1", uid_already)
     assert count == 0
-
-
-@pytest.mark.asyncio
-async def test_user_detail_reports_byok_provider_without_the_key(admin_client, aconn):
-    sid_admin, _, _ = await _seed(aconn, role="admin")
-    _, uid_target, _ = await _seed(aconn, email="byok@x")
-    await aconn.execute(
-        "INSERT INTO user_llm_keys (user_id, provider, encrypted_key, key_suffix) VALUES ($1, 'openai', $2, 'abcd')",
-        uid_target,
-        b"not-a-real-ciphertext",
-    )
-    r = await admin_client.get(f"/api/admin/users/{uid_target}", cookies={"sid": sid_admin})
-    assert r.status_code == 200
-    body = r.json()
-    assert body["byok_provider"] == "openai"
-    assert "key" not in body
-    assert "abcd" not in str(body)
 
 
 @pytest.mark.asyncio
@@ -770,9 +753,9 @@ async def _delete(client, sid, uid):
 
 @pytest.mark.asyncio
 async def test_soft_delete_masks_and_revokes_every_key_the_user_owns(admin_client, aconn):
-    """Ownership is what erase_user and the account export use: a key issued
-    to the account, or a legacy ownerless key recorded under its address in
-    any case. An already-revoked key keeps the time it was revoked."""
+    """Ownership is what the admin soft-delete uses: a key issued to the
+    account, or a legacy ownerless key recorded under its address in any
+    case. An already-revoked key keeps the time it was revoked."""
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid, _ = await _seed(aconn, email="keyed@x")
     _, uid_other, _ = await _seed(aconn, email="other@x")

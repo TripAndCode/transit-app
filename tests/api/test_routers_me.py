@@ -36,17 +36,9 @@ async def test_me_anonymous_is_null(me_client):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("method", "path"),
-    [
-        ("GET", "/api/me/sessions"),
-        ("GET", "/api/me/llm-key"),
-        ("GET", "/api/me/export"),
-        ("DELETE", "/api/me"),
-    ],
-)
+@pytest.mark.parametrize(("method", "path"), [("GET", "/api/me/sessions")])
 async def test_signed_in_only_me_routes_still_refuse_anonymous(me_client, method, path):
-    resp = await me_client.request(method, path, json={"confirm_email": "x@x"}, headers={"Origin": TEST_ORIGIN})
+    resp = await me_client.request(method, path, headers={"Origin": TEST_ORIGIN})
     assert resp.status_code == 401
 
 
@@ -75,6 +67,25 @@ async def test_presets_endpoints_are_retired(me_client, aconn, aagency_id):
     assert r.status_code in (404, 405)
     r2 = await me_client.get(f"/api/me/presets?agency_id={aagency_id}", cookies={"sid": sid})
     assert r2.status_code in (404, 405)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/me/llm-key"),
+        ("PUT", "/api/me/llm-key"),
+        ("DELETE", "/api/me/llm-key"),
+        ("GET", "/api/me/export"),
+        ("DELETE", "/api/me"),
+    ],
+)
+async def test_byok_export_and_erasure_routes_are_retired(me_client, aconn, method, path):
+    """No BYOK keys, no self-service export or erasure: a signed-in caller gets
+    404/405, not a working route, for every retired self-service endpoint."""
+    sid, _uid = await _seed_user_and_session(aconn)
+    r = await me_client.request(method, path, cookies={"sid": sid}, headers={"Origin": TEST_ORIGIN})
+    assert r.status_code in (404, 405)
 
 
 @pytest.mark.asyncio

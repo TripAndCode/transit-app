@@ -6,3 +6,7 @@
 # STORAGE_ID; this entry pins the pre-rename commit's finding so re-scanning
 # the same historical blob doesn't re-trigger the rule.
 43675b3732e6cce9a06fb8ab3920ca3d5d6e838e:frontend/src/components/analysis/savedAnalyses.ts:generic-api-key:4
+# Synthetic provider key in a deleted key-storage test. The path allowlist went
+# with the file; this pins the one historical finding the full-history scan
+# still reads.
+19458ee23b37fe4ff0615a03df7f5e3fedffeb1a:tests/db/test_user_llm_keys_db.py:generic-api-key:28

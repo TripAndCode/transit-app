@@ -24,10 +24,10 @@ from openai import Timeout
 
 _log = logging.getLogger(__name__)
 
-# Bounds every provider call, on the shared ladder and the BYOK path alike. A
-# rung that hangs has to give up while the caller is still waiting, or the
-# ladder never reaches the next provider; the SDK's own default read timeout is
-# far longer than any Ask/follow-up caller waits.
+# Bounds every provider call. A rung that hangs has to give up while the
+# caller is still waiting, or the ladder never reaches the next provider;
+# the SDK's own default read timeout is far longer than any Ask/follow-up
+# caller waits.
 REQUEST_TIMEOUT = Timeout(30.0, connect=5.0)
 
 # Built-in defaults for each provider we support; provider_endpoint applies
@@ -122,9 +122,8 @@ def _build_create_kwargs(
     tool_choice: str,
     response_format: dict | None,
 ) -> dict[str, Any]:
-    """Build ``chat.completions.create`` kwargs, shared by the ladder and the
-    BYOK one-off path (:func:`pipeline.query.chat._completion_with_key`) so a
-    request-shape fix only ever needs to happen once.
+    """Build ``chat.completions.create`` kwargs for every rung of the ladder,
+    so a request-shape fix only ever needs to happen once.
 
     ``tools``/``tool_choice`` are omitted together when there are no tools,
     rather than sent as ``tools=None``/``tool_choice="none"``: OpenAI rejects
@@ -166,12 +165,12 @@ def log_usage(provider: str, model: str, response: Any) -> None:
 def describe_provider_failure(exc: BaseException) -> str:
     """Safe-to-log description of a failed provider call.
 
-    Deliberately omits the exception's message. These calls carry an API key —
-    the user's own on the BYOK paths, the operator's on the shared ladder — and
-    a provider's error body routinely echoes part of it back ("Incorrect API
-    key provided: sk-..."), so the message is the one field that must never be
-    logged. The exception type, the HTTP status and the provider's request id
-    identify the failure well enough to act on and carry no secret.
+    Deliberately omits the exception's message. These calls carry the
+    operator's API key, and a provider's error body routinely echoes part of
+    it back ("Incorrect API key provided: sk-..."), so the message is the one
+    field that must never be logged. The exception type, the HTTP status and
+    the provider's request id identify the failure well enough to act on and
+    carry no secret.
 
     Every handler that logs a provider failure goes through here, so a new call
     site inherits that guarantee rather than having to remember it.

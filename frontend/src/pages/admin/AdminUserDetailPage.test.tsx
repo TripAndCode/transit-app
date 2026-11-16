@@ -19,7 +19,6 @@ const mockDetail = vi.hoisted(() => ({
   created_at: "2026-01-01T00:00:00Z",
   identities: [],
   recent_events: [],
-  byok_provider: null,
 }));
 
 // A signed-in admin viewing someone else's record (user_id 999 !== 1), so
