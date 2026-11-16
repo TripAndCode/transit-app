@@ -797,7 +797,8 @@ COVERAGE_MISSING_TEXT: dict[tuple[str, str], str] = {
 
 def _feed_quality_text(meta: DefinitionMeta, locale: str, *, grouped: bool = True) -> str | None:
     """Each listed agency's completeness and clamp share, named by its agency
-    when there are several; None when no router stated them. *grouped* puts
+    when the stamp's scope lists several (`_by_agency`); None when no router
+    stated them. *grouped* puts
     thousands separators in the trip counts, which the CSV preamble's single
     cell leaves out, as it keeps no ASCII comma."""
     if not meta.feed_quality:
