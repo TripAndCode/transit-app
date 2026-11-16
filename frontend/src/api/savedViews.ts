@@ -4,7 +4,7 @@ import { withStorage, writeStorage } from "../utils/safeStorage";
 
 const KEY = "transit.savedViews.v1";
 
-/** Mirrors the limit the server used to enforce on a saved preset's name. */
+/** Keeps a view's name short enough to read in one row of the menu. */
 export const NAME_MAX = 120;
 
 /** Keeps a view list short enough to scan from the menu. */
@@ -25,8 +25,8 @@ export type CreateSavedViewResult =
 const listeners = new Set<() => void>();
 // The parsed store, cached by the raw string it was parsed from. A render
 // that hasn't seen a storage change gets the same array reference back --
-// useSyncExternalStore loops otherwise. A refused read reports empty rather
-// than this page's last-known value, per the stored contract below.
+// useSyncExternalStore loops otherwise. A refused read is an empty list
+// (withStorage's fallback), not this page's last-known value.
 let cachedRaw: string | null = null;
 let cached: readonly SavedView[] = [];
 
@@ -122,9 +122,12 @@ export const savedViews = {
     return { ok: true, view };
   },
 
-  remove(id: string): void {
-    writeAll(readAll().filter((v) => v.id !== id));
+  /** Deletes the view; false when the browser refuses the write, which
+   *  leaves the view in place. */
+  remove(id: string): boolean {
+    if (!writeAll(readAll().filter((v) => v.id !== id))) return false;
     notify();
+    return true;
   },
 };
 

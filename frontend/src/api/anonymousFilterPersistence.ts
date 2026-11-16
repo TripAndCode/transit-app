@@ -50,9 +50,8 @@ function writeStored(key: string, value: StoredFilter): void {
  * page load starting from a blank filter state, it doesn't let a visitor
  * save/name/switch between multiple filter sets the way a saved view does.
  *
- * Logged-in users are intentionally unaffected (this hook no-ops once
- * `session` is present); PresetMenu's saved views cover them the same as
- * anyone else.
+ * Signed-in users are unaffected: this hook no-ops once `session` is
+ * present.
  */
 export function useAnonymousFilterPersistence(agencyId: number | null): void {
   const { data: session, isLoading } = useSession();

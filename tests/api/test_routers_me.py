@@ -64,7 +64,7 @@ async def test_me_returns_profile(me_client, aconn):
 
 @pytest.mark.asyncio
 async def test_presets_endpoints_are_retired(me_client, aconn, aagency_id):
-    """Saved views moved to the browser (slice 3): the routes are gone, not just refusing anonymous callers."""
+    """Saved views live in the browser: /api/me/presets is not mounted, even for a signed-in caller."""
     sid, _uid = await _seed_user_and_session(aconn)
     r = await me_client.post(
         "/api/me/presets",

@@ -66,8 +66,18 @@ describe("savedViews", () => {
   it("deletes a view", () => {
     const created = savedViews.create(1, "A", {});
     if (!created.ok) throw new Error("unreachable");
-    savedViews.remove(created.view.id);
+    expect(savedViews.remove(created.view.id)).toBe(true);
     expect(savedViews.list(1)).toEqual([]);
+  });
+
+  it("keeps a view and reports false when the browser refuses the delete", () => {
+    const created = savedViews.create(1, "A", {});
+    if (!created.ok) throw new Error("unreachable");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    expect(savedViews.remove(created.view.id)).toBe(false);
+    expect(savedViews.list(1)).toEqual([created.view]);
   });
 
   it("reads corrupt JSON as an empty list", () => {

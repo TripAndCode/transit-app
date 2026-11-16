@@ -218,6 +218,38 @@ describe("PresetMenu", () => {
     expect(screen.getByRole("button", { name: "next control" })).toHaveFocus();
   });
 
+  it("says in words that a delete was refused, and keeps the view listed", async () => {
+    seed(SAVED, "Weekday mornings");
+    renderMenu();
+    await open();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Delete Weekday mornings" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't delete this view. Try again.");
+    expect(screen.getByRole("button", { name: "Weekday mornings" })).toBeInTheDocument();
+    expect(savedViews.list(1).map((v) => v.name)).toEqual(["Weekday mornings"]);
+  });
+
+  it("clears a failed delete's message once a save succeeds", async () => {
+    seed(SAVED, "Weekday mornings");
+    renderMenu();
+    await open();
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Delete Weekday mornings" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    setItem.mockRestore();
+    await userEvent.click(screen.getByRole("button", { name: "Save current conditions" }));
+    const name = await screen.findByRole("textbox", { name: "View name" });
+    await userEvent.clear(name);
+    await userEvent.type(name, "Everything");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(savedViews.list(1).map((v) => v.name)).toEqual(["Everything", "Weekday mornings"]);
+  });
+
   it("clears a failed save's message once a delete succeeds", async () => {
     seed(SAVED, "Weekday mornings");
     renderMenu();
@@ -234,7 +266,7 @@ describe("PresetMenu", () => {
 
   it("a view saved from elsewhere appears in an already-open mounted menu without a reload", async () => {
     // A second PresetMenu can't stay open alongside this one -- opening it
-    // would blur this one's popover closed (see onBlur above) -- so the
+    // would blur this one's popover closed (PresetMenu's onBlur) -- so the
     // "elsewhere" stands for any other save path through the same store,
     // such as another mounted menu's own form submit.
     renderMenu();

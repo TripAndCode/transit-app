@@ -31,7 +31,7 @@ export function PresetMenu({
   const [menuOpen, setMenuOpen] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [name, setName] = useState("");
-  const [errorReason, setErrorReason] = useState<"name_taken" | "full" | "save_failed" | null>(null);
+  const [errorReason, setErrorReason] = useState<"name_taken" | "full" | "save_failed" | "delete_failed" | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const headRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -94,8 +94,8 @@ export function PresetMenu({
   }
 
   function remove(view: SavedView) {
-    savedViews.remove(view.id);
-    settle();
+    if (savedViews.remove(view.id)) settle();
+    else setErrorReason("delete_failed");
   }
 
   return (
@@ -174,7 +174,9 @@ export function PresetMenu({
                 ? t("presets.name_taken")
                 : errorReason === "full"
                   ? t("presets.full")
-                  : t("presets.save_failed")}
+                  : errorReason === "save_failed"
+                    ? t("presets.save_failed")
+                    : t("presets.delete_failed")}
             </p>
           )}
           {showForm ? (

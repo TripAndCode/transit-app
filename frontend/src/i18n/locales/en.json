@@ -851,7 +851,8 @@
     "name_taken": "A view with this name already exists. Choose another name.",
     "delete": "Delete {{name}}",
     "full": "You have reached the limit of saved views for this agency. Delete one to save another.",
-    "save_failed": "Couldn't save this view. Try again."
+    "save_failed": "Couldn't save this view. Try again.",
+    "delete_failed": "Couldn't delete this view. Try again."
   },
   "filters": {
     "range": {
