@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from pipeline import retention, static_archive
 from pipeline.agg_registry import METHOD_VERSION
+from pipeline.clickhouse import majority_source
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
     LEGACY_ON_TIME_LATE_TOLERANCE_SEC,
@@ -575,7 +576,7 @@ def test_a_day_is_filed_under_the_source_most_of_its_observations_came_from(arch
     """A tie reads live, the sparser source, so a day is never called archive
     without archive rows outnumbering live ones. A day whose counts predate
     their columns has no source yet."""
-    assert definition._day_source(archive_rows, live_rows) == source
+    assert majority_source(archive_rows, live_rows) == source
 
 
 def test_each_listed_agency_files_every_day_of_the_range_under_one_source():

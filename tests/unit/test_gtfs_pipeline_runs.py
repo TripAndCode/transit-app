@@ -199,6 +199,27 @@ def test_strict_ingest_exits_dataerr_and_records_the_partial_run(strict, code):
     assert (finish.call_args.args[2], finish.call_args.kwargs["rows"]) == ("ok" if code is None else "error", 5)
 
 
+def test_an_ingest_that_leaves_a_day_unsettled_exits_tempfail_and_records_the_error(caplog):
+    """A per-agency shell loop moves on from 75; the next run settles the day."""
+    from pipeline.archive_replace import ReplacementIncomplete
+
+    conn = _conn()
+    with (
+        patch.object(gtfs_pipeline, "_get_conn", return_value=conn),
+        patch("pipeline.locks.try_lock_ingest_analyze", return_value=True),
+        patch("pipeline.clickhouse.get_client", return_value=MagicMock()),
+        patch("pipeline.runs.start_run", return_value=11),
+        patch("pipeline.runs.finish_run") as finish,
+        patch("pipeline.ingest.ingest", side_effect=ReplacementIncomplete("agency 1: 2026-04-02 left unsettled")),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            gtfs_pipeline.cmd_ingest(Namespace(agency_id=1, folder="/tmp/x", strict=False))
+
+    assert exc_info.value.code == gtfs_pipeline.EX_TEMPFAIL
+    assert finish.call_args.args[2] == "error"
+    assert "2026-04-02 left unsettled" in caplog.text
+
+
 @pytest.mark.parametrize(
     "cmd,args,target",
     [

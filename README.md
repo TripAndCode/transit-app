@@ -52,93 +52,71 @@ returns to `:5173` instead of `:8000`.
 
 ## Load Data
 
-The bootstrap database is empty. With a read-only R2 key (the four
-`OBJECT_STORE_*` variables in `.env`; `make doctor` reports them), fill it with
-the last few days of real data:
+History and live data each have one command:
 
 ```bash
-make catch-up-from-r2 SEED_DAYS=3                     # the plan: days, timetable loads, download size
-make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1   # ingest them and build the aggregates
+make catch-up-from-r2 APPLY=1 ANALYZE=1               # history: closed days from the R2 archive
+make catch-up-from-r2 SEED_DAYS=3 APPLY=1 ANALYZE=1   # the same, for an empty database: its last 3 days
+poetry run python gtfs_pipeline.py ingest_live        # live: a sample of each agency's feed into updates_live
 ```
 
-`AGENCY="1 9"` narrows it to some agencies. An agency the plan marks `REFUSED`
-stops the whole apply, so leave it out with `AGENCY=` or follow its refusal
-first. Without an R2 key, choose one of these:
+**History** comes from the collector's daily archives in R2 (the four
+`OBJECT_STORE_*` variables in `.env`; `make doctor` reports them). The catch-up
+ingests each agency's archived days after its newest row in `updates`, loading
+R2's newer timetables between them so each day joins the timetable in force on
+it, then builds the aggregates. Without `APPLY=1` it prints the plan (days,
+timetable loads, download size) and changes nothing; `scripts/catch_up_from_r2.py`'s
+docstring has its rules. The bootstrap database is empty, so the first run
+needs `SEED_DAYS`. `AGENCY="1 9"` narrows it to some agencies. An agency the plan marks `REFUSED` stops the whole apply, so leave it
+out with `AGENCY=` or follow its refusal first. `make check-aggs` then confirms
+the aggregates reach the newest day.
 
-```bash
-# Fallback: load each agency's timetable, sample the current agency feeds into
-# updates_live, then build every agency's aggregates. A sample reaches agg_*
-# only once its service day closes and the promotion sweep (the cron poke, or
-# an admin ingest run) copies it into updates.
-poetry run python gtfs_pipeline.py refresh-static
-poetry run python gtfs_pipeline.py ingest_live
-make analyze-all
+**Live** data goes to `updates_live`: the collector's pushes in production,
+`ingest_live` locally (load each agency's timetable first with
+`gtfs_pipeline.py refresh-static`). It serves today's screens. Once a day
+closes, promotion (the cron poke, or an admin ingest run) copies it into
+`updates`, and the next analyze aggregates it. That copy holds only the
+polls the collector pushed, so an archive ingest that reads the day's complete
+archive later replaces it (`pipeline/archive_replace.py` defines complete).
+`make check-aggs` lists the days still held from the live copy. The catch-up
+starts after the newest row, so it does not reach back to a promoted day: ingest
+a folder holding both of that day's tarballs with
+`make ingest FOLDER=<dir> AGENCY_ID=<id>`, then `make analyze-all`. For a
+`static_join` agency whose timetable changed since that day, load the timetable
+in force on it first, or its rows join the newer one.
 
-# Or replay the archives the Oracle collector still holds (the days it has not
-# uploaded to R2 yet).
-make fetch-ingest
-```
-
-The archive path pulls GTFS-Realtime and static GTFS archives, then runs ingest,
-static loading, and aggregation. A `static_join` agency needs its timetable
-loaded before it can be ingested (`REQUIRES_STATIC_TIMETABLE` in
-`pipeline/strategies/__init__.py`). The live path is useful for local checks but
-does not provide the same historical coverage. Add a one-off agency with:
+Add a one-off agency with:
 
 ```bash
 poetry run python gtfs_pipeline.py add_agency \
   --name "My Agency" --feed-url "https://example.test/feed.pb"
 ```
 
-### Fill days the dashboard is missing
+### Disaster tools
 
-The admin agencies page's 再集計 and まとめて更新 read the agency's live feed,
-which carries only the present moment, so neither fills a past day. Past days
-come from the collector's daily archives. The collector VM deletes each archive
-once R2 holds it, so `make fetch-ingest` (and its `SINCE`) reaches only the days
-not uploaded yet. `make catch-up-from-r2` catches every agency up from the
-bucket instead: it ingests the days after each agency's newest row and loads
-R2's newer timetables between them, so each day joins the timetable in force on
-it, which a plain `make ingest` over many days does not. It prints its plan and
-changes nothing until `APPLY=1`; `scripts/catch_up_from_r2.py`'s docstring has
-its rules.
+These rewrite rows `updates` already holds, across the whole table. Normal
+operation never needs them. Run one only when stored rows are known to be wrong,
+and follow it with `make analyze-all FULL=1 && make check-aggs`.
 
-```bash
-make catch-up-from-r2              # the plan: days, timetable loads, download size
-make catch-up-from-r2 APPLY=1      # run it; then `make analyze-all`, as it prints
-SINCE=20260917 make fetch-ingest   # or fetch and ingest the days still on the VM from that date on
-make check-aggs                    # confirm the aggregates reach the newest day
-```
+- `scripts/repair_archive_rows.py` brings archive-ingested rows to what archive
+  ingest assigns them today: the `captured_at` read from each file's own feed
+  header, and, for `static_join` agencies, the timetable fields of rows ingested
+  before a timetable was loaded, so load each `static_join` agency's current
+  timetable first. It targets whatever `CLICKHOUSE_*` and `DATABASE_URL` name,
+  and prints both. Without `--apply` it only reads, and reports per agency the
+  rows that would move, the blank rows the timetables would fill, and the disk
+  the rebuild needs. `--apply` copies `updates` into `updates_repair` one
+  partition at a time, verifies the copy, and swaps it in with `EXCHANGE TABLES`;
+  the original rows stay in `updates_repair` until you drop it. Rerun with
+  `--resume`, and the same options, to finish a run that stopped partway.
+  `--extra-static 8=path/to/gtfs_static_20260816.zip` adds an older timetable for
+  retired trips. The script's docstring has the details.
+- `gtfs_pipeline.py restamp_archive` restamps archive-ingested rows with the time
+  archive ingest assigns today. It prints the plan and writes nothing unless
+  `--apply`.
 
-Days already ingested are skipped, and the same run aggregates each newly
-ingested day. After a repair that rewrites rows already stored (below), rebuild
-every date with `make analyze-all FULL=1` instead.
-
-### Repair archive-ingested rows
-
-`scripts/repair_archive_rows.py` brings archive-ingested `updates` rows to what
-archive ingest assigns them today: the `captured_at` read from each file's own
-feed header, and, for `static_join` agencies, the timetable fields of rows
-ingested before a timetable was loaded, so load each `static_join` agency's
-current timetable first. It targets whatever `CLICKHOUSE_*` and
-`DATABASE_URL` name, and prints both. Without `--apply` it only reads, and
-reports per agency the rows that would move (with a histogram of the shift),
-the blank rows the timetables would fill, and the disk the rebuild needs.
-
-```bash
-poetry run python scripts/repair_archive_rows.py                  # report only
-poetry run python scripts/repair_archive_rows.py \
-  --extra-static 8=path/to/gtfs_static_20260816.zip               # an older timetable, for retired trips
-poetry run python scripts/repair_archive_rows.py --apply          # rebuild; asks to confirm
-make analyze-all FULL=1 && make check-aggs                        # then rebuild every date's aggregates
-```
-
-`--apply` copies `updates` into `updates_repair` one partition at a time,
-verifies the copy, and swaps it in with `EXCHANGE TABLES`. The original rows
-stay in `updates_repair` until you drop it. Rerun with `--resume`, and the same
-options, to finish a run that stopped partway. `--agency` limits which rows
-change, not how much is rewritten: the whole table is still copied and swapped.
-The script's docstring has the details.
+`make fetch-ingest` replays the archives the Oracle collector still holds, the
+days it has not uploaded to R2 yet. It needs SSH access to the collector VM.
 
 ## Data Flow
 
@@ -146,7 +124,7 @@ The script's docstring has the details.
 GTFS-RT feeds
     |
     v
-Oracle collector -- daily archives --> Cloudflare R2 (backfill only)
+Oracle collector -- daily archives --> Cloudflare R2 (history)
     |
     | pushed polls
     v
@@ -160,8 +138,8 @@ FastAPI + React SPA  <-------------------------------------------------+
 - Oracle is the production collector. It pushes polls to the API, which keeps
   them in `updates_live`, and it uploads daily archives to R2.
 - A daily cron poke promotes each closed JST day into `updates` (history) and
-  rebuilds aggregates. The R2 archive job backfills only days the live path
-  never promoted.
+  rebuilds aggregates. An archive ingest that reads a day's complete archive
+  later replaces that promoted copy, which holds only the pushed polls.
 - Without collector streaming, `ingest_live` takes one live sample per poke.
 - The API normally reads precomputed `agg_*` tables; narrow time-band queries
   may read ClickHouse directly.
@@ -243,7 +221,7 @@ the [feature guides](docs/features/) for user-facing behavior.
 | `make analyze-all` | Rebuild the changed dates' aggregates for all agencies (`FULL=1`: every date) |
 | `make fetch-ingest` | Fetch Oracle archives and run the full local pipeline (`SINCE=YYYYMMDD` fetches only that day's RT archives and later; per-agency layout only) |
 | `make catch-up-from-r2` | Plan catching every agency up from R2, timetable loads interleaved by day (`APPLY=1` runs it, `ANALYZE=1` analyzes after, `ALLOW_GAPS=1` passes a day R2 lacks and loads a timetable after days with no rows, `SEED_DAYS=3` starts an agency with no rows 3 JST days back, `AGENCY="8 53"` narrows it) |
-| `make check-aggs` | Detect stale aggregate tables |
+| `make check-aggs` | Detect stale aggregate tables; list days still held from the live copy |
 | `make digest` | Generate the daily delay digest (Markdown, ja/en) |
 | `make ingest-weather` | Ingest daily weather observations (kill-switched by `WEATHER_INGEST_ENABLED`) |
 | `make reprobe-rt-coverage` | Re-probe each agency whose RT field-coverage verdict is missing, refuted or about to lapse; probes only in service hours, so schedule it daily in the late morning |
