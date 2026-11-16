@@ -1,6 +1,5 @@
 """Self-service endpoints for logged-in users."""
 
-import json
 from typing import Any
 
 import asyncpg
@@ -8,7 +7,7 @@ import openai
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel
 
 from api.deps import get_conn, get_pooled_conn
 from api.middleware.ratelimit import limiter, tier_limit
@@ -154,112 +153,6 @@ async def revoke_session(
     except SessionPrefixError as exc:
         raise HTTPException(exc.status, exc.detail) from None
     await conn.execute("DELETE FROM sessions WHERE sid_hash=$1 AND user_id=$2", sid_hash, user.user_id)
-    return Response(status_code=204)
-
-
-# Sized against what the filter UI can legitimately build, not against today's
-# data: range_ctx carries a route list, and the picker can select every route an
-# agency has. A large network's full selection would exceed a few kilobytes, so
-# the cap sits well clear of it and only stops payloads no picker could produce.
-_MAX_PRESET_RANGE_CTX_BYTES = 64 * 1024
-
-
-class PresetIn(BaseModel):
-    """Body for creating a saved filter preset."""
-
-    agency_id: int
-    name: str = Field(max_length=120)
-    range_ctx: dict[str, Any]
-
-    @field_validator("range_ctx")
-    @classmethod
-    def _range_ctx_bounded(cls, v: dict[str, Any]) -> dict[str, Any]:
-        size = len(json.dumps(v).encode())
-        if size > _MAX_PRESET_RANGE_CTX_BYTES:
-            raise ValueError(f"range_ctx exceeds {_MAX_PRESET_RANGE_CTX_BYTES} bytes serialized")
-        return v
-
-
-class PresetOut(BaseModel):
-    """Saved filter preset as returned to the caller."""
-
-    preset_id: int
-    agency_id: int
-    name: str
-    range_ctx: dict[str, Any]
-
-
-@router.get("/me/presets", response_model=list[PresetOut])
-async def list_presets(
-    agency_id: int, user: User = Depends(require_user), conn: asyncpg.Connection = Depends(get_conn)
-) -> list[PresetOut]:
-    """List the caller's saved filter presets for ``agency_id``."""
-    rows = await conn.fetch(
-        "SELECT preset_id, agency_id, name, range_ctx::text AS range_ctx_text "
-        "FROM filter_presets WHERE user_id=$1 AND agency_id=$2 ORDER BY created_at DESC",
-        user.user_id,
-        agency_id,
-    )
-    return [
-        PresetOut(
-            preset_id=r["preset_id"],
-            agency_id=r["agency_id"],
-            name=r["name"],
-            range_ctx=json.loads(r["range_ctx_text"]),
-        )
-        for r in rows
-    ]
-
-
-@router.post("/me/presets", response_model=PresetOut, status_code=201)
-async def create_preset(
-    body: PresetIn,
-    request: Request,
-    user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> PresetOut:
-    """Save a filter preset; 409 if the name is already in use."""
-    csrf_guard(request)
-    try:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO filter_presets (user_id, agency_id, name, range_ctx)
-            VALUES ($1, $2, $3, $4::jsonb)
-            RETURNING preset_id, agency_id, name, range_ctx::text AS range_ctx_text
-            """,
-            user.user_id,
-            body.agency_id,
-            body.name,
-            json.dumps(body.range_ctx),
-        )
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(409, "name already used") from None
-    except asyncpg.ForeignKeyViolationError:
-        raise HTTPException(404, "unknown agency") from None
-    return PresetOut(
-        preset_id=row["preset_id"],
-        agency_id=row["agency_id"],
-        name=row["name"],
-        range_ctx=json.loads(row["range_ctx_text"]),
-    )
-
-
-@router.delete("/me/presets/{preset_id}", status_code=204)
-async def delete_preset(
-    preset_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> Response:
-    """Delete one of the caller's filter presets."""
-    csrf_guard(request)
-    result = await conn.execute(
-        "DELETE FROM filter_presets WHERE preset_id=$1 AND user_id=$2",
-        preset_id,
-        user.user_id,
-    )
-    if result.endswith(" 0"):
-        raise HTTPException(404, "preset not found")
     return Response(status_code=204)
 
 
