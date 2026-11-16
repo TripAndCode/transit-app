@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport
 from starlette.requests import Request as StarletteRequest
 
-from api.routers.internal import _MAX_COLLECTOR_PAYLOAD, UnknownAgency, collector_router
+from api.routers.internal import UnknownAgency, collector_router
+from pipeline.collector_push import MAX_POLL_BYTES
 from pipeline.ingest import PayloadDecodeError, StaticTimetableMissing
 
 VALID_HEADERS = {
@@ -73,7 +74,7 @@ async def test_content_length_over_cap_rejected_without_reading_body(client, mon
 
     monkeypatch.setattr(StarletteRequest, "stream", spy_stream)
 
-    oversize = b"x" * (_MAX_COLLECTOR_PAYLOAD + 1)
+    oversize = b"x" * (MAX_POLL_BYTES + 1)
     async with client as ac:
         r = await ac.post(
             "/internal/collector/updates/1",
@@ -87,7 +88,7 @@ async def test_content_length_over_cap_rejected_without_reading_body(client, mon
 async def test_chunked_body_over_cap_rejected(client):
     async def oversize_chunks():
         chunk = b"x" * 1024
-        for _ in range(_MAX_COLLECTOR_PAYLOAD // 1024 + 2):
+        for _ in range(MAX_POLL_BYTES // 1024 + 2):
             yield chunk
 
     async with client as ac:
@@ -135,7 +136,7 @@ async def test_happy_path_calls_ingest_once(client):
     args = mock_ingest.call_args.args
     assert args[0] == 1
     assert args[1] == b"protobuf-bytes"
-    assert args[3] == "oracle/20260919/TripUpdate_120000.pb"
+    assert args[3] == "20260919/TripUpdate_120000.pb"
 
 
 @pytest.mark.parametrize(
@@ -203,7 +204,7 @@ async def _raw_asgi_post(headers: dict[str, str], body_chunks: list[bytes]) -> i
 async def test_non_numeric_content_length_still_bounded_by_the_stream():
     """A Content-Length that isn't a number falls through to the streaming
     cap rather than skipping the check."""
-    oversize = b"x" * (_MAX_COLLECTOR_PAYLOAD + 1)
+    oversize = b"x" * (MAX_POLL_BYTES + 1)
     code = await _raw_asgi_post(
         {**VALID_HEADERS, "content-length": "not-a-number"},
         [oversize],
@@ -215,7 +216,7 @@ async def test_understated_content_length_still_bounded_by_the_stream():
     """A header that understates the body must not license an unbounded read:
     the per-chunk check is what actually holds here."""
     chunk = b"x" * (1024 * 1024)
-    chunks = [chunk] * ((_MAX_COLLECTOR_PAYLOAD // len(chunk)) + 2)
+    chunks = [chunk] * ((MAX_POLL_BYTES // len(chunk)) + 2)
     code = await _raw_asgi_post(
         {**VALID_HEADERS, "content-length": "100"},
         chunks,

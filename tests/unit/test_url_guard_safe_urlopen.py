@@ -8,6 +8,10 @@ hosts so no real DNS/network call happens - the opener itself is mocked,
 matching this suite's existing hermetic style (see test_url_guard.py).
 """
 
+import http.client
+import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -255,3 +259,59 @@ def test_preserves_request_body_across_redirect(monkeypatch):
     with safe_urlopen(req) as resp:
         assert resp.read() == b"ok"
     assert seen_bodies == [b"payload", b"payload"]
+
+
+def _dripping_server(*, chunked: bool):
+    """A local HTTP server that sends its body one byte every 50 ms, each well
+    inside the client's socket timeout."""
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def serve():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            if chunked:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3c\r\n")
+            else:
+                conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 60\r\n\r\n")
+            try:
+                for _ in range(60):
+                    time.sleep(0.05)
+                    conn.sendall(b"x")
+                if chunked:
+                    conn.sendall(b"\r\n0\r\n\r\n")
+            except OSError:
+                pass
+
+    threading.Thread(target=serve, daemon=True).start()
+    return server
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_a_deadline_ends_a_real_fetch_whose_body_drips(chunked):
+    server = _dripping_server(chunked=chunked)
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", server.getsockname()[1], timeout=5)
+        conn.request("GET", "/feed")
+        resp = conn.getresponse()
+        deadline = time.monotonic() + 0.3
+        with pytest.raises(FeedURLError, match="deadline"):
+            url_guard._read_capped(resp, 10 * 1024 * 1024, deadline, "http://127.0.0.1/feed")
+        assert time.monotonic() - deadline < 0.5
+        conn.close()
+    finally:
+        server.close()
+
+
+def test_a_deadline_still_returns_a_body_that_arrives_in_time(monkeypatch):
+    monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _FakeResponse(b"hello" * 30000))
+    with safe_urlopen("http://8.8.8.8/feed", deadline=time.monotonic() + 5) as resp:
+        assert resp.read() == b"hello" * 30000
+
+
+def test_a_deadline_keeps_the_size_cap(monkeypatch):
+    monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _FakeResponse(b"x" * 1000))
+    with pytest.raises(FeedURLError, match="exceeded"):
+        safe_urlopen("http://8.8.8.8/feed", max_bytes=500, deadline=time.monotonic() + 5)
