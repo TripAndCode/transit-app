@@ -237,7 +237,11 @@ and where the floor lies. For an operator, that means:
   dates, in Postgres, in the ClickHouse aggregates or in the feed-quality
   scorecard.
 - A method or builder change rebuilds only the dates from the floor on, so
-  older aggregates keep the method they were built under.
+  older aggregates keep the method they were built under. Each drop records
+  the method in force (`updates_pruned_months.method_version`), and a report
+  or export whose period reaches dates before the floor names that method in
+  its stamp. Its text notes those dates only when their method is not the
+  current one, or was not recorded.
 - Rows that land below the floor later, from a backfill or a restamp, are never
   aggregated.
 - A ClickHouse/Postgres disagreement before the floor is never repaired. A
@@ -308,13 +312,11 @@ next run drops them under a new row. So an empty `dropped_at` means only that
 the run which wrote the row did not confirm the drop; ClickHouse's
 `system.parts` says whether `updates` still holds the month.
 
-Before the prune is switched on in production, each of these must hold:
+Before the prune is switched on in production, this must hold:
 
 - A live read re-reads the floor after its last scan and refuses if the floor
   moved past its start, so no partial answer is returned or cached. Until
   then, the drain wait above bounds it by time.
-- An export spanning the floor records that its figures before the floor keep
-  the method they were built under.
 
 To turn it on in production:
 
