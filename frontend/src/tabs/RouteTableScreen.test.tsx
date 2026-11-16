@@ -8,6 +8,13 @@ import * as snapshots from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
 import type { DefinitionMeta, ReportResponse, RouteReference, RouteReferences } from "../api/types";
 import { RouteTableScreen } from "./RouteTableScreen";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
 vi.mock("../components/PerformanceStandardPanel", () => ({ PerformanceStandardPanel: () => <div>standards-panel</div> }));
@@ -88,6 +95,25 @@ const csvHref = () => screen.getByRole("link", { name: /CSV/ }).getAttribute("hr
 
 describe("RouteTableScreen", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("hides the observation count until statistics are asked for, and remembers the choice", async () => {
+    setup("/agencies/9/routes");
+    const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers()).not.toContain("Samples");
+    const toggle = screen.getByRole("checkbox", { name: "Show statistics" });
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    expect(headers()).toContain("Samples");
+    expect(localStorage.getItem("transit.showStatistics")).toBe("1");
+    // A later visit in this browser reads the stored choice.
+    cleanup();
+    resetShowStatisticsForTests();
+    setup("/agencies/9/routes");
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeChecked();
+    expect(headers()).toContain("Samples");
+    await userEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
+    expect(localStorage.getItem("transit.showStatistics")).toBe("0");
+  });
 
   it("opens on every route sorted by average delay, worst first, fifty at a time", () => {
     const { useReport, options } = setup("/agencies/1/routes");
@@ -220,6 +246,7 @@ describe("RouteTableScreen", () => {
     setup("/agencies/1/routes", tableResponse({ rows: [], rows_total: 0 }));
     expect(screen.getByText("No matching data")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Include routes observed fewer than 100 times" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
   });
 
   it("marks the rows it holds by the sort they arrived in while another sort loads", () => {

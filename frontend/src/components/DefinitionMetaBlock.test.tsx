@@ -4,7 +4,7 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
 import * as hooks from "../api/hooks";
-import type { DefinitionMeta, FeedQuality, SourceMix, TimetableVersion } from "../api/types";
+import type { DefinitionMeta, FeedQuality, PreFloorMethod, SourceMix, TimetableVersion } from "../api/types";
 
 const LEGACY: DefinitionMeta = {
   preset: "legacy_60s",
@@ -426,5 +426,53 @@ describe("DefinitionMetaBlock", () => {
     unmount();
     renderWithProviders(<DefinitionMetaBlock definition={LEGACY} />);
     expect(screen.getByTestId("definition-meta")).toHaveTextContent("算出方法 2026.11.0、集計日 不明。");
+  });
+
+  const FROZEN: PreFloorMethod[] = [
+    { agency_id: 1, from_date: "2025-01-10", to_date: "2025-02-28", method_version: "2026.10.0" },
+    { agency_id: 1, from_date: "2025-03-01", to_date: "2025-03-31", method_version: null },
+  ];
+
+  it("names the method each date before the floor was frozen under, and says when none was recorded", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, pre_floor_methods: FROZEN }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "Figures for dates whose detailed readings are no longer kept stay as analyzed then: " +
+        "Jan 10 – Feb 28, 2025 under method 2026.10.0, Mar 1 – Mar 31, 2025 under a method not recorded.",
+    );
+  });
+
+  it("names the frozen dates' method the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, pre_floor_methods: FROZEN }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "詳細な観測データの保存期間を過ぎた日の数値は集計時の算出方法のまま：" +
+        "2025年1月10日〜2月28日は算出方法 2026.10.0、2025年3月1日〜3月31日は算出方法の記録なし。",
+    );
+  });
+
+  it("says nothing of dates frozen under the current method", () => {
+    const current: PreFloorMethod[] = [
+      { agency_id: 1, from_date: "2025-01-10", to_date: "2025-02-28", method_version: LEGACY.method_version },
+    ];
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, pre_floor_methods: current }} />);
+    expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("no longer kept");
+  });
+
+  it("names the agency on a board's stamp even when only one agency has frozen dates", () => {
+    const board: TimetableVersion[] = [
+      { agency_id: 1, name: null, fetched_on: null, days: 7 },
+      { agency_id: 2, name: null, fetched_on: null, days: 7 },
+    ];
+    renderWithProviders(
+      <DefinitionMetaBlock
+        definition={{ ...LEGACY, timetable_versions: board, pre_floor_methods: FROZEN }}
+        agencyNames={new Map([[1, "Hiroden"], [2, "HiroBus"]])}
+      />,
+    );
+    const items = screen.getAllByRole("listitem").map((item) => item.textContent);
+    expect(items).toContain(
+      "Hiroden — Jan 10 – Feb 28, 2025 under method 2026.10.0, Mar 1 – Mar 31, 2025 under a method not recorded",
+    );
+    expect(items.filter((item) => item?.startsWith("Hiroden — Jan"))).toHaveLength(1);
   });
 });

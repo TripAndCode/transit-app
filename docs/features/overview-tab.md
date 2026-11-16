@@ -31,6 +31,21 @@ What the user sees/does:
 - **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`
   states the shared scope as one sentence (see `analysis-tab.md` ▸ Scope),
   greying the conditions `useOverviewSummary`'s `scope_applied` did not apply.
+- **First-visit tour** — `frontend/src/components/FirstRunTour.tsx`, three
+  steps about meaning rather than controls: what one delay is (on the headline
+  figure), what on time means (on the pointer to on-time % on Routes, worded
+  from the on-time window the Routes link carries, since Pulse itself applies
+  none) and what the screen counts (on the scope sentence). `OverviewTab`
+  mounts it inside the branch that renders the figures, so every anchor
+  (`data-tour="pulse-*"`) exists whenever the tour does. Finishing it, ×, or
+  Escape stores `transit.pulseTourSeen` (`frontend/src/api/tourSeen.ts`);
+  "Later" closes it for that visit only.
+- **Inline definitions** — `frontend/src/components/overview/MetricDefinition.tsx`
+  puts an ⓘ popover (`InsightHint`) beside the average delay, each fact row
+  (beside its button, never inside it) and the Routes to check heading: a one-
+  or two-sentence definition consistent with the user manual, then a link to
+  the manual section (`help.anchor.*`, per locale; `manualAnchors.test.tsx`
+  ties each to a heading id).
 - **Empty state** — `frontend/src/components/EmptyState.tsx` when the agency
   has zero samples, zero concentration routes, and an empty service split for
   the current range (`hasAnyData` in `OverviewTab.tsx`; `movers` and

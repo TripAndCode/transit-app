@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from pipeline import flags, refiled
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.clickhouse import insert_updates
 from pipeline.retention import prune_updates, retention_floor
 from pipeline.static_archive import FILED_DATES
@@ -107,7 +108,7 @@ def _written_off(ch_client, agency_id) -> list[date]:
 
 
 def _prune(pg_conn, ch_client, **kwargs):
-    return prune_updates(pg_conn, ch_client, acquire=lambda: None, **kwargs)
+    return prune_updates(pg_conn, ch_client, acquire=lambda: None, sleep=lambda seconds: None, **kwargs)
 
 
 def test_a_month_past_the_horizon_whose_dates_are_aggregated_is_dropped(pg_conn, ch_client, seeded, monkeypatch):
@@ -124,6 +125,9 @@ def test_a_month_past_the_horizon_whose_dates_are_aggregated_is_dropped(pg_conn,
     assert _runs(pg_conn) == [("retention", "ok", 2)]
     assert _recorded(pg_conn) == [("202301", [seeded], date(2023, 3, 1), 2, True)]
     assert retention_floor(pg_conn, seeded) == date(2023, 3, 1)
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT method_version FROM updates_pruned_months")
+        assert cur.fetchall() == [(METHOD_VERSION,)]
     # Only the dropped month's dates are written off, not the recent one.
     assert _written_off(ch_client, seeded) == [_OLD_DAY]
 

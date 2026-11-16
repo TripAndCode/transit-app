@@ -79,11 +79,13 @@ from pipeline import perf
 from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.clickhouse import is_query_timeout, is_result_overflow
 from pipeline.day_types import DayTypes
+from pipeline.live_filing import RangeNotRetained
 from pipeline.query.pooled_conn import PooledConnection
 from pipeline.reports.filters import _agg_filter, _dedup_cte_ch, _round2, ctx_filing
 from pipeline.reports.rankings import RANKING_MIN_SAMPLES, _round1
 from pipeline.reports.reference import Coverage, reference_coverage, reference_reason, reference_window
 from pipeline.reports.reference import reference_ctx as _reference_ctx
+from pipeline.retention import retention_floor_async
 from pipeline.route_catalog import left_out_unless_named, route_list
 
 _log = logging.getLogger(__name__)
@@ -342,7 +344,9 @@ def _route_sums(grain: _Grain | None, ctx: RangeCtx, value_index: int = _SUM_DEL
     return {code: sums for code, sums in by_route.items() if code is not None}
 
 
-async def _fetch_grain(agency_id: int, ctx: RangeCtx, conn, ch, *, shape: _GrainShape = "full") -> _Grain:
+async def _fetch_grain(
+    agency_id: int, ctx: RangeCtx, conn, ch, *, shape: _GrainShape = "full", baseline: bool = True
+) -> _Grain:
     """Fetch the whole request's deduped ``updates`` in ONE ClickHouse query.
 
     Under a time band it serves only a band the aggregates can't answer
@@ -423,7 +427,7 @@ async def _fetch_grain(agency_id: int, ctx: RangeCtx, conn, ch, *, shape: _Grain
     none reach the grain, since the band filter places no such row in any
     band.
     """
-    lookback = _grain_lookback_days(ctx) if shape == "full" else 0
+    lookback = _grain_lookback_days(ctx) if shape == "full" and baseline else 0
     span_ctx = RangeCtx(
         from_date=ctx.from_date - timedelta(days=lookback),
         to_date=ctx.to_date,
@@ -808,6 +812,14 @@ async def _route_weekly_history(
     # oldest-first append order into `out[code]`.
     if ch is None:
         raise RuntimeError("_route_weekly_history's live fallback requires a ClickHouse client")
+    # Weeks before the agency's retention floor stay empty: the payload's own
+    # period is retained, and a week half before the floor would average part
+    # of itself.
+    floor = await retention_floor_async(conn, agency_id)
+    if floor is not None and span_from < floor:
+        span_from += timedelta(days=7 * -(-(floor - span_from).days // 7))
+        if span_from > ctx.to_date:
+            return {code: [None] * weeks_back for code in route_codes}
     span_ctx = RangeCtx(
         from_date=span_from,
         to_date=ctx.to_date,
@@ -1629,9 +1641,13 @@ async def compute_overview_summary(
 
     async def _period_hours() -> _Grain | None:
         """The period's hour set from ClickHouse, or None once a failure has
-        degraded the three hour profiles: no other figure reads it."""
+        degraded the three hour profiles: no other figure reads it. A period
+        before the retention floor is refused, as every live read refuses it,
+        rather than shown without its hour profiles."""
         try:
             return await _fetch_grain(agency_id, ctx, grain_conn, ch, shape="period_hours")
+        except RangeNotRetained:
+            raise
         except Exception as exc:
             _log.warning(
                 "ClickHouse grain fetch failed for agency %s — degrading the peak-hour profiles to null",
@@ -1661,7 +1677,16 @@ async def compute_overview_summary(
         async with perf.timed_block("overview.grain"):
             if ctx.time_band != "all":
                 try:
-                    grain = await _fetch_grain(agency_id, ctx, grain_conn, ch)
+                    try:
+                        grain = await _fetch_grain(agency_id, ctx, grain_conn, ch)
+                    except RangeNotRetained as refused:
+                        # Only the reach back for the baseline crosses the floor:
+                        # the period is served without its baseline. A period that
+                        # itself starts before the floor stays refused.
+                        if ctx.from_date < refused.floor:
+                            raise
+                        baseline_unavailable = True
+                        grain = await _fetch_grain(agency_id, ctx, grain_conn, ch, baseline=False)
                 except Exception as exc:
                     if not (is_result_overflow(exc) or is_query_timeout(exc)):
                         raise

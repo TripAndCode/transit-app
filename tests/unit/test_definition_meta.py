@@ -11,7 +11,7 @@ import asyncpg
 import pytest
 from pydantic import ValidationError
 
-from pipeline import static_archive
+from pipeline import retention, static_archive
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import (
@@ -27,6 +27,7 @@ from pipeline.reports.definition import (
     VALUE_BASIS,
     DefinitionMeta,
     FeedQuality,
+    PreFloorMethod,
     SourceMix,
     TimetableVersion,
     format_definition_csv_line,
@@ -821,7 +822,7 @@ async def test_a_database_without_the_source_counts_stamps_everything_else(monke
     monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
     schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 1), [(1, date(2026, 5, 1), "gtfs_static_20260401")])
     meta = await definition.stamp_build(_BehindConn(error), resolve_definition_meta("on_time", None, None), 1, schedule)
-    assert (meta.source_mix, meta.built_at) == (None, _BUILT_AT)
+    assert (meta.source_mix, meta.built_at, meta.pre_floor_methods) == (None, _BUILT_AT, None)
     assert meta.timetable_versions == [
         TimetableVersion(agency_id=1, name="gtfs_static_20260401", fetched_on=date(2026, 4, 1), days=1)
     ]
@@ -1038,3 +1039,221 @@ def test_a_build_evicts_only_the_agencies_whose_builds_moved(monkeypatch):
     definition._note_builds({1: (2, 11.0), 3: (1, 5.0)})
     assert evicted[-1] == {2, 3}
     assert len(cleared) == 1
+
+
+# The method each date before a retention floor was frozen under.
+
+_OLD_METHOD = "2026.11.0"
+
+
+def _frozen(*spans) -> DefinitionMeta:
+    return _DATED.model_copy(
+        update={
+            "pre_floor_methods": [
+                PreFloorMethod(agency_id=agency, from_date=first, to_date=last, method_version=method)
+                for agency, first, last, method in spans
+            ]
+        }
+    )
+
+
+def test_the_period_before_the_floor_is_clipped_and_joined_where_one_method_froze_it():
+    drops = [(date(2025, 2, 1), _OLD_METHOD), (date(2025, 3, 1), _OLD_METHOD), (date(2025, 4, 1), None)]
+    spans = definition._pre_floor_spans(1, drops, date(2025, 1, 10), date(2025, 6, 30))
+    assert spans == [
+        PreFloorMethod(agency_id=1, from_date=date(2025, 1, 10), to_date=date(2025, 2, 28), method_version=_OLD_METHOD),
+        PreFloorMethod(agency_id=1, from_date=date(2025, 3, 1), to_date=date(2025, 3, 31), method_version=None),
+    ]
+
+
+def test_a_period_wholly_before_the_floor_is_frozen_throughout():
+    spans = definition._pre_floor_spans(1, [(date(2025, 4, 1), _OLD_METHOD)], date(2025, 1, 1), date(2025, 1, 31))
+    assert spans == [
+        PreFloorMethod(agency_id=1, from_date=date(2025, 1, 1), to_date=date(2025, 1, 31), method_version=_OLD_METHOD)
+    ]
+
+
+def test_a_period_from_the_floor_on_has_no_frozen_dates():
+    assert definition._pre_floor_spans(1, [(date(2025, 4, 1), _OLD_METHOD)], date(2025, 4, 1), date(2025, 4, 30)) == []
+
+
+@pytest.mark.parametrize(
+    ("locale", "line"),
+    [
+        (
+            "ja",
+            "詳細な観測データの保存期間を過ぎた日の数値は集計時の算出方法のまま: "
+            "2025-01-10〜2025-02-28は算出方法 2026.11.0、2025-03-01〜2025-03-31は算出方法の記録なし",
+        ),
+        (
+            "en",
+            "Figures for dates whose detailed readings are no longer kept stay as analyzed then: "
+            "2025-01-10 to 2025-02-28 under method 2026.11.0, 2025-03-01 to 2025-03-31 under a method not recorded",
+        ),
+    ],
+)
+def test_the_stamp_ends_with_the_method_each_date_before_the_floor_was_frozen_under(locale, line):
+    meta = _frozen(
+        (1, date(2025, 1, 10), date(2025, 2, 28), _OLD_METHOD), (1, date(2025, 3, 1), date(2025, 3, 31), None)
+    )
+    assert format_stamp_lines(meta, locale)[-1] == line
+    assert format_definition_footnotes(meta, locale)[-1] == line
+
+
+def test_csv_line_ends_with_the_method_each_date_before_the_floor_was_frozen_under_in_one_cell():
+    meta = _frozen(
+        (1, date(2025, 1, 10), date(2025, 2, 28), _OLD_METHOD), (1, date(2025, 3, 1), date(2025, 3, 31), None)
+    )
+    line = format_definition_csv_line(meta)
+    assert line.endswith(
+        "; 保存期間を過ぎた日の算出方法=2025-01-10〜2025-02-28は算出方法 2026.11.0、"
+        "2025-03-01〜2025-03-31は算出方法の記録なし"
+    )
+    assert "," not in line
+
+
+def test_dates_frozen_under_the_current_method_add_no_note():
+    meta = _frozen((1, date(2025, 1, 10), date(2025, 2, 28), METHOD_VERSION))
+    assert format_stamp_lines(meta, "en") == format_stamp_lines(_DATED, "en")
+    assert format_definition_csv_line(meta) == format_definition_csv_line(_DATED)
+
+
+def test_only_the_dates_frozen_under_another_method_are_noted():
+    meta = _frozen(
+        (1, date(2025, 1, 1), date(2025, 1, 31), _OLD_METHOD), (1, date(2025, 2, 1), date(2025, 2, 28), METHOD_VERSION)
+    )
+    assert format_stamp_lines(meta, "en")[-1].endswith(": 2025-01-01 to 2025-01-31 under method 2026.11.0")
+
+
+def test_several_agencies_frozen_dates_are_each_named_by_their_agency():
+    meta = _frozen(
+        (1, date(2025, 1, 1), date(2025, 1, 31), _OLD_METHOD), (2, date(2025, 1, 1), date(2025, 2, 28), None)
+    )
+    assert format_stamp_lines(meta, "en")[-1].endswith(
+        ": agency 1: 2025-01-01 to 2025-01-31 under method 2026.11.0; "
+        "agency 2: 2025-01-01 to 2025-02-28 under a method not recorded"
+    )
+
+
+class _FrozenConn:
+    """A database whose drops froze agency 1's dates before 2025-03-01 under
+    the old method; every other enrichment reads empty."""
+
+    def __init__(self):
+        self.frozen_reads: list[tuple] = []
+
+    def is_in_transaction(self):
+        return False
+
+    async def fetch(self, sql, *args):
+        if sql == definition._BUILDS_SQL:
+            return [(1, 1, 0.0, _BUILT_AT, True)]
+        if sql == retention.FROZEN_METHODS_SQL:
+            self.frozen_reads.append(args)
+            return [(1, date(2025, 3, 1), _OLD_METHOD)]
+        return []
+
+
+@pytest.mark.asyncio
+async def test_an_aggregate_stamp_names_the_method_its_dates_before_the_floor_were_frozen_under(monkeypatch):
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    conn = _FrozenConn()
+    schedule = ScheduleDays(date(2025, 2, 20), date(2025, 3, 10), [])
+    meta = await definition.stamp_build(
+        conn, resolve_definition_meta("on_time", None, None), 1, schedule, read_feed_quality=False
+    )
+    assert conn.frozen_reads == [(1,)]
+    assert meta.pre_floor_methods == [
+        PreFloorMethod(agency_id=1, from_date=date(2025, 2, 20), to_date=date(2025, 2, 28), method_version=_OLD_METHOD)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_live_stamp_reads_no_frozen_method(monkeypatch):
+    conn = _FrozenConn()
+    schedule = ScheduleDays(date(2025, 2, 20), date(2025, 3, 10), [])
+    meta = await definition.stamp_build(
+        conn, resolve_definition_meta("on_time", None, None, live=True), 1, schedule, read_feed_quality=False
+    )
+    assert (conn.frozen_reads, meta.pre_floor_methods) == ([], None)
+
+
+def test_a_board_stamp_names_its_agency_once_even_when_one_agency_alone_has_frozen_dates():
+    meta = _frozen(
+        (1, date(2025, 1, 1), date(2025, 1, 31), _OLD_METHOD), (1, date(2025, 2, 1), date(2025, 2, 28), None)
+    ).model_copy(
+        update={
+            "timetable_versions": [
+                TimetableVersion(agency_id=1, name=None, fetched_on=None, days=59),
+                TimetableVersion(agency_id=2, name=None, fetched_on=None, days=59),
+            ]
+        }
+    )
+    assert format_stamp_lines(meta, "en")[-1].endswith(
+        ": agency 1: 2025-01-01 to 2025-01-31 under method 2026.11.0, "
+        "2025-02-01 to 2025-02-28 under a method not recorded"
+    )
+    assert format_definition_csv_line(meta).endswith(
+        "; 保存期間を過ぎた日の算出方法=事業者1：2025-01-01〜2025-01-31は算出方法 2026.11.0、"
+        "2025-02-01〜2025-02-28は算出方法の記録なし"
+    )
+
+
+def test_the_frozen_dates_and_the_feed_quality_name_several_agencies_alike():
+    quality = _frozen(
+        (1, date(2025, 1, 1), date(2025, 1, 31), _OLD_METHOD), (2, date(2025, 1, 1), date(2025, 1, 31), None)
+    )
+    lines = format_stamp_lines(quality, "ja")
+    assert lines[-1].endswith(
+        "事業者1：2025-01-01〜2025-01-31は算出方法 2026.11.0／事業者2：2025-01-01〜2025-01-31は算出方法の記録なし"
+    )
+
+
+class _NoMethodColumnConn(_FrozenConn):
+    """A database migrated to record drops but not their method: only the
+    frozen-method read fails."""
+
+    async def fetch(self, sql, *args):
+        if sql == retention.FROZEN_METHODS_SQL:
+            raise asyncpg.exceptions.UndefinedColumnError("column p.method_version does not exist")
+        return await super().fetch(sql, *args)
+
+
+@pytest.mark.asyncio
+async def test_a_database_without_the_method_column_stamps_everything_else(monkeypatch):
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    schedule = ScheduleDays(date(2025, 2, 20), date(2025, 2, 20), [(1, date(2025, 2, 20), "gtfs_static_20250101")])
+    meta = await definition.stamp_build(
+        _NoMethodColumnConn(), resolve_definition_meta("on_time", None, None), 1, schedule, read_feed_quality=False
+    )
+    assert (meta.pre_floor_methods, meta.built_at) == (None, _BUILT_AT)
+    assert meta.timetable_versions == [
+        TimetableVersion(agency_id=1, name="gtfs_static_20250101", fetched_on=date(2025, 1, 1), days=1)
+    ]
+
+
+class _BoardConn:
+    """The frozen-method rows of a board scope, as FROZEN_METHODS_SQL orders them."""
+
+    def is_in_transaction(self):
+        return False
+
+    async def fetch(self, sql, *args):
+        assert (sql, args) == (retention.FROZEN_METHODS_SQL, (None,))
+        return [
+            (1, date(2025, 2, 1), _OLD_METHOD),
+            (1, date(2025, 4, 1), "2026.11.15"),
+            (2, date(2025, 2, 1), None),
+        ]
+
+
+@pytest.mark.asyncio
+async def test_the_board_reads_each_agencys_frozen_spans_apart():
+    spans = await definition._read_pre_floor(_BoardConn(), None, date(2025, 1, 1), date(2025, 6, 30))
+    assert spans == [
+        PreFloorMethod(agency_id=1, from_date=date(2025, 1, 1), to_date=date(2025, 1, 31), method_version=_OLD_METHOD),
+        PreFloorMethod(agency_id=1, from_date=date(2025, 2, 1), to_date=date(2025, 3, 31), method_version="2026.11.15"),
+        PreFloorMethod(agency_id=2, from_date=date(2025, 1, 1), to_date=date(2025, 1, 31), method_version=None),
+    ]

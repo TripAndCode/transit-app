@@ -26,6 +26,8 @@ import { HeatSurface } from "../components/charts/HeatSurface";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
+import { hasStatisticsColumns } from "../components/reportTableSchemas";
+import { FEW_DATA_MIN_SAMPLES } from "../components/fewData";
 import { FILTER_SEPARATOR, formatDate, formatDateRange } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
@@ -44,6 +46,8 @@ import { certificateDayScope } from "../components/analysis/certificateDayScope"
 import { pickReport } from "../routes/destinations";
 import { LeftOutToggle, RowsShown } from "../components/analysis/RankingCoverage";
 import { CsvLink } from "../components/analysis/CsvLink";
+import { StatisticsToggle } from "../components/analysis/StatisticsToggle";
+import { useShowStatistics } from "../api/statisticsPref";
 import { ExportMenu } from "../components/ExportMenu";
 import type { SnapshotSpec } from "../api/snapshots";
 
@@ -93,6 +97,7 @@ export function AnalysisTab({
   const tier = useCapabilityTier(id);
   const routeNames = useRouteNames(id);
   const [ctx, update] = useScope();
+  const [showStatistics] = useShowStatistics();
   const jumpToLatestData = useJumpToLatestDataRange(id);
   function selectReport(type: string) {
     setSearchParams((prev) => {
@@ -253,7 +258,7 @@ export function AnalysisTab({
             {detail.data.report_type === "trend" ? (
               <TrendBlock data={detail.data.rows} ctx={ctx} />
             ) : detail.data.report_type === "dwell_run" ? (
-              id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} />
+              id != null && <WhyAnalyses aid={id} payload={detail.data.rows[0]} showStatistics={showStatistics} />
             ) : detail.data.report_type === "council_summary" && detail.data.rows.length > 0 ? (
               // Figures held over from another scope while this one loads
               // are not what the screen's query names, so their print
@@ -272,7 +277,17 @@ export function AnalysisTab({
                 )}
               </>
             ) : detail.data.rows.length > 0 ? (
-              <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} />
+              <>
+                {hasStatisticsColumns(detail.data.report_type) && <StatisticsToggle />}
+                {/* The day-type reports name no floor of their own; the ranking
+                    floor marks a thin route's average while its count is hidden. */}
+                <ReportTable
+                  reportType={detail.data.report_type}
+                  rows={detail.data.rows}
+                  minSamples={detail.data.reliable_min_samples ?? FEW_DATA_MIN_SAMPLES}
+                  showStatistics={showStatistics}
+                />
+              </>
             ) : (
               <EmptyState
                 title={t("reports.no_data.title")}
@@ -333,6 +348,7 @@ export function AnalysisTab({
  *  folded. */
 function CertificateSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
+  const [showStatistics] = useShowStatistics();
   const latestDay = defaultPeriod(use(DataEndContext)).to;
   const [pickedDate, setPickedDate] = useState<string | null>(null);
   const date = pickedDate ?? latestDay;
@@ -372,7 +388,7 @@ function CertificateSection({ aid }: { aid: number }) {
               </p>
             ))}
             <CsvLink href={apiUrl(`/api/${aid}/reports/delay_certificate?${reportQueryString(day)}&format=csv`)} />
-            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} />}
+            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} showStatistics={showStatistics} />}
           </>
         )}
       </details>

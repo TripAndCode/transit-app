@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -39,7 +39,16 @@ function SearchProbe() {
   return <span data-testid="search">{params.toString()}</span>;
 }
 
-function renderOverview(data: OverviewSummary, path = "/agencies/8/overview?from=2030-01-01&to=2030-01-07") {
+/** Unless a test asks for a first visit ("fresh") or for whatever an
+ *  earlier render stored ("stored"), Pulse's tour has already been seen, so
+ *  its dialog stays out of the tests about the screen itself. */
+function renderOverview(
+  data: OverviewSummary,
+  path = "/agencies/8/overview?from=2030-01-01&to=2030-01-07",
+  { tour = "seen" }: { tour?: "seen" | "fresh" | "stored" } = {},
+) {
+  if (tour === "fresh") localStorage.removeItem("transit.pulseTourSeen");
+  else if (tour === "seen") localStorage.setItem("transit.pulseTourSeen", "1");
   vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data, isPending: false, error: null, refetch: vi.fn() } as never);
   vi.spyOn(hooks, "usePeakHourBreakdown").mockReturnValue({ data: null, isLoading: false } as never);
   // The jump-to-latest-data recovery reads the agency's latest_data_date.
@@ -47,13 +56,16 @@ function renderOverview(data: OverviewSummary, path = "/agencies/8/overview?from
     data: [{ agency_id: 8, agency_name: "A", feed_url: "", static_url: null, latest_data_date: "2026-05-01" }],
     isPending: false,
   } as never);
-  renderWithProviders(
+  // A fresh element each time: React skips re-rendering an identical one.
+  const tree = () => (
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/agencies/:agencyId/overview" element={<><OverviewTab /><SearchProbe /></>} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const { rerender } = renderWithProviders(tree());
+  return { rerender: () => rerender(tree()) };
 }
 
 describe("OverviewTab", () => {
@@ -282,6 +294,68 @@ describe("OverviewTab", () => {
     renderOverview(summary(), "/agencies/8/overview?from=2030-01-01&to=2030-01-07");
     expect(screen.queryByRole("button", { name: "Clear the route filter" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reset service type to all" })).not.toBeInTheDocument();
+  });
+});
+
+describe("OverviewTab's first-visit tour", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const withData = () =>
+    summary({
+      headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
+      service_split: [{ day_type: "weekday", avg_min: 3.2, days: 5, samples: 50, insufficient: false }],
+    });
+
+  it("opens on a first visit, anchored on the headline figure", async () => {
+    renderOverview(withData(), undefined, { tour: "fresh" });
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("What a delay is here")).toBeInTheDocument();
+    expect(document.querySelector('[data-tour="pulse-delay"]')).not.toBeNull();
+    expect(document.querySelector('[data-tour="pulse-on-time"]')).not.toBeNull();
+    expect(document.querySelector('[data-tour="pulse-scope"]')).not.toBeNull();
+  });
+
+  it("does not come back once dismissed", async () => {
+    renderOverview(withData(), undefined, { tour: "fresh" });
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss this tour" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Unmounted and opened again, as a later visit to Pulse would.
+    cleanup();
+    renderOverview(withData(), undefined, { tour: "stored" });
+    expect(screen.getByText("3.2")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays put off for the visit after \"Later\", through a refetch that replaces the figures", async () => {
+    const { rerender } = renderOverview(withData(), undefined, { tour: "fresh" });
+    await userEvent.click(await screen.findByRole("button", { name: "Later" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: undefined, isPending: true, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(document.querySelector('[data-tour="pulse-delay"]')).toBeNull();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: withData(), isPending: false, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(document.querySelector('[data-tour="pulse-delay"]')).not.toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("keeps its step through the refetch that step 3's scope change starts", async () => {
+    const { rerender } = renderOverview(withData(), undefined, { tour: "fresh" });
+    await userEvent.click(await screen.findByRole("button", { name: "Next" }));
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Step 3 of 3")).toBeInTheDocument();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: undefined, isPending: true, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: withData(), isPending: false, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(await screen.findByText("Step 3 of 3")).toBeInTheDocument();
+    expect(screen.getByText("What this screen covers")).toBeInTheDocument();
+  });
+
+  it("waits for figures: an empty period shows no tour", () => {
+    renderOverview(summary(), undefined, { tour: "fresh" });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

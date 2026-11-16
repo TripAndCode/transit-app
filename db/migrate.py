@@ -7,8 +7,10 @@ Driven by `gtfs_pipeline.py migrate up|down`.
 
 import functools
 import logging
+import os
 import pathlib
 import re
+from collections.abc import Collection, Iterable, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +22,23 @@ _MIGRATIONS_DIR = pathlib.Path(__file__).parent / "migrations"
 _DESTRUCTIVE_MARKER = "-- DESTRUCTIVE"
 
 
+#: Versions whose data-losing up migration may apply on a database with a
+#: retention floor, comma-separated, beside `migrate up --allow-destructive-up`:
+#: a deploy's pre-deploy command is fixed, so its environment names them.
+ALLOW_DESTRUCTIVE_UP_ENV = "MIGRATE_ALLOW_DESTRUCTIVE_UP"
+
+
 class DestructiveMigrationError(RuntimeError):
-    """Raised when a `-- DESTRUCTIVE`-marked down migration runs without
-    force_destructive=True."""
+    """Raised when a migration that loses data runs without being named: a
+    down marked `-- DESTRUCTIVE`, or on a database with a retention floor any
+    down or pending up that `data_losing_tables` flags."""
+
+
+def allowed_destructive_ups(named: Iterable[str], environ: Mapping[str, str] = os.environ) -> frozenset[str]:
+    """The versions named with --allow-destructive-up and in
+    ALLOW_DESTRUCTIVE_UP_ENV."""
+    from_env = (v.strip() for v in environ.get(ALLOW_DESTRUCTIVE_UP_ENV, "").split(","))
+    return frozenset(v for v in (*named, *from_env) if v)
 
 
 def is_destructive_down(sql: str) -> bool:
@@ -38,13 +54,11 @@ def is_destructive_down(sql: str) -> bool:
 
 @functools.cache
 def rebuildable_agg_tables() -> frozenset[str]:
-    """Aggregates a later analyze run rebuilds in full from source data: its
-    rebuild set and its agg_meta bookkeeping, plus agg_route_dow and
-    agg_stop_seq, which analyze built until they were retired. Any other
-    `agg_*` table, such as one analyze only upserts or one an ingest fills,
-    holds rows no rebuild restores. In full only while no agency has a
-    retention floor (pipeline.retention.retention_floor): analyze never
-    rebuilds a date before one, so the rows there are restored by nothing.
+    """Aggregates a later analyze run rebuilds from source data: its rebuild
+    set and its agg_meta bookkeeping, plus agg_route_dow and agg_stop_seq,
+    which analyze built until they were retired. Any other `agg_*` table, such
+    as one analyze only upserts or one an ingest fills, holds rows no rebuild
+    restores. :func:`data_losing_tables` says when these lose data too.
 
     Imported lazily: the API's health poll imports this module, and must not
     pull in analyze with it.
@@ -52,6 +66,22 @@ def rebuildable_agg_tables() -> frozenset[str]:
     from pipeline.analyze import _AGG_TABLES_ORDERED
 
     return frozenset(_AGG_TABLES_ORDERED) | {"agg_meta", "agg_route_dow", "agg_stop_seq"}
+
+
+def retention_floor_exists(conn) -> bool:
+    """Whether any agency has a retention floor: the `updates` prune has
+    recorded a drop (pipeline.retention.retention_floor). A database without
+    the table that records drops has had none. Read-only."""
+    from pipeline.retention import PRUNED_TABLE
+
+    with conn.cursor() as cur:
+        # A separate statement: Postgres resolves a missing relation while
+        # parsing, so it cannot be guarded inside the query that reads it.
+        cur.execute("SELECT to_regclass(%s)", (PRUNED_TABLE,))
+        if cur.fetchone()[0] is None:
+            return False
+        cur.execute(f"SELECT EXISTS (SELECT 1 FROM {PRUNED_TABLE})")
+        return bool(cur.fetchone()[0])
 
 
 _SPECIAL = re.compile(r"""--|/\*|['";$]""")
@@ -133,15 +163,28 @@ def _top_level_statements(sql: str) -> list[str]:
 _NAME = r'(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_$]*)'
 _TABLE = rf"{_NAME}(?:\s*\.\s*{_NAME})?"
 _TABLES = rf"{_TABLE}(?:\s*,\s*{_TABLE})*"
-# In ALTER TABLE, a DROP followed by none of these drops a column, with or
-# without the COLUMN keyword.
+# An ALTER TABLE subcommand: the first after the table name, or one after a
+# comma. A keyword inside a subcommand (ALTER COLUMN c DROP DEFAULT, ALTER
+# COLUMN c ADD GENERATED ...) starts none. The skipped subcommands are
+# possessive, so each comma and the whitespace around it splits the text one
+# way only: a statement that matches nowhere is given up in time linear in its
+# subcommands, not exponential.
+_ALTER_SUBCOMMAND = rf"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s++(?:[^,]*+,\s*+)*?"
+# A DROP subcommand followed by none of these drops a column, with or without
+# the COLUMN keyword.
 _KEPT_ON_ALTER_DROP = r"(?:CONSTRAINT|DEFAULT|NOT|EXPRESSION|IDENTITY)\b"
 _DATA_LOSS = re.compile(
     rf"^\s*(?:DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?P<drop>{_TABLES})"
     rf"|DELETE\s+FROM\s+(?:ONLY\s+)?(?P<delete>{_TABLE})"
     rf"|TRUNCATE\s+(?:TABLE\s+)?(?:ONLY\s+)?(?P<truncate>{_TABLES})"
-    rf"|ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?(?P<alter>{_TABLE})\s.*?\bDROP\s+(?!{_KEPT_ON_ALTER_DROP}))",
-    re.IGNORECASE | re.DOTALL,
+    rf"|{_ALTER_SUBCOMMAND}DROP\b(?!\s*{_KEPT_ON_ALTER_DROP}))",
+    re.IGNORECASE,
+)
+# An ADD subcommand followed by none of these adds a column.
+_KEPT_ON_ALTER_ADD = r"(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|EXCLUDE)\b"
+_ADDS_COLUMN = re.compile(rf"^\s*{_ALTER_SUBCOMMAND}ADD\b(?!\s*{_KEPT_ON_ALTER_ADD})", re.IGNORECASE)
+_CREATES_TABLE = re.compile(
+    rf"^\s*CREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<create>{_TABLE})", re.IGNORECASE
 )
 
 
@@ -152,22 +195,32 @@ def _table_names(group: str) -> list[str]:
     return [re.findall(_NAME, name)[-1].strip('"') for name in names]
 
 
-def data_losing_tables(sql: str) -> list[str]:
-    """Tables outside `rebuildable_agg_tables()` that a top-level statement in
-    *sql* drops, drops a column from, or deletes or truncates rows of.
+def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
+    """Tables that a top-level statement in *sql* loses data from: it drops
+    them, drops a column from them, or deletes or truncates their rows.
 
     A down migration it flags must carry the `-- DESTRUCTIVE` marker
     (tests/unit/test_migration_destructive_markers.py), and a pending up
     migration it flags stops scripts/dev_upgrade.py until the owner names it.
-    The rebuildable aggregates are exempt in both directions: their rows derive
-    from source data, and an analyze rebuild restores them, as long as no
-    agency has a retention floor, below which nothing restores them. A plain
-    analyze-all rebuilds an incremental aggregate only for the dates its
-    ledger or its table fingerprint marks, so a migration that deletes such
-    rows also bumps that table's registry version, or the rebuild needs FULL=1.
+
+    The rebuildable aggregates (`rebuildable_agg_tables`) are exempt while no
+    agency has a retention floor, since an analyze rebuild then restores every
+    row of theirs. With *retention_floor* (`retention_floor_exists`), analyze
+    never rebuilds a date before the floor, so from the first `updates` drop
+    on their rows there are restored by nothing: they count like any other
+    table, and so does a column added to one, or one created anew, since
+    analyze fills it only from the floor on. The down markers are judged
+    without a floor, as a migration file is written once for every database.
+
+    A plain analyze-all rebuilds an incremental aggregate only for the dates
+    its ledger or its table fingerprint marks, so a migration that deletes
+    such rows also bumps that table's registry version, or the rebuild needs
+    FULL=1.
 
     Scope: DROP TABLE, DELETE FROM, TRUNCATE, and ALTER TABLE ... DROP [COLUMN]
-    statements, read past comments, string literals and dollar-quoted bodies.
+    statements, read past comments, string literals and dollar-quoted bodies,
+    and with a floor ALTER TABLE ... ADD [COLUMN] on, or CREATE TABLE of, a
+    rebuildable aggregate.
     An UPDATE is not counted: a backfill in a reviewed migration rewrites
     values on purpose. Not detected: statements inside a DO block or a function
     body, a data-modifying WITH ... DELETE, MERGE ... DELETE, a narrowing ALTER
@@ -179,11 +232,12 @@ def data_losing_tables(sql: str) -> list[str]:
     rebuildable = rebuildable_agg_tables()
     tables: list[str] = []
     for statement in _top_level_statements(sql):
-        m = _DATA_LOSS.match(statement)
-        if not m:
-            continue
-        group = m.group("drop") or m.group("delete") or m.group("truncate") or m.group("alter")
-        tables.extend(name for name in _table_names(group) if name.lower() not in rebuildable)
+        if m := _DATA_LOSS.match(statement):
+            group = m.group("drop") or m.group("delete") or m.group("truncate") or m.group("alter")
+            tables.extend(name for name in _table_names(group) if retention_floor or name.lower() not in rebuildable)
+        elif retention_floor and (m := _ADDS_COLUMN.match(statement) or _CREATES_TABLE.match(statement)):
+            group = m.groupdict().get("alter") or m.group("create")
+            tables.extend(name for name in _table_names(group) if name.lower() in rebuildable)
     return tables
 
 
@@ -258,12 +312,26 @@ def pending_migrations(conn) -> list[str]:
     return [v for v in on_disk if v not in applied]
 
 
-def _run_up(version: str, conn) -> None:
-    """Apply one up-migration and record its version, atomically."""
+def _up_migration_path(version: str) -> pathlib.Path:
     matches = sorted(_MIGRATIONS_DIR.glob(f"{version}_*.up.sql"))
     if not matches:
         raise FileNotFoundError(f"No up migration file for version {version}")
-    sql = matches[0].read_text()
+    return matches[0]
+
+
+def _losing_on_a_floor(paths: Iterable[pathlib.Path], conn) -> dict[str, list[str]]:
+    """Each of *paths* that loses data on *conn*'s database once it has a
+    retention floor, with the tables it loses it from; nothing without one,
+    which is read first, so a database without a floor classifies nothing."""
+    if not retention_floor_exists(conn):
+        return {}
+    return {p.name: t for p in paths if (t := data_losing_tables(p.read_text(), retention_floor=True))}
+
+
+def _run_up(version: str, conn) -> None:
+    """Apply one up-migration and record its version, atomically."""
+    path = _up_migration_path(version)
+    sql = path.read_text()
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
@@ -272,7 +340,7 @@ def _run_up(version: str, conn) -> None:
     except Exception:
         conn.rollback()
         raise
-    logger.info(f"  Applied: {matches[0].name}")
+    logger.info(f"  Applied: {path.name}")
 
 
 def _down_migration_path(version: str) -> pathlib.Path:
@@ -288,9 +356,12 @@ def _down_migration_path(version: str) -> pathlib.Path:
     return matches[0]
 
 
-def _destructive_versions(versions: list[str]) -> list[str]:
-    """Which of *versions* have a down migration marked `-- DESTRUCTIVE`."""
-    return [v for v in versions if is_destructive_down(_down_migration_path(v).read_text())]
+def _destructive_versions(versions: list[str], conn) -> list[str]:
+    """Which of *versions* have a down migration marked `-- DESTRUCTIVE`, or,
+    on a database with a retention floor, one that loses data there."""
+    paths = {v: _down_migration_path(v) for v in versions}
+    on_floor = _losing_on_a_floor(paths.values(), conn)
+    return [v for v, p in paths.items() if is_destructive_down(p.read_text()) or p.name in on_floor]
 
 
 def _run_down(version: str, conn, *, force_destructive: bool) -> None:
@@ -299,10 +370,10 @@ def _run_down(version: str, conn, *, force_destructive: bool) -> None:
     sql = path.read_text()
     # Also checked ahead of the loop in `migrate_down`; kept here so the
     # invariant survives a direct call to this function.
-    if is_destructive_down(sql) and not force_destructive:
+    if not force_destructive and _destructive_versions([version], conn):
         raise DestructiveMigrationError(
-            f"{path.name} is marked `-- DESTRUCTIVE` and will not run without "
-            "force_destructive=True (CLI: `migrate down --force-destructive`)."
+            f"{path.name} is marked `-- DESTRUCTIVE`, or loses data below this database's retention floor, "
+            "and will not run without force_destructive=True (CLI: `migrate down --force-destructive`)."
         )
     try:
         with conn.cursor() as cur:
@@ -315,8 +386,16 @@ def _run_down(version: str, conn, *, force_destructive: bool) -> None:
     logger.info(f"  Rolled back: {path.name}")
 
 
-def migrate_up(conn) -> None:
-    """Apply every migration on disk that is not yet in schema_migrations."""
+def migrate_up(conn, *, allow_destructive: Collection[str] = ()) -> None:
+    """Apply every migration on disk that is not yet in schema_migrations.
+
+    On a database with a retention floor, refuses (raises
+    DestructiveMigrationError, applying nothing) while any pending up
+    migration loses data there (`data_losing_tables`) and its version is not
+    in *allow_destructive* (`allowed_destructive_ups`). Every deploy runs
+    this, and below the floor no analyze restores what such a migration
+    deletes or leaves unfilled.
+    """
     with conn.cursor() as cur:
         cur.execute(_CREATE_TRACKING)
     conn.commit()
@@ -326,6 +405,25 @@ def migrate_up(conn) -> None:
     if not pending:
         logger.info("Already up to date.")
         return
+    paths = {v: _up_migration_path(v) for v in pending}
+    losing = _losing_on_a_floor(paths.values(), conn)
+    refused = [
+        f"{p.name} ({', '.join(losing[p.name])})"
+        for v, p in paths.items()
+        if p.name in losing and v not in allow_destructive
+    ]
+    if refused:
+        conn.rollback()
+        raise DestructiveMigrationError(
+            "refusing to migrate up: this database has a retention floor, and "
+            + "; ".join(refused)
+            + " loses data below it that no analyze restores. Nothing has been applied. The owner names each "
+            "version with --allow-destructive-up VERSION or, for a deploy, sets "
+            + ALLOW_DESTRUCTIVE_UP_ENV
+            + "="
+            + ",".join(v for v, p in paths.items() if p.name in losing and v not in allow_destructive)
+            + "."
+        )
     for v in pending:
         _run_up(v, conn)
     logger.info(f"Applied {len(pending)} migration(s).")
@@ -361,12 +459,13 @@ def migrate_down(target: str | None, conn, *, force_destructive: bool = False) -
         logger.info(f"Already at or before version {target}.")
         return
     if not force_destructive:
-        marked = _destructive_versions(to_roll)
+        marked = _destructive_versions(to_roll, conn)
         if marked:
             raise DestructiveMigrationError(
                 "refusing to roll back: "
                 + ", ".join(_down_migration_path(v).name for v in marked)
-                + " is marked `-- DESTRUCTIVE`. Nothing has been rolled back. Re-run with "
+                + " is marked `-- DESTRUCTIVE`, or loses data below this database's retention floor. "
+                "Nothing has been rolled back. Re-run with "
                 "force_destructive=True (CLI: `migrate down --force-destructive`), or pass a "
                 "`--target` that stops short of it."
             )

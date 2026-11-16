@@ -37,7 +37,13 @@ deploys — pick this if you'd rather not manage a Linux box yourself.
   builder, the `/health` healthcheck, and runs `migrate up` as a
   **pre-deploy command** before every release. Railway's equivalent of
   Fly's `release_command`; `migrate up` is idempotent (tracked in
-  `schema_migrations`), so re-running is a no-op.
+  `schema_migrations`), so re-running is a no-op. Once the `updates` prune has
+  set a retention floor, `migrate up` refuses a pending migration that loses
+  aggregate rows below it, and the deploy fails before anything is applied.
+  To let one through, set `MIGRATE_ALLOW_DESTRUCTIVE_UP=<version>[,<version>]`
+  on the service for that release, and remove it afterwards (see
+  `docs/ops-monitoring-deploy.md`, "The retention floor and the `updates`
+  prune").
 - Optional CLI: `npm i -g @railway/cli` then `railway login`. The steps
   below are dashboard-driven; the CLI is only needed for `railway run`
   one-offs (migrations from your Mac, ad-hoc psql).

@@ -44,11 +44,6 @@ describe("TopBar", () => {
     window.removeEventListener(COMMAND_PALETTE_OPEN_EVENT, onOpen);
   });
 
-  it("anchors the first-run tour's Ask step", () => {
-    renderBar();
-    expect(screen.getByRole("button", { name: /Search routes, reports and screens/ })).toHaveAttribute("data-tour", "ask-nav");
-  });
-
   it("shows the ⌘K shortcut where there is a keyboard", () => {
     renderBar();
     expect(screen.getByText("K")).toBeInTheDocument();

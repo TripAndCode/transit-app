@@ -5,7 +5,6 @@ import { useAnonymousFilterPersistence } from "./api/anonymousFilterPersistence"
 import { useAgencyId } from "./api/useAgencyId";
 import { NoticeStack } from "./components/NoticeStack";
 import { HelpHint } from "./components/HelpHint";
-import { FirstRunTourOnLive } from "./components/FirstRunTour";
 import { ChunkLoading } from "./components/RoutePlaceholders";
 import { Sidebar } from "./components/Sidebar";
 import { NavPendingProvider } from "./components/navPending";
@@ -71,10 +70,6 @@ export default function App() {
                   footer keeps the credit clear of it. */}
               <PrintCredit />
             </main>
-            {/* Persisted in localStorage (transit.tourSeen); a no-op render
-                once a visitor has finished or dismissed it. Leaving Live mid-tour
-                closes it for that visit without marking it seen. */}
-            <FirstRunTourOnLive />
           </div>
         </PrintFootProvider>
       </NavPendingProvider>

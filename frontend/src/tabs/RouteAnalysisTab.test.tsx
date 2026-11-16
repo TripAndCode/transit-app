@@ -5,6 +5,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
+import { ApiError } from "../api/client";
 import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import * as snapshots from "../api/snapshots";
@@ -533,9 +534,9 @@ describe("RouteAnalysisTab where delay grows", () => {
     { shape_id: "in", first_stop_name: "観音新町三丁目", last_stop_name: "広島駅", stop_count: 5, samples: 250, share_pct: 25 },
   ];
 
-  function renderDossier(search = "") {
+  function renderDossier(search = "", previousWindow?: object) {
     mockSupportHooks();
-    const useRouteShape = vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+    const current = {
       data: {
         ...shape(STOPS),
         shape_id: "out",
@@ -549,7 +550,9 @@ describe("RouteAnalysisTab where delay grows", () => {
       isPending: false,
       error: null,
       refetch: vi.fn(),
-    } as never);
+    };
+    const useRouteShape = vi.spyOn(hooks, "useRouteShape").mockImplementation(((...args: Parameters<typeof hooks.useRouteShape>) =>
+      previousWindow && args[2].from === "2026-08-25" ? previousWindow : current) as never);
     renderTab(`/agencies/1/route-analysis?routes=R1${search}`);
     return useRouteShape;
   }
@@ -615,6 +618,16 @@ describe("RouteAnalysisTab where delay grows", () => {
     const previousCall = useRouteShape.mock.calls.find((call) => call[2].from === "2026-08-25");
     expect(previousCall?.[1]).toBe("R1");
     expect(previousCall?.[3]).toBe("in");
+  });
+
+  it("says a comparison window before the retention floor has no data, without an error or a retry", () => {
+    const refused = new ApiError(422, JSON.stringify({ detail: "x", code: "range_not_retained", floor: "2026-09-01" }));
+    renderDossier("&from=2026-09-24&to=2026-10-23&compare=1", {
+      data: undefined, isPending: false, isFetching: false, error: refused, refetch: vi.fn(),
+    });
+    expect(screen.getByText("No comparison data available")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeEnabled();
   });
 
   it("compares with the previous window on the variant shown", () => {
