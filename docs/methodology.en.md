@@ -62,9 +62,20 @@ A monthly feed-quality scorecard per operator is kept (from method `2026.11.5`) 
   - the stop ID (`stop_id`);
   - the arrival delay (`arr_delay`);
   - the trip's status (the trip's `schedule_relationship`);
-  - the stop's status (the stop's `schedule_relationship`).
+  - the stop's status (the stop's `schedule_relationship`);
+- **Poll success**: of the polls the collector should have made during the operator's planned service, the share it recorded (from method `2026.11.17`);
+- **Outage minutes**: the time inside planned service in which nothing arrived from the feed, the feed's apart from the collector's own (from method `2026.11.17`).
 
-A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. Trips reported and the implausible share are also stated in every figure's [definition stamp](#definition-stamp), over that figure's own period. The definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
+Poll success and outage minutes are counted as follows. Neither affects the grade:
+
+- **Days.** From the operator's first observed day through the newest day any listed agency has observations for, each day whose hours the timetable in force that day gives: from its first planned departure to its last planned arrival, within the service day. The time on a calendar day (JST) holding any poll that came through the live path is left out: the collector's archive replaces a day's live polls whole once it arrives, and the collector forwards only one poll in every few to the live path, so the gaps of a day that keeps them are there by design.
+- **Polls.** A poll is timed as message age times it: an archived poll by its file name, a live one by its stored capture time. Each distinct time counts once. A poll the feed answers with nothing stores no row, so a gap can also be a feed with nothing to say; only gaps inside planned service count, where an empty feed is itself a fault.
+- **Interval.** The median gap between consecutive polls inside service over the month.
+- **Poll success.** The polls recorded inside service, of the time in service divided by the interval, at most 100%.
+- **Outage.** A gap inside service longer than 5 minutes and longer than 3 intervals, including the time from the start of service to the first poll and from the last poll to the end of service. It counts from one interval after the last poll, when the next poll was due, or from the start of service if that is later. A few polls missed in a row are a slow response or a retry, not an outage anyone acts on, and the 3 intervals keep a slowly polled feed from being charged for one or two missed polls. The longest outage is the longest single gap's.
+- **Ours or the feed's.** Where, inside an outage, no other listed operator was polled for more than 5 minutes, the collector was down: that time is counted apart as our outage, so an operator is not charged with our downtime. Late at night, when every other feed is empty too, a gap can read as ours. In a month with an outage but no other operator polled, whose it was is unknown, and both are left empty.
+
+A figure the feed or the Service cannot supply is left empty beside a reason, never shown as 0. Trips reported and the implausible share are also stated in every figure's [definition stamp](#definition-stamp), over that figure's own period. Poll success and outage minutes are defined above; the other figures' definitions in full are in [DELAY_ANALYSIS.md's "Feed-quality scorecard"](../DELAY_ANALYSIS.md#feed-quality-scorecard).
 
 Each month is graded A to F from these figures by four criteria, each passing or failing on its own. Each threshold is inclusive, except the arrival-delay band in field coverage, which excludes both its ends: 0% and 50% fail. The implausible share is judged as printed to a tenth, as in the comparability conditions, and every other figure as it is shown:
 
@@ -379,10 +390,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.16`. Newest first, each version with the inputs it set.
+The current method is `2026.11.17`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.17` | `feed_quality_monthly` 8 → 9 |
 | `2026.11.16` | `feed_quality_monthly` 7 → 8 |
 | `2026.11.15` | `agg_route_band_daily` = 1 |
 | `2026.11.14` | `agg_daily_trend` 4 → 5, `agg_hour_daily` 5 → 6, `agg_route_daily` 4 → 5, `agg_route_daily_dist` 4 → 5, `agg_route_daily_dwell_run` 4 → 5, `agg_route_headway_daily` 5 → 6, `agg_route_hour` 5 → 6, `agg_route_hour_dow` 5 → 6, `agg_route_stats` 4 → 5, `agg_route_stop_daily` 5 → 6, `agg_service_delivered_daily` 4 → 5, `agg_stop_daily` 5 → 6, `feed_quality_monthly` 6 → 7, `route_delay_counts` 5 → 6 |

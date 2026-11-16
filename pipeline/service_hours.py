@@ -14,16 +14,23 @@ feed that stopped.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import date, datetime
 from typing import NamedTuple
 
 from pipeline.cache import async_lru_cache
 from pipeline.db import hms_to_sec_sql
-from pipeline.planned_trips import plan_ctes
+from pipeline.planned_trips import ROWS_CALENDAR_CTES, PlanSource, calendar_params, plan_ctes
 from pipeline.service_day import service_day_moment_utc, service_day_seconds_sql
 
 _DEPARTURE = hms_to_sec_sql("s.departure_time")
 _ARRIVAL = hms_to_sec_sql("s.arrival_time")
+# A day's hours from its running trips' ends, each a trip_ends ``starts`` and
+# ``ends`` in seconds from midnight as written.
+_HOURS = (
+    f"MIN({service_day_seconds_sql('starts')}) AS first_departure, "
+    f"MAX({service_day_seconds_sql('ends')}) AS last_arrival"
+)
 
 # A trip runs from its first stop's departure to its last stop's arrival (a
 # stop with one time stands for both; an untimed end is left out). Each end is
@@ -45,11 +52,96 @@ _SERVICE_HOURS_SQL = (
         FROM running r
         JOIN static_trips t ON t.agency_id = $1 AND t.agency_id = r.agency_id AND t.service_id = r.service_id
     )
-    SELECT MIN({service_day_seconds_sql("starts")}) AS first_departure,
-           MAX({service_day_seconds_sql("ends")}) AS last_arrival
+    SELECT {_HOURS}
     FROM trip_ends
     """
 )
+
+# The same hours of each day a timetable given as rows covers: its calendar
+# (planned_trips.ROWS_CALENDAR_CTES) and each trip's first and last stop
+# times, as hours_of takes them, each service's span taken before it meets
+# the running days. A covered day nothing timed runs on reads NULL.
+ROWS_HOURS_SQL = (
+    """WITH
+    rows_trips AS (
+        SELECT %(agency_id)s AS agency_id, a.*
+        FROM unnest(%(trip_ids)s::text[], %(trip_services)s::text[], %(first_departures)s::text[],
+                    %(first_arrivals)s::text[], %(last_arrivals)s::text[], %(last_departures)s::text[])
+            AS a(trip_id, service_id, first_departure, first_arrival, last_arrival, last_departure)
+    ),"""
+    + ROWS_CALENDAR_CTES
+    + plan_ctes(
+        "ARRAY[%(agency_id)s]::int[]",
+        "%(from_date)s::date",
+        "%(to_date)s::date",
+        PlanSource("rows_trips", "rows_trips", "rows_calendar", "rows_calendar_dates"),
+    )
+    + f""",
+    trip_ends AS (
+        SELECT t.service_id,
+               COALESCE({hms_to_sec_sql("t.first_departure")}, {hms_to_sec_sql("t.first_arrival")}) AS starts,
+               COALESCE({hms_to_sec_sql("t.last_arrival")}, {hms_to_sec_sql("t.last_departure")}) AS ends
+        FROM rows_trips t
+    ),
+    service_hours AS (
+        SELECT service_id, {_HOURS} FROM trip_ends GROUP BY service_id
+    )
+    SELECT cv.day, MIN(sh.first_departure), MAX(sh.last_arrival)
+    FROM covered cv
+    LEFT JOIN running r ON r.agency_id = cv.agency_id AND r.day = cv.day
+    LEFT JOIN service_hours sh ON sh.service_id = r.service_id
+    GROUP BY cv.day
+    """
+)
+
+
+class TripEnds(NamedTuple):
+    """A trip's service and the times of its first and last stop times, as
+    the feed wrote them: a stop with one time stands for both."""
+
+    trip_id: str
+    service_id: str | None
+    first_departure: str | None
+    first_arrival: str | None
+    last_arrival: str | None
+    last_departure: str | None
+
+
+def hours_of(
+    conn,
+    agency_id: int,
+    first: date,
+    last: date,
+    *,
+    trips: Iterable[TripEnds],
+    calendar: Iterable[tuple],
+    calendar_dates: Iterable[tuple[str, str, int | None]],
+) -> dict[date, tuple[int, int] | None]:
+    """The hours of each day of [first, last] that a timetable given as rows
+    covers, as (first departure, last arrival) in service-day seconds, by the
+    rule the loaded timetable's are read by; None on a covered day with no
+    timed trip running. *calendar* and *calendar_dates* are as
+    :func:`pipeline.planned_trips.calendar_params` takes them. Only reads.
+    *conn* is a psycopg2 connection."""
+    rows = list(trips)
+    params = {
+        "agency_id": agency_id,
+        "from_date": first,
+        "to_date": last,
+        "trip_ids": [t.trip_id for t in rows],
+        "trip_services": [t.service_id for t in rows],
+        "first_departures": [t.first_departure for t in rows],
+        "first_arrivals": [t.first_arrival for t in rows],
+        "last_arrivals": [t.last_arrival for t in rows],
+        "last_departures": [t.last_departure for t in rows],
+        **calendar_params(calendar, calendar_dates),
+    }
+    with conn.cursor() as cur:
+        cur.execute(ROWS_HOURS_SQL, params)
+        return {
+            day: None if starts is None or ends is None else (int(starts), int(ends))
+            for day, starts, ends in cur.fetchall()
+        }
 
 
 class ServiceHours(NamedTuple):

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline import feed_quality, feed_quality_grade
+from pipeline import feed_quality, feed_quality_grade, poll_outages
 from pipeline.agg_registry import METHOD_VERSION, METHOD_VERSIONS, MethodVersion
 from pipeline.reports import comparability
 from pipeline.reports.definition import METHODOLOGY_URLS
@@ -211,3 +211,20 @@ def test_delay_analysis_points_to_the_grade_thresholds_rather_than_repeating_the
     assert "docs/methodology.md#フィードの品質" in scorecard
     assert not any(row in scorecard for locale in changelog.DOCS for row in _grade_rows(locale, *_GRADE_CURRENT))
     assert "| Criterion |" not in scorecard
+
+
+def _outage_phrase(locale: str, floor_sec: int, intervals: int) -> str:
+    """How the documents write the length a gap in service must exceed to be an outage."""
+    minutes = floor_sec / 60
+    if locale == "en":
+        return f"longer than {minutes:g} minutes and longer than {intervals} intervals"
+    return f"{minutes:g}分より長く、かつ間隔の{intervals}倍より長い"
+
+
+@pytest.mark.parametrize("locale", sorted(changelog.DOCS))
+def test_the_documents_state_the_outage_threshold(locale):
+    text = changelog.DOCS[locale].read_text(encoding="utf-8")
+    phrase = _outage_phrase(locale, poll_outages.OUTAGE_FLOOR_SEC, poll_outages.OUTAGE_INTERVALS)
+    assert _stated(phrase, text), f"{changelog.DOCS[locale].name} must state {phrase!r}, pipeline/poll_outages.py's"
+    assert not _stated(_outage_phrase(locale, 600, poll_outages.OUTAGE_INTERVALS), text)
+    assert not _stated(_outage_phrase(locale, poll_outages.OUTAGE_FLOOR_SEC, 2), text)

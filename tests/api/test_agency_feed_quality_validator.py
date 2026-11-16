@@ -60,3 +60,31 @@ async def test_the_drawer_reads_the_validator_figures_as_json_values(aconn):
     assert (september["validator_rules"], september["validator_files_validated"]) == (None, None)
     assert september["validator_missing"] == "not_validated"
     assert october["grade"] == september["grade"]
+
+
+async def test_the_drawer_reads_the_poll_figures_as_numbers_and_a_month_before_them_as_none(aconn):
+    agency_id = await aconn.fetchval(
+        "INSERT INTO agencies (agency_name, feed_url) VALUES ('a', 'http://a') RETURNING agency_id"
+    )
+    measured = {
+        "poll_days": 30,
+        "in_service_min": 28800.0,
+        "poll_interval_sec": 30.0,
+        "polls_in_service": 57000,
+        "polls_expected": 57600,
+        "poll_success_pct": 99.0,
+        "feed_outage_min": 12.5,
+        "feed_outage_longest_min": 8.0,
+        "collector_outage_min": 3.5,
+        "collector_outage_longest_min": 3.5,
+        "polls_missing": None,
+        "outage_missing": None,
+        "peer_rows": 1000,
+    }
+    await _month(aconn, agency_id, date(2026, 10, 1), measured)
+    await _month(aconn, agency_id, date(2026, 9, 1), {})
+    rows = [dict(r) for r in await aconn.fetch(ad.FEED_QUALITY_SQL, agency_id, ad.FEED_QUALITY_MONTHS)]
+    october, september = (FeedQualityMonth(**m).model_dump() for m in ad.build_feed_quality(rows))
+
+    assert {name: october[name] for name in measured} == measured
+    assert all(september[name] is None for name in measured)

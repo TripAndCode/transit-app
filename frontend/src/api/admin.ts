@@ -459,7 +459,12 @@ export type FeedQualityMissing =
   | "no_header"
   | "feed_cannot_report"
   | "not_recorded"
-  | "not_validated";
+  | "not_validated"
+  | "undated_polls"
+  | "no_service_hours"
+  | "live_sampled"
+  | "no_poll_interval"
+  | "no_peer";
 
 /** One GTFS-RT validator rule's counts over a month's validated days. */
 type ValidatorRule = {
@@ -479,8 +484,8 @@ type RtCoverageField = "stop_id" | "arr_delay" | "schedule_relationship_trip" | 
 /** One month of an agency's feed-quality scorecard. Each figure is null
  *  exactly when its `*_missing` reason is set. The grade is null exactly
  *  when `grade_missing` names a criterion whose figure the month lacks. The
- *  validator figures are all null for a month built before they existed, and
- *  never enter the grade. */
+ *  validator and poll figures are all null, reasons included, for a month
+ *  built before they existed, and never enter the grade. */
 export type AgencyFeedQualityMonth = {
   month: string;
   through_date: string;
@@ -520,6 +525,21 @@ export type AgencyFeedQualityMonth = {
   validator_rules: Record<string, ValidatorRule> | null;
   validator_missing: FeedQualityMissing | null;
   validator_ingested_at: string | null;
+  poll_days: number | null;
+  in_service_min: number | null;
+  poll_interval_sec: number | null;
+  polls_in_service: number | null;
+  polls_expected: number | null;
+  poll_success_pct: number | null;
+  /** Outage minutes inside service the feed is answerable for. */
+  feed_outage_min: number | null;
+  feed_outage_longest_min: number | null;
+  /** Outage minutes no agency was polled in for more than 5 minutes: the collector's, not the feed's. */
+  collector_outage_min: number | null;
+  collector_outage_longest_min: number | null;
+  polls_missing: FeedQualityMissing | null;
+  outage_missing: FeedQualityMissing | null;
+  peer_rows: number | null;
   grade: "A" | "B" | "C" | "D" | "F" | null;
   grade_failing: FeedQualityCriterion[];
   grade_missing: { criterion: FeedQualityCriterion; reason: FeedQualityMissing }[];
