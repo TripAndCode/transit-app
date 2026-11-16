@@ -1,0 +1,215 @@
+"""Archive ingest replaces a day promotion stored from the live path, once the
+folder holds the day's complete archive (pipeline.archive_replace)."""
+
+import io
+import tarfile
+from datetime import date, datetime, time, timedelta, timezone
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
+
+import pytest
+from clickhouse_connect.driver.exceptions import OperationalError
+
+from api.range import jst_today
+from pipeline import archive_replace
+from pipeline.analyze import _dates_needing_rebuild, analyze
+from pipeline.archive_replace import DaySources, day_sources
+from pipeline.clickhouse import LIVE_TABLE, insert_updates
+from pipeline.ingest import IngestIncomplete, ingest
+from pipeline.promote import promote_closed_days
+from tests.fixtures.gtfs_rt import header_only_feed
+
+_JST = ZoneInfo("Asia/Tokyo")
+_DAY = timedelta(days=1)
+D = date(2026, 4, 2)
+
+
+def _at(day: date, hh: int, mm: int = 0) -> datetime:
+    return datetime.combine(day, time(hh, mm), tzinfo=_JST).astimezone(timezone.utc)
+
+
+def _member_name(at: datetime) -> str:
+    return f"{at:%Y%m%d}/TripUpdate_{at:%H%M%S}.pb"
+
+
+def _tarball(folder, utc_day: date, instants: list[datetime]) -> None:
+    """The collector's tarball of *utc_day*: a member per poll in *instants*,
+    named by its UTC time and carrying it as its feed header."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for at in instants:
+            assert at.date() == utc_day
+            data = header_only_feed(int(at.timestamp()))
+            info = tarfile.TarInfo(_member_name(at))
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    (folder / f"{utc_day:%Y%m%d}.tar.gz").write_bytes(buf.getvalue())
+
+
+def _poll_rows(raw, ts, file_name, aid, conn):
+    return [(file_name, ts, trip, "平日", "12:00", "R1", 1, 60) for trip in ("T1", "T2")]
+
+
+def _promote(ch_client, agency_id: int, instants: list[datetime], *, table: str = "updates") -> None:
+    """Store a poll per instant under the collector's push names, as promotion leaves them."""
+    rows = [
+        (f"oracle/{_member_name(at)}", at, trip, "平日", "12:00", "R1", 1, 60)
+        for at in instants
+        for trip in ("T1", "T2")
+    ]
+    insert_updates(ch_client, agency_id, rows, table=table)
+
+
+def _ingest(folder, agency_id, pg_conn, ch_client, **kwargs) -> int:
+    with patch("pipeline.strategies.aomori_regex.parse_feed", side_effect=kwargs.pop("parse", _poll_rows)):
+        return ingest(str(folder), agency_id, pg_conn, ch_client, **kwargs)
+
+
+def _complete_archive(folder, day: date = D, polls_before_nine: tuple[int, ...] = (1, 3)) -> None:
+    """Both tarballs of JST *day*: UTC day-1 holds its hours to 09:00, UTC day the rest."""
+    _tarball(folder, day - _DAY, [_at(day, hh) for hh in polls_before_nine])
+    _tarball(folder, day, [_at(day, hh) for hh in (10, 12, 20)])
+
+
+_LIVE_POLLS = [_at(D, 3), _at(D, 12)]
+
+
+def test_a_complete_archive_replaces_the_promoted_day(pg_conn, ch_client, agency_id, tmp_path):
+    _promote(ch_client, agency_id, [*_LIVE_POLLS, _at(D - _DAY, 12)])
+    _complete_archive(tmp_path)
+
+    assert _ingest(tmp_path, agency_id, pg_conn, ch_client) == 10
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+    # The day before is not covered (its UTC day-1 tarball is absent): untouched.
+    assert day_sources(ch_client, agency_id, D - _DAY) == DaySources(0, 0, 2, 1)
+
+
+def test_a_second_run_over_a_replaced_day_changes_nothing(pg_conn, ch_client, agency_id, tmp_path):
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert _ingest(tmp_path, agency_id, pg_conn, ch_client) == 0
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+
+
+def test_a_day_missing_one_of_its_tarballs_keeps_its_live_copy(pg_conn, ch_client, agency_id, tmp_path):
+    """Tarball D alone holds the day from 09:00 JST only, so its members of D are refused."""
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _tarball(tmp_path, D, [_at(D, hh) for hh in (10, 12, 20)])
+
+    assert _ingest(tmp_path, agency_id, pg_conn, ch_client) == 0
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 4, 2)
+
+
+def test_an_archive_with_fewer_polls_than_the_live_copy_is_taken_back(pg_conn, ch_client, agency_id, tmp_path):
+    _promote(ch_client, agency_id, [_at(D, hh) for hh in (3, 5, 8, 12, 15, 18)])
+    _complete_archive(tmp_path)
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 12, 6)
+
+
+def test_a_failed_member_of_the_day_keeps_its_live_copy(pg_conn, ch_client, agency_id, tmp_path):
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+    broken = _member_name(_at(D, 20))
+
+    def parse(raw, ts, file_name, aid, conn):
+        if file_name == broken:
+            raise ValueError("corrupt member")
+        return _poll_rows(raw, ts, file_name, aid, conn)
+
+    with pytest.raises(IngestIncomplete):
+        _ingest(tmp_path, agency_id, pg_conn, ch_client, parse=parse, strict=True)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 4, 2)
+
+
+def test_a_failed_archive_insert_never_costs_the_live_copy(pg_conn, ch_client, agency_id, tmp_path):
+    """The live rows go only after the archive's are in."""
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+
+    with patch("pipeline.ingest.insert_updates", side_effect=OperationalError("connection dropped")):
+        _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 4, 2)
+
+
+def test_a_day_whose_rows_file_below_the_retention_floor_stays_live(pg_conn, ch_client, agency_id, tmp_path):
+    """JST 2026-04-01's rows before 04:00 file under 2026-03-31, a final date
+    once the floor is 2026-04-01, so that day stays live while the next one,
+    in the same folder, is replaced."""
+    floor = date(2026, 4, 1)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO updates_pruned_months (partition_id, agency_ids, retention_floor, rows, bytes) "
+            "VALUES ('202603', %s, %s, 0, 0)",
+            ([agency_id], floor),
+        )
+    pg_conn.commit()
+    _promote(ch_client, agency_id, [_at(floor, 3), _at(floor, 12), *_LIVE_POLLS])
+    _tarball(tmp_path, floor - _DAY, [_at(floor, 1), _at(floor, 3)])
+    _tarball(tmp_path, floor, [_at(floor, hh) for hh in (10, 12, 20)] + [_at(D, hh) for hh in (1, 3)])
+    _tarball(tmp_path, D, [_at(D, hh) for hh in (10, 12, 20)])
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, floor) == DaySources(0, 0, 4, 2)
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+
+
+def test_an_interrupted_replacement_is_finished_by_the_next_run(pg_conn, ch_client, agency_id, tmp_path):
+    """A run that dies after the archive's rows are in leaves both sources; the
+    next run over the same tarballs finds every member stored and deletes
+    the live copy."""
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+    with patch.object(archive_replace, "settle"):
+        _ingest(tmp_path, agency_id, pg_conn, ch_client)
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 4, 2)
+
+    assert _ingest(tmp_path, agency_id, pg_conn, ch_client) == 0
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+
+
+def test_promotion_never_brings_back_a_replaced_day(pg_conn, ch_client, agency_id, tmp_path):
+    yday = jst_today() - _DAY
+    polls = [_at(yday, 3), _at(yday, 12)]
+    _promote(ch_client, agency_id, polls, table=LIVE_TABLE)
+    assert promote_closed_days(agency_id, pg_conn, ch_client) == 4
+    _complete_archive(tmp_path, yday)
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+    assert day_sources(ch_client, agency_id, yday) == DaySources(10, 5, 0, 0)
+
+    assert promote_closed_days(agency_id, pg_conn, ch_client) == 0
+
+    assert day_sources(ch_client, agency_id, yday) == DaySources(10, 5, 0, 0)
+
+
+def test_analyze_rebuilds_a_replaced_day_whose_counts_did_not_move(pg_conn, ch_client, agency_id, tmp_path):
+    """An archive copy as dense as the live one it replaces keeps the date's
+    row counts; the change of source still lists it for rebuild."""
+    hours = (5, 8, 10, 12, 20)
+    _promote(ch_client, agency_id, [_at(D, hh) for hh in hours])
+    analyze(agency_id, pg_conn, ch_client)
+    _complete_archive(tmp_path, polls_before_nine=(5, 8))
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+    assert D in _dates_needing_rebuild(agency_id, pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT total_rows, archive_rows, live_rows FROM agg_feed_health WHERE agency_id = %s AND date = %s",
+            (agency_id, D),
+        )
+        assert cur.fetchone() == (10, 10, 0)
+    assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []

@@ -58,8 +58,8 @@ class _Conn:
 def test_a_floor_date_that_shrank_reports_no_date_before_the_floor(monkeypatch):
     """A date that lost rows lends to both neighbours, and the day before the
     floor is final."""
-    stored = [(date(2025, 1, 31), 5, 5), (BEFORE, 5, 5), (FLOOR, 5, 5), (date(2025, 2, 3), 5, 5)]
+    stored = [(date(2025, 1, 31), 5, 5, 0), (BEFORE, 5, 5, 0), (FLOOR, 5, 5, 0), (date(2025, 2, 3), 5, 5, 0)]
     monkeypatch.setattr(
-        analyze, "_ledger_counts", lambda agency_id, ch, floor=None: {FLOOR: (3, 3), date(2025, 2, 3): (5, 5)}
+        analyze, "_ledger_counts", lambda agency_id, ch, floor=None: {FLOOR: (3, 3, 0), date(2025, 2, 3): (5, 5, 0)}
     )
     assert analyze._dates_needing_rebuild(1, _Conn(stored), None, FLOOR) == [FLOOR, date(2025, 2, 3)]

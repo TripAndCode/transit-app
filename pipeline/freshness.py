@@ -35,10 +35,11 @@ surgery or from a stale interior date the ledger cannot see (see
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from pipeline.clickhouse import newest_filed_date_before
+from pipeline.clickhouse import majority_source, newest_filed_date_before
+from pipeline.retention import retention_floors
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -84,3 +85,50 @@ def check_agg_freshness(conn, ch_client, agency_ids: Iterable[int]) -> list[Stal
             if is_stale(agg_max, live_max):
                 stale.append(StaleAgency(aid, agg_max, live_max))
     return stale
+
+
+@dataclass(frozen=True)
+class LiveSourcedDays:
+    """An agency's analyzed dates whose rows came mostly from the live path
+    (pipeline.clickhouse.majority_source): *open* from its retention floor
+    on, which an archive ingest can still replace (pipeline.archive_replace),
+    and how many *final* ones lie before it."""
+
+    agency_id: int
+    open: list[date]
+    final: int
+
+
+_SOURCE_COUNTS_SQL = (
+    "SELECT agency_id, date, archive_rows, live_rows FROM agg_feed_health "
+    "WHERE agency_id = ANY(%s) ORDER BY agency_id, date"
+)
+
+
+def live_sourced_days(conn, agency_ids: Iterable[int]) -> list[LiveSourcedDays]:
+    """Each agency with a live-sourced date in agg_feed_health. Read-only."""
+    ids = sorted(set(agency_ids))
+    floors = retention_floors(conn, ids)
+    by_agency: dict[int, list[date]] = {}
+    with conn.cursor() as cur:
+        cur.execute(_SOURCE_COUNTS_SQL, (ids,))
+        for agency_id, day, archive_rows, live_rows in cur.fetchall():
+            if majority_source(archive_rows, live_rows) == "live":
+                by_agency.setdefault(agency_id, []).append(day)
+    found = []
+    for agency_id, days in by_agency.items():
+        floor = floors.get(agency_id)
+        open_days = [day for day in days if floor is None or day >= floor]
+        found.append(LiveSourcedDays(agency_id, open_days, len(days) - len(open_days)))
+    return found
+
+
+def day_ranges(days: list[date]) -> str:
+    """*days* (ascending) as comma-separated runs: ``2026-10-01..2026-10-03, 2026-10-07``."""
+    runs: list[list[date]] = []
+    for day in days:
+        if runs and day - runs[-1][-1] == timedelta(days=1):
+            runs[-1].append(day)
+        else:
+            runs.append([day])
+    return ", ".join(str(run[0]) if len(run) == 1 else f"{run[0]}..{run[-1]}" for run in runs)

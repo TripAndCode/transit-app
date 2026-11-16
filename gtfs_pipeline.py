@@ -619,12 +619,15 @@ def cmd_restamp_archive(args):
 
 
 def cmd_check_aggs(args):
-    """Report agencies whose aggregates lag their newest completed day.
+    """Report agencies whose aggregates lag their newest completed day, and
+    list the analyzed days whose rows came mostly from the live path.
 
     Exits nonzero if any agency is stale — the post-merge / monitoring guard.
+    A live-sourced day is listed but does not fail it: it is history the
+    archive has yet to replace, not a stale aggregate.
     """
     from pipeline.clickhouse import get_client
-    from pipeline.freshness import check_agg_freshness
+    from pipeline.freshness import check_agg_freshness, day_ranges, live_sourced_days
 
     conn = _get_conn()
     with conn.cursor() as cur:
@@ -632,7 +635,12 @@ def cmd_check_aggs(args):
         agency_ids = [r[0] for r in cur.fetchall()]
     ch_client = get_client()
     stale = check_agg_freshness(conn, ch_client, agency_ids)
+    live = live_sourced_days(conn, agency_ids)
     conn.close()
+    for days in live:
+        final = f"; {days.final} more before its retention floor are final" if days.final else ""
+        listed = f": {day_ranges(days.open)}" if days.open else ""
+        logger.warning(f"LIVE-SOURCED agency {days.agency_id}: {len(days.open)} day(s){listed}{final}")
     if stale:
         for s in stale:
             logger.error(

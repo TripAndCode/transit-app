@@ -12,8 +12,10 @@ fails partway through a file leaves some of its rows in `updates`; the next
 run fills the gap rather than reading the file as done. A copy that still
 falls short raises PromotionIncomplete for that day, after every other day
 has been tried, so one stuck day never holds back the rest. A day has one
-source: a day for which `updates` holds archive rows is not promoted (and is
-logged), the mirror of archive ingest refusing a day that holds promoted rows.
+source, and the archive is the one that stays: a day for which `updates`
+holds archive rows is not promoted (and is logged), and archive ingest
+replaces a promoted day once it reads the day's complete archive
+(pipeline.archive_replace).
 
 A day never promoted is lost once `updates_live`'s TTL drops it, so a failure
 here raises for the caller to record, and every run retries it.
@@ -73,9 +75,9 @@ def promote_closed_days(agency_id: int, conn, ch_client, *, now: datetime | None
     Holds the agency's `updates` lock for the whole run, as analyze() does, so
     a copy never lands between analyze's reads (pipeline/locks.py). Callers
     must also hold INGEST_ANALYZE_LOCK_KEY's single-argument ingest/analyze
-    lock, as the cron sweep does around its per-agency loop, so archive
-    ingest cannot interleave its own one-source-per-day check between this
-    function's check and its write.
+    lock, as the cron sweep does around its per-agency loop. Archive ingest
+    holds the same per-agency lock for its whole run, so neither can write a
+    day between the other's check of its source and its write.
     """
     today = jst_date(now or datetime.now(timezone.utc))
     with agency_ingest_lock(conn, agency_id):

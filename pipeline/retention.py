@@ -449,7 +449,7 @@ def read_held_counts(ch, agency_id: int, before: datetime, after: datetime | Non
         LEDGER_COUNTS_CH_SQL,
         parameters={"agency_id": agency_id, "after": after or EARLIEST_CAPTURE, "before": before},
     ).result_rows
-    return {day: (int(raw), int(total)) for day, raw, total in rows}
+    return {day: (int(raw), int(total)) for day, raw, total, _live in rows}
 
 
 def read_unapplied(conn, ch, agency_id: int) -> "Unapplied":

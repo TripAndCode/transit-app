@@ -25,7 +25,7 @@ from pydantic import AwareDatetime, BaseModel
 from pipeline import retention, static_archive
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.cache import clear_all, evict_for_rebuild
-from pipeline.clickhouse import jst_date
+from pipeline.clickhouse import jst_date, majority_source
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.histogram import LEGACY_PRESET_NAME, LEGACY_SEVERE_LATE_TOLERANCE_SEC
 from pipeline.reports.rankings import (
@@ -506,15 +506,6 @@ def _with_contents(versions: list[TimetableVersion], contents: dict[tuple[int, s
     return named
 
 
-def _day_source(archive_rows: int | None, live_rows: int | None) -> Literal["archive", "live"] | None:
-    """The source most of a day's observations came from, or None when none
-    is recorded. A tie reads live, the sparser source, so a day is called
-    archive only when archive rows outnumber live ones."""
-    if archive_rows is None or live_rows is None or archive_rows + live_rows == 0:
-        return None
-    return "archive" if archive_rows > live_rows else "live"
-
-
 def _source_mix(rows: list, from_date: date, to_date: date) -> list[SourceMix]:
     """Each agency's days over [*from_date*, *to_date*] by source, from
     ``(agency_id, date, archive_rows, live_rows)`` rows by agency; every day
@@ -524,7 +515,7 @@ def _source_mix(rows: list, from_date: date, to_date: date) -> list[SourceMix]:
     mix: list[SourceMix] = []
     for agency_id, days in groupby(rows, key=lambda row: row[0]):
         sources = [
-            _day_source(archive_rows, live_rows)
+            majority_source(archive_rows, live_rows)
             for _agency, day, archive_rows, live_rows in days
             if day is not None and from_date <= day <= to_date
         ]

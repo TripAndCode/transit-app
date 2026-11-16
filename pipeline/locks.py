@@ -17,7 +17,9 @@ Two lock domains, distinguished by what the caller is about to write:
    caller that wants the same key with no wait at all -- a sibling, not a
    layer beneath it; each issues its own acquire).
    Held by promotion (pipeline/promote.py) around its copy from
-   `updates_live` into `updates`, by analyze() for the whole of its own
+   `updates_live` into `updates`, by archive ingest (pipeline.ingest.ingest)
+   for the whole of its run, which can replace a promoted day
+   (pipeline.archive_replace), by analyze() for the whole of its own
    run, and by `gtfs_pipeline.py restamp_archive --apply` for every agency
    it moves, under domain 1, across its rewrite of the whole table, and by
    `gtfs_pipeline.py prune-updates` (pipeline.retention.prune_updates) for
@@ -163,8 +165,8 @@ def agency_ingest_lock(conn, agency_id: int) -> Iterator[None]:
     while N+1..last are processed, well past the point this key's exclusion
     is still needed for agency N.
 
-    Waiting cannot deadlock. Promotion and analyze take one agency's key at
-    a time, never nesting, while holding at most INGEST_ANALYZE_LOCK_KEY's
+    Waiting cannot deadlock. Promotion, archive ingest and analyze take one
+    agency's key at a time, never nesting, while holding at most INGEST_ANALYZE_LOCK_KEY's
     single-argument lock, which no holder of this key waits on. The restamp
     and the `updates` prune are the holders of several keys: each takes them
     in ascending agency_id while holding that single-argument lock, so no

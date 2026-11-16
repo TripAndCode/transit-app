@@ -385,3 +385,35 @@ def test_cron_path_jst_boundary_is_fresh(pg_conn, agency_id, monkeypatch, caplog
 
     assert "fresh aggregates" in caplog.text
     assert "stale aggregates" not in caplog.text
+
+
+def test_check_aggs_lists_the_days_most_of_whose_rows_came_from_the_live_path(pg_conn, agency_id):
+    """A tie reads live; a day counted before the source columns has no source
+    and is not listed; days before the retention floor are only counted."""
+    from pipeline.freshness import LiveSourcedDays, live_sourced_days
+
+    days = {
+        date(2026, 3, 30): (0, 50),  # live, before the floor
+        date(2026, 4, 1): (100, 0),
+        date(2026, 4, 2): (0, 40),
+        date(2026, 4, 3): (40, 40),
+        date(2026, 4, 4): (None, None),
+        date(2026, 4, 5): (90, 10),
+    }
+    with pg_conn.cursor() as cur:
+        for day, (archive_rows, live_rows) in days.items():
+            cur.execute(
+                "INSERT INTO agg_feed_health (agency_id, date, raw_samples, clamp_count, total_rows, "
+                "archive_rows, live_rows) VALUES (%s, %s, 0, 0, 0, %s, %s)",
+                (agency_id, day, archive_rows, live_rows),
+            )
+        cur.execute(
+            "INSERT INTO updates_pruned_months (partition_id, agency_ids, retention_floor, rows, bytes) "
+            "VALUES ('202603', %s, %s, 0, 0)",
+            ([agency_id], date(2026, 4, 1)),
+        )
+    pg_conn.commit()
+
+    assert live_sourced_days(pg_conn, [agency_id]) == [
+        LiveSourcedDays(agency_id, [date(2026, 4, 2), date(2026, 4, 3)], final=1)
+    ]

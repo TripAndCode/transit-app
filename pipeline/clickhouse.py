@@ -9,7 +9,7 @@ here are where every reader learns which table a service day lives in.
 import os
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import clickhouse_connect
@@ -268,6 +268,15 @@ def distinct_file_names(client, agency_id: int, since: date | None = None) -> se
 # while archive ingest writes `<YYYYMMDD>/<member>`. The prefix is therefore
 # the source of a row in `updates`.
 LIVE_SOURCED = "(startsWith(file_name, 'oracle/') OR startsWith(file_name, 'live_'))"
+
+
+def majority_source(archive_rows: int | None, live_rows: int | None) -> Literal["archive", "live"] | None:
+    """The source most of a day's observations came from, or None when none
+    is recorded. A tie reads live, the sparser source, so a day is called
+    archive only when archive rows outnumber live ones."""
+    if archive_rows is None or live_rows is None or archive_rows + live_rows == 0:
+        return None
+    return "archive" if archive_rows > live_rows else "live"
 
 
 def days_with_source(client, agency_id: int, days: Iterable[date], *, live_sourced: bool) -> set[date]:
