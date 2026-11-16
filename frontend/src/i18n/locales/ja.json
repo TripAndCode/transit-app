@@ -493,7 +493,13 @@
     "feed_quality_no_data": "期間内の集計済みの観測なし",
     "feed_quality_clamp": "異常値 {{pct}}%",
     "feed_quality_clamp_missing": "異常値 —（期間内の集計済みの観測なし）",
-    "sentence_separator": ""
+    "sentence_separator": "",
+    "pre_floor": "詳細な観測データの保存期間を過ぎた日の数値は集計時の算出方法のまま：{{spans}}。",
+    "pre_floor_heading": "詳細な観測データの保存期間を過ぎた日の数値は集計時の算出方法のまま",
+    "pre_floor_agency": "{{agency}}：{{spans}}",
+    "pre_floor_span": "{{range}}は算出方法 {{version}}",
+    "pre_floor_span_unrecorded": "{{range}}は算出方法の記録なし",
+    "pre_floor_separator": "、"
   },
   "app": {
     "data_stale": {

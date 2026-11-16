@@ -237,7 +237,11 @@ and where the floor lies. For an operator, that means:
   dates, in Postgres, in the ClickHouse aggregates or in the feed-quality
   scorecard.
 - A method or builder change rebuilds only the dates from the floor on, so
-  older aggregates keep the method they were built under.
+  older aggregates keep the method they were built under. Each drop records
+  the method in force (`updates_pruned_months.method_version`), and a report
+  or export whose period reaches dates before the floor names that method in
+  its stamp. Its text notes those dates only when their method is not the
+  current one, or was not recorded.
 - Rows that land below the floor later, from a backfill or a restamp, are never
   aggregated.
 - A ClickHouse/Postgres disagreement before the floor is never repaired. A
@@ -324,10 +328,8 @@ next run drops them under a new row. So an empty `dropped_at` means only that
 the run which wrote the row did not confirm the drop; ClickHouse's
 `system.parts` says whether `updates` still holds the month.
 
-Before the prune is switched on in production, each of these must hold:
-
-- An export spanning the floor records that its figures before the floor keep
-  the method they were built under.
+No code prerequisite remains before the prune is switched on in production.
+Turning it on is the operator steps below.
 
 To turn it on in production:
 
@@ -336,8 +338,8 @@ To turn it on in production:
    floor, so the next analyze purges the aggregates of the rows it removed.
 2. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
    `analyze_all` in the daily ingest job (`docs/deploy-railway.md`, step 5).
-   The job leaves it out until every condition above holds, so the switch
-   alone never arms a drop.
+   The job leaves it out until this step adds it, so the switch alone never
+   arms a drop.
 3. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
    writes nothing, whatever the switch says. It lists each month past the
    horizon: the ones it would drop, with the floor each sets, and the ones it

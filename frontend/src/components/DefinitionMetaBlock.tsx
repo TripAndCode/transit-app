@@ -1,10 +1,10 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import type { DefinitionMeta, FeedQuality, SourceMix, TimetableVersion } from "../api/types";
+import type { DefinitionMeta, FeedQuality, PreFloorMethod, SourceMix, TimetableVersion } from "../api/types";
 import { PRESET_NAMES } from "../api/onTimeDefault";
 import { useCapabilityTierOf, type TierState } from "../api/useCapabilityTier";
 import { toJstISO } from "../api/scope";
-import { fixedTenth, formatDate, formatDuration, formatNumber } from "../utils/format";
+import { fixedTenth, formatDate, formatDateRange, formatDuration, formatNumber } from "../utils/format";
 
 type Props = {
   definition: DefinitionMeta;
@@ -25,8 +25,9 @@ type BlockProps = Props & {
  *  repeated report is treated, which readings are dropped, what on time means
  *  and, where the figures carry an early-departure rate, what it counts, then
  *  the method version, the day the aggregates were built, the timetables
- *  in force, where each day's observations came from and the period's
- *  completeness and clamp share. A reader comparing two agencies or two exports can open it to see
+ *  in force, where each day's observations came from, the period's
+ *  completeness and clamp share, and the method of any of its dates before a
+ *  retention floor that was frozen under another. A reader comparing two agencies or two exports can open it to see
  *  they share a definition. Every value comes from the API response's
  *  `definition` field (pipeline/reports/definition.py is the source of
  *  truth); an identifier this build has no words for is shown as the API
@@ -70,8 +71,65 @@ export function DefinitionMetaBlock({ definition, agencyNames, tiers }: BlockPro
           <CatalogueFeedQualityLines quality={definition.feed_quality} agencyNames={agencyNames} />
         )
       )}
+      <PreFloorLines definition={definition} agencyNames={agencyNames} />
     </details>
   );
+}
+
+/** The period's dates before a retention floor whose method is not the one
+ *  the stamp names, or was not recorded, with that method: one sentence for
+ *  a stamp of one agency, and a list under each agency's name for a stamp
+ *  that spans several, even when only one of them has such dates. Nothing
+ *  when every such date was frozen under the current method, which the
+ *  method sentence already names. The printed stamp says the same
+ *  (pipeline/reports/definition.py's _pre_floor_text). */
+function PreFloorLines({ definition, agencyNames }: Props & { agencyNames?: ReadonlyMap<number, string> }) {
+  const { t } = useTranslation();
+  const spans = (definition.pre_floor_methods ?? []).filter((span) => span.method_version !== definition.method_version);
+  if (spans.length === 0) return null;
+  const byAgency = groupByAgency(spans);
+  if (stampAgencies(definition).size <= 1) {
+    return <p>{t("definitionMeta.pre_floor", { spans: preFloorParts(spans, t) })}</p>;
+  }
+  return (
+    <>
+      <p>{t("definitionMeta.pre_floor_heading")}</p>
+      <ul>
+        {[...byAgency].map(([agencyId, own]) => (
+          <li key={agencyId}>
+            {t("definitionMeta.pre_floor_agency", {
+              agency: agencyNames?.get(agencyId) ?? String(agencyId),
+              spans: preFloorParts(own, t),
+            })}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function preFloorParts(spans: PreFloorMethod[], t: TFunction): string {
+  return spans
+    .map((span) => {
+      const range = formatDateRange(span.from_date, span.to_date);
+      return span.method_version == null
+        ? t("definitionMeta.pre_floor_span_unrecorded", { range })
+        : t("definitionMeta.pre_floor_span", { range, version: span.method_version });
+    })
+    .join(t("definitionMeta.pre_floor_separator"));
+}
+
+/** The agencies the stamp's scope lists, as its per-agency parts name them:
+ *  an agency's own stamp names that one, and the board's every agency it
+ *  lists. */
+function stampAgencies(definition: DefinitionMeta): Set<number> {
+  const parts = [
+    definition.timetable_versions,
+    definition.source_mix,
+    definition.feed_quality,
+    definition.pre_floor_methods,
+  ];
+  return new Set(parts.flatMap((items) => (items ?? []).map((item) => item.agency_id)));
 }
 
 /** Each agency's realtime completeness and clamp share over the period, for
@@ -224,12 +282,12 @@ function Timetables({ versions, agencyNames }: { versions: TimetableVersion[]; a
   );
 }
 
-function groupByAgency(versions: TimetableVersion[]): Map<number, TimetableVersion[]> {
-  const byAgency = new Map<number, TimetableVersion[]>();
-  for (const version of versions) {
-    const own = byAgency.get(version.agency_id);
-    if (own) own.push(version);
-    else byAgency.set(version.agency_id, [version]);
+function groupByAgency<T extends { agency_id: number }>(items: T[]): Map<number, T[]> {
+  const byAgency = new Map<number, T[]>();
+  for (const item of items) {
+    const own = byAgency.get(item.agency_id);
+    if (own) own.push(item);
+    else byAgency.set(item.agency_id, [item]);
   }
   return byAgency;
 }

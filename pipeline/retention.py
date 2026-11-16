@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from pipeline import refiled
 from pipeline import runs as pipeline_runs
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.agg_sql import EARLIEST_CAPTURE, LEDGER_COUNTS_CH_SQL
 from pipeline.clickhouse import LIVE_READ_MAX_EXECUTION_SECONDS, UPDATES_TABLE
 from pipeline.flags import get_flag_state
@@ -209,6 +210,41 @@ async def retention_floor_async(conn, agency_id: int) -> date | None:
     return None if row is None else _month_start_on_or_after(row[1])
 
 
+# Every drop recorded for one agency, or with $1 NULL for each agency the
+# board lists, in the order the drops were recorded.
+FROZEN_METHODS_SQL = f"""
+SELECT u.agency_id, p.retention_floor, p.method_version
+FROM {PRUNED_TABLE} p
+CROSS JOIN LATERAL unnest(p.agency_ids) AS u(agency_id)
+JOIN agencies a ON a.agency_id = u.agency_id
+WHERE u.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)
+ORDER BY u.agency_id, p.id
+"""
+
+
+class FrozenSpan(NamedTuple):
+    after: date | None  # its first date, None for every date before `before`
+    before: date  # the floor that made it final, the first date past it
+    method_version: str | None  # None when the drop recorded no method
+
+
+def frozen_methods(drops: Iterable[tuple[date, str | None]]) -> list[FrozenSpan]:
+    """The spans of service dates an agency's drops made final, oldest first,
+    each with the method recorded by the drop that first raised the floor past
+    it. *drops* are the agency's (retention_floor, method_version) rows in the
+    order they were recorded. A row whose floor does not pass the floor before
+    it, such as a re-run recording a month a failed run already recorded,
+    makes nothing final: those dates kept the method of the row before."""
+    spans: list[FrozenSpan] = []
+    reached: date | None = None
+    for floor, method in drops:
+        floor = _month_start_on_or_after(floor)
+        if reached is None or floor > reached:
+            spans.append(FrozenSpan(reached, floor, method))
+            reached = floor
+    return spans
+
+
 def retention_floor(conn, agency_id: int) -> date | None:
     """The first service date analyze may still purge or rebuild for
     *agency_id*. Every earlier date is final: its aggregates stand as they
@@ -225,8 +261,8 @@ def retention_floor(conn, agency_id: int) -> date | None:
     while `updates` still holds their rows. The floor date's own rows can
     still file a stop event under the day before it, which is final, so the
     prune requires that date to be current as well (plan_updates_prune).
-    floor_after rounds the floor a drop records, and retention_floors rounds
-    whatever floor it reads back.
+    floor_after rounds the floor a drop records, and every read of a
+    recorded floor rounds it to a month's first day as well.
 
     Read from the drops prune_updates records rather than from its switch:
     turning the switch off stops further drops, and must not let the next
@@ -502,13 +538,18 @@ def _filed_dates(partition_id: str) -> list[date]:
 def _record_drops(conn, run_id: int | None, verdicts: list[PartitionVerdict]) -> None:
     """Record each partition about to go, which raises its agencies'
     retention floor, and commit before anything is dropped: from here on an
-    analyze leaves those dates alone, whether or not the drop follows."""
+    analyze leaves those dates alone, whether or not the drop follows.
+
+    Each row names the method in force, which the dates it makes final keep
+    (frozen_methods), since plan_updates_prune holds a month while
+    pipeline.analyze.unapplied finds a change analyze has not applied."""
     with conn.cursor() as cur:
         for verdict in verdicts:
             partition = verdict.partition
             cur.execute(
-                f"INSERT INTO {PRUNED_TABLE} (partition_id, agency_ids, retention_floor, rows, bytes, run_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
+                f"INSERT INTO {PRUNED_TABLE} "
+                "(partition_id, agency_ids, retention_floor, rows, bytes, run_id, method_version) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 (
                     partition.partition_id,
                     list(partition.agency_ids),
@@ -516,6 +557,7 @@ def _record_drops(conn, run_id: int | None, verdicts: list[PartitionVerdict]) ->
                     partition.rows,
                     partition.bytes,
                     run_id,
+                    METHOD_VERSION,
                 ),
             )
     conn.commit()
