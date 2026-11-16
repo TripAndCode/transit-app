@@ -213,6 +213,11 @@ describe("AdminUsersPage", () => {
     });
   });
 
+  it("offers no way to invite someone: a new admin comes only from ADMIN_EMAILS", () => {
+    wrap();
+    expect(screen.queryByRole("button", { name: /invite/i })).toBeNull();
+  });
+
   it("links each email to its user detail page", () => {
     wrap();
     const link = screen.getByRole("link", { name: "active@example.com" });

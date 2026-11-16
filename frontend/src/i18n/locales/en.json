@@ -85,7 +85,6 @@
     "hero": {
       "open_dashboard": "Open the dashboard",
       "view_dashboard": "View the dashboard (no sign-in needed)",
-      "login_note": "<login>Sign in</login> to keep your notebook investigations with your account.",
       "live_badge": "Watching every public bus feed in Japan, minute by minute",
       "title": "Did that bus run on schedule?",
       "lead": "We collect every public GTFS-RT (real-time operations) feed in Japan every minute and match it trip by trip against the published timetable — a third-party record that doesn't depend on any contract with the operator.",
@@ -669,7 +668,6 @@
     "loading": "Loading...",
     "loading_agencies": "Loading agencies...",
     "guest": "Guest",
-    "login": "Sign in",
     "no_match": "No matches",
     "optional_paren": "(optional)",
     "reload": "Reload",
@@ -730,7 +728,8 @@
     "rel_days_ago_other": "{{count}} days ago",
     "still_working": "Still working on it…",
     "still_working_period": "Still working: a long period takes longer to count.",
-    "narrow_to_week": "Narrow to the last 7 days of the period"
+    "narrow_to_week": "Narrow to the last 7 days of the period",
+    "admin_login": "Admin sign-in"
   },
   "legal": {
     "privacy": "Privacy Policy",
@@ -807,16 +806,15 @@
         "suspended": "This account is suspended. If you think this is a mistake, please contact the operator.",
         "invalid_credentials": "Incorrect username or password.",
         "too_many_attempts": "Too many attempts. Please try again shortly.",
-        "generic": "Sign-in failed."
+        "generic": "Sign-in failed.",
+        "not_admin": "This account isn't an administrator of this site. Every screen is open without signing in."
       },
       "sso_disabled_title": "SSO not configured",
       "sso_disabled_body": "SSO is disabled in this build. You can browse anonymously.",
       "config_error_title": "Couldn't load sign-in options",
       "config_error_body": "Something went wrong reaching the server. Please try again.",
       "back_to_top": "Back to home",
-      "choose_provider": "Use your Google or GitHub account",
       "guest_link": "Use without signing in",
-      "username_prompt": "Sign in with your username",
       "google_aria": "Sign in with Google",
       "google_continue": "Sign in with Google",
       "github_aria": "Sign in with GitHub",
@@ -825,7 +823,8 @@
       "username_label": "Username",
       "password_label": "Password",
       "local_submit": "Sign in",
-      "terms_consent": "By signing in, you agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>."
+      "terms_consent": "By signing in, you agree to the <terms>Terms of Service</terms> and <privacy>Privacy Policy</privacy>.",
+      "admin_note": "Sign-in is for this site's administrators. Every screen is open without signing in."
     },
     "back_to_agency": "← Back to {{agency}}",
     "linked_none": "None linked",
@@ -910,7 +909,6 @@
     "refresh_unchanged": "Reloaded; no newer observation available",
     "refresh_failed": "Reload failed",
     "refresh_rate_limited": "Too many refreshes; please try again shortly",
-    "refresh_sign_in": "Sign in to fetch the latest live observation",
     "loading": "Loading the latest operations...",
     "map": {
       "aria_label": "Map of latest reported stops and delays",
@@ -999,7 +997,8 @@
       "toggle_on": "Play the day",
       "toggle_off": "Back to current observations"
     },
-    "refresh_busy": "Another data update is running; try again once it finishes"
+    "refresh_busy": "Another data update is running; try again once it finishes",
+    "refresh_recent": "Live data was fetched moments ago; showing it now"
   },
   "map": {
     "style": {
@@ -1091,7 +1090,7 @@
     "workspace": {
       "investigations": "Your investigations",
       "new_analysis": "Start another analysis",
-      "unavailable": "This investigation could not be opened. Check your connection and account. Guest investigations are available only in the browser where they were saved.",
+      "unavailable": "This investigation could not be opened. Check your connection. An investigation saved without signing in opens only in the browser where it was saved.",
       "retry": "Try again",
       "export_snapshot": "Download result (JSON)",
       "export_csv": "Table {{index}} CSV",
@@ -1818,17 +1817,6 @@
       "activity_col_requests": "Requests",
       "activity_col_errors": "Errors",
       "activity_agency": "agency {{id}}"
-    },
-    "invite": {
-      "trigger": "+ Invite",
-      "dialog_title": "Invite a user",
-      "email_label": "Email",
-      "role_label": "Role",
-      "llm_approved_label": "Pre-approve AI access",
-      "submit": "Send invite",
-      "success": "Invite created for {{email}}.",
-      "error": "Error: {{msg}}",
-      "error_account_exists": "{{email}} already has an account, so an invite would never apply. Change their role or AI access in the user list instead."
     },
     "nav": {
       "label": "Admin navigation",

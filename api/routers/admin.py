@@ -907,9 +907,6 @@ class ApiKeyIssued(ApiKeyOut):
     key: str
 
 
-_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
 class ApiKeyCreate(BaseModel):
     owner_user_id: int
     # The only tier `_key_func` grants anything to; the column default agrees.
@@ -1055,84 +1052,6 @@ async def revoke_api_key(
     return Response(status_code=204)
 
 
-# ── Invites ───────────────────────────────────────────────────────────────
-
-
-class InviteCreate(BaseModel):
-    email: str = Field(max_length=254)
-    role: str = "user"
-    llm_approved: bool = False
-
-    @field_validator("email")
-    @classmethod
-    def _well_formed(cls, v: str) -> str:
-        v = v.strip()
-        if not _EMAIL_SHAPE.fullmatch(v):
-            raise ValueError("email must look like name@domain.tld")
-        return v
-
-
-class InviteOut(BaseModel):
-    invite_id: int
-    email: str
-    role: str
-    llm_approved: bool
-    created_at: Any
-    expires_at: Any
-
-
-@router.post("/invites", response_model=InviteOut, status_code=201)
-async def create_invite(
-    body: InviteCreate,
-    request: Request,
-    admin: User = Depends(require_admin),
-    conn: asyncpg.Connection = Depends(get_conn),
-) -> InviteOut:
-    """Pre-approve a role (and optionally LLM access) for an email that
-    hasn't signed in yet. Honored by the OAuth callback only when it creates
-    the account (see ``api/routers/auth.py``'s ``_upsert_user``), so an email
-    that already has an account is refused with 409 ``account_exists``: its
-    role and AI access are changed on its user row instead."""
-    csrf_guard(request)
-    ua = request.headers.get("user-agent")
-    ip = request.client.host if request.client else None
-    async with conn.transaction():
-        if body.role not in ("user", "admin"):
-            raise HTTPException(400, "invalid role")
-        if await conn.fetchval("SELECT 1 FROM users WHERE email = lower($1)", body.email):
-            raise HTTPException(409, "account_exists")
-        row = await conn.fetchrow(
-            """
-            INSERT INTO user_invites (email, role, llm_approved, invited_by)
-            VALUES ($1, $2, $3, $4)
-            RETURNING invite_id, email, role, llm_approved, created_at, expires_at
-            """,
-            body.email,
-            body.role,
-            body.llm_approved,
-            admin.user_id,
-        )
-        await record_event(
-            conn,
-            user_id=None,
-            actor_id=admin.user_id,
-            kind="invite_created",
-            meta={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
-            ip=ip,
-            user_agent=ua,
-        )
-        await record_admin_action(
-            conn,
-            actor_id=admin.user_id,
-            action="invite.created",
-            target_type="invite",
-            target_id=str(row["invite_id"]),
-            after={"email": body.email, "role": body.role, "llm_approved": body.llm_approved},
-            ip=ip,
-        )
-    return InviteOut(**dict(row))
-
-
 # ── Ops health endpoint ──────────────────────────────────────────────────
 
 
@@ -1251,7 +1170,7 @@ async def list_admin_audit(
     `login`/`login_failed` events from `login_events` (mapped to
     `login.ok`/`login.fail`). Admin mutations are recorded directly into
     `admin_audit`; the other `login_events` kinds (a user's own logout,
-    account creation and invite use, and a role granted by seeding or
+    account creation, and a role granted by seeding or
     `ADMIN_EMAILS`) are not part of this timeline.
 
     `target` matches either `target_type` or `target_id` (exact). `cursor`

@@ -34,7 +34,7 @@ When you open the app, it first asks which agency (bus operator) you want to loo
 - How far the data reaches is shown once, above the cards (“Data through …”). An agency whose updates stopped several days before the others reads “No updates after …”. An agency whose data has not started arriving reads “No data collected yet”.
 - Within a prefecture, agencies with data come first in name order, followed by those whose updates stopped and those with no data.
 - When there are many agencies, a “Search by agency name” box appears above the cards.
-- The language switch in the top-right corner changes the display language. The links at the bottom open Help, About this app and Sign in.
+- The language switch in the top-right corner changes the display language. The links at the bottom open Help, About this app and Admin sign-in.
 
 Click a card to open that agency’s **Pulse** screen (section 4). The app remembers your choice: the next time you open it, it goes straight to that agency’s Pulse. When only one agency is set up, this screen is skipped.
 
@@ -65,7 +65,7 @@ The sidebar on the left lists the screens. Each one answers one kind of question
 
 Under **Other** are **Help** (this manual) and **About this app**, plus **Send feedback** when this site offers a way to send it; an administrator also sees **Model evaluation** (chapter 12) there. The arrow next to the app’s name collapses the sidebar to icons; hover over an icon to see its name.
 
-The account menu at the bottom of the sidebar (your name, or **Guest**) holds sign-in, the display **Language** and the **Appearance** (follow the system, light or dark).
+The account menu at the bottom of the sidebar (your name, or **Guest**) holds the admin sign-in, the display **Language** and the **Appearance** (follow the system, light or dark).
 
 ### My routes
 
@@ -436,7 +436,7 @@ When the box is not shown, free-text follow-ups are not available to your accoun
 
 ### 11-4. Your investigations
 
-“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Without signing in, investigations are kept only in the browser where you ran them.
+“Your investigations” at the top lists your earlier investigations by date. Search them, or start afresh with “New investigation”; each investigation’s menu renames, pins or deletes it. Investigations you run without signing in are kept only in the browser where you ran them.
 
 If you are not sure which report to open, picking an analysis in the Notebook is often the quickest way in.
 

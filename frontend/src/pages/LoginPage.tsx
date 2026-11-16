@@ -45,6 +45,7 @@ const ERROR_KEYS: Record<string, string> = {
   provider_down: "account.login.error.provider_down",
   local_account_conflict: "account.login.error.local_account_conflict",
   suspended: "account.login.error.suspended",
+  not_admin: "account.login.error.not_admin",
 };
 
 export function LoginPage() {
@@ -138,12 +139,8 @@ export function LoginPage() {
           <span className="login-card__brand-tag">{t("header.app_tagline")}</span>
         </div>
 
-        <h1 className="login-card__h1">{t("common.login")}</h1>
-        <p className="login-card__sub">
-          {config?.local_admin_enabled && !config.auth_enabled
-            ? t("account.login.username_prompt")
-            : t("account.login.choose_provider")}
-        </p>
+        <h1 className="login-card__h1">{t("common.admin_login")}</h1>
+        <p className="login-card__sub">{t("account.login.admin_note")}</p>
 
         {error && (
           <div className="login-card__error" role="alert">

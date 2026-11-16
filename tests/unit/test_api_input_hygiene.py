@@ -10,7 +10,7 @@ import pytest
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
-from api.routers.admin import ApiKeyCreate, InviteCreate
+from api.routers.admin import ApiKeyCreate
 from api.routers.auth import ProviderRejected, _fetch_userinfo
 from api.routers.conversations import _MAX_FILTER_CTX_BYTES, CreateConversation, UpdateConversation
 
@@ -40,19 +40,6 @@ def test_api_key_create_reads_an_expiry_without_an_offset_as_utc():
 def test_api_key_create_rejects_loose_input(payload):
     with pytest.raises(ValidationError):
         ApiKeyCreate(**payload)
-
-
-# ── InviteCreate ─────────────────────────────────────────────────────────────
-def test_invite_create_accepts_a_plain_address():
-    assert InviteCreate(email="  ops@example.co.jp ").email == "ops@example.co.jp"
-
-
-@pytest.mark.parametrize(
-    "email", ["", "no-at-sign", "two@@example.com", "spaces in@example.com", "x@nodot", "a" * 250 + "@x.io"]
-)
-def test_invite_create_rejects_a_malformed_address(email):
-    with pytest.raises(ValidationError):
-        InviteCreate(email=email)
 
 
 # ── CORS ─────────────────────────────────────────────────────────────────────

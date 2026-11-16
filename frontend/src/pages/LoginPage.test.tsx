@@ -109,32 +109,27 @@ describe("LoginPage", () => {
     expect(screen.getByLabelText("Password")).toBeTruthy();
   });
 
-  it("asks for a username, not an account choice, when the username form is the only way in", () => {
-    mockConfig = { auth_enabled: false, local_admin_enabled: true };
+  it.each([
+    ["OAuth", { auth_enabled: true, local_admin_enabled: false }],
+    ["the username form", { auth_enabled: false, local_admin_enabled: true }],
+    ["both", { auth_enabled: true, local_admin_enabled: true }],
+  ])("tells every visitor sign-in is for administrators, whichever way in (%s)", (_, config) => {
+    mockConfig = config;
     renderLogin();
-    expect(screen.getByText("Sign in with your username")).toBeInTheDocument();
-    expect(screen.queryByText("Choose an account to sign in")).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Admin sign-in");
+    expect(
+      screen.getByText("Sign-in is for this site's administrators. Every screen is open without signing in."),
+    ).toBeInTheDocument();
   });
 
-  it("claims no sign-in method before the configuration says which", () => {
-    mockConfig = undefined;
+  it("names the administrators in Japanese too", async () => {
     renderLogin();
-    expect(screen.queryByText("Sign in with your username")).toBeNull();
-  });
-
-  it("names the accounts to sign in with while there are accounts to choose", () => {
-    renderLogin();
-    expect(screen.getByText("Use your Google or GitHub account")).toBeInTheDocument();
-  });
-
-  it("greets every visitor with the action, not a welcome back a first-time visitor never had", async () => {
-    renderLogin();
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sign in");
-    expect(screen.queryByText("Welcome back")).toBeNull();
     try {
       await i18n.changeLanguage("ja");
-      await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("ログイン"));
-      expect(screen.getByText("Google または GitHub のアカウントで続けます")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("管理者ログイン"));
+      expect(
+        screen.getByText("ログインは本サイトの管理者向けです。すべての画面はログインせずに使えます。"),
+      ).toBeInTheDocument();
     } finally {
       await i18n.changeLanguage("en");
     }
@@ -309,6 +304,13 @@ describe("LoginPage", () => {
 
     expect(await screen.findByText("Incorrect username or password.")).toBeTruthy();
     expect(assignSpy).not.toHaveBeenCalled();
+  });
+
+  it("says an account that is no administrator's cannot sign in, and that nothing needs it", () => {
+    renderLogin("/login?error=not_admin");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This account isn't an administrator of this site. Every screen is open without signing in.",
+    );
   });
 
   it("says the account is suspended when sign-in comes back refused for that reason", () => {
