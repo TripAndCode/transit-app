@@ -1,6 +1,7 @@
-"""The standalone poller across a UTC day boundary: its pushes are promoted,
+"""The standalone poller across UTC day boundaries: its pushes are promoted,
 and once both tarballs of the JST day are packed, archive ingest replaces the
-promoted day through the ordinary `ingest()` path (pipeline.archive_replace)."""
+promoted day through the ordinary `ingest()` path (pipeline.archive_replace).
+Tarballs that waited out an outage are still read by the next run."""
 
 from __future__ import annotations
 
@@ -68,13 +69,13 @@ def test_the_poller_archive_replaces_the_day_it_promoted(pg_conn, ch_client, age
     d = jst_today() - _DAY
     recorded = _RECORDED.read_bytes()
     clock = _Clock()
-    p = poller.Poller(tmp_path, clock=clock, fetch=lambda url: _restamped(recorded, clock.now))
+    p = poller.Poller(tmp_path, clock=clock, fetch=lambda url: _restamped(recorded, clock.now), reprobe=lambda: None)
 
     def cycle(at: datetime) -> None:
         clock.now = at
         p.poll_cycle()
         p.maybe_start_daily()
-        p.join_daily()
+        p.join_background()
 
     first_half = [_utc(d - _DAY, 16), _utc(d - _DAY, 23, 59, 30)]
     second_half = [_utc(d, 0, 0, 30), _utc(d, 10), _utc(d, 14, 59)]
@@ -97,4 +98,24 @@ def test_the_poller_archive_replaces_the_day_it_promoted(pg_conn, ch_client, age
     held = day_sources(ch_client, agency_id, d)
     assert held.live_rows == 0 and held.archive_rows > 0
     assert p.fetch_failures == {} and p.push_failures == {}
-    assert p.daily_done_for == d + _DAY
+    assert p.pending_retry == {}
+    assert poller.ingested_through(tmp_path / str(agency_id) / "rt") == f"{d:%Y%m%d}"
+
+
+def test_tarballs_left_by_a_four_day_outage_are_all_ingested(pg_conn, ch_client, agency_id, tmp_path):
+    d = jst_today() - _DAY
+    rt = poller.rt_dir(tmp_path, agency_id)
+    recorded = _RECORDED.read_bytes()
+    days = [d - _DAY * n for n in range(5, -1, -1)]
+    polls = [_utc(day, 6) for day in days]
+    for at in polls:
+        poller.write_poll(rt, at, _restamped(recorded, at))
+    poller.pack_closed_days(rt, d + _DAY)
+    # Ingested through the first day; the four after it waited out the outage.
+    poller.mark_ingested_through(rt, f"{days[0]:%Y%m%d}")
+
+    assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {}
+
+    for day, at in zip(days[1:], polls[1:], strict=True):
+        assert _file_names(ch_client, agency_id, day, live=False) == {member_name(at)}, day
+    assert poller.ingested_through(rt) == f"{d:%Y%m%d}"

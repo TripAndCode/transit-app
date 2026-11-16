@@ -101,4 +101,4 @@ def test_unknown_agency_still_closes_both_clients(monkeypatch):
             _ingest_collector_payload(1, b"raw", "2026-09-19T12:00:00+00:00", _MEMBER)
 
     assert conn.closed is True
-    ch_client.close.assert_called_once()
+    ch_client.close.assert_not_called()

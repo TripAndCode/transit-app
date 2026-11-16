@@ -19,12 +19,13 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from pipeline import poller
-from pipeline.collector_push import PUSH_PREFIX, SOURCE_FILE_RE, member_name
+from pipeline.collector_push import MAX_POLL_BYTES, PUSH_PREFIX, SOURCE_FILE_RE, member_name
 from pipeline.url_guard import FeedURLError
 
 ROOT = Path(__file__).resolve().parents[2]
 ROTATE_DAY = ROOT / "oracle_cloud" / "v3" / "bin" / "rotate-day.sh"
 _JST = ZoneInfo("Asia/Tokyo")
+_ONE = ((1, "https://feed.example/1.pb"),)
 
 
 def _utc(*args: int) -> datetime:
@@ -56,22 +57,42 @@ class _Cursor:
         return False
 
 
-def _stores(agencies):
-    conn = MagicMock()
-    conn.cursor.side_effect = lambda: _Cursor(agencies)
+class _FakeStores:
+    def __init__(self, agencies, *, clickhouse_up=True):
+        self.conn = MagicMock()
+        self.conn.cursor.side_effect = lambda: _Cursor(agencies)
+        self._clickhouse_up = clickhouse_up
 
+    @property
+    def ch(self):
+        if not self._clickhouse_up:
+            raise OSError("clickhouse: connection refused")
+        return MagicMock()
+
+
+def _stores(agencies, **kwargs):
     @contextmanager
     def stores():
-        yield conn, MagicMock()
+        yield _FakeStores(agencies, **kwargs)
 
     return stores
 
 
-def _poller(tmp_path, *, agencies=((1, "https://feed.example/1.pb"),), **kwargs):
+def _postgres_down():
+    @contextmanager
+    def stores():
+        raise OSError("could not connect to server")
+        yield
+
+    return stores
+
+
+def _poller(tmp_path, *, agencies=_ONE, stores=None, **kwargs):
     kwargs.setdefault("clock", _Clock(_utc(2026, 4, 2, 10, 0, 0)))
     kwargs.setdefault("fetch", lambda url: b"poll")
-    kwargs.setdefault("daily_step", lambda root, today: True)
-    return poller.Poller(tmp_path, stores=_stores(agencies), **kwargs)
+    kwargs.setdefault("daily_step", lambda root, plan: {})
+    kwargs.setdefault("reprobe", lambda: None)
+    return poller.Poller(tmp_path, stores=stores or _stores(agencies), **kwargs)
 
 
 # --- naming -----------------------------------------------------------------
@@ -164,11 +185,47 @@ def test_packing_matches_the_collectors_rotate_day(tmp_path):
     assert _pb_members(ours / name) == _pb_members(theirs / name)
 
 
-def test_the_ingest_window_holds_both_tarballs_of_yesterdays_jst_day(tmp_path):
-    for day in ("20260329", "20260330", "20260331", "20260401", "20260402"):
-        (tmp_path / f"{day}.tar.gz").write_bytes(b"")
-    names = [p.name for p in poller.window_tarballs(tmp_path, date(2026, 4, 2))]
-    assert names == ["20260330.tar.gz", "20260331.tar.gz", "20260401.tar.gz"]
+def test_a_tarball_written_this_way_is_one_ingest_reads(tmp_path):
+    """The member names ingest reads from the tarball are the names pushes carry."""
+    from pipeline.ingest import _date_dir
+
+    rt = tmp_path / "rt"
+    member = poller.write_poll(rt, _utc(2026, 4, 1, 12, 0, 0), b"x")
+    (tarball,) = poller.pack_closed_days(rt, date(2026, 4, 2))
+    with tarfile.open(tarball, "r:gz") as tf:
+        names = {f"{_date_dir(Path(m.name).parent.name)}/{Path(m.name).name}" for m in tf.getmembers() if m.isfile()}
+    assert names == {member}
+
+
+# --- the ingest window ------------------------------------------------------
+
+
+def _tarballs(rt: Path, *days: str) -> None:
+    rt.mkdir(parents=True, exist_ok=True)
+    for day in days:
+        (rt / f"{day}.tar.gz").write_bytes(b"")
+
+
+def _names(paths: list[Path]) -> list[str]:
+    return [p.name for p in paths]
+
+
+def test_with_no_marker_every_tarball_is_read(tmp_path):
+    _tarballs(tmp_path, "20260330", "20260331", "20260401")
+    assert _names(poller.ingest_window(tmp_path)) == ["20260330.tar.gz", "20260331.tar.gz", "20260401.tar.gz"]
+
+
+def test_the_window_starts_at_the_tarball_the_marker_names(tmp_path):
+    _tarballs(tmp_path, "20260325", "20260326", "20260327", "20260331", "20260401")
+    poller.mark_ingested_through(tmp_path, "20260327")
+    assert _names(poller.ingest_window(tmp_path)) == ["20260327.tar.gz", "20260331.tar.gz", "20260401.tar.gz"]
+
+
+def test_nothing_is_read_when_no_tarball_is_newer_than_the_marker(tmp_path):
+    _tarballs(tmp_path, "20260331", "20260401")
+    poller.mark_ingested_through(tmp_path, "20260401")
+    assert poller.ingest_window(tmp_path) == []
+    assert poller.ingested_through(tmp_path) == "20260401"
 
 
 # --- fetching ---------------------------------------------------------------
@@ -180,7 +237,7 @@ def test_a_fetch_goes_through_the_ssrf_guard_with_a_cap():
     with patch("pipeline.poller.safe_urlopen", return_value=response) as opened:
         assert poller.fetch_feed("https://feed.example/1.pb") == b"pb"
     opened.assert_called_once_with(
-        "https://feed.example/1.pb", timeout=poller.FETCH_TIMEOUT_SEC, max_bytes=poller.MAX_POLL_BYTES
+        "https://feed.example/1.pb", timeout=poller.FETCH_TIMEOUT_SEC, max_bytes=MAX_POLL_BYTES
     )
 
 
@@ -188,6 +245,23 @@ def test_a_fetch_goes_through_the_ssrf_guard_with_a_cap():
 def test_a_feed_url_that_is_not_public_http_is_refused(url):
     with pytest.raises(FeedURLError):
         poller.fetch_feed(url)
+
+
+def test_one_slow_feed_does_not_hold_back_the_others(tmp_path):
+    second_fetched = threading.Event()
+
+    def fetch(url):
+        if url.endswith("/1.pb"):
+            assert second_fetched.wait(5), "the second feed waited for the first"
+        else:
+            second_fetched.set()
+        return b"poll"
+
+    agencies = [(1, "https://feed.example/1.pb"), (2, "https://feed.example/2.pb")]
+    p = _poller(tmp_path, agencies=agencies, fetch=fetch)
+    with patch("pipeline.poller.ingest_pushed_poll", return_value=1):
+        p.poll_cycle()
+    assert p.pushed == {1: 1, 2: 1}
 
 
 # --- polling ----------------------------------------------------------------
@@ -212,11 +286,13 @@ def test_each_poll_is_archived_then_pushed_under_its_member_name(tmp_path):
 def test_a_fetch_error_is_counted_and_the_loop_keeps_polling(tmp_path, caplog):
     stop = threading.Event()
     calls = Counter()
+    lock = threading.Lock()
 
     def fetch(url):
-        calls[url] += 1
-        if sum(calls.values()) >= 6:
-            stop.set()
+        with lock:
+            calls[url] += 1
+            if sum(calls.values()) >= 6:
+                stop.set()
         if "broken" in url:
             raise OSError(f"connection refused fetching {url}")
         return b"poll"
@@ -241,13 +317,30 @@ def test_a_failed_push_is_counted_and_the_next_agency_still_polled(tmp_path):
     assert (tmp_path / "1" / "rt" / "20260402" / "TripUpdate_100000.pb").exists()
 
 
-def test_unreachable_stores_skip_the_cycle_without_raising(tmp_path):
-    @contextmanager
-    def down():
-        raise OSError("could not connect")
-        yield
+def test_with_clickhouse_down_every_poll_is_still_archived(tmp_path):
+    agencies = [(1, "https://feed.example/1.pb"), (2, "https://feed.example/2.pb")]
+    p = _poller(tmp_path, stores=_stores(agencies, clickhouse_up=False))
+    with patch("pipeline.poller.ingest_pushed_poll") as push:
+        p.poll_cycle()
+    push.assert_not_called()
+    for aid in (1, 2):
+        assert (tmp_path / str(aid) / "rt" / "20260402" / "TripUpdate_100000.pb").read_bytes() == b"poll"
+    assert p.push_failures == {1: 1, 2: 1}
 
-    p = poller.Poller(tmp_path, stores=down, fetch=lambda url: pytest.fail("fetched without stores"))
+
+def test_with_postgres_down_the_last_roster_is_still_archived(tmp_path):
+    p = _poller(tmp_path)
+    with patch("pipeline.poller.ingest_pushed_poll", return_value=1):
+        p.poll_cycle()
+    p._stores = _postgres_down()
+    p._clock.now += timedelta(minutes=1)
+    p.poll_cycle()
+    assert (tmp_path / "1" / "rt" / "20260402" / "TripUpdate_100100.pb").exists()
+    assert p.push_failures[1] == 1
+
+
+def test_with_postgres_down_from_the_start_nothing_is_polled(tmp_path):
+    p = _poller(tmp_path, stores=_postgres_down(), fetch=lambda url: pytest.fail("fetched with no roster"))
     p.poll_cycle()
 
 
@@ -266,84 +359,118 @@ def test_sigterm_stops_the_loop():
 # --- the daily step's schedule ----------------------------------------------
 
 
-def _scheduled(tmp_path, outcomes):
+def _scheduled(tmp_path, outcomes, agencies=(1, 2)):
+    for aid in agencies:
+        (tmp_path / str(aid) / "rt").mkdir(parents=True)
     clock = _Clock(_utc(2026, 4, 2, 10, 0, 0))
-    runs = []
+    plans: list[dict] = []
 
-    def daily(root, today):
-        runs.append(today)
-        return outcomes.pop(0)
+    def daily(root, plan):
+        plans.append({aid: set(stages) for aid, stages in plan.items()})
+        return outcomes.pop(0) if outcomes else {}
 
-    return _poller(tmp_path, clock=clock, daily_step=daily), clock, runs
+    return _poller(tmp_path, clock=clock, daily_step=daily), clock, plans
 
 
-def test_the_daily_step_runs_at_start_then_once_per_utc_day(tmp_path):
-    p, clock, runs = _scheduled(tmp_path, [True, True])
-    assert p.maybe_start_daily()
-    p.join_daily()
-    clock.now = _utc(2026, 4, 2, 23, 59, 59)
-    assert not p.maybe_start_daily()
+def _step(p) -> str | None:
+    kind = p.maybe_start_daily()
+    p.join_background()
+    return kind
+
+
+def test_the_utc_day_step_runs_at_start_then_once_per_utc_day(tmp_path):
+    p, clock, plans = _scheduled(tmp_path, [])
+    assert _step(p) == "utc"
+    clock.now = _utc(2026, 4, 2, 14, 59, 59)
+    assert _step(p) is None
     clock.now = _utc(2026, 4, 3, 0, 0, 1)
-    assert p.maybe_start_daily()
-    p.join_daily()
-    assert runs == [date(2026, 4, 2), date(2026, 4, 3)]
+    assert _step(p) == "utc"
+    full = {"promote", "ingest", "analyze"}
+    assert plans == [{1: full, 2: full}, {1: full, 2: full}]
 
 
-def test_a_failed_daily_step_is_retried_after_the_retry_interval(tmp_path):
-    p, clock, runs = _scheduled(tmp_path, [False, True])
-    p.maybe_start_daily()
-    p.join_daily()
+def test_jst_midnight_promotes_and_analyzes_without_ingesting(tmp_path):
+    p, clock, plans = _scheduled(tmp_path, [])
+    _step(p)
+    clock.now = _utc(2026, 4, 2, 15, 0, 1)
+    assert _step(p) == "jst"
+    clock.now = _utc(2026, 4, 2, 23, 0, 0)
+    assert _step(p) is None
+    assert plans[-1] == {1: {"promote", "analyze"}, 2: {"promote", "analyze"}}
+
+
+def test_only_the_failed_stages_are_retried_with_what_follows_them(tmp_path):
+    p, clock, plans = _scheduled(tmp_path, [{2: {"ingest"}}, {}])
+    _step(p)
+    assert p.pending_retry == {2: {"ingest"}}
     clock.now += timedelta(seconds=poller.DAILY_RETRY_SEC - 1)
-    assert not p.maybe_start_daily()
+    assert _step(p) is None
     clock.now += timedelta(seconds=1)
-    assert p.maybe_start_daily()
-    p.join_daily()
-    assert runs == [date(2026, 4, 2), date(2026, 4, 2)]
+    assert _step(p) == "retry"
+    assert plans[-1] == {2: {"ingest", "analyze"}}
+    assert p.pending_retry == {}
 
 
-def test_a_daily_step_still_running_is_not_started_twice(tmp_path):
+def test_retries_stop_at_the_daily_cap(tmp_path):
+    always_failing = [{1: {"promote"}}] * (poller.MAX_RETRIES_PER_DAY + 2)
+    p, clock, plans = _scheduled(tmp_path, list(always_failing), agencies=(1,))
+    _step(p)
+    for _ in range(poller.MAX_RETRIES_PER_DAY + 1):
+        clock.now += timedelta(seconds=poller.DAILY_RETRY_SEC)
+        _step(p)
+    assert sum(1 for plan in plans[1:]) == poller.MAX_RETRIES_PER_DAY
+    assert p.pending_retry == {}
+
+
+def test_a_step_still_running_is_not_started_twice(tmp_path):
     release = threading.Event()
 
-    def slow(root, today):
+    def slow(root, plan):
         release.wait(5)
-        return True
+        return {}
 
+    (tmp_path / "1" / "rt").mkdir(parents=True)
     p = _poller(tmp_path, daily_step=slow)
-    assert p.maybe_start_daily()
-    assert not p.maybe_start_daily()
+    assert p.maybe_start_daily() == "utc"
+    assert p.maybe_start_daily() is None
     release.set()
-    p.join_daily()
+    p.join_background()
 
 
-def test_the_daily_step_packs_closed_days_before_it_starts(tmp_path):
+def test_closed_days_are_packed_before_the_step_reads_them(tmp_path):
     rt = tmp_path / "1" / "rt"
     _day_dir(rt, "20260401", ["120000"])
-    packed_before_step = []
-    p = _poller(
-        tmp_path,
-        daily_step=lambda root, today: packed_before_step.append((rt / "20260401.tar.gz").exists()) or True,
-        on_packed=lambda agency_id, tarball: packed_before_step.append((agency_id, tarball.name)),
-    )
-    p.maybe_start_daily()
-    p.join_daily()
-    assert packed_before_step == [(1, "20260401.tar.gz"), True]
+    seen = []
+    p = _poller(tmp_path, daily_step=lambda root, plan: seen.append((rt / "20260401.tar.gz").exists()) or {})
+    _step(p)
+    assert seen == [True]
 
 
-def test_a_tarball_written_this_way_is_one_ingest_reads(tmp_path):
-    """The member names ingest reads from the tarball are the names pushes carry."""
-    from pipeline.ingest import _date_dir
+def test_a_pack_failure_still_runs_the_step_and_is_retried(tmp_path):
+    p, clock, plans = _scheduled(tmp_path, [], agencies=(1, 2))
+    with patch("pipeline.poller.pack_closed_days", side_effect=lambda rt, today: _fail_for(rt, "1")):
+        _step(p)
+    assert plans == [{1: {"promote", "ingest", "analyze"}, 2: {"promote", "ingest", "analyze"}}]
+    assert p.pending_retry == {1: {"pack"}}
+    clock.now += timedelta(seconds=poller.DAILY_RETRY_SEC)
+    _step(p)
+    assert plans[-1] == {1: {"ingest", "analyze"}}
 
-    rt = tmp_path / "rt"
-    member = poller.write_poll(rt, _utc(2026, 4, 1, 12, 0, 0), b"x")
-    (tarball,) = poller.pack_closed_days(rt, date(2026, 4, 2))
-    with tarfile.open(tarball, "r:gz") as tf:
-        names = {f"{_date_dir(Path(m.name).parent.name)}/{Path(m.name).name}" for m in tf.getmembers() if m.isfile()}
-    assert names == {member}
+
+def _fail_for(rt: Path, agency: str) -> list:
+    if rt.parent.name == agency:
+        raise OSError("disk full")
+    return []
 
 
-@contextmanager
-def _run_row(conn, kind, agency_id=None):
-    yield MagicMock()
+def test_a_step_that_raises_is_retried_whole(tmp_path):
+    def broken(root, plan):
+        raise OSError("could not connect")
+
+    (tmp_path / "1" / "rt").mkdir(parents=True)
+    p = _poller(tmp_path, daily_step=broken)
+    _step(p)
+    assert p.pending_retry == {1: {"promote", "ingest", "analyze"}}
 
 
 def test_a_missing_timetable_owes_no_retry_but_a_failure_does():
@@ -356,6 +483,48 @@ def test_a_missing_timetable_owes_no_retry_but_a_failure_does():
         raise RuntimeError("clickhouse down")
 
     with patch("pipeline.runs.record_run", _run_row):
-        assert poller._stage(MagicMock(), "ingest", 1, no_timetable)
-        assert not poller._stage(MagicMock(), "ingest", 1, broken)
-        assert poller._stage(MagicMock(), "analyze", 1, lambda: None)
+        assert poller._stage(MagicMock(), "ingest", 1, no_timetable) == poller.SKIPPED
+        assert poller._stage(MagicMock(), "ingest", 1, broken) == poller.FAILED
+        assert poller._stage(MagicMock(), "analyze", 1, lambda: None) == poller.OK
+
+
+@contextmanager
+def _run_row(conn, kind, agency_id=None):
+    yield MagicMock()
+
+
+def test_the_marker_moves_only_when_ingest_succeeds(tmp_path):
+    rt = tmp_path / "1" / "rt"
+    _tarballs(rt, "20260331", "20260401")
+    with patch("pipeline.poller._stage", return_value=poller.FAILED):
+        assert poller._ingest_stage(MagicMock(), MagicMock(), tmp_path, 1) == poller.FAILED
+    assert poller.ingested_through(rt) is None
+    with patch("pipeline.poller._stage", return_value=poller.OK):
+        poller._ingest_stage(MagicMock(), MagicMock(), tmp_path, 1)
+    assert poller.ingested_through(rt) == "20260401"
+
+
+# --- the coverage re-probe ---------------------------------------------------
+
+
+def test_the_re_probe_runs_at_start_then_hourly(tmp_path):
+    runs = []
+    clock = _Clock(_utc(2026, 4, 2, 10, 0, 0))
+    p = _poller(tmp_path, clock=clock, reprobe=lambda: runs.append(clock.now))
+    assert p.maybe_start_reprobe()
+    p.join_background()
+    clock.now += timedelta(seconds=poller.REPROBE_INTERVAL_SEC - 1)
+    assert not p.maybe_start_reprobe()
+    clock.now += timedelta(seconds=1)
+    assert p.maybe_start_reprobe()
+    p.join_background()
+    assert len(runs) == 2
+
+
+def test_a_failing_re_probe_does_not_stop_the_loop(tmp_path):
+    def broken():
+        raise RuntimeError("feed down")
+
+    p = _poller(tmp_path, reprobe=broken)
+    p.maybe_start_reprobe()
+    p.join_background()

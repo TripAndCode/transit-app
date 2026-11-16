@@ -128,6 +128,7 @@ DESTRUCTIVE_SUBCOMMANDS = {
     "refresh-static": {"pg"},
     "reprobe_rt_coverage": {"pg"},
     "restamp_archive": {"pg", "ch"},
+    "schema-up": {"pg", "ch"},
     "seed_agencies": {"pg"},
 }
 

@@ -804,6 +804,21 @@ def cmd_migrate(args):
         conn.close()
 
 
+def cmd_schema_up(args):
+    """Bring both stores' schemas up to date: `migrate up` for Postgres, then
+    the ClickHouse schema (db.clickhouse.bootstrap). What a deployment runs
+    before it starts."""
+    from db.clickhouse.bootstrap import apply_schema
+    from pipeline.clickhouse import get_client
+
+    cmd_migrate(argparse.Namespace(direction="up", allow_destructive_up=args.allow_destructive_up))
+    client = get_client()
+    try:
+        apply_schema(client)
+    finally:
+        client.close()
+
+
 def cmd_prune_query_log(args):
     """Delete ask_query_log rows older than the retention window (default 90 days)."""
     import asyncio
@@ -1100,6 +1115,15 @@ def main():
     p_live = sub.add_parser("ingest_live", help="Fetch and ingest live GTFS-RT from each agency's feed_url")
     p_live.add_argument("--agency-id", required=False, default=None, help="Agency ID to ingest (default: all agencies)")
 
+    p_schema = sub.add_parser("schema-up", help="migrate up, then apply the ClickHouse schema")
+    p_schema.add_argument(
+        "--allow-destructive-up",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help="as for `migrate up`",
+    )
+
     p_poll = sub.add_parser("poll", help="Poll every enabled agency's GTFS-RT feed, archive it and ingest it")
     p_poll.add_argument("--archive-dir", default=None, help="default: $POLLER_ARCHIVE_DIR, else ./archive")
     p_poll.add_argument("--interval", type=float, default=None, help="seconds; default: $POLL_INTERVAL_SEC, else 60")
@@ -1195,6 +1219,8 @@ def main():
         cmd_ingest_live(args)
     elif args.command == "refresh-static":
         cmd_refresh_static(args)
+    elif args.command == "schema-up":
+        cmd_schema_up(args)
     elif args.command == "poll":
         cmd_poll(args)
     elif args.command == "migrate":

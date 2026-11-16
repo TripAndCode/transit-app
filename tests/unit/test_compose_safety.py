@@ -66,3 +66,53 @@ def test_env_example_has_no_bare_ipv4_literal():
         if ipv4.search(code_part):
             offending.append((lineno, line))
     assert not offending, f".env.example must not carry a real IP literal in a value: {offending}"
+
+
+_DEV_SERVICES = {"db", "clickhouse"}
+_DEV_VOLUMES = ("transit_pgdata", "transit_chdata")
+
+
+def _blocks() -> dict[str, str]:
+    """Each top-level `x-` extension and each service, by name, as its text:
+    every key the standalone services are built from."""
+    blocks: dict[str, list[str]] = {}
+    current = None
+    in_services = False
+    for line in _compose_lines():
+        top = re.match(r"([A-Za-z][\w-]*):", line)
+        if top:
+            in_services = top.group(1) == "services"
+            current = top.group(1) if top.group(1).startswith("x-") else None
+        elif in_services and (svc := re.match(r"  ([\w-]+):\s*$", line)):
+            current = svc.group(1)
+        if current is not None:
+            blocks.setdefault(current, []).append(line.split("#", 1)[0])
+    return {name: "\n".join(lines) for name, lines in blocks.items()}
+
+
+def test_the_dev_services_keep_no_profile():
+    blocks = _blocks()
+    assert _DEV_SERVICES <= blocks.keys()
+    for name in _DEV_SERVICES:
+        assert "profiles:" not in blocks[name], f"{name} must stay in the default profile"
+
+
+def test_no_other_service_reaches_the_dev_databases():
+    """Everything but the dev databases is the standalone stack, whose project
+    name can be the dev checkout's own: it must neither mount the dev volumes
+    nor connect to the dev services."""
+    others = {name: text for name, text in _blocks().items() if name not in _DEV_SERVICES}
+    assert {"app", "poller", "migrate"} <= others.keys()
+    for name, text in others.items():
+        for volume in _DEV_VOLUMES:
+            assert volume not in text, f"{name} mounts the dev volume {volume}"
+        assert not re.search(r"@db[:/]|_HOST:\s*(db|clickhouse)\s*$", text, re.MULTILINE), (
+            f"{name} connects to a dev database"
+        )
+        assert not re.search(r"^\s+(db|clickhouse):\s*$", text, re.MULTILINE), f"{name} depends on a dev service"
+
+
+def test_the_standalone_databases_publish_no_port():
+    blocks = _blocks()
+    for name in ("standalone-db", "standalone-clickhouse"):
+        assert "ports:" not in blocks[name], f"{name} must not publish a host port"

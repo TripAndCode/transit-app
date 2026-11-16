@@ -18,6 +18,9 @@ from datetime import datetime, timezone
 
 PUSH_PREFIX = "oracle/"
 SOURCE_FILE_RE = re.compile(r"^[0-9]{8}/TripUpdate_[0-9]{6}\.pb$")
+# The largest poll either collector stores: the endpoint refuses a bigger
+# body, and the poller stops reading a feed past it.
+MAX_POLL_BYTES = 10 * 1024 * 1024
 
 
 class UnknownAgency(ValueError):
@@ -33,6 +36,17 @@ def member_name(at: datetime) -> str:
     return f"{utc:%Y%m%d}/TripUpdate_{utc:%H%M%S}.pb"
 
 
+def require_agency(conn, agency_id: int) -> None:
+    """Raise :class:`UnknownAgency` unless *agency_id* exists and is enabled."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM agencies WHERE agency_id = %s AND deleted_at IS NULL",
+            (agency_id,),
+        )
+        if cur.fetchone() is None:
+            raise UnknownAgency(f"Unknown or deleted agency_id={agency_id}")
+
+
 def ingest_pushed_poll(agency_id: int, raw: bytes, captured_at: str, source_file: str, conn, ch_client) -> int:
     """Store one pushed poll in `updates_live` and return the rows inserted.
 
@@ -45,11 +59,5 @@ def ingest_pushed_poll(agency_id: int, raw: bytes, captured_at: str, source_file
         raise ValueError(f"not a collector member name: {source_file!r}")
     from pipeline import ingest
 
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM agencies WHERE agency_id = %s AND deleted_at IS NULL",
-            (agency_id,),
-        )
-        if cur.fetchone() is None:
-            raise UnknownAgency(f"Unknown or deleted agency_id={agency_id}")
+    require_agency(conn, agency_id)
     return ingest.ingest_live_payload(agency_id, raw, captured_at, f"{PUSH_PREFIX}{source_file}", conn, ch_client)

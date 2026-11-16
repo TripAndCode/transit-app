@@ -31,8 +31,7 @@ dpkg -s libgomp1 >/dev/null 2>&1 || { apt-get update -q && apt-get install -y -q
 # leave an untracked poetry.toml in the clone.
 POETRY_VIRTUALENVS_IN_PROJECT=true "${POETRY:-$HOME/.local/bin/poetry}" install --only main,ml --no-interaction
 .venv/bin/python -c "import lightgbm, pandas"
-.venv/bin/python gtfs_pipeline.py migrate up
-.venv/bin/python -c "from pipeline.clickhouse import get_client; from db.clickhouse.bootstrap import apply_schema; apply_schema(get_client())"
+.venv/bin/python gtfs_pipeline.py schema-up
 .venv/bin/python gtfs_pipeline.py seed_agencies agencies.csv
 
 # The GTFS-RT validator image transit-ml-validate runs, at the digest
