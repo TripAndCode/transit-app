@@ -8,6 +8,13 @@ import * as snapshots from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
 import type { DefinitionMeta, ReportResponse, RouteReference, RouteReferences } from "../api/types";
 import { RouteTableScreen } from "./RouteTableScreen";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 vi.mock("../components/HeadwayQualityPanel", () => ({ HeadwayQualityPanel: () => <div>headway-panel</div> }));
 vi.mock("../components/PerformanceStandardPanel", () => ({ PerformanceStandardPanel: () => <div>standards-panel</div> }));
@@ -90,7 +97,6 @@ describe("RouteTableScreen", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("hides the observation count until statistics are asked for, and remembers the choice", async () => {
-    localStorage.removeItem("transit.showStatistics");
     setup("/agencies/9/routes");
     const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
     expect(headers()).not.toContain("Samples");
@@ -98,7 +104,10 @@ describe("RouteTableScreen", () => {
     expect(toggle).not.toBeChecked();
     await userEvent.click(toggle);
     expect(headers()).toContain("Samples");
+    expect(localStorage.getItem("transit.showStatistics")).toBe("1");
+    // A later visit in this browser reads the stored choice.
     cleanup();
+    resetShowStatisticsForTests();
     setup("/agencies/9/routes");
     expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeChecked();
     expect(headers()).toContain("Samples");

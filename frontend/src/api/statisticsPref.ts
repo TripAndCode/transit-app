@@ -5,9 +5,10 @@ const KEY = "transit.showStatistics";
 
 const listeners = new Set<() => void>();
 
-/** The choice where storage refuses a write, so the toggle still works until
+/** The setting, read from storage once and then kept by the writer, so a
+ *  render never touches storage and a refused write still switches it until
  *  the page reloads. */
-let unstored: boolean | null = null;
+let cached: boolean | null = null;
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
@@ -18,11 +19,13 @@ function subscribe(listener: () => void): () => void {
  *  browser chose otherwise: a reader meets the figures first and the
  *  statistics about them on request. */
 export function readShowStatistics(): boolean {
-  return unstored ?? readStorage("localStorage", KEY) === "1";
+  cached ??= readStorage("localStorage", KEY) === "1";
+  return cached;
 }
 
 export function writeShowStatistics(on: boolean): void {
-  unstored = writeStorage("localStorage", KEY, on ? "1" : "0") ? null : on;
+  cached = on;
+  writeStorage("localStorage", KEY, on ? "1" : "0");
   for (const listener of listeners) listener();
 }
 
@@ -31,7 +34,7 @@ export function useShowStatistics(): [boolean, (on: boolean) => void] {
   return [useSyncExternalStore(subscribe, readShowStatistics, () => false), writeShowStatistics];
 }
 
-/** Test-only: forgets a choice held in memory for a refusing store. */
+/** Test-only: forgets the cached setting, so the next read goes to storage. */
 export function resetShowStatisticsForTests(): void {
-  unstored = null;
+  cached = null;
 }

@@ -7,6 +7,13 @@ import * as hooks from "../api/hooks";
 import * as csv from "../components/analysis/csv";
 import { ReportsHomeTab } from "./ReportsHomeTab";
 import type { Agency, DefinitionMeta, RankingRow, ReportResponse, TrendDay } from "../api/types";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 const DEFINITION: DefinitionMeta = {
   preset: null,
@@ -96,7 +103,6 @@ describe("ReportsHomeTab", () => {
       trendResponse(),
       rankingResponse([["101", "平日", 2, 1, 3, 12345] as RankingRow, ["102", "平日", 1, 1, 2, 400] as RankingRow]),
     );
-    localStorage.removeItem("transit.showStatistics");
     renderTab("/agencies/1/reports?service=平日");
     expect(screen.getAllByRole("link", { name: "Open analysis →" })).toHaveLength(2);
     expect(screen.queryByRole("columnheader", { name: "Service" })).toBeNull();
@@ -105,7 +111,6 @@ describe("ReportsHomeTab", () => {
     expect(screen.queryByRole("cell", { name: "12,345" })).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
     expect(screen.getByRole("cell", { name: "12,345" })).toBeInTheDocument();
-    localStorage.removeItem("transit.showStatistics");
   });
 
   it("shows how the figures are made as its own disclosure, not nested in another", () => {

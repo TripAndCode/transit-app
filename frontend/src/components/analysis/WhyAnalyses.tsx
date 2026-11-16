@@ -27,6 +27,8 @@ import { SHARED_TABLE, th, td } from "../tableStyles";
 import { WeatherDelayPanel } from "../WeatherDelayPanel";
 import { dwellNotShown, headwayNotShown, weatherNotShown, type NotShown } from "./notShown";
 import { reportLabel } from "./reportGroups";
+import { StatisticsToggle } from "./StatisticsToggle";
+import { FewDataMark } from "../FewDataMark";
 
 type NotShownItem = NotShown & { key: string; name: string };
 
@@ -37,8 +39,8 @@ export function WhyAnalyses({
 }: {
   aid: number;
   payload: DwellRunPayload | undefined;
-  /** Whether the dwell and running table and headway quality show their
-   *  statistics-only columns. */
+  /** Whether the dwell and running table, rain against dry and headway
+   *  quality show their statistics-only columns. */
   showStatistics: boolean;
 }) {
   const { t } = useTranslation();
@@ -57,10 +59,16 @@ export function WhyAnalyses({
     headwayGap && { key: "headway", name: t("reports.headway_quality.title"), ...headwayGap },
   ].filter((item): item is NotShownItem => item != null);
 
+  // The toggle only where a table it changes is drawn.
+  const dwellTable = !dwellGap && payload != null && payload.time_band_supported && payload.routes.length > 0;
+  const weatherTable = weatherOn && !weatherGap && weather.data?.available === true;
+  const headwayTable = !headwayGap && (headway.data?.rows.length ?? 0) > 0;
+
   return (
     <>
+      {(dwellTable || weatherTable || headwayTable) && <StatisticsToggle />}
       {!dwellGap && <DwellRunBlock payload={payload} showStatistics={showStatistics} />}
-      {weatherOn && !weatherGap && <WeatherDelayPanel aid={aid} ctx={ctx} />}
+      {weatherOn && !weatherGap && <WeatherDelayPanel aid={aid} ctx={ctx} showStatistics={showStatistics} />}
       {!headwayGap && <HeadwayQualityPanel aid={aid} ctx={ctx} showStatistics={showStatistics} />}
       {notShown.length > 0 && <NotShownList items={notShown} aid={aid} offerElsewhere={dwellGap != null} />}
     </>
@@ -170,20 +178,34 @@ function DwellRunBlock({ payload, showStatistics }: { payload: DwellRunPayload |
             <tr key={r.route_code} style={{ borderTop: "1px solid var(--border-soft)" }}>
               <td style={{ ...td({ align: "right" }), color: "var(--text-tertiary)" }}>{i + 1}</td>
               <td style={{ ...td(), fontWeight: 500 }}><RouteLabel code={r.route_code} names={routeNames} compact /></td>
-              <td style={td({ align: "right" })}>{fmtSec(r.dwell_avg_sec)}</td>
+              {/* The backend applies no floor here, so a thin average carries
+                  the few-data mark: on its count while shown, else on itself. */}
+              <td style={td({ align: "right" })}>
+                {fmtSec(r.dwell_avg_sec)}
+                {!showStatistics && <FewDataMark samples={r.dwell_samples} />}
+              </td>
               {showStatistics && (
                 <>
                   <td style={td({ align: "right" })}>{fmtSec(r.dwell_p50_sec)}</td>
                   <td style={td({ align: "right" })}>{fmtSec(r.dwell_p90_sec)}</td>
-                  <td style={td({ align: "right" })}>{fmtSamples(r.dwell_samples)}</td>
+                  <td style={td({ align: "right" })}>
+                    {fmtSamples(r.dwell_samples)}
+                    <FewDataMark samples={r.dwell_samples} />
+                  </td>
                 </>
               )}
-              <td style={td({ align: "right" })}>{fmtSec(r.run_avg_sec)}</td>
+              <td style={td({ align: "right" })}>
+                {fmtSec(r.run_avg_sec)}
+                {!showStatistics && <FewDataMark samples={r.run_samples} />}
+              </td>
               {showStatistics && (
                 <>
                   <td style={td({ align: "right" })}>{fmtSec(r.run_p50_sec)}</td>
                   <td style={td({ align: "right" })}>{fmtSec(r.run_p90_sec)}</td>
-                  <td style={td({ align: "right" })}>{fmtSamples(r.run_samples)}</td>
+                  <td style={td({ align: "right" })}>
+                    {fmtSamples(r.run_samples)}
+                    <FewDataMark samples={r.run_samples} />
+                  </td>
                 </>
               )}
             </tr>

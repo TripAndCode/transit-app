@@ -41,7 +41,7 @@ What the user sees/does:
   Escape stores `transit.pulseTourSeen` (`frontend/src/api/tourSeen.ts`);
   "Later" closes it for that visit only.
 - **Inline definitions** — `frontend/src/components/overview/MetricDefinition.tsx`
-  puts a `?` popover (`InsightHint`) beside the average delay, each fact row
+  puts an ⓘ popover (`InsightHint`) beside the average delay, each fact row
   (beside its button, never inside it) and the Routes to check heading: a one-
   or two-sentence definition consistent with the user manual, then a link to
   the manual section (`help.anchor.*`, per locale; `manualAnchors.test.tsx`

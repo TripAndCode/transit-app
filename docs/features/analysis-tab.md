@@ -165,17 +165,31 @@ per route over the scope:
   row's figures, so it shows only while the reader ticks 「統計を表示」 /
   "Show statistics" (`frontend/src/components/analysis/StatisticsToggle.tsx`).
   One per-browser setting (`frontend/src/api/statisticsPref.ts`, localStorage
-  `transit.showStatistics`, off by default) drives every table that has such
-  columns: a `ReportTable` column marked `stat` (the Routes table's and the
-  day-type reports' observations), `DwellRunBlock`'s medians, 90th percentiles
-  and counts, headway quality's spacing CoV and gap count (on Routes, Why and
-  the snapshot page), the period summary's counts and the snapshot page's
-  table. The toggle itself is left off a printout. While
-  the count is hidden the few-data badge moves onto the sorted figure (else
-  the first figure), and the 「誤差大」 badge stays on the on-time cell either
-  way, so a thin figure never reads as a solid one. CSV exports are built from
-  the rows, not the screen, and keep every column; a browser print shows what
-  the screen shows.
+  `transit.showStatistics`, off by default) drives these tables and no others:
+  - a `ReportTable` column marked `stat`: the Routes table's and the day-type
+    reports' observations (`hasStatisticsColumns` decides where the toggle
+    shows);
+  - Why's dwell and running medians, 90th percentiles and counts, and rain
+    against dry's counts;
+  - headway quality's spacing CoV and gap count, on Routes, Why and the
+    snapshot page;
+  - the period summary's counts and the snapshot page's table.
+
+  The route page's stop table, the agencies board's interval and samples, the
+  notebook and the council report keep their counts: the board's are its
+  fairness gate's evidence and the council report is the deliverable.
+
+  A count may be hidden only while the figures it qualifies carry the
+  few-data mark when it is thin (`frontend/src/components/FewDataMark.tsx`).
+  The Routes table uses the floor its response echoes
+  (`reliable_min_samples`). The day-type reports, dwell and running, and
+  headway quality name none, so they use `FEW_DATA_MIN_SAMPLES`, the frontend
+  twin of `RANKING_MIN_SAMPLES` that a test ties to the server. While the count
+  is hidden, the mark sits on the sorted figure (else the first figure), or on
+  each figure the count qualifies. The 「誤差大」 badge stays on the on-time
+  cell, and rain against dry keeps its low-confidence badge. CSV exports are
+  built from the rows, not the screen, and keep every column. A browser print
+  shows what the screen shows, without the toggle.
 - **Sort.** `sort` picks the figure: `avg`, `on_time`, `late5_share` or
   `late5_count`. The routes that need attention come first; `order=best`
   turns the order around. The sorted column alone carries the bar and the

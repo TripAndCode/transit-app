@@ -26,6 +26,8 @@ import { HeatSurface } from "../components/charts/HeatSurface";
 import { TrendFocusProvider } from "../components/charts/TrendFocusContext";
 import { CompareBars } from "../components/charts/CompareBars";
 import { ReportTable } from "../components/ReportTable";
+import { hasStatisticsColumns } from "../components/reportTableSchemas";
+import { FEW_DATA_MIN_SAMPLES } from "../components/fewData";
 import { FILTER_SEPARATOR, formatDate, formatDateRange } from "../utils/format";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
 import { RouteForecastSection } from "../components/RouteForecastSection";
@@ -81,10 +83,6 @@ function rankingOptions(reportType: string | null | undefined, kept: KeptRoutes)
 
 /** One screen's reports: the list shows only `reportTypes`, and the open
  *  report is the one `pickReport` resolves from the `report` param. */
-/** The reports whose tables carry statistics-only columns, behind the
- *  statistics toggle. */
-const STATISTICS_REPORTS: ReadonlySet<string> = new Set(["dow_weekday", "dow_weekend", "dwell_run"]);
-
 export function AnalysisTab({
   reportTypes,
   defaultReport,
@@ -241,7 +239,6 @@ export function AnalysisTab({
               {councilSnapshot && <ExportMenu csv={null} showPrint={false} snapshot={councilSnapshot} />}
             </div>
             <ReportMeta data={detail.data} />
-            {STATISTICS_REPORTS.has(detail.data.report_type) && <StatisticsToggle />}
             {detail.data.retired_rows != null && detail.data.retired_rows > 0 && (
               <LeftOutToggle
                 reason="retired"
@@ -280,7 +277,17 @@ export function AnalysisTab({
                 )}
               </>
             ) : detail.data.rows.length > 0 ? (
-              <ReportTable reportType={detail.data.report_type} rows={detail.data.rows} showStatistics={showStatistics} />
+              <>
+                {hasStatisticsColumns(detail.data.report_type) && <StatisticsToggle />}
+                {/* The day-type reports name no floor of their own; the ranking
+                    floor marks a thin route's average while its count is hidden. */}
+                <ReportTable
+                  reportType={detail.data.report_type}
+                  rows={detail.data.rows}
+                  minSamples={detail.data.reliable_min_samples ?? FEW_DATA_MIN_SAMPLES}
+                  showStatistics={showStatistics}
+                />
+              </>
             ) : (
               <EmptyState
                 title={t("reports.no_data.title")}
@@ -341,6 +348,7 @@ export function AnalysisTab({
  *  folded. */
 function CertificateSection({ aid }: { aid: number }) {
   const { t } = useTranslation();
+  const [showStatistics] = useShowStatistics();
   const latestDay = defaultPeriod(use(DataEndContext)).to;
   const [pickedDate, setPickedDate] = useState<string | null>(null);
   const date = pickedDate ?? latestDay;
@@ -380,7 +388,7 @@ function CertificateSection({ aid }: { aid: number }) {
               </p>
             ))}
             <CsvLink href={apiUrl(`/api/${aid}/reports/delay_certificate?${reportQueryString(day)}&format=csv`)} />
-            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} />}
+            {data.rows.length > 0 && <ReportTable reportType={data.report_type} rows={data.rows} showStatistics={showStatistics} />}
           </>
         )}
       </details>

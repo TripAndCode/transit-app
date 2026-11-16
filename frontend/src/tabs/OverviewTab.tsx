@@ -71,6 +71,9 @@ export function OverviewTab() {
   const query = useOverviewSummary(agencyId, ctx);
   const { data, isPending, error, refetch } = query;
   const [open, setOpen] = useState<OpenCard>(null);
+  // The tour's place for this visit, kept here because the figures it is
+  // mounted with are replaced while a changed scope loads.
+  const [tourStep, setTourStep] = useState(0);
   const [tourLater, setTourLater] = useState(false);
   // Two string keys rather than one JSON-shaped one, consistent with the
   // route-analysis stop selection: `peak_dow` is only ever written alongside
@@ -186,7 +189,14 @@ export function OverviewTab() {
             {/* Inside the figures' branch, so every step's anchor is on the
                 page whenever the tour is: an anchor that never appears would
                 leave its focus trap holding Tab on a page showing no tour. */}
-            {!tourLater && <FirstRunTour onTime={scopeWindow(ctx)} onLater={() => setTourLater(true)} />}
+            {!tourLater && (
+              <FirstRunTour
+                onTime={scopeWindow(ctx)}
+                step={tourStep}
+                onStep={setTourStep}
+                onLater={() => setTourLater(true)}
+              />
+            )}
             <OverviewHeroRow
               headline={data.headline}
               severeCount={data.top_delayed.band_counts.severe.count}

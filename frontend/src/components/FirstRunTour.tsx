@@ -44,37 +44,47 @@ const STEPS: readonly Step[] = [
   },
 ];
 
-/** How often to re-check for the current step's target element while it
- *  hasn't appeared yet -- a refetch can replace the figures a step anchors
- *  on, so an anchor isn't guaranteed to exist the instant this component
- *  mounts or a step advances. The poll exists only to find the anchor: once found it is
- *  cleared, and the anchor's own ResizeObserver plus resize/scroll keep the
- *  panel on it from then on. */
+/** How often to look again for the current step's anchor while it is
+ *  missing: a fallback for an anchor not on the page yet when a step opens,
+ *  or replaced by a re-layout (such as crossing a breakpoint). Once found
+ *  the poll stops, and the anchor's own ResizeObserver plus resize/scroll
+ *  keep the panel on it. */
 const FIND_RETRY_MS = 250;
 
 /**
  * Three-step first-run coach mark over Pulse, anchored with the same
  * viewport-aware positioning `Tooltip` uses (`computeTooltipPosition`).
  * `onTime` is the on-time window the on-time step describes: the one the
- * Routes link beside its anchor carries over. `onLater` tells the owner the
- * tour was put off for this visit, so a remount (a refetch replacing the
- * figures it is mounted with) does not bring it back.
- * Persistence: "seen" is written only when a
- * visitor finishes the last step or explicitly dismisses the tour; "later"
- * closes it for this mount without writing, so it resumes on the next one.
+ * Routes link beside its anchor carries over.
+ *
+ * The owner holds the step (`step` / `onStep`) and the put-off state, so a
+ * remount, as when a refetch replaces the figures the tour is mounted with,
+ * resumes where the reader was. Persistence: "seen" is written only when a
+ * visitor finishes the last step or explicitly dismisses the tour. "Later"
+ * writes nothing; it closes the tour and tells the owner (`onLater`), which
+ * decides whether a later mount shows it again.
  *
  * Position is written straight to the panel DOM node rather than held in
  * React state (the same trick `Tooltip.tsx` uses): a poll that hasn't found
  * anything new yet never re-renders this component.
  */
-export function FirstRunTour({ onTime, onLater }: { onTime: OnTimeWindow; onLater: () => void }) {
+export function FirstRunTour({
+  onTime,
+  step: stepIndex,
+  onStep,
+  onLater,
+}: {
+  onTime: OnTimeWindow;
+  step: number;
+  onStep: (step: number) => void;
+  onLater: () => void;
+}) {
   const { t } = useTranslation();
   // "unavailable" as well as "seen": a store that cannot be read or written
   // can never remember a dismissal, so running the tour on every single
   // mount is worse than not running it. This is the distinction the
   // tri-state exists for.
   const [dismissed, setDismissed] = useState(() => readTourSeen() !== "unseen");
-  const [stepIndex, setStepIndex] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const step = STEPS[stepIndex];
 
@@ -91,7 +101,7 @@ export function FirstRunTour({ onTime, onLater }: { onTime: OnTimeWindow; onLate
       finish();
       return;
     }
-    setStepIndex((i) => i + 1);
+    onStep(stepIndex + 1);
   }
 
   // Escape is the keyboard form of the x control, so it persists the

@@ -193,7 +193,7 @@ The columns:
 - **On-time %**: the share of departures that left within the on-time tolerance in the scope sentence. Closer to 100% is better. A “wide margin” mark means the rate’s 95% interval is wider than ±5 points, so the percentage is hard to trust. The interval depends on the rate as well as on the number of departures, and widens as the rate nears 50%. Point at or focus the mark to see that route’s margin in points.
 - **Early (> 1 min)**: the share of departures that left more than 1 minute early. When the scope sets an early tolerance, it is the share that left earlier than that, and the header names it.
 - **Share over 5 min** and **Over 5 min (count)**: the departures that left more than five minutes late, as a share and as a count.
-- **Samples**: the number of observations behind the row. Fewer samples mean less certainty. It is a statistic, so it shows only once **Show statistics** above the table is ticked. The choice is remembered in this browser, applies to every table that has statistics, and leaves **Download CSV** unchanged: the CSV always has every column. The “wide margin” and “few data” marks show either way.
+- **Samples**: the number of observations behind the row. Fewer samples mean less certainty. It is a statistic, so it shows only once **Show statistics** above the table is ticked. The choice is remembered in this browser and applies to the tables that hide statistics: this one, the day-type reports (6-2), **Why**’s tables (7), “Headway quality” (5-5), the period summary (10-1) and shared snapshots. **Download CSV** is unchanged: the CSV always has every column. The “wide margin” and “few data” marks show either way; while the samples are hidden, “few data” sits on the figures they qualify.
 
 “Better”, “About the same” and “Worse” beside an on-time rate compare it with the route’s own past 90 days: the 90 days up to the day before the period starts. The past 90 days’ rate keeps the scope sentence’s days of the week, timetable and routes and its on-time definition, and is worked out the same way as the table’s. Point at or focus the mark to see that rate. When the feed missed some days, it says how many days had data. A difference under 1 point reads “about the same”. An on-time rate is already a share, so unlike **Pulse**’s average delay it is not judged by a percentage of the past 90 days’ figure. A route observed fewer than 100 times in those days has no mark. When the feed has data on fewer than four in five of the days the conditions select (an agency collected only recently, or a long outage), no route is marked and the line above the table says why. With a time of day chosen, or an on-time window that is not aggregated, the past 90 days are not compared either. The ⓘ icon beside the line above the table explains how it is worked out.
 
@@ -233,7 +233,7 @@ A service-delivered or vehicle-km target is judged on the route’s own service 
 
 ![On-time rate](./08-routes-ontime.en.png)
 
-Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often. It shows “Excess wait” and “Long-gap rate”; its “Spacing CoV” and “Samples” columns show with **Show statistics** ticked, here and on **Why**.
+Sorted by **On-time rate**, the table is followed by “Headway quality”, which covers the routes scheduled every 12 minutes or more often. It shows “Excess wait” and “Long-gap rate”; its “Spacing CoV” and “Samples” columns show with **Show statistics** ticked, here and on **Why**. A route observed fewer than 100 times carries “few data” either way.
 
 ### 5-6. A route’s own page
 
@@ -272,7 +272,7 @@ A trend needs more than one day. For a one-day period, only the heatmap is shown
 
 ### 6-2. Routes on weekdays, and on weekends and holidays
 
-Each route’s average delay (“Avg (min)”, and “Samples” with **Show statistics** ticked) on the days the agency ran its weekday timetable, or its weekend or holiday timetable. Each day goes by the timetable the agency ran that day, so a public holiday on a weekday, or a weekday the timetable runs as a holiday (such as Obon), counts as a weekend or holiday. Compare the two to see which routes run later on weekends and holidays. These reports choose their own days, so a days or timetable condition in the scope sentence shows as not used.
+Each route’s average delay (“Avg (min)”, and “Samples” with **Show statistics** ticked; a route observed fewer than 100 times carries “few data” either way) on the days the agency ran its weekday timetable, or its weekend or holiday timetable. Each day goes by the timetable the agency ran that day, so a public holiday on a weekday, or a weekday the timetable runs as a holiday (such as Obon), counts as a weekend or holiday. Compare the two to see which routes run later on weekends and holidays. These reports choose their own days, so a days or timetable condition in the scope sentence shows as not used.
 
 ### 6-3. Route forecast
 
@@ -289,7 +289,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ![Why, for a feed whose arrival times can’t be taken in](./09-why.en.png)
 
-**Dwell/running time** shows, for each route, the average dwell at stops (“Dwell avg”) and the average time spent running between them (“Running avg”), in seconds. Tick **Show statistics** to add their medians and 90th percentiles (“Dwell p50”, “Dwell p90”, “Running p50”, “Running p90”) and the number of observations behind each. These are the times actually taken, not delays (chapter 13).
+**Dwell/running time** shows, for each route, the average dwell at stops (“Dwell avg”) and the average time spent running between them (“Running avg”), in seconds. Tick **Show statistics** to add their medians and 90th percentiles (“Dwell p50”, “Dwell p90”, “Running p50”, “Running p90”) and the number of observations behind each. An average resting on fewer than 100 observations carries “few data” either way. “Rain vs. dry average delay” shows its observation counts with **Show statistics** ticked too. These are the times actually taken, not delays (chapter 13).
 
 - Beside it are “Rain vs. dry average delay”, which compares days with and without rain, and “Headway quality”, which covers the high-frequency routes.
 - The analyses that can be shown come first. The rest are gathered under “Analyses not shown” at the end, each with one of these marks and a sentence giving the reason:

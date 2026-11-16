@@ -8,7 +8,7 @@ import { InsightHint } from "../InsightHint";
 type ManualSection = "pulse" | "delay_figures";
 
 /**
- * A headline figure's definition, in a `?` popover beside it: one or two
+ * A headline figure's definition, in an ⓘ popover beside it: one or two
  * sentences consistent with the user manual, then a link to the manual's
  * section as the secondary "more". The definition itself never needs the
  * link, so the reader stays on the page.

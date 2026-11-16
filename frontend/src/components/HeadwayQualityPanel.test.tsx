@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import i18n from "../i18n";
 import { renderWithProviders } from "../test/renderWithProviders";
 import { HeadwayQualityPanel } from "./HeadwayQualityPanel";
@@ -63,6 +63,26 @@ describe("HeadwayQualityPanel", () => {
     const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
     expect(headers).not.toContain(i18n.t("reports.headway_quality.col.cov"));
     expect(headers).not.toContain(i18n.t("reports.headway_quality.col.samples"));
+  });
+
+  it("marks a thinly observed route's figures with few data while its count is hidden", () => {
+    mockRoutes();
+    mockHeadwayQuality({
+      data: {
+        rows: [
+          { route_code: "100", ewt_sec: 60, cov: 0.4, long_gap_rate: 0.1, samples: 12 },
+          { route_code: "200", ewt_sec: 60, cov: 0.4, long_gap_rate: 0.1, samples: 400 },
+        ],
+        ctx: CTX,
+      },
+    });
+    renderWithProviders(<HeadwayQualityPanel aid={1} ctx={CTX as never} showStatistics={false} />);
+    const [thin, solid] = screen.getAllByRole("row").slice(1);
+    const cells = within(thin).getAllByRole("cell");
+    // Columns: route, excess wait, long-gap rate.
+    expect(within(cells[1]).getByText("few data")).toHaveClass("caveat-badge");
+    expect(within(cells[2]).getByText("few data")).toBeInTheDocument();
+    expect(within(solid).queryByText("few data")).toBeNull();
   });
 
   it("names the timetable each route is compared on", () => {

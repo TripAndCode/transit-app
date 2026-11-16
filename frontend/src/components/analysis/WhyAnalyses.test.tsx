@@ -109,6 +109,27 @@ afterEach(() => {
 });
 
 describe("WhyAnalyses", () => {
+  it("marks a thinly observed average with few data while the counts are hidden, and a solid one not", () => {
+    const thick = { ...DWELL.routes[0], route_code: "8", dwell_samples: 400, run_samples: 12 };
+    show({ ...DWELL, routes: [DWELL.routes[0], thick] }, WEATHER, HEADWAY);
+    const table = screen.getByRole("columnheader", { name: i18n.t("reports.dwell_run.col.dwell_avg") }).closest("table")!;
+    const [thin, solid] = within(table).getAllByRole("row").slice(1);
+    const cells = (row: HTMLElement) => within(row).getAllByRole("cell");
+    // Columns: #, route, dwell avg, running avg.
+    expect(within(cells(thin)[2]).getByText("few data")).toHaveClass("caveat-badge");
+    expect(within(cells(thin)[3]).getByText("few data")).toBeInTheDocument();
+    expect(within(cells(solid)[2]).queryByText("few data")).toBeNull();
+    expect(within(cells(solid)[3]).getByText("few data")).toBeInTheDocument();
+  });
+
+  it("offers the statistics toggle only where a table it changes is drawn", () => {
+    show(DWELL, WEATHER, HEADWAY);
+    expect(screen.getByRole("checkbox", { name: "Show statistics" })).toBeInTheDocument();
+    cleanup();
+    show(unavailableDwell("feed_unsupported"), NO_STATION, { ...HEADWAY, rows: [] }, { weatherOn: false });
+    expect(screen.queryByRole("checkbox", { name: "Show statistics" })).toBeNull();
+  });
+
   it("shows the dwell and running averages, and their statistics only on request", () => {
     show(DWELL, WEATHER, HEADWAY);
     const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);

@@ -3,11 +3,18 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nextProvider } from "react-i18next";
 import i18n from "../i18n";
+import { useState } from "react";
 import { FirstRunTour } from "./FirstRunTour";
 import { DEFAULT_WINDOW } from "../api/onTimeDefault";
 import { readTourSeen, resetTourSeenMemoryForTests } from "../api/tourSeen";
 
 void i18n.changeLanguage("en");
+
+/** The tour as Pulse owns it, holding its step. */
+function Tour({ onTime = DEFAULT_WINDOW }: { onTime?: typeof DEFAULT_WINDOW }) {
+  const [step, setStep] = useState(0);
+  return <FirstRunTour onTime={onTime} step={step} onStep={setStep} onLater={() => {}} />;
+}
 
 /** The three anchors FirstRunTour looks for, standing in for Pulse's
  *  headline figure, its on-time pointer and its scope sentence. */
@@ -18,7 +25,7 @@ function renderTourWithAnchors(onTime = DEFAULT_WINDOW) {
         <div data-tour="pulse-delay">2.4 min</div>
         <p data-tour="pulse-on-time">On-time % is on Routes</p>
         <div data-tour="pulse-scope">Viewing all routes</div>
-        <FirstRunTour onTime={onTime} onLater={() => {}} />
+        <Tour onTime={onTime} />
       </div>
     </I18nextProvider>,
   );
@@ -28,7 +35,7 @@ function renderTourWithAnchors(onTime = DEFAULT_WINDOW) {
 function renderTourAlone() {
   return render(
     <I18nextProvider i18n={i18n}>
-      <FirstRunTour onTime={DEFAULT_WINDOW} onLater={() => {}} />
+      <Tour />
     </I18nextProvider>,
   );
 }

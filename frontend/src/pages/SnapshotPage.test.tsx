@@ -8,6 +8,13 @@ import type { DefinitionMeta, ReportFigures, ReportResponse, Route } from "../ap
 import type { Snapshot, SnapshotToday } from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
 import { SnapshotPage } from "./SnapshotPage";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 const ID = "AbCdEfGhIjKlMnOpQrStUv";
 
@@ -633,7 +640,6 @@ describe("SnapshotPage, a Routes table's side panels", () => {
   }
 
   it("draws the stored panels beside the table and asks no live endpoint for them", async () => {
-    localStorage.removeItem("transit.showStatistics");
     const fetchMock = stubFetch(200, withPanels());
     renderPage();
     expect(await screen.findByText("A simulation, as stored")).toBeInTheDocument();
@@ -643,7 +649,6 @@ describe("SnapshotPage, a Routes table's side panels", () => {
     expect(within(headway).queryByText("80")).toBeNull();
     fireEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
     expect(within(headway).getByText("80")).toBeInTheDocument();
-    localStorage.removeItem("transit.showStatistics");
     expect(screen.getByText("Minimum performance standard")).toBeInTheDocument();
     expect(screen.queryByText(/before they were stored/)).toBeNull();
     const urls = fetchMock.mock.calls.map(([url]) => String(url));

@@ -25,6 +25,7 @@ import { formatNumber, fmtRatioPct } from "../utils/format";
 import { DAY_TYPE_KEY } from "./dayTypeKey";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { headwayNotShown } from "./analysis/notShown";
+import { FewDataMark } from "./FewDataMark";
 
 function fmtSignedMin(sec: number | null, t: TFunction): string {
   if (sec == null) return "—";
@@ -126,10 +127,23 @@ export function HeadwayQualityView({
                       <span style={{ marginLeft: 6, fontSize: 12, fontWeight: 400, color: "var(--text-tertiary)" }}>{t(DAY_TYPE_KEY[r.day_type])}</span>
                     )}
                   </td>
-                  <td style={td({ align: "right" })}>{fmtSignedMin(r.ewt_sec, t)}</td>
+                  {/* No floor upstream: a thin route's figures carry the few-data
+                      mark, on the count while it shows, else on each figure. */}
+                  <td style={td({ align: "right" })}>
+                    {fmtSignedMin(r.ewt_sec, t)}
+                    {!showStatistics && <FewDataMark samples={r.samples} />}
+                  </td>
                   {showStatistics && <td style={td({ align: "right" })}>{fmtCov(r.cov)}</td>}
-                  <td style={td({ align: "right" })}>{fmtRatioPct(r.long_gap_rate)}</td>
-                  {showStatistics && <td style={td({ align: "right" })}>{formatNumber(r.samples)}</td>}
+                  <td style={td({ align: "right" })}>
+                    {fmtRatioPct(r.long_gap_rate)}
+                    {!showStatistics && <FewDataMark samples={r.samples} />}
+                  </td>
+                  {showStatistics && (
+                    <td style={td({ align: "right" })}>
+                      {formatNumber(r.samples)}
+                      <FewDataMark samples={r.samples} />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

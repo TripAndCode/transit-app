@@ -30,7 +30,7 @@ function renderTable(rows: unknown[][], reportType = "route_table", props: Table
       <Routes>
         <Route
           path="/agencies/:agencyId/analysis"
-          element={<ReportTable reportType={reportType} rows={rows} {...props} />}
+          element={<ReportTable reportType={reportType} rows={rows} {...props} showStatistics={props.showStatistics ?? true} />}
         />
       </Routes>
     </MemoryRouter>,
@@ -74,7 +74,7 @@ function renderWithNav(rows: unknown[][], go: (to: string) => void, reportType =
     <TestNav go={go}>
       <MemoryRouter initialEntries={["/agencies/1/analysis?from=2026-09-01"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
+          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} showStatistics />} />
         </Routes>
       </MemoryRouter>
     </TestNav>,
@@ -356,7 +356,7 @@ describe("ReportTable route links", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/1/routes?sort=late5_share&order=best&from=2026-09-01&dow=weekday"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("39061", 5.2)]} />} />
+          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("39061", 5.2)]} showStatistics />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -372,7 +372,7 @@ describe("ReportTable route links", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/1/routes"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("21111", 0.9)]} />} />
+          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("21111", 0.9)]} showStatistics />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -570,6 +570,20 @@ describe("ReportTable statistics columns", () => {
     cleanup();
     renderTable([row], reportType, { showStatistics: true });
     expect(headers()).toContain("Samples");
+  });
+
+  it("moves a thin day-type row's few-data badge onto its average while the count is hidden", () => {
+    renderTable(
+      [
+        ["THIN", null, "土日祝", 4.2, 40], // i18n-ignore: query contract
+        ["SOLID", null, "土日祝", 3.1, 150], // i18n-ignore: query contract
+      ],
+      "dow_weekend",
+      { showStatistics: false, minSamples: 100 },
+    );
+    const [thin, solid] = screen.getAllByRole("row").slice(1);
+    expect(within(within(thin).getAllByRole("cell")[2]).getByText("few data")).toHaveClass("caveat-badge");
+    expect(within(solid).queryByText("few data")).toBeNull();
   });
 
   it("keeps the wide-margin mark on the on-time rate with statistics hidden", () => {

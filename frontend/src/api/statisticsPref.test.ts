@@ -20,6 +20,13 @@ describe("statisticsPref", () => {
     expect(readShowStatistics()).toBe(false);
   });
 
+  it("reads storage once, then keeps what the writer set", () => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem");
+    readShowStatistics();
+    readShowStatistics();
+    expect(getItem).toHaveBeenCalledTimes(1);
+  });
+
   it("still switches where storage refuses the write", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("blocked");

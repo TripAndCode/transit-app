@@ -339,6 +339,20 @@ describe("OverviewTab's first-visit tour", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("keeps its step through the refetch that step 3's scope change starts", async () => {
+    const { rerender } = renderOverview(withData(), undefined, { tour: "fresh" });
+    await userEvent.click(await screen.findByRole("button", { name: "Next" }));
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Step 3 of 3")).toBeInTheDocument();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: undefined, isPending: true, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    vi.spyOn(hooks, "useOverviewSummary").mockReturnValue({ data: withData(), isPending: false, error: null, refetch: vi.fn() } as never);
+    rerender();
+    expect(await screen.findByText("Step 3 of 3")).toBeInTheDocument();
+    expect(screen.getByText("What this screen covers")).toBeInTheDocument();
+  });
+
   it("waits for figures: an empty period shows no tour", () => {
     renderOverview(summary(), undefined, { tour: "fresh" });
     expect(screen.queryByRole("dialog")).toBeNull();
