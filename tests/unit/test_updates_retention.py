@@ -378,7 +378,10 @@ def _prune(stores, **kwargs):
     def acquire():
         stores.append(("lock",))
 
-    return retention.prune_updates(object(), _Ch(stores), acquire=acquire, now=_NOW, **kwargs)
+    def sleep(seconds):
+        stores.append(("wait", seconds))
+
+    return retention.prune_updates(object(), _Ch(stores), acquire=acquire, now=_NOW, sleep=sleep, **kwargs)
 
 
 def test_the_prune_reads_and_writes_nothing_while_its_switch_is_off(stores, monkeypatch):
@@ -412,6 +415,38 @@ def test_the_switch_is_read_once(stores, monkeypatch):
     assert reads == [1]
 
 
+def test_the_drop_waits_out_a_whole_live_request():
+    """From its floor check, a live request runs at most
+    LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES ClickHouse queries in turn, each
+    capped at the live client's time budget."""
+    assert retention.LIVE_REQUEST_MAX_SEQUENTIAL_QUERIES >= 20
+    assert retention.LIVE_REQUEST_DRAIN_SECONDS >= 10 * 60
+
+
+def test_a_run_that_drops_nothing_does_not_wait(stores, monkeypatch):
+    monkeypatch.setenv("UPDATES_PRUNE_ENABLED", "true")
+    monkeypatch.setattr(retention, "read_candidates", lambda ch, cutoff: [])
+    result = _prune(stores)
+    assert result.dropped == []
+    assert stores[-1] == ("run closed", "unchanged", 0)
+    assert not any(entry[0] == "wait" for entry in stores)
+
+
+def test_the_live_read_budget_is_the_api_clients(monkeypatch):
+    import asyncio
+
+    from api import clickhouse as api_clickhouse
+
+    seen = {}
+
+    async def fake_client(**kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(api_clickhouse.clickhouse_connect, "get_async_client", fake_client)
+    asyncio.run(api_clickhouse.get_ch_client())
+    assert seen["settings"]["max_execution_time"] == retention.LIVE_READ_MAX_EXECUTION_SECONDS
+
+
 def test_a_prune_locks_records_every_floor_then_writes_off_and_drops_each_month_in_turn(stores, monkeypatch):
     monkeypatch.setenv("UPDATES_PRUNE_ENABLED", "true")
     result = _prune(stores)
@@ -421,6 +456,8 @@ def test_a_prune_locks_records_every_floor_then_writes_off_and_drops_each_month_
         ("agency lock", 2),
         ("run", "retention"),
         ("record", [date(2024, 3, 1), date(2024, 4, 1)]),
+        # Live reads that checked the old floors finish before any row goes.
+        ("wait", retention.LIVE_REQUEST_DRAIN_SECONDS),
         # Only the service dates the month's rows can be filed under.
         ("rows_rewritten", [1, 2], date(2024, 1, 1), date(2024, 2, 1)),
         ("command", "ALTER TABLE updates DROP PARTITION ID '202401'"),
@@ -443,7 +480,7 @@ def test_a_drop_that_fails_leaves_the_rows_dropped_so_far_on_the_run(stores, mon
                 raise RuntimeError("gone")
 
     with pytest.raises(RuntimeError):
-        retention.prune_updates(object(), _Failing(stores), acquire=lambda: None, now=_NOW)
+        retention.prune_updates(object(), _Failing(stores), acquire=lambda: None, now=_NOW, sleep=lambda s: None)
     assert stores[-1] == ("run closed", "ok", 7)
     assert ("dropped", "202401") in stores and ("dropped", "202402") not in stores
 
@@ -455,3 +492,69 @@ def test_a_prune_with_nothing_to_drop_records_an_unchanged_run(stores, monkeypat
     assert stores[-2:] == [("run", "retention"), ("run closed", "unchanged", 0)]
     assert result.dropped == []
     assert all(v.held_by for v in result.verdicts)
+
+
+def test_each_drop_freezes_the_dates_up_to_its_floor_under_the_method_it_recorded():
+    spans = retention.frozen_methods(
+        [(date(2025, 3, 1), "2026.11.0"), (date(2025, 4, 1), "2026.11.15"), (date(2025, 6, 1), None)]
+    )
+    assert spans == [
+        retention.FrozenSpan(None, date(2025, 3, 1), "2026.11.0"),
+        retention.FrozenSpan(date(2025, 3, 1), date(2025, 4, 1), "2026.11.15"),
+        retention.FrozenSpan(date(2025, 4, 1), date(2025, 6, 1), None),
+    ]
+
+
+def test_a_drop_recorded_again_keeps_the_method_of_the_drop_that_first_froze_its_dates():
+    """A failed run's months are recorded again by the next run, possibly under
+    newer code, but their dates froze when the first row was committed."""
+    spans = retention.frozen_methods(
+        [(date(2025, 3, 1), "2026.11.0"), (date(2025, 3, 1), "2026.11.16"), (date(2025, 2, 1), "2026.11.16")]
+    )
+    assert spans == [retention.FrozenSpan(None, date(2025, 3, 1), "2026.11.0")]
+
+
+def test_a_frozen_span_ends_at_the_floor_as_it_is_read_back():
+    assert retention.frozen_methods([(date(2025, 2, 14), "2026.11.0")]) == [
+        retention.FrozenSpan(None, date(2025, 3, 1), "2026.11.0")
+    ]
+
+
+def test_each_recorded_drop_names_the_method_in_force():
+    class _Cursor:
+        def __init__(self, log):
+            self.log = log
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            self.log.append((sql, params))
+
+    class _Conn:
+        def __init__(self):
+            self.log: list = []
+            self.commits = 0
+
+        def cursor(self):
+            return _Cursor(self.log)
+
+        def commit(self):
+            self.commits += 1
+
+    conn = _Conn()
+    verdict = retention.PartitionVerdict(_partition("202501", 1, 2), date(2025, 3, 1), None)
+    retention._record_drops(conn, 7, [verdict])
+    ((sql, params),) = conn.log
+    columns = [name.strip() for name in sql[sql.index("(") + 1 : sql.index(")")].split(",")]
+    recorded = dict(zip(columns, params, strict=True))
+    assert recorded["method_version"] == retention.METHOD_VERSION
+    assert (recorded["partition_id"], recorded["retention_floor"], recorded["run_id"]) == (
+        "202501",
+        date(2025, 3, 1),
+        7,
+    )
+    assert conn.commits == 1

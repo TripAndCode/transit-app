@@ -29,7 +29,7 @@ from datetime import date, datetime
 from typing import NamedTuple
 
 from api.range import TimeBand, UpdatesFilter, time_band_clause_ch_for
-from pipeline import refiled, static_archive
+from pipeline import refiled, retention, static_archive
 from pipeline.cache import async_lru_cache, clear_all
 from pipeline.clickhouse import UPDATES_TABLE, checked_table
 from pipeline.service_day import filed_capture_span
@@ -51,6 +51,35 @@ class Filing(NamedTuple):
         """Raise unless a read of the service dates [first, last] stays within *between*."""
         if self.between is not None and not (self.between[0] <= first and last <= self.between[1]):
             raise ValueError(f"a read of {first}..{last} reaches outside its filing's {self.between}")
+
+
+#: The machine code of a refused read (RangeNotRetained) on the API's 422.
+RANGE_NOT_RETAINED_CODE = "range_not_retained"
+
+
+class RangeNotRetained(Exception):
+    """A live read of `updates` starts before *floor*, the agency's retention
+    floor (pipeline.retention.retention_floor): `updates` no longer holds
+    every row there, so the read would show a dropped month as one with no
+    data, or give a partial answer across the floor."""
+
+    def __init__(self, floor: date) -> None:
+        super().__init__(f"raw readings before {floor.isoformat()} are no longer retained")
+        self.floor = floor
+
+
+async def require_retained(conn, agency_id: int, first: date) -> None:
+    """Raise RangeNotRetained when a read of `updates` from the service date
+    *first* starts before the agency's retention floor, read fresh, so a
+    floor a prune has just committed already holds.
+
+    A reader whose span reaches before the period it was asked for (a
+    baseline, a look-back) starts that span no earlier than the floor itself
+    (pipeline.retention.retention_floor_async), so only a requested period
+    is ever refused."""
+    floor = await retention.retention_floor_async(conn, agency_id)
+    if floor is not None and first < floor:
+        raise RangeNotRetained(floor)
 
 
 # Rows as ingested, for a reader of no agency's versions in force.
@@ -155,7 +184,12 @@ async def filing(
 ) -> Filing:
     """How a read of *table*'s rows of the service dates [first, last] files
     them. *since*, for a read of a window that starts within *first*, is the
-    earliest capture it reads, so deciding costs the window, not the day."""
+    earliest capture it reads, so deciding costs the window, not the day.
+
+    A read of `updates` from before the agency's retention floor raises
+    RangeNotRetained before anything is read (require_retained)."""
+    if table == UPDATES_TABLE:
+        await require_retained(conn, agency_id, first)
     between = (first, last)
     join = await schedule_join(conn, ch, agency_id)
     params = {} if join is None else join.filing_params(between)

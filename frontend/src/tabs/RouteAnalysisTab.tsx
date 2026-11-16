@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { RouteTitleTransition } from "../components/RouteTitleTransition";
 import { RouteLabel } from "../components/RouteLabel";
 import { useTranslation } from "react-i18next";
+import { rangeNotRetainedFloor } from "../api/client";
 import { useRouteShape, useRouteTrips } from "../api/hooks";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { ScopeRouteContext, scopeToQueryString, useScope, isoDaysBefore } from "../api/scope";
@@ -153,6 +154,7 @@ export function RouteAnalysisTab() {
   const stops = query.data ? orderedStops(query.data) : [];
   const axis = stops.map((s) => ({ stop_sequence: s.stop_sequence, stop_name: s.stop_name }));
   const prevStops = compare && previous.data && !previous.error ? orderedStops(previous.data) : [];
+  const previousNotRetained = rangeNotRetainedFloor(previous.error) != null;
   const selected = stops.find((s) => selection?.route === route && s.stop_sequence === selection.sequence) ?? initialStop(stops);
   const [rise, nextRise] = largestRises(query.data?.segments, stops);
   const stopColumns: CsvColumn<RouteShapeStop>[] = [
@@ -186,7 +188,7 @@ export function RouteAnalysisTab() {
       {route && <p className="focus-muted focus-subtitle">{t("investigate")}</p>}
     </div><div className="focus-actions">
       {route && <PinRouteButton agencyId={id} code={route} />}
-      <button className="btn btn--secondary btn--sm" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || !!previous.error))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
+      <button className="btn btn--secondary btn--sm" disabled={!query.data?.stops.length || !!query.error || (compare && (previous.isFetching || (!!previous.error && !previousNotRetained)))} onClick={() => downloadCsv(`stops-${id}-${route}-${ctx.from}-${ctx.to}`, [
         ...buildCsv(stops, stopColumns, ctx),
         [], ["comparison_from", "comparison_to"], [compare ? prevCtx.from : "", compare ? prevCtx.to : ""],
       ])}>{t("csv")}</button>
@@ -215,9 +217,10 @@ export function RouteAnalysisTab() {
         </div>
         <RouteVariantPicker variants={pickableVariants(query.data?.variants ?? [], query.data?.shape_id ?? null, stops)} shown={query.data?.shape_id ?? null} onPick={pickVariant} />
         <RiseHeadline rise={rise} nextRise={nextRise} />
-        {compare && previous.error && <ErrorBanner error={previous.error} onRetry={() => void previous.refetch()} />}
+        {/* A comparison window before the retention floor has nothing to compare, not a failure. */}
+        {compare && previous.error && !previousNotRetained && <ErrorBanner error={previous.error} onRetry={() => void previous.refetch()} />}
         {compare && previous.isPending && <p className="focus-muted" role="status">{t("previous", { days: windowDays(ctx.from, ctx.to) })} …</p>}
-        {compare && !previous.isPending && !previous.error && !prevStops.length && <p>{t("compareUnavailable")}</p>}
+        {compare && !previous.isPending && (previousNotRetained || (!previous.error && !prevStops.length)) && <p>{t("compareUnavailable")}</p>}
         <div className="focus-tabs" role="tablist">
           {/* Roving tabindex: only the selected tab is in the tab order, and
               the arrow keys move between them -- so Tab leaves the tablist

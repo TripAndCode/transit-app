@@ -40,6 +40,7 @@ import clickhouse_connect
 
 from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
 from pipeline import perf
+from pipeline.live_filing import RangeNotRetained
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
@@ -229,6 +230,14 @@ _LOCALES: dict[tuple[str, str], str] = {
         "この条件では集計に時間がかかりすぎました。期間を短くするか、路線を絞ってお試しください。"
     ),
     ("query_timeout", "en"): "This took too long to count. Try a shorter period or fewer routes.",
+    ("range_not_retained", "ja"): (
+        "{floor} より前の詳細な観測データは保存期間を過ぎているため、この表示では扱えません。"
+        "{floor} 以降の期間を選んでください。それより前の期間は日ごとの集計によるレポートで確認できます。"
+    ),
+    ("range_not_retained", "en"): (
+        "Detailed readings before {floor} are no longer kept, so this view can't cover that period. "
+        "Choose a period from {floor} on; the reports built from daily totals still cover the earlier dates."
+    ),
     ("route_did_you_mean", "ja"): "'{raw}' は見つかりません。もしかして: {candidates}",
     ("route_did_you_mean", "en"): "'{raw}' not found. Did you mean: {candidates}",
     ("did_you_mean_candidate", "ja"): "路線{code}({name})",
@@ -286,6 +295,13 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("mt_no_observations", "en"): "no observations.",
     ("mt_date_range_summary", "ja"): "観測期間: {first_date} 〜 {last_date}",
     ("mt_date_range_summary", "en"): "observation window: {first_date} – {last_date}",
+    (
+        "mt_date_range_summary_floor",
+        "ja",
+    ): "観測期間: {first_date} 〜 {last_date}（詳細な観測データは {floor} 以降を保存）",
+    ("mt_date_range_summary_floor", "en"): (
+        "observation window: {first_date} – {last_date} (detailed readings kept from {floor})"
+    ),
     ("mt_agencies_summary", "ja"): "登録されているエージェンシー: {n} 社",
     ("mt_agencies_summary", "en"): "registered agencies: {n}",
     ("mt_sample_counts_no_data", "ja"): "選択期間 ({from_date}〜{to_date}) にサンプルデータがありません。",
@@ -1579,7 +1595,12 @@ async def dispatch(
         # own window; every handler then reads the scope's service filter as
         # the agency's own timetable days.
         effective_ctx = await resolve_service_dates(_apply_date_overrides(ctx, arguments), conn, agency_id)
-        return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
+        try:
+            return await handler(arguments, effective_ctx, conn, agency_id, locale, ch=ch)
+        except RangeNotRetained as exc:
+            return ToolResult(
+                kind="empty", summary=_summary("range_not_retained", lang=locale, floor=exc.floor.isoformat())
+            )
 
 
 # Rendering — the assistant bubble's text body

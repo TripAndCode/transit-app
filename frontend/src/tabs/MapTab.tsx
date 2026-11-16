@@ -24,7 +24,7 @@ import type { LiveTrip, ServiceHoursResponse } from "../api/types";
 import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
-import { ApiError, apiPost } from "../api/client";
+import { ApiError, apiPost, rangeNotRetainedFloor } from "../api/client";
 import { hhmm, quietFor } from "./map/format";
 import { relativeTime } from "../utils/relativeTime";
 import { EM_DASH, FILTER_SEPARATOR, formatJstTime, formatReportTime } from "../utils/format";
@@ -644,9 +644,7 @@ export function MapTab() {
               {t("common.show_more", { count: cappedDelayedRows.remaining })}
             </button>
           )}
-          {/* FirstRunTour.tsx's second coach mark anchors here -- the panel
-              where an observed trip is actually inspected. */}
-          <details className="focus-queue-inspect" data-tour="map-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
+          <details className="focus-queue-inspect"><summary>{td("allObserved")}</summary><OperationsTripPanel
           routeName={effectiveRoute ? routeNames.format(effectiveRoute) : t("operations.all_routes")}
           reporting={liveRows.length > 0}
           activeRoutes={activeRouteOptions}
@@ -711,6 +709,9 @@ export function MapTab() {
           onRetry={() => { void Promise.all([liveQuery.refetch(), summaryQuery.refetch()]); }}
         />
       )}
+      {/* The route overlay draws nothing on any other failure; only a period
+          before the retention floor would otherwise read as a route with no data. */}
+      {rangeNotRetainedFloor(shapeQuery.error) != null && <ErrorBanner error={shapeQuery.error} />}
 
       <div className="ops-workspace" style={{ "--ops-queue-width": `${queueWidth}px` } as CSSProperties}>
         <section className="ops-map" aria-label={t("operations.map.aria_label")}>
@@ -810,20 +811,15 @@ export function MapTab() {
           <MapReference located={locatedTrips} total={liveRows.length} t={t} />
           {/* Rendered after the overlays that cover this corner
               (.ops-map__empty, .ops-map__loading) so a control is never
-              buried behind decoration; the CSS pins that with a z-index too.
-              The `data-tour` wrapper is `display: contents` (generates no
-              box) so it can't affect FilterDock's own floating layout --
-              FirstRunTour.tsx's first coach mark anchors to it. */}
-          <div data-tour="filter-bar" style={{ display: "contents" }}>
-            <FilterDock
-              agencyId={id}
-              applied={ctx.routes}
-              onApply={(routes) => {
-                patchSelection({ routes, route: null, trip: null, direction: null });
-              }}
-              playback={{ active: playbackOn, onToggle: () => setPlaybackOn(!playbackOn) }}
-            />
-          </div>
+              buried behind decoration; the CSS pins that with a z-index too. */}
+          <FilterDock
+            agencyId={id}
+            applied={ctx.routes}
+            onApply={(routes) => {
+              patchSelection({ routes, route: null, trip: null, direction: null });
+            }}
+            playback={{ active: playbackOn, onToggle: () => setPlaybackOn(!playbackOn) }}
+          />
           {playbackOn && (
             <PlaybackRail
               controller={playback}

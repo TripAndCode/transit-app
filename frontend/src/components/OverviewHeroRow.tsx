@@ -16,6 +16,7 @@ import { InlineSparkline } from "./InlineSparkline";
 import { latestDayStanding, storyVerdict, topRoutesShare, windowDays } from "./overview/storySentence";
 import { DayPulseRibbon } from "./overview/DayPulseRibbon";
 import { HeadlineReference } from "./overview/HeadlineReference";
+import { MetricDefinition } from "./overview/MetricDefinition";
 import { BREATH_WINDOW_MS, isBreathing } from "./overview/freshness";
 import { reportHref } from "../routes/destinations";
 import { MAX_REPORT_AGE_MS } from "../tabs/map/liveRowsFilter";
@@ -189,7 +190,7 @@ export function OverviewHeroRow({
             })}
           </p>
         )}
-        <p className="ov-hero-pointer">
+        <p className="ov-hero-pointer" data-tour="pulse-on-time">
           <Trans
             t={t}
             i18nKey="overview.hero_row.on_time_pointer"
@@ -213,9 +214,14 @@ export function OverviewHeroRow({
           />
           {peakHour && <DayPulseRibbon byHour={peakHour.by_hour} />}
           <div className="ov-hero-label">
-            {t("overview.hero_row.avg_delay_label", { count: windowDays(headline.window_from, headline.window_to), range })}
+            {t("overview.hero_row.avg_delay_label", { count: windowDays(headline.window_from, headline.window_to), range })}{" "}
+            <MetricDefinition
+              title={t("overview.definition.avg_delay.title")}
+              body={t("overview.definition.avg_delay.body")}
+              manual="delay_figures"
+            />
           </div>
-          <div className="ov-kpi-value num">
+          <div className="ov-kpi-value num" data-tour="pulse-delay">
             {headline.avg_min != null ? fixedTenth(avgMinDisplay) : "—"}
             <span className="ov-hero-unit">{t("overview.hero_unit_min")}</span>
           </div>
@@ -249,6 +255,13 @@ export function OverviewHeroRow({
                 label={t("overview.hero_row.fact_peak_hour")}
                 period={periodRange}
                 onClick={() => onOpenFact("peak_hour")}
+                definition={
+                  <MetricDefinition
+                    title={t("overview.definition.peak_hour.title")}
+                    body={t("overview.definition.peak_hour.body")}
+                    manual="pulse"
+                  />
+                }
               >
                 {formatHourRange(peakHour.peak_hour)}
               </FactRow>
@@ -258,6 +271,13 @@ export function OverviewHeroRow({
                 label={t("overview.hero_row.fact_concentration", { count: share.count })}
                 period={periodRange}
                 onClick={() => onOpenFact("concentration")}
+                definition={
+                  <MetricDefinition
+                    title={t("overview.definition.concentration.title")}
+                    body={t("overview.definition.concentration.body")}
+                    manual="pulse"
+                  />
+                }
               >
                 {share.share}
                 <span className="ov-hero-fact-unit">{t("overview.hero_row.fact_share_unit")}</span>
@@ -270,6 +290,13 @@ export function OverviewHeroRow({
               label={t("overview.hero_row.fact_late_routes", { min: severeThresholdMin })}
               period={t("overview.hero_row.fact_late_routes_period", { range, min: minSamples })}
               onClick={() => onOpenFact("late_routes")}
+              definition={
+                <MetricDefinition
+                  title={t("overview.definition.late_routes.title")}
+                  body={t("overview.definition.late_routes.body", { min: severeThresholdMin, floor: minSamples })}
+                  manual="pulse"
+                />
+              }
             >
               {severeCountDisplay}
               <span className="ov-hero-fact-unit">
@@ -283,16 +310,20 @@ export function OverviewHeroRow({
   );
 }
 
-/** One fact, dated: the facts count different windows, so each says which. */
+/** One fact, dated: the facts count different windows, so each says which.
+ *  Its definition sits beside the button, never inside it: a control nested
+ *  in a button would open the fact's card as well. */
 function FactRow({
   label,
   period,
   onClick,
+  definition,
   children,
 }: {
   label: string;
   period: string;
   onClick: () => void;
+  definition: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -305,6 +336,7 @@ function FactRow({
         <span className="ov-hero-fact-value num">{children}</span>
         <span className="ov-hero-fact-go" aria-hidden="true">›</span>
       </button>
+      {definition}
     </li>
   );
 }

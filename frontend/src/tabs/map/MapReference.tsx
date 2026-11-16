@@ -33,7 +33,6 @@ export function MapReference({ located, total, t }: {
         <button
           type="button"
           className="ops-map-ref__peek"
-          data-tour="map-reference"
           aria-label={t("operations.map.reference_show")}
           onClick={() => toggle(true)}
         >
@@ -44,7 +43,7 @@ export function MapReference({ located, total, t }: {
   }
 
   return (
-    <div className="ops-map-ref" data-tour="map-reference" aria-label={t("operations.map.legend_label")}>
+    <div className="ops-map-ref" aria-label={t("operations.map.legend_label")}>
       <div className="ops-map-ref__legend">
         <LegendChip color="var(--accent-strong)" label={t("operations.map.legend_current")} />
         <LegendChip color="var(--accent)" label={t("operations.map.legend_trail")} />

@@ -6,11 +6,15 @@ names it."""
 
 from __future__ import annotations
 
+import signal
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
-from db.migrate import _MIGRATIONS_DIR, data_losing_tables, is_destructive_down
+from db.migrate import _MIGRATIONS_DIR, data_losing_tables, is_destructive_down, rebuildable_agg_tables
 
 
 def test_classifier_counts_tables_columns_and_rows_but_not_indexes_or_rebuildable_aggs():
@@ -93,6 +97,67 @@ def test_classifier_counts_column_drops_but_not_other_alters_fk_actions_or_updat
     assert data_losing_tables(sql) == lost
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "DELETE FROM agg_route_daily WHERE date < '2025-01-01';",
+        "TRUNCATE agg_route_daily;",
+        "ALTER TABLE agg_route_daily DROP COLUMN late_samples;",
+        "ALTER TABLE agg_route_daily DROP late_samples;",
+        "DROP TABLE agg_route_daily;",
+        "ALTER TABLE agg_route_daily ADD COLUMN early_samples INT NOT NULL DEFAULT 0;",
+        "ALTER TABLE IF EXISTS ONLY public.agg_route_daily ADD early_samples INT;",
+        "ALTER TABLE agg_route_daily  DROP  late_samples;",
+        "ALTER TABLE agg_route_daily\n    DROP COLUMN late_samples;",
+        "ALTER TABLE agg_route_daily  ADD  early_samples INT;",
+        "ALTER TABLE agg_route_daily\n    ADD COLUMN early_samples INT;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples SET NOT NULL, ADD COLUMN early_samples INT;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples TYPE numeric(10, 2), DROP late_samples;",
+        "CREATE TABLE agg_route_daily (agency_id INT);",
+        "CREATE TABLE IF NOT EXISTS public.agg_route_daily (agency_id INT);",
+    ],
+)
+def test_a_retention_floor_makes_a_rebuildable_aggregate_lose_data(sql):
+    """Below the floor analyze rebuilds nothing, so a rebuildable aggregate's
+    rows there, or a column or a table analyze would fill, are restored by
+    nothing."""
+    assert data_losing_tables(sql) == []
+    assert data_losing_tables(sql, retention_floor=True) == ["agg_route_daily"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "ALTER TABLE agg_route_daily ADD CONSTRAINT c CHECK (samples >= 0);",
+        "ALTER TABLE agg_route_daily ADD PRIMARY KEY (agency_id, date);",
+        "ALTER TABLE agg_route_daily ADD UNIQUE (agency_id, date);",
+        "ALTER TABLE agg_route_daily ADD FOREIGN KEY (agency_id) REFERENCES agencies;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples SET DEFAULT 0;",
+        "CREATE INDEX idx_agg_route_daily_x ON agg_route_daily (date);",
+        "ALTER TABLE users ADD COLUMN nickname TEXT;",
+        "UPDATE agg_route_daily SET samples = 0 WHERE samples IS NULL;",
+        "ALTER TABLE agg_route_daily ADD  CONSTRAINT c CHECK (samples >= 0);",
+        "ALTER TABLE agg_route_daily ADD\n    CONSTRAINT c CHECK (samples >= 0);",
+        "ALTER TABLE agg_route_daily DROP  CONSTRAINT c;",
+        "ALTER TABLE agg_route_daily DROP\n    CONSTRAINT c;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;",
+        "ALTER TABLE agg_route_daily ALTER COLUMN samples DROP DEFAULT;",
+        "ALTER TABLE users DROP  CONSTRAINT users_pkey;",
+        "ALTER TABLE users\n    DROP CONSTRAINT users_pkey;",
+        "ALTER TABLE users ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY;",
+        "ALTER TABLE users ALTER COLUMN email DROP NOT NULL;",
+        "CREATE TABLE users_archive (user_id INT);",
+    ],
+)
+def test_a_retention_floor_leaves_constraints_indexes_and_other_tables_columns_alone(sql):
+    assert data_losing_tables(sql) == []
+    assert data_losing_tables(sql, retention_floor=True) == []
+
+
+def test_a_retention_floor_keeps_the_tables_already_counted():
+    assert data_losing_tables("DROP TABLE users, agg_meta;", retention_floor=True) == ["users", "agg_meta"]
+
+
 UP_FILES = sorted(_MIGRATIONS_DIR.glob("*.up.sql"))
 
 
@@ -126,3 +191,56 @@ def test_a_data_losing_down_migration_carries_the_marker(path: Path):
     lost = data_losing_tables(sql)
     if lost:
         assert is_destructive_down(sql), f"{path.name} loses data in {lost} but has no `-- DESTRUCTIVE` line"
+
+
+# Classifying one statement is linear in its length: migrate up classifies
+# every pending migration on each deploy. A pattern that backtracks
+# exponentially on a statement it does not match runs for hours instead.
+_CLASSIFY_SECONDS = 0.5
+
+
+class _TooSlow(Exception):
+    pass
+
+
+@contextmanager
+def _within(seconds: float) -> Iterator[None]:
+    """Fail, rather than hang, once *seconds* pass."""
+
+    def _expired(signum, frame):
+        raise _TooSlow(f"still classifying after {seconds}s")
+
+    previous = signal.signal(signal.SIGALRM, _expired)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@pytest.fixture(scope="module")
+def _rebuildable_loaded():
+    """The rebuildable set imports analyze once; that is not classification."""
+    rebuildable_agg_tables()
+
+
+@pytest.mark.parametrize("path", UP_FILES + DOWN_FILES, ids=lambda p: p.name)
+def test_every_migration_classifies_in_linear_time(path: Path, _rebuildable_loaded):
+    sql = path.read_text()
+    start = time.monotonic()
+    with _within(_CLASSIFY_SECONDS * 4):
+        data_losing_tables(sql)
+        data_losing_tables(sql, retention_floor=True)
+    assert time.monotonic() - start < _CLASSIFY_SECONDS
+
+
+def test_an_alter_of_many_subcommands_that_lose_nothing_classifies_in_linear_time(_rebuildable_loaded):
+    sql = (
+        "ALTER TABLE agg_route_daily\n"
+        + ",\n".join(f"    ADD CONSTRAINT c{i} CHECK (samples >= {i})" for i in range(30))
+        + ";"
+    )
+    with _within(_CLASSIFY_SECONDS):
+        assert data_losing_tables(sql) == []
+        assert data_losing_tables(sql, retention_floor=True) == []

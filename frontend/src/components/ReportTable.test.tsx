@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -20,7 +20,9 @@ function mockRoutes(data: RouteRecord[]) {
   vi.spyOn(hooks, "useRoutes").mockReturnValue({ data, isLoading: false } as never);
 }
 
-type TableProps = Partial<Pick<Parameters<typeof ReportTable>[0], "minSamples" | "sortBy" | "sortDirection" | "earlyDepartureSec">>;
+type TableProps = Partial<
+  Pick<Parameters<typeof ReportTable>[0], "minSamples" | "sortBy" | "sortDirection" | "earlyDepartureSec" | "showStatistics">
+>;
 
 function renderTable(rows: unknown[][], reportType = "route_table", props: TableProps = {}) {
   return renderWithProviders(
@@ -28,7 +30,7 @@ function renderTable(rows: unknown[][], reportType = "route_table", props: Table
       <Routes>
         <Route
           path="/agencies/:agencyId/analysis"
-          element={<ReportTable reportType={reportType} rows={rows} {...props} />}
+          element={<ReportTable reportType={reportType} rows={rows} {...props} showStatistics={props.showStatistics ?? true} />}
         />
       </Routes>
     </MemoryRouter>,
@@ -72,7 +74,7 @@ function renderWithNav(rows: unknown[][], go: (to: string) => void, reportType =
     <TestNav go={go}>
       <MemoryRouter initialEntries={["/agencies/1/analysis?from=2026-09-01"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} />} />
+          <Route path="/agencies/:agencyId/analysis" element={<ReportTable reportType={reportType} rows={rows} showStatistics />} />
         </Routes>
       </MemoryRouter>
     </TestNav>,
@@ -354,7 +356,7 @@ describe("ReportTable route links", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/1/routes?sort=late5_share&order=best&from=2026-09-01&dow=weekday"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("39061", 5.2)]} />} />
+          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("39061", 5.2)]} showStatistics />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -370,7 +372,7 @@ describe("ReportTable route links", () => {
     renderWithProviders(
       <MemoryRouter initialEntries={["/agencies/1/routes"]}>
         <Routes>
-          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("21111", 0.9)]} />} />
+          <Route path="/agencies/:agencyId/routes" element={<ReportTable reportType="route_table" rows={[tableRow("21111", 0.9)]} showStatistics />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -534,9 +536,59 @@ describe("ReportTable thinly observed rows", () => {
     expect(within(solidRow).queryByText("few data")).not.toBeInTheDocument();
   });
 
+  it("keeps the few-data badge in view on the sorted figure while the observation count is hidden", () => {
+    renderTable([tableRow("SPARSE", 9.1, { samples: 30 }), tableRow("SOLID", 2.0, { samples: 150 })], "route_table", {
+      minSamples: 100,
+      sortBy: "on_time",
+      showStatistics: false,
+    });
+    const [sparseRow, solidRow] = screen.getAllByRole("row").slice(1);
+    const badge = within(sparseRow).getByText("few data");
+    expect(badge.closest("td")).toHaveClass("report-cell--basis");
+    expect(within(solidRow).queryByText("few data")).not.toBeInTheDocument();
+  });
+
   it("marks nothing when the report states no floor", () => {
     renderTable([tableRow("SPARSE", 9.1, { samples: 30 })]);
     expect(screen.queryByText("few data")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReportTable statistics columns", () => {
+  beforeEach(() => mockRoutes([]));
+  afterEach(() => vi.restoreAllMocks());
+
+  const headers = () => screen.getAllByRole("columnheader").map((h) => h.textContent);
+
+  it.each([
+    ["route_table", tableRow("A", 6.0, { samples: 150 })],
+    ["dow_weekend", ["A", null, "土日祝", 4.2, 150]], // i18n-ignore: query contract
+  ])("leaves the %s observation count out unless statistics are asked for", (reportType, row) => {
+    renderTable([row], reportType, { showStatistics: false });
+    expect(headers()).not.toContain("Samples");
+    expect(screen.queryByText("150")).toBeNull();
+    cleanup();
+    renderTable([row], reportType, { showStatistics: true });
+    expect(headers()).toContain("Samples");
+  });
+
+  it("moves a thin day-type row's few-data badge onto its average while the count is hidden", () => {
+    renderTable(
+      [
+        ["THIN", null, "土日祝", 4.2, 40], // i18n-ignore: query contract
+        ["SOLID", null, "土日祝", 3.1, 150], // i18n-ignore: query contract
+      ],
+      "dow_weekend",
+      { showStatistics: false, minSamples: 100 },
+    );
+    const [thin, solid] = screen.getAllByRole("row").slice(1);
+    expect(within(within(thin).getAllByRole("cell")[2]).getByText("few data")).toHaveClass("caveat-badge");
+    expect(within(solid).queryByText("few data")).toBeNull();
+  });
+
+  it("keeps the wide-margin mark on the on-time rate with statistics hidden", () => {
+    renderTable([tableRow("A", 6.0, { onTime: 50.0, wide: true, margin: 7.3 })], "route_table", { showStatistics: false });
+    expect(screen.getByText("wide margin")).toBeInTheDocument();
   });
 });
 

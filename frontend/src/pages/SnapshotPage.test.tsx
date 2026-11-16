@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import i18n from "../i18n";
@@ -8,6 +8,13 @@ import type { DefinitionMeta, ReportFigures, ReportResponse, Route } from "../ap
 import type { Snapshot, SnapshotToday } from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
 import { SnapshotPage } from "./SnapshotPage";
+import { resetShowStatisticsForTests } from "../api/statisticsPref";
+
+// The statistics setting is per browser; each test starts from its default.
+afterEach(() => {
+  localStorage.removeItem("transit.showStatistics");
+  resetShowStatisticsForTests();
+});
 
 const ID = "AbCdEfGhIjKlMnOpQrStUv";
 
@@ -638,6 +645,9 @@ describe("SnapshotPage, a Routes table's side panels", () => {
     expect(await screen.findByText("A simulation, as stored")).toBeInTheDocument();
     const headway = screen.getByText("Headway quality").closest("div")!;
     expect(within(headway).getByText("+2 min")).toBeInTheDocument();
+    // The gap count is a statistic, shown on request as on the live screen.
+    expect(within(headway).queryByText("80")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show statistics" }));
     expect(within(headway).getByText("80")).toBeInTheDocument();
     expect(screen.getByText("Minimum performance standard")).toBeInTheDocument();
     expect(screen.queryByText(/before they were stored/)).toBeNull();

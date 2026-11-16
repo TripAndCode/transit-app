@@ -31,7 +31,6 @@ export function TopBar() {
     >
       <button
         type="button"
-        data-tour="ask-nav"
         className="topbar-search"
         aria-keyshortcuts="Meta+K Control+K"
         onClick={() => openCommandPalette()}

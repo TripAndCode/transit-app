@@ -342,6 +342,24 @@ export type DefinitionMeta = {
    *  period; null when the API stated none, and absent from a definition
    *  saved before the stamp carried them. */
   feed_quality?: FeedQuality[] | null;
+  /** Beside aggregates, the period's dates before each listed agency's
+   *  retention floor, with the method each was frozen under, whether or not
+   *  it is the current one; null when the period reaches no such date, for a
+   *  live scan, and absent from a definition saved before the stamp carried
+   *  them. */
+  pre_floor_methods?: PreFloorMethod[] | null;
+};
+
+/** Dates of the period before an agency's retention floor, whose aggregates
+ *  stand as analyze last built them, and the method they were built under:
+ *  the one in force when the drop that made them final was recorded. A null
+ *  `method_version` means that drop recorded none, so the method is unknown.
+ *  See pipeline/reports/definition.py's PreFloorMethod. */
+export type PreFloorMethod = {
+  agency_id: number;
+  from_date: string;
+  to_date: string;
+  method_version: string | null;
 };
 
 /** Why a feed-quality coverage is null: no observation in the period, or why

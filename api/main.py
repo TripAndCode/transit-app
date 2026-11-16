@@ -38,6 +38,7 @@ from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
 from api.query_timeout import clickhouse_error_handler
+from api.range_not_retained import range_not_retained_handler
 from api.routers.admin import router as admin_router
 from api.routers.admin_agencies import router as admin_agencies_router
 from api.routers.admin_ask import router as admin_ask_router
@@ -66,6 +67,7 @@ from api.sso import SSO_ENV as _AUTH_ENV
 from api.sso import sso_status as auth_status
 from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.flags import aflag, flag
+from pipeline.live_filing import RangeNotRetained
 from pipeline.query.llm_client import llm_available
 from pipeline.runs import reap_abandoned_runs_best_effort
 
@@ -303,6 +305,9 @@ app.add_exception_handler(asyncpg.exceptions.UndefinedTableError, aggregate_not_
 # A ClickHouse read that runs out its time budget answers a localized 504 the
 # client does not retry; any other ClickHouse error stays a 500.
 app.add_exception_handler(ClickHouseDatabaseError, clickhouse_error_handler)  # type: ignore[arg-type]
+# A live scan of `updates` over a range that starts before the agency's
+# retention floor answers a localized 422 naming the floor.
+app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 # Starlette wraps middleware in reverse-add order — the LAST add_middleware
 # call runs FIRST on each request. The add_middleware calls below, outermost
 # (runs first on a request) to innermost (closest to the routers):

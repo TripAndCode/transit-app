@@ -237,7 +237,11 @@ and where the floor lies. For an operator, that means:
   dates, in Postgres, in the ClickHouse aggregates or in the feed-quality
   scorecard.
 - A method or builder change rebuilds only the dates from the floor on, so
-  older aggregates keep the method they were built under.
+  older aggregates keep the method they were built under. Each drop records
+  the method in force (`updates_pruned_months.method_version`), and a report
+  or export whose period reaches dates before the floor names that method in
+  its stamp. Its text notes those dates only when their method is not the
+  current one, or was not recorded.
 - Rows that land below the floor later, from a backfill or a restamp, are never
   aggregated.
 - A ClickHouse/Postgres disagreement before the floor is never repaired. A
@@ -280,6 +284,27 @@ operator decides whether to keep the agency's rows or delete them: an agency
 `analyze_all` never visits, and dates without aggregates below an agency's
 floor, where analyze never builds.
 
+Once any agency has a floor, the migration runner treats the rebuildable
+aggregates like every other table (`db.migrate.data_losing_tables`): no analyze
+restores their rows below the floor. `migrate up`, which every deploy runs,
+refuses a pending migration that deletes, truncates or drops such rows or
+columns, adds a column analyze fills, or creates such a table, and applies
+nothing. The owner names each version, with `--allow-destructive-up VERSION`
+or `MIGRATE_ALLOW_DESTRUCTIVE_UP=V1,V2` in the environment of the deploy that
+runs it. `migrate down` refuses such a down migration, marked or not, without
+`--force-destructive`.
+
+A run that drops a month records the new floors, then waits
+`pipeline.retention.LIVE_REQUEST_DRAIN_SECONDS` before the first drop, so a
+live report that checked the old floor finishes before its rows go. It holds
+the affected agencies' ingest locks for that wait, so an analyze or promotion
+that meets it is turned away rather than queued: the cron poke is recorded
+`skipped` and the CLIs exit. Schedule `prune-updates` clear of the 00:05 JST
+poke. A run that drops nothing does not wait.
+
+`migrate up` reads whether a floor exists once, before it applies anything,
+so the first prune that ever records a floor must not overlap a deploy.
+
 A run that fails part-way leaves a `retention` row in `pipeline_runs` with the
 rows dropped so far. The months it did not reach stay in
 `updates_pruned_months` with `dropped_at` empty. Their floor stands, and the
@@ -287,15 +312,11 @@ next run drops them under a new row. So an empty `dropped_at` means only that
 the run which wrote the row did not confirm the drop; ClickHouse's
 `system.parts` says whether `updates` still holds the month.
 
-Before the prune is switched on in production, each of these must hold:
+Before the prune is switched on in production, this must hold:
 
-- The readers that scan `updates` live refuse or flag a range before the floor,
-  rather than show it as having no data: the delay certificate, the banded
-  fallbacks, the trend heatmap, the Ask tools and the map.
-- `db/migrate.py` and `scripts/dev_upgrade.py` treat `agg_*` as data-losing
-  once `updates_pruned_months` has rows.
-- An export spanning the floor records that its figures before the floor keep
-  the method they were built under.
+- A live read re-reads the floor after its last scan and refuses if the floor
+  moved past its start, so no partial answer is returned or cached. Until
+  then, the drain wait above bounds it by time.
 
 To turn it on in production:
 
