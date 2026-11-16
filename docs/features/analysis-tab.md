@@ -405,8 +405,8 @@ Rules the two sides share:
   a new tab opens every screen on its defaults, and it holds only the params
   a URL states outright, so the default period keeps rolling. Links whose
   job is to carry the current scope elsewhere (saved views) build their own
-  query. The signed-out restore on a fresh visit
-  (`anonymousFilterPersistence.ts`) is keyed per screen the same way.
+  query. The last-filter restore on a fresh visit (`filterPersistence.ts`) is
+  keyed per screen the same way.
 
 Every endpoint behind these screens returns `scope_applied`: one boolean per
 field in `api/scope_applied.py`'s `SCOPE_FIELDS`, saying whether this

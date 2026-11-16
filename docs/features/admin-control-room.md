@@ -234,8 +234,8 @@ Endpoints:
   `DELETE /api/admin/api-keys/{key_id}` — API keys scoped to one user.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
-and one at a time), `oauth_identities`, `api_keys`. Every mutation records an
-`admin_audit` entry.
+and one at a time), `oauth_identities`, `api_keys`, `ask_conversations`
+(deleted on delete). Every mutation records an `admin_audit` entry.
 
 Sign-in is for administrators only, and there is no invite. An admin is an
 address listed in `ADMIN_EMAILS`, created or promoted at its first OAuth
@@ -246,8 +246,10 @@ written.
 
 `DELETE /api/admin/users/{uid}` is a soft-delete. It anonymizes the row,
 sets `users.deleted_at`, revokes the user's API keys and replaces the owner
-address recorded on them. A deleted user is terminal. A single or bulk PATCH
-that includes one, a second DELETE, or a key issued to one each get a 409.
+address recorded on them, and deletes the user's `ask_conversations` (their
+Notebook investigations), cascading to `ask_conversation_messages`. A deleted
+user is terminal. A single or bulk PATCH that includes one, a second DELETE,
+or a key issued to one each get a 409.
 The list and drawer label the row Deleted and offer no Resume control.
 
 The drawer's "Usage (last 30 days)" section reads

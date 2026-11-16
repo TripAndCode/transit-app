@@ -567,8 +567,9 @@ async def delete_user(
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
     """Soft-delete: anonymize PII, suspend, mark deleted, revoke and
-    anonymize API keys, drop sessions + identities, keep ``login_events``
-    intact for audit.
+    anonymize API keys, drop sessions + identities, delete the user's
+    Notebook investigations (``ask_conversations``, cascading to their
+    messages), keep ``login_events`` intact for audit.
 
     Last-admin guard fires only if the target is currently an active
     admin (i.e. role=admin AND not suspended) — suspending an already-
@@ -609,6 +610,9 @@ async def delete_user(
         )
         await conn.execute("DELETE FROM sessions WHERE user_id=$1", uid)
         await conn.execute("DELETE FROM oauth_identities WHERE user_id=$1", uid)
+        deleted_conversations = await conn.fetch(
+            "DELETE FROM ask_conversations WHERE user_id=$1 RETURNING conversation_id", uid
+        )
         await record_event(conn, user_id=uid, actor_id=admin.user_id, kind="deleted", ip=ip, user_agent=ua)
         await record_admin_action(
             conn,
@@ -626,6 +630,7 @@ async def delete_user(
                 "email": anonymized,
                 "deleted_at": deleted_at,
                 "api_keys_revoked": sorted(r["id"] for r in revoked),
+                "ask_conversations_deleted": len(deleted_conversations),
             },
             ip=ip,
         )
