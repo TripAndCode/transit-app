@@ -24,8 +24,8 @@ Soft-delete preserves the audit trail: rows in ``login_events`` survive
 (FK is ``ON DELETE SET NULL``), but the user's PII is anonymized
 (``email -> deleted-{uid}@local``, name/avatar nulled), sessions are
 killed, and OAuth identities are removed so re-login under the same
-provider sub creates a fresh user. The user's API keys are revoked and
-their recorded owner address is replaced with the anonymized one.
+provider sub creates a fresh user. The user's Notebook investigations are
+deleted with their messages.
 
 A soft-delete is terminal and ``deleted_at`` records it. Suspension alone
 is reversible, so the routes that change a user refuse a deleted row with a
@@ -68,7 +68,6 @@ from api.routers.agencies import AdminAgencyOut
 from api.security import User, csrf_guard, require_admin
 from api.sqlutil import escape_like
 from pipeline.admin_users import SessionPrefixError, resolve_session_prefix, session_id_prefix
-from pipeline.api_key_ownership import OWNED_BY_USER
 from pipeline.audit import record_event
 from pipeline.query import admin_audit as _admin_audit
 from pipeline.query import agencies as _agencies
@@ -563,10 +562,10 @@ async def delete_user(
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> Response:
-    """Soft-delete: anonymize PII, suspend, mark deleted, revoke and
-    anonymize API keys, drop sessions + identities, delete the user's
-    Notebook investigations (``ask_conversations``, cascading to their
-    messages), keep ``login_events`` intact for audit.
+    """Soft-delete: anonymize PII, suspend, mark deleted, drop sessions +
+    identities, delete the user's Notebook investigations
+    (``ask_conversations``, cascading to their messages), keep
+    ``login_events`` intact for audit.
 
     Last-admin guard fires only if the target is currently an active
     admin (i.e. role=admin AND not suspended) — suspending an already-
@@ -586,14 +585,6 @@ async def delete_user(
         if row["role"] == "admin" and row["suspended_at"] is None and other_active_admins == 0:
             raise HTTPException(400, "would leave no admins")
         anonymized = f"deleted-{uid}@local"
-        # Revoke before masking: a legacy ownerless key is matched by the
-        # address the mask replaces.
-        revoked = await conn.fetch(
-            f"UPDATE api_keys SET revoked_at = now() WHERE {OWNED_BY_USER} AND revoked_at IS NULL RETURNING id",
-            uid,
-            row["email"],
-        )
-        await conn.execute(f"UPDATE api_keys SET owner_email = $3 WHERE {OWNED_BY_USER}", uid, row["email"], anonymized)
         deleted_at = await conn.fetchval(
             """
             UPDATE users
@@ -626,7 +617,6 @@ async def delete_user(
             after={
                 "email": anonymized,
                 "deleted_at": deleted_at,
-                "api_keys_revoked": sorted(r["id"] for r in revoked),
                 "ask_conversations_deleted": len(deleted_conversations),
             },
             ip=ip,

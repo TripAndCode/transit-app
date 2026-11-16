@@ -3,9 +3,9 @@
 import pytest
 
 _UPSERT = """
-    INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
-    VALUES ($1, DATE '2026-01-05', '/api/me', 'GET', NULL, false, 1, 0)
-    ON CONFLICT (user_id, day, route, method, (COALESCE(agency_id, 0)), via_api_key) DO UPDATE SET
+    INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, requests, errors)
+    VALUES ($1, DATE '2026-01-05', '/api/me', 'GET', NULL, 1, 0)
+    ON CONFLICT (user_id, day, route, method, (COALESCE(agency_id, 0))) DO UPDATE SET
         requests = user_activity_daily.requests + EXCLUDED.requests
 """
 

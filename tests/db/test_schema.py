@@ -15,12 +15,10 @@ EXPECTED_TABLES = [
     "agg_route_hour",
     "agg_daily_trend",
     "rag_chunks",
-    "api_keys",
     "users",
     "oauth_identities",
     "sessions",
     "login_events",
-    "filter_presets",
     "rt_field_coverage_probes",
     "stop_clusters",
 ]
@@ -73,36 +71,6 @@ def test_agencies_has_trip_id_pattern(pg_conn):
             WHERE table_name = 'agencies' AND column_name = 'trip_id_pattern'
         """)
         assert cur.fetchone() is not None, "agencies.trip_id_pattern column missing"
-
-
-def test_api_keys_columns(pg_conn):
-    with pg_conn.cursor() as cur:
-        cur.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'api_keys'
-            ORDER BY column_name
-        """)
-        cols = {r[0] for r in cur.fetchall()}
-    assert {"key", "owner_email", "tier", "created_at", "key_hash", "revoked_at", "expires_at"} <= cols
-
-
-def test_api_keys_are_keyed_by_hash(pg_conn):
-    """0053 moves the primary key onto the digest and lets the raw key go NULL,
-    so a row can exist that holds no replayable credential."""
-    with pg_conn.cursor() as cur:
-        cur.execute("""
-            SELECT a.attname
-            FROM pg_index i
-            JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-            WHERE i.indrelid = 'api_keys'::regclass AND i.indisprimary
-        """)
-        assert {r[0] for r in cur.fetchall()} == {"key_hash"}
-        cur.execute("""
-            SELECT column_name, is_nullable FROM information_schema.columns
-            WHERE table_name = 'api_keys' AND column_name IN ('key', 'key_hash')
-            ORDER BY column_name
-        """)
-        assert cur.fetchall() == [("key", "YES"), ("key_hash", "NO")]
 
 
 def test_sessions_are_keyed_by_hash(pg_conn):

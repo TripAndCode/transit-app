@@ -40,7 +40,8 @@ def test_up_lowercases_the_stored_addresses(pg_conn):
         with pg_conn.cursor() as cur:
             cur.execute("INSERT INTO users (email) VALUES ('Up.Case@X')")
         pg_conn.commit()
-        migrate.migrate_up(pg_conn)
+        # 0071 alone: a later migration deletes reader accounts like this one.
+        migrate._run_up("0071", pg_conn)
         assert _emails(pg_conn, "up.case@x") == ["up.case@x"]
     finally:
         pg_conn.rollback()
