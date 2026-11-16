@@ -1,9 +1,10 @@
 import asyncio
 from datetime import date
 
-from api.activity import ActivityBuffer, ActivityKey, agency_id_from, flush
+from api.activity import ActivityBuffer, ActivityKey, AnonymousKey, agency_id_from, flush
 
 _KEY = ActivityKey(1, date(2026, 1, 5), "/api/{agency_id}/overview/summary", "GET", 3, False)
+_ANON_KEY = AnonymousKey(date(2026, 1, 5), "/api/agencies", "GET", None)
 
 
 def test_counts_add_up_per_key_and_errors_separately():
@@ -20,11 +21,28 @@ def test_drain_empties_the_buffer():
     assert buf.drain() == {}
 
 
+def test_the_buffer_is_generic_over_the_anonymous_key_too():
+    buf: ActivityBuffer[AnonymousKey] = ActivityBuffer()
+    buf.record(_ANON_KEY, is_error=False)
+    buf.record(_ANON_KEY, is_error=True)
+    assert buf.drain() == {_ANON_KEY: [2, 1]}
+
+
 def test_agency_id_comes_from_the_path_parameter_when_it_is_a_number():
     assert agency_id_from({"agency_id": "7"}) == 7
     assert agency_id_from({"agency_id": "nope"}) is None
     assert agency_id_from({}) is None
     assert agency_id_from(None) is None
+
+
+def test_agency_id_outside_postgres_int4_range_is_treated_as_absent():
+    # A signed-out caller supplies this path segment directly; a value
+    # asyncpg can't encode as int4 would otherwise fail the whole flush
+    # batch, not just this one key.
+    assert agency_id_from({"agency_id": "99999999999"}) is None
+    assert agency_id_from({"agency_id": "-99999999999"}) is None
+    assert agency_id_from({"agency_id": str(2**31 - 1)}) == 2**31 - 1
+    assert agency_id_from({"agency_id": str(2**31)}) is None
 
 
 class _FailingPool:

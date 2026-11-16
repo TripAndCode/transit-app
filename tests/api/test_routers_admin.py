@@ -585,6 +585,73 @@ async def test_user_activity_is_admin_only_and_bounded(admin_client, aconn):
     assert r.status_code == 422
 
 
+@pytest.mark.asyncio
+async def test_usage_is_unauthenticated_401_and_non_admin_403(admin_client, aconn):
+    assert (await admin_client.get("/api/admin/usage")).status_code == 401
+    sid_user, _, _ = await _seed(aconn, role="user")
+    assert (await admin_client.get("/api/admin/usage", cookies={"sid": sid_user})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_usage_splits_signed_in_api_key_and_signed_out_and_zero_fills_days(admin_client, aconn):
+    sid_admin, uid, _ = await _seed(aconn, role="admin")
+    await aconn.execute(
+        """
+        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
+        VALUES ($1, current_date, '/api/agencies', 'GET', NULL, false, 2, 1),
+               ($1, current_date, '/api/agencies', 'GET', NULL, true,  5, 0)
+        """,
+        uid,
+    )
+    await aconn.execute(
+        """
+        INSERT INTO anonymous_activity_daily (day, route, method, agency_id, requests, errors)
+        VALUES (current_date, '/api/agencies', 'GET', NULL, 7, 2)
+        """
+    )
+    r = await admin_client.get("/api/admin/usage?days=3", cookies={"sid": sid_admin})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["routes"] == [
+        {"route": "/api/agencies", "method": "GET", "signed_out": 7, "signed_in": 2, "api_key": 5, "errors": 3}
+    ]
+    assert len(body["days"]) == 3
+    assert body["days"][-1] == {
+        "day": datetime.now(timezone.utc).date().isoformat(),
+        "signed_out": 7,
+        "signed_in": 2,
+        "api_key": 5,
+    }
+    assert body["days"][0] == {"day": body["days"][0]["day"], "signed_out": 0, "signed_in": 0, "api_key": 0}
+
+
+@pytest.mark.asyncio
+async def test_usage_filters_by_agency_and_excludes_the_window_boundary_day(admin_client, aconn):
+    sid_admin, _, _ = await _seed(aconn, role="admin")
+    await aconn.execute(
+        """
+        INSERT INTO anonymous_activity_daily (day, route, method, agency_id, requests, errors)
+        VALUES (current_date,      '/api/{agency_id}/overview/summary', 'GET', 1, 3, 0),
+               (current_date,      '/api/{agency_id}/overview/summary', 'GET', 2, 9, 0),
+               (current_date - 30, '/api/{agency_id}/overview/summary', 'GET', 1, 4, 0)
+        """
+    )
+    r = await admin_client.get("/api/admin/usage?days=30&agency_id=1", cookies={"sid": sid_admin})
+    assert r.status_code == 200
+    # Only agency 1's requests count, and the row exactly 30 days ago (the
+    # window's boundary, not strictly inside it) is excluded.
+    assert r.json()["routes"] == [
+        {
+            "route": "/api/{agency_id}/overview/summary",
+            "method": "GET",
+            "signed_out": 3,
+            "signed_in": 0,
+            "api_key": 0,
+            "errors": 0,
+        }
+    ]
+
+
 _ORIGINAL_SUSPENSION = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
 

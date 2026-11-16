@@ -37,6 +37,7 @@ from api.middleware.login_gate import LoginRequiredMiddleware, enforcement_activ
 from api.middleware.ratelimit import limiter
 from api.middleware.request_log import RequestLogMiddleware
 from api.middleware.session import SessionMiddleware
+from api.middleware.usage import UsageCountMiddleware
 from api.query_timeout import clickhouse_error_handler
 from api.range_not_retained import range_not_retained_handler, recheck_live_reads
 from api.routers.admin import router as admin_router
@@ -319,6 +320,7 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 #   SessionMiddleware              (loads request.state.user from sid cookie)
 #   APIKeyMiddleware               (loads request.state.tier from X-API-Key)
 #   LoginRequiredMiddleware        (401s a signed-out caller while sign-in is required)
+#   UsageCountMiddleware           (counts each finished /api/ request, signed in or out)
 #   LocaleMiddleware               (parses Accept-Language → request.state.locale)
 #   CancelGETOnDisconnectMiddleware (cancels GET handler tasks when the client
 #                                    disconnects, so aborted SPA fetches also
@@ -329,6 +331,7 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 # router runs, which is what we want.
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
+app.add_middleware(UsageCountMiddleware)
 app.add_middleware(LoginRequiredMiddleware)
 app.add_middleware(APIKeyMiddleware)
 app.add_middleware(SessionMiddleware)

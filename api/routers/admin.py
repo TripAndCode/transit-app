@@ -713,6 +713,136 @@ async def user_activity(
     return [ActivityTotal(**dict(r)) for r in rows]
 
 
+class AdminUsageRouteRow(BaseModel):
+    """One route template's requests over the window, split by caller kind."""
+
+    route: str
+    method: str
+    signed_out: int
+    signed_in: int
+    api_key: int
+    errors: int
+
+
+class AdminUsageDayRow(BaseModel):
+    """One day's totals, zero-filled when the day had no traffic."""
+
+    day: date
+    signed_out: int
+    signed_in: int
+    api_key: int
+
+
+class AdminUsageOut(BaseModel):
+    from_: str = Field(serialization_alias="from")
+    to: str
+    routes: list[AdminUsageRouteRow]
+    days: list[AdminUsageDayRow]
+
+
+_USAGE_ANON_ROUTES_SQL = """
+    SELECT route, method, SUM(requests)::int AS requests, SUM(errors)::int AS errors
+    FROM anonymous_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY route, method
+"""
+
+_USAGE_USER_ROUTES_SQL = """
+    SELECT route, method,
+           COALESCE(SUM(requests) FILTER (WHERE NOT via_api_key), 0)::int AS signed_in,
+           COALESCE(SUM(requests) FILTER (WHERE via_api_key), 0)::int AS api_key,
+           COALESCE(SUM(errors), 0)::int AS errors
+    FROM user_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY route, method
+"""
+
+_USAGE_ANON_DAYS_SQL = """
+    SELECT day, SUM(requests)::int AS requests
+    FROM anonymous_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY day
+"""
+
+_USAGE_USER_DAYS_SQL = """
+    SELECT day,
+           COALESCE(SUM(requests) FILTER (WHERE NOT via_api_key), 0)::int AS signed_in,
+           COALESCE(SUM(requests) FILTER (WHERE via_api_key), 0)::int AS api_key
+    FROM user_activity_daily
+    WHERE day > $1 AND ($2::int IS NULL OR agency_id = $2)
+    GROUP BY day
+"""
+
+
+@router.get("/usage", response_model=AdminUsageOut)
+async def admin_usage(
+    days: int = Query(30, ge=1, le=400),
+    agency_id: int | None = Query(None),
+    _admin: User = Depends(require_admin),
+    conn: asyncpg.Connection = Depends(get_conn),
+) -> AdminUsageOut:
+    """Requests per route template per day, split by signed-out, signed-in
+    and API-key traffic, over the trailing ``days`` JST days ending today.
+    Either table missing (a deployment behind on migrations) degrades to an
+    empty contribution rather than a 500."""
+    today = today_jst(datetime.now(timezone.utc))
+    since = today - timedelta(days=days)
+
+    try:
+        anon_routes = await conn.fetch(_USAGE_ANON_ROUTES_SQL, since, agency_id)
+        anon_days = await conn.fetch(_USAGE_ANON_DAYS_SQL, since, agency_id)
+    except asyncpg.exceptions.UndefinedTableError:
+        anon_routes, anon_days = [], []
+
+    try:
+        user_routes = await conn.fetch(_USAGE_USER_ROUTES_SQL, since, agency_id)
+        user_days = await conn.fetch(_USAGE_USER_DAYS_SQL, since, agency_id)
+    except asyncpg.exceptions.UndefinedTableError:
+        user_routes, user_days = [], []
+
+    routes: dict[tuple[str, str], dict[str, int]] = {}
+    for r in anon_routes:
+        routes[(r["route"], r["method"])] = {
+            "signed_out": r["requests"],
+            "signed_in": 0,
+            "api_key": 0,
+            "errors": r["errors"],
+        }
+    for r in user_routes:
+        entry = routes.setdefault(
+            (r["route"], r["method"]), {"signed_out": 0, "signed_in": 0, "api_key": 0, "errors": 0}
+        )
+        entry["signed_in"] = r["signed_in"]
+        entry["api_key"] = r["api_key"]
+        entry["errors"] += r["errors"]
+    route_rows = [
+        AdminUsageRouteRow(route=route, method=method, **counts) for (route, method), counts in routes.items()
+    ]
+    route_rows.sort(key=lambda row: (-(row.signed_out + row.signed_in + row.api_key), row.route, row.method))
+
+    by_day: dict[date, dict[str, int]] = {}
+    for r in anon_days:
+        by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0, "api_key": 0})["signed_out"] = r["requests"]
+    for r in user_days:
+        entry = by_day.setdefault(r["day"], {"signed_out": 0, "signed_in": 0, "api_key": 0})
+        entry["signed_in"] = r["signed_in"]
+        entry["api_key"] = r["api_key"]
+
+    day_rows = []
+    cursor = since + timedelta(days=1)
+    while cursor <= today:
+        counts = by_day.get(cursor, {"signed_out": 0, "signed_in": 0, "api_key": 0})
+        day_rows.append(AdminUsageDayRow(day=cursor, **counts))
+        cursor += timedelta(days=1)
+
+    return AdminUsageOut(
+        from_=str(since + timedelta(days=1)),
+        to=str(today),
+        routes=route_rows,
+        days=day_rows,
+    )
+
+
 @router.delete("/users/{uid}/sessions/{sid_prefix}", status_code=204)
 async def revoke_user_session(
     uid: int,
