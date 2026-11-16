@@ -341,7 +341,9 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 > automatically, same effect as `scripts/fetch_and_ingest.sh`'s explicit
 > `continue` on exit 75. `ingest` also exits 75 when it could not leave a day
 > with one source (`pipeline/archive_replace.py`); a retry over the same
-> archives settles it. But unlike that script's local replay, this job's
+> archives settles it. Once the retries run out, the day keeps both sources,
+> and `analyze_all` counts it twice until a later ingest whose folder reaches
+> it settles it. But unlike that script's local replay, this job's
 > `/tmp/zips` is on **ephemeral** compute and the bucket pull is a
 > **two-day window** (the two UTC days before the run) — a skipped
 > agency's newer day is pulled once more by the next run, but its older day

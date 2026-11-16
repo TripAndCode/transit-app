@@ -636,7 +636,8 @@ def cmd_check_aggs(args):
     archive has yet to replace, not a stale aggregate. Nor does a day holding
     both sources, though analyze counts it twice: dev's upgrade runs this
     check with no sanctioned way to settle one, and the next archive ingest
-    whose folder reaches the day returns it to its live copy.
+    whose folder reaches the day settles it: to its archive when that folder
+    covers it, else to its live copy.
     """
     from pipeline.clickhouse import get_client
     from pipeline.freshness import check_agg_freshness, day_ranges, live_sourced_days, two_source_days
@@ -657,7 +658,8 @@ def cmd_check_aggs(args):
     for agency_id, mixed in both.items():
         logger.warning(
             f"TWO SOURCES agency {agency_id}: {day_ranges(mixed)} hold archive and live rows at once, which analyze "
-            "counts twice; the next archive ingest whose folder reaches the day returns it to its live copy"
+            "counts twice; the next archive ingest whose folder reaches the day settles it: to its archive when "
+            "that folder covers it, else to its live copy"
         )
     for s in stale:
         logger.error(

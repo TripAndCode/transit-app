@@ -38,7 +38,6 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from pipeline.agg_sql import EARLIEST_CAPTURE
 from pipeline.clickhouse import LIVE_SOURCED, jst_date, jst_midnight_utc, majority_source, newest_filed_date_before
 from pipeline.retention import retention_floors
 
@@ -135,9 +134,17 @@ def day_ranges(days: list[date]) -> str:
     return ", ".join(str(run[0]) if len(run) == 1 else f"{run[0]}..{run[-1]}" for run in runs)
 
 
+# Service dates whose ledger counts both sources, by agency. A service date
+# runs from 04:00 on its JST day to 04:00 the next, so it can straddle a
+# replaced day and a live one; `updates` then says which JST day holds both.
+_BOTH_SOURCE_DATES_SQL = (
+    "SELECT agency_id, date FROM agg_feed_health "
+    "WHERE agency_id = ANY(%s) AND archive_rows > 0 AND live_rows > 0 ORDER BY agency_id, date"
+)
 _TWO_SOURCE_DAYS_SQL = (
     "SELECT toDate(captured_at, 'Asia/Tokyo') AS day FROM updates "
-    "WHERE agency_id = {agency_id:UInt16} AND captured_at >= {since:DateTime64} AND captured_at < {before:DateTime64} "
+    "WHERE agency_id = {agency_id:UInt16} AND captured_at >= {lo:DateTime64} AND captured_at < {hi:DateTime64} "
+    "AND has({days:Array(Date)}, toDate(captured_at, 'Asia/Tokyo')) "
     f"GROUP BY day HAVING countIf({LIVE_SOURCED}) > 0 AND countIf(NOT {LIVE_SOURCED}) > 0 ORDER BY day"
 )
 
@@ -148,19 +155,31 @@ def two_source_days(
     """Each agency's closed JST days after its retention floor on which
     `updates` holds rows from both the archive and the live path: a
     replacement an ingest left unfinished (pipeline.archive_replace), which
-    analyze counts twice. Judged from `updates` itself, by JST day, since a
-    service date in agg_feed_health legitimately straddles a replaced day
-    and a live one. Read-only."""
+    analyze counts twice. Only the JST days of the service dates whose
+    agg_feed_health counts both sources are read, so a day analyze has not
+    built since it came to hold both is not found until it has, which is
+    also when its aggregates first count it twice. Read-only."""
     ids = sorted(set(agency_ids))
     floors = retention_floors(conn, ids)
-    before = jst_midnight_utc(jst_date(now or datetime.now(ZoneInfo("UTC"))))
-    found: dict[int, list[date]] = {}
-    for agency_id in ids:
+    today = jst_date(now or datetime.now(ZoneInfo("UTC")))
+    with conn.cursor() as cur:
+        cur.execute(_BOTH_SOURCE_DATES_SQL, (ids,))
+        dates = cur.fetchall()
+    suspects: dict[int, set[date]] = {}
+    for agency_id, service_date in dates:
         floor = floors.get(agency_id)
-        since = EARLIEST_CAPTURE if floor is None else jst_midnight_utc(floor + timedelta(days=1))
-        rows = ch_client.query(
-            _TWO_SOURCE_DAYS_SQL, parameters={"agency_id": agency_id, "since": since, "before": before}
-        ).result_rows
+        for day in (service_date, service_date + timedelta(days=1)):
+            if day < today and (floor is None or day > floor):
+                suspects.setdefault(agency_id, set()).add(day)
+    found: dict[int, list[date]] = {}
+    for agency_id, days in sorted(suspects.items()):
+        params = {
+            "agency_id": agency_id,
+            "lo": jst_midnight_utc(min(days)),
+            "hi": jst_midnight_utc(max(days) + timedelta(days=1)),
+            "days": sorted(days),
+        }
+        rows = ch_client.query(_TWO_SOURCE_DAYS_SQL, parameters=params).result_rows
         if rows:
             found[agency_id] = [row[0] for row in rows]
     return found

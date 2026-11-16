@@ -320,6 +320,13 @@ def test_a_push_stamped_after_midnight_matches_its_member_stamped_before(pg_conn
 
     assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
     assert day_sources(ch_client, agency_id, D - _DAY) == DaySources(0, 0, 2, 1)
+    # The poll on the boundary is held by neither copy: accepted (archive_replace).
+    straddling = [_member_name(header), f"oracle/{_member_name(header)}"]
+    held = ch_client.query(
+        "SELECT count() FROM updates WHERE agency_id = {a:UInt16} AND has({names:Array(String)}, file_name)",
+        parameters={"a": agency_id, "names": straddling},
+    ).result_rows
+    assert held == [(0,)]
 
 
 def test_an_insert_that_lands_before_it_fails_is_taken_back(pg_conn, ch_client, agency_id, tmp_path):
@@ -380,6 +387,7 @@ def test_check_aggs_warns_of_a_day_holding_both_sources_without_failing(
     _complete_archive(tmp_path)
     with patch.object(archive_replace, "settle", return_value=0):
         _ingest(tmp_path, agency_id, pg_conn, ch_client)
+    analyze(agency_id, pg_conn, ch_client)
     assert freshness.two_source_days(pg_conn, ch_client, [agency_id]) == {agency_id: [D]}
 
     gtfs_pipeline.cmd_check_aggs(None)
@@ -410,10 +418,10 @@ def test_a_day_with_no_push_keeps_its_live_samples(pg_conn, ch_client, agency_id
     assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 2, 0)
 
 
-def test_a_day_whose_tarball_fails_before_this_run_stored_any_is_left_as_it_is(pg_conn, ch_client, agency_id, tmp_path):
+def test_an_unfinished_day_whose_tarball_fails_on_the_rerun_returns_to_live(pg_conn, ch_client, agency_id, tmp_path):
     """A run died after storing all of D's archive. The rerun cannot open
-    tarball D-1 and reads every member of D's own tarball from the skip-list,
-    so it stores nothing of D and has no ground to delete what is there."""
+    tarball D-1, so it has not read D's archive itself: D keeps its live copy
+    rather than both."""
     _promote(ch_client, agency_id, _LIVE_POLLS)
     _complete_archive(tmp_path)
     with patch.object(archive_replace, "settle", return_value=0):
@@ -422,7 +430,45 @@ def test_a_day_whose_tarball_fails_before_this_run_stored_any_is_left_as_it_is(p
 
     _ingest(tmp_path, agency_id, pg_conn, ch_client)
 
-    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 4, 2)
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 4, 2)
+
+
+def test_a_replaced_day_is_untouched_when_its_tarball_later_fails(pg_conn, ch_client, agency_id, tmp_path):
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+    (tmp_path / f"{D - _DAY:%Y%m%d}.tar.gz").write_bytes(b"not a tarball")
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+
+
+def test_a_day_with_no_push_is_refused_before_any_of_its_archive_goes_in(pg_conn, ch_client, agency_id, tmp_path):
+    """Nothing could ever replace it, so its archive is not stored only to be deleted again."""
+    samples = [_at(D, 6), _at(D, 18)]
+    insert_updates(
+        ch_client,
+        agency_id,
+        [(f"live_{at:%Y%m%dT%H%M%SZ}", at, "T1", "平日", "12:00", "R1", 1, 60) for at in samples],
+    )
+    _complete_archive(tmp_path)
+
+    with patch.object(archive_replace, "_delete", side_effect=AssertionError("nothing should be deleted")):
+        assert _ingest(tmp_path, agency_id, pg_conn, ch_client) == 0
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(0, 0, 2, 0)
+
+
+def test_a_failed_look_for_unfinished_days_still_settles_the_covered_ones(pg_conn, ch_client, agency_id, tmp_path):
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    _complete_archive(tmp_path)
+
+    with patch.object(archive_replace, "residue", side_effect=OperationalError("query timed out")):
+        with pytest.raises(archive_replace.ReplacementIncomplete, match="unfinished days"):
+            _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
 
 
 def test_a_strict_run_reports_its_skipped_files_before_an_unsettled_day(pg_conn, ch_client, agency_id, tmp_path):

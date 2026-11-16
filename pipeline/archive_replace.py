@@ -23,13 +23,18 @@ Complete means all of these, judged by that run:
   them. The stored side is read _MEMBER_REACH either side of the day, the
   furthest archive_captured_at stamps a member from its name.
 
+A poll whose member is stamped on a neighbouring day that keeps its live copy
+is refused there, while its push is deleted with the replaced day's live copy:
+neither copy then holds it. That costs at most the polls straddling the
+boundary of a replaced day, and is accepted, since keeping the push would
+leave a day with both sources.
+
 The archive's rows are inserted first, through ingest's own batches, and only
 then are the live-sourced rows of exactly that agency and JST day deleted
 (settle), so the day never lacks both sources. Partition replacement could
 swap them atomically, but `updates` is partitioned by month. A day whose
 archive turns out incomplete has its archive rows deleted instead, back to its
-live copy, and a later run over both of its tarballs reads them again. A day
-whose file failed before this run stored anything of it is left as stored.
+live copy, and a later run over both of its tarballs reads them again.
 
 Ingest holds the agency's `updates` lock (pipeline.locks.agency_ingest_lock)
 from the first insert to the last delete, so analyze never reads a day holding
@@ -128,13 +133,36 @@ def above_floor(day: date, floor: date | None) -> bool:
     return floor is None or filed_dates(day)[0] >= floor
 
 
+def _pushed_days(ch, agency_id: int, days: set[date]) -> set[date]:
+    if not days:
+        return set()
+    rows = ch.query(
+        f"SELECT DISTINCT toDate(captured_at, 'Asia/Tokyo') FROM {UPDATES_TABLE} "
+        "WHERE agency_id = {agency_id:UInt16} AND captured_at >= {lo:DateTime64} AND captured_at < {hi:DateTime64} "
+        f"AND {COLLECTOR_PUSHED} AND has({{days:Array(Date)}}, toDate(captured_at, 'Asia/Tokyo'))",
+        parameters={
+            "agency_id": agency_id,
+            "lo": jst_midnight_utc(min(days)),
+            "hi": jst_midnight_utc(max(days) + _DAY),
+            "days": sorted(days),
+        },
+    ).result_rows
+    return {row[0] for row in rows}
+
+
 def candidates(ch, agency_id: int, covered: set[date], floor: date | None) -> set[date]:
-    """The days among *covered* that hold live-sourced rows and may be replaced."""
+    """The days among *covered* that hold live-sourced rows and may be
+    replaced: above the floor, and with a push to check the archive against
+    (settle), so a day that could never be replaced is refused before any
+    of its archive rows go in."""
     live = days_with_source(ch, agency_id, covered, live_sourced=True)
     final = {day for day in live if not above_floor(day, floor)}
     for day in sorted(final):
         logger.warning(f"  {day} holds promoted live rows but is final (retention floor {floor}); it stays live")
-    return live - final
+    unpushed = live - final - _pushed_days(ch, agency_id, live - final)
+    for day in sorted(unpushed):
+        logger.warning(f"  {day} holds live rows but no collector push to check its archive against; it stays live")
+    return live - final - unpushed
 
 
 def residue(ch, agency_id: int, span: Collection[date], floor: date | None, today: date) -> set[date]:
@@ -178,9 +206,11 @@ def unarchived_pushes(ch, agency_id: int, day: date, read: Collection[str]) -> i
 def _delete(ch, agency_id: int, day: date, *, live: bool) -> None:
     predicate = LIVE_SOURCED if live else f"NOT {LIVE_SOURCED}"
     lo, hi = _window(day)
-    # The day's rows can change for as many others, which refiled's row count cannot see.
-    first, last = filed_dates(day)
-    refiled.rows_rewritten(ch, [agency_id], [first + _DAY * i for i in range((last - first).days + 1)])
+    if live:
+        # The day's rows can change for as many others, which refiled's row
+        # count cannot see. Taking the archive back restores what was built.
+        first, last = filed_dates(day)
+        refiled.rows_rewritten(ch, [agency_id], [first + _DAY * i for i in range((last - first).days + 1)])
     ch.command(
         f"DELETE FROM {UPDATES_TABLE} WHERE {_WINDOW} AND {predicate}",
         parameters={"agency_id": agency_id, "lo": lo, "hi": hi},
@@ -238,18 +268,13 @@ def settle_all(
     *,
     read: Collection[str],
     failed: Collection[date],
-    stored: Collection[date],
 ) -> tuple[int, list[str]]:
     """Settle each of *covered* (settle) and return each of *unfinished* to
     its live copy, each day on its own so one failure leaves the rest settled.
-    A covered day in *failed* that this run stored nothing of (*stored*) is
-    left as it is. Returns the archive rows deleted and each failure."""
+    Returns the archive rows deleted and each failure."""
     rolled_back, failures = 0, []
     plans = [(day, True) for day in covered] + [(day, False) for day in unfinished]
     for day, is_covered in sorted(plans):
-        if is_covered and day in failed and day not in stored:
-            logger.warning(f"  {day}: a file of it failed before this run stored any; left as it is")
-            continue
         try:
             if is_covered:
                 rolled_back += settle(ch, agency_id, day, read=read, intact=day not in failed)

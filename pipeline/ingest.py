@@ -297,7 +297,8 @@ def ingest(folder: str, agency_id: int, conn, ch_client, *, now: datetime | None
     agency's `updates` lock, which analyze takes too, so analyze never reads
     a day between the two while the run lasts. A run that dies between them
     leaves the day with both sources; the next run whose folder reaches near
-    that day returns it to its live copy, unless that folder covers it. A day this run cannot settle raises
+    that day settles it: to its archive when that folder covers it, else to
+    its live copy. A day this run cannot settle raises
     :class:`pipeline.archive_replace.ReplacementIncomplete` once every other
     day is settled, unless *strict* raises :class:`IngestIncomplete` first.
 
@@ -382,12 +383,13 @@ def _ingest_folder(
     utc_days = archive_replace.tarball_days(tarballs)
     covered = archive_replace.covered_days(utc_days, today)
     replacing = archive_replace.candidates(ch_client, agency_id, covered, floor)
-    # The JST day each admitted file's rows land on, and the days a failed
-    # file could have held rows of: a day among them is not replaced.
+    # The JST day each admitted file's rows land on.
     stamped: dict[str, date] = {}
     # Every member name the folder holds, stored, refused or already in the
-    # skip-list alike: the archive has those polls, whatever day they landed on.
+    # skip-list alike: settle counts a push whose member is among them as
+    # archived (pipeline.archive_replace).
     read_members: set[str] = {f"{_date_dir(p.parent.name)}/{p.name}" for p in pb_loose}
+    # The days a failed file could have held rows of: none of them is replaced.
     failed_days: set[date] = set()
 
     # A member is refused, and left unmarked, when its rows would land on a
@@ -649,16 +651,17 @@ def _ingest_folder(
     # goes back to its live copy here, in the first run whose folder reaches
     # near it, unless this run's folder covers it.
     span = {d for u in utc_days for d in (u, u + timedelta(days=1))} | set(stamped.values())
-    unfinished = archive_replace.residue(ch_client, agency_id, span, floor, today) - replacing
+    residue_failure: list[str] = []
+    try:
+        unfinished = archive_replace.residue(ch_client, agency_id, span, floor, today) - replacing
+    except Exception as exc:
+        logger.exception("  could not look for days an earlier run left with both sources")
+        residue_failure.append(f"looking for unfinished days: {type(exc).__name__}: {exc}")
+        unfinished = set()
     rolled_back, unsettled = archive_replace.settle_all(
-        ch_client,
-        agency_id,
-        replacing,
-        unfinished,
-        read=read_members,
-        failed=failed_days,
-        stored=set(stamped.values()),
+        ch_client, agency_id, replacing, unfinished, read=read_members, failed=failed_days
     )
+    unsettled = residue_failure + unsettled
     # The rows rolled back can include an earlier run's, on an unfinished day.
     n_inserted = max(0, n_inserted - rolled_back)
 
