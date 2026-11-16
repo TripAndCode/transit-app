@@ -1,9 +1,10 @@
-"""Pure-logic tests for the destructive-down-migration gate in `db.migrate`.
+"""Pure-logic tests for the destructive-migration gates in `db.migrate`.
 
-`is_destructive_down` reads only file text (no DB). `migrate_down`'s refusal
-is exercised through a fake connection/cursor that records executed SQL
-instead of running it, with `_MIGRATIONS_DIR` pointed at a `tmp_path` so no
-real migration files or database are involved.
+`is_destructive_down` reads only file text (no DB). `migrate_down`'s and,
+on a database with a retention floor, `migrate_up`'s refusals are exercised
+through a fake connection/cursor that records executed SQL instead of running
+it, with `_MIGRATIONS_DIR` pointed at a `tmp_path` so no real migration files
+or database are involved.
 """
 
 from __future__ import annotations
@@ -13,7 +14,15 @@ from pathlib import Path
 import pytest
 
 from db import migrate as migrate_module
-from db.migrate import DestructiveMigrationError, is_destructive_down, migrate_down
+from db.migrate import (
+    ALLOW_DESTRUCTIVE_UP_ENV,
+    DestructiveMigrationError,
+    allowed_destructive_ups,
+    data_losing_tables,
+    is_destructive_down,
+    migrate_down,
+    migrate_up,
+)
 
 
 def test_is_destructive_down_detects_marker_line():
@@ -56,12 +65,20 @@ class _FakeCursor:
             return [(v,) for v in sorted(self._conn.applied)]
         return []
 
+    def fetchone(self) -> tuple:
+        if "to_regclass" in self._last_sql:
+            return ("updates_pruned_months" if self._conn.floor else None,)
+        if "EXISTS (SELECT 1 FROM updates_pruned_months)" in self._last_sql:
+            return (self._conn.floor,)
+        raise AssertionError(f"unexpected fetchone after {self._last_sql!r}")
+
 
 class _FakeConn:
     """Records executed SQL and tracks applied versions. No database."""
 
-    def __init__(self, applied: set[str]):
+    def __init__(self, applied: set[str], *, floor: bool = False):
         self.applied = set(applied)
+        self.floor = floor
         self.executed: list[str] = []
         self.committed = 0
         self.rolled_back = 0
@@ -169,3 +186,122 @@ def test_a_forced_range_rolls_back_every_version_in_it(tmp_path, monkeypatch):
 
     assert any("DROP TABLE stuff_a" in sql for sql in conn.executed)
     assert any("DROP TABLE stuff_b" in sql for sql in conn.executed)
+
+
+def _write_up(tmp_path: Path, version: str, up_sql: str) -> None:
+    (tmp_path / f"{version}_x.up.sql").write_text(up_sql)
+    (tmp_path / f"{version}_x.down.sql").write_text("SELECT 1;\n")
+
+
+@pytest.fixture
+def agg_purge(tmp_path, monkeypatch):
+    """0001 applied, 0002 pending and deleting a rebuildable aggregate's rows."""
+    monkeypatch.setattr(migrate_module, "_MIGRATIONS_DIR", tmp_path)
+    migrate_module.reset_for_tests()
+    _write_up(tmp_path, "0001", "SELECT 1;\n")
+    _write_up(tmp_path, "0002", "DELETE FROM agg_route_daily;\n")
+    yield
+    migrate_module.reset_for_tests()
+
+
+def _applied_purge(conn: _FakeConn) -> bool:
+    return any("DELETE FROM agg_route_daily" in sql for sql in conn.executed)
+
+
+def test_with_a_floor_a_pending_up_that_loses_data_is_refused_and_nothing_applies(agg_purge):
+    conn = _FakeConn(applied={"0001"}, floor=True)
+    with pytest.raises(DestructiveMigrationError) as refused:
+        migrate_up(conn)
+    assert not _applied_purge(conn)
+    message = str(refused.value)
+    assert "0002_x.up.sql (agg_route_daily)" in message
+    assert "Nothing has been applied" in message
+    assert ALLOW_DESTRUCTIVE_UP_ENV in message
+
+
+def test_without_a_floor_the_same_up_applies(agg_purge):
+    conn = _FakeConn(applied={"0001"}, floor=False)
+    migrate_up(conn)
+    assert _applied_purge(conn)
+
+
+def test_without_a_floor_no_migration_is_classified(agg_purge, tmp_path, monkeypatch):
+    """Every deploy runs migrate up; one with no floor reads no file text."""
+
+    def classified(*args, **kwargs):
+        raise AssertionError("classified a migration on a database without a floor")
+
+    monkeypatch.setattr(migrate_module, "data_losing_tables", classified)
+    migrate_up(_FakeConn(applied={"0001"}, floor=False))
+    _write_migration(tmp_path, "0003", "DROP TABLE IF EXISTS agg_route_band_daily;\n")
+    migrate_down(None, _FakeConn(applied={"0003"}, floor=False))
+
+
+def test_a_named_version_applies_on_a_floor(agg_purge):
+    conn = _FakeConn(applied={"0001"}, floor=True)
+    migrate_up(conn, allow_destructive={"0002"})
+    assert _applied_purge(conn)
+
+
+def test_a_version_named_in_the_environment_applies_on_a_floor(agg_purge):
+    allowed = allowed_destructive_ups([], {ALLOW_DESTRUCTIVE_UP_ENV: " 0002 , 0009,"})
+    assert allowed == {"0002", "0009"}
+    conn = _FakeConn(applied={"0001"}, floor=True)
+    migrate_up(conn, allow_destructive=allowed)
+    assert _applied_purge(conn)
+
+
+def test_the_flag_and_the_environment_add_up():
+    assert allowed_destructive_ups(["0003"], {ALLOW_DESTRUCTIVE_UP_ENV: "0004"}) == {"0003", "0004"}
+    assert allowed_destructive_ups([], {}) == frozenset()
+
+
+def test_the_cli_exits_non_zero_naming_the_refusal(agg_purge, monkeypatch):
+    import argparse
+
+    import gtfs_pipeline
+
+    conn = _FakeConn(applied={"0001"}, floor=True)
+    conn.close = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setattr(gtfs_pipeline, "_get_conn", lambda require_schema: conn)
+    monkeypatch.delenv(ALLOW_DESTRUCTIVE_UP_ENV, raising=False)
+    with pytest.raises(SystemExit) as exited:
+        gtfs_pipeline.cmd_migrate(argparse.Namespace(direction="up", allow_destructive_up=[], target=None))
+    assert "0002_x.up.sql (agg_route_daily)" in str(exited.value.code)
+    assert not _applied_purge(conn)
+
+    monkeypatch.setenv(ALLOW_DESTRUCTIVE_UP_ENV, "0002")
+    gtfs_pipeline.cmd_migrate(argparse.Namespace(direction="up", allow_destructive_up=[], target=None))
+    assert _applied_purge(conn)
+
+
+def test_with_a_floor_an_unmarked_down_dropping_an_aggregate_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(migrate_module, "_MIGRATIONS_DIR", tmp_path)
+    _write_migration(tmp_path, "0001", "DROP TABLE IF EXISTS agg_route_band_daily;\n")
+    conn = _FakeConn(applied={"0001"}, floor=True)
+    with pytest.raises(DestructiveMigrationError) as refused:
+        migrate_down(None, conn)
+    assert "0001_x.down.sql" in str(refused.value)
+    assert not any("DROP TABLE IF EXISTS agg_route_band_daily" in sql for sql in conn.executed)
+
+
+def test_with_a_floor_force_rolls_the_down_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(migrate_module, "_MIGRATIONS_DIR", tmp_path)
+    _write_migration(tmp_path, "0001", "DROP TABLE IF EXISTS agg_route_band_daily;\n")
+    conn = _FakeConn(applied={"0001"}, floor=True)
+    migrate_down(None, conn, force_destructive=True)
+    assert any("DROP TABLE IF EXISTS agg_route_band_daily" in sql for sql in conn.executed)
+
+
+def test_without_a_floor_that_down_rolls_back(tmp_path, monkeypatch):
+    monkeypatch.setattr(migrate_module, "_MIGRATIONS_DIR", tmp_path)
+    _write_migration(tmp_path, "0001", "DROP TABLE IF EXISTS agg_route_band_daily;\n")
+    conn = _FakeConn(applied={"0001"}, floor=False)
+    migrate_down(None, conn)
+    assert any("DROP TABLE IF EXISTS agg_route_band_daily" in sql for sql in conn.executed)
+
+
+def test_0101s_down_is_one_a_floor_refuses():
+    down = next(migrate_module._MIGRATIONS_DIR.glob("0101_*.down.sql")).read_text()
+    assert data_losing_tables(down) == []
+    assert data_losing_tables(down, retention_floor=True) == ["agg_route_band_daily"]

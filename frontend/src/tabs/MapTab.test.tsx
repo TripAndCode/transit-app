@@ -99,6 +99,25 @@ describe("MapTab", () => {
     expect(document.querySelector(".ops-map__empty")).toBeNull();
   });
 
+  it("explains calmly, with no retry, a route overlay refused for a period before the retention floor", () => {
+    mockCommonHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({
+      data: undefined,
+      error: new client.ApiError(422, JSON.stringify({ detail: "x", code: "range_not_retained", floor: "2025-03-01" })),
+    } as never);
+    vi.spyOn(hooks, "useLiveTrips").mockReturnValue({
+      dataUpdatedAt: 0,
+      data: liveTrips([]),
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as never);
+    renderMap();
+    expect(screen.getByText(/Detailed readings before 2025-03-01 are no longer kept/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("does not show the empty state and counts observed trips once live rows arrive", () => {
     mockCommonHooks();
     const capturedAt = new Date().toISOString();

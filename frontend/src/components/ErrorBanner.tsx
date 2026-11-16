@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ApiError, apiErrorDetail } from "../api/client";
+import { ApiError, apiErrorDetail, rangeNotRetainedFloor } from "../api/client";
 import { classifyError, type ErrorClass } from "../api/errorClass";
 
 type Props = {
@@ -140,6 +140,12 @@ export function ErrorBanner({ error, onRetry, message, prefix }: Props) {
   // A query that ran out its time budget would again on a retry; only a
   // narrower view helps, so say that instead of offering one.
   if (cls === "too_slow") return <CalmStatus>{t("errors.query_too_slow")}</CalmStatus>;
+
+  // A period before the retention floor is refused again on a retry; only a
+  // later start helps.
+  if (cls === "not_retained") {
+    return <CalmStatus>{t("errors.range_not_retained", { date: rangeNotRetainedFloor(error) })}</CalmStatus>;
+  }
 
   const reason = messageFor(error, cls, t);
   return <Alert onRetry={onRetry}>{prefix ? `${prefix} ${reason}` : reason}</Alert>;

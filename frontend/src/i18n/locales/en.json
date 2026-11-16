@@ -1749,7 +1749,8 @@
     "followup_rate_limit": "High traffic right now. Please wait a moment and retry.",
     "followup_connection": "Connection dropped for a moment. Please retry.",
     "followup_llm_generic": "Couldn't answer that question. Please try again.",
-    "llm_not_approved": "This feature currently requires admin approval."
+    "llm_not_approved": "This feature currently requires admin approval.",
+    "range_not_retained": "Detailed readings before {{date}} are no longer kept, so this view can't cover that period. Choose a period from {{date}} on; the reports built from daily totals still cover the earlier dates."
   },
   "admin": {
     "users": {

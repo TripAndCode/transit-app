@@ -22,6 +22,10 @@ UPDATES_TABLE = "updates"
 LIVE_TABLE = "updates_live"
 _OBSERVATION_TABLES = frozenset({UPDATES_TABLE, LIVE_TABLE})
 
+#: The longest one read of the observations outside analyze may run: the API's
+#: ClickHouse client caps each query at it (api.clickhouse.get_ch_client).
+LIVE_READ_MAX_EXECUTION_SECONDS = 30
+
 
 # ClickHouse's TIMEOUT_EXCEEDED server error code.
 CH_TIMEOUT_EXCEEDED = 159
