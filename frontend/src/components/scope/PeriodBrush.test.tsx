@@ -13,10 +13,10 @@ const DAYS = Array.from({ length: 27 }, (_, i) => ({
 
 const WIDTH = 290; // 29 calendar days (8/31..9/28) at 10px each
 
-function mount({ from = "2026-09-20", to = "2026-09-28", windowFrom = "2026-08-31" } = {}) {
+function mount({ from = "2026-09-20", to = "2026-09-28", windowFrom = "2026-08-31", disabled = false } = {}) {
   const onCommit = vi.fn();
   const view = renderWithProviders(
-    <PeriodBrush days={DAYS} windowFrom={windowFrom} latest="2026-09-28" from={from} to={to} onCommit={onCommit} />,
+    <PeriodBrush days={DAYS} windowFrom={windowFrom} latest="2026-09-28" from={from} to={to} onCommit={onCommit} disabled={disabled} />,
   );
   return { onCommit, container: view.container };
 }
@@ -83,6 +83,14 @@ describe("PeriodBrush", () => {
       expect(onCommit).not.toHaveBeenCalled();
       fireEvent.pointerUp(strip(), { clientX: xOf(16), pointerId: 1 });
       expect(onCommit).toHaveBeenCalledWith("2026-09-16", "2026-09-21");
+    });
+
+    it("starts no drag while disabled", () => {
+      const { onCommit } = mount({ disabled: true });
+      fireEvent.pointerDown(strip(), { clientX: xOf(21), pointerId: 1, button: 0 });
+      fireEvent.pointerMove(strip(), { clientX: xOf(16), pointerId: 1 });
+      fireEvent.pointerUp(strip(), { clientX: xOf(16), pointerId: 1 });
+      expect(onCommit).not.toHaveBeenCalled();
     });
 
     it("ignores a tap that never crosses a day", () => {

@@ -28,6 +28,9 @@ export type ControlProps = {
    *  control rendered pinned in the scope strip, which has no popover to
    *  close. */
   close?: () => void;
+  /** Set while the sentence is disabled; a control whose input is not a form
+   *  element, which the surrounding fieldset cannot disable, reads it. */
+  disabled?: boolean;
 };
 
 const PERIOD_PRESETS = [7, 14, 30] as const;
@@ -54,7 +57,7 @@ function DelayBar({ minutes }: { minutes: number }) {
  *  then the last seven days that have data, never a week that has not
  *  arrived or a day still under way, and the default period is one of the
  *  presets. */
-export function PeriodControl({ scope, update, summary }: ControlProps) {
+export function PeriodControl({ scope, update, summary, disabled }: ControlProps) {
   const { t } = useTranslation();
   const anchor = defaultPeriod(use(DataEndContext)).to;
   const collectionStart = summary?.earliest ? sinceStart(summary.earliest, anchor) : null;
@@ -97,6 +100,7 @@ export function PeriodControl({ scope, update, summary }: ControlProps) {
           from={scope.from}
           to={scope.to}
           onCommit={(from, to) => update({ from, to })}
+          disabled={disabled}
         />
       )}
       <WholeDayNote scope={scope} update={update} summary={summary} />

@@ -146,7 +146,7 @@ function Token({
               its controls disabled with it, rather than closing on the
               reader mid-pick. */}
           <fieldset className="scope-fieldset" disabled={disabled}>
-            <Control scope={scope} update={update} summary={summary} close={closeAndFocus} />
+            <Control scope={scope} update={update} summary={summary} close={closeAndFocus} disabled={disabled} />
           </fieldset>
         </ScopePopover>
       )}
