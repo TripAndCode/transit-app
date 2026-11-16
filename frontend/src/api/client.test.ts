@@ -61,10 +61,6 @@ describe("apiPatch", () => {
   it("forwards an AbortSignal through to fetch, like apiGet/apiPost already do", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    // rawFetch reads an optional API key out of localStorage — this file's
-    // `node` environment (unlike the suite's default jsdom) has no such
-    // global at all, unrelated to the signal behavior under test here.
-    vi.stubGlobal("localStorage", { getItem: () => null });
     const controller = new AbortController();
 
     await apiPatch("/api/admin/users/1", { role: "admin" }, { signal: controller.signal });

@@ -22,7 +22,6 @@ import { useScreenQuery, withQuery } from "../api/screenScope";
 import { useRailAgencyId } from "../api/railAgency";
 import { AgencyPicker } from "./AgencyPicker";
 import { SidebarUserMenu } from "./SidebarUserMenu";
-import { SettingsDrawer } from "./SettingsDrawer";
 import { useMediaQuery, MOBILE_BREAKPOINT_QUERY } from "../hooks/useMediaQuery";
 import { OverlayBase } from "./ui/OverlayBase";
 import { Z_INDEX } from "../styles/zIndex";
@@ -78,7 +77,7 @@ function writeCollapsedPref(collapsed: boolean): void {
 const MORE_SHEET_PAD_PX = 16;
 
 /** The mobile "…" destination: a bottom sheet holding the agency picker and
- *  the account/settings controls that don't fit as one of the four tab bar
+ *  the account controls that don't fit as one of the four tab bar
  *  slots.
  *
  *  Not the shared `Modal`: its two variants are a centred card and a
@@ -177,7 +176,6 @@ export function Sidebar() {
   const screenQuery = useScreenQuery();
   const screenHref = (screen: string) => withQuery(`/agencies/${agencyId}/${screen}`, agencyId ? screenQuery(agencyId, screen) : "");
   const [collapsed, setCollapsed] = useState(readCollapsedPref);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   // Below 640px (the shared MOBILE_BREAKPOINT_QUERY) the desktop rail's
   // fixed 248/76px width would eat most of a ~390px phone screen, leaving
   // almost no room for tab content. isMobile renders only the active
@@ -191,7 +189,7 @@ export function Sidebar() {
   // (thumb-reachable, and it gives the tab content the width the rail
   // would take); this sheet holds what doesn't fit in the tab slots --
   // the agency picker, the other destinations, the Other group and the
-  // settings/account controls -- behind "…".
+  // account controls -- behind "…".
   const [moreOpen, setMoreOpen] = useState(false);
 
   function toggleCollapsed() {
@@ -200,11 +198,6 @@ export function Sidebar() {
       writeCollapsedPref(next);
       return next;
     });
-  }
-
-  function openSettings() {
-    setSettingsOpen(true);
-    setMoreOpen(false);
   }
 
   // The destinations, the Other group, and the account menu — everything
@@ -224,7 +217,7 @@ export function Sidebar() {
       <>
         {/* On the phone sheet the account row leads: at the end it sat below
             the sheet's first screen. */}
-        {inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
+        {inSheet && <SidebarUserMenu />}
         {!collapsedFlag && (
           <div style={{ padding: inSheet ? "0 22px 16px" : "0 14px 14px" }}>
             {inSheet ? <AgencyPicker /> : <SidebarTicket />}
@@ -340,7 +333,7 @@ export function Sidebar() {
           )}
         </nav>
         <div style={{ flex: 1 }} />
-        {!collapsedFlag && !inSheet && <SidebarUserMenu onOpenSettings={openSettings} />}
+        {!collapsedFlag && !inSheet && <SidebarUserMenu />}
       </>
     );
   }
@@ -524,65 +517,43 @@ export function Sidebar() {
             {renderNavAndFooter(false, () => setMoreOpen(false), true)}
           </MoreSheet>
         )}
-
-        <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       </>
     );
   }
 
   return (
-    <>
-      <aside
-        className="app-sidebar-desktop"
+    <aside
+      className="app-sidebar-desktop"
+      style={{
+        // The line map's badge column is centred 38px in at either width
+        // (sidebarLineMap.css), so the collapsed rail is twice that. At 248
+        // a station's name has about 165px beside its badge, and about
+        // 110px while the chord hint shows; a longer name truncates
+        // (`.rail-name`), so a long screen name gets a short rail key.
+        width: collapsed ? 76 : 248,
+        background: "var(--bg-surface)",
+        borderRight: "1px solid var(--border-soft)",
+        padding: "16px 0",
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+      }}
+    >
+      <div
         style={{
-          // The line map's badge column is centred 38px in at either width
-          // (sidebarLineMap.css), so the collapsed rail is twice that. At 248
-          // a station's name has about 165px beside its badge, and about
-          // 110px while the chord hint shows; a longer name truncates
-          // (`.rail-name`), so a long screen name gets a short rail key.
-          width: collapsed ? 76 : 248,
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border-soft)",
-          padding: "16px 0",
-          flexShrink: 0,
           display: "flex",
-          flexDirection: "column",
-          height: "100%",
+          alignItems: "center",
+          justifyContent: collapsed ? "center" : "space-between",
+          gap: 4,
+          padding: collapsed ? "0 0 16px" : "0 12px 16px 22px",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: collapsed ? "center" : "space-between",
-            gap: 4,
-            padding: collapsed ? "0 0 16px" : "0 12px 16px 22px",
-          }}
-        >
-          {brandBlock(collapsed)}
-          {!collapsed && (
-            <button
-              type="button"
-              aria-label={t("nav.collapse_sidebar")}
-              onClick={toggleCollapsed}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--text-tertiary)",
-                cursor: "pointer",
-                display: "flex",
-                padding: 4,
-                flexShrink: 0,
-              }}
-            >
-              <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        {collapsed && (
+        {brandBlock(collapsed)}
+        {!collapsed && (
           <button
             type="button"
-            aria-label={t("nav.expand_sidebar")}
+            aria-label={t("nav.collapse_sidebar")}
             onClick={toggleCollapsed}
             style={{
               background: "transparent",
@@ -590,18 +561,34 @@ export function Sidebar() {
               color: "var(--text-tertiary)",
               cursor: "pointer",
               display: "flex",
-              justifyContent: "center",
-              padding: "0 0 12px",
-              width: "100%",
+              padding: 4,
+              flexShrink: 0,
             }}
           >
-            <ChevronRight size={16} strokeWidth={1.5} aria-hidden="true" />
+            <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" />
           </button>
         )}
-        {renderNavAndFooter(collapsed)}
-      </aside>
-
-      <SettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-    </>
+      </div>
+      {collapsed && (
+        <button
+          type="button"
+          aria-label={t("nav.expand_sidebar")}
+          onClick={toggleCollapsed}
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--text-tertiary)",
+            cursor: "pointer",
+            display: "flex",
+            justifyContent: "center",
+            padding: "0 0 12px",
+            width: "100%",
+          }}
+        >
+          <ChevronRight size={16} strokeWidth={1.5} aria-hidden="true" />
+        </button>
+      )}
+      {renderNavAndFooter(collapsed)}
+    </aside>
   );
 }

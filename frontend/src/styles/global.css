@@ -298,13 +298,6 @@
   --el-1: 0 1px 3px var(--p-ink-900-a05), 0 0 0 1px var(--p-ink-900-a04);
   --el-2: 0 4px 16px var(--p-ink-900-a10), 0 0 0 1px var(--p-ink-900-a04);
   --el-3: 0 24px 60px var(--p-ink-900-a18), 0 0 0 1px var(--p-ink-900-a04);
-  /* Leftward counterpart of --el-2, for a panel anchored to the right edge
-     (a drawer) whose shadow has to cast onto the page it covers rather than
-     downward -- the scale above is downward-only, so an edge-anchored panel
-     can't reuse it without losing the direction that separates it from the
-     content it covers. Same weight and opacity as --el-2, offset to the left
-     instead of down. */
-  --el-left: -4px 0 16px var(--p-ink-900-a10), 0 0 0 1px var(--p-ink-900-a04);
   /* Type scale. --text-xs (12px) is the floor for any DOM text: below it CJK
      glyphs lose stroke separation and Japanese labels stop being readable.
      SVG chart tick labels are the one exception and set their size as an
@@ -432,11 +425,6 @@
           0 8px 24px var(--p-black-a40);
   --el-3: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
           0 24px 60px var(--p-black-a60);
-  /* Same hairline ring and top inset highlight as el-2 above -- depth on a
-     near-black page still has to come from the edge, not the shadow -- with
-     the drop cast to the left instead of down. */
-  --el-left: 0 0 0 1px var(--p-white-a04), inset 0 1px 0 var(--p-white-a06),
-             -8px 0 24px var(--p-black-a40);
   /* More translucent than the light value: a near-black --bg-surface mixed
      at the same 82% reads as a near-opaque card rather than glass, which
      defeats the point over a bright basemap (aerial photo, GSI std). The

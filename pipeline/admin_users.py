@@ -1,10 +1,10 @@
-"""Pure logic behind the admin user drawer (sessions, API keys) and
-the self-service session revoke.
+"""Pure logic behind the admin user drawer's sessions section and the
+self-service session revoke.
 
 Kept dependency-free of asyncpg so it's unit-testable without a database --
 the routers in ``api/routers/admin.py`` and ``api/routers/me.py`` own all the
-actual I/O. API key and session id hashing is ``api.security.token_hash``,
-shared with the rest of the auth stack rather than duplicated here.
+actual I/O. Session id hashing is ``api.security.token_hash``, shared with
+the rest of the auth stack rather than duplicated here.
 """
 
 from collections.abc import Awaitable, Callable, Iterable

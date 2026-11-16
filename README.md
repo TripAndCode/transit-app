@@ -309,14 +309,13 @@ The main endpoints are:
 | `GET /api/auth/{provider}/login` | Start Google or GitHub OAuth |
 | `/api/admin/board`, `/api/admin/runs` | Admin control room: fleet health board + run timeline |
 | `/api/admin/agencies*` | Admin agency list, per-agency health, and diagnostics drawer |
-| `/api/admin/users*` | Admin user management, sessions, API keys |
+| `/api/admin/users*` | Admin user management, sessions |
 | `/api/admin/audit` | Merged admin-action + login audit log |
 | `/api/admin/ops` | Read-only ops health snapshot (migrations, aggregate freshness) |
 | `/api/admin/flags` | Feature-flag registry: resolved values + DB overrides |
 | `/api/admin/snapshots*`, `GET /api/snapshots/{id}`, `GET /api/snapshots/{id}/today` | Frozen snapshots: admins create, list and delete; anyone with the link reads one and today's figures for its query ([guide](docs/features/snapshots.md)) |
 | `/api/admin/ask/*` | Ask query log and funnel |
 | `/api/admin/architecture/*` | Serves `docs/features/*.md` to the in-product architecture page |
-| `/api/admin/api-keys` | Issue/revoke API keys |
 
 Most data endpoints accept `from`, `to`, `dow`, `time_band`, `service`, and
 `routes` filters. API documentation is available from FastAPI at `/docs`

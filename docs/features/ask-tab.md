@@ -289,7 +289,7 @@ changes.
 
 Approval is the whole budget control: an approved caller's LLM calls are
 bounded only by the generic per-minute limiter every route shares
-(`FREE_LIMIT`/`PRO_LIMIT` in `api/middleware/ratelimit.py`), not by any
+(`DEFAULT_LIMIT` in `api/middleware/ratelimit.py`), not by any
 per-day LLM allowance. Metering approved callers would key on the user row,
 so it is a separate mechanism to build, not a knob to turn on.
 
