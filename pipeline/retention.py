@@ -23,7 +23,7 @@ where analyze stops rebuilding the aggregates of the days it dropped.
 import logging
 import re
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, NamedTuple
@@ -255,6 +255,7 @@ def plan_updates_prune(
     live: Mapping[int, Mapping[date, Counts]],
     disagreeing: Mapping[int, Sequence[str]] | None = None,
     unapplied: Mapping[int, "Unapplied"] | None = None,
+    moved: Mapping[int, Collection[date]] | None = None,
 ) -> list[PartitionVerdict]:
     """A verdict for each partition whose rows are all past *cutoff*.
 
@@ -280,7 +281,9 @@ def plan_updates_prune(
       aggregate, and no scorecard month built from one, is frozen. The new
       floor's own date is included: its rows can file under the day before
       it. Dates below the current floor are final already, and once a month
-      of their rows is gone their counts differ by design;
+      of their rows is gone their counts differ by design. A date whose rows
+      changed source since it was built (*moved*: its live_rows differ) is
+      stale as well, whatever its counts;
     - its ClickHouse aggregates add up to their Postgres copies from its
       current floor on (*disagreeing* names those that do not): analyze
       repairs a disagreement only from the floor on;
@@ -322,6 +325,7 @@ def plan_updates_prune(
                     live.get(agency_id, {}),
                     (disagreeing or {}).get(agency_id, ()),
                     (unapplied or {}).get(agency_id),
+                    (moved or {}).get(agency_id, ()),
                 )
                 if held_by is not None:
                     break
@@ -340,6 +344,7 @@ def _held_by(
     live: Mapping[date, Counts],
     disagreeing: Sequence[str],
     pending: "Unapplied | None",
+    moved: Collection[date] = (),
 ) -> str | None:
     if deleted is not False:
         return (
@@ -368,8 +373,8 @@ def _held_by(
         )
     stale = sorted(
         day
-        for day in {*live, *ledger}
-        if day <= floor and (current is None or day >= current) and live.get(day) != ledger.get(day)
+        for day in {*live, *ledger, *moved}
+        if day <= floor and (current is None or day >= current) and (live.get(day) != ledger.get(day) or day in moved)
     )
     if stale:
         return (
@@ -442,14 +447,28 @@ def read_ledgers(conn, bounds: Mapping[int, date]) -> dict[int, dict[date, Count
     return ledgers
 
 
-def read_held_counts(ch, agency_id: int, before: datetime, after: datetime | None) -> dict[date, Counts]:
-    """The agency's ledger counts of the rows `updates` holds captured before
-    *before*, and from *after* when given."""
+def read_stored_live(conn, bounds: Mapping[int, date]) -> dict[int, dict[date, int]]:
+    """Each agency's agg_feed_health live_rows through its bound in *bounds*, where recorded."""
+    stored: dict[int, dict[date, int]] = {}
+    with conn.cursor() as cur:
+        for agency_id, through in sorted(bounds.items()):
+            cur.execute(
+                "SELECT date, live_rows FROM agg_feed_health "
+                "WHERE agency_id = %s AND date <= %s AND live_rows IS NOT NULL",
+                (agency_id, through),
+            )
+            stored[agency_id] = dict(cur.fetchall())
+    return stored
+
+
+def read_held_counts(ch, agency_id: int, before: datetime, after: datetime | None) -> dict[date, tuple[int, int, int]]:
+    """The agency's ledger counts (raw_samples, total_rows, live_rows) of the
+    rows `updates` holds captured before *before*, and from *after* when given."""
     rows = ch.query(
         LEDGER_COUNTS_CH_SQL,
         parameters={"agency_id": agency_id, "after": after or EARLIEST_CAPTURE, "before": before},
     ).result_rows
-    return {day: (int(raw), int(total)) for day, raw, total in rows}
+    return {day: (int(raw), int(total), int(live)) for day, raw, total, live in rows}
 
 
 def read_unapplied(conn, ch, agency_id: int) -> "Unapplied":
@@ -481,13 +500,18 @@ def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime, no
                 bounds[agency_id] = max(bounds.get(agency_id, date.min), floor_after(end))
                 oldest[agency_id] = min(oldest.get(agency_id, start), start)
     ledgers = read_ledgers(conn, bounds)
+    stored_live = read_stored_live(conn, bounds)
+    moved = {}
     live = {}
     disagreeing = {}
     pending = {}
     for agency_id, bound in bounds.items():
         current = floors.get(agency_id)
         after = None if current is None else min(oldest[agency_id], service_day_start_utc(current))
-        live[agency_id] = read_held_counts(ch, agency_id, service_day_start_utc(bound + timedelta(days=1)), after)
+        held = read_held_counts(ch, agency_id, service_day_start_utc(bound + timedelta(days=1)), after)
+        live[agency_id] = {day: (raw, total) for day, (raw, total, _live) in held.items()}
+        recorded = stored_live[agency_id]
+        moved[agency_id] = {day for day, (_raw, _total, n) in held.items() if day in recorded and recorded[day] != n}
         disagreeing[agency_id] = read_disagreements(conn, ch, agency_id, current)
         pending[agency_id] = read_unapplied(conn, ch, agency_id)
     return plan_updates_prune(
@@ -500,6 +524,7 @@ def _verdicts(conn, ch, candidates: list[UpdatesPartition], cutoff: datetime, no
         live=live,
         disagreeing=disagreeing,
         unapplied=pending,
+        moved=moved,
     )
 
 

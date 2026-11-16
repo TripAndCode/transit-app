@@ -4,9 +4,9 @@
 # Local-dev replay of recent days only: requires SSH access to the Oracle VM,
 # which keeps just the archives not yet uploaded to R2, plus each agency's
 # current static zip (spool-cleanup.sh deletes every other one once R2 holds
-# it). Production history comes from the live path instead (collector pushes
-# into updates_live, promoted daily by the cron), and older days are in R2 for
-# backfill (see docs/deploy-railway.md).
+# it). Production history comes from the R2 archives (see
+# docs/deploy-railway.md); a day the live path promoted first is replaced once
+# an ingest holds its complete archive (pipeline/archive_replace.py).
 # Does NOT crawl the GTFS website — fetches pre-collected archives only.
 # Each agency's archives ingest before its newest local timetable loads: a
 # load replaces the timetable wholesale, and archived days should join the one
@@ -70,15 +70,16 @@ if [ -n "${COLLECTOR_DATA_DIR:-}" ]; then
         STATIC_DIR="$SCRIPT_DIR/../raw_archives_static/$id"
         echo "==> [a$id] Ingesting RT archives"
         # gtfs_pipeline.py's ingest/analyze exit 75 (EX_TEMPFAIL) on ingest/
-        # analyze lock contention -- transient, self-healing on the next
-        # scheduled run -- rather than a genuine failure. Caught here (an
+        # analyze lock contention, and ingest on a day it left unsettled --
+        # transient, self-healing on the next scheduled run -- rather than a
+        # genuine failure. Caught here (an
         # `||` list is `set -e`-safe) and treated as "skip this agency
         # this run", not a script-ending error: a hard `exit` on contention
         # would abort every agency after this one under `set -euo pipefail`.
         code=0
         ingest_agency "$SCRIPT_DIR/../raw_archives/$id" "$STATIC_DIR" "*.zip" "$id" || code=$?
         if [ "$code" -eq 75 ]; then
-            echo "==> [a$id] ingest lock busy, skipping this agency this run"
+            echo "==> [a$id] ingest lock busy or a day left unsettled (see above), skipping this agency this run"
             continue
         fi
         if [ "$code" -eq 78 ]; then

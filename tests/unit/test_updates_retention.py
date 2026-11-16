@@ -76,6 +76,7 @@ def _plan(
     live=None,
     disagreeing=None,
     unapplied=None,
+    moved=None,
 ):
     partitions = list(partitions)
     every = {agency_id for partition in partitions for agency_id in partition.agency_ids}
@@ -89,6 +90,7 @@ def _plan(
         live=live or {},
         disagreeing=disagreeing,
         unapplied=unapplied,
+        moved=moved,
     )
 
 
@@ -216,6 +218,17 @@ def test_a_stale_ledger_on_the_new_floor_holds_the_month(stale_day, holds):
     assert (verdicts[0].held_by is not None) is holds
 
 
+def test_a_date_whose_source_changed_holds_the_month_though_its_counts_match():
+    """An archive copy as dense as the live one it replaced keeps both counts;
+    frozen unanalyzed, its aggregates would stay built from the live copy."""
+    live = _counts(date(2024, 12, 31), date(2025, 3, 10))
+    moved_day = date(2025, 1, 15)
+    verdicts = _plan([_partition("202501", 1)], ledgers={1: live}, live={1: live}, moved={1: {moved_day}})
+    assert verdicts[0].held_by is not None
+    assert moved_day.isoformat() in verdicts[0].held_by
+    assert _plan([_partition("202501", 1)], ledgers={1: live}, live={1: live})[0].held_by is None
+
+
 def test_dates_below_the_agencys_current_floor_are_final_and_not_compared():
     """The day an earlier drop cut short reads fewer rows than its ledger,
     by design; it must not hold every later month."""
@@ -335,7 +348,12 @@ def stores(monkeypatch):
     monkeypatch.setattr(retention, "retention_floors", lambda conn, ids: {})
     monkeypatch.setattr(retention, "read_soft_deleted", lambda conn, ids: dict.fromkeys(ids, False))
     monkeypatch.setattr(retention, "read_ledgers", lambda conn, bounds: {1: held, 2: held})
-    monkeypatch.setattr(retention, "read_held_counts", lambda ch, agency_id, before, after: held)
+    monkeypatch.setattr(retention, "read_stored_live", lambda conn, bounds: {agency_id: {} for agency_id in bounds})
+    monkeypatch.setattr(
+        retention,
+        "read_held_counts",
+        lambda ch, agency_id, before, after: {day: (*counts, 0) for day, counts in held.items()},
+    )
     monkeypatch.setattr(retention, "read_disagreements", lambda conn, ch, agency_id, floor: [])
     monkeypatch.setattr(retention, "read_unapplied", lambda conn, ch, agency_id: Unapplied([], []))
     monkeypatch.setattr(

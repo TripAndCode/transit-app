@@ -56,7 +56,7 @@ class FakeClickHouse:
         # The per-date ledger, not agg_feed_health's own build — the two read
         # the same rows and differ only in what they project.
         if "raw_samples" in sql and "clamp_count" not in sql:
-            return _FakeResult(self._ledger)
+            return _FakeResult([(*row, 0) for row in self._ledger])
         if "FROM system.tables" in sql:
             return _FakeResult([(name,) for name in self._tables])
         if sql.startswith("SELECT count(), sum("):
@@ -180,8 +180,8 @@ class FakeConn:
             return (self._fingerprint,), []
         if "FROM agg_table_state" in sql:
             return None, list(self._states.items())
-        if "SELECT date, raw_samples, total_rows FROM agg_feed_health" in sql:
-            return None, self._ledger_rows
+        if "SELECT date, raw_samples, total_rows, live_rows FROM agg_feed_health" in sql:
+            return None, [(*row, 0) for row in self._ledger_rows]
         if "SUM(clamp_count)" in sql:
             return (0,), []
         # The scorecard finds no observed day, so it builds no month here;
@@ -211,7 +211,8 @@ def _run(
     """Run `analyze`, returning the fakes.
 
     *ledger* is what ClickHouse answers (date, raw_samples, total_rows);
-    *stored* is what agg_feed_health holds, defaulting to the same rows.
+    *stored* is what agg_feed_health holds, defaulting to the same rows. Both
+    hold no live-sourced row.
     *has_static* gives the agency a (row-less) static schedule, which the
     builders joining it — agg_stop_routes among them — need in order to run.
     The agency's tables stand as the last run recorded them under the current

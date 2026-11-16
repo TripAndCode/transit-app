@@ -576,8 +576,8 @@ def _dates_the_move_reaches(
 
 
 def _ledger_counts(agency_id: int, ch_client, floor: date | None = None) -> dict:
-    """Each service date's (raw_samples, total_rows) as ClickHouse holds them
-    now, from *floor* on when given."""
+    """Each service date's (raw_samples, total_rows, live_rows) as ClickHouse
+    holds them now, from *floor* on when given."""
     live = _ch_query(
         "plan: per-date ledger",
         ch_client,
@@ -588,7 +588,7 @@ def _ledger_counts(agency_id: int, ch_client, floor: date | None = None) -> dict
             "before": agg_sql.LATEST_CAPTURE,
         },
     )
-    return {row[0]: (row[1], row[2]) for row in live.result_rows}
+    return {row[0]: (row[1], row[2], row[3]) for row in live.result_rows}
 
 
 def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None = None) -> list | None:
@@ -625,9 +625,16 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None =
     A changed builder or timetable is not the ledger's business: each table's
     own fingerprint covers it (agg_table_state, :func:`table_fingerprints`).
 
+    A date whose rows changed source is listed too, with both its neighbours,
+    which the rows it lost may have filed under, even when its two counts held:
+    archive ingest replacing a promoted day (pipeline.archive_replace) can keep
+    them. A stored ``live_rows`` that is NULL predates the column and is taken
+    to match.
+
     One blind spot survives: the ledger compares per-date row COUNTS, so a
-    date whose rows were replaced by exactly as many different rows reads as
-    unchanged and keeps its stale aggregates, and ``check_aggs``, which
+    date whose rows were replaced by exactly as many different rows from the
+    same source reads as unchanged and keeps its stale aggregates, and
+    ``check_aggs``, which
     compares only each agency's newest day, cannot see it either. Only a
     deliberate full rebuild recovers from that: ``gtfs_pipeline.py analyze
     --full`` / ``analyze_all --full`` (``make analyze-all FULL=1``), which
@@ -646,8 +653,12 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None =
     # run that can least afford one; _plan skips this call altogether when
     # every table rebuilds in full anyway.
     with conn.cursor() as cur:
-        cur.execute("SELECT date, raw_samples, total_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,))
-        stored = {d: (raw, total) for d, raw, total in cur.fetchall()}
+        cur.execute(
+            "SELECT date, raw_samples, total_rows, live_rows FROM agg_feed_health WHERE agency_id = %s", (agency_id,)
+        )
+        ledger = cur.fetchall()
+    stored = {d: (raw, total) for d, raw, total, _live in ledger}
+    stored_live = {d: live for d, _raw, _total, live in ledger}
     if not stored:
         return None
     if floor is not None:
@@ -656,11 +667,18 @@ def _dates_needing_rebuild(agency_id: int, conn, ch_client, floor: date | None =
         logger.info("  incremental: ledger predates total_rows; rebuilding every date")
         return None
 
-    live_counts = _ledger_counts(agency_id, ch_client, floor)
+    held = _ledger_counts(agency_id, ch_client, floor)
+    live_counts = {d: (raw, total) for d, (raw, total, _live) in held.items()}
 
     stale = {d for d, counts in live_counts.items() if stored.get(d) != counts}
     stale |= {d for d in stored if d not in live_counts}
-    changed = stale | _dates_filed_from(agency_id, ch_client, stale, stored, live_counts)
+    swapped = {
+        d
+        for d, (_raw, _total, live) in held.items()
+        if d in stored and d not in stale and stored_live.get(d) is not None and stored_live[d] != live
+    }
+    changed = stale | swapped | {d + timedelta(days=step) for d in swapped for step in (-1, 1)}
+    changed |= _dates_filed_from(agency_id, ch_client, stale, stored, live_counts)
     return sorted(day for day in changed if floor is None or day >= floor)
 
 
@@ -1642,8 +1660,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         # measurable" (see pipeline/health.py, api/agency_diagnostics.py).
         # archive_rows and live_rows split total_rows by ingest source, for the
         # definition stamp's per-day source
-        # (pipeline.reports.definition.stamp_build); the ledger does not
-        # compare them.
+        # (pipeline.reports.definition.stamp_build); _dates_needing_rebuild
+        # reads live_rows to see a day whose rows changed source.
         # Agency-wide — does NOT require static data, so it runs outside the
         # has_static block. Pure aggregation (no static-table JOIN), so it
         # queries ClickHouse directly and bulk-loads the small per-day result
