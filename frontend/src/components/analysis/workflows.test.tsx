@@ -49,10 +49,10 @@ vi.mock("./csv", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./csv")>()),
   downloadCsv: vi.fn(),
 }));
-// The scope sentence renders PresetMenu, which calls useSession -> a real
-// apiGet("/api/me"). Unstubbed that fetch stays pending past the end of this
-// file and destabilises whichever file vitest runs next, so it is settled
-// here. Partial mock: everything else in api/auth stays real.
+// The scope controls and the route screen ask useIsAdmin, which calls
+// useSession -> a real apiGet("/api/me"). Unstubbed that fetch stays pending
+// past the end of this file and destabilises whichever file vitest runs next,
+// so it is settled here. Partial mock: everything else in api/auth stays real.
 vi.mock("../../api/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../api/auth")>()),
   useSession: () => ({ data: null, isPending: false }),
@@ -74,9 +74,9 @@ vi.mock("../../api/hooks", () => ({
   useReport: vi.fn((_id, type) => ({ data: type ? { report_type: type, definition: {}, rows: type === "trend" ? [{ days: [{ date: "2026-09-07", avg_min: 2, samples: 4 }] }] : [["101", null, 2, 1, 3, 4]] } : undefined, isPending: false })),
 }));
 const ctx = { ...SCOPE_EXTRAS_NONE, from: "2026-09-07", to: "2026-09-12", dow: "weekday" as const, time_band: "morning" as const, service: "all" as const, routes: ["101"] };
-// Reports renders the scope sentence, whose PresetMenu calls useQueryClient to
-// invalidate saved presets -- so the tree needs a provider even though no test
-// here asserts on a query.
+// Reports renders the scope sentence, whose PresetMenu looks up stop names
+// with a query (usePlaceLabels) -- so the tree needs a provider even though no
+// test here asserts on a query.
 function show(tab: "routes/101" | "reports", search = "") {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
