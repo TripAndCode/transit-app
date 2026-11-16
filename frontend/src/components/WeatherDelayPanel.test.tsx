@@ -214,7 +214,7 @@ describe("WeatherDelayPanel", () => {
     expect(screen.getByText("20mm+")).toBeInTheDocument();
     expect(screen.getByText("80.1s")).toBeInTheDocument();
     expect(screen.getByText("110.4s")).toBeInTheDocument();
-    expect(screen.getByText("660 samples")).toBeInTheDocument();
+    expect(screen.getByText("660 observations")).toBeInTheDocument();
     expect(screen.getByText("No data")).toBeInTheDocument();
   });
 });

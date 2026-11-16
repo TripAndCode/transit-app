@@ -246,7 +246,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("series_top_offenders", "ja"): " (悪化: {routes})",
     ("series_top_offenders", "en"): " (worst: {routes})",
     ("series_line", "ja"): "{date}: 平均{avg:.2f}分 / {samples}件{top}",
-    ("series_line", "en"): "{date}: mean {avg:.2f} min / {samples} samples{top}",
+    ("series_line", "en"): "{date}: mean {avg:.2f} min / {samples} observations{top}",
     ("more_rows", "ja"): "…他{n}件",
     ("more_rows", "en"): "…{n} more",
     ("route_prefix", "ja"): "路線{route}",
@@ -304,26 +304,26 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("mt_agencies_summary", "ja"): "登録されているエージェンシー: {n} 社",
     ("mt_agencies_summary", "en"): "registered agencies: {n}",
-    ("mt_sample_counts_no_data", "ja"): "選択期間 ({from_date}〜{to_date}) にサンプルデータがありません。",
-    ("mt_sample_counts_no_data", "en"): "no sample data in the selected window ({from_date} – {to_date}).",
+    ("mt_sample_counts_no_data", "ja"): "選択期間 ({from_date}〜{to_date}) に観測がありません。",
+    ("mt_sample_counts_no_data", "en"): "no observations in the selected window ({from_date} – {to_date}).",
     ("mt_sample_counts_page_asc", "ja"): (
-        "サンプル数の少ない順 全{total}路線中 {shown_from}–{shown_to}件を表示"
+        "観測数の少ない順 全{total}路線中 {shown_from}–{shown_to}件を表示"
         "（続きは「次の{limit}件」）({from_date}〜{window_end})"
     ),
     ("mt_sample_counts_page_asc", "en"): (
-        "sample count ascending {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
+        "observation count ascending {shown_from}–{shown_to} of {total} (next: 'next {limit}') "
+        "({from_date} – {window_end})"
     ),
     ("mt_sample_counts_page_desc", "ja"): (
-        "サンプル数 全{total}路線中 {shown_from}–{shown_to}件を表示"
-        "（続きは「次の{limit}件」）({from_date}〜{window_end})"
+        "観測数 全{total}路線中 {shown_from}–{shown_to}件を表示（続きは「次の{limit}件」）({from_date}〜{window_end})"
     ),
     ("mt_sample_counts_page_desc", "en"): (
-        "sample count {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
+        "observation count {shown_from}–{shown_to} of {total} (next: 'next {limit}') ({from_date} – {window_end})"
     ),
-    ("mt_sample_counts_first_asc", "ja"): "サンプル数の少ない順 {n}路線 ({from_date}〜{window_end})",
-    ("mt_sample_counts_first_asc", "en"): "sample count bottom-{n} ({from_date} – {window_end})",
-    ("mt_sample_counts_first_desc", "ja"): "サンプル数 上位{n}路線 ({from_date}〜{window_end})",
-    ("mt_sample_counts_first_desc", "en"): "sample count top-{n} ({from_date} – {window_end})",
+    ("mt_sample_counts_first_asc", "ja"): "観測数の少ない順 {n}路線 ({from_date}〜{window_end})",
+    ("mt_sample_counts_first_asc", "en"): "observation count bottom-{n} ({from_date} – {window_end})",
+    ("mt_sample_counts_first_desc", "ja"): "観測数 上位{n}路線 ({from_date}〜{window_end})",
+    ("mt_sample_counts_first_desc", "en"): "observation count top-{n} ({from_date} – {window_end})",
     ("mt_overview_summary", "ja"): "データセット概要",
     ("mt_overview_summary", "en"): "dataset overview",
     ("mt_metrics_summary", "ja"): "計算可能な指標の一覧",

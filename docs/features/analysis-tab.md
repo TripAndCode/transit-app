@@ -44,6 +44,8 @@ section, each scoped to the shared date/dow/time-band/service/route filter.
   `/agencies/:agencyId/forecast` goes to `time?report=route_forecast`
   (`frontend/src/routes/legacyRedirects.tsx`, through `reportHref` in
   `destinations.ts`).
+  These redirects are removed after 2027-05-16 (Asia/Tokyo), when bookmarks to
+  the old paths are stale; `legacyRedirects.test.tsx` fails after that date.
 - Reach it from the Time, Why and Compare rail entries, the command
   palette's report items (through `reportHref`, which opens the screen
   hosting the type), or the Reports period summary's "Detailed reports →"

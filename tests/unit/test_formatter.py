@@ -145,7 +145,7 @@ def test_fmt_dow_ranking_weekend_names_the_weekend_and_holiday_day_type():
     ja = format_result("dow_ranking", rows, {"dow_group": "weekend"})
     en = format_result("dow_ranking", rows, {"dow_group": "weekend"}, locale="en")
     assert ja == "【土日祝遅延ランキング】\n1位: 路線16101 土日祝：平均8.8分（114件）"
-    assert en == "[Weekend/holiday delay ranking]\n#1 route 16101 Weekend/Holiday: mean 8.8 min (114 samples)"
+    assert en == "[Weekend/holiday delay ranking]\n#1 route 16101 Weekend/Holiday: mean 8.8 min (114 observations)"
 
 
 def test_fmt_ranking_en_locale_uses_english_strings():
@@ -296,5 +296,6 @@ def test_fmt_route_table_names_its_sort_and_order_in_both_languages():
     en_intent = {"sort": "avg", "order": "worst", "early_departure_sec": 90}
     assert format_result("route_table", rows, en_intent, locale="en") == (
         "[Routes, highest average delay first]\n"
-        "#1 route S1 mean 1.7 min, on-time 75.0%, more than 1 min 30 s early 2.0%, over 5 min 25.0% (25), 100 samples"
+        "#1 route S1 mean 1.7 min, on-time 75.0%, more than 1 min 30 s early 2.0%, "
+        "over 5 min 25.0% (25), 100 observations"
     )

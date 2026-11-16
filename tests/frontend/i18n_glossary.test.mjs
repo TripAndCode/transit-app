@@ -27,11 +27,23 @@ const JA_VARIANTS = [
   // The Saturday-Sunday day filter is 土日 on every screen; 土日祝 names the
   // weekend-and-holiday timetable, which is a different set of days.
   [/土日のみ/, "土日"],
+  // One trip leaving one stop is an 観測, and its count is 観測数 on every
+  // screen, in the manual and in the council report. サンプルデータ (sample
+  // data in the landing page's mock-up) is a different thing and stays.
+  [/観測データ数/, "観測数"],
+  [/サンプル数/, "観測数"],
+  [/計測回数/, "観測数"],
 ];
 const EN_VARIANTS = [
   [/Print \/ Save PDF/, "Print / Save as PDF"],
   [/Continue with/, "Sign in with"],
   [/certificate(?! issued)/i, "Delay record (for reference)"],
+  // The count of one trip leaving one stop is Observations wherever it is a
+  // column, figure or glossary term. A bare lower-case "samples" stays legal:
+  // the admin board's probe samples are a different count.
+  [/\bSamples\b/, "Observations"],
+  [/\b(?:dwell|running) samples\b/i, "Dwell observations / Running observations"],
+  [/\{\{count\}\} samples/, "{{count}} observations"],
 ];
 
 const JA_SOURCES = [

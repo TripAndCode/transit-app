@@ -109,7 +109,7 @@ describe("TopBar", () => {
       const panel = screen.getByRole("region", { name: "How fresh the data is" });
       expect(panel).toHaveTextContent("Service days through Tue, Sep 29, 2026");
       expect(panel).toHaveTextContent("436,691");
-      expect(panel).toHaveTextContent("Days without readings are left out, not counted as on time.");
+      expect(panel).toHaveTextContent("Days without observations are left out, not counted as on time.");
       await userEvent.keyboard("{Escape}");
       expect(screen.queryByRole("region", { name: "How fresh the data is" })).toBeNull();
       expect(chip).toHaveFocus();

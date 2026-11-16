@@ -3,7 +3,12 @@ import { destHref, reportHref, routesHref, savedTarget, type Destination } from 
 
 /** Every legacy URL keeps working: each one replaces itself with the screen
  *  that serves it, carrying the query string so filters and deep links
- *  survive. */
+ *  survive.
+ *
+ *  Remove these redirects, and the routes in `main.tsx` that mount them, after
+ *  2027-05-16 (Asia/Tokyo): a bookmark older than that is stale. The date is
+ *  enforced by `legacyRedirects.test.tsx`. */
+export const LEGACY_REDIRECTS_REMOVE_AFTER = "2027-05-16";
 
 export function RedirectTo({ dest, extra = {} }: { dest: Destination; extra?: Record<string, string> }) {
   const { agencyId = "" } = useParams();

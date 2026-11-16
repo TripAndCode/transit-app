@@ -42,17 +42,19 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("ranking_header_best", "ja"): "【{label}平均遅延の少ない順 上位{count}路線】",
     ("ranking_header_best", "en"): "[{label}Lowest average delay — top {count} routes]",
     ("ranking_row", "ja"): "{rank}位: 路線{route} 平均{avg}分、p50={p50}分、p90={p90}分（{samples}件）",
-    ("ranking_row", "en"): "#{rank} route {route} mean {avg} min, p50={p50} min, p90={p90} min ({samples} samples)",
+    ("ranking_row", "en"): (
+        "#{rank} route {route} mean {avg} min, p50={p50} min, p90={p90} min ({samples} observations)"
+    ),
     ("on_time_header", "ja"): "【{label}定時率ランキング】",
     ("on_time_header", "en"): "[{label}On-time rate ranking]",
     ("on_time_header_worst", "ja"): "【{label}定時率の低い順】",
     ("on_time_header_worst", "en"): "[{label}On-time rate, lowest first]",
     ("on_time_row", "ja"): "{rank}位: 路線{route} 定時率{pct}%、平均{avg}分（{samples}件）",
-    ("on_time_row", "en"): "#{rank} route {route} on-time {pct}%, mean {avg} min ({samples} samples)",
+    ("on_time_row", "en"): "#{rank} route {route} on-time {pct}%, mean {avg} min ({samples} observations)",
     ("worst5_header", "ja"): "【{label}5分超遅延ランキング】",
     ("worst5_header", "en"): "[{label}Ranking of delays over 5 min]",
     ("worst5_row", "ja"): "{rank}位: 路線{route} 5分超 {count}回、平均{avg}分（{samples}件）",
-    ("worst5_row", "en"): "#{rank} route {route} over 5 min: {count} times, mean {avg} min ({samples} samples)",
+    ("worst5_row", "en"): "#{rank} route {route} over 5 min: {count} times, mean {avg} min ({samples} observations)",
     ("route_table_header", "ja"): "【{label}系統一覧：{basis}】",
     ("route_table_header", "en"): "[{label}Routes, {basis}]",
     ("route_table_by_avg_worst", "ja"): "平均遅延の大きい順",
@@ -77,14 +79,14 @@ _LOCALES: dict[tuple[str, str], str] = {
     ),
     ("route_table_row", "en"): (
         "#{rank} route {route} mean {avg} min, on-time {pct}%, more than {early_sec} early {early}%, "
-        "over 5 min {share}% ({count}), {samples} samples"
+        "over 5 min {share}% ({count}), {samples} observations"
     ),
     ("dow_header_weekend", "ja"): "【{label}土日祝遅延ランキング】",
     ("dow_header_weekend", "en"): "[{label}Weekend/holiday delay ranking]",
     ("dow_header_weekday", "ja"): "【{label}平日遅延ランキング】",
     ("dow_header_weekday", "en"): "[{label}Weekday delay ranking]",
     ("dow_row", "ja"): "{rank}位: 路線{route} {dow_label}：平均{avg}分（{samples}件）",
-    ("dow_row", "en"): "#{rank} route {route} {dow_label}: mean {avg} min ({samples} samples)",
+    ("dow_row", "en"): "#{rank} route {route} {dow_label}: mean {avg} min ({samples} observations)",
     ("compare_header", "ja"): "【平日・土日祝 遅延差ランキング】",
     ("compare_header", "en"): "[Weekday vs weekend/holiday delay-delta ranking]",
     ("compare_row", "ja"): "{rank}位: 路線{route} 平日{weekday}分 / 土日祝{weekend}分（差：{delta}分、{direction}）",
@@ -109,8 +111,8 @@ _LOCALES: dict[tuple[str, str], str] = {
         "{rank}位: 路線{route} 滞留平均{dwell}分（{dwell_samples}件）、走行平均{run}分（{run_samples}件）"
     ),
     ("dwell_run_row", "en"): (
-        "#{rank} route {route} dwell avg {dwell} min ({dwell_samples} samples), "
-        "running avg {run} min ({run_samples} samples)"
+        "#{rank} route {route} dwell avg {dwell} min ({dwell_samples} observations), "
+        "running avg {run} min ({run_samples} observations)"
     ),
     ("dwell_run_feed_unsupported", "ja"): (
         "この事業者のフィードからは到着時刻を取り込めないため、滞留・走行時間の内訳は表示できません。"
@@ -149,7 +151,7 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("dwell_run_time_band_unsupported", "en"): "This decomposition doesn't support a time-band filter yet.",
     ("council_header", "ja"): "【協議会向け報告（{agency}、{from_date} 〜 {to_date}）】",
     ("council_header", "en"): "[Council report ({agency}, {from_date} to {to_date})]",
-    ("council_headline", "ja"): "定時率 {on_time}%{early}、平均遅延 {avg}分（観測データ{samples}件・停留所単位）",
+    ("council_headline", "ja"): "定時率 {on_time}%{early}、平均遅延 {avg}分（観測数{samples}件・停留所単位）",
     ("council_headline", "en"): (
         "On-time rate {on_time}%{early}, mean delay {avg} min ({samples} stop-level observations)"
     ),

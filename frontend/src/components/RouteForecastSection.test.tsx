@@ -124,7 +124,7 @@ describe("RouteForecastSection", () => {
 
   it("shows the empty-state message when the agency has no data", () => {
     renderSection(overview({ grid: fullGrid([]), worst: null, routes: [] }));
-    expect(screen.getByText(/No measurements yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/No observations yet/i)).toBeInTheDocument();
   });
 
   it("titles a chosen route's grid for that route, and the agency's for all routes", () => {
@@ -242,7 +242,7 @@ describe("RouteForecastSection", () => {
   it("says what the small line beside each route shows, and over which days", () => {
     const routes = overview().routes.map((r, i) => (i === 0 ? { ...r, recent_daily: [2.0, 4.0] } : r));
     renderSection(overview({ routes }));
-    expect(screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" })).toHaveTextContent(
+    expect(screen.getByRole("region", { name: "Past observations (Jul 12 – Oct 23)" })).toHaveTextContent(
       "The small line traces its daily average on the days with data over Oct 17 – Oct 23.",
     );
   });
@@ -250,14 +250,14 @@ describe("RouteForecastSection", () => {
   it("leaves the small line unexplained when no shown route has two days to draw it from", () => {
     const routes = overview().routes.map((r) => ({ ...r, recent_daily: [3.0] }));
     renderSection(overview({ routes }));
-    expect(screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" })).not.toHaveTextContent(
+    expect(screen.getByRole("region", { name: "Past observations (Jul 12 – Oct 23)" })).not.toHaveTextContent(
       "The small line traces",
     );
   });
 
   it("heads the route list as past measurements over its window, apart from the forecast and its caveat", () => {
     renderSection();
-    const history = screen.getByRole("region", { name: "Past measurements (Jul 12 – Oct 23)" });
+    const history = screen.getByRole("region", { name: "Past observations (Jul 12 – Oct 23)" });
     expect(within(history).getByTestId("fc-overview-routes")).toHaveTextContent("Routes that ran late");
     expect(within(history).queryByTestId("fc-overview-grid")).toBeNull();
     expect(within(history).queryByText("test disclaimer")).toBeNull();
@@ -420,7 +420,7 @@ describe("RouteForecastSection", () => {
     fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByText("Past observations")).toBeInTheDocument();
-    expect(within(dialog).queryByText("Measurements")).toBeNull();
+    expect(within(dialog).queryByText("Observations")).toBeNull();
     // The route figure pools the model's forecasts, so it is not called an average.
     expect(within(dialog).getByText("All days and hours, expected")).toBeInTheDocument();
     expect(within(dialog).queryByText("All days and hours, average")).toBeNull();
@@ -428,10 +428,10 @@ describe("RouteForecastSection", () => {
     expect(within(dialog).getByText("Latest day (whole-day average)")).toBeInTheDocument();
   });
 
-  it("keeps calling the detail's count measurements for a baseline forecast", () => {
+  it("calls the detail's count Observations for a baseline forecast", () => {
     renderSection(overview(), "100");
     fireEvent.click(within(screen.getByTestId("fc-card-dow")).getByRole("button", { name: /^Expand/ }));
-    expect(within(screen.getByRole("dialog")).getByText("Measurements")).toBeInTheDocument();
+    expect(within(screen.getByRole("dialog")).getByText("Observations")).toBeInTheDocument();
     expect(within(screen.getByRole("dialog")).getByText("All days and hours, average")).toBeInTheDocument();
   });
 

@@ -315,7 +315,7 @@ describe("ReportTable units and route names", () => {
       "On-time %",
       "Share over 5 min",
       "Over 5 min (count)",
-      "Samples",
+      "Observations",
     ]);
     expect(screen.getByText("6.0")).toBeInTheDocument();
     expect(within(screen.getAllByRole("row")[1]).queryByText(/\d\s?min$/)).toBeNull();
@@ -332,7 +332,7 @@ describe("ReportTable units and route names", () => {
       "Early (> 1 min)",
       "Share over 5 min",
       "Over 5 min (count)",
-      "Samples",
+      "Observations",
     ]);
     expect(screen.getByText("2.4%")).toBeInTheDocument();
   });
@@ -436,7 +436,7 @@ describe("ReportTable on a phone", () => {
     renderTable([tableRow("39061", 5.2, { onTime: 61.5, share: 9.8, count: 12, samples: 120 })], "route_table", { sortBy: "avg" });
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const [item] = screen.getAllByRole("listitem");
-    for (const text of ["1", "T50", "石江・新城線", "Avg", "5.2 min", "On-time %", "61.5%", "Share over 5 min", "9.8%", "Over 5 min (count)", "12", "Samples", "120"]) {
+    for (const text of ["1", "T50", "石江・新城線", "Avg", "5.2 min", "On-time %", "61.5%", "Share over 5 min", "9.8%", "Over 5 min (count)", "12", "Observations", "120"]) {
       expect(within(item).getByText(text)).toBeInTheDocument();
     }
     expect(within(item).queryByText("39061")).toBeNull();
@@ -565,11 +565,11 @@ describe("ReportTable statistics columns", () => {
     ["dow_weekend", ["A", null, "土日祝", 4.2, 150]], // i18n-ignore: query contract
   ])("leaves the %s observation count out unless statistics are asked for", (reportType, row) => {
     renderTable([row], reportType, { showStatistics: false });
-    expect(headers()).not.toContain("Samples");
+    expect(headers()).not.toContain("Observations");
     expect(screen.queryByText("150")).toBeNull();
     cleanup();
     renderTable([row], reportType, { showStatistics: true });
-    expect(headers()).toContain("Samples");
+    expect(headers()).toContain("Observations");
   });
 
   it("moves a thin day-type row's few-data badge onto its average while the count is hidden", () => {

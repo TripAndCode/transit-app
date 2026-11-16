@@ -133,7 +133,7 @@ describe("AnalysisTab", () => {
     } as never);
     renderAnalysis("/agencies/1/analysis/when?report=dow_weekend", ["dow_weekend"]);
     expect(screen.getByRole("checkbox", { name: "Show statistics" })).not.toBeChecked();
-    expect(screen.queryByRole("columnheader", { name: "Samples" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Observations" })).toBeNull();
     expect(screen.getByText("few data")).toHaveClass("caveat-badge");
   });
 

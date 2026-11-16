@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import {
+  LEGACY_REDIRECTS_REMOVE_AFTER,
   RedirectAnalysisLens,
   RedirectForecast,
   RedirectReportType,
@@ -190,5 +191,32 @@ describe("legacy redirects", () => {
     expect(loc.pathname).toBe("/agencies/9/compare");
     expect(loc.params.get("by")).toBe("agencies");
     expect(loc.params.get("from")).toBe("2026-09-01");
+  });
+});
+
+/** Today's calendar date in Tokyo, so the verdict does not move with the
+ *  machine's time zone. */
+function tokyoDate(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo" }).format(now);
+}
+
+describe("legacy redirect removal date", () => {
+  it("is a calendar date", () => {
+    expect(LEGACY_REDIRECTS_REMOVE_AFTER).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(Number.isNaN(Date.parse(LEGACY_REDIRECTS_REMOVE_AFTER))).toBe(false);
+  });
+
+  it("stays in the Tokyo date through its last day and turns over at Tokyo midnight", () => {
+    expect(tokyoDate(new Date("2027-05-16T14:59:59Z"))).toBe("2027-05-16");
+    expect(tokyoDate(new Date("2027-05-16T15:00:00Z"))).toBe("2027-05-17");
+  });
+
+  it("has not passed: delete legacyRedirects.tsx, its tests and its routes in main.tsx once it has", () => {
+    expect(
+      tokyoDate() <= LEGACY_REDIRECTS_REMOVE_AFTER,
+      `The legacy redirects were due for removal after ${LEGACY_REDIRECTS_REMOVE_AFTER}. ` +
+        "Delete frontend/src/routes/legacyRedirects.tsx, this test and the routes that mount them in main.tsx, " +
+        "and drop the removal date from the docs that name it.",
+    ).toBe(true);
   });
 });
