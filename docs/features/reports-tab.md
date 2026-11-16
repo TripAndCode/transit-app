@@ -257,9 +257,9 @@ What the user sees/does:
   route opens that route's dossier, any other selection the Routes list. An
   `EmptyState` ("Save filters on a route's page to see them here") shows
   when none exist for this agency. A note under the local-only one tells
-  these 「保存した分析」 apart from 「保存したビュー」, the account-held views
-  kept under the scope sentence's "Saved views ▾", which this tab does not
-  list; the names are the privacy policy's. Bookmarks are
+  these 「保存した分析」 apart from 「保存したビュー」, the other browser-local
+  views kept under the scope sentence's "Saved views ▾", which this tab does
+  not list; the names are the privacy policy's. Bookmarks are
   browser-local filter snapshots, not immutable historical results —
   opening one re-queries the API with today's data under that filter.
 

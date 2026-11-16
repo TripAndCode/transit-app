@@ -1,4 +1,4 @@
-"""Tests for self-service ``/api/me`` endpoints: profile, sessions, presets."""
+"""Tests for self-service ``/api/me`` endpoints: profile, sessions."""
 
 from datetime import timedelta
 
@@ -40,7 +40,6 @@ async def test_me_anonymous_is_null(me_client):
     ("method", "path"),
     [
         ("GET", "/api/me/sessions"),
-        ("GET", "/api/me/presets"),
         ("GET", "/api/me/llm-key"),
         ("GET", "/api/me/export"),
         ("DELETE", "/api/me"),
@@ -64,57 +63,18 @@ async def test_me_returns_profile(me_client, aconn):
 
 
 @pytest.mark.asyncio
-async def test_preset_create_list_delete(me_client, aconn, aagency_id):
-    """Filter presets: create, list, delete round-trip."""
+async def test_presets_endpoints_are_retired(me_client, aconn, aagency_id):
+    """Saved views live in the browser: /api/me/presets is not mounted, even for a signed-in caller."""
     sid, _uid = await _seed_user_and_session(aconn)
-    body = {"agency_id": aagency_id, "name": "朝ラッシュ", "range_ctx": {"time_band": "0700-1000"}}
-    r = await me_client.post(
-        "/api/me/presets",
-        json=body,
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert r.status_code == 201
-    pid = r.json()["preset_id"]
-
-    # collision
-    r2 = await me_client.post(
-        "/api/me/presets",
-        json=body,
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert r2.status_code == 409
-
-    r3 = await me_client.get(f"/api/me/presets?agency_id={aagency_id}", cookies={"sid": sid})
-    assert r3.status_code == 200
-    assert len(r3.json()) == 1
-
-    r4 = await me_client.delete(
-        f"/api/me/presets/{pid}",
-        cookies={"sid": sid},
-        headers={"Origin": "http://test"},
-    )
-    assert r4.status_code == 204
-
-
-@pytest.mark.asyncio
-async def test_other_user_cannot_delete_preset(me_client, aconn, aagency_id):
-    sid_a, _ = await _seed_user_and_session(aconn)
-    sid_b, _ = await _seed_user_and_session(aconn)
     r = await me_client.post(
         "/api/me/presets",
         json={"agency_id": aagency_id, "name": "x", "range_ctx": {}},
-        cookies={"sid": sid_a},
+        cookies={"sid": sid},
         headers={"Origin": "http://test"},
     )
-    pid = r.json()["preset_id"]
-    r2 = await me_client.delete(
-        f"/api/me/presets/{pid}",
-        cookies={"sid": sid_b},
-        headers={"Origin": "http://test"},
-    )
-    assert r2.status_code == 404
+    assert r.status_code in (404, 405)
+    r2 = await me_client.get(f"/api/me/presets?agency_id={aagency_id}", cookies={"sid": sid})
+    assert r2.status_code in (404, 405)
 
 
 @pytest.mark.asyncio

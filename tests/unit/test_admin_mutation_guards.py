@@ -82,7 +82,7 @@ _SENTINEL_ROUTES = frozenset(
     {
         ("PATCH", "/api/admin/flags/{key}"),
         ("GET", "/api/admin/users"),
-        ("POST", "/api/me/presets"),
+        ("PUT", "/api/me/llm-key"),
         ("POST", "/api/{agency_id}/ask"),
         ("POST", "/internal/cron/ingest"),
     }

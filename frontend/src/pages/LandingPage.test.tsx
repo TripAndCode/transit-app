@@ -45,7 +45,7 @@ describe("LandingPage", () => {
       const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      const note = screen.getByText(/to keep your saved views/);
+      const note = screen.getByText(/to keep your notebook investigations/);
       expect(within(note).getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
     });
 
@@ -56,7 +56,7 @@ describe("LandingPage", () => {
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
       expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
-      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
+      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
     });
 
     it("leaves out the sign-in note on a deployment with nothing to sign in with", () => {
@@ -65,7 +65,7 @@ describe("LandingPage", () => {
       const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
+      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
     });
 
     it("opens the dashboard while the session is still loading, with no sign-in note yet", () => {
@@ -75,7 +75,7 @@ describe("LandingPage", () => {
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
       expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
-      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
+      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
     });
 
     it("opens the dashboard before the configuration has loaded, with no sign-in note yet", () => {
@@ -84,7 +84,7 @@ describe("LandingPage", () => {
       const ctas = screen.getAllByRole("link", { name: "View the dashboard (no sign-in needed)" });
       expect(ctas).toHaveLength(2);
       for (const cta of ctas) expect(cta).toHaveAttribute("href", "/");
-      expect(screen.queryByText(/to keep your saved views/)).toBeNull();
+      expect(screen.queryByText(/to keep your notebook investigations/)).toBeNull();
     });
   });
 
