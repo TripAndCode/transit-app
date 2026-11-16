@@ -148,7 +148,7 @@ Each day's observations are counted by the path they came from, archive or live,
 
 ### Rebuild record
 
-When the method changes, every aggregate it changed is rebuilt over its whole history. Figures exported under an earlier version may therefore differ from today's for the same period.
+When the method changes, every aggregate it changed is rebuilt over its whole retained history. Figures exported under an earlier version may therefore differ from today's for the same period. Dates before an operator's retention floor, whose raw readings are no longer kept, are not rebuilt: they keep the figures of the method they were built under, and an export reaching them names that method.
 
 When a rebuild rewrites the aggregate behind the operator-wide on-time rate and average delay, it records the following for each operator, shown on the admin board's run timeline:
 
@@ -332,7 +332,7 @@ A method change does three things:
 
 - it gets a new version number;
 - what it changes is written down;
-- every aggregate it changes is rebuilt over its whole history.
+- every aggregate it changes is rebuilt over its whole retained history.
 
 The changelog is at the end of this document, and each version's description is in [DELAY_ANALYSIS.md's "Method versions"](../DELAY_ANALYSIS.md#method-versions). How a rebuild moved each operator's on-time rate and average delay is recorded as in [Rebuild record](#rebuild-record).
 

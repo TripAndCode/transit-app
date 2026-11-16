@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date
+from datetime import date, timedelta
 from itertools import groupby
 from pathlib import Path
 from typing import Literal
@@ -22,7 +22,7 @@ from typing import Literal
 import asyncpg
 from pydantic import AwareDatetime, BaseModel
 
-from pipeline import static_archive
+from pipeline import retention, static_archive
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.cache import clear_all, evict_for_rebuild
 from pipeline.clickhouse import jst_date
@@ -188,6 +188,19 @@ class FeedQuality(BaseModel):
     max_clamp_pct: float
 
 
+class PreFloorMethod(BaseModel):
+    """Dates of a request's range before an agency's retention floor, whose
+    aggregates stand as analyze last built them, and the method they were
+    built under: the one in force when the drop that made them final was
+    recorded (:func:`pipeline.retention.frozen_methods`). ``method_version``
+    is None when that drop recorded none, so the method is unknown."""
+
+    agency_id: int
+    from_date: date
+    to_date: date
+    method_version: str | None
+
+
 class DefinitionMeta(BaseModel):
     """On-time/late definition actually used to produce a report or
     comparison view's numbers -- surfaced alongside any such view (and in
@@ -226,6 +239,13 @@ class DefinitionMeta(BaseModel):
     each listed agency's completeness and clamp share over the range
     (:class:`FeedQuality`); ``None`` until a router states them, and on a
     definition saved before the stamp carried them.
+
+    ``method_version`` describes the dates analyze may still rebuild.
+    ``pre_floor_methods`` names, beside aggregates, the range's dates before
+    each listed agency's retention floor and the method each was frozen under
+    (:class:`PreFloorMethod`), whether or not it is the current one; ``None``
+    when the range reaches no such date, for a live scan, which never does,
+    and on a database not yet migrated to record the method.
     """
 
     preset: str | None
@@ -242,6 +262,7 @@ class DefinitionMeta(BaseModel):
     timetable_versions: list[TimetableVersion] | None = None
     source_mix: list[SourceMix] | None = None
     feed_quality: list[FeedQuality] | None = None
+    pre_floor_methods: list[PreFloorMethod] | None = None
 
 
 # Each agency's builds analyze had recorded, when this process last looked,
@@ -293,12 +314,14 @@ async def stamp_build(
 ) -> DefinitionMeta:
     """*meta* with the timetables in force over *schedule*'s dates, each named
     one with its content's short hash, the source of each of those days'
-    observations, and ``built_at``: the newest time analyze rewrote any
-    aggregate, all for *agency_id*, or for every agency the board lists when it
-    is None. *schedule* is that scope's
+    observations, ``built_at``: the newest time analyze rewrote any
+    aggregate, and ``pre_floor_methods``: the method each of its dates before a
+    retention floor was frozen under (:func:`_read_pre_floor`), all for
+    *agency_id*, or for every agency the board lists when it is None.
+    *schedule* is that scope's
     :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
-    gets its timetables and sources and no build. Nothing is read from
-    ClickHouse.
+    gets its timetables and sources, and no build or pre-floor methods.
+    Nothing is read from ClickHouse.
 
     One agency's stamp also states its completeness and clamp share over the
     range (:func:`pipeline.reports.network.compute_agency_feed_quality`), read
@@ -333,6 +356,7 @@ async def stamp_build(
         _note_builds({row[0]: (row[1], row[2]) for row in rows})
         built = [row[3] for row in rows if row[0] == agency_id or (agency_id is None and row[4])]
         update["built_at"] = max(built, default=None)
+        update["pre_floor_methods"] = await _read_pre_floor(conn, agency_id, schedule.from_date, schedule.to_date)
     if agency_id is not None and read_feed_quality:
         # Imported here: pipeline.reports.network reads the gate, whose module imports this one.
         from pipeline.reports import network
@@ -343,6 +367,44 @@ async def stamp_build(
         quality = await network.compute_agency_feed_quality(conn, agency_id, schedule.from_date, schedule.to_date)
         update["feed_quality"] = None if quality is None else [quality]
     return meta.model_copy(update=update)
+
+
+async def _read_pre_floor(conn, agency_id: int | None, from_date: date, to_date: date) -> list[PreFloorMethod] | None:
+    """The :class:`PreFloorMethod` spans of [*from_date*, *to_date*] for
+    *agency_id*, or every agency the board lists when it is None, or None when
+    the range reaches no date before a floor or the database is not yet
+    migrated to record the method."""
+    rows = await _fetch_enrichment(
+        conn, "method stamps in updates_pruned_months", retention.FROZEN_METHODS_SQL, agency_id
+    )
+    if not rows:
+        return None
+    spans = [
+        span
+        for agency, drops in groupby(rows, key=lambda row: row[0])
+        for span in _pre_floor_spans(agency, [(row[1], row[2]) for row in drops], from_date, to_date)
+    ]
+    return spans or None
+
+
+def _pre_floor_spans(
+    agency_id: int, drops: list[tuple[date, str | None]], from_date: date, to_date: date
+) -> list[PreFloorMethod]:
+    """One agency's frozen spans clipped to [*from_date*, *to_date*], the
+    neighbours frozen under one method joined."""
+    spans: list[PreFloorMethod] = []
+    for frozen in retention.frozen_methods(drops):
+        first = from_date if frozen.after is None else max(frozen.after, from_date)
+        last = min(frozen.before - timedelta(days=1), to_date)
+        if first > last:
+            continue
+        if spans and spans[-1].method_version == frozen.method_version:
+            spans[-1] = spans[-1].model_copy(update={"to_date": last})
+        else:
+            spans.append(
+                PreFloorMethod(agency_id=agency_id, from_date=first, to_date=last, method_version=frozen.method_version)
+            )
+    return spans
 
 
 def _timetables(schedule: ScheduleDays) -> list[TimetableVersion]:
@@ -602,7 +664,10 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
     if sources is not None:
         line = f"{line}; 観測データ={sources}"
     quality = _feed_quality_text(meta, "ja", grouped=False)
-    return line if quality is None else f"{line}; {_FEED_QUALITY_LABEL['ja']}={quality}"
+    if quality is not None:
+        line = f"{line}; {_FEED_QUALITY_LABEL['ja']}={quality}"
+    pre_floor = _pre_floor_text(meta, "ja")
+    return line if pre_floor is None else f"{line}; {_PRE_FLOOR_CSV_LABEL}={pre_floor}"
 
 
 _LIVE_DAY = {"ja": "対象外（ライブ集計）", "en": "not applicable (live scan)"}
@@ -732,19 +797,36 @@ COVERAGE_MISSING_TEXT: dict[tuple[str, str], str] = {
 
 def _feed_quality_text(meta: DefinitionMeta, locale: str, *, grouped: bool = True) -> str | None:
     """Each listed agency's completeness and clamp share, named by its agency
-    when there are several; None when no router stated them. *grouped* puts
+    when the stamp's scope lists several (`_by_agency`); None when no router
+    stated them. *grouped* puts
     thousands separators in the trip counts, which the CSV preamble's single
     cell leaves out, as it keeps no ASCII comma."""
     if not meta.feed_quality:
         return None
-    several = len(meta.feed_quality) > 1
-    parts = []
-    for quality in meta.feed_quality:
-        part = _feed_quality_part(quality, locale, grouped)
-        if several:
-            part = f"agency {quality.agency_id}: {part}" if locale == "en" else f"事業者{quality.agency_id}：{part}"
-        parts.append(part)
-    return ("; " if locale == "en" else "／").join(parts)
+    return _by_agency(
+        meta,
+        [(quality.agency_id, _feed_quality_part(quality, locale, grouped)) for quality in meta.feed_quality],
+        locale,
+    )
+
+
+def _stamp_agencies(meta: DefinitionMeta) -> set[int]:
+    """The agencies *meta*'s scope lists, as its per-agency parts name them:
+    an agency's own stamp names that one, and the board's every agency it
+    lists, in its timetables at least (:func:`stamp_build`)."""
+    parts = (meta.timetable_versions, meta.source_mix, meta.feed_quality, meta.pre_floor_methods)
+    return {item.agency_id for items in parts for item in items or []}
+
+
+def _by_agency(meta: DefinitionMeta, parts: list[tuple[int, str]], locale: str) -> str:
+    """Each agency's text of *parts* joined, named by its agency when *meta*'s
+    scope lists several, so a figure is never read as another agency's."""
+    several = len(_stamp_agencies(meta)) > 1
+    named = [
+        (f"agency {agency}: {text}" if locale == "en" else f"事業者{agency}：{text}") if several else text
+        for agency, text in parts
+    ]
+    return ("; " if locale == "en" else "／").join(named)
 
 
 def _feed_quality_part(quality: FeedQuality, locale: str, grouped: bool) -> str:
@@ -793,12 +875,46 @@ def _feed_quality_part(quality: FeedQuality, locale: str, grouped: bool) -> str:
     return f"{coverage}, {clamp}" if en else f"{coverage}、{clamp}"
 
 
+_PRE_FLOOR_LABEL = {
+    "ja": "詳細な観測データの保存期間を過ぎた日の数値は集計時の算出方法のまま",
+    "en": "Figures for dates whose detailed readings are no longer kept stay as analyzed then",
+}
+_PRE_FLOOR_CSV_LABEL = "保存期間を過ぎた日の算出方法"
+
+
+def _pre_floor_text(meta: DefinitionMeta, locale: str) -> str | None:
+    """The range's dates before a retention floor frozen under a method other
+    than the one *meta* names, each with that method or that none was
+    recorded, by agency (:func:`_by_agency`). None when every such date's
+    method is the current one, which the method line already says, or when
+    the range reaches none."""
+    spans = [span for span in meta.pre_floor_methods or [] if span.method_version != meta.method_version]
+    if not spans:
+        return None
+    joiner = ", " if locale == "en" else "、"
+    parts = [
+        (agency, joiner.join(_pre_floor_part(span, locale) for span in own))
+        for agency, own in groupby(spans, key=lambda span: span.agency_id)
+    ]
+    return _by_agency(meta, parts, locale)
+
+
+def _pre_floor_part(span: PreFloorMethod, locale: str) -> str:
+    first, last = span.from_date.isoformat(), span.to_date.isoformat()
+    if locale == "en":
+        method = "a method not recorded" if span.method_version is None else f"method {span.method_version}"
+        return f"{first} to {last} under {method}"
+    method = "算出方法の記録なし" if span.method_version is None else f"算出方法 {span.method_version}"
+    return f"{first}〜{last}は{method}"
+
+
 def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     """The footnote lines that say where *meta*'s figures came from: what they
     are made from, where the method is published, the method and build day
     (:func:`format_method_stamp`), and the timetables in force, the source
     of each day's observations and the period's completeness and clamp share
-    when a router named them.
+    when a router named them, and the method of any of its dates before a
+    retention floor frozen under another (:func:`_pre_floor_text`).
     :func:`format_definition_footnotes` ends with them, and the delay record's
     text is footnoted with them."""
     locale = "en" if locale == "en" else "ja"
@@ -817,6 +933,9 @@ def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     quality = _feed_quality_text(meta, locale)
     if quality is not None:
         lines.append(f"{_FEED_QUALITY_LABEL[locale]}: {quality}")
+    pre_floor = _pre_floor_text(meta, locale)
+    if pre_floor is not None:
+        lines.append(f"{_PRE_FLOOR_LABEL[locale]}: {pre_floor}")
     return lines
 
 

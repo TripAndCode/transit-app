@@ -492,3 +492,69 @@ def test_a_prune_with_nothing_to_drop_records_an_unchanged_run(stores, monkeypat
     assert stores[-2:] == [("run", "retention"), ("run closed", "unchanged", 0)]
     assert result.dropped == []
     assert all(v.held_by for v in result.verdicts)
+
+
+def test_each_drop_freezes_the_dates_up_to_its_floor_under_the_method_it_recorded():
+    spans = retention.frozen_methods(
+        [(date(2025, 3, 1), "2026.11.0"), (date(2025, 4, 1), "2026.11.15"), (date(2025, 6, 1), None)]
+    )
+    assert spans == [
+        retention.FrozenSpan(None, date(2025, 3, 1), "2026.11.0"),
+        retention.FrozenSpan(date(2025, 3, 1), date(2025, 4, 1), "2026.11.15"),
+        retention.FrozenSpan(date(2025, 4, 1), date(2025, 6, 1), None),
+    ]
+
+
+def test_a_drop_recorded_again_keeps_the_method_of_the_drop_that_first_froze_its_dates():
+    """A failed run's months are recorded again by the next run, possibly under
+    newer code, but their dates froze when the first row was committed."""
+    spans = retention.frozen_methods(
+        [(date(2025, 3, 1), "2026.11.0"), (date(2025, 3, 1), "2026.11.16"), (date(2025, 2, 1), "2026.11.16")]
+    )
+    assert spans == [retention.FrozenSpan(None, date(2025, 3, 1), "2026.11.0")]
+
+
+def test_a_frozen_span_ends_at_the_floor_as_it_is_read_back():
+    assert retention.frozen_methods([(date(2025, 2, 14), "2026.11.0")]) == [
+        retention.FrozenSpan(None, date(2025, 3, 1), "2026.11.0")
+    ]
+
+
+def test_each_recorded_drop_names_the_method_in_force():
+    class _Cursor:
+        def __init__(self, log):
+            self.log = log
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params):
+            self.log.append((sql, params))
+
+    class _Conn:
+        def __init__(self):
+            self.log: list = []
+            self.commits = 0
+
+        def cursor(self):
+            return _Cursor(self.log)
+
+        def commit(self):
+            self.commits += 1
+
+    conn = _Conn()
+    verdict = retention.PartitionVerdict(_partition("202501", 1, 2), date(2025, 3, 1), None)
+    retention._record_drops(conn, 7, [verdict])
+    ((sql, params),) = conn.log
+    columns = [name.strip() for name in sql[sql.index("(") + 1 : sql.index(")")].split(",")]
+    recorded = dict(zip(columns, params, strict=True))
+    assert recorded["method_version"] == retention.METHOD_VERSION
+    assert (recorded["partition_id"], recorded["retention_floor"], recorded["run_id"]) == (
+        "202501",
+        date(2025, 3, 1),
+        7,
+    )
+    assert conn.commits == 1
