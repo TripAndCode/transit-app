@@ -13,9 +13,9 @@ Complete is what ingest can know from its own folder and run:
   tarballs (covered_days). Loose `.pb` files never cover a day: nothing says
   a folder of them is whole.
 - No file that could hold rows of D failed to read or insert in the run.
-- The archive holds at least as many polls of D as the live copy does. The
-  collector archives every poll it pushes, so fewer means a gap in the
-  archive.
+- The archive holds at least as many polls of D as the collector pushed. It
+  archives every poll it pushes, so fewer means a gap in the archive.
+  `ingest_live`'s own samples are not counted: the archive never holds them.
 
 The archive's rows are inserted first, through ingest's own batches, and only
 then are the live-sourced rows of exactly that agency and JST day deleted
@@ -44,7 +44,7 @@ from datetime import date, datetime, timedelta
 from typing import NamedTuple
 
 from pipeline import refiled
-from pipeline.clickhouse import LIVE_SOURCED, UPDATES_TABLE, days_with_source, jst_midnight_utc
+from pipeline.clickhouse import COLLECTOR_PUSHED, LIVE_SOURCED, UPDATES_TABLE, days_with_source, jst_midnight_utc
 from pipeline.service_day import filed_dates_reached
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ _STEM_DAY = re.compile(r"(\d{8})")
 _WINDOW = "agency_id = {agency_id:UInt16} AND captured_at >= {lo:DateTime64} AND captured_at < {hi:DateTime64}"
 _SOURCES_SQL = (
     f"SELECT countIf(NOT {LIVE_SOURCED}), uniqExactIf(file_name, NOT {LIVE_SOURCED}), "
-    f"countIf({LIVE_SOURCED}), uniqExactIf(file_name, {LIVE_SOURCED}) FROM {UPDATES_TABLE} WHERE {_WINDOW}"
+    f"countIf({LIVE_SOURCED}), uniqExactIf(file_name, {COLLECTOR_PUSHED}) FROM {UPDATES_TABLE} WHERE {_WINDOW}"
 )
 # Waits for the delete to apply, so the recount after it reads the result.
 _DELETE_SETTINGS = {"lightweight_deletes_sync": 2}
@@ -69,7 +69,7 @@ class DaySources(NamedTuple):
     archive_rows: int
     archive_polls: int
     live_rows: int
-    live_polls: int
+    pushed_polls: int
 
 
 def tarball_days(tarballs: list[pathlib.Path]) -> set[date]:
@@ -144,11 +144,11 @@ def settle(ch, agency_id: int, day: date, *, intact: bool) -> str:
     held = day_sources(ch, agency_id, day)
     if not held.live_rows:
         return "archive"
-    if intact and held.archive_rows and held.archive_polls >= held.live_polls:
+    if intact and held.archive_rows and held.archive_polls >= held.pushed_polls:
         _delete(ch, agency_id, day, live=True)
         logger.info(
             f"  {day}: archive ({held.archive_polls} polls, {held.archive_rows} rows) replaced "
-            f"the promoted live copy ({held.live_polls} polls, {held.live_rows} rows)"
+            f"the promoted live copy ({held.live_rows} rows, {held.pushed_polls} pushed polls)"
         )
         return "archive"
     if held.archive_rows:
@@ -156,7 +156,7 @@ def settle(ch, agency_id: int, day: date, *, intact: bool) -> str:
     reason = (
         "a file of it failed"
         if not intact
-        else f"its archive holds {held.archive_polls} polls to the live copy's {held.live_polls}"
+        else f"its archive holds {held.archive_polls} polls to the collector's {held.pushed_polls} pushed"
     )
     logger.warning(f"  {day}: not replaced, {reason}; it keeps its promoted live copy")
     return "live"

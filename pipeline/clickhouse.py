@@ -267,7 +267,8 @@ def distinct_file_names(client, agency_id: int, since: date | None = None) -> se
 # `live_<timestamp>`. Promotion copies those names into `updates` unchanged,
 # while archive ingest writes `<YYYYMMDD>/<member>`. The prefix is therefore
 # the source of a row in `updates`.
-LIVE_SOURCED = "(startsWith(file_name, 'oracle/') OR startsWith(file_name, 'live_'))"
+COLLECTOR_PUSHED = "startsWith(file_name, 'oracle/')"
+LIVE_SOURCED = f"({COLLECTOR_PUSHED} OR startsWith(file_name, 'live_'))"
 
 
 def majority_source(archive_rows: int | None, live_rows: int | None) -> Literal["archive", "live"] | None:

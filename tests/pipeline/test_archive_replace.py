@@ -11,12 +11,13 @@ import pytest
 from clickhouse_connect.driver.exceptions import OperationalError
 
 from api.range import jst_today
-from pipeline import archive_replace
+from pipeline import archive_replace, refiled
 from pipeline.analyze import _dates_needing_rebuild, analyze
 from pipeline.archive_replace import DaySources, day_sources
 from pipeline.clickhouse import LIVE_TABLE, insert_updates
 from pipeline.ingest import IngestIncomplete, ingest
 from pipeline.promote import promote_closed_days
+from pipeline.static_archive import FILED_DATES
 from tests.fixtures.gtfs_rt import header_only_feed
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -213,3 +214,32 @@ def test_analyze_rebuilds_a_replaced_day_whose_counts_did_not_move(pg_conn, ch_c
         )
         assert cur.fetchone() == (10, 10, 0)
     assert _dates_needing_rebuild(agency_id, pg_conn, ch_client) == []
+
+
+def test_an_ingest_live_sample_does_not_count_against_the_archive(pg_conn, ch_client, agency_id, tmp_path):
+    """The collector pushed every poll it archived; the cron poke's own
+    `ingest_live` sample is a fetch the archive never holds."""
+    polls = [_at(D, hh) for hh in (1, 3, 10, 12, 20)]
+    _promote(ch_client, agency_id, polls)
+    sample = _at(D, 14)
+    insert_updates(
+        ch_client, agency_id, [(f"live_{sample:%Y%m%dT%H%M%SZ}", sample, "T1", "平日", "12:00", "R1", 1, 60)]
+    )
+    _complete_archive(tmp_path)
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert day_sources(ch_client, agency_id, D) == DaySources(10, 5, 0, 0)
+
+
+def test_a_replaced_day_writes_off_its_refiled_rows(pg_conn, ch_client, agency_id, tmp_path):
+    """A refiled build counts a date's rows, which an archive copy as dense as
+    the live one keeps, so analyze would read the live copy's refiled rows."""
+    _promote(ch_client, agency_id, _LIVE_POLLS)
+    record = (agency_id, D, "b1", "gtfs_static_20260401", "c", {}, 4, refiled.RULES)
+    ch_client.insert(FILED_DATES, [record], column_names=refiled._RECORD_COLUMNS)
+    _complete_archive(tmp_path)
+
+    _ingest(tmp_path, agency_id, pg_conn, ch_client)
+
+    assert refiled.written(ch_client, agency_id, (D, D))[D].build == ""
