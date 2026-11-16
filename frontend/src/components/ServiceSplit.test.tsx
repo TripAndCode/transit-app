@@ -67,6 +67,11 @@ describe("ServiceSplit card", () => {
     expect(screen.getByText("Delay is about the same whatever the day type.")).toBeInTheDocument();
   });
 
+  it("prints each day type's mean, or why it has none, under the sentence", () => {
+    renderSplit(split([3.2, 18, 5000], [6.0, 1, 900, true], [null, 0, 0]));
+    expect(screen.getByText("Weekdays 3.2 min · Saturdays not enough data · Sundays & holidays no data")).toBeInTheDocument();
+  });
+
   it("compares only the day types with data", () => {
     renderSplit(split([3.2, 18, 100], [null, 0, 0], [2.0, 4, 100]));
     expect(

@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 
 import type { OverviewDayType, OverviewServiceSplitEntry } from "../api/types";
-import { formatMinutes, roundTenth } from "../utils/format";
+import { FILTER_SEPARATOR, formatMinutes, roundTenth } from "../utils/format";
 import type { LabelT } from "../utils/filterValueLabels";
 import { DAY_TYPE_KEY } from "./dayTypeKey";
 
@@ -38,9 +38,24 @@ function serviceSplitStory(entries: OverviewServiceSplitEntry[], t: LabelT): str
   });
 }
 
-/** Pulse's day-type figure: one sentence comparing the period's day types,
- *  and a link to Day types & agencies, where weekday against weekend is
- *  compared route by route. */
+/** Each day type's mean, or why it has none, in display order. */
+function meansLine(entries: OverviewServiceSplitEntry[], t: LabelT): string {
+  return entries
+    .map((e) => {
+      const value =
+        e.avg_min == null
+          ? t("overview.service_split.no_data")
+          : e.insufficient
+            ? t("overview.service_split.insufficient")
+            : formatMinutes(e.avg_min);
+      return `${dayTypeLabel(e.day_type, t)} ${value}`;
+    })
+    .join(FILTER_SEPARATOR);
+}
+
+/** Pulse's day-type figures: each day type's mean, one sentence comparing
+ *  them, and a link to Day types & agencies, where weekday against weekend
+ *  is compared route by route. */
 export function ServiceSplit({
   service_split,
   compareHref,
@@ -53,7 +68,8 @@ export function ServiceSplit({
   return (
     <div className="ov-card">
       <p className="ov-card-eyebrow">{t("overview.section_service_split")}</p>
-      <p className="ov-svc-story">{serviceSplitStory(service_split, t) ?? t("overview.service_split.story_none")}</p>
+      <p className="ov-card-summary">{serviceSplitStory(service_split, t) ?? t("overview.service_split.story_none")}</p>
+      <p className="ov-card-detail num">{meansLine(service_split, t)}</p>
       <Link className="ov-card-link" to={compareHref}>
         {t("overview.service_split.see_compare")}
       </Link>

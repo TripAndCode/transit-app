@@ -960,17 +960,28 @@ export type ConvMessage = {
     pairs: unknown | null;
   } | null;
   rendered_summary: string | null;
-  /** The dow/time_band/service the message's dispatch actually ran under —
-   *  distinct from `args` (the tool's own arguments) and from the live,
-   *  editable conversation `filter_ctx`, which can change after this
-   *  message was sent. `null` for user messages and for a dispatch-free
-   *  assistant reply (e.g. an LLM-grounded follow-up). */
-  conditions?: { dow: string; time_band: string; service: string } | null;
+  /** The scope the message's dispatch actually ran under — distinct from
+   *  `args` (the tool's own arguments) and from the live, editable
+   *  conversation `filter_ctx`, which can change after this message was
+   *  sent. `null` for user messages and for a dispatch-free assistant reply
+   *  (e.g. an LLM-grounded follow-up). */
+  conditions?: CardConditions | null;
   /** The method stamp the report computing this card's figures carries, as
    *  the card was answered. `null` when no report computes them, and absent
    *  from a card saved before cards carried one: neither shows a stamp. */
   definition?: DefinitionMeta | null;
   created_at: string;
+};
+
+/** A card's recorded scope. The period and routes are recorded only for a card
+ *  answered since they were, so a reader must allow for their absence. */
+export type CardConditions = {
+  dow?: string;
+  time_band?: string;
+  service?: string;
+  from_date?: string;
+  to_date?: string;
+  routes?: string[];
 };
 
 export type AppendMessageResult = { user: ConvMessage; assistant: ConvMessage };
@@ -1175,44 +1186,24 @@ export type OverviewConcentration = {
   rest_route_count?: number;
 };
 
-type OverviewTopDelayedRoute = {
-  route_code: string;
-  route_short_name: string | null;
-  avg_min: number;
-  /** Change (minutes) from the same-length window before; null when the
-   *  route was too thinly observed there to compare. */
-  delta_min?: number | null;
-};
-
 type OverviewBandCount = {
   count: number;
-  /** The band's lower bound, in minutes. */
+  /** The bound, in minutes, the count is of routes averaging at least. */
   threshold_min: number;
 };
 
-/** Routes in each routes-to-check band, over every route rather than only
- *  the listed ones. */
-type OverviewBandCounts = {
-  severe: OverviewBandCount;
-  moderate: OverviewBandCount;
-  mild: OverviewBandCount;
-};
-
+/** The Pulse hero's late-route count over the headline's window. */
 type OverviewTopDelayed = {
-  routes: OverviewTopDelayedRoute[];
-  delayed_count: number;
-  /** The average delay (minutes) at or above which a route was counted. */
-  delayed_threshold_min: number;
-  band_counts: OverviewBandCounts;
-  /** The routes every count is out of: those observed at least
-   *  `min_samples` times in the headline's window. */
+  band_counts: { severe: OverviewBandCount };
+  /** The routes the count is out of: the Routes table's own count for the
+   *  headline's window and scope, those observed at least `min_samples` times. */
   route_count: number;
   min_samples: number;
 };
 
 export type OverviewPeakHour = {
   /** Hours 0..23, and on through the latest hour past midnight (24, 25, …)
-   *  any of the summary's three profiles has; the three share one length. */
+   *  the profile has. */
   by_hour: (number | null)[];
   peak_hour: number;
   peak_avg_min: number;

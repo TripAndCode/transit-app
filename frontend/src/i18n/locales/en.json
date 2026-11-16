@@ -609,7 +609,9 @@
       "story_slowest": "{{slowest}} run the latest, {{diff}} longer on average than {{fastest}}.",
       "story_same": "Delay is about the same whatever the day type.",
       "story_none": "Too little data in this period to compare day types.",
-      "see_compare": "Compare weekdays and weekends/holidays route by route →"
+      "see_compare": "Compare weekdays and weekends/holidays route by route →",
+      "no_data": "no data",
+      "insufficient": "not enough data"
     },
     "modal": {
       "concentration": "Delay concentration (top 20)"
@@ -1085,7 +1087,8 @@
       "row_count_one": "{{count}} row",
       "row_count_other": "{{count}} rows",
       "stop_unnamed": "Unnamed stop",
-      "open_home": "Open on {{screen}} →"
+      "open_home": "Open on {{screen}} →",
+      "open_daily_trend": "See the daily trend on Time →"
     },
     "workspace": {
       "investigations": "Your investigations",

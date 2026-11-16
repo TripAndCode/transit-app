@@ -24,12 +24,11 @@ Most helpers have two internal branches:
   analyze has not yet built them for (:func:`_band_aggregate_built`), or the
   hour profiles under a ``routes`` filter.
 
-The three hour profiles (``peak_hour`` and its weekday/weekend pair, all from
-``_peak_hour_by_dow``) read the per-day ``agg_hour_daily`` (filtering dates by
+The hour profile (``peak_hour``, from ``_peak_hour_by_dow``) reads the per-day ``agg_hour_daily`` (filtering dates by
 the window, by DOW, and by the service filter's dates) on the fast path.
 ``agg_route_hour`` can't serve them: it has no date column, so it would answer
-for every analysed day instead of the window. Under a ``routes`` filter they
-read the shared grain instead, since ``agg_hour_daily`` aggregates across all
+for every analysed day instead of the window. Under a ``routes`` filter it
+reads the shared grain instead, since ``agg_hour_daily`` aggregates across all
 routes.
 
 The shared slow-path grain
@@ -86,7 +85,7 @@ from pipeline.reports.rankings import RANKING_MIN_SAMPLES, _round1
 from pipeline.reports.reference import Coverage, reference_coverage, reference_reason, reference_window
 from pipeline.reports.reference import reference_ctx as _reference_ctx
 from pipeline.retained_reads import RangeNotRetained
-from pipeline.route_catalog import left_out_unless_named, route_list
+from pipeline.route_catalog import left_out_route_codes, left_out_unless_named, route_list
 
 _log = logging.getLogger(__name__)
 
@@ -362,10 +361,8 @@ async def _fetch_grain(
       ``base_ctx`` copy them verbatim from ``ctx``, and ``_peak_hour_by_dow``
       reads ``ctx`` itself — so they are pushed into the shared server-side
       WHERE.
-    * ``dow`` is NOT: ``_peak_hour_by_dow`` deliberately REPLACES ``ctx.dow``
-      with ``weekday``/``weekend`` regardless of what the user chose. So no DOW
-      filter is applied here at all; each consumer applies its own in Python
-      off each row's ``date`` (:func:`_dow_matches`).
+    * ``dow`` is applied by each consumer in Python off each row's ``date``
+      (:func:`_dow_matches`), never in the shared WHERE.
     * The date windows differ (``ctx`` / ``cur_ctx`` / ``base_ctx``), so the
       grain spans their union, ``[ctx.from_date - _grain_lookback_days(ctx),
       ctx.to_date]``, and each consumer re-filters. :func:`_baseline_reach_days`
@@ -645,7 +642,7 @@ async def _per_route_avg(
             # cannot be the unfiltered total here: the slow path below sums a
             # ClickHouse row count where every row carries a dep_delay, so an
             # unfiltered fast path would answer differently for the same
-            # route; and _movers and _top_delayed_routes gate
+            # route; and _movers gates
             # MOVER_MIN_SAMPLES on this number, which would otherwise admit a
             # route whose average rests on far fewer rows than the floor
             # implies.
@@ -954,84 +951,46 @@ async def _concentration(
     }
 
 
-#: A route averaging at least this late (minutes) over the current window
-#: counts as delayed in ``delayed_count``. The count carries it, so a reader
-#: states the threshold it was counted against instead of keeping its own copy.
-DELAYED_ROUTE_MIN = 2.0
-
-#: The fewest observations a route needs in the current window to be listed
-#: or counted by ``_top_delayed_routes``: the Routes ranking's default floor,
-#: so the list's "see every route" link opens on the same routes.
+#: The fewest observations a route needs in the current window to be counted
+#: by ``_top_delayed_routes``: the Routes table's default floor, so the hero's
+#: count is out of the routes the routes-to-check preview's table ranks.
 TOP_DELAYED_MIN_SAMPLES = RANKING_MIN_SAMPLES
 
-#: The fewest observations in EACH of two windows behind a change between
-#: them: a mover's, and a listed route's change from the window before. A
-#: listed route clears it in the current window by the list's own floor,
-#: which a test holds at or above this one.
+#: The fewest observations in EACH of two windows behind a mover's change
+#: between them.
 MOVER_MIN_SAMPLES = 10
 
-#: The routes-to-check bands, worst first, each with its lower bound
-#: (minutes): a route belongs to the first band whose bound its average
-#: reaches, and to none below the last. Each count carries its bound, as
-#: ``delayed_threshold_min`` does, so a client prints the bound it is given
-#: and keeps no copy of these.
-ROUTE_BAND_MIN = {"severe": 5.0, "moderate": 3.0, "mild": 1.5}
-
-
-def _route_band_counts(avgs: list[float]) -> dict[str, dict[str, float | int]]:
-    """How many of ``avgs`` fall in each of ``ROUTE_BAND_MIN``'s bands.
-
-    Banded on the 2-dp rounded average each listed route carries, the value
-    the client bands it on, so a route listed at exactly a bound is always
-    counted in that band.
-    """
-    counts = {band: 0 for band in ROUTE_BAND_MIN}
-    for avg in avgs:
-        rounded = float(_round2(avg))
-        band = next((b for b, lower in ROUTE_BAND_MIN.items() if rounded >= lower), None)
-        if band is not None:
-            counts[band] += 1
-    return {band: {"count": counts[band], "threshold_min": lower} for band, lower in ROUTE_BAND_MIN.items()}
+#: The average delay (minutes) from which a route counts as running late in
+#: the hero's late-route count. The count carries it, so a reader prints the
+#: bound it is given and keeps no copy of this.
+SEVERE_ROUTE_MIN = 5.0
 
 
 async def _top_delayed_routes(
     agency_id: int,
     cur_ctx: RangeCtx,
     conn,
-    limit: int = 5,
     ch=None,
     grain: _Grain | None = None,
     *,
     left_out: Mapping[str, frozenset[str]],
-    base_ctx: RangeCtx | None = None,
 ) -> dict:
-    """Routes ranked by absolute current-window avg delay ("routes to check
-    now"), plus a count of routes at/above ``DELAYED_ROUTE_MIN``, one per
-    ``ROUTE_BAND_MIN`` band, and ``route_count``, the routes all of them are
-    out of. Every count is over every route :func:`_listable` keeps that was
-    observed at least ``TOP_DELAYED_MIN_SAMPLES`` times in the window (echoed
-    as ``min_samples``), not only the ``limit`` listed: the list is truncated,
-    the counts are not.
+    """The hero's late-route count: ``route_count``, every route
+    :func:`_listable` keeps that was observed at least
+    ``TOP_DELAYED_MIN_SAMPLES`` times in ``cur_ctx`` (echoed as
+    ``min_samples``), and ``band_counts.severe``, how many of them averaged at
+    least ``SEVERE_ROUTE_MIN`` late, with that bound.
 
-    Each listed route carries ``delta_min``, its change from ``base_ctx`` (the
-    same-width window before), by the movers' rule: the unrounded current
-    average less the unrounded previous one, and None unless the route has
-    ``MOVER_MIN_SAMPLES`` observations there. The movers list only the routes
-    that moved most, so it cannot supply a change for every listed route.
+    ``cur_ctx`` is the headline's window and ``left_out`` the codes the Routes
+    table leaves out over it (:func:`_top_delayed`), so ``route_count`` is the
+    Routes table's own count of routes for the routes-to-check preview's scope.
 
-    Uses cur_ctx, the current window compute_overview_summary builds for the
-    headline (the period up to its last day with data), so the KPI row's
-    stats and the routes list all describe the same days.
-
-    Fast path mirrors _concentration()'s: reads agg_daily_trend, but computes
-    each route's true weighted average (SUM(sum_delay_sec)/SUM(samples),
-    dividing once at the end rather than re-weighting each day's already-
-    rounded avg_min — see pipeline/analyze.py's module docstring), not
-    _concentration()'s "total lateness contribution" sum — a route with
-    few samples but a high average must outrank a route with more samples
-    but a lower average, which _concentration()'s metric would get backwards.
-    Slow path reads the shared grain (:func:`_fetch_grain`) for a non-default
-    time_band, same as _concentration().
+    Fast path reads agg_daily_trend for each route's true weighted average
+    (SUM(sum_delay_sec)/SUM(samples), dividing once at the end rather than
+    re-weighting each day's already-rounded avg_min — see
+    pipeline/analyze.py's module docstring). Slow path reads the shared grain
+    (:func:`_fetch_grain`) for a non-default time_band, same as
+    _concentration().
     """
     if cur_ctx.time_band == "all":
         where, params, _ = _agg_filter(cur_ctx, next_param=2)
@@ -1069,58 +1028,29 @@ async def _top_delayed_routes(
         ]
 
     rows = _listable(rows, left_out)
-    if not rows:
-        return {
-            "routes": [],
-            "delayed_count": 0,
-            "delayed_threshold_min": DELAYED_ROUTE_MIN,
-            "band_counts": _route_band_counts([]),
-            "route_count": 0,
-            "min_samples": TOP_DELAYED_MIN_SAMPLES,
-        }
-
-    delayed_count = sum(1 for _code, avg in rows if avg is not None and avg >= DELAYED_ROUTE_MIN)
-    band_counts = _route_band_counts([avg for _code, avg in rows if avg is not None])
-    top_n = rows[:limit]
-    listed = [code for code, _avg in top_n]
-    names = await _route_short_names(agency_id, listed, conn)
-    # Narrowed to the listed routes: the window before is wanted only for them.
-    previous = (
-        await _per_route_avg(agency_id, replace(base_ctx, routes=tuple(listed)), conn, ch=ch, grain=grain)
-        if base_ctx is not None
-        else {}
-    )
-
-    def _change(code: str, avg) -> float | None:
-        prv_avg, prv_n = previous.get(code, (None, 0))
-        if prv_avg is None or prv_n < MOVER_MIN_SAMPLES:
-            return None
-        return float(_round2(float(avg) - prv_avg))
-
+    severe = sum(1 for _code, avg in rows if avg is not None and float(_round2(avg)) >= SEVERE_ROUTE_MIN)
     return {
-        "routes": [
-            {
-                "route_code": code,
-                "route_short_name": names.get(code),
-                "avg_min": float(_round2(avg)),
-                "delta_min": _change(code, avg),
-            }
-            for code, avg in top_n
-        ],
-        "delayed_count": delayed_count,
-        "delayed_threshold_min": DELAYED_ROUTE_MIN,
-        "band_counts": band_counts,
+        "band_counts": {"severe": {"count": severe, "threshold_min": SEVERE_ROUTE_MIN}},
         "route_count": len(rows),
         "min_samples": TOP_DELAYED_MIN_SAMPLES,
     }
+
+
+async def _top_delayed(agency_id: int, cur_ctx: RangeCtx, conn, ch=None, grain: _Grain | None = None) -> dict:
+    """:func:`_top_delayed_routes` leaving out what the Routes table leaves out
+    over the same window: :func:`~pipeline.route_catalog.left_out_route_codes`
+    of ``cur_ctx``, whatever routes the scope names. The other route lists here
+    share one set judged over the period instead."""
+    left_out = await left_out_route_codes(conn, agency_id, cur_ctx)
+    return await _top_delayed_routes(agency_id, cur_ctx, conn, ch=ch, grain=grain, left_out=left_out)
 
 
 async def _peak_hour_by_dow(
     agency_id: int, ctx: RangeCtx, conn, dow_group: str, ch=None, grain: _Grain | None = None
 ) -> dict | None:
     """Hour-by-hour avg delay over ``ctx``'s window and the days of the week
-    ``dow_group`` names, plus the peak hour: ``ctx.dow`` for the payload's
-    ``peak_hour``, ``'weekday'``/``'weekend'`` for its pair.
+    ``dow_group`` names, plus the peak hour; the payload's ``peak_hour``
+    passes ``ctx.dow``.
 
     Fast path reads the per-day/hour ``agg_hour_daily`` (filtering dates by
     DOW and by the service filter's dates), a sample-weighted average across
@@ -1128,12 +1058,7 @@ async def _peak_hour_by_dow(
     Overview's cold load. That table is aggregated across all routes, so a
     ``routes`` filter, or any ``time_band`` other than ``'all'``, has to leave
     it for the shared grain, which :func:`compute_overview_summary` prefetches
-    for exactly those shapes. One scan then serves all three profiles.
-
-    ``dow_group`` REPLACES ``ctx.dow``: the pair asks "weekday vs weekend",
-    regardless of any day-of-week the user had already narrowed to. That is
-    exactly why the grain carries no DOW filter of its own (see
-    :func:`_fetch_grain`).
+    for exactly those shapes.
     """
     if ctx.time_band == "all" and not ctx.routes:
         dow_frag, _, n = dow_clause("date", replace(ctx, dow=dow_group), 4)
@@ -1191,16 +1116,6 @@ def _peak_from_hour_rows(rows) -> dict | None:
         "peak_hour": peak_h,
         "peak_avg_min": float(by_hour[peak_h]),  # type: ignore[arg-type]
     }
-
-
-def _on_one_hour_axis(*profiles: dict | None) -> tuple[dict | None, ...]:
-    """*profiles* with every ``by_hour`` as long as the longest, padded with
-    None: one profile can run past midnight where another does not, and the
-    weekday and weekend charts are drawn one above the other on one axis."""
-    hours = max((len(p["by_hour"]) for p in profiles if p is not None), default=0)
-    return tuple(
-        None if p is None else {**p, "by_hour": p["by_hour"] + [None] * (hours - len(p["by_hour"]))} for p in profiles
-    )
 
 
 async def _daily_totals(agency_id: int, ctx: RangeCtx, conn, grain: _Grain | None) -> list[tuple[date, int, int]]:
@@ -1289,9 +1204,9 @@ async def _movers(
     # dividing by a near-zero baseline can turn a trivial absolute change into
     # a triple-digit-or-larger swing that reads as a real signal but isn't,
     # even past the MOVER_MIN_SAMPLES gate above (a small sample can still average
-    # to a near-zero delay). The floor matches the delay-severity ramp's
-    # "mild" threshold (ROUTE_BAND_MIN), which already treats anything below it as background
-    # noise rather than a noticeable delay.
+    # to a near-zero delay). The floor matches the delay ramp's first late
+    # step, which already treats anything below it as background noise rather
+    # than a noticeable delay.
     MIN_PRV_AVG_FOR_PCT_MIN = 1.5
     for code in common:
         cur_avg, cur_n = cur[code]
@@ -1556,7 +1471,7 @@ async def compute_overview_summary(
     immediately before it (``base_ctx``). Equal widths keep the "vs. the
     period before it" copy honest: two windows of different lengths differ in
     day-of-week composition, which alone can manufacture a delta. The movers
-    and the routes-to-check list rank over the same two windows;
+    rank over the same two windows, and the late-route count over ``cur_ctx``;
     concentration / peak / service_split / sparkline aggregate over the full
     ctx.
 
@@ -1595,18 +1510,17 @@ async def compute_overview_summary(
     only query for any ``ctx`` wide enough for the grain to also cover
     :func:`_route_weekly_history`'s 4-week sparkline span (every default 30-day
     request); a narrower ``ctx`` costs that one helper a second scan. Under a
-    routes filter alone the grain is fetched only for the three hour profiles,
-    whose ``agg_hour_daily`` is aggregated across routes; every other helper
-    still reads its ``agg_*`` table, and a failed fetch degrades just those
-    three fields to null. With neither filter ``grain`` stays ``None`` and
+    routes filter alone the grain is fetched only for the hour profile, whose
+    ``agg_hour_daily`` is aggregated across routes; every other helper still
+    reads its ``agg_*`` table, and a failed fetch degrades just that field to
+    null. With neither filter ``grain`` stays ``None`` and
     every helper reads its ``agg_*`` table.
 
     Under a time band, a ClickHouse grain past the client's row cap or its
     time budget is fetched again over the period's route rows alone
     (:func:`_fetch_grain`'s ``"period_routes"``), and every figure that needs
     the window before the period or the hour set is null: the baseline and
-    the headline's deltas, the movers, each listed route's ``delta_min`` and
-    the three hour profiles. Any other ClickHouse failure, or the retry
+    the headline's deltas, the movers and the hour profile. Any other ClickHouse failure, or the retry
     failing too, still fails the payload: every figure reads the grain. A
     degraded grain costs about twice ``get_ch_client``'s
     ``max_execution_time`` (ClickHouse checks the limit periodically, so a
@@ -1628,10 +1542,10 @@ async def compute_overview_summary(
                 ctx = await resolve_service_dates(ctx, c, agency_id, from_date=_calendar_from(ctx))
 
     grain: _Grain | None = None
-    # Under a routes filter alone only the three hour profiles need live rows
+    # Under a routes filter alone only the hour profile needs live rows
     # (agg_hour_daily is aggregated across routes; every other stage reads its
-    # agg_* table), so the grain is fetched for them, and a ClickHouse failure
-    # degrades just those three fields to null rather than failing the payload.
+    # agg_* table), so the grain is fetched for it, and a ClickHouse failure
+    # degrades just that field to null rather than failing the payload.
     peaks_unavailable = False
     baseline_unavailable = False
     # The grain's Postgres reads borrow from the pool per statement when the
@@ -1640,9 +1554,9 @@ async def compute_overview_summary(
 
     async def _period_hours() -> _Grain | None:
         """The period's hour set from ClickHouse, or None once a failure has
-        degraded the three hour profiles: no other figure reads it. A period
+        degraded the hour profile: no other figure reads it. A period
         before the retention floor is refused, as every live read refuses it,
-        rather than shown without its hour profiles."""
+        rather than shown without its hour profile."""
         try:
             return await _fetch_grain(agency_id, ctx, grain_conn, ch, shape="period_hours")
         except RangeNotRetained:
@@ -1703,8 +1617,10 @@ async def compute_overview_summary(
                 grain = await _period_hours()
                 peaks_unavailable = grain is None
 
-    # The route lists leave out one set of codes, judged once over the period,
-    # so every list leaves out the same codes whichever window it ranks over.
+    # The movers and the concentration leave out one set of codes, judged once
+    # over the period, so both leave out the same codes whichever window they
+    # rank over. The late-route count leaves out what the Routes table does
+    # over its own window instead (_top_delayed).
     async with perf.timed_block("overview.latest_date"):
         if pool is None:
             latest = await _latest_data_date(agency_id, ctx, conn, ch=ch, grain=grain)
@@ -1768,19 +1684,11 @@ async def compute_overview_summary(
         async with perf.timed_block("overview.concentration"):
             concentration = await _concentration(agency_id, ctx, conn, ch=ch, grain=grain, left_out=left_out)
         async with perf.timed_block("overview.top_delayed"):
-            top_delayed = await _top_delayed_routes(
-                agency_id, cur_ctx, conn, ch=ch, grain=grain, left_out=left_out, base_ctx=baseline_ctx
-            )
+            top_delayed = await _top_delayed(agency_id, cur_ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.peaks"):
-            peak, peak_weekday, peak_weekend = (
-                (None, None, None)
-                if peaks_unavailable
-                else (
-                    await _peak_hour_by_dow(agency_id, ctx, conn, ctx.dow, ch=ch, grain=grain),
-                    await _peak_hour_by_dow(agency_id, ctx, conn, "weekday", ch=ch, grain=grain),
-                    await _peak_hour_by_dow(agency_id, ctx, conn, "weekend", ch=ch, grain=grain),
-                )
-            )
+            peak = None
+            if not peaks_unavailable:
+                peak = await _peak_hour_by_dow(agency_id, ctx, conn, ctx.dow, ch=ch, grain=grain)
         async with perf.timed_block("overview.service_split"):
             service_split, service_split_daily = await _service_day_split(agency_id, ctx, conn, ch=ch, grain=grain)
         async with perf.timed_block("overview.sparkline"):
@@ -1816,20 +1724,18 @@ async def compute_overview_summary(
                 return None
             return await _own_conn(fn, *args, **kwargs)
 
-        async def _peak_dow(group: str) -> dict | None:
-            """``_peak_hour_by_dow`` for ``group``, through the same bounded acquire."""
+        async def _peak() -> dict | None:
+            """``_peak_hour_by_dow`` for the scope's days, through the same bounded acquire."""
             if peaks_unavailable:
                 return None
             async with fanout, pool.acquire() as c:
-                return await _peak_hour_by_dow(agency_id, ctx, c, group, ch=ch, grain=grain)
+                return await _peak_hour_by_dow(agency_id, ctx, c, ctx.dow, ch=ch, grain=grain)
 
-        # Stages take fan-out slots in argument order, so the hour profiles,
-        # the slowest reads on the fast path, go first rather than queueing
+        # Stages take fan-out slots in argument order, so the hour profile,
+        # the slowest read on the fast path, goes first rather than queueing
         # behind stages that finish quickly.
         (
             peak,
-            peak_weekday,
-            peak_weekend,
             (avg_min, samples),
             baseline_stats,
             reference,
@@ -1839,15 +1745,13 @@ async def compute_overview_summary(
             (service_split, service_split_daily),
             (sparkline_points, period_avg),
         ) = await asyncio.gather(
-            _peak_dow(ctx.dow),
-            _peak_dow("weekday"),
-            _peak_dow("weekend"),
+            _peak(),
             _own_conn(_headline_stats, agency_id, cur_ctx),
             _with_baseline(_headline_stats, agency_id, baseline_ctx),
             _own_conn(_reference, agency_id, ref_ctx),
             _with_baseline(_movers, agency_id, cur_ctx, baseline_ctx, left_out=left_out),
             _own_conn(_concentration, agency_id, ctx, left_out=left_out),
-            _own_conn(_top_delayed_routes, agency_id, cur_ctx, left_out=left_out, base_ctx=baseline_ctx),
+            _own_conn(_top_delayed, agency_id, cur_ctx),
             _own_conn(_service_day_split, agency_id, ctx),
             _own_conn(_daily_sparkline, agency_id, ctx),
         )
@@ -1855,7 +1759,6 @@ async def compute_overview_summary(
 
     delta_min, delta_pct = _change(avg_min, baseline_avg)
     reference_delta_min, reference_delta_pct = _change(avg_min, reference["avg_min"])
-    peak, peak_weekday, peak_weekend = _on_one_hour_axis(peak, peak_weekday, peak_weekend)
     return {
         "headline": {
             "avg_min": avg_min,
@@ -1871,8 +1774,6 @@ async def compute_overview_summary(
         "concentration": concentration,
         "top_delayed": top_delayed,
         "peak_hour": peak,
-        "peak_hour_weekday": peak_weekday,
-        "peak_hour_weekend": peak_weekend,
         "service_split": service_split,
         "service_split_daily": service_split_daily,
         "sparkline_points": sparkline_points,

@@ -7,12 +7,8 @@ import { OverviewTab } from "./OverviewTab";
 import * as hooks from "../api/hooks";
 import type { OverviewSummary, ReportResponse } from "../api/types";
 
-function bandCounts(severe: number, moderate: number, mild: number) {
-  return {
-    severe: { count: severe, threshold_min: 5 },
-    moderate: { count: moderate, threshold_min: 3 },
-    mild: { count: mild, threshold_min: 1.5 },
-  };
+function lateRoutes(severe: number, route_count: number) {
+  return { band_counts: { severe: { count: severe, threshold_min: 5 } }, route_count, min_samples: 100 };
 }
 
 function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
@@ -20,7 +16,7 @@ function summary(partial: Partial<OverviewSummary> = {}): OverviewSummary {
     headline: { avg_min: null, baseline_avg_min: null, delta_min: null, delta_pct: null, samples: 0, window_from: "2030-01-01", window_to: "2030-01-07" },
     movers: { worse: [], better: [] },
     concentration: { top_routes: [], rest_share_pct: 0 },
-    top_delayed: { routes: [], delayed_count: 0, delayed_threshold_min: 2, band_counts: bandCounts(0, 0, 0), route_count: 0, min_samples: 100 },
+    top_delayed: lateRoutes(0, 0),
     peak_hour: null,
     service_split: [
       { day_type: "weekday", avg_min: null, days: 0, samples: 0, insufficient: true },
@@ -131,14 +127,7 @@ describe("OverviewTab", () => {
     renderOverview(
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
-        top_delayed: {
-          routes: [{ route_code: "R1", route_short_name: "Line 1", avg_min: 6.0 }],
-          delayed_count: 1,
-          delayed_threshold_min: 2,
-          band_counts: bandCounts(1, 0, 0),
-          route_count: 1,
-          min_samples: 100,
-        },
+        top_delayed: lateRoutes(1, 1),
       }),
     );
     expect(screen.getByText(/^Routes to check \(/)).toBeInTheDocument();
@@ -175,7 +164,7 @@ describe("OverviewTab", () => {
   describe("the questions another screen answers in full", () => {
     // Every figure below is counted over the screen's filters on the days the
     // payload names for it, so each link carries exactly that scope.
-    const SCOPED = "/agencies/8/overview?from=2026-05-01&to=2026-06-09&dow=weekday&time_band=morning&routes=R1,R2";
+    const SCOPED = "/agencies/8/overview?from=2026-05-01&to=2026-06-09&dow=weekday&time_band=morning&service=平日&routes=R1,R2"; // i18n-ignore: query contract
     const figures = () =>
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.4, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
@@ -189,13 +178,13 @@ describe("OverviewTab", () => {
         sparkline_points: [2.1, 2.8, 3.3],
         period_avg_min: 2.7,
       });
-    const PERIOD_SCOPE = "from=2026-05-11&to=2026-06-09&dow=weekday&time_band=morning&routes=R1%2CR2";
+    const PERIOD_SCOPE = "from=2026-05-11&to=2026-06-09&dow=weekday&time_band=morning&service=%E5%B9%B3%E6%97%A5&routes=R1%2CR2";
 
     it("draws the routes to check as the Routes table's own first rows, over the headline's days and the screen's filters", () => {
       renderOverview(figures(), SCOPED);
       const call = vi.mocked(hooks.useReport).mock.calls.find((c) => c[1] === "route_table")!;
       expect(call[0]).toBe(8);
-      expect(call[2]).toMatchObject({ from: "2026-06-01", to: "2026-06-07", dow: "weekday", time_band: "morning", routes: ["R1", "R2"] });
+      expect(call[2]).toMatchObject({ from: "2026-06-01", to: "2026-06-07", dow: "weekday", time_band: "morning", service: "平日", routes: ["R1", "R2"] }); // i18n-ignore: query contract
       expect(call[3]).toEqual({ sort: "avg", limit: 5 });
       const anchor = document.querySelector<HTMLElement>(".ov-routes-anchor")!;
       expect(within(anchor).getByRole("table")).toBeInTheDocument();
@@ -206,7 +195,7 @@ describe("OverviewTab", () => {
       renderOverview(figures(), SCOPED);
       expect(screen.getByRole("link", { name: "See all 163 routes →" })).toHaveAttribute(
         "href",
-        "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekday&time_band=morning&routes=R1%2CR2&sort=avg",
+        "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekday&time_band=morning&service=%E5%B9%B3%E6%97%A5&routes=R1%2CR2&sort=avg",
       );
     });
 
@@ -234,22 +223,30 @@ describe("OverviewTab", () => {
       );
     });
 
-    it("draws no hour chart, day-type chart or hour breakdown of its own", () => {
+    it("draws no hour chart or day-type chart of its own", () => {
       renderOverview(figures(), SCOPED);
-      expect(screen.queryByRole("img", { name: "Worst hour of day" })).toBeNull();
-      expect(document.querySelector(".ov-svc-list")).toBeNull();
+      for (const title of ["Worst hour of day", "By service day"]) {
+        const card = screen.getByText(title).closest(".ov-card")!;
+        expect(card.querySelector("svg")).toBeNull();
+        expect(within(card as HTMLElement).queryByRole("img")).toBeNull();
+      }
+    });
+
+    it("counts the hero's late routes out of the same routes the preview says it covers", () => {
+      const facts = figures();
+      renderOverview({ ...facts, top_delayed: { ...facts.top_delayed, route_count: 163 } }, SCOPED);
+      expect(screen.getByRole("button", { name: /Averaging 5 min or more late/ })).toHaveTextContent("/ 163 routes");
+      expect(screen.getByText("Covers the 163 routes observed 100 or more times.")).toBeInTheDocument();
     });
   });
 
   describe("the hero's fact rows", () => {
-    const delayed = (route_code: string, avg_min: number) => ({ route_code, route_short_name: null, avg_min });
-    const withFacts = (routes = [delayed("R1", 7.2), delayed("R2", 5.0), delayed("R3", 4.1), delayed("R4", 2.2)], bands = bandCounts(2, 1, 1)) =>
+    const withFacts = (late = lateRoutes(2, 4)) =>
       summary({
         headline: { avg_min: 3.2, baseline_avg_min: 2.8, delta_min: 0.9, delta_pct: 14.3, samples: 50, window_from: "2026-06-01", window_to: "2026-06-07" },
         concentration: { top_routes: [{ route_code: "R1", route_short_name: "Line 1", share_pct: 60 }], rest_share_pct: 40 },
         peak_hour: { by_hour: Array(24).fill(1), peak_hour: 17, peak_avg_min: 4.8 },
-        // delayed_count counts a different, lower threshold; the hero must not read it.
-        top_delayed: { routes, delayed_count: 4, delayed_threshold_min: 2, band_counts: bands, route_count: routes.length, min_samples: 100 },
+        top_delayed: late,
       });
     const lateRow = () => screen.getByRole("button", { name: /Averaging 5 min or more late/ });
 
@@ -267,14 +264,14 @@ describe("OverviewTab", () => {
       expect(screen.getByRole("dialog", { name: "Delay concentration (top 20)" })).toBeInTheDocument();
     });
 
-    it("prints the top band's count in ink like the facts beside it, not the payload's delayed_count", () => {
+    it("prints the late-route count in ink like the facts beside it", () => {
       renderOverview(withFacts());
       expect(within(lateRow()).getByText("2")).toBeInTheDocument();
       expect(lateRow()).toHaveClass("ov-hero-fact", { exact: true });
     });
 
     it("shows a neutral zero when no route reaches the top band", () => {
-      renderOverview(withFacts([delayed("R3", 4.1), delayed("R4", 2.2)], bandCounts(0, 1, 1)));
+      renderOverview(withFacts(lateRoutes(0, 2)));
       expect(within(lateRow()).getByText("0")).toBeInTheDocument();
       expect(lateRow()).toHaveClass("ov-hero-fact", { exact: true });
     });

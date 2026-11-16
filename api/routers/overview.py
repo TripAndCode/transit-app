@@ -118,42 +118,26 @@ class Concentration(BaseModel):
     rest_route_count: int = 0
 
 
-class TopDelayedRoute(BaseModel):
-    """One route's absolute avg delay in the headline's window, and its
-    change (minutes) from the same-width window before; ``delta_min`` is None
-    when the route was too thinly observed there to compare."""
-
-    route_code: str
-    route_short_name: str | None
-    avg_min: float
-    delta_min: float | None = None
-
-
 class RouteBandCount(BaseModel):
-    """Routes in one routes-to-check band, and the band's lower bound."""
+    """Routes averaging at least ``threshold_min`` minutes late, and that bound."""
 
     count: int
     threshold_min: float
 
 
 class RouteBandCounts(BaseModel):
-    """One count per band the routes-to-check list shows, worst first."""
+    """The late-route count the Pulse hero prints beside its bound."""
 
     severe: RouteBandCount
-    moderate: RouteBandCount
-    mild: RouteBandCount
 
 
 class TopDelayed(BaseModel):
-    """Top-5 routes by absolute avg delay, plus a count of routes averaging at
-    least ``delayed_threshold_min`` late and one per routes-to-check band, all
-    over the same window the headline covers. The counts cover every route the
-    list may show, not only the five listed: the ``route_count`` routes
-    observed at least ``min_samples`` times in the window."""
+    """The Pulse hero's late-route count over the headline's window: of the
+    ``route_count`` routes observed at least ``min_samples`` times there, how
+    many averaged at least the severe bound late. ``route_count`` is the
+    Routes table's own count for that window and scope, with the same routes
+    left out, so it is the total the routes-to-check preview states."""
 
-    routes: list[TopDelayedRoute]
-    delayed_count: int
-    delayed_threshold_min: float
     band_counts: RouteBandCounts
     route_count: int
     min_samples: int
@@ -195,9 +179,8 @@ class ServiceSplitDay(BaseModel):
 class OverviewSummary(BaseModel):
     """Magazine payload — 5 modules + sparkline + range echo.
 
-    ``peak_hour_weekday`` / ``peak_hour_weekend`` are the hour profiles on
-    calendar weekdays and weekends; ``service_split_daily`` is each day's mean
-    with its day type, which the headline's latest-day standing reads.
+    ``service_split_daily`` is each day's mean with its day type, which the
+    headline's latest-day standing reads.
 
     ``movers`` is None, like the headline's baseline, when the window before
     the period could not be read: a time-band request whose ClickHouse grain
@@ -210,8 +193,6 @@ class OverviewSummary(BaseModel):
     concentration: Concentration
     top_delayed: TopDelayed
     peak_hour: PeakHour | None
-    peak_hour_weekday: PeakHour | None = None
-    peak_hour_weekend: PeakHour | None = None
     # Every bucket the agency is split into, in display order: 平日 / 土曜 /
     # 日祝, or 平日 / 土日祝 for a feed with one weekend timetable.
     service_split: list[ServiceSplitEntry]

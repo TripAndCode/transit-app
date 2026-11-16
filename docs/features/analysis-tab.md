@@ -186,6 +186,16 @@ Kept on purpose, because each answers a different question:
   home. The per-day-type split of one route (`compare_segments` with
   `dimension=service_type`) has no home and no link.
 
+Given up with the second renderings, accepted as such:
+
+- Each listed route's change from the window before, on Pulse's preview.
+  The movers still show the routes that changed most.
+- The moderate and mild band counts beside the preview. The hero keeps the
+  count of routes averaging 5 minutes or more late.
+- The routes of one hour of the day, which Pulse's hour chart opened. The
+  Routes table has no single-hour scope; a time band narrows it to the band
+  around an hour.
+
 ## The Routes table
 
 `RouteTableScreen` asks `GET /api/{agency_id}/reports/route_table` for one row

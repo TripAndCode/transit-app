@@ -1,70 +1,103 @@
 import { describe, expect, it } from "vitest";
 import { cardHome } from "./cardHome";
 
-const DATES = { from_date: "2026-06-01", to_date: "2026-06-07" };
-const CONDITIONS = { dow: "weekday", time_band: "morning", service: "all" };
+// What a card's message records since it keeps its period: the thread's
+// filters as the dispatch resolved them.
+const CONDITIONS = {
+  dow: "weekday",
+  time_band: "morning",
+  service: "all",
+  from_date: "2026-06-01",
+  to_date: "2026-06-07",
+  routes: ["R1", "R2"],
+};
+const SCOPE = "from=2026-06-01&to=2026-06-07&dow=weekday&time_band=morning";
 
 describe("cardHome", () => {
-  it("opens a top-N delay card on the Routes table over the card's dates and conditions", () => {
-    expect(cardHome(8, "top_n", { metric: "avg_delay", n: 10, ...DATES }, CONDITIONS)).toEqual({
+  // The card templates send no dates: the thread's period, routes and
+  // conditions scope them (askCardTemplates.ts).
+  it("opens a top-N delay card on the Routes table over the thread's scope it was answered under", () => {
+    expect(cardHome(8, "top_n", { metric: "avg_delay", k: 5 }, CONDITIONS)).toEqual({
       screen: "routes",
-      href: "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekday&time_band=morning&sort=avg",
+      href: `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&sort=avg`,
     });
   });
 
+  it("lets a top-N card's own service type replace the thread's", () => {
+    expect(cardHome(8, "top_n", { metric: "avg_delay", k: 5, service_type: "saturday" }, CONDITIONS)?.href).toBe(
+      `/agencies/8/routes?${SCOPE}&service=%E5%9C%9F%E6%9B%9C&routes=R1%2CR2&sparse=1&sort=avg`,
+    );
+  });
+
+  it("ranks at the card's own floor, not the table's default", () => {
+    const href = new URL(cardHome(8, "top_n", { metric: "avg_delay" }, CONDITIONS)!.href, "http://x");
+    expect(href.searchParams.get("sparse")).toBe("1");
+  });
+
+  it("lets a card's own dates win over the thread's, as they do at dispatch", () => {
+    expect(cardHome(8, "top_n", { metric: "avg_delay", from_date: "2026-05-01", to_date: "2026-05-31" }, CONDITIONS)?.href).toBe(
+      "/agencies/8/routes?from=2026-05-01&to=2026-05-31&dow=weekday&time_band=morning&routes=R1%2CR2&sparse=1&sort=avg",
+    );
+  });
+
   it("keeps a best-first delay card's order", () => {
-    expect(cardHome(8, "top_n", { metric: "avg_delay", best_first: true, ...DATES }, null)?.href).toBe(
-      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&sort=avg&order=best",
+    expect(cardHome(8, "top_n", { metric: "avg_delay", best_first: true }, CONDITIONS)?.href).toBe(
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&sort=avg&order=best`,
     );
   });
 
   it("opens a top-N on-time card highest first, as the card lists it", () => {
-    expect(cardHome(8, "top_n", { metric: "on_time_rate", ...DATES }, null)?.href).toBe(
-      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&order=best&sort=on_time",
+    expect(cardHome(8, "top_n", { metric: "on_time_rate" }, CONDITIONS)?.href).toBe(
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&order=best&sort=on_time`,
     );
   });
 
   it("opens a top-N 5-minute card on the late-departure count", () => {
-    expect(cardHome(8, "top_n", { metric: "worst_5min", ...DATES }, null)?.href).toBe(
-      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&sort=late5_count",
+    expect(cardHome(8, "top_n", { metric: "worst_5min" }, CONDITIONS)?.href).toBe(
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&sort=late5_count`,
     );
   });
 
   it("opens an on-time ranking card in its order, under its threshold", () => {
-    expect(cardHome(8, "on_time", { best_first: false, threshold_min: 3, ...DATES }, CONDITIONS)?.href).toBe(
-      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekday&time_band=morning&late=180&early=any&sort=on_time",
+    expect(cardHome(8, "on_time", { k: 5, best_first: false, threshold_min: 3 }, CONDITIONS)?.href).toBe(
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&late=180&early=any&sparse=1&sort=on_time`,
     );
-    expect(cardHome(8, "on_time_rate", { ...DATES }, null)?.href).toBe(
-      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&order=best&sort=on_time",
+    expect(cardHome(8, "on_time_rate", {}, CONDITIONS)?.href).toBe(
+      `/agencies/8/routes?${SCOPE}&routes=R1%2CR2&sparse=1&order=best&sort=on_time`,
     );
   });
 
-  it("opens a weekday-against-weekend card on Day types & agencies, with its route", () => {
-    expect(cardHome(8, "cmp_service", { dimension: "dow", route: "R1", ...DATES }, CONDITIONS)).toEqual({
+  it("opens a weekday-against-weekend card on Day types & agencies, narrowed to the card's route", () => {
+    expect(cardHome(8, "cmp_service", { metric: "avg_delay", route_code: "R9" }, CONDITIONS)).toEqual({
       screen: "compare",
-      href: "/agencies/8/compare?from=2026-06-01&to=2026-06-07&dow=weekday&time_band=morning&routes=R1&by=periods",
+      href: `/agencies/8/compare?${SCOPE}&routes=R9&by=periods`,
     });
   });
 
   it("has no home for one route's split by every day type", () => {
-    expect(cardHome(8, "compare_segments", { dimension: "service_type", route: "R1", ...DATES }, null)).toBeNull();
+    expect(cardHome(8, "compare_segments", { dimension: "service_type", route: "R1" }, CONDITIONS)).toBeNull();
   });
 
-  it("opens a trend card on Time's trend, with its route", () => {
-    expect(cardHome(8, "trend", { route: "R1", ...DATES }, null)).toEqual({
+  it("opens a trend card on Time's trend, narrowed to the card's route", () => {
+    expect(cardHome(8, "trend", { metric: "avg_delay", route_code: "R9", granularity: "week" }, CONDITIONS)).toEqual({
       screen: "time",
-      href: "/agencies/8/time?from=2026-06-01&to=2026-06-07&routes=R1&report=trend",
+      href: `/agencies/8/time?${SCOPE}&routes=R9&report=trend`,
     });
   });
 
-  it("has no home for a card the rail screens do not answer", () => {
-    expect(cardHome(8, "route_stats", { route: "R1", ...DATES }, null)).toBeNull();
-    expect(cardHome(8, null, null, null)).toBeNull();
+  it("links nothing for a card saved before its conditions kept the period", () => {
+    const legacy = { dow: "weekday", time_band: "morning", service: "all" };
+    expect(cardHome(8, "top_n", { metric: "avg_delay" }, legacy)).toBeNull();
+    expect(cardHome(8, "trend", { route_code: "R9" }, legacy)).toBeNull();
+    expect(cardHome(8, "cmp_service", { route_code: "R9" }, null)).toBeNull();
   });
 
-  it("drops a value the scope would not accept rather than carrying it", () => {
-    expect(cardHome(8, "trend", { from_date: "yesterday", to_date: "2026-06-07" }, null)?.href).toBe(
-      "/agencies/8/time?to=2026-06-07&report=trend",
-    );
+  it("has no home for a card the rail screens do not answer", () => {
+    expect(cardHome(8, "route_stats", { route: "R1" }, CONDITIONS)).toBeNull();
+    expect(cardHome(8, null, null, CONDITIONS)).toBeNull();
+  });
+
+  it("links nothing when the recorded period is not one the scope accepts", () => {
+    expect(cardHome(8, "trend", { route_code: "R9" }, { ...CONDITIONS, from_date: "yesterday" })).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useReport, type ReportOptions } from "../../api/hooks";
 import { scopeToQueryString, type Scope } from "../../api/scope";
 import { reportHref } from "../../routes/destinations";
+import { onTimeReferenceMark } from "../analysis/routeReferenceText";
 import { ErrorBanner } from "../ErrorBanner";
 import { ReportTable } from "../ReportTable";
 import { SkeletonTable } from "../Skeleton";
@@ -27,6 +28,7 @@ export function RoutesPreview({ agencyId, scope, range }: { agencyId: number; sc
   const report = useReport(agencyId, "route_table", scope, PREVIEW_OPTIONS);
   const data = report.data?.report_type === "route_table" ? report.data : undefined;
   const total = data?.rows_total ?? data?.rows.length ?? null;
+  const reference = data?.reference ?? null;
   return (
     <div>
       <p className="ov-check-section-hd">
@@ -55,6 +57,8 @@ export function RoutesPreview({ agencyId, scope, range }: { agencyId: number; sc
           minSamples={data.reliable_min_samples}
           sortBy="avg"
           sortDirection="descending"
+          earlyDepartureSec={data.definition.early_departure_sec}
+          cellMarks={reference ? { 2: (row) => onTimeReferenceMark(reference, row, t) } : undefined}
           showStatistics={false}
         />
       )}

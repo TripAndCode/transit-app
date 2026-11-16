@@ -8,6 +8,7 @@ stay covered, while ``agg_*`` is what the Overview reads.
 """
 
 import asyncio
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
@@ -502,10 +503,8 @@ async def test_headline_covers_the_scope_period_against_the_same_width_before(ac
     assert h["delta_min"] == pytest.approx(3.0, abs=0.01)
     [mover] = out["movers"]["worse"]
     assert (mover["route_code"], mover["current_avg_min"], mover["previous_avg_min"]) == ("R_P", 5.0, 2.0)
-    [listed] = out["top_delayed"]["routes"]
-    assert listed["route_code"] == "R_P"
-    assert listed["avg_min"] == pytest.approx(5.0, abs=0.01)
-    assert listed["delta_min"] == pytest.approx(3.0, abs=0.01)
+    assert out["top_delayed"]["route_count"] == 1
+    assert out["top_delayed"]["band_counts"]["severe"]["count"] == 1
 
 
 @pytest.mark.asyncio
@@ -968,10 +967,10 @@ async def test_concentration_fast_and_slow_paths_agree_on_mixed_early_late_day(
 
 
 @pytest.mark.asyncio
-async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency_id):
-    """Ranked by raw avg_min, not by _concentration()'s total-lateness-contribution
-    metric — a route with few samples but a high average outranks a route
-    with more samples but a lower average."""
+async def test_top_delayed_counts_each_routes_true_average_not_its_share(aconn, aagency_id):
+    """Each route is judged on its own average, not on _concentration()'s
+    total-lateness-contribution metric: a route with few samples but a high
+    average is late, one with more samples but a lower average is not."""
     # R_HIGH: avg 8.0 min, 100 samples. R_LOW: avg 3.0 min, 1,000 samples.
     # Under _concentration()'s SUM(avg_min*samples) metric R_LOW would win
     # (3,000 > 800); under a true average, R_HIGH must win.
@@ -982,55 +981,17 @@ async def test_top_delayed_routes_ranks_by_absolute_avg_not_share(aconn, aagency
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
     out = await compute_overview_summary(aagency_id, ctx, aconn)
-    routes = out["top_delayed"]["routes"]
-    assert routes[0]["route_code"] == "R_HIGH"
-    assert routes[0]["avg_min"] == pytest.approx(8.0, abs=0.05)
-    assert routes[1]["route_code"] == "R_LOW"
+    assert out["top_delayed"]["band_counts"]["severe"]["count"] == 1
+    assert out["top_delayed"]["route_count"] == 2
 
 
 @pytest.mark.asyncio
-async def test_top_delayed_routes_fast_path_tie_break_is_deterministic(aconn, aagency_id):
-    """Two routes tied on weighted avg_min (agg_daily_trend fast path) must
-    rank by route_code, ascending — same tie-break as concentration's fast
-    path; each route here is a single-day row, so its weighted average is
-    just its own avg_min.
-    """
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_B", "平日", 5.0, 200)
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_TDTIE_A", "平日", 5.0, 300)  # tied avg, diff samples
-
+async def test_top_delayed_counts_every_route_and_states_its_bound(aconn, aagency_id):
+    """The late-route count covers every ranked route, one exactly on the
+    bound included; an empty dataset returns zero counts with their bound,
+    not an error."""
     from pipeline.reports import compute_overview_summary
 
-    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn)
-    codes = [r["route_code"] for r in out["top_delayed"]["routes"] if r["route_code"].startswith("R_TDTIE")]
-    assert codes == ["R_TDTIE_A", "R_TDTIE_B"]
-
-
-@pytest.mark.asyncio
-async def test_top_delayed_routes_delayed_count_excludes_under_threshold(aconn, aagency_id):
-    """delayed_count only counts routes at/above the 2.0-min DELAY_RAMP
-    'not ok' threshold — matching frontend/src/styles/tokens.ts's boundary."""
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_OK", "平日", 1.5, 100)  # under threshold
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_EDGE", "平日", 2.0, 100)  # exactly at threshold
-    await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), "R_BAD", "平日", 6.0, 100)  # over threshold
-
-    from pipeline.reports import compute_overview_summary
-
-    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
-    out = await compute_overview_summary(aagency_id, ctx, aconn)
-    assert out["top_delayed"]["delayed_count"] == 2
-
-
-@pytest.mark.asyncio
-async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
-    """Caps the list at 5 routes even with more seeded, while every count
-    covers every route; an empty dataset returns no routes and zero counts
-    (with their thresholds), not an error."""
-    from pipeline.reports import compute_overview_summary
-
-    # Bands, by lower bound: severe 5.0 (three routes), moderate 3.0 (three:
-    # the list's last two slots take two of them), mild 1.5 (two), and one
-    # route under every band. Each band has a route exactly on its bound.
     avgs = [7.0, 6.0, 5.0, 4.0, 3.5, 3.0, 2.0, 1.5, 1.0]
     for i, avg in enumerate(avgs):
         await _seed_agg_daily(aconn, aagency_id, date(2026, 5, 18), f"R_{i}", "平日", avg, 100)
@@ -1038,27 +999,14 @@ async def test_top_delayed_routes_limit_and_empty(aconn, aagency_id):
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18))
     out = await compute_overview_summary(aagency_id, ctx, aconn)
     top = out["top_delayed"]
-    assert [r["route_code"] for r in top["routes"]] == ["R_0", "R_1", "R_2", "R_3", "R_4"]
-    assert top["band_counts"] == {
-        "severe": {"count": 3, "threshold_min": 5.0},
-        "moderate": {"count": 3, "threshold_min": 3.0},
-        "mild": {"count": 2, "threshold_min": 1.5},
-    }
-    assert top["delayed_count"] == 7
+    assert top["band_counts"] == {"severe": {"count": 3, "threshold_min": 5.0}}
     assert top["route_count"] == 9
 
     # Empty-dataset agency: no seeded rows at all.
     empty_ctx = RangeCtx(from_date=date(2020, 1, 1), to_date=date(2020, 1, 1))
     empty_out = await compute_overview_summary(aagency_id, empty_ctx, aconn)
     assert empty_out["top_delayed"] == {
-        "routes": [],
-        "delayed_count": 0,
-        "delayed_threshold_min": 2.0,
-        "band_counts": {
-            "severe": {"count": 0, "threshold_min": 5.0},
-            "moderate": {"count": 0, "threshold_min": 3.0},
-            "mild": {"count": 0, "threshold_min": 1.5},
-        },
+        "band_counts": {"severe": {"count": 0, "threshold_min": 5.0}},
         "route_count": 0,
         "min_samples": 100,
     }
@@ -1094,10 +1042,8 @@ async def test_top_delayed_routes_falls_back_to_live_under_time_band(
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
-    routes = out["top_delayed"]["routes"]
-    assert len(routes) == 1
-    assert routes[0]["route_code"] == "R_TD"
-    assert routes[0]["avg_min"] == pytest.approx(5.5, abs=0.05)
+    assert out["top_delayed"]["route_count"] == 1
+    assert out["top_delayed"]["band_counts"]["severe"]["count"] == 1
 
 
 @pytest.mark.asyncio
@@ -1121,7 +1067,7 @@ async def test_a_time_band_period_with_a_no_route_observation_lists_only_routes(
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 18), time_band="morning")
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
-    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["R_TD"]
+    assert out["top_delayed"]["route_count"] == 1
     assert [r["route_code"] for r in out["concentration"]["top_routes"]] == ["R_TD"]
     assert out["concentration"]["top_routes"][0]["share_pct"] == 100.0
     Concentration.model_validate(out["concentration"])
@@ -1130,9 +1076,9 @@ async def test_a_time_band_period_with_a_no_route_observation_lists_only_routes(
 
 @pytest.mark.asyncio
 async def test_top_delayed_routes_cover_the_headline_window(aconn, aagency_id):
-    """top_delayed ranks over the headline's window, the whole period: a route
-    late on the period's first day is listed and counted, and a route late
-    only in the window before the period is not.
+    """top_delayed counts over the headline's window, the whole period: a
+    route late on the period's first day is counted, and a route late only in
+    the window before the period is not.
     """
     # ctx spans 14 days (2026-05-05..2026-05-18); the window before it is
     # 2026-04-21..2026-05-04.
@@ -1145,16 +1091,15 @@ async def test_top_delayed_routes_cover_the_headline_window(aconn, aagency_id):
     ctx = RangeCtx(from_date=date(2026, 5, 5), to_date=date(2026, 5, 18))
     out = await compute_overview_summary(aagency_id, ctx, aconn)
     assert (out["headline"]["window_from"], out["headline"]["window_to"]) == ("2026-05-05", "2026-05-18")
-    codes = [r["route_code"] for r in out["top_delayed"]["routes"]]
-    assert codes == ["R_OLD", "R_NEW"]
-    assert out["top_delayed"]["delayed_count"] == 2
+    assert out["top_delayed"]["route_count"] == 2
+    assert out["top_delayed"]["band_counts"]["severe"]["count"] == 1
 
 
 @pytest.mark.asyncio
 async def test_top_delayed_routes_leave_out_a_thinly_observed_route(aconn, aagency_id):
     """A route observed fewer times in the window than the Routes ranking's
-    floor is neither listed nor counted, and the counts say what they are out
-    of: the routes observed at least that often."""
+    floor is not counted, and the counts say what they are out of: the
+    routes observed at least that often."""
     from pipeline.reports import compute_overview_summary
     from pipeline.reports.rankings import RANKING_MIN_SAMPLES
 
@@ -1165,30 +1110,9 @@ async def test_top_delayed_routes_leave_out_a_thinly_observed_route(aconn, aagen
 
     out = await compute_overview_summary(aagency_id, RangeCtx(day, day), aconn)
     top = out["top_delayed"]
-    assert [r["route_code"] for r in top["routes"]] == ["R_SOLID", "R_CALM"]
     assert top["band_counts"]["severe"]["count"] == 1
     assert top["route_count"] == 2
     assert top["min_samples"] == RANKING_MIN_SAMPLES
-
-
-@pytest.mark.asyncio
-async def test_a_listed_route_that_is_a_mover_carries_the_movers_change(aconn, aagency_id):
-    """The list's change from the window before is the movers' figure, so a
-    route on both says the same thing in both places; a route seen only in
-    the current window has none."""
-    from pipeline.reports import compute_overview_summary
-
-    for d in range(11, 18):
-        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, d), "R_MOVE", "平日", 2.13, 30)
-    for d in range(18, 25):
-        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, d), "R_MOVE", "平日", 5.27, 30)
-        await _seed_agg_daily(aconn, aagency_id, date(2026, 5, d), "R_FRESH", "平日", 4.0, 30)
-
-    out = await compute_overview_summary(aagency_id, RangeCtx(date(2026, 5, 18), date(2026, 5, 24)), aconn)
-    listed = {r["route_code"]: r["delta_min"] for r in out["top_delayed"]["routes"]}
-    mover = next(m for m in out["movers"]["worse"] if m["route_code"] == "R_MOVE")
-    assert listed["R_MOVE"] == mover["delta_min"] == pytest.approx(3.14, abs=1e-9)
-    assert listed["R_FRESH"] is None
 
 
 @pytest.mark.asyncio
@@ -1308,7 +1232,6 @@ async def test_overview_endpoint_full_payload_via_test_client(client, aconn, aag
     assert body["headline"]["avg_min"] is not None
     # Five observations sit under the list's floor: nothing listed, nothing
     # counted, and the counts still say what they would be out of.
-    assert body["top_delayed"]["routes"] == []
     assert body["top_delayed"]["route_count"] == 0
     assert body["top_delayed"]["min_samples"] == 100
     assert body["service_split_daily"] == [{"date": "2026-05-18", "day_type": "weekday", "avg_min": 2.0, "samples": 5}]
@@ -1359,9 +1282,9 @@ async def test_headline_uses_live_path_when_time_band_set(aconn, aagency_id, ch_
 
 
 @pytest.mark.asyncio
-async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
-    """``peak_hour_weekday`` / ``peak_hour_weekend`` partition by ISO
-    day-of-week, reading the per-day/hour ``agg_hour_daily`` fast path
+async def test_peak_hour_follows_the_scopes_days_from_agg(aconn, aagency_id):
+    """``peak_hour`` keeps the scope's days of the week, partitioning by ISO
+    day-of-week on the per-day/hour ``agg_hour_daily`` fast path
     (sample-weighted across the range).
 
     2026-05-19 is a Tuesday (weekday); 2026-05-23 is a Saturday (weekend).
@@ -1372,10 +1295,9 @@ async def test_peak_hour_weekday_weekend_split_from_agg(aconn, aagency_id):
 
     from pipeline.reports import compute_overview_summary
 
-    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24))
-    out = await compute_overview_summary(aagency_id, ctx, aconn)
-    pk_wd = out["peak_hour_weekday"]
-    pk_we = out["peak_hour_weekend"]
+    window = {"from_date": date(2026, 5, 18), "to_date": date(2026, 5, 24)}
+    pk_wd = (await compute_overview_summary(aagency_id, RangeCtx(**window, dow="weekday"), aconn))["peak_hour"]
+    pk_we = (await compute_overview_summary(aagency_id, RangeCtx(**window, dow="weekend"), aconn))["peak_hour"]
     assert pk_wd is not None
     assert pk_we is not None
     assert pk_wd["peak_hour"] == 8
@@ -1404,7 +1326,7 @@ async def test_peak_hour_by_dow_pools_exact_sum_delay_sec_not_reweighted_avg(aco
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
     out = await compute_overview_summary(aagency_id, ctx, aconn)
-    pk_wd = out["peak_hour_weekday"]
+    pk_wd = out["peak_hour"]
     assert pk_wd is not None
     # Exact: (290 + 100000) / 60 / 1003 ~= 1.6665 -> 1.67, NOT the reweighted
     # (1.61*3 + 2.0*1000) / 1003 ~= 1.9988 -> 2.00.
@@ -1423,7 +1345,7 @@ async def test_peak_hour_agg_sample_weights_across_days(aconn, aagency_id):
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 31))
     out = await compute_overview_summary(aagency_id, ctx, aconn)
-    pk_wd = out["peak_hour_weekday"]
+    pk_wd = out["peak_hour"]
     assert pk_wd is not None
     assert pk_wd["peak_hour"] == 8
     assert pk_wd["by_hour"][8] == pytest.approx(8.17, abs=0.01)
@@ -1463,10 +1385,11 @@ async def test_peak_hour_falls_back_to_live_under_routes_filter(aconn, aagency_i
     from pipeline.reports import compute_overview_summary
 
     # A routes filter forces the live path (agg_hour_daily has no route column).
-    ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), routes=("R_PW",))
-    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
-    pk_wd = out["peak_hour_weekday"]
-    pk_we = out["peak_hour_weekend"]
+    window = {"from_date": date(2026, 5, 18), "to_date": date(2026, 5, 24), "routes": ("R_PW",)}
+    weekday = await compute_overview_summary(aagency_id, RangeCtx(**window, dow="weekday"), aconn, ch=ch_async_client)
+    weekend = await compute_overview_summary(aagency_id, RangeCtx(**window, dow="weekend"), aconn, ch=ch_async_client)
+    pk_wd = weekday["peak_hour"]
+    pk_we = weekend["peak_hour"]
     assert pk_wd is not None and pk_we is not None
     assert pk_wd["peak_hour"] == 8
     assert pk_we["peak_hour"] == 17
@@ -1492,13 +1415,10 @@ async def test_peak_hours_under_a_service_filter_read_its_dates_from_the_aggrega
     weekday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="平日"), aconn)
     assert weekday["peak_hour"]["peak_hour"] == 8
     assert weekday["peak_hour"]["by_hour"][12] is None
-    assert weekday["peak_hour_weekday"]["peak_hour"] == 8
-    assert weekday["peak_hour_weekend"] is None
 
     holiday = await compute_overview_summary(aagency_id, RangeCtx(**window, service="日祝"), aconn)
     assert holiday["peak_hour"]["peak_hour"] == 12
     assert holiday["peak_hour"]["by_hour"][8] is None
-    assert holiday["peak_hour_weekday"]["peak_hour"] == 12
 
 
 @pytest.mark.asyncio
@@ -1719,12 +1639,8 @@ async def test_pool_path_matches_sequential_path(aconn, aagency_id):
     assert pool_out["headline"] == seq_out["headline"]
     assert pool_out["movers"] == seq_out["movers"]
     assert pool_out["concentration"] == seq_out["concentration"]
-    # The pool path hands the list its window before as well.
-    assert pool_out["top_delayed"]["routes"][0]["delta_min"] is not None
     assert pool_out["top_delayed"] == seq_out["top_delayed"]
     assert pool_out["peak_hour"] == seq_out["peak_hour"]
-    assert pool_out["peak_hour_weekday"] == seq_out["peak_hour_weekday"]
-    assert pool_out["peak_hour_weekend"] == seq_out["peak_hour_weekend"]
     assert pool_out["service_split"] == seq_out["service_split"]
     assert pool_out["service_split_daily"] == seq_out["service_split_daily"]
     assert pool_out["sparkline_points"] == seq_out["sparkline_points"]
@@ -1801,15 +1717,15 @@ async def _seed_left_out_routes(aconn, agency_id):
 
 @pytest.mark.asyncio
 async def test_overview_route_lists_leave_out_retired_and_zero_delay_routes(aconn, aagency_id):
-    """Neither the routes to check nor the delay concentration lists a retired
-    code or a route whose feed reports no delay, and the concentration's
-    shares are of the routes it can list."""
+    """Neither the late-route count nor the delay concentration counts a
+    retired code or a route whose feed reports no delay, and the
+    concentration's shares are of the routes it can list."""
     from pipeline.reports.overview import compute_overview_summary
 
     await _seed_left_out_routes(aconn, aagency_id)
     out = await compute_overview_summary(aagency_id, RangeCtx(date(2026, 9, 24), date(2026, 10, 23)), aconn)
 
-    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["C1", "C2"]
+    assert out["top_delayed"]["route_count"] == 2
     assert [(r["route_code"], r["share_pct"]) for r in out["concentration"]["top_routes"]] == [
         ("C1", 75.0),
         ("C2", 25.0),
@@ -1825,8 +1741,34 @@ async def test_overview_lists_a_left_out_route_the_routes_filter_names(aconn, aa
     ctx = RangeCtx(date(2026, 9, 24), date(2026, 10, 23), routes=("C1", "OLD", "ECHO"))
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
 
-    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["OLD", "C1", "ECHO"]
     assert [r["route_code"] for r in out["concentration"]["top_routes"]] == ["C1", "OLD", "ECHO"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("routes", [(), ("C1", "OLD", "ECHO")])
+async def test_the_late_route_count_is_out_of_the_routes_the_routes_table_ranks(
+    aconn, aagency_id, ch_async_client, routes
+):
+    """The hero's "N / M routes" and the routes-to-check preview's "Covers M
+    routes" are one population: the Routes table over the headline's window,
+    leaving out what it leaves out, a retired code the routes filter names
+    included."""
+    from api.routers.reports import render_report
+    from pipeline.reports.overview import compute_overview_summary
+
+    await _seed_left_out_routes(aconn, aagency_id)
+    ctx = RangeCtx(date(2026, 9, 24), date(2026, 10, 23), routes=routes)
+    out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
+    window = replace(
+        ctx,
+        from_date=date.fromisoformat(out["headline"]["window_from"]),
+        to_date=date.fromisoformat(out["headline"]["window_to"]),
+    )
+    table = await render_report(
+        "route_table", agency_id=aagency_id, ctx=window, conn=aconn, ch=ch_async_client, locale="en", limit=5
+    )
+
+    assert table.rows_total == out["top_delayed"]["route_count"] == (1 if routes else 2)
 
 
 # Consolidated slow path (ctx.time_band != 'all') — one shared ClickHouse grain
@@ -1874,7 +1816,7 @@ async def _seed_update(aconn, agency_id, when, route_code, dep_delay, *, sched="
 async def test_slow_path_top_delayed_leaves_out_a_thinly_observed_route(
     aconn, aagency_id, ch_client, ch_async_client, monkeypatch
 ):
-    """The grain-derived list applies the same floor as the aggregate path."""
+    """The grain-derived count applies the same floor as the aggregate path."""
     monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 3)
     when = datetime.combine(date(2026, 5, 20), time(12, 0), tzinfo=timezone.utc)
     for seq, dep in enumerate([120, 120, 120], start=1):
@@ -1889,7 +1831,6 @@ async def test_slow_path_top_delayed_leaves_out_a_thinly_observed_route(
 
     ctx = RangeCtx(from_date=date(2026, 5, 18), to_date=date(2026, 5, 24), time_band="morning")
     out = await compute_overview_summary(aagency_id, ctx, aconn, ch=ch_async_client)
-    assert [r["route_code"] for r in out["top_delayed"]["routes"]] == ["R_SEEN"]
     assert out["top_delayed"]["route_count"] == 1
     assert out["top_delayed"]["min_samples"] == 3
 
@@ -1904,7 +1845,7 @@ async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_cl
     scan — short-circuits before querying. Everything else must be served
     from the shared grain.
     """
-    # Three live rows stand for a route: the list's floor is not this test's subject.
+    # Three live rows stand for a route: the count's floor is not this test's subject.
     monkeypatch.setattr("pipeline.reports.overview.TOP_DELAYED_MIN_SAMPLES", 1)
     for i, dep in enumerate([120, 240, 360]):
         await _seed_update(
@@ -1933,9 +1874,9 @@ async def test_slow_path_uses_a_single_clickhouse_query(aconn, aagency_id, ch_cl
     assert out["headline"]["avg_min"] == pytest.approx(4.0, abs=0.01)  # (2+4+6)/3
     assert out["sparkline_points"] == [4.0]
     assert out["service_split"] == _split(weekday=(4.0, 1, 3))
-    assert out["top_delayed"]["routes"][0]["route_code"] == "R_G1"
+    assert out["top_delayed"]["route_count"] == 1
     assert out["concentration"]["top_routes"][0]["route_code"] == "R_G1"
-    assert out["peak_hour_weekday"]["peak_hour"] == 8
+    assert out["peak_hour"]["peak_hour"] == 8
 
 
 @pytest.mark.asyncio
@@ -2174,13 +2115,8 @@ async def test_widest_period_reads_a_baseline_as_wide(aconn, aagency_id, ch_clie
 
 @pytest.mark.asyncio
 async def test_slow_path_dow_applies_per_consumer(aconn, aagency_id, ch_client, ch_async_client):
-    """`ctx.dow` gates the ctx-windowed helpers, but `peak_hour_weekday` /
-    `peak_hour_weekend` must IGNORE it and re-partition weekday vs weekend.
-
-    This is why the grain carries no DOW filter of its own: baking `ctx.dow`
-    into the shared WHERE would make the weekend peak permanently empty
-    whenever the user narrowed to weekdays.
-    """
+    """`ctx.dow` gates every consumer of the shared grain, each applying it
+    off its rows' dates, the hour profile included."""
     # 2026-05-21 Thu (weekday), 2026-05-23 Sat (weekend).
     await _seed_update(
         aconn,
@@ -2212,12 +2148,10 @@ async def test_slow_path_dow_applies_per_consumer(aconn, aagency_id, ch_client, 
     assert out["headline"]["samples"] == 1
     assert out["headline"]["avg_min"] == pytest.approx(2.0, abs=0.01)
     assert out["sparkline_points"] == [2.0]
-    # ...but both peak-hour splits still see their own day-of-week slice.
-    assert out["peak_hour_weekday"]["peak_hour"] == 7
-    assert out["peak_hour_weekday"]["by_hour"][7] == pytest.approx(2.0, abs=0.01)
-    assert out["peak_hour_weekend"] is not None, "ctx.dow must not suppress the weekend peak"
-    assert out["peak_hour_weekend"]["peak_hour"] == 8
-    assert out["peak_hour_weekend"]["by_hour"][8] == pytest.approx(10.0, abs=0.01)
+    # ...and the hour profile too: the Saturday's 08:00 row is not in it.
+    assert out["peak_hour"]["peak_hour"] == 7
+    assert out["peak_hour"]["by_hour"][7] == pytest.approx(2.0, abs=0.01)
+    assert out["peak_hour"]["by_hour"][8] is None
 
 
 @pytest.mark.asyncio
@@ -2420,16 +2354,15 @@ async def test_slow_path_pool_and_sequential_agree(aconn, aagency_id, ch_client,
     # single 05-23 one; the ten 05-08 rows fall in the window before it.
     assert seq_out["headline"]["samples"] == 11
     assert seq_out["headline"]["baseline_avg_min"] == pytest.approx(2.0, abs=0.01)
-    assert seq_out["peak_hour_weekday"]["peak_hour"] == 7
+    assert seq_out["peak_hour"]["peak_hour"] == 7
 
 
 @pytest.mark.asyncio
 async def test_routes_filter_serves_every_hour_profile_from_one_scan(aconn, aagency_id, ch_client, ch_async_client):
     """Under a routes filter, agg_hour_daily (aggregated across routes) can't
-    serve the hour profiles, so all three read one shared scan: the filtered
-    route's own hours, inside the window, split weekday/weekend from the same
-    rows. Every other figure reads its agg_* table, so the scan groups by hour
-    alone: one row per date and hour, and no route rows."""
+    serve the hour profile, so it reads one scan: the filtered route's own
+    hours, inside the window. Every other figure reads its agg_* table, so the
+    scan groups by hour alone: one row per date and hour, and no route rows."""
     tue = datetime.combine(date(2026, 5, 19), time(12, 0), tzinfo=timezone.utc)
     sat = datetime.combine(date(2026, 5, 23), time(12, 0), tzinfo=timezone.utc)
     before = datetime.combine(date(2026, 5, 5), time(12, 0), tzinfo=timezone.utc)
@@ -2456,10 +2389,6 @@ async def test_routes_filter_serves_every_hour_profile_from_one_scan(aconn, aage
     assert out["peak_hour"]["by_hour"][17] == pytest.approx(5.0, abs=0.01)
     assert out["peak_hour"]["by_hour"][6] is None
     assert out["peak_hour"]["by_hour"][21] is None
-    assert out["peak_hour_weekday"]["peak_hour"] == 8
-    assert out["peak_hour_weekday"]["by_hour"][17] is None
-    assert out["peak_hour_weekend"]["peak_hour"] == 17
-    assert out["peak_hour_weekend"]["by_hour"][8] is None
 
 
 # ch=None on a live-fallback path must raise a clear RuntimeError, not a bare
@@ -2553,8 +2482,6 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id,
     # The three ClickHouse-derived peak fields degrade to null, from one
     # attempted scan rather than one each...
     assert out["peak_hour"] is None
-    assert out["peak_hour_weekday"] is None
-    assert out["peak_hour_weekend"] is None
     # ...and every Postgres-served surface is fully populated.
     assert out["headline"]["avg_min"] == pytest.approx(5.0, abs=0.01)
     assert out["headline"]["baseline_avg_min"] == pytest.approx(2.0, abs=0.01)
@@ -2564,7 +2491,7 @@ async def test_overview_summary_survives_peak_hour_ch_failure(aconn, aagency_id,
     assert [m["route_code"] for m in out["movers"]["worse"]] == ["R_DEG"]
     assert out["movers"]["worse"][0]["delta_min"] == pytest.approx(3.0, abs=0.01)
     assert out["concentration"]["top_routes"][0]["route_code"] == "R_DEG"
-    assert out["top_delayed"]["routes"][0]["route_code"] == "R_DEG"
+    assert out["top_delayed"]["route_count"] == 1
     # 06-22 is a Monday: five weekdays, a Saturday and a Sunday, all at 5.0.
     assert out["service_split"] == _split(weekday=(5.0, 5, 100), saturday=(5.0, 1, 20), sunday_holiday=(5.0, 1, 20))
     assert len(out["sparkline_points"]) == 7
@@ -2947,24 +2874,11 @@ _GRAIN_PAYLOAD = {
         "rest_route_count": 0,
     },
     "top_delayed": {
-        "routes": [
-            {"route_code": "R1", "route_short_name": None, "avg_min": 6.81, "delta_min": 5.28},
-            {"route_code": "R2", "route_short_name": None, "avg_min": 1.66, "delta_min": -4.17},
-            {"route_code": "R3", "route_short_name": None, "avg_min": 0.94, "delta_min": None},
-        ],
-        "delayed_count": 1,
-        "delayed_threshold_min": 2.0,
-        "band_counts": {
-            "severe": {"count": 1, "threshold_min": 5.0},
-            "moderate": {"count": 0, "threshold_min": 3.0},
-            "mild": {"count": 1, "threshold_min": 1.5},
-        },
+        "band_counts": {"severe": {"count": 1, "threshold_min": 5.0}},
         "route_count": 3,
         "min_samples": 3,
     },
     "peak_hour": {"by_hour": _by_hour({6: 1.08, 7: 2.79, 8: 4.99}), "peak_hour": 8, "peak_avg_min": 4.99},
-    "peak_hour_weekday": {"by_hour": _by_hour({7: 2.79, 8: 5.8}), "peak_hour": 8, "peak_avg_min": 5.8},
-    "peak_hour_weekend": {"by_hour": _by_hour({6: 1.08, 8: 0.5}), "peak_hour": 6, "peak_avg_min": 1.08},
     "service_split": _split(weekday=(4.11, 4, 25), saturday=(1.08, 1, 4), sunday_holiday=(0.5, 1, 2)),
     "service_split_daily": [
         {"date": "2026-05-12", "day_type": "weekday", "avg_min": 0.75, "samples": 3},
@@ -3058,19 +2972,12 @@ async def test_a_grain_past_the_row_cap_or_time_budget_serves_the_period_without
         **full,
         "headline": {**full["headline"], "baseline_avg_min": None, "delta_min": None, "delta_pct": None},
         "movers": None,
-        "top_delayed": {
-            **full["top_delayed"],
-            "routes": [{**r, "delta_min": None} for r in full["top_delayed"]["routes"]],
-        },
         "peak_hour": None,
-        "peak_hour_weekday": None,
-        "peak_hour_weekend": None,
     }
     # Each figure that went null had a value to lose.
     assert full["headline"]["baseline_avg_min"] is not None
     assert full["movers"]["worse"] and full["movers"]["better"]
-    assert any(r["delta_min"] is not None for r in full["top_delayed"]["routes"])
-    assert None not in (full["peak_hour"], full["peak_hour_weekday"], full["peak_hour_weekend"])
+    assert full["peak_hour"] is not None
 
 
 @pytest.mark.asyncio

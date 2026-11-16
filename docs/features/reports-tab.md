@@ -238,8 +238,8 @@ What the user sees/does:
     delay, samples), each row's "Open analysis →" link opening that route's
     dossier (`/agencies/:agencyId/routes/<route_code>`) with the active
     scope's query string, `service` included when one is set. When there are
-    more, a line says how many of how many are shown. A link under it always
-    opens the Routes table, the home of "which routes are worst", over the
+    more, a line says how many of how many are shown. A link under it opens
+    the Routes table, the home of "which routes are worst", over the
     same scope and sorted by mean delay (`routes?sort=avg`), so its first
     rows are this list.
   - The chart and the list are part of the printable period document, so

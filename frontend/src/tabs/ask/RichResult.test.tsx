@@ -338,38 +338,64 @@ describe("RichResult evidence card", () => {
 });
 
 describe("RichResult's link to the screen answering the card's question", () => {
-  it("links a ranking card to the Routes table over the card's own scope", () => {
+  // As a card records them: the template sends no dates, so the thread's
+  // resolved period and routes come from the message's conditions.
+  const answered = {
+    dow: "weekend",
+    time_band: "all",
+    service: "all",
+    from_date: "2026-06-01",
+    to_date: "2026-06-07",
+    routes: ["R1"],
+  };
+
+  it("links a ranking card to the Routes table over the scope it was answered under", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper result={tableResult} tool="top_n" args={{ metric: "avg_delay", k: 5 }} conditions={answered} agencyId={8} />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Open on Routes →" })).toHaveAttribute(
+      "href",
+      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekend&routes=R1&sparse=1&sort=avg",
+    );
+  });
+
+  it("links a trend card to Time's daily trend, saying so whatever the card's granularity", () => {
+    renderWithProviders(
+      <MemoryRouter>
+        <Wrapper
+          result={seriesResult}
+          tool="trend"
+          args={{ metric: "avg_delay", route_code: "R9", granularity: "week" }}
+          conditions={answered}
+          agencyId={8}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "See the daily trend on Time →" })).toHaveAttribute(
+      "href",
+      "/agencies/8/time?from=2026-06-01&to=2026-06-07&dow=weekend&routes=R9&report=trend",
+    );
+  });
+
+  it("shows no link for a card saved before its conditions kept the period", () => {
     renderWithProviders(
       <MemoryRouter>
         <Wrapper
           result={tableResult}
           tool="top_n"
-          args={{ metric: "avg_delay", from_date: "2026-06-01", to_date: "2026-06-07" }}
-          conditions={{ dow: "weekend", time_band: "all", service: "all" }}
+          args={{ metric: "avg_delay" }}
+          conditions={{ dow: "all", time_band: "all", service: "all" }}
           agencyId={8}
         />
       </MemoryRouter>,
     );
-    expect(screen.getByRole("link", { name: "Open on Routes →" })).toHaveAttribute(
-      "href",
-      "/agencies/8/routes?from=2026-06-01&to=2026-06-07&dow=weekend&sort=avg",
-    );
-  });
-
-  it("links a trend card to Time over the card's own scope", () => {
-    renderWithProviders(
-      <MemoryRouter>
-        <Wrapper result={seriesResult} tool="time_series" args={{ from_date: "2026-06-01", to_date: "2026-06-07" }} agencyId={8} />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("link", { name: "Open on Time →" })).toHaveAttribute(
-      "href",
-      "/agencies/8/time?from=2026-06-01&to=2026-06-07&report=trend",
-    );
+    expect(screen.queryByRole("link", { name: /^Open on |daily trend/ })).toBeNull();
   });
 
   it("shows no link without an agency to link into", () => {
-    renderWithProviders(<Wrapper result={tableResult} tool="top_n" args={{ metric: "avg_delay" }} />);
+    renderWithProviders(<Wrapper result={tableResult} tool="top_n" args={{ metric: "avg_delay" }} conditions={answered} />);
     expect(screen.queryByRole("link", { name: /^Open on / })).toBeNull();
   });
 });

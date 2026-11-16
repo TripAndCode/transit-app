@@ -65,17 +65,32 @@ What the user sees/does:
   bubbles; assistant bubbles render `frontend/src/tabs/ask/RichResult.tsx`
   (table / kv / chart depending on `result.kind`), with a collapsible
   "details" JSON dump of tool/args/result.
-- **Link to the question's home** — a ranking, on-time, trend or
-  weekday/weekend card ends with "Open on Routes / Time / Day types &
-  agencies" (`frontend/src/tabs/ask/cardHome.ts`), the screen that answers
-  its question in full (`analysis-tab.md` ▸ One home per question). The link
-  carries the card's own scope as it was answered: its persisted
-  `from_date`/`to_date` and route, and the `conditions` its dispatch ran
-  under, not the thread's current filters. A ranking card keeps its order
-  (`best_first`), and an on-time card's `threshold_min` becomes the scope's
-  late tolerance with every early departure on time, which is how the tool
-  counts it. The per-day-type split of one route
-  (`compare_segments`, `dimension="service_type"`) has no home and no link.
+- **Link to the question's home** — a ranking, on-time or weekday/weekend
+  card ends with "Open on Routes / Day types & agencies", and a trend card
+  with "See the daily trend on Time" (`frontend/src/tabs/ask/cardHome.ts`):
+  the screen that answers its question in full (`analysis-tab.md` ▸ One home
+  per question).
+  - The link carries the scope the card was answered under, not the
+    thread's current filters. The card templates send no dates, so the
+    period, routes, dow, time band and service come from the message's
+    `conditions`, which `_run_card` (`api/routers/conversations.py`) records
+    from the dispatched filters. A card's own `from_date`/`to_date` win over
+    them, as they do at dispatch; a card's own route narrows the link to that
+    route; a top-N card's `service_type` replaces the service filter, mapped
+    as `_SERVICE_TYPE_MAP` maps it.
+  - A card saved before `conditions` kept the period has no link: a link to
+    the screen's default days would show other figures.
+  - Ranking links set `sparse=1`, so the Routes table ranks at
+    `MIN_GROUP_SAMPLES` (21), the cards' own floor, rather than its default
+    100. The 5-minute ranking has no floor of its own, so its card can list a
+    route thinner than the table shows. A ranking card keeps its order
+    (`best_first`), and an on-time card's `threshold_min` becomes the scope's
+    late tolerance with every early departure on time, which is how the tool
+    counts it.
+  - Time's trend is daily, so a weekly or monthly trend card's link says
+    "daily" rather than promising its own granularity.
+  - The per-day-type split of one route (`compare_segments`,
+    `dimension="service_type"`) has no home and no link.
 - **Result exports** — `frontend/src/tabs/ask/ResultExports.tsx`: the
   selected step as JSON, and a CSV for each table answer (`resultTableCsv`
   in `resultSnapshot.ts`). The CSV opens with key/value rows recording what

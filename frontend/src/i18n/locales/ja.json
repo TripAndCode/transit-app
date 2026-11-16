@@ -609,7 +609,9 @@
       "story_slowest": "{{slowest}}が最も遅れ、{{fastest}}より平均{{diff}}長い。",
       "story_same": "日種別による遅れの差はほぼありません。",
       "story_none": "この期間は、日種別を比べられるだけのデータがありません。",
-      "see_compare": "平日と土日祝を系統ごとに比べる →"
+      "see_compare": "平日と土日祝を系統ごとに比べる →",
+      "no_data": "データなし",
+      "insufficient": "データ不足"
     },
     "modal": {
       "concentration": "遅延の集中度 (上位20)"
@@ -1085,7 +1087,8 @@
       "row_count_one": "{{count}}行",
       "row_count_other": "{{count}}行",
       "stop_unnamed": "名称未設定の停留所",
-      "open_home": "「{{screen}}」で開く →"
+      "open_home": "「{{screen}}」で開く →",
+      "open_daily_trend": "日ごとの推移を「時間」で見る →"
     },
     "workspace": {
       "investigations": "これまでの調査",

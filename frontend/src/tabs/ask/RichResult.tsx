@@ -1,7 +1,7 @@
 import { useRef, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { TFunction } from "i18next";
-import type { DefinitionMeta, ToolResult, TrendDay } from "../../api/types";
+import type { CardConditions, DefinitionMeta, ToolResult, TrendDay } from "../../api/types";
 import { DefinitionMetaBlock } from "../../components/DefinitionMetaBlock";
 import { DailyChart, type TrendGranularity } from "../../components/charts/DailyChart";
 import { formatNumber } from "../../utils/format";
@@ -14,7 +14,7 @@ import { MAX_STAGGER, rankedBarColor, rankedBarColumn, rankedBarShares } from ".
 import { SHARED_TABLE } from "../../components/tableStyles";
 import "./rankedBars.css";
 
-type Conditions = { dow?: string; time_band?: string; service?: string } | null;
+type Conditions = CardConditions | null;
 
 /** Render a tool result as a table / key-value list / chart, falling back to
  *  plain text for empty or text-kind results. Table/kv/series results are
@@ -294,8 +294,8 @@ function EvidenceCard({
       )}
 
       {home && (
-        <Link className="ask-evidence-home" to={home.href} style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "var(--accent)" }}>
-          {t("ask.evidence.open_home", { screen: t(`nav.${home.screen}`) })}
+        <Link className="ask-evidence-home" to={home.href} style={{ display: "inline-block", marginTop: 10, fontSize: 12, color: "var(--accent-strong)" }}>
+          {home.screen === "time" ? t("ask.evidence.open_daily_trend") : t("ask.evidence.open_home", { screen: t(`nav.${home.screen}`) })}
         </Link>
       )}
 

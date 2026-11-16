@@ -235,7 +235,7 @@ export function OverviewHeroRow({
               {t("overview.hero_row.sparkline_baseline", { range: periodRange, value: fixedTenth(sparklineMean) })}
             </div>
           )}
-          <Link className="ov-hero-trend-link" to={trendHref}>
+          <Link className="ov-card-link ov-card-link--small" to={trendHref}>
             {t("overview.hero_row.see_trend")}
           </Link>
           <div className="ov-hero-feed">

@@ -33,9 +33,10 @@ silently disagree about.
 
 Why Overview's "Routes to check" preview and headline DELTA are NOT the
 check target here:
-- "Routes to check" (`RoutesPreview.tsx`) draws the Routes table's own rows
-  with `ReportTable.tsx`, the component the ranking-table check below already
-  reads, so it would check the same figures twice.
+- "Routes to check" (`RoutesPreview.tsx`) lists only routes observed at
+  least 100 times in the window (the Routes table's default floor), which no
+  pattern of this single-day fixture reaches, so it always reads "No routes
+  need attention" regardless of correctness. Not a usable check target.
 - The headline's delta against the window before it (`hasBaseline` in
   `OverviewHeroRow.tsx`) needs data in the same-width window just before the
   period, which this single-day fixture doesn't have, so it always renders

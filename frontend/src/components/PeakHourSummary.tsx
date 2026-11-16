@@ -11,7 +11,7 @@ export function PeakHourSummary({ peak_hour, timeHref }: { peak_hour: OverviewPe
   return (
     <div className="ov-card">
       <p className="ov-card-eyebrow">{t("overview.section_peak_hour")}</p>
-      <p className="ov-pareto-rest">
+      <p className="ov-card-summary">
         {t("overview.peak_hour_callout", {
           range: formatHourRange(peak_hour.peak_hour),
           avg: fixedTenth(peak_hour.peak_avg_min),
