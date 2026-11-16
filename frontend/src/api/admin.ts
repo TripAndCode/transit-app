@@ -837,27 +837,6 @@ export function useRevokeApiKey(ownerUserId: number) {
   });
 }
 
-// ── Invites ────────────────────────────────────────────────────────────────
-
-type InviteCreateBody = { email: string; role: "user" | "admin"; llm_approved: boolean };
-
-type AdminInvite = {
-  invite_id: number;
-  email: string;
-  role: "user" | "admin";
-  llm_approved: boolean;
-  created_at: string;
-  expires_at: string;
-};
-
-/** Mutation: pre-approve a role (+ optional LLM access) for an email that
- * hasn't signed in yet; the OAuth callback honors it on first login. */
-export function useCreateInvite() {
-  return useMutation({
-    mutationFn: (body: InviteCreateBody) => apiPost<AdminInvite>("/api/admin/invites", body),
-  });
-}
-
 // ── Unified audit log ────────────────────────────────────────────────────
 
 export type AdminAuditFilters = {

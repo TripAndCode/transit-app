@@ -232,14 +232,14 @@ describe("OnboardingGate", () => {
     expect(names).toEqual(["Full one", "Full two", "Empty oneNo data collected yet"]);
   });
 
-  it("explains the app, and offers help, about and login to a signed-out guest", () => {
+  it("explains the app, and offers help, about and the admin sign-in to a signed-out guest", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Choose an agency");
     expect(screen.getByText(/Look up bus delays/)).toHaveTextContent("No sign-in needed.");
     expect(screen.getByRole("link", { name: "Help" })).toHaveAttribute("href", "/help");
     expect(screen.getByRole("link", { name: "About this app" })).toHaveAttribute("href", "/welcome");
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "Admin sign-in" })).toHaveAttribute("href", "/login");
   });
 
   it("tells a signed-out guest login is unneeded before the config has loaded", () => {
@@ -247,7 +247,7 @@ describe("OnboardingGate", () => {
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
     expect(screen.getByText(/Look up bus delays/)).toHaveTextContent("No sign-in needed.");
-    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Admin sign-in" })).toBeNull();
   });
 
   it.each([
@@ -257,7 +257,7 @@ describe("OnboardingGate", () => {
     mockVisitor(visitor);
     mockAgencies([agency({ agency_id: 1, agency_name: "A" }), agency({ agency_id: 2, agency_name: "B" })]);
     renderGate();
-    expect(screen.queryByRole("link", { name: "Sign in" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Admin sign-in" })).toBeNull();
     expect(screen.getByRole("link", { name: "Help" })).toBeInTheDocument();
   });
 

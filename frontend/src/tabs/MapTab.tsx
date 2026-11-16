@@ -135,16 +135,17 @@ async function refreshFeed(
   refetchAll: () => Promise<{ failed: boolean; latestCapturedAt: string | null }>,
 ): Promise<string> {
   try {
-    const { inserted } = await apiPost<{ status: string; inserted: number }>(`/api/${agencyId}/delays/refresh`, {}, { signal });
+    const poll = await apiPost<{ status: "updated" | "recent"; inserted: number }>(`/api/${agencyId}/delays/refresh`, {}, { signal });
     const { failed, latestCapturedAt } = await refetchAll();
     if (failed) return t("operations.refresh_failed");
+    if (poll.status === "recent") return t("operations.refresh_recent");
+    const { inserted } = poll;
     return inserted > 0 && latestCapturedAt
       ? t("operations.refresh_updated", { when: relativeTime(latestCapturedAt), count: inserted })
       : t("operations.refresh_unchanged");
   } catch (error) {
     const status = error instanceof ApiError ? error.status : null;
     if (status === 429) return t("operations.refresh_rate_limited");
-    if (status === 401) return t("operations.refresh_sign_in");
     if (status === 409) return t("operations.refresh_busy");
     return t("operations.refresh_failed");
   }
