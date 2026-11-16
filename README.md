@@ -74,7 +74,8 @@ the aggregates reach the newest day.
 **Live** data goes to `updates_live`: the collector's pushes in production,
 `ingest_live` locally (load each agency's timetable first with
 `gtfs_pipeline.py refresh-static`). It serves today's screens. Once a day
-closes, promotion (the cron poke, or an admin ingest run) copies it into
+closes, promotion (the cron poke, an admin ingest run, or the standalone
+poller's daily step) copies it into
 `updates`, and the next analyze aggregates it. That copy holds only the
 polls the collector pushed, so an archive ingest that reads the day's complete
 archive later replaces it (`pipeline/archive_replace.py` defines complete).
@@ -138,7 +139,8 @@ FastAPI + React SPA  <-------------------------------------------------+
 - Oracle is the production collector. It pushes polls to the API, which keeps
   them in `updates_live`, and it uploads daily archives to R2.
 - A daily cron poke promotes each closed JST day into `updates` (history) and
-  rebuilds aggregates. An archive ingest that reads a day's complete archive
+  rebuilds aggregates; in a standalone deployment the poller's daily step does
+  this. An archive ingest that reads a day's complete archive
   later replaces that promoted copy, which holds only the pushed polls.
 - Without collector streaming, `ingest_live` takes one live sample per poke.
 - The API normally reads precomputed `agg_*` tables; narrow time-band queries

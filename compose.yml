@@ -16,7 +16,6 @@ x-standalone-env: &standalone-env
 
 x-standalone-app: &standalone-app
   build: .
-  image: transit-app-standalone
   profiles: [standalone]
   restart: unless-stopped
   # `.env` supplies everything else (keys, SSO, POLL_INTERVAL_SEC); the

@@ -3,9 +3,10 @@
 ``POST /internal/cron/ingest`` is the daily history path as well as a live
 fallback. Per agency it fetches the feed into ``updates_live`` (``ingest_live``),
 promotes every closed JST day from ``updates_live`` into ``updates``
-(:mod:`pipeline.promote`), then runs ``analyze``. Nothing else promotes, so a
-deployment must poke it at least once a day after JST midnight;
-``updates_live``'s TTL drops a day that is never promoted. A poke that lands
+(:mod:`pipeline.promote`), then runs ``analyze``. Apart from an admin run, the
+only other promoter is the standalone poller's daily step (:mod:`pipeline.poller`),
+so a deployment without that poller must poke this at least once a day after
+JST midnight; ``updates_live``'s TTL drops a day that is never promoted. A poke that lands
 in service hours also renews lapsing RT field-coverage verdicts
 (:mod:`pipeline.rt_coverage_reprobe`), so a deployment needs one daytime poke
 as well. Every endpoint is gated by :envvar:`CRON_SECRET` passed via the

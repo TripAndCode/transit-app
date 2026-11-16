@@ -213,8 +213,10 @@ def run_daily_step(archive_root: Path, utc_today: date) -> bool:
 
 def _stage(conn, stage: str, agency_id: int, work: Callable[[], Any]) -> bool:
     """Run one stage of the daily step inside its run row, as the cron sweep
-    records its own. Returns whether it succeeded."""
+    records its own. Returns whether a retry is owed: an agency with no
+    timetable loaded is not, since only an operator loading one heals it."""
     from pipeline import runs as pipeline_runs
+    from pipeline.ingest import StaticTimetableMissing
 
     try:
         with pipeline_runs.record_run(conn, stage, agency_id=agency_id) as run:
@@ -223,6 +225,8 @@ def _stage(conn, stage: str, agency_id: int, work: Callable[[], Any]) -> bool:
                 run.rebuild_headline = result
             else:
                 run.rows = result
+    except StaticTimetableMissing as exc:
+        logger.warning("poller: %s skipped: %s", stage, exc)
     except Exception:
         logger.exception("poller: %s failed for agency %s", stage, agency_id)
         return False

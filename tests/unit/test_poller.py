@@ -339,3 +339,23 @@ def test_a_tarball_written_this_way_is_one_ingest_reads(tmp_path):
     with tarfile.open(tarball, "r:gz") as tf:
         names = {f"{_date_dir(Path(m.name).parent.name)}/{Path(m.name).name}" for m in tf.getmembers() if m.isfile()}
     assert names == {member}
+
+
+@contextmanager
+def _run_row(conn, kind, agency_id=None):
+    yield MagicMock()
+
+
+def test_a_missing_timetable_owes_no_retry_but_a_failure_does():
+    from pipeline.ingest import StaticTimetableMissing
+
+    def no_timetable():
+        raise StaticTimetableMissing(1, "static_join")
+
+    def broken():
+        raise RuntimeError("clickhouse down")
+
+    with patch("pipeline.runs.record_run", _run_row):
+        assert poller._stage(MagicMock(), "ingest", 1, no_timetable)
+        assert not poller._stage(MagicMock(), "ingest", 1, broken)
+        assert poller._stage(MagicMock(), "analyze", 1, lambda: None)
