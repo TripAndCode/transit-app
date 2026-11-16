@@ -225,11 +225,9 @@ Endpoints:
 - `GET /api/admin/users/{uid}/sessions` and
   `DELETE /api/admin/users/{uid}/sessions/{sid_prefix}` — list and revoke
   active sessions, identified by a display-safe hash prefix.
-- `GET /api/admin/api-keys`, `POST /api/admin/api-keys`,
-  `DELETE /api/admin/api-keys/{key_id}` — API keys scoped to one user.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
-and one at a time), `oauth_identities`, `api_keys`. Every mutation records an
+and one at a time), `oauth_identities`. Every mutation records an
 `admin_audit` entry.
 
 Sign-in is for administrators only, and there is no invite. An admin is an
@@ -242,7 +240,7 @@ written.
 `DELETE /api/admin/users/{uid}` is a soft-delete. It anonymizes the row,
 sets `users.deleted_at`, revokes the user's API keys and replaces the owner
 address recorded on them. A deleted user is terminal. A single or bulk PATCH
-that includes one, a second DELETE, or a key issued to one each get a 409.
+that includes one, or a second DELETE, each get a 409.
 The list and drawer label the row Deleted and offer no Resume control.
 
 The drawer's "Usage (last 30 days)" section reads
@@ -251,10 +249,9 @@ template and agency, the requests and errors summed from
 `user_activity_daily`. `UsageCountMiddleware` (`api/middleware/usage.py`)
 counts every finished `/api/` request that matched a route, except the
 sign-in flow, `/api/config`, the who-am-I read (`GET`/`HEAD` `/api/me`) and a
-method the matched route doesn't serve (a 405); a session
-user or an API key's owner lands here, attributed to the key's owner for an
-API-key request (`api/activity.py`, flushed every 30 s). It stores route
-templates and days only — never raw paths, query text, or finer timestamps.
+method the matched route doesn't serve (a 405); a session user lands here
+(`api/activity.py`, flushed every 30 s). It stores route templates and days
+only — never raw paths, query text, or finer timestamps.
 
 ## Ops
 
@@ -380,19 +377,18 @@ Route: `/admin/usage`, backed by `AdminUsagePage`.
 
 Endpoint: `GET /api/admin/usage` (`days` 1–400, default 30; optional
 `agency_id`, 1 to the int4 maximum) — requests per route template per day over the trailing `days`
-JST days ending today, split by whether the caller was signed out, signed in,
-or an API key. The response gives the window (`from`/`to`), the per-route
-totals (`route`, `method`, `signed_out`, `signed_in`, `api_key`, `errors`,
+JST days ending today, split by whether the caller was signed out or signed
+in. The response gives the window (`from`/`to`), the per-route
+totals (`route`, `method`, `signed_out`, `signed_in`, `errors`,
 ordered by total requests descending), and the per-day totals, zero-filled for
 every day in the window. Either source table missing (a deployment behind on
 migrations) degrades to an empty contribution rather than a 500.
 
-Tables: `signed_out` reads `anonymous_activity_daily`; `signed_in` and
-`api_key` read `user_activity_daily`, summed over every user. This is the
+Tables: `signed_out` reads `anonymous_activity_daily`; `signed_in` reads
+`user_activity_daily`, summed over every user. This is the
 reader signal from `docs/features/audience.md`: readers never sign in, so
 `anonymous_activity_daily` is the only server-side count of how much the
 notebook itself is used, and it holds no caller identity at all, only route
 templates and counts. A signed-out caller can put any agency id in the path,
 so a signed-out request that failed is counted under no agency; the `agency_id`
-filter therefore leaves out signed-out errors. A request made with an API key
-that has no owner is counted in neither table.
+filter therefore leaves out signed-out errors.
