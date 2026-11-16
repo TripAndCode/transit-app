@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 from api import agency_diagnostics as ad
 from api.routers.admin_agencies import FeedQualityMonth
 from api.security import require_admin
+from pipeline import poll_outages
 from tests.fixtures.routes import api_routes
 
 
@@ -102,6 +103,8 @@ def test_a_month_failing_field_coverage_names_the_fields_it_fails_on_in_the_resp
         "validator_rules": None,
         "validator_missing": None,
         "validator_ingested_at": None,
+        # Built before the poll figures existed too.
+        **dict.fromkeys(poll_outages.COLUMNS),
     }
     (built,) = ad.build_feed_quality([_month(date(2026, 10, 1), arr_delay_pct=Decimal("100.00"), **unvalidated)])
     october = FeedQualityMonth(**built).model_dump()

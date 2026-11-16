@@ -201,8 +201,7 @@ def route_plan_ctes(agency_ids: str) -> str:
 # A timetable given as rows (rows_plan), each relation a CTE unnested from
 # array parameters into its table's columns. A trip's stop times are expanded
 # from its count, one row each, as static_stop_times holds them.
-_ROWS_CTES = (
-    """
+_ROWS_TRIP_CTES = """
     rows_trips AS (
         SELECT %(agency_id)s AS agency_id, a.trip_id, a.service_id
         FROM unnest(%(trip_ids)s::text[], %(trip_services)s::text[]) AS a(trip_id, service_id)
@@ -210,7 +209,12 @@ _ROWS_CTES = (
     rows_stop_times AS (
         SELECT %(agency_id)s AS agency_id, a.trip_id
         FROM unnest(%(trip_ids)s::text[], %(trip_stops)s::int[]) AS a(trip_id, stops), generate_series(1, a.stops)
-    ),
+    ),"""
+
+#: A calendar given as rows, ``rows_calendar`` and ``rows_calendar_dates`` in
+#: their tables' columns, from :func:`calendar_params`; each CTE ends in a comma.
+ROWS_CALENDAR_CTES = (
+    """
     rows_calendar AS (
         SELECT %(agency_id)s AS agency_id, a.*
         FROM unnest(%(calendar_services)s::text[], """
@@ -224,6 +228,7 @@ _ROWS_CTES = (
             AS a(service_id, date, exception_type)
     ),"""
 )
+_ROWS_CTES = _ROWS_TRIP_CTES + ROWS_CALENDAR_CTES
 _ROWS = PlanSource("rows_trips", "rows_stop_times", "rows_calendar", "rows_calendar_dates")
 
 _ROWS_PLAN_SQL = (
@@ -237,6 +242,24 @@ _ROWS_PLAN_SQL = (
     JOIN timetable_stop_plan sp ON sp.agency_id = p.agency_id AND sp.day = p.day
     """
 )
+
+
+def calendar_params(calendar: Iterable[tuple], calendar_dates: Iterable[tuple[str, str, int | None]]) -> dict:
+    """:data:`ROWS_CALENDAR_CTES`' parameters: *calendar* is
+    ``static_calendar``'s columns after agency_id up to end_date, and
+    *calendar_dates* ``static_calendar_dates``' after agency_id."""
+    calendar_rows, date_rows = list(calendar), list(calendar_dates)
+    params: dict = {
+        "calendar_services": [row[0] for row in calendar_rows],
+        "calendar_starts": [row[8] for row in calendar_rows],
+        "calendar_ends": [row[9] for row in calendar_rows],
+        "dates_services": [row[0] for row in date_rows],
+        "dates": [row[1] for row in date_rows],
+        "dates_exceptions": [row[2] for row in date_rows],
+    }
+    for i, day in enumerate(WEEKDAY_COLUMNS, start=1):
+        params[f"calendar_{day}"] = [row[i] for row in calendar_rows]
+    return params
 
 
 class DayPlan(NamedTuple):
@@ -264,7 +287,7 @@ def rows_plan(
     no stop time is counted only if given, with 0. Only reads, so it runs in a
     read-only transaction. *conn* is a psycopg2 connection.
     """
-    trip_rows, calendar_rows, date_rows = list(trips), list(calendar), list(calendar_dates)
+    trip_rows = list(trips)
     params: dict = {
         "agency_id": agency_id,
         "from_date": first,
@@ -272,15 +295,8 @@ def rows_plan(
         "trip_ids": [row[0] for row in trip_rows],
         "trip_services": [row[1] for row in trip_rows],
         "trip_stops": [row[2] for row in trip_rows],
-        "calendar_services": [row[0] for row in calendar_rows],
-        "calendar_starts": [row[8] for row in calendar_rows],
-        "calendar_ends": [row[9] for row in calendar_rows],
-        "dates_services": [row[0] for row in date_rows],
-        "dates": [row[1] for row in date_rows],
-        "dates_exceptions": [row[2] for row in date_rows],
+        **calendar_params(calendar, calendar_dates),
     }
-    for i, day in enumerate(WEEKDAY_COLUMNS, start=1):
-        params[f"calendar_{day}"] = [row[i] for row in calendar_rows]
     with conn.cursor() as cur:
         cur.execute(_ROWS_PLAN_SQL, params)
         return {day: DayPlan(planned, events) for day, planned, events in cur.fetchall()}

@@ -19,6 +19,11 @@ function secondsText(v: number): string {
   return formatNumber(v, { maximumFractionDigits: 1 });
 }
 
+/** Minutes to a tenth, as stored. */
+function minutesText(t: TFunction, v: number): string {
+  return t("admin.agency_diag.quality_minutes", { value: formatNumber(v, { maximumFractionDigits: 1 }) });
+}
+
 const FIELD_PCT = {
   stop_id: "stop_id_pct",
   arr_delay: "arr_delay_pct",
@@ -296,6 +301,41 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
         <Row label={t("admin.agency_diag.quality_validator")}>
           <ValidatorFigure m={latest} />
         </Row>
+        <Row label={t("admin.agency_diag.quality_polls")}>
+          <Figure
+            value={latest.poll_success_pct == null ? null : pctText(latest.poll_success_pct)}
+            // A month built before the poll figures were stored has neither
+            // the figures nor a reason.
+            missing={latest.polls_missing ?? "not_recorded"}
+          >
+            {t("admin.agency_diag.quality_polls_detail", {
+              polls: latest.polls_in_service ?? 0,
+              expected: latest.polls_expected ?? 0,
+              interval: secondsText(latest.poll_interval_sec ?? 0),
+              days: latest.poll_days ?? 0,
+            })}
+          </Figure>
+        </Row>
+        <Row label={t("admin.agency_diag.quality_feed_outage")}>
+          <Figure
+            value={latest.feed_outage_min == null ? null : minutesText(t, latest.feed_outage_min)}
+            missing={latest.outage_missing ?? "not_recorded"}
+          >
+            {t("admin.agency_diag.quality_outage_longest", {
+              value: secondsText(latest.feed_outage_longest_min ?? 0),
+            })}
+          </Figure>
+        </Row>
+        <Row label={t("admin.agency_diag.quality_collector_outage")}>
+          <Figure
+            value={latest.collector_outage_min == null ? null : minutesText(t, latest.collector_outage_min)}
+            missing={latest.outage_missing ?? "not_recorded"}
+          >
+            {t("admin.agency_diag.quality_collector_note", {
+              value: secondsText(latest.collector_outage_longest_min ?? 0),
+            })}
+          </Figure>
+        </Row>
       </div>
       <table
         aria-label={t("admin.agency_diag.quality_trend")}
@@ -308,6 +348,11 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
             <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_stops")}</th>
             <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_age")}</th>
             <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_clamp")}</th>
+            <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_polls")}</th>
+            <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_feed_outage")}</th>
+            <th style={{ textAlign: "right", fontWeight: 500 }}>
+              {t("admin.agency_diag.quality_col_collector_outage")}
+            </th>
             <th style={{ textAlign: "right", fontWeight: 500 }}>{t("admin.agency_diag.quality_col_grade")}</th>
           </tr>
         </thead>
@@ -332,6 +377,18 @@ export function FeedQualityTrend({ months }: { months: AgencyFeedQualityMonth[] 
                 missing={m.message_age_missing}
               />
               <Cell value={m.clamp_pct == null ? null : clampText(m.clamp_pct)} missing={m.clamp_missing} />
+              <Cell
+                value={m.poll_success_pct == null ? null : pctText(m.poll_success_pct)}
+                missing={m.polls_missing ?? "not_recorded"}
+              />
+              <Cell
+                value={m.feed_outage_min == null ? null : minutesText(t, m.feed_outage_min)}
+                missing={m.outage_missing ?? "not_recorded"}
+              />
+              <Cell
+                value={m.collector_outage_min == null ? null : minutesText(t, m.collector_outage_min)}
+                missing={m.outage_missing ?? "not_recorded"}
+              />
               <td
                 title={gradeReasons(t, m).join(" · ")}
                 style={{ textAlign: "right", padding: "3px 0 3px 8px", ...(m.grade == null ? MUTED : {}) }}

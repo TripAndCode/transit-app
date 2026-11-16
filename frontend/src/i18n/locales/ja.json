@@ -2036,7 +2036,12 @@
         "no_header": "フィードに時刻がない",
         "feed_cannot_report": "この形式のフィードでは保存されない",
         "not_recorded": "記録なし",
-        "not_validated": "未検証"
+        "not_validated": "未検証",
+        "undated_polls": "取得時刻の分からない取得がある",
+        "no_service_hours": "運行時間の分かる時刻表がない",
+        "live_sampled": "ライブ経路の間引いた取得しかない",
+        "no_poll_interval": "運行時間内の取得が少なく間隔が分からない",
+        "no_peer": "他の事業者の取得がなく、どちらの停止か分からない"
       },
       "quality_validator": "RT検証",
       "quality_validator_value": "{{days, number}} 日中 {{ok, number}} 日を検証",
@@ -2057,7 +2062,17 @@
         "arr_delay": "到着",
         "schedule_relationship_trip": "便の状態",
         "schedule_relationship_stop": "停留所の状態"
-      }
+      },
+      "quality_polls": "取得の成功率",
+      "quality_polls_detail": "運行時間内に見込む {{expected, number}} 回のうち {{polls, number}} 回 · {{interval}} 秒ごと · {{days, number}} 日 · 評価には含めない",
+      "quality_feed_outage": "フィードの停止",
+      "quality_collector_outage": "当方の収集停止",
+      "quality_minutes": "{{value}} 分",
+      "quality_outage_longest": "最長 {{value}} 分",
+      "quality_collector_note": "最長 {{value}} 分 · どの事業者も取得できなかった時間で、事業者ではなく当方の停止",
+      "quality_col_polls": "取得",
+      "quality_col_feed_outage": "フィード停止",
+      "quality_col_collector_outage": "当方"
     },
     "architecture": {
       "title": "アーキテクチャ",

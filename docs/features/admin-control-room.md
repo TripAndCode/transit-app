@@ -162,6 +162,11 @@ with no validated day reads not validated, never no findings. The counts are
 recorded, never graded. They come from `rt_validation_daily`, which the ML
 store ingest fills (`docs/features/ml-forecast.md`).
 
+After them come poll success, the feed's outage minutes with the longest, and
+the collector's outage minutes, labelled as ours so an operator is not read as
+answerable for our downtime; the six-month trend carries all three. None is
+graded. `docs/methodology.md` defines them (`pipeline/poll_outages.py`).
+
 ### RT field-coverage verdicts
 
 The drawer's RT field diagnostics show the agency's verdicts in

@@ -48,6 +48,19 @@ function month(m: string, over: Partial<AgencyFeedQualityMonth> = {}): AgencyFee
     },
     validator_missing: null,
     validator_ingested_at: "2026-10-31T00:40:00+00:00",
+    poll_days: 30,
+    in_service_min: 28800,
+    poll_interval_sec: 30,
+    polls_in_service: 56448,
+    polls_expected: 57600,
+    poll_success_pct: 98,
+    feed_outage_min: 42.5,
+    feed_outage_longest_min: 20,
+    collector_outage_min: 9.5,
+    collector_outage_longest_min: 9.5,
+    polls_missing: null,
+    outage_missing: null,
+    peer_archive_rows: 120000,
     grade: "C",
     grade_failing: ["rt_completeness", "stale_polls"],
     grade_missing: [],
@@ -277,6 +290,56 @@ describe("FeedQualityTrend", () => {
     expect(validatorFigure()).toBe("— not recorded");
   });
 
+  it("shows poll success and outage minutes beside the graded figures, ours apart from the feed's", async () => {
+    await i18n.changeLanguage("en");
+    renderTrend([month("2026-10"), month("2026-09", { poll_success_pct: 100, feed_outage_min: 0 })]);
+    expect(screen.getByText("Poll success").nextElementSibling?.textContent).toBe(
+      "98.0% 56,448 of 57,600 polls expected in service · every 30 s · 30 days · not graded",
+    );
+    expect(screen.getByText("Feed outages").nextElementSibling?.textContent).toBe("42.5 min longest 20 min");
+    expect(screen.getByText("Our collector's outages").nextElementSibling?.textContent).toBe(
+      "9.5 min longest 9.5 min · no agency was polled then, so this is our downtime, not the operator's",
+    );
+    const rows = within(screen.getByRole("table")).getAllByRole("row") as HTMLTableRowElement[];
+    expect([5, 6, 7].map((i) => rows[0].cells[i].textContent)).toEqual(["Polls", "Feed outage", "Ours"]);
+    expect([5, 6, 7].map((i) => rows[1].cells[i].textContent)).toEqual(["98.0%", "42.5 min", "9.5 min"]);
+    expect([5, 6].map((i) => rows[2].cells[i].textContent)).toEqual(["100.0%", "0 min"]);
+  });
+
+  it("reads an outage whose cause is unknown as a dash with its reason, and an older month as not recorded", async () => {
+    await i18n.changeLanguage("en");
+    const unsplit = {
+      feed_outage_min: null,
+      feed_outage_longest_min: null,
+      collector_outage_min: null,
+      collector_outage_longest_min: null,
+      outage_missing: "no_peer" as const,
+    };
+    const before = {
+      ...unsplit,
+      poll_days: null,
+      in_service_min: null,
+      poll_interval_sec: null,
+      polls_in_service: null,
+      polls_expected: null,
+      poll_success_pct: null,
+      polls_missing: null,
+      outage_missing: null,
+      peer_archive_rows: null,
+    };
+    renderTrend([month("2026-10", unsplit), month("2026-09", before)]);
+    const why = "no other operator was polled, so whose outage it was is unknown";
+    expect(screen.getByText("Feed outages").nextElementSibling?.textContent).toBe(`— ${why}`);
+    expect(screen.getByText("Poll success").nextElementSibling?.textContent).toMatch(/^98\.0%/);
+    const rows = within(screen.getByRole("table")).getAllByRole("row") as HTMLTableRowElement[];
+    expect(rows[1].cells[6].getAttribute("title")).toBe(why);
+    expect([5, 6, 7].map((i) => rows[2].cells[i].getAttribute("title"))).toEqual([
+      "not recorded",
+      "not recorded",
+      "not recorded",
+    ]);
+  });
+
   it("speaks Japanese", async () => {
     await i18n.changeLanguage("ja");
     renderTrend([month("2026-10", { through_date: "2026-10-20" })]);
@@ -286,6 +349,8 @@ describe("FeedQualityTrend", () => {
     expect(screen.getByRole("table", { name: "直近6か月" })).toBeInTheDocument();
     expect(screen.getByText("基準に届かない項目：便の充足率 69.3%、65秒を超えた取得 12.50%")).toBeInTheDocument();
     expect(screen.getByText("30 日中 28 日を検証")).toBeInTheDocument();
+    expect(screen.getByText("当方の収集停止")).toBeInTheDocument();
+    expect(screen.getByText("フィードの停止").nextElementSibling?.textContent).toBe("42.5 分 最長 20 分");
     expect(screen.getAllByRole("listitem")[0].textContent).toBe(
       "E022 Times are not increasing、28 日の取得 1,624 回で 3,360 件",
     );

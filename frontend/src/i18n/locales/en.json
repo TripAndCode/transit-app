@@ -2036,7 +2036,12 @@
         "no_header": "polls carry no feed timestamp",
         "feed_cannot_report": "not stored for this feed type",
         "not_recorded": "not recorded",
-        "not_validated": "not validated"
+        "not_validated": "not validated",
+        "undated_polls": "some polls' capture times are unknown",
+        "no_service_hours": "no timetable in force gives the service hours",
+        "live_sampled": "only the live path's sampled polls are stored",
+        "no_poll_interval": "too few polls in service to know the interval",
+        "no_peer": "no other operator was polled, so whose outage it was is unknown"
       },
       "quality_validator": "RT validator",
       "quality_validator_value": "{{ok, number}} of {{days, number}} days validated",
@@ -2057,7 +2062,17 @@
         "arr_delay": "arrival",
         "schedule_relationship_trip": "trip status",
         "schedule_relationship_stop": "stop status"
-      }
+      },
+      "quality_polls": "Poll success",
+      "quality_polls_detail": "{{polls, number}} of {{expected, number}} polls expected in service · every {{interval}} s · {{days, number}} days · not graded",
+      "quality_feed_outage": "Feed outages",
+      "quality_collector_outage": "Our collector's outages",
+      "quality_minutes": "{{value}} min",
+      "quality_outage_longest": "longest {{value}} min",
+      "quality_collector_note": "longest {{value}} min · no agency was polled then, so this is our downtime, not the operator's",
+      "quality_col_polls": "Polls",
+      "quality_col_feed_outage": "Feed outage",
+      "quality_col_collector_outage": "Ours"
     },
     "architecture": {
       "title": "Architecture",

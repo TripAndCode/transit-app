@@ -20,7 +20,7 @@ Complete means all of these, judged by that run:
   pushes, so a missing one is a gap in the archive. A day with no push has
   nothing to check the archive against: the live path's own samples
   (`ingest_live`) are polls the collector may have missed, so such a day keeps
-  them. The stored side is read _MEMBER_REACH either side of the day, the
+  them. The stored side is read MEMBER_REACH either side of the day, the
   furthest archive_captured_at stamps a member from its name.
 
 A poll whose member is stamped on a neighbouring day that keeps its live copy
@@ -68,7 +68,7 @@ _DAY = timedelta(days=1)
 _STEM_DAY = re.compile(r"(\d{8})")
 # archive_captured_at keeps a header on its name's JST day or the next, and
 # reads a name with no usable header as JST, nine hours before its UTC time.
-_MEMBER_REACH = timedelta(days=2)
+MEMBER_REACH = timedelta(days=2)
 # How far before a folder's span an interrupted replacement is looked for.
 _RESIDUE_DAYS = 3
 
@@ -198,7 +198,7 @@ def unarchived_pushes(ch, agency_id: int, day: date, read: Collection[str]) -> i
     unread = sorted(pushed - set(read))
     if not unread:
         return 0
-    params = {"agency_id": agency_id, "lo": lo - _MEMBER_REACH, "hi": hi + _MEMBER_REACH, "names": unread}
+    params = {"agency_id": agency_id, "lo": lo - MEMBER_REACH, "hi": hi + MEMBER_REACH, "names": unread}
     stored = {row[0] for row in ch.query(_STORED_MEMBERS_SQL, parameters=params).result_rows}
     return len(set(unread) - stored)
 

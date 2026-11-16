@@ -113,8 +113,8 @@ class ValidatorRule(BaseModel):
 class FeedQualityMonth(BaseModel):
     """One month of the feed-quality scorecard (pipeline.feed_quality). Each
     figure is ``None`` exactly when its ``*_missing`` reason is set, and the
-    validator figures are ``None`` throughout for a month built before they
-    existed. The grade
+    validator and poll figures are ``None`` throughout, reasons included, for
+    a month built before they existed. The poll figures are not graded. The grade
     (pipeline.feed_quality_grade) is admin-only: no other response carries it."""
 
     month: str
@@ -155,6 +155,21 @@ class FeedQualityMonth(BaseModel):
     validator_rules: dict[str, ValidatorRule] | None
     validator_missing: str | None
     validator_ingested_at: str | None
+    poll_days: int | None
+    in_service_min: float | None
+    poll_interval_sec: float | None
+    polls_in_service: int | None
+    polls_expected: int | None
+    poll_success_pct: float | None
+    #: Outage minutes inside service the feed is answerable for, apart from
+    #: ``collector_outage_min``, the shared collector's.
+    feed_outage_min: float | None
+    feed_outage_longest_min: float | None
+    collector_outage_min: float | None
+    collector_outage_longest_min: float | None
+    polls_missing: str | None
+    outage_missing: str | None
+    peer_archive_rows: int | None
     grade: Literal["A", "B", "C", "D", "F"] | None
     grade_failing: list[Criterion]
     grade_missing: list[FeedQualityGradeMissing]
