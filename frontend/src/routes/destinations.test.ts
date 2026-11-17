@@ -10,6 +10,7 @@ import {
   agencySwitchHref,
   destHref,
   compareMode,
+  whyMode,
   mergeSearch,
   pickReport,
   reportDestination,
@@ -146,6 +147,13 @@ describe("the view a screen opens", () => {
     ["sort=late5_count&order=best", "late5_count", "best"],
   ] as const)("opens the Routes table for ?%s sorted by %s, %s first", (search, sort, order) => {
     expect(routeTableView(search)).toEqual({ sort, order });
+  });
+
+  it("shows the slow segments on Why only for by=segments", () => {
+    expect(whyMode("segments")).toBe("segments");
+    expect(whyMode("dwell_run")).toBe("dwell_run");
+    expect(whyMode(null)).toBe("dwell_run");
+    expect(whyMode("agencies")).toBe("dwell_run");
   });
 
   it("compares agencies only for by=agencies", () => {

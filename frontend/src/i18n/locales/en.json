@@ -2655,5 +2655,45 @@
     "note": "Each day type is compared on one typical day from each timetable: an ordinary day of that type near the revision. A trip's last stop is not a departure. Stop names are the current timetable's; a stop it no longer has shows its ID. See the methodology for the full definitions.",
     "no_revision_title": "This revision is no longer listed",
     "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list."
+  },
+  "why": {
+    "mode_segments": "Slow segments"
+  },
+  "slow_zones": {
+    "map_label": "Segments by running time over the timetable",
+    "day_type_label": "Days",
+    "day_type": {
+      "weekday": "Weekdays",
+      "weekend_holiday": "Weekends and holidays"
+    },
+    "band_label": "Departure time band",
+    "estimate_note": "These are estimates from the delays the operator's feed predicted, not observed passages. Until the predictions are validated, segments are not ranked as bus-priority candidates.",
+    "map_unavailable": "The map can't be shown in this browser. The list below still applies.",
+    "summary": "{{segments}} segments, {{zones}} slow zones, weeks of {{from}} to {{to}}.",
+    "list_title": "Segments that stayed slow",
+    "rule": "A week is slow when the median running time is {{excess}} s or more over the timetable, on a segment the timetable gives at least {{scheduled}} s, with {{samples}} or more runs that week. Listed when the newest {{weeks}} or more weeks were all slow, longest-standing first.",
+    "none": "No segment has stayed slow in these weeks.",
+    "distance_note": "Distance and speed use the straight line between the two stops, so the speed is a lower bound on a winding road. The slow-zone rule does not use them.",
+    "col": {
+      "segment": "Segment",
+      "routes": "Routes",
+      "since": "Slow since",
+      "excess": "Over timetable (s)",
+      "speed": "Speed (km/h)",
+      "trips": "Runs per day",
+      "minutes_lost": "Minutes lost per day",
+      "weeks": "Weekly excess"
+    },
+    "since": "Week of {{date}} ({{weeks}} weeks)",
+    "since_at_least": "Week of {{date}} or earlier ({{weeks}}+ weeks)",
+    "detail": "{{pair}} ({{routes}}), newest week: median {{p50}} s, 85th percentile {{p85}} s, timetable {{scheduled}} s, over by {{excess}} s; {{speed}} km/h over {{distance}} m in a straight line; {{samples}} runs.",
+    "detail_unobserved": "{{pair}}: no run observed in the newest week.",
+    "legend": {
+      "few": "Too few runs",
+      "within": "Within the timetable",
+      "range": "{{from}}–{{to}} s over",
+      "over": "Over {{sec}} s",
+      "slow_zone": "Slow for weeks"
+    }
   }
 }

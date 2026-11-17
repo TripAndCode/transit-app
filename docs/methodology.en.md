@@ -220,6 +220,19 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 
 When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them until the operator's predictions are validated.
 
+**Slow segments** (**Why**, "Slow segments"): the running time per segment above, taken per stop pair of the agency over every route through it. It is read per time band (of the scheduled departure from the first stop) and per day type (weekdays, or weekends and holidays, by the calendar).
+
+- The period is the 8 complete weeks (Monday to Sunday) up to yesterday (Japan time). A week not yet over is not read.
+- Each week gives the median of every running time observed on its dates of the day type, and the mean scheduled running time of the same trips. When the timetable is revised within a week, only the days of the timetable in force on the last day read that week are used.
+- Over the timetable: the week's median running time − the scheduled running time (the padding above with its sign reversed).
+- **Slow week**: a week with 21 or more runs, on a segment the timetable gives at least 60 seconds, that is 60 seconds or more over the timetable. Timetables are often written to the minute, which alone can put nearly a minute on one segment and take it off the next, hence the one-minute floor. A segment the timetable gives under a minute is mostly rounding, so it is not judged.
+- **Segment that stayed slow**: one whose newest 3 or more weeks in a row were slow weeks. A week with no observation or too few runs ends the streak, since it cannot show the segment stayed slow. When all 8 weeks were slow, it may have started earlier.
+- Runs per day: the week's observed runs ÷ the days with an observation. Trips the feed did not report are not counted, so it can fall short of the timetable's trips.
+- Minutes lost per day: the excess (0 when negative) × runs per day ÷ 60.
+- Distance and speed: the distance is the straight line between the two stops of the timetable loaded now. It is shorter than the road, so the speed (distance ÷ median running time) reads low on a winding road. A road distance from the timetable's shapes would need one shape picked per stop pair, and a loop route leaves the stops' places on it ambiguous, so the straight line is used. The slow-segment rule does not read the distance.
+
+The list is ordered by how many weeks a segment has stayed slow. It is not ranked by minutes lost, and no bus-priority (bus lane, transit signal priority) candidates are chosen from it, until the operator's predictions are validated. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)).
+
 ### Comparing timetable revisions
 
 Each timetable revision is compared stop by stop, the timetable before it against the one after (**Reports**, “Timetable revisions”). It reads the timetables alone, never the observations.

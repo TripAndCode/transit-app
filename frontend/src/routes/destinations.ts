@@ -123,6 +123,19 @@ export function reportsView(doc: string | null, report: string | null): ReportsV
   return doc === "saved" ? "saved" : "summary";
 }
 
+/** Why's two views, picked by `by`: dwell against running time, and the
+ *  segments that stay slower than the timetable. */
+export const WHY_MODES = [
+  { mode: "dwell_run", labelKey: "reports.type.dwell_run" },
+  { mode: "segments", labelKey: "why.mode_segments" },
+] as const;
+export type WhyMode = (typeof WHY_MODES)[number]["mode"];
+
+/** `by=segments` is the slow segments map; every other `by` is dwell and run. */
+export function whyMode(by: string | null): WhyMode {
+  return by === "segments" ? "segments" : "dwell_run";
+}
+
 /** Where each report type lives. Reports' own documents are picked by
  *  `doc`, the Routes table's lists by `sort` (and `order`), and Time opens
  *  its types by `report`. Why and Compare each show their one report, so a

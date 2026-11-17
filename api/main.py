@@ -58,6 +58,7 @@ from api.routers.overview import router as overview_router
 from api.routers.replay import router as replay_router
 from api.routers.reports import router as reports_router
 from api.routers.scope_summary import router as scope_summary_router
+from api.routers.segments import router as segments_router
 from api.routers.snapshots import admin_router as admin_snapshots_router
 from api.routers.snapshots import router as snapshots_router
 from api.routers.static import router as static_router
@@ -389,6 +390,7 @@ app.include_router(scope_summary_router)
 app.include_router(snapshots_router)
 app.include_router(static_router)
 app.include_router(timetable_revisions_router)
+app.include_router(segments_router)
 app.include_router(internal_router)
 app.include_router(collector_router)
 
