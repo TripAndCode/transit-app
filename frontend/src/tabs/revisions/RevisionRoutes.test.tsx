@@ -1,0 +1,138 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { screen, within } from "@testing-library/react";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { renderWithProviders } from "../../test/renderWithProviders";
+import type { DefinitionMeta, RevisionRouteRow, RevisionTally, TimetableRevisionRoutes } from "../../api/types";
+import { RevisionRoutes } from "./RevisionRoutes";
+
+const DEFINITION: DefinitionMeta = {
+  preset: "standard_m1_p5",
+  early_tolerance_sec: 60,
+  late_tolerance_sec: 300,
+  early_departure_sec: null,
+  exclusion_threshold_sec: 7200,
+  measurement_point: "all_stops_all_observations",
+  dedup_rule: "latest_observation_per_stop_event",
+  method_version: "2026.11.0",
+  source: "aggregates",
+  built_at: null,
+  value_basis: "feed_prediction",
+  timetable_versions: null,
+  source_mix: null,
+};
+
+const tally = (on_time_pct: number | null, mean_delay_sec: number | null, observations = 150): RevisionTally => ({
+  observations,
+  on_time_pct,
+  mean_delay_sec,
+  uncertain: false,
+});
+
+function route(over: Partial<RevisionRouteRow>): RevisionRouteRow {
+  return {
+    route_code: "R1",
+    route_class: "cut",
+    trips_before: 6,
+    trips_after: 5,
+    first_before: 7 * 3600,
+    first_after: 7 * 3600,
+    last_before: 12 * 3600,
+    last_after: 11 * 3600,
+    main_stop_id: "S1",
+    main_stop_name: "Station",
+    main_departures_before: 6,
+    main_departures_after: 5,
+    longest_gap_before: 3600,
+    longest_gap_after: 7200,
+    observed_before: tally(0, 400),
+    observed_after: tally(100, 30),
+    ...over,
+  };
+}
+
+const REVISION = {
+  first_day: "2026-04-01",
+  before: { version: "v1", content: "aaaa1111", first_day: "2026-01-01", last_day: "2026-03-31" },
+  after: { version: "v2", content: "bbbb2222", first_day: "2026-04-01", last_day: "2026-09-30" },
+};
+
+const OBSERVED: TimetableRevisionRoutes = {
+  available: true,
+  reason: null,
+  revision: REVISION,
+  day_type: "weekday",
+  day_type_known: true,
+  full_through: "2026-04-28",
+  window: { weeks: 4, complete: true, before_first: "2026-03-04", before_last: "2026-03-31", after_first: "2026-04-01", after_last: "2026-04-28" },
+  routes: [route({}), route({ route_code: "R2", route_class: "unchanged", observed_before: tally(null, null, 40), observed_after: tally(90, 45) })],
+  classes: [
+    { route_class: "cut", routes: 1, before: tally(0, 400), after: tally(100, 30) },
+    { route_class: "added", routes: 0, before: tally(null, null, 0), after: tally(null, null, 0) },
+    { route_class: "unchanged", routes: 1, before: tally(80, 60), after: tally(90, 45) },
+  ],
+  definition: DEFINITION,
+};
+
+function render(body: TimetableRevisionRoutes) {
+  const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+  const fetchMock = vi.fn((url: string) => {
+    if (url.includes("/timetable-revisions/routes")) return Promise.resolve(json(body));
+    if (url.endsWith("/routes")) return Promise.resolve(json({ rows: [] }));
+    return Promise.resolve(json([]));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const router = createMemoryRouter(
+    [{ path: "agencies/:agencyId/reports", element: <RevisionRoutes agencyId={9} on="2026-04-01" dayType="weekday" /> }],
+    { initialEntries: ["/agencies/9/reports?doc=revisions"] },
+  );
+  renderWithProviders(<RouterProvider router={router} />);
+  return fetchMock;
+}
+
+describe("RevisionRoutes", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("compares each route's timetable and how it ran over the same weeks on each side", async () => {
+    const fetchMock = render(OBSERVED);
+    expect(await screen.findByText(/four weeks on each side/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/timetable-revisions/routes?on=2026-04-01&day_type=weekday"))).toBe(true);
+    const r1 = screen.getAllByText("Fewer trips").map((cell) => cell.closest("tr")!).find((row) => row.textContent?.includes("Station"))!;
+    expect(r1).toHaveTextContent("6 → 5");
+    expect(r1).toHaveTextContent("12:00 → 11:00");
+    expect(r1).toHaveTextContent("60 min → 120 min");
+    expect(r1).toHaveTextContent("0.0% → 100.0%");
+    const r2 = screen.getAllByText("Same trips").map((cell) => cell.closest("tr")!).find((row) => row.textContent?.includes("Station"))!;
+    expect(r2).toHaveTextContent("— → 90.0%");
+    const classes = screen.getByRole("columnheader", { name: "Routes" }).closest("table")!;
+    expect(within(classes).getAllByRole("row")).toHaveLength(4);
+    expect(screen.getByText(/real-time feed predicted/)).toBeInTheDocument();
+  });
+
+  it("says when the observed side appears, before a whole week after the revision is aggregated", async () => {
+    render({ ...OBSERVED, window: null, classes: [], definition: null, routes: [route({ observed_before: null, observed_after: null })] });
+    expect(await screen.findByText(/once a whole week after it is aggregated/)).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "On-time rate" })).not.toBeInTheDocument();
+    expect(screen.getByText("Fewer trips")).toBeInTheDocument();
+  });
+
+  it("labels a window short of four weeks with how many it holds", async () => {
+    render({ ...OBSERVED, window: { ...OBSERVED.window!, weeks: 2, complete: false } });
+    expect(await screen.findByText(/over 2 of the four weeks/)).toBeInTheDocument();
+  });
+
+  it("says a day type with no typical day on one side is not compared", async () => {
+    render({ ...OBSERVED, day_type_known: false, routes: [] });
+    expect(await screen.findByText(/has no day of that type in force/)).toBeInTheDocument();
+  });
+
+  it("says no route runs on a day type neither timetable serves", async () => {
+    render({ ...OBSERVED, routes: [] });
+    expect(await screen.findByText("No route runs on this day type under either timetable.")).toBeInTheDocument();
+  });
+
+  it("shows nothing of its own when the revision cannot be compared", async () => {
+    render({ ...OBSERVED, available: false, reason: "no_calendar", routes: [] });
+    expect(await screen.findByRole("heading", { name: "Routes" })).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+});

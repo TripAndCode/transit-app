@@ -28,8 +28,11 @@ from pipeline.histogram import bucketize
 
 # The route_code a static route's id maps to. Aomori's ids carry the code in a
 # parenthesised tail ('国道・古川線(1021)'); every other feed's id is its code,
-# which the replace leaves as it is.
-ROUTE_CODE_SQL = "regexp_replace({route_id}, '.*\\((\\d+)\\)$', '\\1')"
+# which the replace leaves as it is. One pattern for Postgres and ClickHouse
+# (pipeline.reports.revision_effects binds it there).
+ROUTE_CODE_PATTERN = r".*\((\d+)\)$"
+ROUTE_CODE_REPLACEMENT = r"\1"
+ROUTE_CODE_SQL = f"regexp_replace({{route_id}}, '{ROUTE_CODE_PATTERN}', '{ROUTE_CODE_REPLACEMENT}')"
 
 # How recently, before the agency's last observed day in the window, a route
 # must have been seen to count as still running.

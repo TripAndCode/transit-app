@@ -226,6 +226,19 @@ Each timetable revision is compared stop by stop, the timetable before it agains
 - **Stops left with none**: stops with departures before and none after. On Saturday or Sunday & holiday, these are the stops that lost their weekend service.
 - Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under the old ID and gaining them under the new one. Stop names are the loaded timetable's, so a stop it no longer has shows its ID.
 
+### Routes before and after a revision
+
+For each timetable revision, each route's timetable change is set beside how its trips ran before and after (**Reports**, “Timetable revisions”, **Routes**). Day types and typical days are those of [Comparing timetable revisions](#comparing-timetable-revisions).
+
+- **Route**: the timetable's `route_id` mapped to the route code the aggregates use (for Aomori City Bus's “…(1021)” form, the number in the brackets).
+- **Trips and last trip**: the route's trips running on the typical day, and the start of the latest of them. A trip starts at its first stop with a time.
+- **Longest gap at the main stop**: the longest time between two consecutive departures at the stop the route departs from most on the typical day before the revision (the lower stop ID on a tie; for a route with no departure before, the stop is chosen on the after side). Both sides are measured at that one stop. A side with fewer than two departures there shows none. This is not the median headway of the [headway metrics](#main-metrics).
+- **Change**: decided by a week of trips over the day types compared, a weekday counting five times and Saturday and Sunday & holiday once each. A route with no trips before is “New route”, one with none after “No trips left”; otherwise fewer trips is “Fewer trips”, more “More trips”, and the same “Same trips”. A day type with no typical day is not counted.
+- **Weeks compared**: whole weeks of equal length, ending on the last day of the timetable before the revision and starting on the revision day. At most four, and no more than both the timetable before it is in force and the days after it are aggregated. Nothing is shown before one whole week after it; under four, the number of weeks is shown.
+- **On-time rate and mean delay**: over those weeks, the aggregates' counts (observations, on-time departures and the sum of delays) added up per route over each side's days of the day type compared. The on-time definition is always the industry standard (`standard_m1_p5`). Like every other figure, the values are the delays the operator's real-time feed predicted, and each day is aggregated under the timetable in force that day.
+- A route's on-time rate and mean delay show a dash when that side has fewer than 100 observations.
+- **Per change**: the counts of the “Fewer trips”, “More trips” and “Same trips” routes observed on both sides, added up; never the mean of route rates. “New route” and “No trips left” are not compared.
+
 ### What is not observed
 
 - A stop with no delay report counts neither as on time nor as late.

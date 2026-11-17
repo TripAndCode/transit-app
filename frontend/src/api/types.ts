@@ -1567,3 +1567,64 @@ export interface TimetableRevisionDiff {
   day_types: RevisionDayTypeSummary[];
   stops: RevisionStopChange[];
 }
+
+/** Departures observed on one side of a revision, pooled; the rate and mean
+ *  are null under the ranking floor of observations. */
+export interface RevisionTally {
+  observations: number;
+  on_time_pct: number | null;
+  mean_delay_sec: number | null;
+  uncertain: boolean;
+}
+
+type RevisionRouteClass = "cut" | "added" | "unchanged" | "new" | "removed";
+
+/** One route on a day type's typical days before and after a revision.
+ *  Times and gaps are seconds. */
+export interface RevisionRouteRow {
+  route_code: string;
+  route_class: RevisionRouteClass;
+  trips_before: number;
+  trips_after: number;
+  first_before: number | null;
+  first_after: number | null;
+  last_before: number | null;
+  last_after: number | null;
+  main_stop_id: string | null;
+  main_stop_name: string | null;
+  main_departures_before: number;
+  main_departures_after: number;
+  longest_gap_before: number | null;
+  longest_gap_after: number | null;
+  observed_before: RevisionTally | null;
+  observed_after: RevisionTally | null;
+}
+
+interface RevisionClassRow {
+  route_class: RevisionRouteClass;
+  routes: number;
+  before: RevisionTally;
+  after: RevisionTally;
+}
+
+interface RevisionWindow {
+  weeks: number;
+  complete: boolean;
+  before_first: string;
+  before_last: string;
+  after_first: string;
+  after_last: string;
+}
+
+export interface TimetableRevisionRoutes {
+  available: boolean;
+  reason: "no_revision" | "no_calendar" | null;
+  revision: TimetableRevision | null;
+  day_type: RevisionDayType;
+  day_type_known: boolean;
+  full_through: string | null;
+  window: RevisionWindow | null;
+  routes: RevisionRouteRow[];
+  classes: RevisionClassRow[];
+  definition: DefinitionMeta | null;
+}
