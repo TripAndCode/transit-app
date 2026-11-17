@@ -57,7 +57,7 @@ async def headway_client(apply_schema):
     aid = row["agency_id"]
     # compute_headway_quality gates on pipeline.strategies.static_join's
     # RT_INGEST_STRATEGIES ∩ live-probe-verdict check
-    # (rt_field_coverage_confirmed) -- a freshly-inserted test agency has no
+    # (rt_field_coverage_gap) -- a freshly-inserted test agency has no
     # rows in rt_field_coverage_probes, so record a verdict for just this
     # fixture's agency to exercise the normal "available" path;
     # test_headway_quality_unconfirmed_static_join_agency_returns_no_rows
@@ -196,9 +196,8 @@ async def test_headway_quality_unconfirmed_static_join_agency_returns_no_rows(he
     even with real high-frequency data present -- sharing the wire shape
     that CAN populate `stop_id` (`ingest_strategy == 'static_join'`) is not
     the same as being confirmed to actually populate it on this specific
-    agency's own live feed. Mirrors `pipeline.reports.dwell_run`'s and
-    `schedule_realism_padding`'s use of the same underlying trust model
-    (`pipeline.strategies.static_join.rt_field_coverage_confirmed`).
+    agency's own live feed. Mirrors `pipeline.reports.dwell_run`'s use of the
+    same underlying trust model (`pipeline.strategies.static_join.rt_field_coverage_gap`).
     """
     client, _aid = headway_client
     conn = await asyncpg.connect(DATABASE_URL)

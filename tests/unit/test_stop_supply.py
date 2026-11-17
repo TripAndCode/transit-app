@@ -219,3 +219,13 @@ def test_rows_carry_their_day_type_in_day_type_order():
         (7, "S", "c", "weekday", "s1", 10, 1, hm(10), hm(10), None),
         (7, "S", "c", "sunday_holiday", "s1", 24, 1, hm(24, 30), hm(24, 30), None),
     ]
+
+
+def test_both_tables_fingerprint_the_shared_timetable_reading():
+    import inspect
+
+    from pipeline import stop_supply, timetable_sampling
+
+    shared = inspect.getsource(timetable_sampling)
+    assert shared in stop_supply.render_days()
+    assert shared in stop_supply.render()

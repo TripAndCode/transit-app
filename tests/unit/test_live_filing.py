@@ -116,12 +116,10 @@ _ROUTED_BAND = RangeCtx(**_BAND_ONLY, routes=("R1",))
 
 
 def test_a_shared_scan_read_as_ingested_tests_each_route_once_as_stored():
-    from pipeline.reports.filters import _stop_visits_cte_ch
-
-    for sql, _params in (_dedup_cte_ch(_ROUTED_BAND, AS_INGESTED), _stop_visits_cte_ch(_ROUTED_BAND, AS_INGESTED)):
-        assert "route_code IS NULL" not in sql
-        assert sql.count("route_code IN {ch_routes:Array(String)}") == 1
-        assert sql.count("{ch_tb_start:UInt32}") == 1
+    sql, _params = _dedup_cte_ch(_ROUTED_BAND, AS_INGESTED)
+    assert "route_code IS NULL" not in sql
+    assert sql.count("route_code IN {ch_routes:Array(String)}") == 1
+    assert sql.count("{ch_tb_start:UInt32}") == 1
 
 
 def test_hand_written_reads_as_ingested_test_each_route_once_as_stored():

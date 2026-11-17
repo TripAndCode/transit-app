@@ -154,6 +154,15 @@ def _feed_quality() -> list[str]:
     return feed_quality.render()
 
 
+def _visits(builder: Callable[..., str]) -> list[str]:
+    """A visits builder, whole and scoped to its dates, and the visits scan it reads."""
+    return [
+        builder(scoped=False),
+        builder(scoped=True),
+        *(build_stop_visits_ch_sql(extra_where="", join_schedule=True, stamp=stamp) for stamp in Stamp),
+    ]
+
+
 def _timetable_of(name: str) -> Timetable:
     return Timetable.ARCHIVED if name in ch_aggregates.STATIC_JOINED_TABLES else Timetable.NONE
 
@@ -204,13 +213,19 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_daily_dwell_run",
-            5,
+            6,
             Kind.DATED,
             Timetable.ARCHIVED,
-            lambda: [
-                agg_sql.dwell_run_sql(),
-                *(build_stop_visits_ch_sql(extra_where="", join_schedule=True, stamp=stamp) for stamp in Stamp),
-            ],
+            lambda: _visits(agg_sql.dwell_run_sql),
+            archived_input=ArchivedInput.STOP_TIMES,
+            in_force=True,
+        ),
+        AggTable(
+            "agg_route_segment_runtime",
+            1,
+            Kind.DATED,
+            Timetable.ARCHIVED,
+            lambda: _visits(agg_sql.segment_runtime_sql),
             archived_input=ArchivedInput.STOP_TIMES,
             in_force=True,
         ),
@@ -428,7 +443,8 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
     MethodVersion("2026.11.16", {"feed_quality_monthly": 8}),
     MethodVersion("2026.11.17", {"feed_quality_monthly": 9}),
-    MethodVersion("2026.11.18", {"agg_stop_supply_days": 1, "agg_stop_supply_hourly": 1}),
+    MethodVersion("2026.11.18", {"agg_route_daily_dwell_run": 6, "agg_route_segment_runtime": 1}),
+    MethodVersion("2026.11.19", {"agg_stop_supply_days": 1, "agg_stop_supply_hourly": 1}),
 )
 
 # The method every report, CSV and council document names beside its figures

@@ -231,6 +231,10 @@ renders it with the reports' `DefinitionMetaBlock`.
      (`pipeline/query/tool_queries.py`) have **no agg fast path at all** —
      they always read live `updates` via ClickHouse regardless of the
      filter.
+   - `schedule_realism` reads `agg_route_segment_runtime`
+     (`pipeline/reports/segment_runtime.py`) for an agency confirmed to send
+     arrivals, and falls back to the live `schedule_realism_segments` scan
+     for every other agency.
    Either way the result becomes a `ToolResult` →
    `render_tool_result()` produces the locale-specific summary string.
 5. `ask.py` logs to `ask_query_log` via `pipeline/query/query_log.py:

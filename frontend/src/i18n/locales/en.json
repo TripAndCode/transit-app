@@ -58,7 +58,9 @@
     "view_reports": "Council report & delay record",
     "subtitle_summary": "How service ran over the period, on one printable page.",
     "subtitle_saved": "Analyses saved on route pages in this browser.",
-    "subtitle_reports": "The council report, and a delay record for reference."
+    "subtitle_reports": "The council report, and a delay record for reference.",
+    "view_revisions": "Timetable revisions",
+    "subtitle_revisions": "What each timetable revision changed at every stop: departures lost and gained by hour, the last bus, and stops left with none."
   },
   "sheet": {
     "handle": "Resize the sheet"
@@ -1112,7 +1114,10 @@
       "actual_run_p85_min": "Actual run p85 (min)",
       "padding_min": "Padding (min)",
       "time_adjustment_rate": "Held for schedule (rate)",
-      "low_confidence": "Margin"
+      "low_confidence": "Margin",
+      "from_stop": "From stop",
+      "to_stop": "To stop",
+      "time_band": "Time band"
     },
     "low_confidence_mark": "wide margin",
     "more_rows": "…and {{count}} more",
@@ -2610,6 +2615,47 @@
       "status": "Loading",
       "text": "Loading what this agency's feed covers…"
     }
+  },
+  "revisions": {
+    "pick": "Revision",
+    "option": "From {{date}} ({{version}})",
+    "versions": "From {{date}}, {{after}} ({{afterContent}}) replaces {{before}} ({{beforeContent}}).",
+    "empty_title": "No timetable revision to compare yet",
+    "empty_hint": "Once a second timetable takes effect, each revision appears here with what it changed at every stop.",
+    "no_calendar_title": "This revision cannot be compared",
+    "no_calendar_hint": "The calendar of one of its timetables is not kept, so the days its trips run are unknown.",
+    "day_types_title": "By day type",
+    "stops_title": "Stops that changed",
+    "day_type_label": "Day type",
+    "day_type": {
+      "weekday": "Weekday",
+      "saturday": "Saturday",
+      "sunday_holiday": "Sunday & holiday"
+    },
+    "col": {
+      "day_type": "Day type",
+      "typical_days": "Typical day (before → after)",
+      "departures": "Departures",
+      "change": "Change",
+      "stops_ended": "Stops left with none",
+      "last_earlier": "Stops with an earlier last bus",
+      "stop": "Stop",
+      "lost_gained": "Lost / gained",
+      "last": "Last departure",
+      "hours": "Change by hour",
+      "first": "First departure"
+    },
+    "lost_gained": "{{lost}} / {{gained}}",
+    "minutes": "({{value}} min)",
+    "hour_change": "{{hour}}:00 {{delta}}",
+    "hour_separator": ", ",
+    "ended": "no departures left",
+    "no_change": "No stop changed on this day type.",
+    "unknown_day_type": "A day type with a dash has no day of that type in force under one of the timetables, so it is not compared.",
+    "show_all": "Show all {{count}} stops",
+    "note": "Each day type is compared on one typical day from each timetable: an ordinary day of that type near the revision. A trip's last stop is not a departure. Stop names are the current timetable's; a stop it no longer has shows its ID. See the methodology for the full definitions.",
+    "no_revision_title": "This revision is no longer listed",
+    "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list."
   },
   "supply": {
     "map_label": "Map of planned departures at every operator's stops",

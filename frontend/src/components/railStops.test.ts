@@ -15,7 +15,7 @@ describe("RAIL_STOPS", () => {
 
   it("opens Compare's boards by `by` and Reports' views by `doc`", () => {
     expect(RAIL_STOPS.compare?.map((stop) => stop.extra)).toEqual([{ by: "periods" }, { by: "agencies" }, { by: "supply" }]);
-    expect(RAIL_STOPS.reports?.map((stop) => stop.extra)).toEqual([{}, { doc: "saved" }, { doc: "council" }]);
+    expect(RAIL_STOPS.reports?.map((stop) => stop.extra)).toEqual([{}, { doc: "saved" }, { doc: "council" }, { doc: "revisions" }]);
   });
 });
 

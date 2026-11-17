@@ -280,7 +280,7 @@ def _visit(day: str, seq: int, arrival_stem: str | None, departure_stem: str | N
 
 
 def _visits(ch_client, join: ScheduleJoin, columns: str = "sched_arrival_time, sched_departure_time") -> list[tuple]:
-    sql = build_stop_visits_ch_sql(include_scheduled_sec="scheduled_sec" in columns, join_schedule=True)
+    sql = build_stop_visits_ch_sql(join_schedule=True)
     rows = ch_client.query(
         f"SELECT date, stop_sequence, {columns} FROM ({sql}) ORDER BY date, stop_sequence",
         parameters={"agency_id": AGENCY, **join.params()},
@@ -322,15 +322,59 @@ def test_a_visit_with_no_archived_stop_time_keeps_its_row(ch_client):
     assert _visits(ch_client, ScheduleJoin(["v_a"], [A], A)) == [(date(2026, 6, 1), 9, None, None)]
 
 
-def test_the_join_composes_with_the_scheduled_seconds(ch_client):
-    _two_timetables(ch_client)
-    insert_updates(ch_client, AGENCY, _visit("2026-06-01", 2, "v_b", "v_b"))
-    rows = _visits(ch_client, ScheduleJoin(["v_b"], [B], A), "scheduled_sec, sched_departure_time")
-    assert rows == [(date(2026, 6, 1), 2, 36420, "10:07:00")]
+_SEGMENT_COLUMNS = (
+    "sched_stop_id, sched_prev_stop_sequence, sched_prev_stop_id, sched_prev_departure_time, sched_is_last"
+)
+
+
+def _archive_trip(ch_client, content: str, stops: list[tuple[int, str, str | None, str | None]]) -> None:
+    """Trip T1's (stop_sequence, stop_id, arrival, departure) rows archived for AGENCY under *content*."""
+    ch_client.insert(
+        static_archive.ARCHIVE,
+        [(AGENCY, content, "T1", *stop) for stop in stops],
+        column_names=[
+            "agency_id",
+            "content_hash",
+            "trip_id",
+            "stop_sequence",
+            "stop_id",
+            "arrival_time",
+            "departure_time",
+        ],
+    )
+
+
+def test_a_visit_takes_the_stop_before_it_from_its_own_timetable(ch_client):
+    """Sequences with gaps: the stop before 7 is 3, the timetable's previous call,
+    not 6, and the last call is flagged whichever stops the feed reported."""
+    _archive_trip(
+        ch_client,
+        A,
+        [(1, "S1", None, "10:00:00"), (3, "S3", "10:05:00", "10:06:00"), (7, "S7", "10:12:00", None)],
+    )
+    _archive_trip(ch_client, B, [(1, "X1", None, "09:00:00"), (3, "X3", "09:04:00", None)])
+    insert_updates(
+        ch_client,
+        AGENCY,
+        [
+            *_visit("2026-06-01", 3, "v_a", "v_a"),
+            *_visit("2026-06-01", 7, "v_a", "v_a"),
+            *_visit("2026-06-01", 9, "v_a", "v_a"),
+            *_visit("2026-06-02", 1, "v_b", "v_b"),
+            *_visit("2026-06-02", 3, "v_b", "v_b"),
+        ],
+    )
+    assert _visits(ch_client, ScheduleJoin(["v_a", "v_b"], [A, B], A), _SEGMENT_COLUMNS) == [
+        (date(2026, 6, 1), 3, "S3", 1, "S1", "10:00:00", False),
+        (date(2026, 6, 1), 7, "S7", 3, "S3", "10:06:00", True),
+        (date(2026, 6, 1), 9, None, None, None, None, None),
+        (date(2026, 6, 2), 1, "X1", None, None, None, False),
+        (date(2026, 6, 2), 3, "X3", 1, "X1", "09:00:00", True),
+    ]
 
 
 def test_the_visits_without_the_join_keep_their_columns():
-    sql = build_stop_visits_ch_sql(include_scheduled_sec=True)
+    sql = build_stop_visits_ch_sql()
     assert "sched_arrival_time" not in sql
     assert "join_" not in sql
 

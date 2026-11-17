@@ -210,9 +210,35 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 
 **Dwell and running time**: each stop's actual arrival and departure are its scheduled times plus the reported delays. Dwell time is the actual departure minus the actual arrival at the same stop, counted only for a departure reported after the arrival, and running time is the actual arrival minus the previous stop's actual departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
 
+**Running time per timetable segment**: a segment is the pair of stops a trip calls at in turn under the timetable in force that day. Trips of one route through the same pair share one segment, whatever their variant. Its running time is, as in the split above, the actual arrival at the segment's last stop minus the actual departure from its first. A trip whose first stop of the segment the feed did not report gives no running time for it, so a time spanning two segments never counts as one. The time band is that of the scheduled departure from the first stop.
+
+- Median and 85th-percentile running time: from every running time observed in the period, linearly interpolated.
+- Scheduled running time: the mean, over the same trips, of the scheduled arrival at the last stop minus the scheduled departure from the first.
+- Padding: scheduled running time − median running time. Positive is slack, negative too tight.
+- Held-for-schedule rate: of the trips reaching the first stop on time or early, the share that stayed more than 60 seconds beyond the scheduled dwell, counting only trips whose departure was reported after the arrival and whose next stop the feed reported.
+- Terminus early-arrival rate: the share of arrivals at a trip's last stop at least 60 seconds ahead of the timetable.
+
+When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them until the operator's predictions are validated.
+
+### Comparing timetable revisions
+
+Each timetable revision is compared stop by stop, the timetable before it against the one after (**Reports**, “Timetable revisions”). It reads the timetables alone, never the observations.
+
+- **Revision**: a day whose timetable in force ([Matching the timetable](#matching-the-timetable)) differs from the day before's. Either its content (content hash) or its service calendar differing makes a revision; two names with the same content and calendar do not. Only versions whose content and calendar the timetable archive keeps are compared, so a timetable just loaded is compared once the next analyze has kept it.
+- **Day type**: weekday, Saturday, and Sunday & holiday. Sundays and public holidays (substitute holidays included) are Sunday & holiday. Every operator is split the same way, so the two sides of a revision are always compared on the same day types. The day types elsewhere follow each operator's calendar and may merge Saturday with Sunday & holiday; these are fixed by the date alone.
+- **Typical day**: one day per day type from each timetable. Days of the type are read back from the day before the revision for the timetable before it, and on from the revision day for the one after: up to five of each weekday Monday to Friday (twenty-five) for weekdays, and up to five for Saturday and for Sunday & holiday. The typical day is the one running the same trips as most of them, the one nearest the revision on a tie, so a holiday or the year-end break does not stand for the type.
+- A day outside the timetable calendar's extent (from the first day it names to the last) is never picked. A day inside it that runs no trip counts as a day with no departures: in a timetable that lists only the days its services run in `calendar_dates`, a day it does not list runs nothing.
+- A day type with no typical day (no day of that type within the calendar's extent while that timetable is in force) is unknown, never zero.
+- **Departure**: one trip running on the typical day scheduled to leave one stop. A trip's last stop is not a departure, nor is a stop with no time given.
+- **Hour**: by scheduled departure. A departure after midnight falls in its service day's 24:00 or 25:00 hour.
+- **Departures lost and gained**: per stop and hour, the fall from before to after is lost, and the rise gained. A departure moved to another hour is one lost and one gained.
+- **Last departure**: the stop's latest departure on that day type. Its shift is given only for a stop with departures on both sides.
+- **Stops left with none**: stops with departures before and none after. On Saturday or Sunday & holiday, these are the stops that lost their weekend service.
+- Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under the old ID and gaining them under the new one. Stop names are the loaded timetable's, so a stop it no longer has shows its ID.
+
 ### Planned departures at stops
 
-How much service each stop is planned to get, from the timetables alone, with no realtime data (from method `2026.11.18`).
+How much service each stop is planned to get, from the timetables alone, with no realtime data (from method `2026.11.19`).
 
 - **Timetable**: each operator's timetable version in force on the chosen date (today's service day by default). It is read from the kept timetables, so a version a later load replaced can still be read. An operator with no version in force that day is shown as such.
 - **Day type**: weekday, Saturday or Sunday and holiday, decided by the date alone (a public holiday is Sunday and holiday). Saturday is never merged with Sunday and holiday by an operator's calendar, so every operator reads in the same three day types.
@@ -404,11 +430,12 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.18`. Newest first, each version with the inputs it set.
+The current method is `2026.11.19`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
-| `2026.11.18` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
+| `2026.11.19` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
+| `2026.11.18` | `agg_route_daily_dwell_run` 5 → 6, `agg_route_segment_runtime` = 1 |
 | `2026.11.17` | `feed_quality_monthly` 8 → 9 |
 | `2026.11.16` | `feed_quality_monthly` 7 → 8 |
 | `2026.11.15` | `agg_route_band_daily` = 1 |

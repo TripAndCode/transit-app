@@ -30,7 +30,7 @@ async def _trust_dwell_run(pool, *agency_ids):
     """See tests/api/test_network.py's `_trust_service_delivered` docstring --
     same reasoning, for the dwell_run report. Both reports resolve the same
     `rt_field_coverage_probes` verdict through
-    `pipeline.strategies.static_join.rt_field_coverage_confirmed`."""
+    `pipeline.strategies.static_join.rt_field_coverage_gap`."""
     await confirm_rt_field_coverage(pool, *agency_ids)
 
 

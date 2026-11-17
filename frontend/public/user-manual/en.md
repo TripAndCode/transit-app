@@ -354,7 +354,7 @@ When no vehicle is reporting, the map says why, going by the agency’s timetabl
 
 ## 10. Reports — documents to hand on
 
-Three tabs along the top: **Period summary**, **Saved analyses** and **Council report & delay record**.
+Four tabs along the top: **Period summary**, **Saved analyses**, **Council report & delay record** and **Timetable revisions**.
 
 A printed page (“Print / Save as PDF”) ends with its data source: who publishes the agency’s data, with the URLs of the data and of its licence. A CSV that opens with notes (a report’s **Download CSV**, and each table’s CSV in the **Notebook**) carries the same credit as its last note. A CSV whose first row is the table (the period summary, a route’s page, **Live**) has no credit added, so it still loads straight into a spreadsheet or another tool.
 
@@ -409,6 +409,16 @@ When the trip can’t be matched to that day’s timetable, as on a day before t
 If the route has no real-time data that day, the page says so.
 
 For staff, “Late departures (delay at each trip's first recorded stop)” opens every route’s late departures on the chosen day, with **Download CSV**. The list loads only when it is opened. It picks late trips by their delay at the first stop the real-time data recorded for each, so a trip that left its first stop on time and fell behind later is not in it. In its table, the “Recorded stop” carries “trip start” when the timetable starts that trip there.
+
+### 10-4. Timetable revisions
+
+For each day another timetable took effect (a revision), the timetables before and after it are compared stop by stop. **Revision** picks the one to compare; the newest opens first.
+
+- The **By day type** table gives, for weekdays, Saturdays and Sundays & holidays, the typical day (before → after), the departures and their change, how many stops were left with none, and how many have an earlier last bus. A typical day is an ordinary day of that type under each timetable, near the revision. These day types are fixed by the date alone, unlike the day types elsewhere, which follow the operator’s calendar and may merge Saturday with Sunday & holiday.
+- **Stops that changed** lists, for the day type chosen, every stop whose departures, first departure or last departure changed, those that lost the most first. The first and last departures read before → after. **Change by hour** shows only the hours whose count changed, as in “7:00 -1, 8:00 +1”. A stop left with no departures says so.
+- A day type with no day in force under one of the timetables shows a dash and is not compared.
+- **Download CSV** saves the changed stops, with the versions compared, their typical days and the data source in its notes: a draft of a monitoring list.
+- Stop names are the current timetable’s; a stop it no longer has shows its ID. A trip’s last stop is not counted as a departure.
 
 ---
 

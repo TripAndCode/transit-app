@@ -523,7 +523,7 @@ async def confirm_rt_field_coverage(conn, *agency_ids, confirmed=True, expires_a
     Production gates every RT-optional-field reader on a live verdict in
     `rt_field_coverage_probes` intersected with a `RT_INGEST_STRATEGIES`
     ingest_strategy (see
-    `pipeline.strategies.static_join.rt_field_coverage_confirmed`), so a
+    `pipeline.strategies.static_join.rt_field_coverage_gap`), so a
     freshly-inserted test agency is untrusted until a test says otherwise —
     which is exactly the production default and needs no setup at all.
 

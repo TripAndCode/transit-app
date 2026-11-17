@@ -503,6 +503,12 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "(%s, '2099-01-01', 'GHOST', 'morning', 100, 999, 999)",
         ),
         (
+            "agg_route_segment_runtime",
+            "(agency_id, date, route_code, from_stop_id, to_stop_id, time_band, to_stop_sequence, run_sec, "
+            "scheduled_samples, scheduled_sum_sec, hold_eligible, holds, terminal_arrivals, terminal_early)",
+            "(%s, '2099-01-01', 'GHOST', 'A', 'B', 'morning', 2, '{60}', 1, 60, 0, 0, 0, 0)",
+        ),
+        (
             "agg_stop_daily",
             "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples)",
             "(%s, 'GHOST_STOP', '2099-01-01', '平日', 'morning', 999, 100)",
