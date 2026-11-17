@@ -24,6 +24,7 @@ from httpx import ASGITransport
 from api.range import jst_today
 from pipeline import static_archive
 from pipeline.analyze import analyze
+from pipeline.day_types import public_holidays_between
 from pipeline.ingest import ingest
 from pipeline.static_loader import load_static
 from tests.fixtures.clock import JST
@@ -87,10 +88,15 @@ def _write_poll(folder, day: date, trip_id: str, route: str, hh: int, delay: int
 
 @pytest.fixture
 def revised(pg_conn, ch_client, tmp_path) -> tuple[int, date]:
-    """The revision a week and a day ago, with every weekday from a week
-    before it through yesterday polled and analyzed."""
+    """A revision at least a week before yesterday, with every weekday from a
+    week before it through yesterday polled and analyzed. It is moved back
+    until neither week holds a public holiday: a holiday weekday pools with
+    Sundays, and two in one week would take a route under the floor of
+    weekday observations."""
     yesterday = jst_today() - timedelta(days=1)
     revision = yesterday - timedelta(days=7)
+    while public_holidays_between(revision - timedelta(days=7), revision + timedelta(days=6)):
+        revision -= timedelta(days=1)
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
@@ -146,7 +152,7 @@ async def test_each_routes_timetable_and_observed_shift_across_the_revision(revi
     assert body["available"] is True and body["day_type_known"] is True
     assert body["full_through"] == (revision + timedelta(days=27)).isoformat()
     window = body["window"]
-    assert (window["weeks"], window["complete"]) == (1, False)
+    assert window["weeks"] >= 1 and window["complete"] is (window["weeks"] == 4)
     assert window["before_last"] == (revision - timedelta(days=1)).isoformat()
     assert window["after_first"] == revision.isoformat()
 

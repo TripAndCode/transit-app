@@ -2672,6 +2672,7 @@
       "unchanged": "Same trips",
       "new": "New route",
       "removed": "No trips left"
-    }
+    },
+    "uncertain": "wide margin"
   }
 }

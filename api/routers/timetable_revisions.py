@@ -379,7 +379,7 @@ async def revision_diff(
 class TallyOut(BaseModel):
     """Departures observed on one side, pooled. ``on_time_pct`` and
     ``mean_delay_sec`` are None under the ranking floor of observations,
-    and ``uncertain`` marks a rate whose interval is too wide to read."""
+    and ``uncertain`` marks a shown rate whose interval is too wide to read."""
 
     observations: int
     on_time_pct: float | None
@@ -388,22 +388,19 @@ class TallyOut(BaseModel):
 
 
 class RouteRowOut(BaseModel):
-    """One route on the requested day type's typical days before and after.
-    Times and gaps are seconds; ``main_stop_id`` is the stop both gaps are
-    measured at. ``observed_*`` is None until the windows exist."""
+    """One route on the requested day type's typical days before and after,
+    classed on that day type. Times and gaps are seconds; ``main_stop_id``
+    is the stop both gaps are measured at. ``observed_*`` is None until the
+    windows exist."""
 
     route_code: str
     route_class: RouteClass
     trips_before: int
     trips_after: int
-    first_before: int | None
-    first_after: int | None
     last_before: int | None
     last_after: int | None
     main_stop_id: str | None
     main_stop_name: str | None
-    main_departures_before: int
-    main_departures_after: int
     longest_gap_before: int | None
     longest_gap_after: int | None
     observed_before: TallyOut | None
@@ -437,7 +434,6 @@ class RevisionRoutesResponse(BaseModel):
 
     available: bool
     reason: Literal["no_revision", "no_calendar"] | None = None
-    revision: RevisionOut | None = None
     day_type: RevisionDayType
     day_type_known: bool = False
     full_through: date | None = None
@@ -453,7 +449,7 @@ def _tally(t: Tally) -> TallyOut:
         observations=t.observations,
         on_time_pct=t.on_time_pct if shown else None,
         mean_delay_sec=t.mean_delay_sec if shown else None,
-        uncertain=pct_is_uncertain(t.on_time, t.observations),
+        uncertain=shown and pct_is_uncertain(t.on_time, t.observations),
     )
 
 
@@ -468,14 +464,10 @@ def _route_row(
         route_class=route_class,
         trips_before=c.trips_before,
         trips_after=c.trips_after,
-        first_before=c.first_before,
-        first_after=c.first_after,
         last_before=c.last_before,
         last_after=c.last_after,
         main_stop_id=c.main_stop,
         main_stop_name=None if c.main_stop is None else names.get(c.main_stop),
-        main_departures_before=c.main_departures_before,
-        main_departures_after=c.main_departures_after,
         longest_gap_before=c.longest_gap_before,
         longest_gap_after=c.longest_gap_after,
         observed_before=side("before"),
@@ -524,15 +516,11 @@ async def revision_routes(
         return RevisionRoutesResponse(available=False, reason="no_revision", day_type=day_type)
     timetables = await load_route_timetables(ch, agency_id, revision)
     if isinstance(timetables, Unavailable):
-        return RevisionRoutesResponse(
-            available=False, reason="no_calendar", revision=_revision(revision), day_type=day_type
-        )
+        return RevisionRoutesResponse(available=False, reason="no_calendar", day_type=day_type)
     spans = windows(revision, await last_aggregated_day(conn, agency_id))
     observed = {} if spans is None else await load_observed(conn, agency_id, spans)
-    changes = sorted(
-        (c for c in timetables.changes if c.day_type == day_type),
-        key=lambda c: (c.trips_after - c.trips_before, c.route_code),
-    )
+    on_day, classes = timetables.on(day_type)
+    changes = sorted(on_day, key=lambda c: (c.trips_after - c.trips_before, c.route_code))
     names = await _stop_names(conn, agency_id, sorted({c.main_stop for c in changes if c.main_stop is not None}))
     definition = None
     if spans is not None:
@@ -541,12 +529,11 @@ async def revision_routes(
         definition = await stamp_build(conn, meta, agency_id, schedule)
     return RevisionRoutesResponse(
         available=True,
-        revision=_revision(revision),
         day_type=day_type,
         day_type_known=day_type in timetables.known,
         full_through=full_through(revision),
         window=None if spans is None else _window(spans),
-        routes=[_route_row(c, timetables.classes[c.route_code], names, observed, spans) for c in changes],
-        classes=[] if spans is None else [_class(c) for c in class_tallies(observed, timetables.classes, day_type)],
+        routes=[_route_row(c, classes[c.route_code], names, observed, spans) for c in changes],
+        classes=[] if spans is None else [_class(c) for c in class_tallies(observed, classes, day_type)],
         definition=definition,
     )

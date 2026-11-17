@@ -10,8 +10,15 @@ import { SHARED_TABLE, td, th } from "../../components/tableStyles";
 import { EM_DASH, fixedTenth, formatDate, formatDateRange, formatDuration, formatNumber } from "../../utils/format";
 import { serviceClock } from "./revisionModel";
 
-function pct(tally: RevisionTally | null): string {
-  return tally?.on_time_pct == null ? EM_DASH : `${fixedTenth(tally.on_time_pct)}%`;
+function Pct({ tally }: { tally: RevisionTally | null }) {
+  const { t } = useTranslation();
+  if (tally?.on_time_pct == null) return <>{EM_DASH}</>;
+  return (
+    <>
+      {`${fixedTenth(tally.on_time_pct)}%`}
+      {tally.uncertain && <span className="focus-muted"> ({t("revisions.uncertain")})</span>}
+    </>
+  );
 }
 
 function delay(tally: RevisionTally | null): string {
@@ -81,7 +88,7 @@ function RoutesBody({ data, agencyId }: { data: TimetableRevisionRoutes; agencyI
                   <td style={td()}>{t(`revisions.route_class.${c.route_class}`)}</td>
                   <td style={td({ align: "right" })}>{formatNumber(c.routes)}</td>
                   <td style={td({ align: "right" })}>
-                    {pct(c.before)} → {pct(c.after)}
+                    <Pct tally={c.before} /> → <Pct tally={c.after} />
                   </td>
                   <td style={td({ align: "right" })}>
                     {delay(c.before)} → {delay(c.after)}
@@ -126,7 +133,7 @@ function RoutesBody({ data, agencyId }: { data: TimetableRevisionRoutes; agencyI
                 </td>
                 {observed && (
                   <td style={td({ align: "right" })}>
-                    {pct(r.observed_before)} → {pct(r.observed_after)}
+                    <Pct tally={r.observed_before} /> → <Pct tally={r.observed_after} />
                   </td>
                 )}
                 {observed && (

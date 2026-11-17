@@ -133,34 +133,25 @@ def route_changes(
 
 RouteClass = Literal["cut", "added", "unchanged", "new", "removed"]
 
-# A week of service: a weekday's trips count five times, Saturday's and
-# Sunday & holiday's once each.
-_WEEK_WEIGHTS: dict[RevisionDayType, int] = {"weekday": 5, "saturday": 1, "sunday_holiday": 1}
-
 
 def route_classes(changes: Iterable[RouteChange]) -> dict[str, RouteClass]:
-    """Each route's class from its trips over a week of the day types
-    *changes* hold (those both sides know): new with none before, removed
-    with none after, else cut, added or unchanged as the week's trips fell,
-    rose or stayed."""
-    before: dict[str, int] = defaultdict(int)
-    after: dict[str, int] = defaultdict(int)
-    for c in changes:
-        before[c.route_code] += _WEEK_WEIGHTS[c.day_type] * c.trips_before
-        after[c.route_code] += _WEEK_WEIGHTS[c.day_type] * c.trips_after
+    """Each route's class from its trips on the typical days of the one day
+    type *changes* hold: new with none before, removed with none after, else
+    cut, added or unchanged as they fell, rose or stayed. Classed per day
+    type, so a route cut only on Saturdays is unchanged on weekdays."""
     classes: dict[str, RouteClass] = {}
-    for route in before.keys() | after.keys():
-        b, a = before[route], after[route]
+    for c in changes:
+        b, a = c.trips_before, c.trips_after
         if b == 0:
-            classes[route] = "new"
+            classes[c.route_code] = "new"
         elif a == 0:
-            classes[route] = "removed"
+            classes[c.route_code] = "removed"
         elif a < b:
-            classes[route] = "cut"
+            classes[c.route_code] = "cut"
         elif a > b:
-            classes[route] = "added"
+            classes[c.route_code] = "added"
         else:
-            classes[route] = "unchanged"
+            classes[c.route_code] = "unchanged"
     return classes
 
 
@@ -249,7 +240,11 @@ class RouteTimetables(NamedTuple):
     revision: Revision
     known: tuple[RevisionDayType, ...]
     changes: tuple[RouteChange, ...]
-    classes: Mapping[str, RouteClass]
+
+    def on(self, day_type: RevisionDayType) -> tuple[list[RouteChange], dict[str, RouteClass]]:
+        """The routes of *day_type*, and their classes on it."""
+        changes = [c for c in self.changes if c.day_type == day_type]
+        return changes, route_classes(changes)
 
 
 # Keyed by the revision, which fixes its timetables (load_comparison's cache).
@@ -274,7 +269,7 @@ async def load_route_timetables(ch, agency_id: int, revision: Revision) -> Route
         stop_counts_of(after_stops),
         known,
     )
-    return RouteTimetables(revision, known, tuple(changes), route_classes(changes))
+    return RouteTimetables(revision, known, tuple(changes))
 
 
 # ── the observed side ───────────────────────────────────────────────────────
@@ -329,7 +324,7 @@ class Tally(NamedTuple):
     on_time: int = 0
     sum_delay_sec: int = 0
 
-    def __add__(self, other: tuple) -> Tally:  # type: ignore[override]
+    def plus(self, other: Tally) -> Tally:
         return Tally(*(a + b for a, b in zip(self, other, strict=True)))
 
     @property
@@ -361,7 +356,8 @@ def pool(rows: Iterable[tuple], spans: Windows) -> dict[tuple[Side, RevisionDayT
         else:
             continue
         day_type = cast(RevisionDayType, fallback_day_type(day, holidays))
-        out[(side, day_type, route)] += (int(observations), int(on_time), int(sum_delay))
+        key = (side, day_type, route)
+        out[key] = out[key].plus(Tally(int(observations), int(on_time), int(sum_delay)))
     return out
 
 
@@ -389,8 +385,10 @@ def class_tallies(observed: Observed, classes: Mapping[str, RouteClass], day_typ
             and observed.get(("before", day_type, r), Tally()).observations
             and observed.get(("after", day_type, r), Tally()).observations
         ]
-        before = sum((observed[("before", day_type, r)] for r in routes), Tally())
-        after = sum((observed[("after", day_type, r)] for r in routes), Tally())
+        before, after = Tally(), Tally()
+        for r in routes:
+            before = before.plus(observed[("before", day_type, r)])
+            after = after.plus(observed[("after", day_type, r)])
         out.append(ClassTally(route_class, len(routes), before, after))
     return out
 

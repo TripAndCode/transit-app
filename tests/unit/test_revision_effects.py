@@ -88,16 +88,29 @@ def _change(route: str, day_type, before: int, after: int) -> RouteChange:
     ("before", "after", "expected"),
     [(10, 9, "cut"), (10, 11, "added"), (10, 10, "unchanged"), (0, 3, "new"), (3, 0, "removed")],
 )
-def test_a_route_is_classed_by_its_weeks_trips(before, after, expected):
+def test_a_route_is_classed_by_its_trips(before, after, expected):
     assert route_classes([_change("R", "weekday", before, after)]) == {"R": expected}
 
 
-def test_a_weekday_counts_five_times_against_one_weekend_day():
-    # Weekday +1 trip (5 a week) outweighs Saturday -4.
-    changes = [_change("R", "weekday", 10, 11), _change("R", "saturday", 8, 4)]
-    assert route_classes(changes) == {"R": "added"}
-    changes = [_change("R", "weekday", 10, 11), _change("R", "saturday", 8, 2)]
-    assert route_classes(changes) == {"R": "cut"}
+def test_a_route_is_classed_on_the_day_type_compared():
+    # Cut only on Saturdays: unchanged on weekdays.
+    weekday = route_classes([_change("R", "weekday", 10, 10)])
+    saturday = route_classes([_change("R", "saturday", 8, 4)])
+    assert (weekday, saturday) == ({"R": "unchanged"}, {"R": "cut"})
+
+
+def test_route_timetables_class_each_day_type_on_its_own_routes():
+    from pipeline.reports.revision_effects import RouteTimetables
+
+    timetables = RouteTimetables(
+        REVISION,
+        ("weekday", "saturday"),
+        (_change("R", "weekday", 10, 10), _change("R", "saturday", 8, 4), _change("S", "saturday", 0, 2)),
+    )
+    changes, classes = timetables.on("saturday")
+    assert [c.route_code for c in changes] == ["R", "S"]
+    assert classes == {"R": "cut", "S": "new"}
+    assert timetables.on("weekday")[1] == {"R": "unchanged"}
 
 
 # ── windows ─────────────────────────────────────────────────────────────────
@@ -182,6 +195,10 @@ def test_a_class_pools_exact_counts_of_routes_observed_on_both_sides():
     assert round(cut.after.on_time_pct, 1) == 89.1
     assert by_class["unchanged"].routes == 0
     assert by_class["unchanged"].before.on_time_pct is None
+
+
+def test_tallies_add_by_count():
+    assert Tally(4, 3, 120).plus(Tally(6, 1, -60)) == Tally(10, 4, 60)
 
 
 def test_a_tally_reads_its_rate_and_mean_delay():

@@ -1569,7 +1569,8 @@ export interface TimetableRevisionDiff {
 }
 
 /** Departures observed on one side of a revision, pooled; the rate and mean
- *  are null under the ranking floor of observations. */
+ *  are null under the ranking floor of observations, and `uncertain` marks a
+ *  shown rate whose interval is too wide to read. */
 export interface RevisionTally {
   observations: number;
   on_time_pct: number | null;
@@ -1586,14 +1587,10 @@ export interface RevisionRouteRow {
   route_class: RevisionRouteClass;
   trips_before: number;
   trips_after: number;
-  first_before: number | null;
-  first_after: number | null;
   last_before: number | null;
   last_after: number | null;
   main_stop_id: string | null;
   main_stop_name: string | null;
-  main_departures_before: number;
-  main_departures_after: number;
   longest_gap_before: number | null;
   longest_gap_after: number | null;
   observed_before: RevisionTally | null;
@@ -1619,7 +1616,6 @@ interface RevisionWindow {
 export interface TimetableRevisionRoutes {
   available: boolean;
   reason: "no_revision" | "no_calendar" | null;
-  revision: TimetableRevision | null;
   day_type: RevisionDayType;
   day_type_known: boolean;
   full_through: string | null;

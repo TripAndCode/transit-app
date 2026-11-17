@@ -21,11 +21,11 @@ const DEFINITION: DefinitionMeta = {
   source_mix: null,
 };
 
-const tally = (on_time_pct: number | null, mean_delay_sec: number | null, observations = 150): RevisionTally => ({
+const tally = (on_time_pct: number | null, mean_delay_sec: number | null, observations = 150, uncertain = false): RevisionTally => ({
   observations,
   on_time_pct,
   mean_delay_sec,
-  uncertain: false,
+  uncertain,
 });
 
 function route(over: Partial<RevisionRouteRow>): RevisionRouteRow {
@@ -34,14 +34,10 @@ function route(over: Partial<RevisionRouteRow>): RevisionRouteRow {
     route_class: "cut",
     trips_before: 6,
     trips_after: 5,
-    first_before: 7 * 3600,
-    first_after: 7 * 3600,
     last_before: 12 * 3600,
     last_after: 11 * 3600,
     main_stop_id: "S1",
     main_stop_name: "Station",
-    main_departures_before: 6,
-    main_departures_after: 5,
     longest_gap_before: 3600,
     longest_gap_after: 7200,
     observed_before: tally(0, 400),
@@ -50,21 +46,14 @@ function route(over: Partial<RevisionRouteRow>): RevisionRouteRow {
   };
 }
 
-const REVISION = {
-  first_day: "2026-04-01",
-  before: { version: "v1", content: "aaaa1111", first_day: "2026-01-01", last_day: "2026-03-31" },
-  after: { version: "v2", content: "bbbb2222", first_day: "2026-04-01", last_day: "2026-09-30" },
-};
-
 const OBSERVED: TimetableRevisionRoutes = {
   available: true,
   reason: null,
-  revision: REVISION,
   day_type: "weekday",
   day_type_known: true,
   full_through: "2026-04-28",
   window: { weeks: 4, complete: true, before_first: "2026-03-04", before_last: "2026-03-31", after_first: "2026-04-01", after_last: "2026-04-28" },
-  routes: [route({}), route({ route_code: "R2", route_class: "unchanged", observed_before: tally(null, null, 40), observed_after: tally(90, 45) })],
+  routes: [route({}), route({ route_code: "R2", route_class: "unchanged", observed_before: tally(null, null, 40), observed_after: tally(90, 45, 120, true) })],
   classes: [
     { route_class: "cut", routes: 1, before: tally(0, 400), after: tally(100, 30) },
     { route_class: "added", routes: 0, before: tally(null, null, 0), after: tally(null, null, 0) },
@@ -102,7 +91,7 @@ describe("RevisionRoutes", () => {
     expect(r1).toHaveTextContent("60 min → 120 min");
     expect(r1).toHaveTextContent("0.0% → 100.0%");
     const r2 = screen.getAllByText("Same trips").map((cell) => cell.closest("tr")!).find((row) => row.textContent?.includes("Station"))!;
-    expect(r2).toHaveTextContent("— → 90.0%");
+    expect(r2).toHaveTextContent("— → 90.0% (wide margin)");
     const classes = screen.getByRole("columnheader", { name: "Routes" }).closest("table")!;
     expect(within(classes).getAllByRole("row")).toHaveLength(4);
     expect(screen.getByText(/real-time feed predicted/)).toBeInTheDocument();
