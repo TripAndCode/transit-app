@@ -6,17 +6,21 @@ element of each row's array, so the query's memory grows with its rows times
 the parameter's length. A parameter array rows are matched against is joined
 as rows instead (feed_quality.PEER_STRETCHES_CH_SQL); one read at known
 positions is indexed by constants (timetable_sampling.stop_departures).
+
+The scan reads each source file's own text, so it misses a lambda that only
+meets the parameter through Python, such as a constant spliced into an
+f-string from another name.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCES = ("pipeline", "api", "db", "scripts")
 # A call whose first argument is a lambda, written as SQL or as SQL in an
 # f-string; its opening parenthesis ends the match's name.
 _LAMBDA_CALL = re.compile(r"\barray[A-Z]\w*\((?=\s*(?:\w+|\([\w\s,]+\))\s*->)")
@@ -38,6 +42,11 @@ def _closing(text: str, opening: int) -> int:
         if depth == 0:
             return at + 1
     return len(text)
+
+
+def _sources() -> list[str]:
+    listed = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT, capture_output=True, text=True, check=True)
+    return [name for name in listed.stdout.split() if not name.startswith("tests/")]
 
 
 def offenders(text: str) -> list[str]:
@@ -81,10 +90,7 @@ def test_a_constant_index_a_scalar_or_no_lambda_is_not_an_offender(sql):
 
 def test_no_source_reads_a_parameter_array_inside_a_lambda_call():
     found = [
-        (path.relative_to(ROOT).as_posix(), offender)
-        for source in SOURCES
-        for path in sorted((ROOT / source).rglob("*.py"))
-        for offender in offenders(path.read_text(encoding="utf-8"))
+        (name, offender) for name in _sources() for offender in offenders((ROOT / name).read_text(encoding="utf-8"))
     ]
     assert [hit for hit in found if hit not in ALLOWED] == []
 
