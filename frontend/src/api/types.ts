@@ -1625,6 +1625,10 @@ export interface TransferReliability {
   by_day: (TransferTally & { day: string })[];
   worst_days: (TransferTally & { day: string })[];
   no_plan_days: string[];
+  /** Why the arriving agency's arrival delays were not read, null when
+   *  they were; its arrivals then come from departure delays alone. */
+  arrivals_unread_reason: "feed_unsupported" | "probe_refuted" | "probe_expired" | "never_probed" | null;
+  arrivals_last_checked: string | null;
   definition: DefinitionMeta;
 }
 

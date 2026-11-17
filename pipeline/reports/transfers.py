@@ -28,6 +28,7 @@ The definitions a reader sees are in docs/methodology.md (乗継ぎ拠点での�
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 from bisect import bisect_left
 from collections import defaultdict
@@ -35,6 +36,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal, NamedTuple
+
+from clickhouse_connect.driver.external import ExternalData
 
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import fallback_day_type, public_holidays_between
@@ -44,7 +47,7 @@ from pipeline.planned_trips import plan_ctes
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import clock_to_sec, filed_between_ch
-from pipeline.strategies.static_join import rt_field_coverage_gap
+from pipeline.strategies.static_join import CoverageGap, rt_field_gap
 from pipeline.timetable_sampling import DayType
 
 PairDayType = DayType
@@ -199,7 +202,8 @@ def _first_catchable(predicted: Sequence[int | None], planned: int, catchable_fr
     """The first predicted departure from ``planned`` on, in scheduled order,
     at or after ``catchable_from``: (its second, False); (None, False) when an
     unobserved trip comes first; (None, True) when none is left that day."""
-    for p in predicted[planned:]:
+    for i in range(planned, len(predicted)):
+        p = predicted[i]
         if p is None:
             return None, False
         if p >= catchable_from:
@@ -283,6 +287,7 @@ class Reliability:
     worst_days: list[date]
     days: list[date] = field(default_factory=list)
     no_plan_days: list[date] = field(default_factory=list)
+    arrivals_gap: CoverageGap | None = None
 
 
 def summarise(
@@ -399,18 +404,30 @@ async def _plan(
 
 
 def visits_sql() -> str:
-    """Each visit of the planned trips at the planned stop sequences over a
-    span of service days, with its predicted departure and arrival delays.
+    """Each visit of the planned (trip, stop sequence) pairs over a span of
+    service days, with its predicted departure and arrival delays.
 
     Bounded by trip and stop sequence rather than by stop id: `stop_id` is an
     optional realtime field, and a feed that leaves it out would read every
-    connection unobserved. The caller's join on (service day, trip, stop
-    sequence) keeps only the pair's stops."""
-    where = "u.trip_id IN {trips:Array(String)} AND u.stop_sequence IN {seqs:Array(UInt16)} AND " + filed_between_ch(
+    connection unobserved. The pairs come as the external table ``planned``
+    (:func:`_planned_table`), which grows with the window without meeting the
+    size limit on a bound parameter."""
+    where = "(u.trip_id, u.stop_sequence) IN (SELECT trip_id, stop_sequence FROM planned) AND " + filed_between_ch(
         "{from_date:Date}", "{to_date:Date}"
     )
     visits = build_stop_visits_ch_sql(extra_where=where)
     return f"SELECT trip_id, date, stop_sequence, dep_delay, arr_delay FROM ({visits})"
+
+
+def _planned_table(events: Iterable[StopEvent]) -> ExternalData:
+    pairs = sorted({(e.trip_id, e.stop_sequence) for e in events})
+    rows = "\n".join(json.dumps({"trip_id": t, "stop_sequence": q}, ensure_ascii=False) for t, q in pairs)
+    return ExternalData(
+        file_name="planned",
+        data=rows.encode(),
+        fmt="JSONEachRow",
+        structure=["trip_id String", "stop_sequence UInt16"],
+    )
 
 
 Visit = tuple[str, date, int, int | None, int | None]
@@ -421,13 +438,8 @@ async def _observed(ch, agency_id: int, events: Sequence[StopEvent], days: list[
         return []
     result = await ch.query(
         visits_sql(),
-        parameters={
-            "agency_id": agency_id,
-            "trips": sorted({e.trip_id for e in events}),
-            "seqs": sorted({e.stop_sequence for e in events}),
-            "from_date": days[0],
-            "to_date": days[-1],
-        },
+        parameters={"agency_id": agency_id, "from_date": days[0], "to_date": days[-1]},
+        external_data=_planned_table(events),
     )
     return [(str(t), d, int(s), dep, arr) for t, d, s, dep, arr in result.result_rows]
 
@@ -483,17 +495,29 @@ async def compute_reliability(
         arriving=False,
     )
     # Arrival delays are an optional realtime field, read only from a feed
-    # confirmed to send them (pipeline.strategies.static_join).
-    arrivals_confirmed = await rt_field_coverage_gap(pair.from_agency_id, conn) is None
+    # confirmed to send them (pipeline.strategies.static_join); the other
+    # optional fields are not read here, so their verdicts do not matter.
+    arrivals_gap = await rt_field_gap(pair.from_agency_id, conn, "arr_delay")
+    arrivals_confirmed = arrivals_gap is None
     if len(agencies) == 1:
-        a_rows = b_rows = await _observed(ch, pair.from_agency_id, [*arrivals, *departures], planned_days)
+        rows = await _observed(ch, pair.from_agency_id, [*arrivals, *departures], planned_days)
+        a_rows, b_rows = _split(rows, arrivals), _split(rows, departures)
     else:
         a_rows = await _observed(ch, pair.from_agency_id, arrivals, planned_days)
         b_rows = await _observed(ch, pair.to_agency_id, departures, planned_days)
     wanted = set(planned_days)
     arr = delays(a_rows, wanted, arriving=True, arrivals_confirmed=arrivals_confirmed)
     dep = delays(b_rows, wanted, arriving=False, arrivals_confirmed=arrivals_confirmed)
-    return await asyncio.to_thread(_reliability, arrivals, departures, arr, dep, pair.walk_sec, planned_days, no_plan)
+    result = await asyncio.to_thread(_reliability, arrivals, departures, arr, dep, pair.walk_sec, planned_days, no_plan)
+    result.arrivals_gap = arrivals_gap
+    return result
+
+
+def _split(rows: Iterable[Visit], events: Iterable[StopEvent]) -> list[Visit]:
+    """The rows of one side of a same-operator pair: those at a (trip, stop
+    sequence) that side plans."""
+    planned = {(e.trip_id, e.stop_sequence) for e in events}
+    return [r for r in rows if (r[0], r[2]) in planned]
 
 
 def _reliability(

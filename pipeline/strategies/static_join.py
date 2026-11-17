@@ -198,19 +198,25 @@ class CoverageGap:
         }
 
 
-def coverage_gap(ingest_strategy: str | None, rows: Iterable[Mapping[str, Any]], now: datetime) -> CoverageGap | None:
+def coverage_gap(
+    ingest_strategy: str | None,
+    rows: Iterable[Mapping[str, Any]],
+    now: datetime,
+    fields: tuple[RtCoverageField, ...] = RT_COVERAGE_FIELDS,
+) -> CoverageGap | None:
     """Why the gate is closed for an agency, or None when it is open.
 
     *rows* are the agency's ``rt_field_coverage_probes`` rows and *now* the
     database's clock, the one ``expires_at`` is judged by in the gate's SQL.
-    None exactly when every ``RT_COVERAGE_FIELDS`` field holds a live,
-    affirmative verdict, which is the gate's own rule. A live refutation is
+    None exactly when every one of *fields* holds a live, affirmative
+    verdict; the gate's own rule names every ``RT_COVERAGE_FIELDS`` field,
+    and a reader of one field alone may name only it. A live refutation is
     reported ahead of a lapsed field: re-checking the lapsed one cannot open
     the gate while the refutation stands.
     """
     if ingest_strategy not in RT_INGEST_STRATEGIES:
         return CoverageGap("feed_unsupported", None)
-    by_field = {r["field_name"]: r for r in rows if r["field_name"] in RT_COVERAGE_FIELDS}
+    by_field = {r["field_name"]: r for r in rows if r["field_name"] in fields}
     if not by_field:
         return CoverageGap("never_probed", None)
     last_checked = max(r["probed_at"] for r in by_field.values()).astimezone(_JST).date()
@@ -220,7 +226,7 @@ def coverage_gap(ingest_strategy: str | None, rows: Iterable[Mapping[str, Any]],
 
     if any(live(r) and not r["confirmed"] for r in by_field.values()):
         return CoverageGap("probe_refuted", last_checked)
-    if len(by_field) == len(RT_COVERAGE_FIELDS) and all(live(r) and r["confirmed"] for r in by_field.values()):
+    if len(by_field) == len(fields) and all(live(r) and r["confirmed"] for r in by_field.values()):
         return None
     return CoverageGap("probe_expired", last_checked)
 
@@ -244,8 +250,8 @@ class CoverageState:
     probes: list[Mapping[str, Any]]
     now: datetime
 
-    def gap(self) -> CoverageGap | None:
-        return coverage_gap(self.ingest_strategy, self.probes, self.now)
+    def gap(self, fields: tuple[RtCoverageField, ...] = RT_COVERAGE_FIELDS) -> CoverageGap | None:
+        return coverage_gap(self.ingest_strategy, self.probes, self.now, fields)
 
 
 async def rt_field_coverage_states(conn, agency_ids: Iterable[int]) -> dict[int, CoverageState]:
@@ -273,6 +279,15 @@ async def rt_field_coverage_gap(agency_id: int, conn) -> CoverageGap | None:
     if state is None:
         return coverage_gap(None, [], datetime.now().astimezone())
     return state.gap()
+
+
+async def rt_field_gap(agency_id: int, conn, field: RtCoverageField) -> CoverageGap | None:
+    """``coverage_gap`` for *agency_id* judged on *field* alone, for a reader
+    that needs that one optional field and none of the others."""
+    state = (await rt_field_coverage_states(conn, [agency_id])).get(agency_id)
+    if state is None:
+        return coverage_gap(None, [], datetime.now().astimezone(), (field,))
+    return state.gap((field,))
 
 
 def assess_field_coverage(cov: dict) -> dict[RtCoverageField, bool] | None:

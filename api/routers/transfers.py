@@ -35,6 +35,7 @@ from pipeline.reports.transfers import (
     compute_reliability,
 )
 from pipeline.route_catalog import route_code_sql
+from pipeline.strategies.static_join import CoverageGap, CoverageGapReason
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["transfers"])
 
@@ -98,7 +99,11 @@ class TransferReliabilityResponse(BaseModel):
     """A pair over the days of one day type. ``held_share``, the wait
     figures and ``buffer_min`` are None below ``min_samples``. Days either
     agency's loaded timetable does not plan are in ``no_plan_days`` and in
-    no other figure."""
+    no other figure. ``arrivals_unread_reason`` says why the arriving
+    agency's arrival delays were not read (its feed is not confirmed to send
+    them), so its arrivals came from departure delays alone, and a route that
+    ends at the hub reads unobserved; ``arrivals_last_checked`` is the day of
+    the check behind it."""
 
     pair: TransferPairSummary
     from_date: date
@@ -118,6 +123,8 @@ class TransferReliabilityResponse(BaseModel):
     by_day: list[DayOut]
     worst_days: list[DayOut]
     no_plan_days: list[date]
+    arrivals_unread_reason: CoverageGapReason | None = None
+    arrivals_last_checked: date | None = None
     definition: DefinitionMeta
 
 
@@ -227,26 +234,47 @@ _FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
 
 
 def _inert(text: str) -> str:
-    """*text* as a spreadsheet shows it rather than runs it: names an admin
-    or a feed wrote reach the file, and a leading quote keeps one that opens
-    like a formula a string."""
+    """A cell as a spreadsheet shows it rather than runs it: names an admin
+    or a feed wrote reach the file, and a leading quote keeps a cell that
+    opens like a formula a string."""
     return f"'{text}" if text.startswith(_FORMULA_LEADS) else text
 
 
+# Why the arriving agency's arrival delays were not read, in the file's
+# Japanese, as the board says it in the reader's language
+# (transfers.arrivals_unread.*).
+_FROM_DEPARTURES = "到着は発車の遅延から判定しています"
+_ARRIVALS_UNREAD_CSV: dict[CoverageGapReason, str] = {
+    "feed_unsupported": "到着の遅延は使っていません：この事業者の配信形式は到着の遅延を伝えられません。"
+    + _FROM_DEPARTURES,
+    "probe_refuted": "到着の遅延は使っていません：直近の確認（{day}）で、この事業者の配信は到着の遅延を"
+    "伝えていませんでした。" + _FROM_DEPARTURES,
+    "probe_expired": "到着の遅延は使っていません：配信が到着の遅延を伝えるかの確認（{day}）が期限切れです。"
+    + _FROM_DEPARTURES,
+    "never_probed": "到着の遅延は使っていません：この事業者の配信が到着の遅延を伝えるかは、まだ確認していません。"
+    + _FROM_DEPARTURES,
+}
+
+
+def _checked_day(gap: CoverageGap) -> str:
+    return "日付不明" if gap.last_checked is None else gap.last_checked.isoformat()
+
+
 def _side_text(side: PairSide) -> str:
-    route = _inert(side.route_name or side.route_code)
-    return f"{_inert(side.agency_name)} {route} 停留所ID {'・'.join(_inert(s) for s in side.stop_ids)}"
+    return f"{side.agency_name} {side.route_name or side.route_code} 停留所ID {'・'.join(side.stop_ids)}"
 
 
 def _csv_lines(pair: TransferPairSummary, r: Reliability, start: date, end: date, day_type: PairDayType) -> list[str]:
     lines = [
-        f"乗継ぎ：{_inert(pair.name)}（{_side_text(pair.arriving)} → {_side_text(pair.departing)}；"
+        f"乗継ぎ：{pair.name}（{_side_text(pair.arriving)} → {_side_text(pair.departing)}；"
         f"乗継ぎの歩行 {pair.walk_sec}秒）",
         f"期間：{start.isoformat()}〜{end.isoformat()}（{DAY_TYPE_SERVICE[day_type]}）",
         f"計画した接続 {r.total.planned}；接続できた {r.total.held}；接続できなかった {r.total.missed}；"
         f"観測なし {r.total.unobserved}；接続できた割合 {_pct(r.held_share) or '標本不足'}；"
         f"当日中に乗り継ぐ便が計画されていない到着 {r.no_onward}",
     ]
+    if r.arrivals_gap is not None:
+        lines.append(_ARRIVALS_UNREAD_CSV[r.arrivals_gap.reason].format(day=_checked_day(r.arrivals_gap)))
     if r.buffer_min is not None:
         lines.append(
             f"計画上の乗継ぎ時間を{r.buffer_min}分とっていれば、観測した{DAY_TYPE_SERVICE[day_type]}の接続の"
@@ -257,16 +285,22 @@ def _csv_lines(pair: TransferPairSummary, r: Reliability, start: date, end: date
     return lines
 
 
-def _csv_response(preamble: list[str], rows: list[list], fname: str) -> StreamingResponse:
+def csv_text(preamble: list[str], rows: list[list]) -> str:
+    """The monitoring list: a BOM, so Excel reads the file as UTF-8, one
+    preamble line per row, then the columns and a row per day."""
     buf = io.StringIO()
-    buf.write("﻿")  # BOM, so Excel reads the file as UTF-8
+    buf.write("﻿")
     w = csv.writer(buf)
     for line in preamble:
         w.writerow([_inert(line)])
     w.writerow(_CSV_COLUMNS)
     w.writerows(rows)
+    return buf.getvalue()
+
+
+def _csv_response(preamble: list[str], rows: list[list], fname: str) -> StreamingResponse:
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        iter([csv_text(preamble, rows)]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
@@ -362,5 +396,7 @@ async def transfer_reliability(
         by_day=list(by_day.values()),
         worst_days=[by_day[d] for d in result.worst_days],
         no_plan_days=result.no_plan_days,
+        arrivals_unread_reason=None if result.arrivals_gap is None else result.arrivals_gap.reason,
+        arrivals_last_checked=None if result.arrivals_gap is None else result.arrivals_gap.last_checked,
         definition=definition,
     )

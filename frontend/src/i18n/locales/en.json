@@ -2850,6 +2850,12 @@
     "no_plan_days_one": "{{count}} day is left out because one operator's loaded timetable does not plan it.",
     "no_plan_days_other": "{{count}} days are left out because one operator's loaded timetable does not plan them.",
     "no_onward_one": "{{count}} arrival had no later departure planned that day, so it plans no connection and is not counted above.",
-    "no_onward_other": "{{count}} arrivals had no later departure planned that day, so they plan no connection and are not counted above."
+    "no_onward_other": "{{count}} arrivals had no later departure planned that day, so they plan no connection and are not counted above.",
+    "arrivals_unread": {
+      "feed_unsupported": "Arrival delays are not read: this operator's feed format cannot carry them, so arrivals are judged by departure delays, and a route ending at the hub reads not observed.",
+      "probe_refuted": "Arrival delays are not read: the last check ({{date}}) found this operator's feed does not send them, so arrivals are judged by departure delays, and a route ending at the hub reads not observed.",
+      "probe_expired": "Arrival delays are not read: the check that this operator's feed sends them ({{date}}) has lapsed, so arrivals are judged by departure delays, and a route ending at the hub reads not observed.",
+      "never_probed": "Arrival delays are not read: whether this operator's feed sends them has not been checked yet, so arrivals are judged by departure delays, and a route ending at the hub reads not observed."
+    }
   }
 }

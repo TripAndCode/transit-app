@@ -121,6 +121,13 @@ function ReliabilityBody({ data }: { data: TransferReliability }) {
           <Figure label={t("transfers.held_share")} value={share(data.held_share)} />
         </dl>
         {data.no_onward > 0 && <p className="focus-muted">{t("transfers.no_onward", { count: data.no_onward })}</p>}
+        {data.arrivals_unread_reason != null && (
+          <p className="focus-muted" data-testid="transfers-arrivals-unread">
+            {t(`transfers.arrivals_unread.${data.arrivals_unread_reason}`, {
+              date: data.arrivals_last_checked == null ? "" : formatDate(data.arrivals_last_checked),
+            })}
+          </p>
+        )}
         {data.buffer_min != null ? (
           <p data-testid="transfers-recommendation">
             {t("transfers.recommendation", {

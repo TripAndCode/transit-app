@@ -126,18 +126,22 @@ def transfer_app(ch_async_client):
     return app
 
 
-@pytest.fixture(params=["stop_id_sent", "stop_id_missing"])
-def hub(request, pg_conn, ch_client):
-    """Route 29 arrives at H-A and route 2 leaves H-B. The feed sends each
-    reading's stop id, or (an optional realtime field) leaves it out."""
+def _build_hub(pg_conn, ch_client, *, stop_ids_sent: bool, same_operator: bool):
+    """Route 29 arrives at H-A and route 2 leaves H-B, run by two agencies or
+    by one. The feed sends each reading's stop id, or (an optional realtime
+    field) leaves it out."""
     from pipeline.clickhouse import insert_updates
 
-    a_stop = "H-A" if request.param == "stop_id_sent" else None
-    b_stop = "H-B" if request.param == "stop_id_sent" else None
+    a_stop = "H-A" if stop_ids_sent else None
+    b_stop = "H-B" if stop_ids_sent else None
     bus = _agency(
         pg_conn, "広島バス", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin", arrivals_confirmed=True
     )
-    tram = _agency(pg_conn, "広島電鉄", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin")
+    tram = (
+        bus
+        if same_operator
+        else _agency(pg_conn, "広島電鉄", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin")
+    )
     for trip, clock in [("a1", "10:00:00"), ("a2", "11:00:00"), ("a4", "12:00:00"), ("a3", "24:20:00")]:
         _trip(pg_conn, bus, "29", trip, "H-A", clock, shape="through")
     # A trip that starts at the hub brings nobody to it.
@@ -189,6 +193,16 @@ def hub(request, pg_conn, ch_client):
     return bus, tram, pair_id
 
 
+@pytest.fixture(params=["stop_id_sent", "stop_id_missing"])
+def hub(request, pg_conn, ch_client):
+    return _build_hub(pg_conn, ch_client, stop_ids_sent=request.param == "stop_id_sent", same_operator=False)
+
+
+@pytest.fixture
+def one_operator_hub(pg_conn, ch_client):
+    return _build_hub(pg_conn, ch_client, stop_ids_sent=True, same_operator=True)
+
+
 def _url(agency: int, pair_id: int, **params) -> str:
     query = {"from": DAY.isoformat(), "to": DAY.isoformat(), "day_type": DAY_TYPE, **params}
     return f"/api/{agency}/transfer-pairs/{pair_id}/reliability?" + "&".join(f"{k}={v}" for k, v in query.items())
@@ -227,15 +241,60 @@ async def test_trips_that_end_or_start_at_the_hub_plan_no_connection(client, hub
 
 
 @pytest.mark.asyncio
-async def test_arrival_delays_count_only_from_a_feed_confirmed_to_send_them(client, hub, pg_conn, transfer_app):
+async def test_arrival_delays_are_read_on_the_arrival_verdict_alone(client, hub, pg_conn, transfer_app):
     bus, _tram, pair_id = hub
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE rt_field_coverage_probes SET confirmed = false WHERE agency_id = %s AND field_name = 'stop_id'",
+            (bus,),
+        )
+    pg_conn.commit()
+    body = (await client.get(_url(bus, pair_id))).json()
+    total = body["total"]
+    assert (total["planned"], total["held"], total["missed"], total["unobserved"]) == (4, 2, 1, 1)
+    assert body["arrivals_unread_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_arrivals_leave_a_route_ending_at_the_hub_unobserved_and_say_why(
+    client, hub, pg_conn, ch_client, transfer_app
+):
+    from pipeline.clickhouse import insert_updates
+
+    bus, _tram, pair_id = hub
+    _trip(pg_conn, bus, "29", "a-end", "H-A", "09:00:00", shape="ends")
+    insert_updates(ch_client, bus, [_reading("29", "a-end", "H-A", "09:00:00", arr=0)])
     with pg_conn.cursor() as cur:
         cur.execute("DELETE FROM rt_field_coverage_probes WHERE agency_id = %s", (bus,))
     pg_conn.commit()
-    total = (await client.get(_url(bus, pair_id))).json()["total"]
-    # Route 29's readings at the hub are arrivals only, so with arrivals
-    # unconfirmed no connection has a reading on its arriving side.
-    assert (total["planned"], total["held"], total["missed"], total["unobserved"]) == (4, 0, 0, 4)
+    body = (await client.get(_url(bus, pair_id))).json()
+    (nine,) = [h for h in body["by_hour"] if h["hour"] == 9]
+    assert (nine["planned"], nine["unobserved"]) == (1, 1)
+    assert body["arrivals_unread_reason"] == "never_probed"
+    assert body["arrivals_last_checked"] is None
+    text = (await client.get(_url(bus, pair_id, format="csv"))).text
+    assert "到着の遅延は使っていません" in text
+
+
+@pytest.mark.asyncio
+async def test_a_pair_run_by_one_operator_reads_both_sides(client, one_operator_hub, transfer_app):
+    agency, _same, pair_id = one_operator_hub
+    body = (await client.get(_url(agency, pair_id))).json()
+    total = body["total"]
+    assert (total["planned"], total["held"], total["missed"], total["unobserved"]) == (4, 2, 1, 1)
+    assert body["waits"] == 3
+
+
+@pytest.mark.asyncio
+async def test_a_plan_of_many_trips_reaches_clickhouse_whole(hub, ch_async_client):
+    from pipeline.reports.transfers import StopEvent, _observed
+
+    bus, _tram, _pair_id = hub
+    real = [StopEvent(DAY, "a1", 4, 36000)]
+    # Far past the size at which a bound parameter travels as a form field.
+    padding = [StopEvent(DAY, f"padding-trip-{i:06d}-{'x' * 16}", 4, 36000) for i in range(8000)]
+    rows = await _observed(ch_async_client, bus, [*padding, *real], [DAY])
+    assert [(r[0], r[2]) for r in rows] == [("a1", 4)]
 
 
 @pytest.mark.asyncio
@@ -270,15 +329,15 @@ async def test_the_csv_carries_the_report_preamble_and_a_row_per_day(client, hub
 
 
 @pytest.mark.asyncio
-async def test_the_csv_writes_a_name_that_opens_like_a_formula_as_text(client, hub, pg_conn, transfer_app):
+async def test_no_csv_cell_opens_like_a_formula(client, hub, pg_conn, transfer_app):
     bus, _tram, pair_id = hub
     with pg_conn.cursor() as cur:
         cur.execute("UPDATE transfer_pairs SET name = %s WHERE id = %s", ('=HYPERLINK("http://x","y")', pair_id))
         cur.execute("UPDATE agencies SET agency_name = '+cmd' WHERE agency_id = %s", (bus,))
     pg_conn.commit()
     text = (await client.get(_url(bus, pair_id, format="csv"))).text.lstrip("\ufeff")
-    assert "'=HYPERLINK" in text and "'+cmd" in text
     rows = list(csv.reader(io.StringIO(text)))
+    assert any('=HYPERLINK("http://x","y")' in cell for row in rows for cell in row)
     assert not any(cell.startswith(("=", "+", "-", "@")) for row in rows for cell in row)
 
 

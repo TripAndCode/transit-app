@@ -61,6 +61,8 @@ const REPORT: TransferReliability = {
   by_day: [],
   worst_days: [{ day: "2026-10-14", ...tally({ planned: 3, held: 1, missed: 2, unobserved: 0, held_share: 1 / 3, small_sample: true }) }],
   no_plan_days: ["2026-10-02"],
+  arrivals_unread_reason: null,
+  arrivals_last_checked: null,
   definition: {} as TransferReliability["definition"],
 };
 
@@ -104,6 +106,21 @@ describe("TransfersView", () => {
     expect(screen.getByText(/2 arrivals had no later departure planned that day/)).toBeInTheDocument();
     const reliability = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/reliability"))!;
     expect(reliability).toContain("/api/9/transfer-pairs/3/reliability?day_type=weekday");
+  });
+
+  it("says why arrival delays were not read, beside the counts", async () => {
+    stub([PAIR], { ...REPORT, arrivals_unread_reason: "probe_refuted", arrivals_last_checked: "2026-10-20" });
+    open();
+    const note = await screen.findByTestId("transfers-arrivals-unread");
+    expect(note).toHaveTextContent("Arrival delays are not read: the last check");
+    expect(note).toHaveTextContent("2026");
+  });
+
+  it("says nothing about arrivals when they were read", async () => {
+    stub([PAIR]);
+    open();
+    await screen.findByTestId("transfers-recommendation");
+    expect(screen.queryByTestId("transfers-arrivals-unread")).toBeNull();
   });
 
   it("withholds the share, buffer and waits below the sample floor", async () => {

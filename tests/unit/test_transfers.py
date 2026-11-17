@@ -2,15 +2,18 @@
 plans and predictions."""
 
 import time
+from bisect import bisect_left
 from datetime import date, timedelta
 
 import pytest
 
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from pipeline.reports.transfers import (
     Connection,
     StopEvent,
     Tally,
+    _DayDepartures,
     buffer_needed,
     connections,
     days_of_type,
@@ -18,6 +21,9 @@ from pipeline.reports.transfers import (
     percentile_cont,
     summarise,
     worst_days,
+)
+from pipeline.reports.transfers import (
+    _connection as match_one,
 )
 
 D = date(2026, 10, 7)
@@ -165,9 +171,34 @@ def test_matching_stays_linear_in_the_departures_of_a_day():
     found, _ = connections(arrivals, departures, arr, dep, WALK)
     elapsed = time.perf_counter() - started
     assert len(found) == len(arrivals) - len(days) * 2
-    # Bounded look-back finishes in a fraction of the bound; scanning every
-    # earlier departure for each arrival takes several times it.
-    assert elapsed < 2.0
+    # A smoke check only: the bound on what each arrival reads is pinned by
+    # test_an_arrival_reads_departures_within_the_delay_clamp_only.
+    assert elapsed < 10.0
+
+
+class _Counted(list):
+    """A list that counts the elements read from it."""
+
+    reads = 0
+
+    def __getitem__(self, index):
+        value = super().__getitem__(index)
+        type(self).reads += len(value) if isinstance(index, slice) else 1
+        return value
+
+
+def test_an_arrival_reads_departures_within_the_delay_clamp_only():
+    spacing = 45
+    events = [StopEvent(D, f"b{i}", 3, 18000 + i * spacing) for i in range(1600)]
+    secs = [e.sec for e in events]
+    predicted = _Counted(e.sec for e in events)
+    day_b = _DayDepartures(events, secs, predicted)
+    arrival = a(18000 + 800 * spacing)
+    planned = bisect_left(secs, arrival.sec + WALK)
+    _Counted.reads = 0
+    match_one(arrival, day_b, planned, {k(arrival): 0}, WALK)
+    window = 2 * MAX_PLAUSIBLE_DELAY_SEC // spacing
+    assert _Counted.reads <= window // 2 + 4
 
 
 def test_the_buffer_holds_at_least_95_percent_of_needs_and_never_undercuts_the_walk():
