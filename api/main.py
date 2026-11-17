@@ -43,6 +43,7 @@ from api.routers.admin import router as admin_router
 from api.routers.admin_agencies import router as admin_agencies_router
 from api.routers.admin_ask import router as admin_ask_router
 from api.routers.admin_flags import router as admin_flags_router
+from api.routers.admin_transfers import router as admin_transfers_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.auth import router as auth_router
@@ -380,6 +381,7 @@ app.include_router(admin_router)
 app.include_router(admin_agencies_router)
 app.include_router(admin_ask_router)
 app.include_router(admin_flags_router)
+app.include_router(admin_transfers_router)
 app.include_router(admin_snapshots_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
