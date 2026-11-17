@@ -173,6 +173,9 @@ export function useTimetableRevisionDiff(
     queryFn: ({ signal }) => apiGet<TimetableRevisionDiff>(`/api/${agencyId}/timetable-revisions/diff?${query}`, { signal }),
     enabled: agencyId != null,
     staleTime: 5 * 60 * 1000,
+    // A day-type switch keeps the same revision's tabs and totals on screen
+    // while its stops load; another revision's would be wrong figures.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
   });
 }
 

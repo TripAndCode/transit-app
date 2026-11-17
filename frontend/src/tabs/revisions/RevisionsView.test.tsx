@@ -123,9 +123,47 @@ describe("RevisionsView", () => {
   });
 
   it("says a revision dropped from the list since the page loaded is no longer listed", async () => {
-    stubApi({ revisions: [APRIL] }, { available: false, reason: "no_revision", revision: null, day_types: [], stops: [] });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.includes("/diff")
+            ? new Response(JSON.stringify({ detail: "No timetable revision starts on 2026-04-01" }), { status: 404 })
+            : new Response(JSON.stringify({ revisions: [APRIL] }), { status: 200, headers: { "content-type": "application/json" } }),
+        ),
+      ),
+    );
     open();
     expect(await screen.findByText("This revision is no longer listed")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps the day-type tabs and totals on screen while another day type's stops load", async () => {
+    let releaseSaturday: () => void = () => {};
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (!url.includes("/diff")) return Promise.resolve(json({ revisions: [APRIL] }));
+        const dayType = new URL(url, "http://test").searchParams.get("day_type");
+        const body = { ...DIFF, stops: DIFF.stops.filter((s) => s.day_type === dayType) };
+        if (dayType !== "saturday") return Promise.resolve(json(body));
+        return new Promise<Response>((resolve) => {
+          releaseSaturday = () => resolve(json(body));
+        });
+      }),
+    );
+    open();
+    await screen.findByText("Station");
+    const saturday = screen.getByRole("button", { name: "Saturday" });
+    fireEvent.click(saturday);
+    expect(saturday).toBeInTheDocument();
+    expect(saturday).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("heading", { name: "By day type" })).toBeInTheDocument();
+    expect(screen.getByText("Station").closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
+    releaseSaturday();
+    expect(await screen.findByText("S2")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Saturday" })).toBe(saturday);
   });
 
   it("offers every stop past the first fifty", async () => {

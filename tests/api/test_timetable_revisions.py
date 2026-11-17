@@ -256,3 +256,8 @@ async def test_a_calendar_dates_only_timetable_that_drops_sunday_reads_as_a_know
     assert sunday["after_date"] == "2026-04-05"
     assert (sunday["departures_before"], sunday["departures_after"]) == (3, 0)
     assert sunday["stops_ended"] == 3
+
+
+async def test_day_type_applies_only_to_the_json(revised, api):
+    response = await api.get(f"/api/{revised}/timetable-revisions/diff?day_type=saturday&format=csv")
+    assert response.status_code == 400

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { apiUrl } from "../../api/client";
+import { ApiError, apiUrl } from "../../api/client";
 import { useTimetableRevisionDiff, useTimetableRevisions } from "../../api/hooks";
 import type { RevisionDayType, RevisionDayTypeSummary, RevisionStopChange, TimetableRevision } from "../../api/types";
 import { useAgencyId } from "../../api/useAgencyId";
@@ -69,12 +69,13 @@ export function RevisionsView() {
         <CsvLink href={apiUrl(`/api/${id}/timetable-revisions/diff?${csv.toString()}`)} />
       </div>
       <RevisionVersions revision={revision} />
-      {diff.isError ? (
+      {diff.error instanceof ApiError && diff.error.status === 404 ? (
+        // The list named a revision the archive no longer starts on that day.
+        <EmptyState title={t("revisions.no_revision_title")} hint={t("revisions.no_revision_hint")} />
+      ) : diff.isError ? (
         <ErrorBanner error={diff.error} onRetry={() => void diff.refetch()} />
       ) : diff.isPending ? (
         <SkeletonTable />
-      ) : diff.data.reason === "no_revision" ? (
-        <EmptyState title={t("revisions.no_revision_title")} hint={t("revisions.no_revision_hint")} />
       ) : !diff.data.available ? (
         <EmptyState title={t("revisions.no_calendar_title")} hint={t("revisions.no_calendar_hint")} />
       ) : (
@@ -97,12 +98,14 @@ export function RevisionsView() {
                 </button>
               ))}
             </div>
-            <StopTable
-              stops={diff.data.stops}
-              known={diff.data.day_types.find((s) => s.day_type === dayType)}
-              showAll={showAll}
-              onShowAll={() => setShowAll(true)}
-            />
+            <div aria-busy={diff.isPlaceholderData} style={{ opacity: diff.isPlaceholderData ? 0.5 : 1 }}>
+              <StopTable
+                stops={diff.data.stops}
+                known={diff.data.day_types.find((s) => s.day_type === dayType)}
+                showAll={showAll}
+                onShowAll={() => setShowAll(true)}
+              />
+            </div>
           </section>
           <p className="focus-muted">{t("revisions.note")}</p>
         </>

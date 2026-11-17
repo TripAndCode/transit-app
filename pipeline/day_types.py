@@ -105,8 +105,8 @@ class ServiceCalendar:
     added: Mapping[date, frozenset[str]]
     removed: Mapping[date, frozenset[str]]
     # The first and last day any row names: a weekly row's range or a
-    # calendar_dates.txt date. None for a calendar with no rows.
-    extent: tuple[date, date] | None = None
+    # calendar_dates.txt addition or removal. None for a calendar with no rows.
+    extent: tuple[date, date] | None
 
     @classmethod
     def of(cls, weekly: Iterable[WeeklyService], exceptions: Iterable[tuple[str, date, int]]) -> ServiceCalendar:
@@ -117,11 +117,12 @@ class ServiceCalendar:
         removed: dict[date, set[str]] = defaultdict(set)
         named: list[date] = [day for s in weekly for day in (s.start, s.end)]
         for service_id, d, exception_type in exceptions:
-            named.append(d)
             if exception_type == 1:
                 added[d].add(service_id)
+                named.append(d)
             elif exception_type == 2:
                 removed[d].add(service_id)
+                named.append(d)
         return cls(
             weekly,
             {d: frozenset(s) for d, s in added.items()},

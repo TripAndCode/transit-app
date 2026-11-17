@@ -6,12 +6,16 @@ from datetime import date, timedelta
 
 import pytest
 
+from pipeline import static_archive
+from pipeline.cache import DEGRADED_TTL_SECONDS
 from pipeline.day_types import ServiceCalendar, WeeklyService
 from pipeline.reports.timetable_diff import (
     Cell,
+    Comparison,
     Revision,
     Run,
     TypicalDay,
+    Unavailable,
     compare,
     counts_of,
     load_comparison,
@@ -90,6 +94,19 @@ def test_a_version_whose_calendar_is_not_kept_is_one_timetable_with_its_neighbou
         (date(2026, 10, 1), date(2026, 12, 31), "v2", "d2"),
     ]
     assert [rev.first_day for rev in revisions(found)] == [date(2026, 10, 1)]
+
+
+def test_a_run_whose_calendar_is_not_kept_carries_the_last_kept_one_across_gaps():
+    segments = [
+        (date(2026, 1, 1), date(2026, 3, 31), "v1", "c"),
+        (date(2026, 4, 10), date(2026, 6, 30), "v2", "c"),
+        (date(2026, 7, 10), date(2026, 9, 30), "v3", "c"),
+    ]
+    found = revisions(runs(segments, {("v1", "c"): "d1", ("v3", "c"): "d2"}))
+    assert [(rev.first_day, rev.before.calendar, rev.before.stem, rev.after.calendar) for rev in found] == [
+        (date(2026, 7, 10), "d1", "v1", "d2")
+    ]
+    assert found[0].before.first == date(2026, 4, 10)
 
 
 def test_one_timetable_on_both_sides_of_a_gap_is_no_revision():
@@ -327,7 +344,7 @@ def test_a_day_type_unknown_on_either_side_reports_no_changes_and_no_stop_counts
     saturday = next(s for s in result.day_types if s.day_type == "saturday")
     assert saturday.before is None
     assert (saturday.departures_before, saturday.departures_after, saturday.stops_ended) == (None, 0, None)
-    assert result.stops == []
+    assert result.stops == ()
 
 
 def test_counts_are_read_by_day_type_in_their_order():
@@ -381,6 +398,20 @@ async def test_a_comparison_is_cached_by_its_revision_calendars_included():
     by_type = {s.day_type: s for s in nothing.day_types}
     assert by_type["weekday"].departures_after == 0
     assert {s.day_type: s for s in weekdays.day_types}["weekday"].departures_after == 1
+
+
+async def test_a_calendar_its_digest_names_but_the_archive_lacks_is_unavailable_only_briefly(cache_clock, monkeypatch):
+    archive, revision = _FakeArchive(), _revision_with("weekdays")
+    real, reads = static_archive.archived_calendar_async, []
+
+    async def missing_at_first(*args):
+        reads.append(args)
+        return None if len(reads) <= 2 else await real(*args)
+
+    monkeypatch.setattr(static_archive, "archived_calendar_async", missing_at_first)
+    assert await load_comparison(archive, 1, revision) is Unavailable.NO_CALENDAR
+    cache_clock.now += DEGRADED_TTL_SECONDS + 1
+    assert isinstance(await load_comparison(archive, 1, revision), Comparison)
 
 
 @pytest.mark.parametrize("missing", ["before", "after"])

@@ -103,7 +103,8 @@ class DayTypeSummaryOut(BaseModel):
 
 class RevisionDiffResponse(BaseModel):
     """``stops`` holds the changed stops of the requested day type, or of
-    every day type when none is requested; ``day_types`` always all three."""
+    every day type when none is requested; ``day_types`` holds all three
+    whenever the comparison is available."""
 
     available: bool
     reason: Literal["no_revision", "no_calendar"] | None = None
@@ -287,8 +288,8 @@ async def revision_diff(
     ),
     day_type: RevisionDayType | None = Query(
         default=None,
-        description="JSON only: list the changed stops of this day type alone. The day-type totals and the "
-        "CSV always cover all three.",
+        description="JSON only (400 with format=csv, which covers all three): list the changed stops of this "
+        "day type alone. The day-type totals always cover all three.",
     ),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
     lang: str | None = Query(
@@ -310,6 +311,10 @@ async def revision_diff(
     day ``on`` that starts no revision is a 404."""
     if lang is not None and format != "csv":
         raise HTTPException(status_code=400, detail="lang only applies to format=csv")
+    if day_type is not None and format == "csv":
+        raise HTTPException(
+            status_code=400, detail="day_type does not apply to format=csv, which covers every day type"
+        )
     found = await load_revisions(ch, agency_id)
     if on is None:
         revision = found[-1] if found else None
