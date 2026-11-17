@@ -105,15 +105,21 @@ def typical_days(
     return {day_type: typical_day(dates, calendar) for day_type, dates in picked.items()}
 
 
-# A trip's last stop is where it arrives, so it departs nowhere; an untimed
-# stop time departs at no known hour. {services} holds each day type's
-# running services, in DAY_TYPES order. Each row is one departure: its day
-# type's index, its stop and its service-day second (pipeline.service_day), so
-# 00:40 written at face value is the same night's 24:40.
-_STOP_DEPARTURES = f"""
-    SELECT dt, stop_id, sec
+def stop_departures(*, trips: bool = False) -> str:
+    """Each departure a typical day plans, one row each: its day type's index,
+    its stop and its service-day second (pipeline.service_day), so 00:40
+    written at face value is the same night's 24:40; with *trips*, its trip
+    and route as well (NULL where the timetable names none).
+
+    A trip's last stop is where it arrives, so it departs nowhere; an untimed
+    stop time departs at no known hour. {services} holds each day type's
+    running services, in DAY_TYPES order."""
+    outer = ", trip_id, route_id" if trips else ""
+    inner = " s.trip_id AS trip_id, s.route_id AS route_id," if trips else ""
+    return f"""
+    SELECT dt, stop_id, sec{outer}
     FROM (
-        SELECT st.stop_id AS stop_id, assumeNotNull(s.service_type) AS service,
+        SELECT st.stop_id AS stop_id,{inner} assumeNotNull(s.service_type) AS service,
                assumeNotNull({service_day_offset_ch("s.scheduled_sec")}) AS sec
         FROM {static_archive.SCHEDULE} AS s
         INNER JOIN (
@@ -130,6 +136,9 @@ _STOP_DEPARTURES = f"""
         i -> has({{services:Array(Array(String))}}[i], service), range(1, {len(DAY_TYPES) + 1})
     ) AS dt
 """
+
+
+_STOP_DEPARTURES = stop_departures()
 
 # One row per day type and stop, its departures in an array.
 DEPARTURE_SECONDS_SQL = f"SELECT dt, stop_id, groupArray(sec) FROM ({_STOP_DEPARTURES}) GROUP BY dt, stop_id"

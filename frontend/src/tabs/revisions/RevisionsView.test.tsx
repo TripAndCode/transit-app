@@ -5,6 +5,9 @@ import { renderWithProviders } from "../../test/renderWithProviders";
 import type { RevisionStopChange, TimetableRevisionDiff, TimetableRevisionsResponse } from "../../api/types";
 import { RevisionsView } from "./RevisionsView";
 
+// The routes section has its own tests and endpoint; here it only has to mount.
+vi.mock("./RevisionRoutes", () => ({ RevisionRoutes: ({ dayType }: { dayType: string }) => <div>routes:{dayType}</div> }));
+
 const side = (version: string, first_day: string, last_day: string) => ({ version, content: `${version}c`.slice(0, 8), first_day, last_day });
 const APRIL = { first_day: "2026-04-01", before: side("v1", "2026-01-01", "2026-03-31"), after: side("v2", "2026-04-01", "2026-09-30") };
 const OCTOBER = { first_day: "2026-10-01", before: side("v2", "2026-04-01", "2026-09-30"), after: side("v3", "2026-10-01", "2027-03-31") };
@@ -96,8 +99,10 @@ describe("RevisionsView", () => {
     expect(row).toHaveTextContent("-40 min");
     expect(row).toHaveTextContent("7:00 -1, 8:00 +1");
 
+    expect(screen.getByText("routes:weekday")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Saturday" }));
     const ended = (await screen.findByText("S2")).closest("tr")!;
+    expect(screen.getByText("routes:saturday")).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("day_type=saturday"))).toBe(true);
     expect(ended).toHaveTextContent("no departures left");
     expect(screen.queryByText("Station")).not.toBeInTheDocument();
