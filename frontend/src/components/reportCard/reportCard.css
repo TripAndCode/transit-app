@@ -1,0 +1,42 @@
+.report-card {
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.report-card__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.report-card__head h2 { margin: 0; font-size: var(--text-md); }
+.report-card__actions { display: flex; align-items: center; gap: 8px; }
+.report-card__muted { color: var(--text-tertiary); font-size: var(--text-xs); }
+.report-card__verdict { display: flex; align-items: flex-start; gap: 16px; margin: 12px 0; flex-wrap: wrap; }
+.report-card__verdict > div:first-of-type { flex: 1; min-width: 200px; }
+.report-card__lead { margin: 0 0 4px; color: var(--text-secondary); }
+.report-card__raise { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--text-sm); }
+.report-card__rules { margin: 12px 0 0; }
+.report-card__trend ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; gap: 8px; }
+.report-card__ungraded td { color: var(--text-tertiary); }
+
+/* A letter is calm whatever it is: the good grades in the accent, every other
+   one, F included, in the neutral surface rather than an alarm colour. */
+.report-grade {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  text-align: center;
+  font-weight: 600;
+  font-size: var(--text-sm);
+  background: var(--bg-soft);
+  color: var(--text-primary);
+}
+.report-grade--good { background: var(--accent-soft); color: var(--accent-strong); }
+.report-grade--none { color: var(--text-tertiary); font-weight: 400; }
+.report-grade--large { font-size: var(--text-3xl); padding: 4px 16px; }
+
+@media print {
+  [data-print-scope="report-card"] .focus-page > :not(.report-card) { display: none !important; }
+  .report-card { break-inside: avoid; border-color: #999; }
+  .report-card__actions { display: none; }
+  .report-card .definition-meta { display: block; }
+}

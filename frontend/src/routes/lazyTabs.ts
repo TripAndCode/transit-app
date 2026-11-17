@@ -44,6 +44,8 @@ export const loadTimeTab: TabLoader = () => import("../tabs/TimeTab").then((m) =
 export const loadWhyTab: TabLoader = () => import("../tabs/WhyTab").then((m) => ({ default: m.WhyTab }));
 export const loadSlowZonesView: TabLoader = () =>
   import("../tabs/segments/SlowZonesView").then((m) => ({ default: m.SlowZonesView }));
+export const loadReportCardsView: TabLoader = () =>
+  import("../tabs/reportCards/ReportCardsView").then((m) => ({ default: m.ReportCardsView }));
 export const loadCompareTab: TabLoader = () =>
   import("../tabs/CompareTab").then((m) => ({ default: m.CompareTab }));
 export const loadBusTownTab: TabLoader = () =>
