@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import * as hooks from "../../api/hooks";
 import i18n from "../../i18n";
-import { DataEndContext } from "../../api/scope";
+import { DataEndContext, ScopeRouteContext } from "../../api/scope";
 import { useTopmostEscape } from "../../hooks/useFocusTrap";
 import { ScopeHeaderProvider, ScopePageHeader } from "./ScopePageHeader";
 import { ScopeBar } from "./ScopeBar";
@@ -275,6 +275,27 @@ describe("ScopeBar", () => {
   it("offers no reset for a change the screen does not use", () => {
     mount("?from=2026-09-01&to=2026-09-30&dow=weekday", { dow: false, service: false });
     expect(screen.queryByRole("button", { name: "Reset conditions" })).toBeNull();
+  });
+
+  it("resets only the conditions it shows, leaving one the screen hides for the screens that use it", async () => {
+    mount("?from=2026-09-01&to=2026-09-30&dow=weekday&time_band=morning", { dow: false, service: false });
+    await userEvent.click(screen.getByRole("button", { name: "Reset conditions" }));
+    expect(params().has("time_band")).toBe(false);
+    expect(params().get("dow")).toBe("weekday");
+  });
+
+  it("keeps a route's own page on its route through a reset", async () => {
+    mount(
+      "?from=2026-09-01&to=2026-09-30&routes=101&dow=weekday",
+      undefined,
+      <ScopeRouteContext value="101">
+        <ScopeBar />
+      </ScopeRouteContext>,
+      TWO_ROUTES,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Reset conditions" }));
+    expect(params().has("dow")).toBe(false);
+    expect(params().get("routes")).toBe("101");
   });
 
   it("reads the band where the screen bands the day but takes no hour, in the bar and its control", async () => {

@@ -63,9 +63,8 @@ section, each scoped to the shared date/dow/time-band/service/route filter.
 
 What the user sees/does:
 
-- **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`
-  (see Scope below), greying what the open report's `scope_applied` did not
-  use.
+- **Scope bar** — `frontend/src/components/scope/ScopeBar.tsx` (see Scope
+  below), leaving out what the open report's `scope_applied` did not use.
 - **Report list** (left column; only on screens with several reports, Time
   and the Reports documents — Why and Compare have none) — one button per
   report type the hosting screen owns; clicking sets `report={reportType}` on the current URL, keeping
@@ -438,48 +437,52 @@ response honoured that field.
   but no endpoint honours them yet: `hour` waits on `agg_route_hour_daily`,
   and none of today's aggregates carries `direction_id`.
 
-### The scope sentence
+### The scope bar
 
-The scope sentence (`frontend/src/components/scope/ScopeSentence.tsx`) is
-the app's one filter component. Pulse, Routes, Time, Why, Day types &
-agencies and the Reports summary state the scope as one sentence above their
-content, for example
-「青森市バスの全路線を、9/1〜9/28のすべての曜日・全時間帯で、定時は5分以内として見る」.
-The other screens with filters use the same sentence and controls:
+The scope bar (`frontend/src/components/scope/ScopeBar.tsx`) is the app's
+one filter component. Pulse, Routes, Time, Why, Day types & agencies and
+the Reports summary show the scope above their content as a row of
+labelled conditions, each a small label and a button holding its value,
+for example `期間 [9/1〜9/28 28日] 曜日 [すべて] 時間帯 [全日] 路線 [すべて]`.
+The order is the period, days, timetable, time, routes, stop, direction,
+on-time tolerance and early tolerance. The other screens with filters use
+the same bar and controls:
 
-| Screen | Scope | Sentence | Saved views / pin |
+| Screen | Scope | Conditions shown | Saved views / pin |
 |---|---|---|---|
-| A route's page | The URL's; the page's route is its routes baseline, never marked changed | Default; greyed by what none of its sections used (`mergeScopeApplied` over the stop delays, the summary strip's on-time list and the performance standard) | No |
-| Live | The URL's; a routes change also drops the map selection | `template="live"`: routes and tolerance, no period | No |
-| Day types & agencies ▸ Agencies | The URL's | `template="board"`: the period only; everything else it ignores is named in the note, from the endpoint's `scope_applied` | No |
-| Notebook | The open thread's `filter_ctx` (`source`), seeded from the URL's for a new thread | Default, without the tolerance clause unless the screen's URL sets one, which then shows as unused | No |
+| A route's page | The URL's; the page's route is its routes baseline, never marked changed and never reset | What any of its sections used (`mergeScopeApplied` over the stop delays, the summary strip's on-time list and the performance standard) | No |
+| Live | The URL's; a routes change also drops the map selection | `LIVE_SCOPE_APPLIED` (`tabs/map/liveScope.ts`): routes and the on-time window | No |
+| Day types & agencies ▸ Agencies | The URL's | The endpoint's `scope_applied`, and `BOARD_SCOPE_APPLIED` (the period alone) until it answers | No |
+| Notebook | The open thread's `filter_ctx` (`source`), seeded from the URL's for a new thread | `THREAD_SCOPE_APPLIED` (`tabs/ask/filterCtx.ts`): the period, days, time band, timetable and routes, the conditions a thread stores | No |
 
-`source` swaps the URL's scope for another one and its writer. `template`
-picks a sentence (`scope.sentence_live`, `scope.sentence_board`) for a screen
-the default would misdescribe. A condition such a sentence leaves out still
-appears in the not-used note when it is set and `applied` marks it unused.
+The route forecast and the delay certificate have no bar: each picks its
+own day or route, and nothing on them reads the scope.
+
+`source` swaps the URL's scope for another one and its writer.
 `actions={false}` leaves out the saved views and the pin, which hold and lay
-out the URL's scope. A sentence with a `template` never fetches the scope
-summary: its figures are one agency's over the scope's period, which the
-board (every agency) and Live (no period) do not count by, so their
+out the URL's scope. `figures={false}` keeps the controls from fetching the
+scope summary: its figures are one agency's over the scope's period, which
+the board (every agency) and Live (no period) do not count by, so their
 controls show without them.
 
 - **Words.** `scopeTokens` in `components/scope/scopePhrases.ts` turns a
-  scope into one labelled token per condition, in sentence order, and names
-  the `scope_applied` field each maps to. The locale template
-  `scope.sentence` places them with `[slot]` placeholders. Timetable, stop,
-  direction and the early tolerance appear only when set, in `[extras]`;
-  `early=any` reads 「早発も定時扱い」. A line picked by name reads as that
-  line with its variant count, not as a route count. `scopeTitle` reuses
-  the same words for saved-analysis titles. Punctuation after a token stays
-  on its line.
-- **Popovers.** Every condition but the agency is a button that opens its
-  own control in a `role="dialog"` popover (`ScopePopover.tsx`). Focus moves
-  in. Escape closes it and returns focus to the button, through the shared
-  Escape stack (`useTopmostEscape`), so an overlay opened over it takes the
-  Escape instead. A click outside, or Tab walking off its last control,
-  also closes it. It is positioned against the sentence's section and slid
-  left to fit, so it never runs off a phone screen. The controls are in `scopeControls.tsx`:
+  scope into one labelled token per condition and names the `scope_applied`
+  field each maps to. Timetable, stop, direction and the early tolerance
+  are tokens only when set. A line picked by name reads as that line with
+  its variant count, not as a route count. `scopeTitle` and the saved
+  views' suggested names reuse the same words. The bar shortens a few
+  values, since its label already names the condition: a default reads
+  すべて or 全日, a timetable its day type alone, a direction its letter,
+  and the early tolerance 「1分まで」 or 「すべて定時扱い」. The period carries its
+  day count as a hint.
+- **Popovers.** Every condition is a button that opens its own control in
+  a `role="dialog"` popover (`ScopePopover.tsx`). Focus moves in. Escape
+  closes it and returns focus to the button, through the shared Escape
+  stack (`useTopmostEscape`), so an overlay opened over it takes the Escape
+  instead. A click outside, or Tab walking off its last control, also
+  closes it. It is positioned against the bar's section and slid left to
+  fit, so it never runs off a phone screen. The controls are in
+  `scopeControls.tsx`:
   - Period: presets ending on the agency's latest data day (see the
     controls' data below), and from/to dates (a start after the end is
     ignored).
@@ -519,7 +522,8 @@ controls show without them.
     `standard_m1_p5` window, or every early departure on time (`early=any`),
     which with the 1-minute pill is the `legacy_60s` window. An `early` a link
     set to anything else presses neither and is named beneath them. The
-    `early` token in the sentence opens the same choice. The scope summary
+    bar's early condition, shown while `early` is set, opens the same
+    choice. The scope summary
     reads the scope's `early` the same way, so the curve's early bound is
     one minute unless the scope names another.
 
@@ -533,23 +537,26 @@ controls show without them.
 - **Live apply.** A single-choice change writes at once, the URL's with
   `replace`. The days and routes controls stage their picks behind their own
   Apply, so a half-built selection never reaches the screen.
-- **Greying.** Each screen passes its main response's `scope_applied`. A
-  set condition whose field is `false` renders struck through, in the
-  sentence and in the pinned strip, with 「この画面では使われない条件です」
-  as its title and accessible description. A condition at its default
-  filters nothing and is never greyed; the period always filters, so it is
-  greyed wherever `from` is `false`. A screen that passes nothing greys
-  nothing. AnalysisTab uses the forecast overview's map for
-  `route_forecast` (the route heatmap's when exactly one route is
-  selected), and a report's map only once that report's response is
-  the one on screen.
-- **Pinned strip.** 「すべての条件を表示」 shows every control inline under the
-  sentence; the choice is kept in localStorage `transit.scopePinned`.
+- **Only what the screen uses.** Each screen passes its main response's
+  `scope_applied`, and the bar leaves out a condition none of whose fields
+  the screen used (`conditionUsed`): the days control also holds the
+  timetable, and the time control sets a band or an hour, so either field
+  keeps it. A screen that passes nothing shows every condition. While the
+  screen reloads, the bar keeps its last answer, so it does not grow every
+  condition and shrink back on each change. Where a screen bands the day
+  but takes no hour, the bar and its controls read the band, whatever hour
+  a link carried. AnalysisTab passes a report's map only once that
+  report's response is the one on screen. A snapshot's statement marks an
+  unused condition differently (see `docs/features/snapshots.md`).
+- **Pinned strip.** 「すべての条件を表示」 shows the bar's controls inline
+  under it; the choice is kept in localStorage `transit.scopePinned`.
 - **Presets and reset.** Any visitor saves and loads named views, kept in
-  this browser, beside the sentence (`PresetMenu`), or on the page heading's
-  row when the page has a `ScopePageHeader`. 「条件をリセット」 appears once
-  any condition the sentence shows or its note names, the period included,
-  differs from the default, and resets the dates too.
+  this browser, beside the bar (`PresetMenu`), or on the page heading's
+  row when the page has a `ScopePageHeader`. 「リセット」 (named
+  「条件をリセット」) appears once a condition the bar shows, the period
+  included, differs from what a reset gives back, and resets the conditions
+  the bar shows. A condition the screen leaves out keeps its value for the
+  screens that use it, and a route's page keeps its own route.
 
 ## Request path
 
@@ -643,9 +650,9 @@ controls show without them.
    sorted by on-time rate, lowest first; pick another sort and expect `sort`
    to replace `report` in the URL.
 4. On Time, click "Route forecast" - expect the agency-wide grid/route list; select
-   exactly one route in the scope sentence - expect the view to switch to the
+   a route in the section's route picker - expect the view to switch to the
    per-route detail (band-collapsed grid, worst-window sentence).
-5. Change the scope sentence's period / days / time - expect the
+5. Change the scope bar's period / days / time - expect the
    selected report to refetch with new numbers.
 
 ## i18n

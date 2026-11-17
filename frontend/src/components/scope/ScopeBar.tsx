@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { useAgencies, useScopeSummary } from "../../api/hooks";
 import {
   DataEndContext,
-  SCOPE_EXTRAS_NONE,
   ScopeRouteContext,
   defaultPeriod,
   presetScopePatch,
@@ -38,14 +37,17 @@ import "./scope.css";
 
 type Condition = ScopeToken & { key: ConditionKey };
 
-const RESET: ScopePatch = {
-  ...SCOPE_EXTRAS_NONE,
-  from: null,
-  to: null,
-  dow: "all",
-  time_band: "all",
-  service: "all",
-  routes: null,
+/** What Reset gives back for each condition. */
+const RESET: Record<ConditionKey, ScopePatch> = {
+  period: { from: null, to: null },
+  days: { dow: "all" },
+  service: { service: "all" },
+  time: { time_band: "all", hour: null },
+  routes: { routes: null },
+  stop: { stop: null },
+  dir: { dir: null },
+  tolerance: { late: null },
+  early: { early: null },
 };
 
 /** The bar's order: when, then what. */
@@ -264,8 +266,10 @@ export function ScopeBar({
     }
   }
 
+  // Reset clears only what the bar shows: a condition the screen hides is
+  // never named here, and it still applies on the screens that use it.
   function reset() {
-    update(RESET);
+    update(Object.assign({}, ...conditions.filter((tok) => !(tok.key === "routes" && onPageRoute)).map((tok) => RESET[tok.key])));
     setOpenKey(null);
     sectionRef.current?.focus();
   }

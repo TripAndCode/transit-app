@@ -350,8 +350,6 @@ describe("AskTab scope bar", () => {
     Element.prototype.scrollTo = vi.fn();
   });
 
-  const region = () => screen.getByRole("region", { name: "What you're viewing" });
-
   it("seeds a new thread's conditions from the screen's scope", () => {
     renderAskTab("/agencies/5/ask?from=2026-09-01&to=2026-09-07&dow=weekend&time_band=morning");
     expect(screen.getByRole("button", { name: "Days weekends" })).toBeInTheDocument();
@@ -365,7 +363,7 @@ describe("AskTab scope bar", () => {
     expect(screen.getByRole("button", { name: /^Period/ })).toBeInTheDocument();
   });
 
-  it("shows an open thread's own conditions, with no tolerance clause, saved views or pin", () => {
+  it("shows an open thread's own conditions, with no tolerance, saved views or pin", () => {
     vi.spyOn(hooks, "useConversation").mockReturnValue({
       data: {
         conversation: {
@@ -380,7 +378,7 @@ describe("AskTab scope bar", () => {
     renderAskTab("/agencies/5/ask?conversation=t1&dow=weekend");
     expect(screen.getByRole("button", { name: "Days weekdays" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Days weekends" })).toBeNull();
-    expect(region()).not.toHaveTextContent("counting on-time");
+    expect(screen.queryByRole("button", { name: /^On time/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Show all filters" })).toBeNull();
   });
 });

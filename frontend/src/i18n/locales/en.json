@@ -288,7 +288,7 @@
     },
     "scope": {
       "title": "What this screen covers",
-      "body": "This sentence says which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any part marked ▼ to change it."
+      "body": "These controls say which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any one to change it."
     }
   },
   "forecast": {

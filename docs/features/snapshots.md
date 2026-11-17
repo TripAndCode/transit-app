@@ -100,10 +100,11 @@ Payloads over 1 MiB serialized are refused with 413.
 `/s/{id}` draws the stored responses with the live screens' own components
 (`CouncilSummaryBlock`, `ReportTable`, `DefinitionMetaBlock`), under a banner
 「スナップショット（2026-11-09 14:05 JST 作成、手法 2026.11.0）」 / "Snapshot
-(created 2026-11-09 14:05 JST, method 2026.11.0)". Beneath it the scope reads
-as the live scope sentence does, every condition the figures were computed
-under, one the screen's data did not use struck through; a Routes table also
-states its observation floor and the routes it left out, as disabled toggles.
+(created 2026-11-09 14:05 JST, method 2026.11.0)". Beneath it the scope states
+every condition the figures were computed under, since it records what was
+asked: a condition the screen's data did not use is struck through, where
+the live screens' scope bar leaves it out; a Routes table also states its observation floor and the routes it left out,
+as disabled toggles.
 Route rows are not links, since a route's live page would show today's
 figures. The table's observation counts follow the reader's statistics
 setting, as on the live screen (`analysis-tab.md` ▸ The Routes table).
