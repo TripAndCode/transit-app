@@ -24,14 +24,14 @@ CLICKHOUSE_VARS = ("CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABAS
 # A pytest run started under `make … VAR=x` hands its command-line overrides to
 # the nested make through these, and they outrank the test's `.env`.
 MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")
+STRIPPED = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_ENV, *CLICKHOUSE_VARS, *MAKE_VARS)
 
 
 def _doctor(checkout: Path, env_file: str | None) -> list[str]:
     shutil.copy(REPO_ROOT / "Makefile", checkout / "Makefile")
     if env_file is not None:
         (checkout / ".env").write_text(env_file)
-    stripped = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_ENV, *CLICKHOUSE_VARS, *MAKE_VARS)
-    env = {k: v for k, v in os.environ.items() if k not in stripped}
+    env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
     result = subprocess.run(["make", "-s", "doctor"], cwd=checkout, env=env, capture_output=True, text=True, check=True)
     return [line.strip() for line in result.stdout.splitlines()]
 
@@ -151,7 +151,7 @@ def _doctor_with_docker(checkout: Path, services: str, exit_codes: str) -> list[
         "esac\n"
     )
     fake.chmod(0o755)
-    env = {k: v for k, v in os.environ.items() if k not in SSO_VARS + CLICKHOUSE_VARS}
+    env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
     result = subprocess.run(["make", "-s", "doctor"], cwd=checkout, env=env, capture_output=True, text=True, check=True)
     return [line.strip() for line in result.stdout.splitlines()]
