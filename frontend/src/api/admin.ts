@@ -1040,3 +1040,58 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
   });
 }
 
+
+// ── Transfer pairs ───────────────────────────────────────────────────────
+
+/** A hub transfer's whole definition, as an admin writes it. Each side names
+ *  its own operator's stop ids; a null direction takes both directions. */
+export type TransferPairInput = {
+  name: string;
+  from_agency_id: number;
+  from_route_code: string;
+  from_direction: 0 | 1 | null;
+  from_stop_ids: string[];
+  to_agency_id: number;
+  to_route_code: string;
+  to_direction: 0 | 1 | null;
+  to_stop_ids: string[];
+  walk_sec: number;
+  day_types: ("weekday" | "saturday" | "sunday_holiday")[];
+  active: boolean;
+};
+
+export type AdminTransferPair = TransferPairInput & { id: number; created_at: string; updated_at: string };
+
+/** Every transfer pair, inactive ones included. */
+export function useAdminTransferPairs() {
+  return useQuery({
+    queryKey: ["adminTransferPairs"],
+    queryFn: ({ signal }) => apiGet<AdminTransferPair[]>("/api/admin/transfer-pairs", { signal }),
+  });
+}
+
+/** Mutation: create a pair, or replace one's whole definition when `id` is set. */
+export function useSaveTransferPair() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number | null; body: TransferPairInput }) =>
+      id == null
+        ? apiPost<AdminTransferPair>("/api/admin/transfer-pairs", body)
+        : apiPatch<AdminTransferPair>(`/api/admin/transfer-pairs/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminTransferPairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-pairs"] });
+    },
+  });
+}
+
+export function useDeleteTransferPair() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: number }) => apiDelete(`/api/admin/transfer-pairs/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["adminTransferPairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-pairs"] });
+    },
+  });
+}

@@ -52,6 +52,8 @@ import type {
   RevisionDayType,
   TimetableRevisionDiff,
   TimetableRevisionsResponse,
+  TransferPairsResponse,
+  TransferReliability,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -176,6 +178,32 @@ export function useTimetableRevisionDiff(
     // A day-type switch keeps the same revision's tabs and totals on screen
     // while its stops load; another revision's would be wrong figures.
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
+  });
+}
+
+/** The active transfer pairs the agency arrives or departs in. */
+export function useTransferPairs(agencyId: number | null): UseQueryResult<TransferPairsResponse> {
+  return useQuery({
+    queryKey: ["transfer-pairs", agencyId],
+    queryFn: ({ signal }) => apiGet<TransferPairsResponse>(`/api/${agencyId}/transfer-pairs`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** One pair's reliability over the last closed days of `dayType`. */
+export function useTransferReliability(
+  agencyId: number | null,
+  pairId: number | null,
+  dayType: RevisionDayType | null,
+): UseQueryResult<TransferReliability> {
+  const query = dayType == null ? "" : `?${new URLSearchParams({ day_type: dayType }).toString()}`;
+  return useQuery({
+    queryKey: ["transfer-reliability", agencyId, pairId, dayType],
+    queryFn: ({ signal }) =>
+      apiGet<TransferReliability>(`/api/${agencyId}/transfer-pairs/${pairId}/reliability${query}`, { signal }),
+    enabled: agencyId != null && pairId != null,
+    staleTime: 5 * 60 * 1000,
   });
 }
 

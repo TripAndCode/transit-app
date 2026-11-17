@@ -48,7 +48,8 @@
       "col_gap": "Gap",
       "gap_later": "{{side}} {{minutes}} min later",
       "gap_even": "No gap"
-    }
+    },
+    "mode_transfers": "Transfers"
   },
   "saved": {
     "title": "Reports",
@@ -1796,7 +1797,8 @@
         "reference": "Reference"
       },
       "ask_ops": "Ask ops",
-      "usage": "Usage"
+      "usage": "Usage",
+      "transfers": "Transfers"
     },
     "ops": {
       "title": "Ops",
@@ -2347,6 +2349,41 @@
         "signed_in": "Signed in",
         "errors": "Errors"
       }
+    },
+    "transfers": {
+      "title": "Transfer pairs",
+      "subtitle": "The hub transfers the Transfers board reads. Each side names its own operator's stop ids.",
+      "table_label": "Transfer pairs",
+      "empty": "No transfer pair yet.",
+      "col_name": "Name",
+      "col_from": "Arriving",
+      "col_to": "Departing",
+      "col_walk": "Walk",
+      "col_state": "State",
+      "col_actions": "Actions",
+      "minutes": "{{value}} min",
+      "active": "Active",
+      "inactive": "Inactive",
+      "edit": "Edit",
+      "delete": "Delete",
+      "delete_confirm": "Delete the transfer pair \"{{name}}\"?",
+      "delete_error": "The transfer pair could not be deleted.",
+      "new_title": "New transfer pair",
+      "edit_title": "Edit transfer pair",
+      "name": "Name",
+      "from_legend": "Arriving route",
+      "to_legend": "Departing route",
+      "agency": "Agency",
+      "choose_agency": "Choose an agency",
+      "route_code": "Route code",
+      "direction": "Direction",
+      "direction_both": "Both",
+      "stop_ids": "Stop ids (comma-separated)",
+      "walk": "Walk between the stops (min)",
+      "day_types": "Day types",
+      "create": "Add",
+      "save": "Save",
+      "save_error": "The transfer pair could not be saved."
     }
   },
   "palette": {
@@ -2655,5 +2692,50 @@
     "note": "Each day type is compared on one typical day from each timetable: an ordinary day of that type near the revision. A trip's last stop is not a departure. Stop names are the current timetable's; a stop it no longer has shows its ID. See the methodology for the full definitions.",
     "no_revision_title": "This revision is no longer listed",
     "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list."
+  },
+  "transfers": {
+    "pick": "Transfer",
+    "empty_title": "No transfer is defined for this agency",
+    "empty_hint": "An administrator defines the hub transfers to watch, in the admin control room.",
+    "pair_line": "{{from}} → {{to}}, allowing {{walk}} min to change stops",
+    "day_type_label": "Day type",
+    "day_type": {
+      "weekday": "Weekdays",
+      "saturday": "Saturdays",
+      "sunday_holiday": "Sundays & holidays"
+    },
+    "day_type_phrase": {
+      "weekday": "weekday",
+      "saturday": "Saturday",
+      "sunday_holiday": "Sunday and holiday"
+    },
+    "period": "{{range}} · {{dayType}}",
+    "summary_title": "Connections",
+    "planned": "Planned",
+    "held": "Held",
+    "missed": "Missed",
+    "unobserved": "Not observed",
+    "held_share": "Held share",
+    "recommendation": "A planned buffer of {{minutes}} min would have held {{share}} of observed {{dayType}} connections.",
+    "feed_based": "Feed-based: from the operators' predicted times, not observed passings.",
+    "withheld": "Fewer than {{min}} connections were observed, so no share or buffer is given.",
+    "by_hour_title": "Held and missed by hour of arrival",
+    "hour": "{{hour}}:00",
+    "counts": "{{held}} held · {{missed}} missed · {{unobserved}} not observed",
+    "legend": "Each bar is the connections planned in that hour: held, then missed, then not observed. An hour past 24 is after midnight on the same service day.",
+    "no_connections": "No connection was planned on these days.",
+    "wait_title": "Realised wait against the riders' tolerances",
+    "wait_withheld": "The wait is known for {{n}} connections, fewer than {{min}}, so its distribution is not shown.",
+    "wait_percentiles": "Median {{p50}} min, 90th percentile {{p90}} min",
+    "within": "Within {{minutes}} min",
+    "wait_note": "From stepping off to the departure caught, the walk included, over the {{n}} connections whose wait is known. The bands are the waits riders said they would tolerate.",
+    "worst_title": "Days with the most missed connections",
+    "no_missed": "No connection was observed missed.",
+    "col": {
+      "day": "Day"
+    },
+    "note": "A connection with no prediction for either bus counts as not observed, never as held or missed.",
+    "no_plan_days_one": "{{count}} day is left out because one operator's loaded timetable does not plan it.",
+    "no_plan_days_other": "{{count}} days are left out because one operator's loaded timetable does not plan them."
   }
 }

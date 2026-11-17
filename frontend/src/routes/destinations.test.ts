@@ -148,8 +148,9 @@ describe("the view a screen opens", () => {
     expect(routeTableView(search)).toEqual({ sort, order });
   });
 
-  it("compares agencies only for by=agencies", () => {
+  it("compares agencies for by=agencies, hub transfers for by=transfers, else periods", () => {
     expect(compareMode("agencies")).toBe("agencies");
+    expect(compareMode("transfers")).toBe("transfers");
     expect(compareMode("periods")).toBe("periods");
     expect(compareMode(null)).toBe("periods");
   });

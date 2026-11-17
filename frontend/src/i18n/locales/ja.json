@@ -48,7 +48,8 @@
       "col_gap": "差",
       "gap_later": "{{side}}のほうが{{minutes}}分遅い",
       "gap_even": "差なし"
-    }
+    },
+    "mode_transfers": "乗継ぎ"
   },
   "saved": {
     "title": "レポート",
@@ -1796,7 +1797,8 @@
         "reference": "参照"
       },
       "ask_ops": "Ask 運用",
-      "usage": "利用状況"
+      "usage": "利用状況",
+      "transfers": "乗継ぎ"
     },
     "ops": {
       "title": "運用状況",
@@ -2347,6 +2349,41 @@
         "signed_in": "ログイン",
         "errors": "エラー"
       }
+    },
+    "transfers": {
+      "title": "乗継ぎの定義",
+      "subtitle": "乗継ぎの比較画面で読む乗継ぎです。到着側・出発側それぞれの事業者の停留所IDを指定します。",
+      "table_label": "乗継ぎの一覧",
+      "empty": "乗継ぎはまだ定義されていません。",
+      "col_name": "名前",
+      "col_from": "到着側",
+      "col_to": "出発側",
+      "col_walk": "歩行",
+      "col_state": "状態",
+      "col_actions": "操作",
+      "minutes": "{{value}}分",
+      "active": "有効",
+      "inactive": "無効",
+      "edit": "編集",
+      "delete": "削除",
+      "delete_confirm": "乗継ぎ「{{name}}」を削除しますか？",
+      "delete_error": "乗継ぎを削除できませんでした。",
+      "new_title": "乗継ぎを追加",
+      "edit_title": "乗継ぎを編集",
+      "name": "名前",
+      "from_legend": "到着する路線",
+      "to_legend": "出発する路線",
+      "agency": "事業者",
+      "choose_agency": "事業者を選択",
+      "route_code": "路線コード",
+      "direction": "方向",
+      "direction_both": "両方向",
+      "stop_ids": "停留所ID（カンマ区切り）",
+      "walk": "停留所間の歩行（分）",
+      "day_types": "曜日区分",
+      "create": "追加",
+      "save": "保存",
+      "save_error": "乗継ぎを保存できませんでした。"
     }
   },
   "palette": {
@@ -2655,5 +2692,50 @@
     "note": "曜日区分ごとに、それぞれの時刻表から代表日1日を選んで比べます。代表日は、改正日に近い、その曜日区分のふつうの日です。便の終点は発車に数えません。停留所名は今の時刻表のもので、今の時刻表にない停留所はIDで示します。定義の詳細は算出方法の文書にあります。",
     "no_revision_title": "この改正は一覧から外れました",
     "no_revision_hint": "このページを開いた後で、事業者の時刻表の改正が変わりました。ページを読み込み直すと、今の一覧を表示します。"
+  },
+  "transfers": {
+    "pick": "乗継ぎ",
+    "empty_title": "この事業者の乗継ぎはまだ定義されていません",
+    "empty_hint": "見守る乗継ぎは、管理画面で管理者が定義します。",
+    "pair_line": "{{from}} → {{to}}（乗り換えの歩行 {{walk}}分）",
+    "day_type_label": "曜日区分",
+    "day_type": {
+      "weekday": "平日",
+      "saturday": "土曜",
+      "sunday_holiday": "日祝"
+    },
+    "day_type_phrase": {
+      "weekday": "平日",
+      "saturday": "土曜",
+      "sunday_holiday": "日祝"
+    },
+    "period": "{{range}}・{{dayType}}",
+    "summary_title": "接続",
+    "planned": "計画した接続",
+    "held": "接続できた",
+    "missed": "接続できなかった",
+    "unobserved": "観測なし",
+    "held_share": "接続できた割合",
+    "recommendation": "計画上の乗継ぎ時間を{{minutes}}分とっていれば、観測した{{dayType}}の接続の{{share}}が接続できていました。",
+    "feed_based": "フィードの予測値にもとづく値で、通過の観測値ではありません。",
+    "withheld": "観測できた接続が{{min}}件未満のため、割合と乗継ぎ時間の目安は示しません。",
+    "by_hour_title": "到着時刻帯ごとの接続",
+    "hour": "{{hour}}時台",
+    "counts": "接続 {{held}}・不接続 {{missed}}・観測なし {{unobserved}}",
+    "legend": "棒はその時刻帯に計画した接続で、接続できた・できなかった・観測なしの順です。24時台以降は同じ運行日の深夜です。",
+    "no_connections": "この期間に計画された接続はありません。",
+    "wait_title": "実際の待ち時間と許容できる待ち時間",
+    "wait_withheld": "待ち時間がわかった接続が{{n}}件で{{min}}件未満のため、分布は示しません。",
+    "wait_percentiles": "中央値 {{p50}}分、90パーセンタイル {{p90}}分",
+    "within": "{{minutes}}分以内",
+    "wait_note": "降車から乗れた便の発車までの時間（歩行を含む）で、待ち時間がわかった{{n}}件の接続から算出。区切りは利用者が許容できると答えた待ち時間です。",
+    "worst_title": "接続できなかった便の多い日",
+    "no_missed": "接続できなかった便は観測されていません。",
+    "col": {
+      "day": "日付"
+    },
+    "note": "どちらかの便の予測値がない接続は「観測なし」とし、接続できた・できなかったのどちらにも数えません。",
+    "no_plan_days_one": "{{count}}日は、どちらかの事業者の時刻表が計画していないため集計に含めていません。",
+    "no_plan_days_other": "{{count}}日は、どちらかの事業者の時刻表が計画していないため集計に含めていません。"
   }
 }

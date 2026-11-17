@@ -1567,3 +1567,63 @@ export interface TimetableRevisionDiff {
   day_types: RevisionDayTypeSummary[];
   stops: RevisionStopChange[];
 }
+
+/** One side of a transfer pair: the arriving route's stops, or the
+ *  departing one's. Each side is its own operator's stop ids. */
+export interface TransferPairSide {
+  agency_id: number;
+  agency_name: string;
+  route_code: string;
+  route_name: string | null;
+  direction: number | null;
+  stop_ids: string[];
+  stop_names: (string | null)[];
+}
+
+export interface TransferPairSummary {
+  id: number;
+  name: string;
+  arriving: TransferPairSide;
+  departing: TransferPairSide;
+  walk_sec: number;
+  day_types: RevisionDayType[];
+}
+
+export interface TransferPairsResponse {
+  pairs: TransferPairSummary[];
+}
+
+/** Connections planned and how each turned out. `held_share` is held over
+ *  held plus missed; unobserved connections are in neither. */
+export interface TransferTally {
+  planned: number;
+  held: number;
+  missed: number;
+  unobserved: number;
+  stranded: number;
+  held_share: number | null;
+  small_sample: boolean;
+}
+
+export interface TransferReliability {
+  pair: TransferPairSummary;
+  from_date: string;
+  to_date: string;
+  day_type: RevisionDayType;
+  min_samples: number;
+  buffer_share: number;
+  total: TransferTally;
+  /** Null below `min_samples` observed connections. */
+  held_share: number | null;
+  no_onward: number;
+  waits: number;
+  wait_p50_sec: number | null;
+  wait_p90_sec: number | null;
+  wait_bands: { max_sec: number; share: number }[] | null;
+  buffer_min: number | null;
+  by_hour: (TransferTally & { hour: number })[];
+  by_day: (TransferTally & { day: string })[];
+  worst_days: (TransferTally & { day: string })[];
+  no_plan_days: string[];
+  definition: DefinitionMeta;
+}
