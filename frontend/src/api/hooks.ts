@@ -49,6 +49,8 @@ import type {
   ServiceHoursResponse,
   StopBounds,
   StopBoundsResponse,
+  TimetableRevisionDiff,
+  TimetableRevisionsResponse,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -144,6 +146,37 @@ export function useReplayWindow(
   toHour: number | null,
 ): UseQueryResult<ReplayResponse> {
   return useQuery(replayWindowQueryOptions(agencyId, date, fromHour, toHour));
+}
+
+/** The agency's timetable revisions, newest first. They change only when a
+ *  timetable is loaded and kept, so a few minutes' staleness is harmless. */
+export function useTimetableRevisions(agencyId: number | null): UseQueryResult<TimetableRevisionsResponse> {
+  return useQuery({
+    queryKey: ["timetable-revisions", agencyId],
+    queryFn: ({ signal }) => apiGet<TimetableRevisionsResponse>(`/api/${agencyId}/timetable-revisions`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** The query string of one revision's comparison: `on` is its first day, or
+ *  null for the newest. */
+function revisionDiffQuery(on: string | null): string {
+  return on == null ? "" : `?on=${encodeURIComponent(on)}`;
+}
+
+/** What one revision changed at every stop. */
+export function useTimetableRevisionDiff(
+  agencyId: number | null,
+  on: string | null,
+): UseQueryResult<TimetableRevisionDiff> {
+  return useQuery({
+    queryKey: ["timetable-revision-diff", agencyId, on],
+    queryFn: ({ signal }) =>
+      apiGet<TimetableRevisionDiff>(`/api/${agencyId}/timetable-revisions/diff${revisionDiffQuery(on)}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {

@@ -97,6 +97,45 @@ class WeeklyService:
 
 
 @dataclass(frozen=True)
+class ServiceCalendar:
+    """A feed's calendar as the GTFS running rule reads it: ``calendar.txt``'s
+    weekly rows and ``calendar_dates.txt``'s additions and removals by date."""
+
+    weekly: tuple[WeeklyService, ...]
+    added: Mapping[date, frozenset[str]]
+    removed: Mapping[date, frozenset[str]]
+
+    @classmethod
+    def of(cls, weekly: Iterable[WeeklyService], exceptions: Iterable[tuple[str, date, int]]) -> ServiceCalendar:
+        """``exceptions`` are ``(service_id, date, exception_type)``: type 1 adds
+        the service on that date, type 2 removes it, and any other type is ignored."""
+        added: dict[date, set[str]] = defaultdict(set)
+        removed: dict[date, set[str]] = defaultdict(set)
+        for service_id, d, exception_type in exceptions:
+            if exception_type == 1:
+                added[d].add(service_id)
+            elif exception_type == 2:
+                removed[d].add(service_id)
+        return cls(
+            tuple(weekly),
+            {d: frozenset(s) for d, s in added.items()},
+            {d: frozenset(s) for d, s in removed.items()},
+        )
+
+    def running(self, d: date) -> frozenset[str]:
+        """The services that run on ``d``: a weekly row whose range covers it
+        with that weekday's flag set, plus the date's additions, minus its
+        removals, which win over the weekly flags."""
+        weekly = {s.service_id for s in self.weekly if s.start <= d <= s.end and s.days[d.weekday()]}
+        return frozenset((weekly | self.added.get(d, frozenset())) - self.removed.get(d, frozenset()))
+
+    def covers(self, d: date) -> bool:
+        """Whether the calendar says anything about ``d``: a weekly row's range
+        covers it, or a ``calendar_dates.txt`` row names it."""
+        return d in self.added or d in self.removed or any(s.start <= d <= s.end for s in self.weekly)
+
+
+@dataclass(frozen=True)
 class DayTypes:
     """Each date of a window filed under one of ``buckets``. ``from_calendar``
     holds the dates a classed calendar service decided; every other date of
@@ -174,16 +213,12 @@ def resolve_day_types(
     weekly = list(weekly)
     classes: dict[str, DayType | None] = {s.service_id: service_class(s.days) for s in weekly}
     in_window = [s for s in weekly if s.start <= to_date and s.end >= from_date]
-    added: dict[date, set[str]] = defaultdict(set)
-    removed: dict[date, set[str]] = defaultdict(set)
-    for service_id, d, exception_type in exceptions:
-        if exception_type == 1:
-            added[d].add(service_id)
-        elif exception_type == 2:
-            removed[d].add(service_id)
+    calendar = ServiceCalendar.of(in_window, exceptions)
 
     window_classes = {classes[s.service_id] for s in in_window or weekly}
-    window_classes |= {classes.get(sid) for d, sids in added.items() if from_date <= d <= to_date for sid in sids}
+    window_classes |= {
+        classes.get(sid) for d, sids in calendar.added.items() if from_date <= d <= to_date for sid in sids
+    }
     two_way = "weekend_holiday" in window_classes and "saturday" not in window_classes
 
     holidays = frozenset(public_holidays_between(from_date, to_date))
@@ -192,9 +227,7 @@ def resolve_day_types(
     d = from_date
     while d <= to_date:
         fallback = fallback_day_type(d, holidays)
-        running = {s.service_id for s in in_window if s.start <= d <= s.end and s.days[d.weekday()]}
-        running = (running | added.get(d, set())) - removed.get(d, set())
-        cls = _majority(running, classes, trips, fallback)
+        cls = _majority(calendar.running(d), classes, trips, fallback)
         if cls is None:
             cls = fallback
         else:

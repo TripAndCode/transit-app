@@ -210,6 +210,21 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 
 **Dwell and running time**: each stop's actual arrival and departure are its scheduled times plus the reported delays. Dwell time is the actual departure minus the actual arrival at the same stop, counted only for a departure reported after the arrival, and running time is the actual arrival minus the previous stop's actual departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
 
+### Comparing timetable revisions
+
+Each timetable revision is compared stop by stop, the timetable before it against the one after (**Reports**, “Timetable revisions”). It reads the timetables alone, never the observations.
+
+- **Revision**: a day whose timetable in force ([Matching the timetable](#matching-the-timetable)) differs from the day before's. Either its content (content hash) or its service calendar differing makes a revision; two names with the same content and calendar do not. Only versions whose content and calendar the timetable archive keeps are compared, so a timetable just loaded is compared once the next analyze has kept it.
+- **Day type**: weekday, Saturday, and Sunday & holiday. Sundays and public holidays (substitute holidays included) are Sunday & holiday. Every operator is split the same way, so the two sides of a revision are always compared on the same day types.
+- **Typical day**: one day per day type from each timetable. Up to five days of the type are read, back from the day before the revision for the timetable before it and on from the revision day for the one after. The typical day is the one running the same trips as most of them, the one nearest the revision on a tie, so a holiday or the year-end break does not stand for the type. A day the timetable's calendar says nothing about is never picked.
+- A day type with no typical day (no day of that type while that timetable is in force) is unknown, never zero.
+- **Departure**: one trip running on the typical day scheduled to leave one stop. A trip's last stop is not a departure, nor is a stop with no time given.
+- **Hour**: by scheduled departure. A departure after midnight falls in its service day's 24:00 or 25:00 hour.
+- **Departures lost and gained**: per stop and hour, the fall from before to after is lost, and the rise gained. A departure moved to another hour is one lost and one gained.
+- **Last departure**: the stop's latest departure on that day type. Its shift is given only for a stop with departures on both sides.
+- **Stops left with none**: stops with departures before and none after. On Saturday or Sunday & holiday, these are the stops that lost their weekend service.
+- Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under the old ID and gaining them under the new one. Stop names are the loaded timetable's, so a stop it no longer has shows its ID.
+
 ### What is not observed
 
 - A stop with no delay report counts neither as on time nor as late.

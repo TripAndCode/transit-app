@@ -158,6 +158,7 @@ describe("the view a screen opens", () => {
     expect(reportsView(null, "delay_certificate")).toBe("reports");
     expect(reportsView("council", null)).toBe("reports");
     expect(reportsView("saved", null)).toBe("saved");
+    expect(reportsView("revisions", null)).toBe("revisions");
     expect(reportsView(null, "ranking")).toBe("summary");
   });
 });
