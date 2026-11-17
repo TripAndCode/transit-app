@@ -165,11 +165,23 @@ def test_the_up_migrations_that_lose_data_are_pinned():
     """scripts/dev_upgrade.py stops on each of these until the owner names it,
     so a classifier change, or a new up migration that loses data, shows up
     here for review. 0045 and 0047 delete stored LLM keys of a provider the app
-    stopped supporting: user data no rebuild restores."""
+    stopped supporting, and 0108 removes the reader accounts and everything
+    stored for them: user data no rebuild restores."""
     flagged = {path.name: data_losing_tables(path.read_text()) for path in UP_FILES}
     assert {name: lost for name, lost in flagged.items() if lost} == {
         "0045_widen_user_llm_keys_providers.up.sql": ["user_llm_keys"],
         "0047_narrow_user_llm_keys_providers.up.sql": ["user_llm_keys"],
+        "0108_drop_reader_tables.up.sql": [
+            "filter_presets",
+            "user_llm_keys",
+            "user_invites",
+            "api_keys",
+            "feature_flags",
+            "login_events",
+            "users",
+            "user_activity_daily",
+            "user_activity_daily",
+        ],
     }
 
 

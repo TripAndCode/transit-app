@@ -77,7 +77,8 @@ def test_up_backfills_deleted_users_and_retires_their_keys(pg_conn):
             _insert_key(cur, "h-legacy-unaudited-key", None, "without-event@x")
         pg_conn.commit()
 
-        migrate.migrate_up(pg_conn)
+        # 0077 alone: a later migration drops api_keys and the reader accounts.
+        migrate._run_up("0077", pg_conn)
 
         with pg_conn.cursor() as cur:
             cur.execute("SELECT user_id, deleted_at FROM users")

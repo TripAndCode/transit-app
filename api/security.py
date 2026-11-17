@@ -66,11 +66,11 @@ def verify_local_login_password(password: str, stored: str | None) -> bool:
 
 
 def token_hash(raw: str) -> str:
-    """SHA-256 hex digest of an opaque bearer credential (session id, API key).
+    """SHA-256 hex digest of an opaque bearer credential, a session id.
 
-    Session ids and API keys are high-entropy random strings, so a plain
-    digest -- not a slow password KDF -- is the right primitive: there is no
-    guessable pre-image to defend against, and this runs on every request.
+    Session ids are high-entropy random strings, so a plain digest -- not a
+    slow password KDF -- is the right primitive: there is no guessable
+    pre-image to defend against, and this runs on every request.
     Storing only the digest means a copy of the database cannot be replayed
     as a login.
 
