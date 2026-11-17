@@ -62,8 +62,6 @@ export function windowLabels({ early_sec, late_sec }: OnTimeWindow, t: LabelT): 
   };
 }
 
-/** The scope as words, one token per condition, in reading order. Each
- *  token names the `scope_applied` field that says whether a screen used it. */
 function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx): string {
   if (routes.length === 0) return translationT(t, "scope.routes_all");
   if (routes.length === 1) return routeLabel(routes[0]);
@@ -120,6 +118,10 @@ export function dirLabel(dir: 0 | 1, ctx: PlaceCtx): string {
   return joined(dirParts(dir, ctx));
 }
 
+/** The scope as words, one token per condition, in the order a saved
+ *  analysis's title, a saved view's name and a snapshot's statement read
+ *  them. Each token names the `scope_applied` field that says whether a
+ *  screen used it. */
 export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   const { t, agencyName } = ctx;
   const tr = (key: string, opts?: Record<string, unknown>) => translationT(t, key, opts);

@@ -238,6 +238,24 @@ describe("AnalysisTab", () => {
     expect(bar().getByRole("button", { name: /^Days/ })).toBeInTheDocument();
   });
 
+  it("shows every condition once a new report fails, instead of the previous report's", async () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("trend"), reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, service: false } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const { router } = renderAnalysis("/agencies/1/analysis/when?report=dow_weekday&dow=weekday", ["trend", "dow_weekday"]);
+    const bar = () => within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar().queryByRole("button", { name: /^Days/ })).toBeNull();
+
+    useReport.mockReturnValue({ data: undefined, isFetching: false, error: new Error("boom"), refetch: vi.fn() } as never);
+    await act(() => router.navigate("/agencies/1/analysis/when?report=trend"));
+    expect(bar().getByRole("button", { name: /^Days/ })).toBeInTheDocument();
+  });
+
   it("lists only the report types it is given", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({

@@ -190,9 +190,12 @@ function ReportScreen({ reportType, aside }: { reportType: string | null; aside?
     isAdmin && id != null && detail.data?.report_type === "council_summary"
       ? { screen: "council_report", agencyId: id, query: reportQueryString(ctx, rankingOptions(detail.data.report_type, kept)) }
       : null;
-  // A report's map counts only once that report's response is the one on
-  // screen, not the previous report kept as placeholder data.
-  const scopeApplied = detail.data?.report_type === reportType ? detail.data.scope_applied : undefined;
+  // The bar reads a report's map only once that report has answered; while
+  // the previous report stays on screen as placeholder data, the bar keeps
+  // what it last held. A report that failed says nothing about its
+  // conditions, so the bar shows them all.
+  const scopeApplied =
+    detail.data?.report_type === reportType ? detail.data.scope_applied : detail.error ? {} : undefined;
 
   function csvHref(type: string): string {
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, kept))}&format=csv`);

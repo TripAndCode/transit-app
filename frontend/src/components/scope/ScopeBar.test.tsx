@@ -329,6 +329,7 @@ describe("ScopeBar", () => {
   it("asks for no stop names for a stop the bar leaves out on a screen without saved views", () => {
     const spy = vi.spyOn(placeLabels, "usePlaceLabels");
     mount("?from=2026-09-01&to=2026-09-30&stop=S1", { stop: false }, <ScopeBar applied={{ stop: false }} actions={false} />);
+    expect(spy).toHaveBeenCalled();
     expect(spy.mock.calls.every((call) => !call[1])).toBe(true);
   });
 
