@@ -455,8 +455,9 @@ the same bar and controls:
 | Day types & agencies ▸ Agencies | The URL's | The endpoint's `scope_applied`, and `BOARD_SCOPE_APPLIED` (the period alone) until it answers | No |
 | Notebook | The open thread's `filter_ctx` (`source`), seeded from the URL's for a new thread | `THREAD_SCOPE_APPLIED` (`tabs/ask/filterCtx.ts`): the period, days, time band, timetable and routes, the conditions a thread stores | No |
 
-The route forecast and the delay certificate have no bar: each picks its
-own day or route, and nothing on them reads the scope.
+The route forecast and the delay certificate have no bar. The forecast's
+own route picker reads and sets the shared `routes` condition, and no other
+condition reaches it; the certificate picks its own route and departure.
 
 `source` swaps the URL's scope for another one and its writer.
 `actions={false}` leaves out the saved views and the pin, which hold and lay
