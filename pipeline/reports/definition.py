@@ -78,6 +78,13 @@ _VALUE_BASIS_TEXT: dict[tuple[str, str], str] = {
     ),
 }
 
+
+def value_basis_text(basis: str, locale: str) -> str:
+    """What *basis* (``VALUE_BASIS``) means, in *locale* ("ja" or "en"), as the
+    report definitions state it."""
+    return _VALUE_BASIS_TEXT[(basis, locale)]
+
+
 # format_definition_csv_line's own Japanese-only lookups: a plain
 # {value: text} dict, so an unrecognized value raises KeyError, sourced from
 # the locale-aware dicts above's "ja" slice instead of repeating either string
