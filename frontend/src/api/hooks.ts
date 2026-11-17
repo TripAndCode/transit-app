@@ -51,6 +51,7 @@ import type {
   StopBoundsResponse,
   RevisionDayType,
   TimetableRevisionDiff,
+  TimetableRevisionRoutes,
   TimetableRevisionsResponse,
   WeatherDelayResponse,
 } from "./types";
@@ -175,6 +176,23 @@ export function useTimetableRevisionDiff(
     staleTime: 5 * 60 * 1000,
     // A day-type switch keeps the same revision's tabs and totals on screen
     // while its stops load; another revision's would be wrong figures.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
+  });
+}
+
+/** What the revision starting on `on` did to each route on `dayType`. */
+export function useTimetableRevisionRoutes(
+  agencyId: number | null,
+  on: string,
+  dayType: RevisionDayType,
+): UseQueryResult<TimetableRevisionRoutes> {
+  const query = new URLSearchParams({ on, day_type: dayType }).toString();
+  return useQuery({
+    queryKey: ["timetable-revision-routes", agencyId, on, dayType],
+    queryFn: ({ signal }) =>
+      apiGet<TimetableRevisionRoutes>(`/api/${agencyId}/timetable-revisions/routes?${query}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
   });
 }

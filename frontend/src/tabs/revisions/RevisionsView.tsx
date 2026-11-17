@@ -12,6 +12,7 @@ import { CsvLink } from "../../components/analysis/CsvLink";
 import { SHARED_TABLE, td, th } from "../../components/tableStyles";
 import { EM_DASH, formatDate, formatNumber } from "../../utils/format";
 import { REVISION_DAY_TYPES, pickRevision, serviceClock } from "./revisionModel";
+import { RevisionRoutes } from "./RevisionRoutes";
 import "../../styles/focusedAnalysis.css";
 
 /** How many changed stops the table lists before "show all". */
@@ -107,6 +108,7 @@ export function RevisionsView() {
               />
             </div>
           </section>
+          <RevisionRoutes agencyId={id} on={revision.first_day} dayType={dayType} />
           <p className="focus-muted">{t("revisions.note")}</p>
         </>
       )}
