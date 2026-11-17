@@ -35,6 +35,7 @@ from pipeline.reports.timetable_diff import (
     load_sides,
 )
 from pipeline.route_catalog import ROUTE_CODE_PATTERN, ROUTE_CODE_REPLACEMENT
+from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS
 
 
 class RouteDay(NamedTuple):
@@ -417,13 +418,16 @@ _OBSERVED_SQL = f"""
 
 
 # The newest date analyze has built: the later of the newest aggregated row
-# and the last JST day closed when analyze last ran. A day with no departure
-# (a weekday-only agency's Sunday, a stalled feed) has no row yet is built.
-_AGGREGATED_SQL = """
+# and the last service day closed when analyze last ran. A day with no
+# departure (a weekday-only agency's Sunday, a stalled feed) has no row yet is
+# built.
+_AGGREGATED_SQL = f"""
     SELECT (SELECT min(date) FROM agg_route_daily_dist WHERE agency_id = $1),
            GREATEST(
                (SELECT max(date) FROM agg_route_daily_dist WHERE agency_id = $1),
-               (SELECT (analyzed_at AT TIME ZONE 'Asia/Tokyo')::date - 1 FROM agg_meta WHERE agency_id = $1)
+               (SELECT ((analyzed_at AT TIME ZONE 'Asia/Tokyo')
+                        - INTERVAL '{SERVICE_DAY_CUTOVER_HOURS} hours')::date - 1
+                FROM agg_meta WHERE agency_id = $1)
            )
 """
 

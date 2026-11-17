@@ -280,3 +280,8 @@ async def test_the_after_side_reaches_the_last_day_analyze_built_not_only_the_ne
     analyzed = datetime(2026, 3, 9, 6, 0, tzinfo=JST)
     await aconn.execute("INSERT INTO agg_meta (agency_id, analyzed_at) VALUES ($1, $2)", aagency_id, analyzed)
     assert await aggregated_days(aconn, aagency_id) == (date(2026, 3, 2), date(2026, 3, 8))
+    # Before the 04:00 cutover, Sunday's service day is still open.
+    await aconn.execute(
+        "UPDATE agg_meta SET analyzed_at = $2 WHERE agency_id = $1", aagency_id, datetime(2026, 3, 9, 3, 0, tzinfo=JST)
+    )
+    assert await aggregated_days(aconn, aagency_id) == (date(2026, 3, 2), date(2026, 3, 7))
