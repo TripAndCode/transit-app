@@ -210,6 +210,16 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 
 **Dwell and running time**: each stop's actual arrival and departure are its scheduled times plus the reported delays. Dwell time is the actual departure minus the actual arrival at the same stop, counted only for a departure reported after the arrival, and running time is the actual arrival minus the previous stop's actual departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
 
+**Running time per timetable segment**: a segment is the pair of stops a trip calls at in turn under the timetable in force that day. Trips of one route through the same pair share one segment, whatever their variant. Its running time is, as in the split above, the actual arrival at the segment's last stop minus the actual departure from its first. A trip whose first stop of the segment the feed did not report gives no running time for it, so a time spanning two segments never counts as one. The time band is that of the scheduled departure from the first stop.
+
+- Median and 85th-percentile running time: from every running time observed in the period, linearly interpolated.
+- Scheduled running time: the mean, over the same trips, of the scheduled arrival at the last stop minus the scheduled departure from the first.
+- Padding: scheduled running time − median running time. Positive is slack, negative too tight.
+- Held-for-schedule rate: of the trips reaching the first stop on time or early, the share that stayed more than 60 seconds beyond the scheduled dwell, counting only trips whose departure was reported after the arrival and whose next stop the feed reported.
+- Terminus early-arrival rate: the share of arrivals at a trip's last stop at least 60 seconds ahead of the timetable.
+
+When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them until the operator's predictions are validated.
+
 ### Comparing timetable revisions
 
 Each timetable revision is compared stop by stop, the timetable before it against the one after (**Reports**, “Timetable revisions”). It reads the timetables alone, never the observations.
@@ -419,10 +429,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.17`. Newest first, each version with the inputs it set.
+The current method is `2026.11.18`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.18` | `agg_route_daily_dwell_run` 5 → 6, `agg_route_segment_runtime` = 1 |
 | `2026.11.17` | `feed_quality_monthly` 8 → 9 |
 | `2026.11.16` | `feed_quality_monthly` 7 → 8 |
 | `2026.11.15` | `agg_route_band_daily` = 1 |

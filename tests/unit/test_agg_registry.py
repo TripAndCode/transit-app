@@ -9,7 +9,11 @@ from pipeline import agg_registry, ch_aggregates, feed_quality
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.analyze import _AGG_TABLES_ORDERED, _STATIC_ONLY_AGG_TABLES
 
-ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {"agg_route_headway_daily", "agg_route_daily_dwell_run"}
+ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {
+    "agg_route_headway_daily",
+    "agg_route_daily_dwell_run",
+    "agg_route_segment_runtime",
+}
 
 
 def test_every_table_analyze_builds_is_registered_and_nothing_else():
@@ -151,6 +155,7 @@ def test_each_archive_joined_table_names_what_it_reads_of_its_timetable():
     assert inputs == {
         **dict.fromkeys(ch_aggregates.STATIC_JOINED_TABLES, ArchivedInput.STOP_TIMES),
         "agg_route_daily_dwell_run": ArchivedInput.STOP_TIMES,
+        "agg_route_segment_runtime": ArchivedInput.STOP_TIMES,
         "agg_route_headway_daily": ArchivedInput.MEDIANS,
     }
     assert all(t.archived_input is None for t in agg_registry.TABLES.values() if t.timetable is not Timetable.ARCHIVED)

@@ -365,12 +365,8 @@ def plausible_delay_ch(column: str) -> str:
 def build_stop_visits_ch_sql(
     *,
     extra_where: str = "",
-    include_scheduled_sec: bool = False,
     join_schedule: bool = False,
-    table: str = UPDATES_TABLE,
     stamp: static_archive.Stamp = static_archive.Stamp.INGESTED,
-    filed_where: str = "",
-    live_form: bool = False,
 ) -> str:
     """Return the SQL body that resolves one row per stop visit (a trip's stop
     on one service day) with the latest plausible departure AND the latest
@@ -429,24 +425,28 @@ def build_stop_visits_ch_sql(
     Both return `(epoch, '')`, not NULL, over no rows, which is why the
     comparison is made only when both delays are present.
 
-    `scheduled_sec`, when requested, is the latest departure poll's, as in the
-    dedup, and NULL for an arrival-only visit.
-
     `join_schedule` adds each visit's scheduled arrival and departure from the
     archived timetable its version name maps to, the loaded one when it maps to
     none (`static_archive.ScheduleJoin`, whose parameters the query then binds).
     The name is filed like the route and the service: the departure poll's when
     the visit has one, else the arrival's. A stop with no archived stop time
-    keeps its row, with NULL scheduled times.
+    keeps its row, with NULL scheduled times. The same archived trip also gives
+    the stop's id, the stop the timetable calls at just before it (its
+    sequence, id and departure time), and whether the stop is the trip's last:
+    what a running time needs to be filed under the segment the timetable
+    defines, whichever of the trip's other stops the feed reported
+    (`pipeline.agg_sql.segment_runtime_sql`). The previous stop's columns are
+    NULL at a trip's first stop, and every archived column is NULL for a stop
+    with no archived stop time.
 
-    `stamp` decides which timetable each poll is read as joined to, and
-    `filed_where` is tested on the filed row, with `live_form`, as in
+    `stamp` decides which timetable each poll is read as joined to, as in
     `build_dedup_ch_sql`.
 
     Columns, in this order (`pipeline/analyze.py` loads them by position):
     `route_code, service_type, scheduled_time, trip_id, date, stop_sequence,
-    dep_delay[, scheduled_sec], arr_delay, dep_observed[, sched_arrival_time,
-    sched_departure_time]`.
+    dep_delay, arr_delay, dep_observed[, sched_arrival_time,
+    sched_departure_time, sched_stop_id, sched_prev_stop_sequence,
+    sched_prev_stop_id, sched_prev_departure_time, sched_is_last]`.
 
     The inner query's aliases are named apart from every `updates` column, so
     a caller's `extra_where` (applied to raw rows, like the dedup's) can name
@@ -464,25 +464,22 @@ def build_stop_visits_ch_sql(
         # In the prefix both tuples share, so one index files it either way.
         schedule += ", ifNull(u.static_version_id, '')"
         filed.append((5, "static_version_id"))
-    sched_sec = ", u.scheduled_sec" if include_scheduled_sec else ""
     extra = f" AND ({extra_where})" if extra_where else ""
     filed_under = ", ".join(
         f"if(tupleElement(visit_dep, 1) IS NOT NULL, tupleElement(visit_dep, {i}), tupleElement(visit_arr, {i})) "
         f"AS {name}"
         for i, name in filed
     )
-    sched_sec_at = len(filed) + 2
     visits = (
         f"SELECT {filed_under}, visit_trip_id AS trip_id, visit_date AS date, "
         "visit_stop_sequence AS stop_sequence, tupleElement(visit_dep, 1) AS dep_delay"
-        + (f", tupleElement(visit_dep, {sched_sec_at}) AS scheduled_sec" if include_scheduled_sec else "")
-        + ", tupleElement(visit_arr, 1) AS arr_delay, "
+        ", tupleElement(visit_arr, 1) AS arr_delay, "
         "if(tupleElement(visit_dep, 1) IS NOT NULL AND tupleElement(visit_arr, 1) IS NOT NULL, "
         "toBool(visit_dep_key >= visit_first_arr_key), NULL) AS dep_observed "
         "FROM ("
         f"SELECT u.trip_id AS visit_trip_id, {static_archive.filed_date_sql(stamp)} AS visit_date, "
         "u.stop_sequence AS visit_stop_sequence, "
-        f"argMaxIf(tuple({departure_ch()}, {schedule}{sched_sec}), {latest}, {dep_ok} OR {withdrawn}) AS visit_dep, "
+        f"argMaxIf(tuple({departure_ch()}, {schedule}), {latest}, {dep_ok} OR {withdrawn}) AS visit_dep, "
         f"argMaxIf(tuple(if({withdrawn}, NULL, u.arr_delay), {schedule}), {latest}, {arr_ok} OR {withdrawn}) "
         "AS visit_arr, "
         f"maxIf({latest}, {dep_ok} AND NOT {withdrawn}) AS visit_dep_key, "
@@ -491,9 +488,6 @@ def build_stop_visits_ch_sql(
             f"u.agency_id = {{agency_id:UInt16}} AND ({dep_ok} OR {arr_ok} OR {withdrawn}) "
             f"AND {timely_reading_ch()}{extra}",
             stamp,
-            table,
-            filed_where,
-            live_form=live_form,
         )
         + f" GROUP BY u.trip_id, {static_archive.filed_date_sql(stamp)}, u.stop_sequence"
         ") WHERE tupleElement(visit_dep, 1) IS NOT NULL OR tupleElement(visit_arr, 1) IS NOT NULL"
@@ -501,14 +495,30 @@ def build_stop_visits_ch_sql(
     if not join_schedule:
         return visits
     columns = ["route_code", "service_type", "scheduled_time", "trip_id", "date", "stop_sequence", "dep_delay"]
-    columns += ["scheduled_sec"] if include_scheduled_sec else []
     columns += ["arr_delay", "dep_observed"]
-    archived = static_archive.archived_stop_times_sql(
-        "content_hash, trip_id, stop_sequence, arrival_time, departure_time"
+    # Each archived stop time beside the one before it on its trip. Every
+    # column is Nullable, so a visit the LEFT JOIN finds no stop time for reads
+    # NULL rather than the type's default.
+    archived = (
+        "(SELECT content_hash, trip_id, stop_sequence, arrival_time, departure_time, "
+        "toNullable(stop_id) AS stop_id, "
+        "lagInFrame(toNullable(stop_sequence)) OVER trip AS prev_stop_sequence, "
+        "lagInFrame(toNullable(stop_id)) OVER trip AS prev_stop_id, "
+        "lagInFrame(departure_time) OVER trip AS prev_departure_time, "
+        "toNullable(toBool(isNull(leadInFrame(toNullable(stop_sequence)) OVER trip))) AS is_last "
+        "FROM "
+        + static_archive.archived_stop_times_sql(
+            "content_hash, trip_id, stop_sequence, stop_id, arrival_time, departure_time"
+        )
+        + " WINDOW trip AS (PARTITION BY content_hash, trip_id ORDER BY stop_sequence "
+        "ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING))"
     )
     return (
         f"SELECT {', '.join(f'v.{column}' for column in columns)}, "
-        "st.arrival_time AS sched_arrival_time, st.departure_time AS sched_departure_time "
+        "st.arrival_time AS sched_arrival_time, st.departure_time AS sched_departure_time, "
+        "st.stop_id AS sched_stop_id, st.prev_stop_sequence AS sched_prev_stop_sequence, "
+        "st.prev_stop_id AS sched_prev_stop_id, st.prev_departure_time AS sched_prev_departure_time, "
+        "st.is_last AS sched_is_last "
         f"FROM (SELECT *, {static_archive.JOIN_CONTENT_SQL} AS join_content FROM ({visits})) AS v "
         f"LEFT JOIN {archived} AS st "
         "ON st.content_hash = v.join_content AND st.trip_id = v.trip_id "

@@ -6,7 +6,7 @@ optional field, what fraction of stop_time_updates carry it. With
 ``--record --agency-id N`` the same verdict is persisted, which is what
 makes an agency's ``schedule_relationship_*``/``arr_delay``/``stop_id``-
 derived reports available: the read-side gate
-(``pipeline.strategies.static_join.rt_field_coverage_confirmed``) consults
+(``pipeline.strategies.static_join.rt_field_coverage_gap``) consults
 that registry, so onboarding a newly-verified feed -- or letting a feed that
 regressed fall back to "not available" -- needs a probe run, not a code
 change and a deploy.

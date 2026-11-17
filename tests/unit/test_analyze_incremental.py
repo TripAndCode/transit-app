@@ -585,8 +585,9 @@ def test_the_dated_slice_loads_no_capture_time():
     [("aomori_regex", True), (None, True), ("static_join", False)],
 )
 def test_the_visit_slice_is_scanned_only_where_dwell_and_running_time_is_built(ingest_strategy, has_static):
-    """agg_route_daily_dwell_run is the slice's only reader: an agency without
-    both an arrival-carrying feed and a schedule never pays for the scan."""
+    """The slice's readers, agg_route_daily_dwell_run and
+    agg_route_segment_runtime, are built only for an agency with both an
+    arrival-carrying feed and a schedule; any other never pays for the scan."""
     _, ch = _changed_run(ingest_strategy=ingest_strategy, has_static=has_static)
     assert _visit_scans(ch) == []
 

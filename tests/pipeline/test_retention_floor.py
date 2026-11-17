@@ -18,7 +18,13 @@ from tests.pipeline.ch_agg_helpers import JST, ch_rows, seed_schedule, update_ro
 _NOW = datetime(2025, 3, 15, tzinfo=timezone.utc)
 _FLOOR = date(2025, 3, 1)
 _DATED = sorted(_INCREMENTAL_AGG_TABLES)
-_UNSEEDED = {"agg_route_headway_daily", "agg_schedule_revision_daily", "agg_service_delivered_daily"}
+# seed_schedule's trips call at one stop, so they have no segment either.
+_UNSEEDED = {
+    "agg_route_headway_daily",
+    "agg_route_segment_runtime",
+    "agg_schedule_revision_daily",
+    "agg_service_delivered_daily",
+}
 
 
 @pytest.fixture(params=[None, "static_join"])

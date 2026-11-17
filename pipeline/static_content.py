@@ -10,7 +10,8 @@ each timetable it keeps by it."""
 #
 #   static_stop_times  which physical stop a trip visit maps to
 #     (agg_stop_daily, agg_route_stop_daily, agg_stop_routes), its scheduled
-#     arrival/departure (agg_route_daily_dwell_run), and the departures
+#     arrival/departure (agg_route_daily_dwell_run), the stop pairs and their
+#     scheduled times (agg_route_segment_runtime), and the departures
 #     agg_route_headway's scheduled median is built from.
 #   static_trips       the route_id bridge to that median, plus the service_id
 #     it picks each route's dominant calendar by — a reimport that only

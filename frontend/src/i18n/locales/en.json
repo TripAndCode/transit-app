@@ -1113,7 +1113,10 @@
       "actual_run_p85_min": "Actual run p85 (min)",
       "padding_min": "Padding (min)",
       "time_adjustment_rate": "Held for schedule (rate)",
-      "low_confidence": "Margin"
+      "low_confidence": "Margin",
+      "from_stop": "From stop",
+      "to_stop": "To stop",
+      "time_band": "Time band"
     },
     "low_confidence_mark": "wide margin",
     "more_rows": "…and {{count}} more",

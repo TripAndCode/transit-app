@@ -24,8 +24,8 @@
     "version": 5
   },
   "agg_route_daily_dwell_run": {
-    "hash": "d2be2e63822655b9c119ea7f677cada851dcdc69acec1161c3ec363f0a189265",
-    "version": 5
+    "hash": "fba332f2a5188dc434ff72e442bb29c69545390c6178a5d1b709cef8001a189c",
+    "version": 6
   },
   "agg_route_headway": {
     "hash": "59c7793e572155272ca955c345ed97630c829327b3baf9656f9f2a27c43edb92",
@@ -42,6 +42,10 @@
   "agg_route_hour_dow": {
     "hash": "e2940bed50f5894091be2b08f92a0fd2eb1216378085ed43c03734283ba8f46a",
     "version": 6
+  },
+  "agg_route_segment_runtime": {
+    "hash": "e252f3cff4161d1c94f7ed73a2235a3b7681bc764fab1e1ba3588251bc767e36",
+    "version": 1
   },
   "agg_route_stats": {
     "hash": "589e3bfa9bf02dfb70ff8672858582b526a8e3f6cda28261ff4bc20eabd5f3d3",
