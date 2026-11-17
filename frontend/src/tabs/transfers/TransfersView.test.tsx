@@ -44,7 +44,7 @@ const REPORT: TransferReliability = {
   buffer_share: 0.95,
   total: tally(),
   held_share: 30 / 36,
-  no_onward: 0,
+  no_onward: 2,
   waits: 34,
   wait_p50_sec: 360,
   wait_p90_sec: 960,
@@ -101,6 +101,7 @@ describe("TransfersView", () => {
     const worst = screen.getByRole("heading", { name: "Days with the most missed connections" }).parentElement!;
     expect(within(worst).getAllByRole("row")).toHaveLength(2);
     expect(screen.getByText(/1 day is left out/)).toBeInTheDocument();
+    expect(screen.getByText(/2 arrivals had no later departure planned that day/)).toBeInTheDocument();
     const reliability = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/reliability"))!;
     expect(reliability).toContain("/api/9/transfer-pairs/3/reliability?day_type=weekday");
   });

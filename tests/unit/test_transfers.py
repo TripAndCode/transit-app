@@ -1,7 +1,8 @@
 """The transfer-reliability rules (pipeline.reports.transfers) on hand-built
 plans and predictions."""
 
-from datetime import date
+import time
+from datetime import date, timedelta
 
 import pytest
 
@@ -126,10 +127,47 @@ def test_connections_stay_inside_their_service_day():
     assert (c.day, c.hour, c.outcome, c.wait_sec) == (D, 24, "held", 900)
 
 
+ROWS = [("a1", D, 5, 30, None), ("a2", D, 5, 30, 10), ("b1", D, 3, None, 50), ("x", date(2026, 1, 1), 1, 5, 5)]
+
+
 def test_arrival_delay_falls_back_to_departure_and_b_reads_departures_only():
-    rows = [("a1", D, 5, 30, None), ("a2", D, 5, 30, 10), ("b1", D, 3, None, 50), ("x", date(2026, 1, 1), 1, 5, 5)]
-    assert delays(rows, {D}, arriving=True) == {(D, "a1", 5): 30, (D, "a2", 5): 10, (D, "b1", 3): 50}
-    assert delays(rows, {D}, arriving=False) == {(D, "a1", 5): 30, (D, "a2", 5): 30}
+    arriving = delays(ROWS, {D}, arriving=True, arrivals_confirmed=True)
+    assert arriving == {(D, "a1", 5): 30, (D, "a2", 5): 10, (D, "b1", 3): 50}
+    departing = delays(ROWS, {D}, arriving=False, arrivals_confirmed=True)
+    assert departing == {(D, "a1", 5): 30, (D, "a2", 5): 30}
+
+
+def test_arrival_delays_are_ignored_unless_the_feed_is_confirmed_to_send_them():
+    assert delays(ROWS, {D}, arriving=True, arrivals_confirmed=False) == {(D, "a1", 5): 30, (D, "a2", 5): 30}
+
+
+def test_an_earlier_late_trip_saves_a_rider_the_last_planned_trip_would_strand():
+    arrival, late_earlier, last = a(36000), b(35900, "b0"), b(36300, "b1")
+    c = one(arrival, [late_earlier, last], {k(arrival): 600}, {k(late_earlier): 1200, k(last): 0})
+    assert c.outcome == "missed"
+    assert not c.stranded
+    assert c.wait_sec == 35900 + 1200 - 36600
+
+
+def test_an_earlier_late_trip_does_not_settle_a_wait_an_unobserved_trip_leaves_open():
+    arrival, late_earlier, planned, unseen = a(36000), b(35900, "b0"), b(36300, "b1"), b(36900, "b2")
+    c = one(arrival, [late_earlier, planned, unseen], {k(arrival): 600}, {k(late_earlier): 1200, k(planned): 0})
+    assert c.outcome == "missed" and c.wait_sec is None and not c.stranded
+
+
+def test_matching_stays_linear_in_the_departures_of_a_day():
+    days = [date(2026, 1, 1) + timedelta(days=i) for i in range(16)]
+    arrivals = [StopEvent(d, f"a{i}", 5, 18000 + i * 45) for d in days for i in range(1600)]
+    departures = [StopEvent(d, f"b{i}", 3, 18060 + i * 45) for d in days for i in range(1600)]
+    arr = {k(e): (i % 7) * 60 for i, e in enumerate(arrivals)}
+    dep = {k(e): (i % 5) * 60 for i, e in enumerate(departures)}
+    started = time.perf_counter()
+    found, _ = connections(arrivals, departures, arr, dep, WALK)
+    elapsed = time.perf_counter() - started
+    assert len(found) == len(arrivals) - len(days) * 2
+    # Bounded look-back finishes in a fraction of the bound; scanning every
+    # earlier departure for each arrival takes several times it.
+    assert elapsed < 2.0
 
 
 def test_the_buffer_holds_at_least_95_percent_of_needs_and_never_undercuts_the_walk():

@@ -222,15 +222,30 @@ def _pct(share: float | None) -> str:
     return "" if share is None else f"{share * 100:.1f}"
 
 
+# A spreadsheet runs a cell that starts with one of these as a formula.
+_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _inert(text: str) -> str:
+    """*text* as a spreadsheet shows it rather than runs it: names an admin
+    or a feed wrote reach the file, and a leading quote keeps one that opens
+    like a formula a string."""
+    return f"'{text}" if text.startswith(_FORMULA_LEADS) else text
+
+
+def _side_text(side: PairSide) -> str:
+    route = _inert(side.route_name or side.route_code)
+    return f"{_inert(side.agency_name)} {route} 停留所ID {'・'.join(_inert(s) for s in side.stop_ids)}"
+
+
 def _csv_lines(pair: TransferPairSummary, r: Reliability, start: date, end: date, day_type: PairDayType) -> list[str]:
-    a, b = pair.arriving, pair.departing
     lines = [
-        f"乗継ぎ：{pair.name}（{a.agency_name} {a.route_name or a.route_code} 停留所ID {'・'.join(a.stop_ids)} → "
-        f"{b.agency_name} {b.route_name or b.route_code} 停留所ID {'・'.join(b.stop_ids)}；"
+        f"乗継ぎ：{_inert(pair.name)}（{_side_text(pair.arriving)} → {_side_text(pair.departing)}；"
         f"乗継ぎの歩行 {pair.walk_sec}秒）",
         f"期間：{start.isoformat()}〜{end.isoformat()}（{DAY_TYPE_SERVICE[day_type]}）",
         f"計画した接続 {r.total.planned}；接続できた {r.total.held}；接続できなかった {r.total.missed}；"
-        f"観測なし {r.total.unobserved}；接続できた割合 {_pct(r.held_share) or '標本不足'}",
+        f"観測なし {r.total.unobserved}；接続できた割合 {_pct(r.held_share) or '標本不足'}；"
+        f"当日中に乗り継ぐ便が計画されていない到着 {r.no_onward}",
     ]
     if r.buffer_min is not None:
         lines.append(
@@ -247,7 +262,7 @@ def _csv_response(preamble: list[str], rows: list[list], fname: str) -> Streamin
     buf.write("﻿")  # BOM, so Excel reads the file as UTF-8
     w = csv.writer(buf)
     for line in preamble:
-        w.writerow([line])
+        w.writerow([_inert(line)])
     w.writerow(_CSV_COLUMNS)
     w.writerows(rows)
     return StreamingResponse(

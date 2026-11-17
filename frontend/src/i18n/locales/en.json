@@ -2848,6 +2848,8 @@
     },
     "note": "A connection with no prediction for either bus counts as not observed, never as held or missed.",
     "no_plan_days_one": "{{count}} day is left out because one operator's loaded timetable does not plan it.",
-    "no_plan_days_other": "{{count}} days are left out because one operator's loaded timetable does not plan them."
+    "no_plan_days_other": "{{count}} days are left out because one operator's loaded timetable does not plan them.",
+    "no_onward_one": "{{count}} arrival had no later departure planned that day, so it plans no connection and is not counted above.",
+    "no_onward_other": "{{count}} arrivals had no later departure planned that day, so they plan no connection and are not counted above."
   }
 }

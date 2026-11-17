@@ -28,7 +28,3 @@ CREATE TABLE IF NOT EXISTS transfer_pairs (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- The pair list a report screen reads is the pairs touching its agency.
-CREATE INDEX IF NOT EXISTS idx_transfer_pairs_from_agency ON transfer_pairs (from_agency_id);
-CREATE INDEX IF NOT EXISTS idx_transfer_pairs_to_agency ON transfer_pairs (to_agency_id);

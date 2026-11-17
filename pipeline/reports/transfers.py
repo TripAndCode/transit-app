@@ -17,15 +17,17 @@ not refiled under the version in force (pipeline.live_filing.filing) as the
 delay reports read them: refiling rewrites a row's schedule and route, never
 its delay, and the plan this joins to is the loaded timetable's, so a row
 refiled under another version would be judged against two timetables at once.
-A's arrival reads the visit's arrival delay, else its departure delay; a bus
-leaves no earlier than it arrives, so the fallback can only make A look later
-and a connection look less safe. B reads the departure delay only.
+A's arrival reads the visit's arrival delay where the agency's feed is
+confirmed to send arrivals, else its departure delay; a bus leaves no earlier
+than it arrives, so the fallback can only make A look later and a connection
+look less safe. B reads the departure delay only.
 
 The definitions a reader sees are in docs/methodology.md (乗継ぎ拠点での接続).
 """
 
 from __future__ import annotations
 
+import asyncio
 import math
 from bisect import bisect_left
 from collections import defaultdict
@@ -36,12 +38,13 @@ from typing import Literal, NamedTuple
 
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import fallback_day_type, public_holidays_between
-from pipeline.db import build_stop_visits_ch_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_stop_visits_ch_sql
 from pipeline.live_filing import require_retained
 from pipeline.planned_trips import plan_ctes
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import clock_to_sec, filed_between_ch
+from pipeline.strategies.static_join import rt_field_coverage_gap
 from pipeline.timetable_sampling import DayType
 
 PairDayType = DayType
@@ -103,6 +106,27 @@ class Connection(NamedTuple):
     stranded: bool
 
 
+class _DayDepartures(NamedTuple):
+    """One service day's B departures in scheduled order, with each one's
+    scheduled second and predicted second (None where unobserved)."""
+
+    events: list[StopEvent]
+    secs: list[int]
+    predicted: list[int | None]
+
+
+def _departures_by_day(departures: Sequence[StopEvent], dep_delay: Mapping[Key, int]) -> dict[date, _DayDepartures]:
+    grouped: dict[date, list[StopEvent]] = defaultdict(list)
+    for d in departures:
+        grouped[d.day].append(d)
+    out = {}
+    for day, events in grouped.items():
+        events.sort(key=lambda e: (e.sec, e.trip_id, e.stop_sequence))
+        predicted = [None if (delay := dep_delay.get(_key(e))) is None else e.sec + delay for e in events]
+        out[day] = _DayDepartures(events, [e.sec for e in events], predicted)
+    return out
+
+
 def connections(
     arrivals: Sequence[StopEvent],
     departures: Sequence[StopEvent],
@@ -123,69 +147,63 @@ def connections(
     read in scheduled order from the planned one; an unobserved trip met
     before a catchable one leaves the wait unknown, since it may have been
     the one caught. An earlier trip predicted to leave late enough to catch
-    counts too: a rider would take it.
+    counts too: a rider would take it, even when no later trip runs.
+
+    Predicted delays lie within ``MAX_PLAUSIBLE_DELAY_SEC`` of the schedule
+    (pipeline.db.plausible_delay_ch), so only the earlier trips scheduled
+    within that reach of the catchable moment are looked at, and the forward
+    scan ends at the first observed trip scheduled that far past it.
     """
-    by_day_b: dict[date, list[StopEvent]] = defaultdict(list)
-    for d in departures:
-        by_day_b[d.day].append(d)
-    for events in by_day_b.values():
-        events.sort(key=lambda e: (e.sec, e.trip_id, e.stop_sequence))
+    by_day_b = _departures_by_day(departures, dep_delay)
+    empty = _DayDepartures([], [], [])
     out: list[Connection] = []
     no_onward = 0
     for a in sorted(arrivals, key=lambda e: (e.day, e.sec, e.trip_id, e.stop_sequence)):
-        day_b = by_day_b.get(a.day, [])
-        planned = bisect_left([b.sec for b in day_b], a.sec + walk_sec)
-        if planned == len(day_b):
+        day_b = by_day_b.get(a.day, empty)
+        planned = bisect_left(day_b.secs, a.sec + walk_sec)
+        if planned == len(day_b.secs):
             no_onward += 1
             continue
-        out.append(_connection(a, day_b, planned, arr_delay, dep_delay, walk_sec))
+        out.append(_connection(a, day_b, planned, arr_delay, walk_sec))
     return out, no_onward
 
 
 def _connection(
-    a: StopEvent,
-    day_b: Sequence[StopEvent],
-    planned: int,
-    arr_delay: Mapping[Key, int],
-    dep_delay: Mapping[Key, int],
-    walk_sec: int,
+    a: StopEvent, day_b: _DayDepartures, planned: int, arr_delay: Mapping[Key, int], walk_sec: int
 ) -> Connection:
     hour = a.sec // 3600
     a_delay = arr_delay.get(_key(a))
-    b = day_b[planned]
-    b_delay = dep_delay.get(_key(b))
-    if a_delay is None or b_delay is None:
+    b_predicted = day_b.predicted[planned]
+    if a_delay is None or b_predicted is None:
         return Connection(a.day, hour, "unobserved", None, None, False)
     alighted = a.sec + a_delay
     catchable_from = alighted + walk_sec
-    held = b.sec + b_delay >= catchable_from
-    caught, stranded = _first_catchable(day_b, planned, dep_delay, catchable_from)
-    earlier = [
-        e.sec + dep_delay[_key(e)]
-        for e in day_b[:planned]
-        if _key(e) in dep_delay and e.sec + dep_delay[_key(e)] >= catchable_from
-    ]
-    if caught is not None and earlier:
-        caught = min(caught, *earlier)
+    b_delay = b_predicted - day_b.secs[planned]
+    reach = bisect_left(day_b.secs, catchable_from - MAX_PLAUSIBLE_DELAY_SEC, hi=planned)
+    earlier = [p for p in day_b.predicted[reach:planned] if p is not None and p >= catchable_from]
+    caught, stranded = _first_catchable(day_b.predicted, planned, catchable_from)
+    if earlier and (caught is not None or stranded):
+        caught = min(earlier) if caught is None else min(caught, *earlier)
+        stranded = False
     return Connection(
         a.day,
         hour,
-        "held" if held else "missed",
+        "held" if b_predicted >= catchable_from else "missed",
         None if caught is None else caught - alighted,
         a_delay - b_delay + walk_sec,
         stranded,
     )
 
 
-def _first_catchable(
-    day_b: Sequence[StopEvent], planned: int, dep_delay: Mapping[Key, int], catchable_from: int
-) -> tuple[int | None, bool]:
-    for e in day_b[planned:]:
-        delay = dep_delay.get(_key(e))
-        if delay is None:
+def _first_catchable(predicted: Sequence[int | None], planned: int, catchable_from: int) -> tuple[int | None, bool]:
+    """The first predicted departure from ``planned`` on, in scheduled order,
+    at or after ``catchable_from``: (its second, False); (None, False) when an
+    unobserved trip comes first; (None, True) when none is left that day."""
+    for p in predicted[planned:]:
+        if p is None:
             return None, False
-        if e.sec + delay >= catchable_from:
-            return e.sec + delay, False
+        if p >= catchable_from:
+            return p, False
     return None, True
 
 
@@ -323,6 +341,9 @@ def days_of_type(from_date: date, to_date: date, day_type: PairDayType) -> list[
     return [d for d in days if fallback_day_type(d, holidays) == day_type]
 
 
+# A trip's first stop is where it starts, so nobody arrives there on it, and
+# its last is where it ends, so it departs nowhere (the rule of
+# pipeline.timetable_sampling.stop_departures): $8 says which side is read.
 _PLAN_SQL = (
     "WITH"
     + plan_ctes("ARRAY[$1::int]", "$2::date", "$3::date")
@@ -331,10 +352,17 @@ _PLAN_SQL = (
     FROM running r
     JOIN static_trips t ON t.agency_id = r.agency_id AND t.service_id = r.service_id
     JOIN static_stop_times st ON st.agency_id = t.agency_id AND st.trip_id = t.trip_id
+    JOIN LATERAL (
+        SELECT min(x.stop_sequence) AS first_sequence, max(x.stop_sequence) AS last_sequence
+        FROM static_stop_times x
+        WHERE x.agency_id = t.agency_id AND x.trip_id = t.trip_id
+    ) ends ON TRUE
     WHERE {route_code_sql("t.route_id")} = $4
       AND ($5::smallint IS NULL OR t.direction_id = $5)
       AND st.stop_id = ANY($6::text[])
       AND r.day = ANY($7::date[])
+      AND CASE WHEN $8::bool THEN st.stop_sequence > ends.first_sequence
+               ELSE st.stop_sequence < ends.last_sequence END
     """
 )
 
@@ -360,7 +388,7 @@ async def _plan(
     *,
     arriving: bool,
 ) -> list[StopEvent]:
-    rows = await conn.fetch(_PLAN_SQL, agency_id, days[0], days[-1], route_code, direction, list(stops), days)
+    rows = await conn.fetch(_PLAN_SQL, agency_id, days[0], days[-1], route_code, direction, list(stops), days, arriving)
     events = []
     for r in rows:
         first, second = (r["arrival_time"], r["departure_time"])
@@ -371,24 +399,32 @@ async def _plan(
 
 
 def visits_sql() -> str:
-    """Each visit of one route at the pair's stops over a span of service
-    days, with its predicted departure and arrival delays."""
-    where = "u.route_code = {route:String} AND u.stop_id IN {stops:Array(String)} AND " + filed_between_ch(
+    """Each visit of the planned trips at the planned stop sequences over a
+    span of service days, with its predicted departure and arrival delays.
+
+    Bounded by trip and stop sequence rather than by stop id: `stop_id` is an
+    optional realtime field, and a feed that leaves it out would read every
+    connection unobserved. The caller's join on (service day, trip, stop
+    sequence) keeps only the pair's stops."""
+    where = "u.trip_id IN {trips:Array(String)} AND u.stop_sequence IN {seqs:Array(UInt16)} AND " + filed_between_ch(
         "{from_date:Date}", "{to_date:Date}"
     )
     visits = build_stop_visits_ch_sql(extra_where=where)
     return f"SELECT trip_id, date, stop_sequence, dep_delay, arr_delay FROM ({visits})"
 
 
-async def _observed(
-    ch, agency_id: int, route_code: str, stops: Sequence[str], days: list[date]
-) -> list[tuple[str, date, int, int | None, int | None]]:
+Visit = tuple[str, date, int, int | None, int | None]
+
+
+async def _observed(ch, agency_id: int, events: Sequence[StopEvent], days: list[date]) -> list[Visit]:
+    if not events:
+        return []
     result = await ch.query(
         visits_sql(),
         parameters={
             "agency_id": agency_id,
-            "route": route_code,
-            "stops": list(stops),
+            "trips": sorted({e.trip_id for e in events}),
+            "seqs": sorted({e.stop_sequence for e in events}),
             "from_date": days[0],
             "to_date": days[-1],
         },
@@ -396,16 +432,15 @@ async def _observed(
     return [(str(t), d, int(s), dep, arr) for t, d, s, dep, arr in result.result_rows]
 
 
-def delays(
-    rows: Iterable[tuple[str, date, int, int | None, int | None]], wanted: set[date], *, arriving: bool
-) -> dict[Key, int]:
-    """Each observed visit's delay on the wanted days: the arrival's, else the
-    departure's, for A; the departure's for B."""
+def delays(rows: Iterable[Visit], wanted: set[date], *, arriving: bool, arrivals_confirmed: bool) -> dict[Key, int]:
+    """Each observed visit's delay on the wanted days. For A, the arrival's
+    where the agency's feed is confirmed to send arrivals, else the
+    departure's; for B, the departure's."""
     out: dict[Key, int] = {}
     for trip_id, day, seq, dep, arr in rows:
         if day not in wanted:
             continue
-        value = (arr if arr is not None else dep) if arriving else dep
+        value = arr if arriving and arrivals_confirmed and arr is not None else dep
         if value is not None:
             out[(day, trip_id, seq)] = int(value)
     return out
@@ -419,9 +454,12 @@ async def compute_reliability(
     days = days_of_type(from_date, to_date, day_type)
     if not days:
         return summarise([], 0, pair.walk_sec, [], [])
-    for agency_id in {pair.from_agency_id, pair.to_agency_id}:
+    agencies = sorted({pair.from_agency_id, pair.to_agency_id})
+    for agency_id in agencies:
         await require_retained(conn, agency_id, days[0])
-    covered = await _covered(conn, pair.from_agency_id, days) & await _covered(conn, pair.to_agency_id, days)
+    covered = await _covered(conn, agencies[0], days)
+    if len(agencies) > 1:
+        covered &= await _covered(conn, agencies[1], days)
     planned_days = [d for d in days if d in covered]
     no_plan = [d for d in days if d not in covered]
     if not planned_days:
@@ -444,16 +482,28 @@ async def compute_reliability(
         planned_days,
         arriving=False,
     )
+    # Arrival delays are an optional realtime field, read only from a feed
+    # confirmed to send them (pipeline.strategies.static_join).
+    arrivals_confirmed = await rt_field_coverage_gap(pair.from_agency_id, conn) is None
+    if len(agencies) == 1:
+        a_rows = b_rows = await _observed(ch, pair.from_agency_id, [*arrivals, *departures], planned_days)
+    else:
+        a_rows = await _observed(ch, pair.from_agency_id, arrivals, planned_days)
+        b_rows = await _observed(ch, pair.to_agency_id, departures, planned_days)
     wanted = set(planned_days)
-    arr = delays(
-        await _observed(ch, pair.from_agency_id, pair.from_route_code, pair.from_stop_ids, planned_days),
-        wanted,
-        arriving=True,
-    )
-    dep = delays(
-        await _observed(ch, pair.to_agency_id, pair.to_route_code, pair.to_stop_ids, planned_days),
-        wanted,
-        arriving=False,
-    )
-    found, no_onward = connections(arrivals, departures, arr, dep, pair.walk_sec)
-    return summarise(found, no_onward, pair.walk_sec, planned_days, no_plan)
+    arr = delays(a_rows, wanted, arriving=True, arrivals_confirmed=arrivals_confirmed)
+    dep = delays(b_rows, wanted, arriving=False, arrivals_confirmed=arrivals_confirmed)
+    return await asyncio.to_thread(_reliability, arrivals, departures, arr, dep, pair.walk_sec, planned_days, no_plan)
+
+
+def _reliability(
+    arrivals: list[StopEvent],
+    departures: list[StopEvent],
+    arr: dict[Key, int],
+    dep: dict[Key, int],
+    walk_sec: int,
+    days: list[date],
+    no_plan: list[date],
+) -> Reliability:
+    found, no_onward = connections(arrivals, departures, arr, dep, walk_sec)
+    return summarise(found, no_onward, walk_sec, days, no_plan)

@@ -120,6 +120,7 @@ function ReliabilityBody({ data }: { data: TransferReliability }) {
           <Figure label={t("transfers.unobserved")} value={formatNumber(data.total.unobserved)} />
           <Figure label={t("transfers.held_share")} value={share(data.held_share)} />
         </dl>
+        {data.no_onward > 0 && <p className="focus-muted">{t("transfers.no_onward", { count: data.no_onward })}</p>}
         {data.buffer_min != null ? (
           <p data-testid="transfers-recommendation">
             {t("transfers.recommendation", {

@@ -62,8 +62,7 @@ export const ROUTE_CHUNK_LOADERS: Record<Destination | "ask", () => Promise<unkn
   // A thin destination only hosts a report screen, which is a chunk of its own.
   time: () => Promise.all([loadTimeTab(), loadAnalysisTab()]),
   why: () => Promise.all([loadWhyTab(), loadSingleReportScreen()]),
-  // Compare warms its period report and its agencies (NetworkTab) and
-  // transfers (TransfersView) boards.
+  // The supply map stays cold: it pulls in MapLibre.
   compare: () => Promise.all([loadCompareTab(), loadSingleReportScreen(), loadNetworkTab(), loadTransfersView()]),
   live: loadMapTab,
   // The Reports host lazy-loads its default view, so warm both.

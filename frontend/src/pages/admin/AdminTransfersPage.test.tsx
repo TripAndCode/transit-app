@@ -129,4 +129,14 @@ describe("AdminTransfersPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("to_stop_ids: unknown stop ids ['zz']");
   });
+
+  it("sends a blank walk as null, for the server to refuse, rather than as no walk at all", async () => {
+    const calls = stub(422, { detail: "walk_sec: Input should be a valid integer" });
+    open();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Walk between the stops (min)"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "PATCH")).toBe(true));
+    expect((calls.find((c) => c.method === "PATCH")!.body as { walk_sec: unknown }).walk_sec).toBeNull();
+  });
 });

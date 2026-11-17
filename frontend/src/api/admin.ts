@@ -1040,9 +1040,6 @@ export function useAdminAskFunnel(params: { agencyId?: number; from?: string; to
   });
 }
 
-
-// ── Transfer pairs ───────────────────────────────────────────────────────
-
 /** A hub transfer's whole definition, as an admin writes it. Each side names
  *  its own operator's stop ids; a null direction takes both directions. */
 export type TransferPairInput = {
@@ -1055,12 +1052,18 @@ export type TransferPairInput = {
   to_route_code: string;
   to_direction: 0 | 1 | null;
   to_stop_ids: string[];
-  walk_sec: number;
+  /** Null for a walk left blank, which the server refuses. */
+  walk_sec: number | null;
   day_types: ("weekday" | "saturday" | "sunday_holiday")[];
   active: boolean;
 };
 
-export type AdminTransferPair = TransferPairInput & { id: number; created_at: string; updated_at: string };
+export type AdminTransferPair = Omit<TransferPairInput, "walk_sec"> & {
+  walk_sec: number;
+  id: number;
+  created_at: string;
+  updated_at: string;
+};
 
 /** Every transfer pair, inactive ones included. */
 export function useAdminTransferPairs() {
@@ -1081,6 +1084,7 @@ export function useSaveTransferPair() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminTransferPairs"] });
       qc.invalidateQueries({ queryKey: ["transfer-pairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-reliability"] });
     },
   });
 }
@@ -1092,6 +1096,7 @@ export function useDeleteTransferPair() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["adminTransferPairs"] });
       qc.invalidateQueries({ queryKey: ["transfer-pairs"] });
+      qc.invalidateQueries({ queryKey: ["transfer-reliability"] });
     },
   });
 }

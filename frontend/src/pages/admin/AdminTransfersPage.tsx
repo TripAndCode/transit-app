@@ -85,7 +85,7 @@ function toInput(d: Draft): TransferPairInput {
     to_route_code: d.to_route_code.trim(),
     to_direction: direction(d.to_direction),
     to_stop_ids: ids(d.to_stop_ids),
-    walk_sec: Math.round(Number(d.walk_min) * 60),
+    walk_sec: d.walk_min.trim() === "" ? null : Math.round(Number(d.walk_min) * 60),
     day_types: d.day_types,
     active: d.active,
   };
