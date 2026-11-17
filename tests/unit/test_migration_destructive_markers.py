@@ -256,3 +256,13 @@ def test_an_alter_of_many_subcommands_that_lose_nothing_classifies_in_linear_tim
     with _within(_CLASSIFY_SECONDS):
         assert data_losing_tables(sql) == []
         assert data_losing_tables(sql, retention_floor=True) == []
+
+
+def test_a_retention_floor_leaves_a_new_table_built_whole_from_the_timetables_alone():
+    """The stop supply tables are rebuilt in full from the timetable archive
+    whatever the floor, so creating them loses nothing; a dated aggregate
+    created anew is still filled only from the floor on."""
+    supply = (_MIGRATIONS_DIR / "0110_agg_stop_supply.up.sql").read_text()
+    segments = (_MIGRATIONS_DIR / "0109_agg_route_segment_runtime.up.sql").read_text()
+    assert data_losing_tables(supply, retention_floor=True) == []
+    assert data_losing_tables(segments, retention_floor=True) == ["agg_route_segment_runtime"]

@@ -18,6 +18,7 @@ vi.mock("../routes/lazyTabs", () => ({
         </div>
       ),
     }),
+  loadSupplyMapView: () => Promise.resolve({ default: () => <div>supply-map</div> }),
   loadAnalysisTab: () =>
     Promise.resolve({
       default: ({ reportTypes }: { reportTypes: readonly string[] }) => <div>analysis-tab:{reportTypes.join(",")}</div>,
@@ -27,6 +28,7 @@ vi.mock("../routes/lazyTabs", () => ({
     Promise.resolve({
       default: ({ reportType }: { reportType: string }) => <div>single-report:{reportType}</div>,
     }),
+  loadSlowZonesView: () => Promise.resolve({ default: () => <div>slow-zones-view</div> }),
 }));
 
 function open(path: string, route: string, element: React.ReactNode) {
@@ -44,6 +46,18 @@ describe("destination screens", () => {
   it("hosts dwell vs run on Why", async () => {
     open("/agencies/9/why", "agencies/:agencyId/why", <WhyTab />);
     expect(await screen.findByText("single-report:dwell_run")).toBeInTheDocument();
+  });
+
+  it("shows the slow segments on Why by segments and switches back to dwell vs run", async () => {
+    const router = open("/agencies/9/why?by=segments", "agencies/:agencyId/why", <WhyTab />);
+    expect(await screen.findByText("slow-zones-view")).toBeInTheDocument();
+    const segments = screen.getByRole("button", { name: "Slow segments" });
+    const dwell = screen.getByRole("button", { name: "Dwell/running time" });
+    expect(segments).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(dwell);
+    expect(await screen.findByText("single-report:dwell_run")).toBeInTheDocument();
+    expect(new URLSearchParams(router.state.location.search).get("by")).toBe("dwell_run");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it.each([
@@ -94,10 +108,18 @@ describe("destination screens", () => {
     expect(search.get("from")).toBe("2026-09-01");
   });
 
+  it("shows the planned departures map on Compare by supply", async () => {
+    open("/agencies/9/compare?by=supply", "agencies/:agencyId/compare", <CompareTab />);
+    expect(await screen.findByText("supply-map")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Planned departures" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
   it("shows the transfers board on Compare by transfers", async () => {
     open("/agencies/9/compare?by=transfers", "agencies/:agencyId/compare", <CompareTab />);
     expect(await screen.findByText("transfers-view")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Transfers" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it.each(["", "?by=service", "?by=periods"])("shows the period comparison on Compare%s", async (search) => {

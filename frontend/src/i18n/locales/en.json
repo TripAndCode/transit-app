@@ -49,6 +49,7 @@
       "gap_later": "{{side}} {{minutes}} min later",
       "gap_even": "No gap"
     },
+    "mode_supply": "Planned departures",
     "mode_transfers": "Transfers"
   },
   "saved": {
@@ -2692,6 +2693,92 @@
     "note": "Each day type is compared on one typical day from each timetable: an ordinary day of that type near the revision. A trip's last stop is not a departure. Stop names are the current timetable's; a stop it no longer has shows its ID. See the methodology for the full definitions.",
     "no_revision_title": "This revision is no longer listed",
     "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list."
+  },
+  "why": {
+    "mode_segments": "Slow segments"
+  },
+  "slow_zones": {
+    "map_label": "Segments by running time over the timetable",
+    "day_type_label": "Days",
+    "day_type": {
+      "weekday": "Weekdays",
+      "weekend_holiday": "Weekends and holidays"
+    },
+    "band_label": "Departure time band",
+    "estimate_note": "These are estimates from the delays the operator's feed predicted, not observed passages. Until the predictions are validated, segments are not ranked as bus-priority candidates.",
+    "map_unavailable": "The map can't be shown in this browser. The list below still applies.",
+    "summary": "{{segments}} segments, {{zones}} slow zones, weeks of {{from}} to {{to}}.",
+    "list_title": "Segments that stayed slow",
+    "rule": "A week is slow when the median running time is {{excess}} s or more over the timetable, on a segment the timetable gives at least {{scheduled}} s, with {{samples}} or more runs that week. Listed when the newest {{weeks}} or more weeks were all slow, longest-standing first.",
+    "none": "No segment has stayed slow in these weeks.",
+    "distance_note": "Distance and speed use the straight line between the two stops, so the speed is a lower bound on a winding road. The slow-zone rule does not use them.",
+    "col": {
+      "segment": "Segment",
+      "routes": "Routes",
+      "since": "Slow since",
+      "excess": "Over timetable (s)",
+      "speed": "Speed (km/h)",
+      "trips": "Runs per day",
+      "minutes_lost": "Minutes lost per day",
+      "weeks": "Weekly excess"
+    },
+    "since": "Week of {{date}} ({{weeks}} weeks)",
+    "since_at_least": "Week of {{date}} or earlier ({{weeks}}+ weeks)",
+    "detail": "{{pair}} ({{routes}}), newest week: median {{p50}} s, 85th percentile {{p85}} s, timetable {{scheduled}} s, over by {{excess}} s; {{speed}} km/h over {{distance}} m in a straight line; {{samples}} runs.",
+    "detail_unobserved": "{{pair}}: no run observed in the newest week.",
+    "legend": {
+      "few": "Too few runs",
+      "within": "Within the timetable",
+      "range": "{{from}}–{{to}} s over",
+      "over": "Over {{sec}} s",
+      "slow_zone": "Slow for weeks"
+    }
+  },
+  "supply": {
+    "map_label": "Map of planned departures at every operator's stops",
+    "map_unavailable": "The map cannot be shown in this browser.",
+    "date_label": "Timetable in force on",
+    "date_hint": "Leave empty for today",
+    "day_type_label": "Day type",
+    "day_type": {
+      "weekday": "Weekday",
+      "saturday": "Saturday",
+      "sunday_holiday": "Sunday & holiday"
+    },
+    "band_from": "From",
+    "band_to": "To",
+    "band_invalid": "The end must be after the start.",
+    "mode_label": "Show",
+    "mode": {
+      "departures": "Departures per hour",
+      "gap": "Longest gap"
+    },
+    "gap_threshold": "Highlight gaps over",
+    "minutes": "{{count}} min",
+    "legend": {
+      "class_0": "No departure",
+      "class_1": "Under 1 an hour",
+      "class_2": "1 to under 2 an hour",
+      "class_3": "2 to under 3 an hour",
+      "class_4": "3 or more an hour",
+      "over_gap": "A gap over {{minutes}} min",
+      "within_gap": "No gap over {{minutes}} min"
+    },
+    "summary": "Operators read: {{agencies}} · stops: {{stops}} · with a gap over {{minutes}} min: {{over}}",
+    "not_shown": "Operators not shown",
+    "status": {
+      "no_timetable": "{{name}}: no timetable in force on this date",
+      "not_built": "{{name}}: this timetable has not been computed yet",
+      "unknown_day": "{{name}}: its timetable cannot tell this day type"
+    },
+    "timetables_read": "Timetables read",
+    "typical_day": "{{name}}: {{version}}, typical day {{day}}",
+    "stop_detail": "{{name}}: {{departures}} departures in the hours ({{perHour}} an hour), longest gap {{gap}} min, first {{first}}, last {{last}}",
+    "no_departure_day": "none",
+    "note": "Planned departures from each operator's timetable, read on a typical day of the day type. A trip's last stop is not a departure, and the stops of different operators are not added together.",
+    "empty": "No operator's stops can be read for this date and day type.",
+    "unplaced_one": "{{count}} stop has no position in the current timetable and is not drawn.",
+    "unplaced_other": "{{count}} stops have no position in the current timetable and are not drawn."
   },
   "transfers": {
     "pick": "Transfer",

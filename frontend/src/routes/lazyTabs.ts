@@ -34,6 +34,8 @@ export const loadRevisionsView: TabLoader = () =>
   import("../tabs/revisions/RevisionsView").then((m) => ({ default: m.RevisionsView }));
 export const loadTransfersView: TabLoader = () =>
   import("../tabs/transfers/TransfersView").then((m) => ({ default: m.TransfersView }));
+export const loadSupplyMapView: TabLoader = () =>
+  import("../tabs/supply/SupplyMapView").then((m) => ({ default: m.SupplyMapView }));
 export const loadSavedExportTab: TabLoader = () =>
   import("../tabs/SavedExportTab").then((m) => ({ default: m.SavedExportTab }));
 export const loadRoutesIndex: TabLoader = () =>
@@ -42,6 +44,8 @@ export const loadRouteDossier: TabLoader = () =>
   import("../tabs/RouteDossier").then((m) => ({ default: m.RouteDossier }));
 export const loadTimeTab: TabLoader = () => import("../tabs/TimeTab").then((m) => ({ default: m.TimeTab }));
 export const loadWhyTab: TabLoader = () => import("../tabs/WhyTab").then((m) => ({ default: m.WhyTab }));
+export const loadSlowZonesView: TabLoader = () =>
+  import("../tabs/segments/SlowZonesView").then((m) => ({ default: m.SlowZonesView }));
 export const loadCompareTab: TabLoader = () =>
   import("../tabs/CompareTab").then((m) => ({ default: m.CompareTab }));
 export const loadBusTownTab: TabLoader = () =>
@@ -58,8 +62,8 @@ export const ROUTE_CHUNK_LOADERS: Record<Destination | "ask", () => Promise<unkn
   // A thin destination only hosts a report screen, which is a chunk of its own.
   time: () => Promise.all([loadTimeTab(), loadAnalysisTab()]),
   why: () => Promise.all([loadWhyTab(), loadSingleReportScreen()]),
-  // Compare hosts three boards: the agencies one renders NetworkTab, the
-  // transfers one TransfersView.
+  // Compare warms its period report and its agencies (NetworkTab) and
+  // transfers (TransfersView) boards.
   compare: () => Promise.all([loadCompareTab(), loadSingleReportScreen(), loadNetworkTab(), loadTransfersView()]),
   live: loadMapTab,
   // The Reports host lazy-loads its default view, so warm both.

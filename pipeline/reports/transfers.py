@@ -12,12 +12,16 @@ does not cover has no plan and is listed apart, never counted as zero.
 The observed side is each stop visit's latest feed prediction
 (pipeline.db.build_stop_visits_ch_sql), filed under its trip's service day
 (pipeline.service_day.filed_date_ch) and joined to the plan on (service day,
-trip, stop sequence). A's arrival reads the visit's arrival delay, else its
-departure delay; a bus leaves no earlier than it arrives, so the fallback can
-only make A look later and a connection look less safe. B reads the departure
-delay only.
+trip, stop sequence). Rows are read as ingest stamped them (Stamp.INGESTED),
+not refiled under the version in force (pipeline.live_filing.filing) as the
+delay reports read them: refiling rewrites a row's schedule and route, never
+its delay, and the plan this joins to is the loaded timetable's, so a row
+refiled under another version would be judged against two timetables at once.
+A's arrival reads the visit's arrival delay, else its departure delay; a bus
+leaves no earlier than it arrives, so the fallback can only make A look later
+and a connection look less safe. B reads the departure delay only.
 
-The definitions a reader sees are in docs/methodology.md (乗継ぎの接続).
+The definitions a reader sees are in docs/methodology.md (乗継ぎ拠点での接続).
 """
 
 from __future__ import annotations
@@ -38,8 +42,9 @@ from pipeline.planned_trips import plan_ctes
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import clock_to_sec, filed_between_ch
+from pipeline.timetable_sampling import DayType
 
-PairDayType = Literal["weekday", "saturday", "sunday_holiday"]
+PairDayType = DayType
 
 # The rider survey's tolerable waits (5, 10 and 20 minutes), as shares of the
 # realised waits at or under each.

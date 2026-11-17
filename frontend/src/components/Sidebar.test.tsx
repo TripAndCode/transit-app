@@ -458,7 +458,7 @@ describe("Sidebar", () => {
     });
 
     it("opens no stops on a screen with a single view", () => {
-      renderSidebar("/agencies/8/why");
+      renderSidebar("/agencies/8/pulse");
       expect(screen.queryByRole("group", { name: /views$/ })).toBeNull();
     });
 
@@ -467,6 +467,7 @@ describe("Sidebar", () => {
       ["/agencies/8/routes?sort=late5_share", "Routes views", "Share over 5 min"],
       ["/agencies/8/routes?sort=worst_5min", "Routes views", "Impact (count)"],
       ["/agencies/8/time", "Time views", "Trend"],
+      ["/agencies/8/why?by=segments", "Why views", "Slow segments"],
       ["/agencies/8/compare?by=agencies", "Day types & agencies views", "Agencies"],
       ["/agencies/8/reports?doc=saved", "Reports views", "Saved analyses"],
     ])("on %s marks the stop the page shows", (path, group, current) => {
@@ -494,7 +495,12 @@ describe("Sidebar", () => {
       renderSidebar("/agencies/8/compare");
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       const stops = within(screen.getByRole("group", { name: "Day types & agencies views" })).getAllByRole("link");
-      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends/holidays", "Agencies", "Transfers"]);
+      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual([
+        "Weekdays and weekends/holidays",
+        "Agencies",
+        "Planned departures",
+        "Transfers",
+      ]);
     });
 
     it("marks each station with its screen's own icon rather than a station code, the link carrying the name", async () => {

@@ -49,6 +49,7 @@
       "gap_later": "{{side}}のほうが{{minutes}}分遅い",
       "gap_even": "差なし"
     },
+    "mode_supply": "運行本数",
     "mode_transfers": "乗継ぎ"
   },
   "saved": {
@@ -2692,6 +2693,92 @@
     "note": "曜日区分ごとに、それぞれの時刻表から代表日1日を選んで比べます。代表日は、改正日に近い、その曜日区分のふつうの日です。便の終点は発車に数えません。停留所名は今の時刻表のもので、今の時刻表にない停留所はIDで示します。定義の詳細は算出方法の文書にあります。",
     "no_revision_title": "この改正は一覧から外れました",
     "no_revision_hint": "このページを開いた後で、事業者の時刻表の改正が変わりました。ページを読み込み直すと、今の一覧を表示します。"
+  },
+  "why": {
+    "mode_segments": "遅い区間"
+  },
+  "slow_zones": {
+    "map_label": "時刻表を超える走行時間の区間の地図",
+    "day_type_label": "曜日区分",
+    "day_type": {
+      "weekday": "平日",
+      "weekend_holiday": "土日祝"
+    },
+    "band_label": "発車の時間帯",
+    "estimate_note": "事業者のフィードが配信した遅延の予測値にもとづく推定で、通過の観測値ではありません。予測値の検証を終えるまで、バス優先策の候補として区間に順位は付けません。",
+    "map_unavailable": "このブラウザでは地図を表示できません。下の一覧はそのまま使えます。",
+    "summary": "{{from}}の週から{{to}}の週まで：{{segments}}区間、遅い状態が続く区間{{zones}}。",
+    "list_title": "遅い状態が続く区間",
+    "rule": "走行時間の中央値が時刻表より{{excess}}秒以上長い週を、遅い週とします（時刻表の走行時間が{{scheduled}}秒以上の区間で、その週に{{samples}}便以上）。最新の週まで{{weeks}}週以上続いた区間を、長く続いている順に示します。",
+    "none": "この期間に遅い状態が続いた区間はありません。",
+    "distance_note": "距離と速度は2つの停留所を結ぶ直線で測るため、曲がった道では速度が実際より低く出ます。遅い状態の判定には使いません。",
+    "col": {
+      "segment": "区間",
+      "routes": "系統",
+      "since": "続いている期間",
+      "excess": "時刻表からの超過（秒）",
+      "speed": "速度（km/h）",
+      "trips": "1日の便数",
+      "minutes_lost": "1日の損失（分）",
+      "weeks": "週ごとの超過"
+    },
+    "since": "{{date}}の週から（{{weeks}}週）",
+    "since_at_least": "{{date}}の週以前から（{{weeks}}週以上）",
+    "detail": "{{pair}}（{{routes}}）最新の週：中央値{{p50}}秒、85パーセンタイル{{p85}}秒、時刻表{{scheduled}}秒、超過{{excess}}秒。直線距離{{distance}}mで時速{{speed}}km。{{samples}}便。",
+    "detail_unobserved": "{{pair}}：最新の週には走行の観測がありません。",
+    "legend": {
+      "few": "便が少ない",
+      "within": "時刻表以内",
+      "range": "{{from}}〜{{to}}秒超過",
+      "over": "{{sec}}秒を超える",
+      "slow_zone": "遅い状態が続く"
+    }
+  },
+  "supply": {
+    "map_label": "全事業者の停留所の運行本数の地図",
+    "map_unavailable": "このブラウザでは地図を表示できません。",
+    "date_label": "時刻表の基準日",
+    "date_hint": "空欄なら今日",
+    "day_type_label": "曜日区分",
+    "day_type": {
+      "weekday": "平日",
+      "saturday": "土曜",
+      "sunday_holiday": "日祝"
+    },
+    "band_from": "開始",
+    "band_to": "終了",
+    "band_invalid": "終了は開始より後にしてください。",
+    "mode_label": "表示",
+    "mode": {
+      "departures": "1時間あたりの本数",
+      "gap": "最も長い間隔"
+    },
+    "gap_threshold": "強調する間隔",
+    "minutes": "{{count}}分",
+    "legend": {
+      "class_0": "発車なし",
+      "class_1": "1時間に1本未満",
+      "class_2": "1時間に1本以上2本未満",
+      "class_3": "1時間に2本以上3本未満",
+      "class_4": "1時間に3本以上",
+      "over_gap": "{{minutes}}分を超える間隔あり",
+      "within_gap": "{{minutes}}分を超える間隔なし"
+    },
+    "summary": "{{agencies}}事業者の停留所{{stops}}か所。うち{{minutes}}分を超える間隔があるのは{{over}}か所",
+    "not_shown": "表示していない事業者",
+    "status": {
+      "no_timetable": "{{name}}：この日に有効な時刻表がありません",
+      "not_built": "{{name}}：この時刻表はまだ集計されていません",
+      "unknown_day": "{{name}}：時刻表からこの曜日区分を判断できません"
+    },
+    "timetables_read": "読んだ時刻表",
+    "typical_day": "{{name}}：{{version}}、代表日 {{day}}",
+    "stop_detail": "{{name}}：時間帯の発車 {{departures}}本（1時間に{{perHour}}本）、最も長い間隔 {{gap}}分、始発 {{first}}、終発 {{last}}",
+    "no_departure_day": "なし",
+    "note": "各事業者の時刻表による計画上の発車を、曜日区分の代表日で読んだものです。便の最後の停留所は発車に数えず、別の事業者の停留所は合算しません。",
+    "empty": "この日と曜日区分で読める事業者の停留所がありません。",
+    "unplaced_one": "停留所{{count}}か所は現在の時刻表に位置がなく、地図に表示していません。",
+    "unplaced_other": "停留所{{count}}か所は現在の時刻表に位置がなく、地図に表示していません。"
   },
   "transfers": {
     "pick": "乗継ぎ",

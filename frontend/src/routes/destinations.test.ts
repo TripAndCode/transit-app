@@ -10,6 +10,7 @@ import {
   agencySwitchHref,
   destHref,
   compareMode,
+  whyMode,
   mergeSearch,
   pickReport,
   reportDestination,
@@ -67,7 +68,9 @@ describe("destinations", () => {
 
   it("sends each report type to the screen that hosts it", () => {
     expect(reportHref(9, "trend", "?routes=5")).toBe("/agencies/9/time?routes=5&report=trend");
-    expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why");
+    expect(reportHref(9, "dwell_run")).toBe("/agencies/9/why?by=dwell_run");
+    // The report's own view wins over the slow segments the link was on.
+    expect(reportHref(9, "dwell_run", "?by=segments")).toBe("/agencies/9/why?by=dwell_run");
     expect(reportHref(9, "on_time")).toBe("/agencies/9/routes?sort=on_time");
     expect(reportHref(9, "ranking_best", "?from=2026-09-01")).toBe("/agencies/9/routes?from=2026-09-01&sort=avg&order=best");
     // A previous report or sort gives way to the report's own; a former
@@ -148,8 +151,16 @@ describe("the view a screen opens", () => {
     expect(routeTableView(search)).toEqual({ sort, order });
   });
 
-  it("compares agencies for by=agencies, hub transfers for by=transfers, else periods", () => {
+  it("shows the slow segments on Why only for by=segments", () => {
+    expect(whyMode("segments")).toBe("segments");
+    expect(whyMode("dwell_run")).toBe("dwell_run");
+    expect(whyMode(null)).toBe("dwell_run");
+    expect(whyMode("agencies")).toBe("dwell_run");
+  });
+
+  it("opens the agencies, supply and transfers boards by their `by`, else periods", () => {
     expect(compareMode("agencies")).toBe("agencies");
+    expect(compareMode("supply")).toBe("supply");
     expect(compareMode("transfers")).toBe("transfers");
     expect(compareMode("periods")).toBe("periods");
     expect(compareMode(null)).toBe("periods");
