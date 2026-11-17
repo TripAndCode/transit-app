@@ -14,7 +14,7 @@ describe("RAIL_STOPS", () => {
   });
 
   it("opens Compare's boards by `by` and Reports' views by `doc`", () => {
-    expect(RAIL_STOPS.compare?.map((stop) => stop.extra)).toEqual([{ by: "periods" }, { by: "agencies" }]);
+    expect(RAIL_STOPS.compare?.map((stop) => stop.extra)).toEqual([{ by: "periods" }, { by: "agencies" }, { by: "supply" }]);
     expect(RAIL_STOPS.reports?.map((stop) => stop.extra)).toEqual([{}, { doc: "saved" }, { doc: "council" }]);
   });
 });
@@ -29,6 +29,7 @@ describe("currentStop", () => {
     ["time", "report=route_forecast", "route_forecast"],
     ["time", "", "trend"],
     ["compare", "by=agencies", "agencies"],
+    ["compare", "by=supply", "supply"],
     ["compare", "by=anything", "periods"],
     ["reports", "doc=saved", "saved"],
     ["reports", "doc=certificate", "reports"],

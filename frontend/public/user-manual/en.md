@@ -306,7 +306,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ## 8. Day types & agencies — side by side
 
-Two buttons at the top switch between **Weekdays and weekends/holidays** and **Agencies**.
+Three buttons at the top switch between **Weekdays and weekends/holidays**, **Agencies** and **Planned departures**.
 
 ### 8-1. Weekdays and weekends/holidays
 
@@ -323,6 +323,16 @@ Below them, under “Not ranked: the data does not support a comparison”, the 
 Each row shows “Avg delay (min)” with its bar, “On-time %” with its 95% interval under it, “Observation coverage” (the trips the feed reported out of those the timetable planned), “Planned trips”, “Service delivered %”, “Vehicle-km delivered %” and “Observations”. Every bar shares one axis, 6, 12, 18 or 24 minutes, whichever holds the latest-running agency. Where an agency has data for only part of the period, its own dates are shown too. Planned trips are the trips the timetable planned over the period; where a timetable plans only some of its days, the figure says so, such as “16/30 days a timetable plans”. Where Service delivered % cannot be shown, “—” is followed by the reason (“no timetable plans this period”, “this feed format cannot report cancellations”, “the feed is not yet checked for cancellations” or “this feed doesn't report cancellations”). Vehicle-km delivered % appears only where Service delivered % does. A “Behind” badge means that agency’s totals have not caught up with its latest data yet. “How to read this” explains each figure. Where ridership weights have been set up, “Weight by ridership” switches the on-time figure to a ridership-weighted one.
 
 Click an agency’s name to open that agency’s **Live** screen.
+
+### 8-3. Planned departures
+
+A map of every operator’s stops by the departures their timetables plan, for a band of hours on a weekday, a Saturday or a Sunday & holiday (by default weekdays, 10:00 to 16:00). It reads the timetable each operator has in force on **Timetable in force on** (today when left empty), on a typical day of the day type: an ordinary day of that type early in that timetable, so a holiday timetable or a one-off service day does not stand for it. **Timetables read** lists each operator’s timetable and typical day.
+
+- **Departures per hour** shades each stop by its departures in the band divided by its hours: none, under 1, 1 to 2, 2 to 3, and 3 or more an hour.
+- **Longest gap** brings forward the stops whose longest stretch of the band without a departure is over the threshold chosen under **Highlight gaps over** (60 min by default). A band with no departure at a stop is one gap the length of the band.
+- Hours after midnight read 24:00 and later, so a band can run into the night. Click a stop for its departures, longest gap and first and last departure of the day.
+- An operator whose timetable cannot be read for the date and day type is listed under **Operators not shown** with the reason, never drawn as a stop without service. A stop the current timetable gives no position is counted below the map.
+- A trip’s last stop is not counted as a departure. Each operator’s stops are shown on their own: two operators’ stops at one place are not added together.
 
 ---
 

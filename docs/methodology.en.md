@@ -210,6 +210,20 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 
 **Dwell and running time**: each stop's actual arrival and departure are its scheduled times plus the reported delays. Dwell time is the actual departure minus the actual arrival at the same stop, counted only for a departure reported after the arrival, and running time is the actual arrival minus the previous stop's actual departure. Some feeds send the same value for arrival and departure delay, so how far this split can be trusted differs by operator.
 
+### Planned departures at stops
+
+How much service each stop is planned to get, from the timetables alone, with no realtime data (from method `2026.11.18`).
+
+- **Timetable**: each operator's timetable version in force on the chosen date (today's service day by default). It is read from the kept timetables, so a version a later load replaced can still be read. An operator with no version in force that day is shown as such.
+- **Day type**: weekday, Saturday or Sunday and holiday, decided by the date alone (a public holiday is Sunday and holiday). Saturday is never merged with Sunday and holiday by an operator's calendar, so every operator reads in the same three day types.
+- **Typical day**: from the day the version comes into force, the earliest dates of the type are taken, five of each weekday Monday to Friday for weekdays and five each for Saturdays and for Sundays and holidays, and the typical day is the first of them that runs the set of services most of them run. A holiday-timetable weekday or a one-off service day therefore does not stand for its type. A type with no such date in force within the timetable's calendar, or a version whose calendar was not kept, is unknown, never zero. A type whose typical day runs nothing has no departures.
+- **Departure**: a timed stop of a trip other than its last stop, where it only arrives. An untimed stop departs at no known hour and is not counted.
+- **Time**: the service day's time ("Service day and time"). A departure written as 00:40 is that night's 24:40, so a late-night trip never sorts before the next morning's.
+- **Departures in a band and per hour**: the departures within a band of hours (for example 10:00 to 16:00), and that count divided by the band's hours.
+- **Longest gap**: the longest time in the band with no departure: between two consecutive departures within the band, from the band's start to its first departure, or from its last departure to the band's end, whichever is longest, and the whole band when there is no departure in it. Departures outside the band do not stretch a gap, so it never exceeds the band, and a gap that straddles the band's edge counts only its part inside the band.
+- **First and last departure**: the stop's first and last departure on the typical day. The last can be at 24:00 or later.
+- **Stops of several operators**: each operator's stops are shown on their own. The departures of different operators' stops at one place are not added together.
+
 ### What is not observed
 
 - A stop with no delay report counts neither as on time nor as late.
@@ -390,10 +404,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.17`. Newest first, each version with the inputs it set.
+The current method is `2026.11.18`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.18` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
 | `2026.11.17` | `feed_quality_monthly` 8 → 9 |
 | `2026.11.16` | `feed_quality_monthly` 7 → 8 |
 | `2026.11.15` | `agg_route_band_daily` = 1 |

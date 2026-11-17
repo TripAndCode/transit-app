@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import NamedTuple
 
-from pipeline import agg_sql, ch_aggregates, db, headways, static_archive, static_headways
+from pipeline import agg_sql, ch_aggregates, db, headways, static_archive, static_headways, stop_supply
 from pipeline.db import build_stop_visits_ch_sql
 from pipeline.static_archive import Stamp
 
@@ -63,6 +63,10 @@ class Timetable(str, Enum):
     # timetable changes no built row, except where the ingest stamps no version
     # and every row falls back to the loaded one.
     ARCHIVED = "archived"
+    # Each archived version in force, its rows kept under it
+    # (pipeline.stop_supply): a new version adds its own rows and changes no
+    # other version's, so the fingerprint carries no timetable.
+    VERSIONS = "versions"
 
 
 class ArchivedInput(str, Enum):
@@ -222,6 +226,15 @@ def _entries() -> list[AggTable]:
             Timetable.LOADED,
             _feed_quality,
             depends_on=("agg_route_daily", "agg_route_daily_dist", "agg_feed_health"),
+        ),
+        AggTable(stop_supply.DAYS_TABLE, 1, Kind.STATIC_ONLY, Timetable.VERSIONS, stop_supply.render_days),
+        AggTable(
+            stop_supply.TABLE,
+            1,
+            Kind.STATIC_ONLY,
+            Timetable.VERSIONS,
+            stop_supply.render,
+            depends_on=(stop_supply.DAYS_TABLE,),
         ),
     ]
     for name in ch_aggregates.MONTHLY_TABLES:
@@ -415,6 +428,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
     MethodVersion("2026.11.16", {"feed_quality_monthly": 8}),
     MethodVersion("2026.11.17", {"feed_quality_monthly": 9}),
+    MethodVersion("2026.11.18", {"agg_stop_supply_days": 1, "agg_stop_supply_hourly": 1}),
 )
 
 # The method every report, CSV and council document names beside its figures

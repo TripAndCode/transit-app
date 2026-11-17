@@ -67,6 +67,14 @@
     "hash": "d3be98369f6dd9a9112e58528207385ba189a777635f0a1dae4b994a3a3231a8",
     "version": 3
   },
+  "agg_stop_supply_days": {
+    "hash": "e881b6659015592382b2addaaf19b0e390458de52fb2efeebcc30186ccaf6496",
+    "version": 1
+  },
+  "agg_stop_supply_hourly": {
+    "hash": "e6956a31f0504063acddd6e13fcb4a05b0c0d164b2fe073fa355200fa12deaae",
+    "version": 1
+  },
   "feed_quality_monthly": {
     "hash": "239f19e630d755119d7eb566d4b84f20f720ccf2997e81dc79f5836c0f9ee903",
     "version": 9

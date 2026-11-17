@@ -1,10 +1,10 @@
 """Cross-agency network summary endpoint (not scoped to a single agency)."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import asyncpg
 from clickhouse_connect.driver.asyncclient import AsyncClient
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from api.deps import get_ch, get_conn
@@ -23,6 +23,9 @@ from pipeline.reports.definition import DefinitionMeta, stamp_build
 from pipeline.reports.network import board_feed_quality, compute_network_summary, coverage_through
 from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
+from pipeline.reports.stop_supply import FIRST_HOUR, LAST_HOUR, AgencyStatus, read_supply_map
+from pipeline.service_day import service_date_of
+from pipeline.stop_supply import SupplyDayType
 
 router = APIRouter(prefix="/api/network", tags=["network"])
 
@@ -161,4 +164,82 @@ async def network_summary(
         coverage_through=through.isoformat() if through else None,
         definition=definition,
         scope_applied=_NETWORK_SCOPE,
+    )
+
+
+class SupplyAgency(BaseModel):
+    agency_id: int
+    agency_name: str
+    # pipeline.reports.stop_supply.AgencyStatus: only "ok" has stops below.
+    status: AgencyStatus
+    static_version_id: str | None
+    # The day the version's departures of the day type were read on.
+    typical_day: date | None
+
+
+class SupplyStop(BaseModel):
+    agency_id: int
+    stop_id: str
+    stop_name: str | None
+    # From the loaded timetable; None for a stop it no longer has.
+    lat: float | None
+    lon: float | None
+    departures: int
+    per_hour: float
+    # The longest stretch of the band without a departure, at most the band.
+    longest_gap_min: float
+    # The day's first and last departure in service-day seconds (24:30 is
+    # 88200); None for a stop with no departure on the day type.
+    first_sec: int | None
+    last_sec: int | None
+
+
+class SupplyMapResponse(BaseModel):
+    date: date
+    day_type: SupplyDayType
+    from_hour: int
+    to_hour: int
+    agencies: list[SupplyAgency]
+    stops: list[SupplyStop]
+
+
+@router.get("/supply", response_model=SupplyMapResponse)
+@limiter.limit(DEFAULT_LIMIT)
+async def network_supply(
+    request: Request,
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+    day: date | None = Query(None, alias="date"),
+    day_type: SupplyDayType = Query("weekday"),
+    from_hour: int = Query(10, ge=FIRST_HOUR, lt=LAST_HOUR),
+    to_hour: int = Query(16, gt=FIRST_HOUR, le=LAST_HOUR),
+) -> SupplyMapResponse:
+    """Every operator's stops by planned departures over [from_hour, to_hour)
+    of a typical day of *day_type*, from each operator's timetable version in
+    force on *date* (today's service date by default). Read-only."""
+    if to_hour <= from_hour:
+        raise HTTPException(status_code=422, detail="to_hour must be after from_hour")
+    day = day or service_date_of(datetime.now(timezone.utc))
+    supply = await read_supply_map(conn, ch, day, day_type, from_hour, to_hour)
+    return SupplyMapResponse(
+        date=day,
+        day_type=day_type,
+        from_hour=from_hour,
+        to_hour=to_hour,
+        agencies=[SupplyAgency(**a._asdict()) for a in supply.agencies],
+        stops=[
+            SupplyStop(
+                agency_id=s.agency_id,
+                stop_id=s.stop_id,
+                stop_name=s.stop_name,
+                lat=s.lat,
+                lon=s.lon,
+                departures=s.band.departures,
+                per_hour=round(s.band.per_hour, 2),
+                longest_gap_min=round(s.band.longest_gap_sec / 60, 1),
+                first_sec=s.first_sec,
+                last_sec=s.last_sec,
+            )
+            for s in supply.stops
+        ],
     )

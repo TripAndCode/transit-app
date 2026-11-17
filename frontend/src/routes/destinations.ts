@@ -92,16 +92,19 @@ export function pickReport(
   return requested != null && reportTypes.includes(requested) ? requested : fallback;
 }
 
-/** Compare's two boards, picked by `by`. */
+/** Compare's three views, picked by `by`: the two boards, and every
+ *  operator's stops by planned departures. */
 export const COMPARE_MODES = [
   { mode: "periods", labelKey: "compare.mode_periods" },
   { mode: "agencies", labelKey: "compare.mode_agencies" },
+  { mode: "supply", labelKey: "compare.mode_supply" },
 ] as const;
 export type CompareMode = (typeof COMPARE_MODES)[number]["mode"];
 
-/** `by=agencies` is the agencies board; every other `by` compares periods. */
+/** `by=agencies` is the agencies board, `by=supply` the planned departures
+ *  map; every other `by` compares periods. */
 export function compareMode(by: string | null): CompareMode {
-  return by === "agencies" ? "agencies" : "periods";
+  return by === "agencies" || by === "supply" ? by : "periods";
 }
 
 /** Reports' three views, and the `doc` each opens with. */

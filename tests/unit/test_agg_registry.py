@@ -5,7 +5,7 @@ from datetime import date
 
 import pytest
 
-from pipeline import agg_registry, ch_aggregates, feed_quality
+from pipeline import agg_registry, ch_aggregates, feed_quality, stop_supply
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.analyze import _AGG_TABLES_ORDERED, _STATIC_ONLY_AGG_TABLES
 
@@ -40,6 +40,12 @@ def test_static_only_tables_match_analyze():
 def test_only_agg_route_headway_and_the_scorecard_are_built_from_the_loaded_timetable():
     loaded = {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.LOADED}
     assert loaded == {"agg_route_headway", feed_quality.TABLE}
+
+
+def test_only_the_stop_supply_tables_are_kept_per_archived_version():
+    kept = {n for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.VERSIONS}
+    assert kept == {stop_supply.DAYS_TABLE, stop_supply.TABLE}
+    assert agg_registry.TABLES[stop_supply.TABLE].depends_on == (stop_supply.DAYS_TABLE,)
 
 
 def test_the_scorecard_is_rebuilt_with_the_tables_it_reads():

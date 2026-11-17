@@ -48,7 +48,8 @@
       "col_gap": "差",
       "gap_later": "{{side}}のほうが{{minutes}}分遅い",
       "gap_even": "差なし"
-    }
+    },
+    "mode_supply": "運行本数"
   },
   "saved": {
     "title": "レポート",
@@ -2609,5 +2610,50 @@
       "status": "読み込み中",
       "text": "この事業者の配信が扱う範囲を読み込んでいます…"
     }
+  },
+  "supply": {
+    "map_label": "全事業者の停留所の運行本数の地図",
+    "map_unavailable": "このブラウザでは地図を表示できません。",
+    "date_label": "時刻表の基準日",
+    "date_hint": "空欄なら今日",
+    "day_type_label": "曜日区分",
+    "day_type": {
+      "weekday": "平日",
+      "saturday": "土曜",
+      "sunday_holiday": "日祝"
+    },
+    "band_from": "開始",
+    "band_to": "終了",
+    "band_invalid": "終了は開始より後にしてください。",
+    "mode_label": "表示",
+    "mode": {
+      "departures": "1時間あたりの本数",
+      "gap": "最も長い間隔"
+    },
+    "gap_threshold": "強調する間隔",
+    "minutes": "{{count}}分",
+    "legend": {
+      "class_0": "発車なし",
+      "class_1": "1時間に1本未満",
+      "class_2": "1時間に1本以上2本未満",
+      "class_3": "1時間に2本以上3本未満",
+      "class_4": "1時間に3本以上",
+      "over_gap": "{{minutes}}分を超える間隔あり",
+      "within_gap": "{{minutes}}分を超える間隔なし"
+    },
+    "summary": "{{agencies}}事業者の{{stops}}停留所。うち{{minutes}}分を超える間隔のある停留所は{{over}}",
+    "unplaced": "{{count}}停留所は現在の時刻表に位置がなく、地図に表示していません。",
+    "not_shown": "表示していない事業者",
+    "status": {
+      "no_timetable": "{{name}}：この日に有効な時刻表がありません",
+      "not_built": "{{name}}：この時刻表はまだ集計されていません",
+      "unknown_day": "{{name}}：時刻表からこの曜日区分を判断できません"
+    },
+    "timetables_read": "読んだ時刻表",
+    "typical_day": "{{name}}：{{version}}、代表日 {{day}}",
+    "stop_detail": "{{name}}：時間帯の発車 {{departures}}本（1時間に{{perHour}}本）、最も長い間隔 {{gap}}分、始発 {{first}}、終発 {{last}}",
+    "no_departure_day": "なし",
+    "note": "各事業者の時刻表による計画上の発車を、曜日区分の代表日で読んだものです。便の最後の停留所は発車に数えず、別の事業者の停留所は合算しません。",
+    "empty": "この日と曜日区分で読める事業者の停留所がありません。"
   }
 }

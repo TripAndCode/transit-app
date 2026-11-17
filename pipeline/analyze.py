@@ -46,6 +46,8 @@ Aggregation tables produced:
   excess-wait/CoV/long-gap pooling (static_join agencies only)
 - agg_route_daily_dwell_run — per-day dwell/running-time distribution (decomposition view; static_join agencies only)
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
+- agg_stop_supply_days / agg_stop_supply_hourly — per timetable version in force, the typical day of each
+  day type and each stop's planned departures per hour on it (pipeline/stop_supply.py)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
   section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
 - feed_quality_monthly — per-month feed-quality scorecard (pipeline/feed_quality.py)
@@ -105,6 +107,7 @@ from pipeline import (
     retention,
     static_archive,
     static_headways,
+    stop_supply,
 )
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
@@ -194,6 +197,8 @@ _AGG_TABLES_ORDERED = (
     "agg_route_headway_daily",
     "agg_route_daily_dwell_run",
     "agg_schedule_revision_daily",
+    stop_supply.DAYS_TABLE,
+    stop_supply.TABLE,
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
 
@@ -225,11 +230,13 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # survives `static_loader.load_static()` overwriting the raw static_* tables
 # on the next reload (db/migrations/0037_agg_static_version_summary.up.sql).
 
-# Aggregates built from the static schedule alone. Every column they read is
-# in pipeline.static_content.STATIC_DEPENDENCY_COLUMNS, plus constants their registry version covers
-# (e.g. agg_route_headway's HIGH_FREQUENCY_HEADWAY_SEC threshold) -- so while
-# their fingerprint matches, a rebuild would produce what already stands.
-_STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
+# Aggregates built from the static schedule alone. agg_route_headway reads
+# only columns in pipeline.static_content.STATIC_DEPENDENCY_COLUMNS, plus
+# constants its registry version covers (e.g. its HIGH_FREQUENCY_HEADWAY_SEC
+# threshold) -- so while its fingerprint matches, a rebuild would produce what
+# already stands. The stop supply tables keep rows per archived version, and
+# stop_supply.rebuild adds and drops versions on a run that leaves them standing.
+_STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway", stop_supply.DAYS_TABLE, stop_supply.TABLE})
 
 # What a table whose scope is [] may leave standing: a date-scoped table with
 # no date of its own to rebuild, or a static-only table whose fingerprint, and
@@ -1960,6 +1967,14 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         else:
             logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
 
+        # ── agg_stop_supply_days / agg_stop_supply_hourly ──
+        # From the archive alone, whatever is loaded now or ingested: every
+        # version in force keeps its rows, and a version new since the last run
+        # is added on a run that otherwise leaves the tables standing.
+        with _step(f"{stop_supply.TABLE}: build"):
+            supply_full = scopes[stop_supply.TABLE] is None or scopes[stop_supply.DAYS_TABLE] is None
+            supply_rewritten = stop_supply.rebuild(conn, ch_client, agency_id, full=supply_full)
+
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
         # After every Postgres builder but the scorecard, which reads their
         # copy, so one that fails above leaves ClickHouse untouched too.
@@ -1999,6 +2014,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                 rewritten.add(feed_quality.TABLE)
             else:
                 rewritten.discard(feed_quality.TABLE)
+            if supply_rewritten:
+                rewritten |= {stop_supply.DAYS_TABLE, stop_supply.TABLE}
             _record_fingerprints(conn, agency_id, plan.current, rewritten)
             _record_in_force(conn, agency_id, join)
             cur.execute(

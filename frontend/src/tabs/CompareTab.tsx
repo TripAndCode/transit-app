@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 import { COMPARE_MODES, COMPARE_REPORT, compareMode, type CompareMode } from "../routes/destinations";
-import { loadSingleReportScreen, loadNetworkTab } from "../routes/lazyTabs";
+import { loadSingleReportScreen, loadNetworkTab, loadSupplyMapView } from "../routes/lazyTabs";
 
 const SingleReportScreen = lazy(loadSingleReportScreen);
 const NetworkTab = lazy(loadNetworkTab);
+const SupplyMapView = lazy(loadSupplyMapView);
 
 /** Compare: the board `compareMode` picks from `by`. */
 export function CompareTab() {
@@ -61,7 +62,13 @@ export function CompareTab() {
           ))}
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
-          {mode === "agencies" ? <NetworkTab /> : <SingleReportScreen reportType={COMPARE_REPORT} />}
+          {mode === "agencies" ? (
+            <NetworkTab />
+          ) : mode === "supply" ? (
+            <SupplyMapView />
+          ) : (
+            <SingleReportScreen reportType={COMPARE_REPORT} />
+          )}
         </div>
       </div>
     </ScopeHeaderProvider>

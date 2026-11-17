@@ -30,6 +30,8 @@ export const loadReportsHomeTab: TabLoader = () =>
   import("../tabs/ReportsHomeTab").then((m) => ({ default: m.ReportsHomeTab }));
 export const loadNetworkTab: TabLoader = () =>
   import("../tabs/NetworkTab").then((m) => ({ default: m.NetworkTab }));
+export const loadSupplyMapView: TabLoader = () =>
+  import("../tabs/supply/SupplyMapView").then((m) => ({ default: m.SupplyMapView }));
 export const loadSavedExportTab: TabLoader = () =>
   import("../tabs/SavedExportTab").then((m) => ({ default: m.SavedExportTab }));
 export const loadRoutesIndex: TabLoader = () =>

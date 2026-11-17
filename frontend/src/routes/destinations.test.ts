@@ -150,6 +150,7 @@ describe("the view a screen opens", () => {
 
   it("compares agencies only for by=agencies", () => {
     expect(compareMode("agencies")).toBe("agencies");
+    expect(compareMode("supply")).toBe("supply");
     expect(compareMode("periods")).toBe("periods");
     expect(compareMode(null)).toBe("periods");
   });

@@ -82,6 +82,10 @@
   "2026.11.17": {
     "feed_quality_monthly": 9
   },
+  "2026.11.18": {
+    "agg_stop_supply_days": 1,
+    "agg_stop_supply_hourly": 1
+  },
   "2026.11.2": {
     "agg_feed_health": 2
   },

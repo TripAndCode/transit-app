@@ -220,7 +220,9 @@ def test_a_changed_timetable_rebuilds_only_the_tables_that_read_it(pg_conn, agen
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     logged = _scopes_logged(caplog)
-    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable is not Timetable.NONE}
+    # A table kept per archived version adds the new content's rows itself,
+    # with no scope of its own to rebuild.
+    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable not in (Timetable.NONE, Timetable.VERSIONS)}
     assert {n for n, s in logged.items() if s != "unchanged"} == readers
 
 

@@ -2675,9 +2675,15 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     totals_reads = tuple(f"FROM {t} " for t in (*ch_aggregates.INTERNAL_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES))
     probes = ("SELECT count(), ", *(f"SELECT {e} FROM {t} " for t, (_, e, _) in ch_aggregates.REFERENCES.items()))
     # The archive's stop times and schedules are read for one content, or listed
-    # by content; its version map and spans hold a row per version name.
+    # by content; its version map and spans hold a row per version name, and its
+    # calendars a row per service or exception date of each version, which the
+    # stop supply reads to tell whether a version's typical days moved.
     archive_reads = (f"FROM {static_archive.ARCHIVE} ", f"FROM {static_archive.SCHEDULE} ")
-    name_reads = (f"FROM {static_archive.VERSION_MAP} ", f"FROM {static_archive.SPANS} ")
+    name_reads = (
+        f"FROM {static_archive.VERSION_MAP} ",
+        f"FROM {static_archive.SPANS} ",
+        f"FROM {static_archive.CALENDAR} ",
+    )
     assert all(
         s.rstrip().endswith("LIMIT 1")
         or (
@@ -2796,8 +2802,9 @@ def test_a_changed_static_schedule_needs_every_date_of_the_tables_that_read_it(p
     pg_conn.commit()
 
     plan = _plan(agency_id, pg_conn, ch_client, _static_loaded(pg_conn, agency_id), strategy)
-    # The agency_id fixture's ingest stamps no version, so every timetable reader rebuilds.
-    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable is not Timetable.NONE}
+    # The agency_id fixture's ingest stamps no version, so every timetable reader
+    # rebuilds but those kept per archived version, which add the new content's rows.
+    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable not in (Timetable.NONE, Timetable.VERSIONS)}
     assert {n for n, scope in plan.scopes.items() if scope is None} == readers
 
 
