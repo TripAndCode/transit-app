@@ -73,9 +73,9 @@ bake:
 	@echo "→ baked frontend/dist → api/static/"
 
 # ── Sanity check ─────────────────────────────────────────────────────────────
-# Reports the state of env, DB container, port 8000, and SSO env without
+# Reports the state of env, DB container, port 8000, and sign-in env without
 # starting anything. Exit code 0 always — informational.
-# The SSO, ClickHouse and R2 lines count `.env` assignments with `grep -c`, which
+# The sign-in, ClickHouse and R2 lines count `.env` assignments with `grep -c`, which
 # prints no count at all for a file it cannot open, so an empty count (no
 # readable `.env`) is read as zero.
 
@@ -83,10 +83,15 @@ doctor:
 	@echo "── env ──"
 	@test -f .env && echo "  .env present" || echo "  .env MISSING (run \`cp .env.example .env\`)"
 	@grep -qE '^(GEMINI_API_KEY|OPENAI_API_KEY)=..+' .env 2>/dev/null && echo "  LLM provider key set" || echo "  no GEMINI_API_KEY/OPENAI_API_KEY (LLM-backed Ask features off; the API still starts)"
-	@n=$$(grep -cE '^(SESSION_SIGNING_KEY|GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
-		if [ "$$n" = "5" ]; then echo "  SSO env: all 5 set (login enabled)"; \
-		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (anonymous-only)"; \
-		else echo "  SSO env: PARTIAL ($$n/5) — startup will fail"; fi
+	@n=$$(grep -cE '^(GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|GITHUB_CLIENT_ID|GITHUB_CLIENT_SECRET)=.+' .env 2>/dev/null || true); n=$${n:-0}; \
+		a=$$(grep -cE '^(DEFAULT_ADMIN_USERNAME|DEFAULT_ADMIN_PASSWORD)=.+' .env 2>/dev/null || true); a=$${a:-0}; \
+		k=$$(grep -E '^SESSION_SIGNING_KEY=.+' .env 2>/dev/null | grep -cvx 'SESSION_SIGNING_KEY=dev-only-not-secret' || true); k=$${k:-0}; \
+		if [ "$$n" = "4" ]; then echo "  SSO env: all 4 OAuth client vars set (login enabled)"; \
+		elif [ "$$n" = "0" ]; then echo "  SSO env: none set (no OAuth sign-in)"; \
+		else echo "  SSO env: PARTIAL ($$n/4) — startup will fail"; fi; \
+		if [ "$$k" != "0" ]; then echo "  SESSION_SIGNING_KEY: set"; \
+		elif [ "$$n" = "4" ] || [ "$$a" = "2" ]; then echo "  SESSION_SIGNING_KEY: MISSING or the dev default — sign-in is on, startup will fail (\`openssl rand -hex 32\`)"; \
+		else echo "  SESSION_SIGNING_KEY: unset (fine with no sign-in method)"; fi
 	@n=$$(grep -cE '^(CLICKHOUSE_USER|CLICKHOUSE_PASSWORD|CLICKHOUSE_DATABASE)=..+' .env 2>/dev/null || true); n=$${n:-0}; \
 		if [ "$$n" = "3" ]; then echo "  CLICKHOUSE env: all 3 set"; \
 		else echo "  CLICKHOUSE env: PARTIAL ($$n/3) — \`make ch-bootstrap\` will fail"; fi

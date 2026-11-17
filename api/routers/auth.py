@@ -44,6 +44,7 @@ from api.security import (
     token_hash,
     verify_local_login_password,
 )
+from api.sso import session_signing_key, sso_status
 from pipeline.audit import record_event
 
 _log = logging.getLogger(__name__)
@@ -133,24 +134,15 @@ def _get_signer() -> URLSafeTimedSerializer:
     it reads ``SESSION_SIGNING_KEY`` after ``api.main``'s startup validation
     has had a chance to reject a missing key in production, instead of
     baking in the dev-only fallback key permanently at module import."""
-    return URLSafeTimedSerializer(
-        os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret"),
-        salt="oauth-tx",
-    )
+    return URLSafeTimedSerializer(session_signing_key(), salt="oauth-tx")
 
 
 def _require_sso_configured() -> None:
-    """503 the request when any OAuth env var is unset. ``GET /api/config``
+    """503 the request when any OAuth client env var is unset. ``GET /api/config``
     advertises this state so the SPA hides login UI; this guard catches
     direct hits to the OAuth endpoints (curl, stale browser tabs)."""
-    required = (
-        "SESSION_SIGNING_KEY",
-        "GOOGLE_CLIENT_ID",
-        "GOOGLE_CLIENT_SECRET",
-        "GITHUB_CLIENT_ID",
-        "GITHUB_CLIENT_SECRET",
-    )
-    if any(not os.environ.get(k) for k in required):
+    enabled, _ = sso_status()
+    if not enabled:
         raise HTTPException(status_code=503, detail="sso not configured")
 
 
@@ -586,7 +578,7 @@ def _username_fingerprint(username: str) -> str:
     protect. Lowercased first so one account fingerprints identically
     regardless of case.
     """
-    key = os.environ.get("SESSION_SIGNING_KEY", "dev-only-not-secret").encode()
+    key = session_signing_key().encode()
     return hmac.new(key, username.lower().encode(), hashlib.sha256).hexdigest()[:16]
 
 

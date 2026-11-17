@@ -62,7 +62,9 @@ from api.routers.snapshots import admin_router as admin_snapshots_router
 from api.routers.snapshots import router as snapshots_router
 from api.routers.static import router as static_router
 from api.security import cookie_secure
+from api.sso import DEV_SIGNING_KEY as _DEV_SIGNING_KEY
 from api.sso import SSO_ENV as _AUTH_ENV
+from api.sso import configured_signing_key, session_signing_key
 from api.sso import sso_status as auth_status
 from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.flags import aflag, flag
@@ -74,11 +76,6 @@ _log = logging.getLogger(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-
-# The placeholder signing key used when SESSION_SIGNING_KEY is unset. Safe for
-# local/anonymous boots; refused at startup once SSO is enabled (see
-# _validate_session_signing_key) so a forgeable-cookie config can't reach prod.
-_DEV_SIGNING_KEY = "dev-only-not-secret"
 
 # Path prefixes the SPA fallback must NOT swallow. An unknown URL under one
 # of these prefixes returns a structured JSON 404 instead of the SPA's
@@ -116,13 +113,16 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
 
 
 def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
-    """Refuse to boot an auth-enabled deployment that still uses the dev signing
-    key — every session/OAuth cookie would be forgeable. No-op when auth is off
-    (anonymous-only mode never mints those cookies)."""
-    if enabled and signing_key == _DEV_SIGNING_KEY:
+    """Refuse to boot with any sign-in method on (OAuth or the break-glass local
+    admin) unless SESSION_SIGNING_KEY is a real secret. A missing key falls back
+    to the public dev key, so the OAuth transaction cookie and the keyed
+    failed-login fingerprint would both be computable by anyone. No-op when no
+    sign-in method is on."""
+    if enabled and (signing_key is None or signing_key == _DEV_SIGNING_KEY):
         raise RuntimeError(
-            "SESSION_SIGNING_KEY is the dev default in an auth-enabled deployment. "
-            "Set a real secret (e.g. `openssl rand -hex 32`)."
+            "SESSION_SIGNING_KEY is missing or the public dev default while a sign-in method "
+            "(OAuth or DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD) is enabled. "
+            "Generate one with `openssl rand -hex 32` and set it."
         )
 
 
@@ -179,21 +179,23 @@ async def _close_startup_resources(app: FastAPI) -> None:
 async def lifespan(app: FastAPI):
     """Validate required env, open the asyncpg pool, and tear it down on exit.
 
-    Auth env is optional in aggregate: all five vars present → SSO on; none
-    present → SSO off (anonymous-only mode, ``/api/auth/*`` returns 503). A
-    partial set is rejected as a misconfiguration since a half-wired OAuth
-    flow would leak state cookies without ever completing.
+    OAuth env is optional in aggregate: all four client vars present → SSO on;
+    none present → SSO off (the OAuth routes return 503). A partial set is
+    rejected as a misconfiguration since a half-wired OAuth flow would leak
+    state cookies without ever completing. Any sign-in method, SSO or the
+    local admin, also requires a real ``SESSION_SIGNING_KEY``.
     """
     from pipeline.flags import warm as warm_flags
 
     if not llm_available():
         _log.warning("No LLM provider key configured; LLM-backed Ask features are disabled")
-    enabled, missing = auth_status()
-    if not enabled and len(missing) != len(_AUTH_ENV):
+    sso_enabled, missing = auth_status()
+    if not sso_enabled and len(missing) != len(_AUTH_ENV):
         raise RuntimeError(
-            f"Partial auth env: missing {', '.join(missing)}. Set all five or none — half-wired OAuth is unsafe."
+            f"Partial OAuth env: missing {', '.join(missing)}. "
+            "Set all four OAuth client variables or none — half-wired OAuth is unsafe."
         )
-    _validate_session_signing_key(enabled, os.environ.get("SESSION_SIGNING_KEY"))
+    _validate_session_signing_key(sso_enabled or local_admin_enabled(), configured_signing_key())
     # max_size=20 (asyncpg default 10): a cold overview request holds at most
     # OVERVIEW_FANOUT_LIMIT connections at once. It takes no request
     # connection; each fanned-out stage acquires its own under that bound, and
@@ -323,7 +325,7 @@ app.add_middleware(UsageCountMiddleware)
 app.add_middleware(SessionMiddleware)
 app.add_middleware(
     StarletteSessionMiddleware,
-    secret_key=os.environ.get("SESSION_SIGNING_KEY", _DEV_SIGNING_KEY),
+    secret_key=session_signing_key(),
     session_cookie="auth_tmp",
     max_age=600,
     # Secure when the deployment is HTTPS (PUBLIC_BASE_URL). TLS terminates at

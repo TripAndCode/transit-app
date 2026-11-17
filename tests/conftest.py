@@ -473,9 +473,9 @@ def _sso_off_unless_a_test_turns_it_on(monkeypatch):
     """Whether SSO is configured changes whether ``/api/auth/*`` answers at
     all. A shell that exports the OAuth block would otherwise change that for
     the whole suite; a test that needs SSO sets the variables itself."""
-    from api.sso import SSO_ENV
+    from api.sso import SIGNING_KEY_ENV, SSO_ENV
 
-    for var in SSO_ENV:
+    for var in (*SSO_ENV, SIGNING_KEY_ENV):
         monkeypatch.delenv(var, raising=False)
 
 

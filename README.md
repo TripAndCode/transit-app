@@ -359,12 +359,18 @@ Copy `.env.example` and set only what your environment needs. Important groups:
   key for any provider listed in `CHAT_PROVIDERS` the API still starts, LLM-backed
   features are disabled and `/api/config` reports `llm_enabled: false`.
 - `CRON_SECRET`: protects the internal live-ingest endpoint.
-- `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `SESSION_SIGNING_KEY`,
-  `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`, `ADMIN_EMAILS`: optional admin
-  sign-in. Sign-in is for administrators only: `ADMIN_EMAILS` is the one way
-  to make a new admin through SSO, and any other account is refused.
+- `SESSION_SIGNING_KEY`: required by every sign-in method (OAuth or the local
+  admin below). Startup refuses to boot with sign-in on while it is unset or
+  the public dev default; generate one with `openssl rand -hex 32`. An
+  anonymous-only deployment needs none.
+- `GOOGLE_CLIENT_*`, `GITHUB_CLIENT_*`, `PUBLIC_BASE_URL`, `FRONTEND_BASE_URL`,
+  `ADMIN_EMAILS`: optional admin sign-in through OAuth. Set all four client
+  variables or none; startup refuses a partial set. Sign-in is for
+  administrators only: `ADMIN_EMAILS` is the one way to make a new admin
+  through SSO, and any other account is refused.
 - `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`: break-glass local-admin
-  account, seeded (and re-seeded on every boot) only when both are set.
+  account, seeded (and re-seeded on every boot) only when both are set. It
+  needs `SESSION_SIGNING_KEY` too, with or without OAuth.
   Rotating it is editing `.env` and restarting — the same mental model as
   rotating an OAuth client secret. Never set `DEFAULT_ADMIN_USERNAME` to a
   live SSO user's email: seeding refuses to promote an email that already
