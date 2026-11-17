@@ -104,19 +104,22 @@ export function compareMode(by: string | null): CompareMode {
   return by === "agencies" ? "agencies" : "periods";
 }
 
-/** Reports' three views, and the `doc` each opens with. */
+/** Reports' four views, and the `doc` each opens with. */
 export const REPORTS_VIEWS = [
   { view: "summary", labelKey: "saved.view_summary", extra: {} },
   { view: "saved", labelKey: "saved.view_saved", extra: { doc: "saved" } },
   { view: "reports", labelKey: "saved.view_reports", extra: { doc: "council" } },
+  { view: "revisions", labelKey: "saved.view_revisions", extra: { doc: "revisions" } },
 ] as const satisfies readonly { view: string; labelKey: string; extra: Record<string, string> }[];
 export type ReportsView = (typeof REPORTS_VIEWS)[number]["view"];
 
 /** An export document's `report` or `doc` opens the documents view,
- *  `doc=saved` the saved analyses, and anything else the period summary. */
+ *  `doc=saved` the saved analyses, `doc=revisions` the timetable revisions,
+ *  and anything else the period summary. */
 export function reportsView(doc: string | null, report: string | null): ReportsView {
   if ((SAVED_REPORT_TYPES as readonly string[]).includes(report ?? "")) return "reports";
   if (doc === "council" || doc === "certificate") return "reports";
+  if (doc === "revisions") return "revisions";
   return doc === "saved" ? "saved" : "summary";
 }
 

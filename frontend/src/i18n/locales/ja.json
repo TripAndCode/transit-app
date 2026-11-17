@@ -57,7 +57,9 @@
     "view_reports": "協議会向け報告・遅延の記録",
     "subtitle_summary": "期間中の運行を、印刷できる一枚にまとめます。",
     "subtitle_saved": "このブラウザで路線のページから保存した分析です。",
-    "subtitle_reports": "協議会向け報告と、遅延の記録（参考）です。"
+    "subtitle_reports": "協議会向け報告と、遅延の記録（参考）です。",
+    "view_revisions": "時刻表の改正",
+    "subtitle_revisions": "時刻表の改正ごとに、停留所ごとの変化を示します。時間帯ごとに減った発車と増えた発車、最終の時刻、発車がなくなった停留所です。"
   },
   "sheet": {
     "handle": "シートの高さを変える"
@@ -2612,5 +2614,46 @@
       "status": "読み込み中",
       "text": "この事業者の配信が扱う範囲を読み込んでいます…"
     }
+  },
+  "revisions": {
+    "pick": "改正",
+    "option": "{{date}}から（{{version}}）",
+    "versions": "{{date}}から、{{before}}（{{beforeContent}}）に代わって{{after}}（{{afterContent}}）が有効です。",
+    "empty_title": "比べられる時刻表の改正はまだありません",
+    "empty_hint": "2つ目の時刻表が有効になると、改正ごとに停留所ごとの変化をここに示します。",
+    "no_calendar_title": "この改正は比べられません",
+    "no_calendar_hint": "どちらかの時刻表の運行日カレンダーが保存されていないため、便の運行日がわかりません。",
+    "day_types_title": "曜日区分ごと",
+    "stops_title": "変化があった停留所",
+    "day_type_label": "曜日区分",
+    "day_type": {
+      "weekday": "平日",
+      "saturday": "土曜",
+      "sunday_holiday": "日祝"
+    },
+    "col": {
+      "day_type": "曜日区分",
+      "typical_days": "代表日（改正前 → 改正後）",
+      "departures": "発車数",
+      "change": "増減",
+      "stops_ended": "発車がなくなった停留所",
+      "last_earlier": "最終が早まった停留所",
+      "stop": "停留所",
+      "lost_gained": "減った / 増えた",
+      "last": "最終の発車",
+      "hours": "時間帯ごとの増減",
+      "first": "始発の発車"
+    },
+    "lost_gained": "{{lost}} / {{gained}}",
+    "minutes": "（{{value}}分）",
+    "hour_change": "{{hour}}時台 {{delta}}",
+    "hour_separator": "、",
+    "ended": "発車がなくなった",
+    "no_change": "この曜日区分で変化があった停留所はありません。",
+    "unknown_day_type": "「—」の曜日区分は、どちらかの時刻表が有効な期間にその曜日区分の日がないため、比べていません。",
+    "show_all": "{{count}}件すべて表示",
+    "note": "曜日区分ごとに、それぞれの時刻表から代表日1日を選んで比べます。代表日は、改正日に近い、その曜日区分のふつうの日です。便の終点は発車に数えません。停留所名は今の時刻表のもので、今の時刻表にない停留所はIDで示します。定義の詳細は算出方法の文書にあります。",
+    "no_revision_title": "この改正は一覧から外れました",
+    "no_revision_hint": "このページを開いた後で、事業者の時刻表の改正が変わりました。ページを読み込み直すと、今の一覧を表示します。"
   }
 }

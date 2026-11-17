@@ -61,6 +61,7 @@ from api.routers.scope_summary import router as scope_summary_router
 from api.routers.snapshots import admin_router as admin_snapshots_router
 from api.routers.snapshots import router as snapshots_router
 from api.routers.static import router as static_router
+from api.routers.timetable_revisions import router as timetable_revisions_router
 from api.security import cookie_secure
 from api.sso import DEV_SIGNING_KEY as _DEV_SIGNING_KEY
 from api.sso import SSO_ENV as _AUTH_ENV
@@ -387,6 +388,7 @@ app.include_router(reports_router)
 app.include_router(scope_summary_router)
 app.include_router(snapshots_router)
 app.include_router(static_router)
+app.include_router(timetable_revisions_router)
 app.include_router(internal_router)
 app.include_router(collector_router)
 

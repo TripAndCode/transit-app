@@ -382,14 +382,39 @@ def archive_calendar(conn, ch, agency_id: int, key: str, parts: list[str]) -> bo
     return True
 
 
+_ARCHIVED_CALENDAR_SQL = (
+    f"SELECT DISTINCT kind, service_id, {', '.join(WEEKDAY_COLUMNS)}, start_date, end_date, date, exception_type "
+    f"FROM {CALENDAR} WHERE agency_id = {{agency:Int32}} AND static_version_id = {{stem:String}} "
+    "AND content_hash = {content:String}"
+)
+
+
 def archived_calendar(ch, agency_id: int, stem: str, content: str) -> ArchivedCalendar | None:
     """The calendar kept for the agency's version *stem* at *content*, or None when none is."""
-    rows = ch.query(
-        f"SELECT DISTINCT kind, service_id, {', '.join(WEEKDAY_COLUMNS)}, start_date, end_date, date, exception_type "
-        f"FROM {CALENDAR} WHERE agency_id = {{agency:Int32}} AND static_version_id = {{stem:String}} "
-        "AND content_hash = {content:String}",
-        parameters={"agency": agency_id, "stem": stem, "content": content},
-    ).result_rows
+    parameters = {"agency": agency_id, "stem": stem, "content": content}
+    return _archived_calendar(ch.query(_ARCHIVED_CALENDAR_SQL, parameters=parameters).result_rows)
+
+
+async def archived_calendar_async(ch, agency_id: int, stem: str, content: str) -> ArchivedCalendar | None:
+    """archived_calendar through an async ClickHouse client."""
+    parameters = {"agency": agency_id, "stem": stem, "content": content}
+    return _archived_calendar((await ch.query(_ARCHIVED_CALENDAR_SQL, parameters=parameters)).result_rows)
+
+
+_CALENDAR_DIGESTS_SQL = (
+    f"SELECT DISTINCT static_version_id, content_hash, calendar_digest FROM {CALENDAR} "
+    "WHERE agency_id = {agency:Int32}"
+)
+
+
+async def calendar_digests_async(ch, agency_id: int) -> dict[tuple[str, str], str]:
+    """The digest of each (version name, content) of the agency whose calendar
+    is kept: two equal digests are one calendar."""
+    rows = (await ch.query(_CALENDAR_DIGESTS_SQL, parameters={"agency": agency_id})).result_rows
+    return {(stem, content): digest for stem, content, digest in rows}
+
+
+def _archived_calendar(rows) -> ArchivedCalendar | None:
     if not rows:
         return None
     calendar = sorted(
