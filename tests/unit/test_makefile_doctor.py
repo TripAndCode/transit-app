@@ -21,13 +21,16 @@ from api.sso import DEV_SIGNING_KEY, LOCAL_ADMIN_ENV, SIGNING_KEY_ENV, SSO_ENV
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 CLICKHOUSE_VARS = ("CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABASE")
+# A pytest run started under `make … VAR=x` hands its command-line overrides to
+# the nested make through these, and they outrank the test's `.env`.
+MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")
 
 
 def _doctor(checkout: Path, env_file: str | None) -> list[str]:
     shutil.copy(REPO_ROOT / "Makefile", checkout / "Makefile")
     if env_file is not None:
         (checkout / ".env").write_text(env_file)
-    stripped = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_ENV, *CLICKHOUSE_VARS)
+    stripped = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_ENV, *CLICKHOUSE_VARS, *MAKE_VARS)
     env = {k: v for k, v in os.environ.items() if k not in stripped}
     result = subprocess.run(["make", "-s", "doctor"], cwd=checkout, env=env, capture_output=True, text=True, check=True)
     return [line.strip() for line in result.stdout.splitlines()]
