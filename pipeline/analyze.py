@@ -415,7 +415,7 @@ def _insert_visits_table(
     if table not in _VALID_AGG_TABLES:
         raise ValueError(f"Unknown aggregation table: {table!r}")
     params = p if rebuild_dates is None else {**p, "rebuild_dates": rebuild_dates}
-    with _step(f"{table}: build"), conn.cursor() as cur:
+    with _step(f"{table}: build+insert"), conn.cursor() as cur:
         cur.execute(f"INSERT INTO {table} ({', '.join(col_names)}) {builder(scoped=rebuild_dates is not None)}", params)
         inserted = cur.rowcount
     logger.info(f"  {table}: {inserted} rows")
