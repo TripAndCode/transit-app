@@ -3,9 +3,10 @@
 validate_feed_url alone only checks the URL given to it once, before the
 first request - it does nothing about urllib's default redirect handling
 (which follows a 3xx to a new host with no re-validation) or an unbounded
-response body. safe_urlopen closes both gaps. All cases use IP-literal
-hosts so no real DNS/network call happens - the opener itself is mocked,
-matching this suite's existing hermetic style (see test_url_guard.py).
+response body. safe_urlopen closes both gaps. No case makes a DNS or
+external network call: most mock the opener with IP-literal hosts, and the
+deadline cases talk to a real loopback server with validate_feed_url stubbed,
+because only a real socket shows how http.client closes a finished response.
 """
 
 import http.client
@@ -317,9 +318,22 @@ def test_a_deadline_keeps_the_size_cap(monkeypatch):
         safe_urlopen("http://8.8.8.8/feed", max_bytes=500, deadline=time.monotonic() + 5)
 
 
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_a_deadline_reads_a_dripping_body_that_finishes_in_time(monkeypatch, chunked):
+    server = _dripping_server(chunked=chunked)
+    monkeypatch.setattr(url_guard, "validate_feed_url", lambda url: None)
+    try:
+        url = f"http://127.0.0.1:{server.getsockname()[1]}/feed"
+        with safe_urlopen(url, timeout=5, deadline=time.monotonic() + 10) as resp:
+            assert resp.read() == b"x" * 60
+    finally:
+        server.close()
+
+
 def test_a_deadline_reads_a_content_length_body_the_response_closes_itself_on(monkeypatch):
-    """http.client closes a Content-Length response's socket on its last byte,
-    so no read may touch that socket again."""
+    """Under urllib, http.client closes a Content-Length response and its socket
+    on the body's last byte, so a deadline read must not reset that socket's
+    timeout afterwards."""
     body = b"y" * 5000
     server = socket.socket()
     server.bind(("127.0.0.1", 0))
