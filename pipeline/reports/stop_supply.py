@@ -220,9 +220,14 @@ async def read_supply_stop(
 ) -> dict | None:
     """One stop of the map, opened: its name, its supply over the band, and
     the day's first and last departure in service-day seconds (None with no
-    departure on the day type). None when the operator's version in force on
-    *day* has no such stop or cannot be read for *day_type*."""
+    departure on the day type). None when the operator is not an active one,
+    as the map lists only those, or its version in force on *day* has no such
+    stop or cannot be read for *day_type*."""
     _check(day_type, from_hour, to_hour)
+    if not await conn.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM agencies WHERE agency_id = $1 AND deleted_at IS NULL)", agency_id
+    ):
+        return None
     version = version_on(await _in_force(ch, agency_id), day)
     if version is None:
         return None

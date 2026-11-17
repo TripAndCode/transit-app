@@ -166,11 +166,65 @@ def test_a_new_version_is_added_and_one_no_longer_in_force_dropped(revised, pg_c
     assert _hourly(pg_conn, revised, C, "weekday")[("S1", 7)] == (1, 7 * H, 7 * H, None)
 
 
-def test_a_run_with_nothing_moved_reads_no_calendar(revised, pg_conn, ch_client, monkeypatch):
-    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
-    reads = []
+def _counting_calendar_reads(monkeypatch) -> list:
+    reads: list = []
     real = static_archive.archived_calendar
     monkeypatch.setattr(static_archive, "archived_calendar", lambda *a: reads.append(a) or real(*a))
+    return reads
+
+
+def _days_rows(pg_conn, agency_id: int, stem: str) -> list[tuple]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT day_type, typical_day, segments, calendar_read FROM agg_stop_supply_days "
+            "WHERE agency_id = %s AND static_version_id = %s ORDER BY day_type",
+            (agency_id, stem),
+        )
+        return cur.fetchall()
+
+
+def test_moved_dates_that_leave_the_typical_days_only_record_the_read(revised, pg_conn, ch_client, monkeypatch):
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    built = _days_rows(pg_conn, revised, A)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agg_stop_supply_days SET segments = 'moved' WHERE agency_id = %s AND static_version_id = %s",
+            (revised, A),
+        )
+    reads = _counting_calendar_reads(monkeypatch)
+    assert stop_supply.rebuild(pg_conn, ch_client, revised, full=False) is False
+    assert [args[2] for args in reads] == [A]
+    assert _days_rows(pg_conn, revised, A) == built
+
+
+def test_a_kept_calendar_that_tells_no_day_type_is_read_once(revised, pg_conn, ch_client, monkeypatch):
+    monkeypatch.setattr(stop_supply, "typical_days", lambda segments, calendar: dict.fromkeys(stop_supply.DAY_TYPES))
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    assert {(day, read) for _dt, day, _segments, read in _days_rows(pg_conn, revised, A)} == {(None, True)}
+    reads = _counting_calendar_reads(monkeypatch)
+    assert stop_supply.rebuild(pg_conn, ch_client, revised, full=False) is False
+    assert reads == []
+
+
+def test_a_version_built_without_a_calendar_is_read_once_one_is_kept(revised, pg_conn, ch_client, monkeypatch):
+    kept = static_archive.calendar_versions
+    without_a = lambda ch, agency: {key for key in kept(ch, agency) if key[0] != A}  # noqa: E731
+    monkeypatch.setattr(static_archive, "calendar_versions", without_a)
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    assert {(day, read) for _dt, day, _segments, read in _days_rows(pg_conn, revised, A)} == {(None, False)}
+    monkeypatch.setattr(static_archive, "calendar_versions", kept)
+    assert stop_supply.rebuild(pg_conn, ch_client, revised, full=False)
+    rows = _days_rows(pg_conn, revised, A)
+    assert all(day is not None and read for _dt, day, _segments, read in rows)
+    assert _hourly(pg_conn, revised, A, "weekday")[("S1", 7)][0] == 2
+    reads = _counting_calendar_reads(monkeypatch)
+    assert stop_supply.rebuild(pg_conn, ch_client, revised, full=False) is False
+    assert reads == []
+
+
+def test_a_run_with_nothing_moved_reads_no_calendar(revised, pg_conn, ch_client, monkeypatch):
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    reads = _counting_calendar_reads(monkeypatch)
     assert stop_supply.rebuild(pg_conn, ch_client, revised, full=False) is False
     assert reads == []
 
@@ -188,6 +242,9 @@ async def test_the_map_reads_the_version_in_force_on_the_date(revised, pg_conn, 
     stops = _stops(body, revised)
     assert set(stops) == {"S1", "S2", "S3"}
     assert stops["S1"] == {"stop_id": "S1", "lat": 34.4, "lon": 132.4, "departures": 2, "longest_gap_min": 90.0}
+    from api.routers.network import SupplyMapResponse
+
+    SupplyMapResponse.model_validate(body)
 
 
 async def test_an_opened_stop_names_itself_and_its_first_and_last_departure(revised, pg_conn, ch_client, api):
@@ -266,3 +323,70 @@ async def test_an_operator_without_a_version_or_a_build_says_so(revised, api):
 async def test_a_band_ending_before_it_starts_is_refused(api):
     response = await api.get("/api/network/supply", params={"from_hour": 16, "to_hour": 10})
     assert response.status_code == 422
+
+
+def _built_at(pg_conn, agency_id: int) -> dict[str, object]:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT table_name, built_at FROM agg_table_state WHERE agency_id = %s AND table_name = ANY(%s)",
+            (agency_id, [stop_supply.DAYS_TABLE, stop_supply.TABLE]),
+        )
+        return dict(cur.fetchall())
+
+
+def _seed_ledger(pg_conn, ch_client, agency_id: int) -> None:
+    """A few observations, so analyze keeps a ledger and a later run rebuilds
+    only what moved rather than every table."""
+    from datetime import time
+
+    from tests.conftest import mirror_updates_to_ch
+
+    with pg_conn.cursor() as cur:
+        for i, delay in enumerate([60, 120, 180]):
+            cur.execute(
+                "INSERT INTO updates (agency_id, file_name, captured_at, trip_id, service_type, "
+                "scheduled_time, route_code, stop_sequence, dep_delay) "
+                "VALUES (%s,%s,'2026-06-09T08:10:00','w1','平日',%s,'R1',1,%s)",
+                (agency_id, f"f{i}.pb", time(8, 10), delay),
+            )
+    pg_conn.commit()
+    mirror_updates_to_ch(ch_client, agency_id)
+
+
+async def test_analyze_adds_a_new_version_and_the_map_shows_it(revised, pg_conn, ch_client, tmp_path, api, caplog):
+    import logging
+
+    from pipeline.analyze import analyze
+
+    _seed_ledger(pg_conn, ch_client, revised)
+    analyze(revised, pg_conn, ch_client)
+    before = _built_at(pg_conn, revised)
+    params = {"date": "2026-05-12", "from_hour": 7, "to_hour": 9}
+    assert _agency((await api.get("/api/network/supply", params=params)).json(), revised)["static_version_id"] == B
+    # C covers all of B's days and was fetched later, so it is in force there now.
+    load_static(_zip(tmp_path, C, B_FIRST, B_LAST, _C), revised, pg_conn, ch_client=ch_client)
+    pg_conn.commit()
+    with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
+        analyze(revised, pg_conn, ch_client)
+    # The supply tables were left standing by the plan: the builder's own
+    # rebuild is what has to mark them rewritten.
+    scopes = {r.getMessage().strip() for r in caplog.records}
+    assert f"scope {stop_supply.TABLE}: unchanged" in scopes
+    assert f"scope {stop_supply.DAYS_TABLE}: unchanged" in scopes
+    after = _built_at(pg_conn, revised)
+    assert set(after) == {stop_supply.DAYS_TABLE, stop_supply.TABLE}
+    assert all(after[name] > before[name] for name in after)
+    body = (await api.get("/api/network/supply", params=params)).json()
+    assert _agency(body, revised)["static_version_id"] == C
+    assert _stops(body, revised)["S1"]["departures"] == 1
+
+
+async def test_a_stop_of_a_removed_operator_is_not_found(revised, pg_conn, ch_client, api):
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    pg_conn.commit()
+    params = {"agency_id": revised, "stop_id": "S1", "date": "2026-02-10"}
+    assert (await api.get("/api/network/supply/stop", params=params)).status_code == 200
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = %s", (revised,))
+    pg_conn.commit()
+    assert (await api.get("/api/network/supply/stop", params=params)).status_code == 404

@@ -237,7 +237,11 @@ async def network_supply(
     return JSONResponse(await read_supply_map(conn, ch, day, day_type, from_hour, to_hour))
 
 
-@router.get("/supply/stop", response_model=SupplyStopResponse)
+@router.get(
+    "/supply/stop",
+    response_model=SupplyStopResponse,
+    responses={404: {"description": "No active operator's version in force has this stop for the date and day type"}},
+)
 @limiter.limit(DEFAULT_LIMIT)
 async def network_supply_stop(
     request: Request,
@@ -252,7 +256,8 @@ async def network_supply_stop(
 ) -> SupplyStopResponse:
     """One stop of the supply map, opened: its name, its supply over the band
     and the day's first and last departure (read_supply_stop). 404 when the
-    operator's version in force has no such stop or cannot tell the day type."""
+    operator is not active, or its version in force has no such stop or
+    cannot tell the day type."""
     if to_hour <= from_hour:
         raise HTTPException(status_code=422, detail="to_hour must be after from_hour")
     day = day or service_date_of(datetime.now(timezone.utc))

@@ -9,7 +9,9 @@
 -- kept), which a reader never takes as zero departures. segments is the
 -- dates the version was in force on when they were read
 -- (pipeline.stop_supply.segments_digest), the same on each of its rows: a
--- run reads its calendar again only once they move.
+-- run reads its calendar again only once they move. calendar_read says the
+-- typical days were read from the version's kept calendar: a version built
+-- with none has it false, and its calendar is read once one is kept.
 CREATE TABLE IF NOT EXISTS agg_stop_supply_days (
     agency_id         INTEGER NOT NULL REFERENCES agencies(agency_id),
     static_version_id TEXT    NOT NULL,
@@ -17,6 +19,7 @@ CREATE TABLE IF NOT EXISTS agg_stop_supply_days (
     day_type          TEXT    NOT NULL CHECK (day_type IN ('weekday', 'saturday', 'sunday_holiday')),
     typical_day       DATE,
     segments          TEXT    NOT NULL,
+    calendar_read     BOOLEAN NOT NULL,
     PRIMARY KEY (agency_id, static_version_id, content_hash, day_type)
 );
 

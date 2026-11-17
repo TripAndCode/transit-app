@@ -68,6 +68,18 @@ def rebuildable_agg_tables() -> frozenset[str]:
     return frozenset(_AGG_TABLES_ORDERED) | {"agg_meta", "agg_route_dow", "agg_stop_seq"}
 
 
+@functools.cache
+def floor_filled_agg_tables() -> frozenset[str]:
+    """The aggregates analyze fills date by date (Kind.DATED), which a
+    retention floor stops at the floor. A table built from the timetables
+    alone (Kind.STATIC_ONLY) is rebuilt whole whatever the floor, and a
+    whole-history one is finalized from internal tables that keep the months
+    before it. Imported lazily, as rebuildable_agg_tables is."""
+    from pipeline.agg_registry import TABLES, Kind
+
+    return frozenset(name for name, table in TABLES.items() if table.kind is Kind.DATED)
+
+
 def retention_floor_exists(conn) -> bool:
     """Whether any agency has a retention floor: the `updates` prune has
     recorded a drop (pipeline.retention.retention_floor). A database without
@@ -208,8 +220,9 @@ def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
     row of theirs. With *retention_floor* (`retention_floor_exists`), analyze
     never rebuilds a date before the floor, so from the first `updates` drop
     on their rows there are restored by nothing: they count like any other
-    table, and so does a column added to one, or one created anew, since
-    analyze fills it only from the floor on. The down markers are judged
+    table, and so does a column added to, or a table created as, one analyze
+    fills date by date (`floor_filled_agg_tables`), since it fills that only
+    from the floor on. The down markers are judged
     without a floor, as a migration file is written once for every database.
 
     A plain analyze-all rebuilds an incremental aggregate only for the dates
@@ -219,8 +232,8 @@ def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
 
     Scope: DROP TABLE, DELETE FROM, TRUNCATE, and ALTER TABLE ... DROP [COLUMN]
     statements, read past comments, string literals and dollar-quoted bodies,
-    and with a floor ALTER TABLE ... ADD [COLUMN] on, or CREATE TABLE of, a
-    rebuildable aggregate.
+    and with a floor ALTER TABLE ... ADD [COLUMN] on, or CREATE TABLE of, an
+    aggregate analyze fills date by date.
     An UPDATE is not counted: a backfill in a reviewed migration rewrites
     values on purpose. Not detected: statements inside a DO block or a function
     body, a data-modifying WITH ... DELETE, MERGE ... DELETE, a narrowing ALTER
@@ -230,6 +243,7 @@ def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
     word, by its author's own judgment.
     """
     rebuildable = rebuildable_agg_tables()
+    floor_filled = floor_filled_agg_tables() if retention_floor else frozenset()
     tables: list[str] = []
     for statement in _top_level_statements(sql):
         if m := _DATA_LOSS.match(statement):
@@ -237,7 +251,7 @@ def data_losing_tables(sql: str, *, retention_floor: bool = False) -> list[str]:
             tables.extend(name for name in _table_names(group) if retention_floor or name.lower() not in rebuildable)
         elif retention_floor and (m := _ADDS_COLUMN.match(statement) or _CREATES_TABLE.match(statement)):
             group = m.groupdict().get("alter") or m.group("create")
-            tables.extend(name for name in _table_names(group) if name.lower() in rebuildable)
+            tables.extend(name for name in _table_names(group) if name.lower() in floor_filled)
     return tables
 
 

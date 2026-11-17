@@ -72,11 +72,11 @@
     "version": 3
   },
   "agg_stop_supply_days": {
-    "hash": "7e6b0803e70c2f2997978d3e804c9a670a08a8cefd318fc412b59074024bc02b",
+    "hash": "2772b71b58a8659696118fe89fc12b00000d775ec4ed8eb525ca5c9b507062d1",
     "version": 1
   },
   "agg_stop_supply_hourly": {
-    "hash": "eccfa02390f1e801e5b61938768405a4e37a7b18783936de34eb229a77c75d4d",
+    "hash": "fd74a73bacc9c344b2baba7734ee98b826afeda1affd1b9b4b663f597da64ba3",
     "version": 1
   },
   "feed_quality_monthly": {

@@ -229,7 +229,7 @@ Both the timetable revision comparison and the planned departures at stops read 
 - A day outside the timetable calendar's extent (from the first day it names to the last) is never picked. A day inside it that runs no trip counts as a day with no departures: in a timetable that lists only the days its services run in `calendar_dates`, a day it does not list runs nothing.
 - A day type with no typical day (no day of that type within the calendar's extent while that timetable is in force), or any day type of a timetable whose calendar was not kept, is unknown, never zero.
 - **Departure**: one trip running on the typical day scheduled to leave one stop. A trip's last stop is not a departure, nor is a stop with no time given.
-- **Time**: the service day's time ([Service day and time](#service-day-and-time)). A departure written past 24:00, and one written at face value as 00:40, both fall in that night's 24:00 or 25:00 hour: a 00:40 trip is the night's last, never the morning's first.
+- **Time**: the service day's time ([Service day and time](#service-day-and-time)). A departure written past 24:00 reads as written, and one written at face value between 00:00 and 03:59 reads as that night's 24:00 to 27:59: a 00:40 trip is the night's last, never the morning's first.
 
 ### Comparing timetable revisions
 
