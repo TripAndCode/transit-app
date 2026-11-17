@@ -31,14 +31,14 @@ What the user sees/does:
   `<details>` explaining each column (avg delay, on-time % and its interval,
   observation coverage, the ranking rule with the gate's thresholds, samples,
   feed health, freshness, coverage).
-- **Scope sentence** — the shared `ScopeSentence` with `template="board"`:
-  「全事業者を[period]で比較する」 / "Comparing every agency over [period]",
-  whose one condition is the period, with the period control every screen
-  uses (presets and from/to dates; no daily chart, since its figures are one
-  agency's), writing `from`/`to`.
-  Every other condition set in the URL that the endpoint's `scope_applied`
-  marks unused is named in the sentence's "Not used on this screen" note,
-  never ignored silently. It carries no saved views or pin.
+- **Scope bar** — the shared `ScopeBar` (`frontend/src/components/scope/ScopeBar.tsx`),
+  read through the endpoint's `scope_applied`, and through
+  `BOARD_SCOPE_APPLIED` (the period alone) until that answers, so the row
+  shows only the period, with the period
+  control every screen uses (presets and from/to dates; no daily chart, since
+  its figures are one agency's), writing `from`/`to`. Every other condition
+  set in the URL is left out of the row rather than shown; it keeps its value
+  and still applies on screens that use it. It carries no saved views or pin.
 - **Agency card list** — one card per agency. The comparable agencies
   (`comparable`) come first, sorted client-side worst-avg-delay first
   (`byDelayDescending`), agencies whose data stopped after the current ones
@@ -106,7 +106,7 @@ What the user sees/does:
   agency's feed quality (observation coverage and implausible share), which
   `api/routers/network.py` states from the board's own rows
   (`pipeline/reports/network.py: board_feed_quality`).
-- **Ridership-weighted on-time toggle** — a checkbox under the scope sentence,
+- **Ridership-weighted on-time toggle** — a checkbox under the scope bar,
   present only when at least one agency in the current list has a
   manually-configured ridership weight (`pipeline/reports/ridership.py`,
   backed by the `ridership_weights` table — there is no IC-card/APC ridership
@@ -238,7 +238,7 @@ default order is still by delay among the comparable agencies.
 
 | File | Role |
 |---|---|
-| `frontend/src/tabs/NetworkTab.tsx` | Network tab: the board's scope sentence, ranked card list rendering |
+| `frontend/src/tabs/NetworkTab.tsx` | Network tab: the board's scope bar, ranked card list rendering |
 | `frontend/src/components/comparabilityReason.ts` | `unrankedReason()` — an unranked agency's reason in words, shared with the council report's comparison tile |
 | `frontend/src/tabs/CompareTab.tsx` | Compare screen: the `by` switch between this board and `compare_ranking` |
 | `frontend/src/routes/legacyRedirects.tsx` (`RedirectNetworkToAgencyNetwork`) | Bare `/network` → `/agencies/{lastAgencyId}/compare?by=agencies` redirect (or `/` with no remembered agency) |

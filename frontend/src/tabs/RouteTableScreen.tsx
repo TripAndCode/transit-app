@@ -8,7 +8,7 @@ import { useScope } from "../api/scope";
 import { useAgencyId } from "../api/useAgencyId";
 import { useIsAdmin } from "../api/useIsAdmin";
 import { useRouteNames } from "../api/useRouteNames";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -108,7 +108,7 @@ export function RouteTableScreen() {
 
   return (
     <div className="analysis-tab route-table-screen">
-      <ScopeSentence applied={data?.scope_applied} />
+      <ScopeBar applied={data?.scope_applied} />
       <div className="route-table-screen__body">
         <div className="route-table__head">
           <h2>{t("routeTable.title")}</h2>

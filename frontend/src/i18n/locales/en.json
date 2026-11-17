@@ -291,7 +291,7 @@
     },
     "scope": {
       "title": "What this screen covers",
-      "body": "This sentence says which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any part marked ▼ to change it."
+      "body": "These controls say which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any one to change it."
     }
   },
   "forecast": {
@@ -2415,7 +2415,6 @@
   },
   "scope": {
     "label": "What you're viewing",
-    "sentence": "Viewing [routes] of [agency], [period], [days], [time][extras], counting on-time as [tolerance]",
     "routes_all": "all routes",
     "routes_count": "{{count}} routes",
     "period": "{{from}} – {{to}}",
@@ -2481,13 +2480,24 @@
       "early": "Early tolerance",
       "tolerance": "On-time tolerance"
     },
-    "unapplied_note": "Not used on this screen: {{list}}",
-    "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]",
     "stop_unnamed": "selected stop",
     "dir_unnamed": "Direction {{letter}}",
     "id_tag": "({{id}})",
-    "sentence_live": "Viewing [routes] of [agency] live[extras], counting on-time as [tolerance]",
-    "sentence_board": "Comparing every agency over [period]"
+    "bar": {
+      "routes": "Routes",
+      "period": "Period",
+      "days": "Days",
+      "time": "Time",
+      "service": "Timetable",
+      "stop": "Stop",
+      "dir": "Direction",
+      "early": "Early",
+      "tolerance": "On time",
+      "all": "All",
+      "all_day": "All day",
+      "early_up_to": "up to {{span}}",
+      "early_any": "All on time"
+    }
   },
   "print": {
     "generated_at": "Generated {{time}}",
@@ -2643,7 +2653,15 @@
       "lost_gained": "Lost / gained",
       "last": "Last departure",
       "hours": "Change by hour",
-      "first": "First departure"
+      "first": "First departure",
+      "last_trip": "Last trip",
+      "longest_gap": "Longest gap at the main stop",
+      "mean_delay": "Mean delay",
+      "on_time": "On-time rate",
+      "route": "Route",
+      "route_class": "Change",
+      "routes": "Routes",
+      "trips": "Trips"
     },
     "lost_gained": "{{lost}} / {{gained}}",
     "minutes": "({{value}} min)",
@@ -2655,7 +2673,24 @@
     "show_all": "Show all {{count}} stops",
     "note": "Each day type is compared on one typical day from each timetable: an ordinary day of that type near the revision. A trip's last stop is not a departure. Stop names are the current timetable's; a stop it no longer has shows its ID. See the methodology for the full definitions.",
     "no_revision_title": "This revision is no longer listed",
-    "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list."
+    "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list.",
+    "observed_capped_history": "The agency's aggregated days before the revision hold under four weeks, so no more weeks can be compared.",
+    "observed_capped_timetable": "A timetable on one side is in force for under four weeks, so no more weeks can be compared.",
+    "observed_none": "There is no whole week to compare how the routes ran: a timetable on one side is in force for less than a week, or the agency's aggregated days before the revision hold less than one.",
+    "observed_note": "The on-time rate and mean delay come from the delays the operator's real-time feed predicted, pooled over each side's days of this day type; a dash marks a route with fewer than 100 observations on that side. A class pools only its routes observed on both sides.",
+    "observed_pending": "How the routes ran after the revision appears once a whole week after it is aggregated. All {{cap}} whole weeks that can be compared are aggregated through {{date}}.",
+    "observed_window": "How the routes ran over the same {{weeks}} whole weeks on each side: {{before}} and {{after}}.",
+    "observed_window_partial": "How the routes ran over {{weeks}} of the {{cap}} whole weeks on each side so far: {{before}} and {{after}}. All {{cap}} are aggregated through {{date}}.",
+    "route_class": {
+      "added": "More trips",
+      "cut": "Fewer trips",
+      "new": "New route",
+      "removed": "No trips left",
+      "unchanged": "Same trips"
+    },
+    "routes_none": "No route runs on this day type under either timetable.",
+    "routes_title": "Routes",
+    "show_all_routes": "Show all {{count}} routes"
   },
   "why": {
     "mode_segments": "Slow segments"

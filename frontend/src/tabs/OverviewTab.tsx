@@ -23,7 +23,7 @@ import { RoutesPreview } from "../components/overview/RoutesPreview";
 import { ServiceSplit } from "../components/ServiceSplit";
 import { SkeletonKpiRow, SkeletonTable } from "../components/Skeleton";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { reportHref } from "../routes/destinations";
 import { formatDateRange } from "../utils/format";
 import { prefersReducedMotion } from "../utils/motion";
@@ -130,11 +130,11 @@ export function OverviewTab() {
 
   return (
     <ScopeHeaderProvider>
-      {/* The heading and the sentence share the page's column, so they line
+      {/* The heading and the scope bar share the page's column, so they line
           up with each other and with the cards below. */}
       <div className="ov-page-head" data-tour="pulse-scope">
         <ScopePageHeader title={t("nav.pulse")} />
-        <ScopeSentence applied={query.data?.scope_applied} />
+        <ScopeBar applied={query.data?.scope_applied} />
       </div>
       <div className="ov-page">
         <AsyncSection

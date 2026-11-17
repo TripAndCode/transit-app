@@ -102,20 +102,21 @@ describe("OverviewTab", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Pulse" })).toBeInTheDocument();
   });
 
-  it("puts the scope sentence in the heading's column, with its saved views and pin on the heading's row", () => {
+  it("puts the scope bar in the heading's column, with its saved views and pin on the heading's row", () => {
     renderOverview(summary());
     const heading = screen.getByRole("heading", { level: 1, name: "Pulse" });
     expect(heading.closest(".ov-page-head")).toContainElement(screen.getByRole("region", { name: "What you're viewing" }));
     expect(heading.closest("header")).toContainElement(screen.getByRole("button", { name: "Show all filters" }));
   });
 
-  it("states its scope as a sentence, greying what the summary did not use", () => {
+  it("hides the scope conditions the summary did not use", () => {
     renderOverview(
-      { ...summary({}), scope_applied: { from: true, to: true, dow: false } } as OverviewSummary,
+      { ...summary({}), scope_applied: { from: true, to: true, dow: false, service: false } } as OverviewSummary,
       "/agencies/8/overview?from=2030-01-01&to=2030-01-07&dow=weekday",
     );
-    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--off");
+    const bar = within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar.queryByRole("button", { name: /^Days/ })).toBeNull();
+    expect(bar.getByRole("button", { name: /^Period/ })).toBeInTheDocument();
   });
 
   it("shows real content when the headline has samples", () => {

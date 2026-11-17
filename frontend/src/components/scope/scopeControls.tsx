@@ -28,7 +28,7 @@ export type ControlProps = {
    *  control rendered pinned in the scope strip, which has no popover to
    *  close. */
   close?: () => void;
-  /** Set while the sentence is disabled; a control whose input is not a form
+  /** Set while the scope bar is disabled; a control whose input is not a form
    *  element, which the surrounding fieldset cannot disable, reads it. */
   disabled?: boolean;
 };

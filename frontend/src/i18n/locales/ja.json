@@ -291,7 +291,7 @@
     },
     "scope": {
       "title": "この画面が数えている範囲",
-      "body": "この一文が、どの路線・曜日・時間帯を、どの期間で数えているかを示します。概況は、その期間を直前の同じ日数と比べます。▼の付いた部分をクリックすると変えられます。"
+      "body": "これらの項目が、どの路線・曜日・時間帯を、どの期間で数えているかを示します。概況は、その期間を直前の同じ日数と比べます。クリックすると変えられます。"
     }
   },
   "forecast": {
@@ -2415,7 +2415,6 @@
   },
   "scope": {
     "label": "表示の条件",
-    "sentence": "[agency]の[routes]を、[period]の[days]・[time][extras]で、定時は[tolerance]として見る",
     "routes_all": "全路線",
     "routes_count": "{{count}}路線",
     "period": "{{from}}〜{{to}}",
@@ -2481,13 +2480,24 @@
       "early": "早発の幅",
       "tolerance": "定時の幅"
     },
-    "unapplied_note": "この画面では使いません：{{list}}",
-    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
     "stop_unnamed": "選択した停留所",
     "dir_unnamed": "方面{{letter}}",
     "id_tag": "（{{id}}）",
-    "sentence_live": "[agency]の[routes]を、リアルタイム[extras]で、定時は[tolerance]として見る",
-    "sentence_board": "全事業者を[period]で比較する"
+    "bar": {
+      "routes": "路線",
+      "period": "期間",
+      "days": "曜日",
+      "time": "時間帯",
+      "service": "ダイヤ",
+      "stop": "停留所",
+      "dir": "方向",
+      "early": "早発",
+      "tolerance": "定時の幅",
+      "all": "すべて",
+      "all_day": "全日",
+      "early_up_to": "{{span}}まで",
+      "early_any": "すべて定時扱い"
+    }
   },
   "print": {
     "generated_at": "作成日時 {{time}}",
@@ -2643,7 +2653,15 @@
       "lost_gained": "減った / 増えた",
       "last": "最終の発車",
       "hours": "時間帯ごとの増減",
-      "first": "始発の発車"
+      "first": "始発の発車",
+      "last_trip": "最終便の発車",
+      "longest_gap": "主な停留所での最長の間隔",
+      "mean_delay": "平均遅延",
+      "on_time": "定時率",
+      "route": "路線",
+      "route_class": "変化",
+      "routes": "路線数",
+      "trips": "便数"
     },
     "lost_gained": "{{lost}} / {{gained}}",
     "minutes": "（{{value}}分）",
@@ -2655,7 +2673,24 @@
     "show_all": "{{count}}件すべて表示",
     "note": "曜日区分ごとに、それぞれの時刻表から代表日1日を選んで比べます。代表日は、改正日に近い、その曜日区分のふつうの日です。便の終点は発車に数えません。停留所名は今の時刻表のもので、今の時刻表にない停留所はIDで示します。定義の詳細は算出方法の文書にあります。",
     "no_revision_title": "この改正は一覧から外れました",
-    "no_revision_hint": "このページを開いた後で、事業者の時刻表の改正が変わりました。ページを読み込み直すと、今の一覧を表示します。"
+    "no_revision_hint": "このページを開いた後で、事業者の時刻表の改正が変わりました。ページを読み込み直すと、今の一覧を表示します。",
+    "observed_capped_history": "改正前に集計された日が4週間に満たないため、これより多くの週は比べられません。",
+    "observed_capped_timetable": "どちらかの時刻表の有効な期間が4週間に満たないため、これより多くの週は比べられません。",
+    "observed_none": "改正の前後で運行のようすを比べられる、まとまった1週間がありません。どちらかの時刻表の有効な期間が1週間に満たないか、改正前に集計された日が1週間に満たないためです。",
+    "observed_note": "定時率と平均遅延は、事業者のリアルタイム配信が予測した遅延を、それぞれの側のこの曜日区分の日について合わせたものです。「—」は、その側の観測数が100未満の路線です。区分ごとの値は、前と後の両方で観測された路線だけを合わせています。",
+    "observed_pending": "改正後の運行のようすは、改正後の1週間分が集計されると示します。比べられる{{cap}}週間分がそろうのは{{date}}の集計後です。",
+    "observed_window": "改正の前と後それぞれ{{weeks}}週間の運行です。改正前は{{before}}、改正後は{{after}}。",
+    "observed_window_partial": "改正の前と後それぞれ、{{cap}}週間のうち{{weeks}}週間分の運行です。改正前は{{before}}、改正後は{{after}}。{{cap}}週間分がそろうのは{{date}}の集計後です。",
+    "route_class": {
+      "added": "増便",
+      "cut": "減便",
+      "new": "新しい路線",
+      "removed": "運行なし",
+      "unchanged": "便数は同じ"
+    },
+    "routes_none": "どちらの時刻表でも、この曜日区分に運行する路線はありません。",
+    "routes_title": "路線ごとの変化",
+    "show_all_routes": "{{count}}路線すべて表示"
   },
   "why": {
     "mode_segments": "遅い区間"

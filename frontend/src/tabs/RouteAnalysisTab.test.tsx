@@ -650,7 +650,7 @@ describe("RouteAnalysisTab where delay grows", () => {
     expect(previousCall?.[3]).toBe("out");
   });
 
-  describe("scope sentence", () => {
+  describe("scope bar", () => {
     function Probe() {
       const [params] = useSearchParams();
       return <div data-testid="params">{params.toString()}</div>;
@@ -707,44 +707,45 @@ describe("RouteAnalysisTab where delay grows", () => {
 
     const region = () => screen.getByRole("region", { name: "What you're viewing" });
 
-    it("opens an old link's conditions in the scope sentence, its own route not marked as a change", () => {
+    it("opens an old link's conditions in the scope bar, its own route not marked as a change", () => {
       renderRoutePage("?from=2026-09-24&to=2026-10-23&dow=weekday&time_band=morning");
-      expect(region()).toHaveTextContent("Viewing R1 of");
-      expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--on");
-      expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--on");
-      expect(screen.getByRole("button", { name: "R1" })).not.toHaveClass("scope-token--on");
+      const bar = within(region());
+      expect(bar.getByRole("button", { name: "Days weekdays" })).toHaveClass("scope-bar__control--changed");
+      expect(bar.getByRole("button", { name: "Time Morning (05–09)" })).toHaveClass("scope-bar__control--changed");
+      expect(bar.getByRole("button", { name: "Routes R1" })).not.toHaveClass("scope-bar__control--changed");
       // The routes control stages a pick behind its own Apply, which stays
       // disabled until the pick differs from what the screen shows.
-      fireEvent.click(screen.getByRole("button", { name: "R1" }));
+      fireEvent.click(bar.getByRole("button", { name: "Routes R1" }));
       const picker = screen.getByRole("dialog", { name: "Routes" });
       expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
     });
 
-    it("strikes through only what no section of the page uses", () => {
+    it("hides only what no section of the page uses", () => {
       renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1&late=120");
-      expect(screen.getByRole("button", { name: "within 2 min" })).not.toHaveClass("scope-token--off");
-      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+      const bar = within(region());
+      expect(bar.getByRole("button", { name: "On time within 2 min" })).toBeInTheDocument();
+      expect(bar.queryByRole("button", { name: /^Stop/ })).toBeNull();
     });
 
-    it("counts a section that failed as using nothing, so the others still name what went unused", () => {
+    it("counts a section that failed as using nothing, so the others still hide what went unused", () => {
       renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => ({
         data: undefined, isPending: false, error: new Error("route-shape failed"), refetch: vi.fn(),
       }));
-      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+      expect(within(region()).queryByRole("button", { name: /^Stop/ })).toBeNull();
     });
 
-    it("keeps naming an unused condition while a section reloads", () => {
+    it("keeps hiding an unused condition while a section reloads", () => {
       let shapeResult: unknown = SHAPE_ANSWERED;
       const rerender = renderRoutePage("?from=2026-09-24&to=2026-10-23&stop=S1", () => shapeResult);
-      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+      expect(within(region()).queryByRole("button", { name: /^Stop/ })).toBeNull();
       shapeResult = { data: undefined, isPending: true, error: null, refetch: vi.fn() };
       rerender();
-      expect(region()).toHaveTextContent("Not used on this screen: Stop");
+      expect(within(region()).queryByRole("button", { name: /^Stop/ })).toBeNull();
     });
 
     it("writes a changed time band as the canonical param", () => {
       renderRoutePage("?from=2026-09-24&to=2026-10-23");
-      fireEvent.click(screen.getByRole("button", { name: "all hours" }));
+      fireEvent.click(screen.getByRole("button", { name: "Time All day" }));
       fireEvent.click(screen.getByRole("radio", { name: "Evening (17–20)" }));
       const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
       expect(params.get("time_band")).toBe("evening");

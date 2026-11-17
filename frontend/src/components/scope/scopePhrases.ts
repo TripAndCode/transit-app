@@ -7,6 +7,8 @@ import { roundTenth } from "../../utils/format";
 /** The `scope_applied` keys an endpoint reports, one per URL scope param. */
 export type ScopeField = "from" | "to" | "dow" | "time_band" | "hour" | "service" | "routes" | "stop" | "dir" | "late" | "early";
 export type TokenKey = "agency" | "routes" | "period" | "days" | "time" | "service" | "stop" | "dir" | "early" | "tolerance";
+/** A token a reader can change: every one but the agency's name. */
+export type ConditionKey = Exclude<TokenKey, "agency">;
 /** `idTag` is the raw id an admin sees after the words. It is its own field so
  *  a screen can mark it apart (and print without it) and so a saved name never
  *  carries it. */
@@ -17,9 +19,6 @@ export type PhraseCtx = {
   routeLabel: (code: string) => string;
   /** The line a route code belongs to, as the route picker groups them. */
   routeGroup?: (code: string) => string | undefined;
-  /** A route code's plate text (its number/letter badge), for the routes
-   *  token's decorative plate stack. */
-  routePlate?: (code: string) => string | null;
   /** A stop's name from the static GTFS. Without one a stop reads as a
    *  neutral "selected stop": a reader is never shown a bare stop id. */
   stopName?: (id: string) => string | undefined;
@@ -55,7 +54,7 @@ export function earlyLabel(sec: number, t: LabelT): string {
   return secondsLabel(sec, t, "scope.early_min", "scope.early_sec");
 }
 
-/** An on-time window's two sides in the scope sentence's words. */
+/** An on-time window's two sides in the scope's words. */
 export function windowLabels({ early_sec, late_sec }: OnTimeWindow, t: LabelT): { late: string; early: string } {
   return {
     late: toleranceLabel(late_sec, t),
@@ -63,8 +62,6 @@ export function windowLabels({ early_sec, late_sec }: OnTimeWindow, t: LabelT): 
   };
 }
 
-/** The scope as words, one token per condition, in sentence order. Each
- *  token names the `scope_applied` field that says whether a screen used it. */
 function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx): string {
   if (routes.length === 0) return translationT(t, "scope.routes_all");
   if (routes.length === 1) return routeLabel(routes[0]);
@@ -74,39 +71,6 @@ function routesLabel(routes: string[], { t, routeLabel, routeGroup }: PhraseCtx)
     return `${group} ${translationT(t, "filters.routes.variant_count", { count: routes.length })}`;
   }
   return translationT(t, "scope.routes_count", { count: routes.length });
-}
-
-/** The routes token's decorative plate stack: one plate per picked line (its
- *  first-selected variant), or, when every pick is one line, that line's own
- *  distinct variant plates -- up to three either way. Across several lines,
- *  a line past the third or one with no plate of its own folds into a "+N"
- *  count, so the stack never shows fewer lines than were picked. A single
- *  line shows only the plates its variants have, possibly none, since the
- *  label already names that line. Purely visual: `routesLabel`'s own text
- *  is unaffected and stays the sentence's only accessible description. */
-export function routeTokenPlates(routes: string[], ctx: PhraseCtx): { plates: string[]; more: number } {
-  if (routes.length === 0) return { plates: [], more: 0 };
-  const plateOf = (code: string): string | null => (ctx.routePlate ? ctx.routePlate(code) : code);
-  const groupOf = (code: string) => ctx.routeGroup?.(code) ?? code;
-  const singleGroup = new Set(routes.map(groupOf)).size === 1;
-  const sourceCodes: string[] = [];
-  const seenGroups = new Set<string>();
-  for (const code of routes) {
-    const g = groupOf(code);
-    if (!singleGroup && seenGroups.has(g)) continue;
-    seenGroups.add(g);
-    sourceCodes.push(code);
-  }
-  const texts: string[] = [];
-  let folded = 0;
-  for (const code of sourceCodes) {
-    const text = plateOf(code);
-    if (text && !texts.includes(text)) texts.push(text);
-    else if (!singleGroup) folded += 1;
-  }
-  const total = texts.length + folded;
-  const plates = total <= 3 ? texts : texts.slice(0, 2);
-  return { plates, more: total - plates.length };
 }
 
 export function daysLabel(dow: Scope["dow"], t: LabelT): string {
@@ -154,6 +118,10 @@ export function dirLabel(dir: 0 | 1, ctx: PlaceCtx): string {
   return joined(dirParts(dir, ctx));
 }
 
+/** The scope as words, one token per condition, in the order a saved
+ *  analysis's title, a saved view's name and a snapshot's statement read
+ *  them. Each token names the `scope_applied` field that says whether a
+ *  screen used it. */
 export function scopeTokens(scope: Scope, ctx: PhraseCtx): ScopeToken[] {
   const { t, agencyName } = ctx;
   const tr = (key: string, opts?: Record<string, unknown>) => translationT(t, key, opts);
@@ -190,9 +158,9 @@ export type ScopeApplied = Partial<Record<ScopeField | (string & {}), boolean>> 
 
 /** What a page whose sections each report their own `scope_applied` used:
  *  a condition any section used counts as used. Until every section has
- *  answered nothing is known, and the result is undefined (every condition
- *  shown as used) rather than a partial answer that would strike through a
- *  condition a section still loading is about to use. */
+ *  answered nothing is known, and the result is undefined rather than a
+ *  partial answer that would hide a condition a section still loading is
+ *  about to use. */
 export function mergeScopeApplied(...sections: ScopeApplied[]): ScopeApplied {
   if (sections.some((applied) => applied == null)) return undefined;
   const merged: Record<string, boolean> = {};
@@ -222,24 +190,31 @@ function conditionIsSet(key: TokenKey, scope: Scope): boolean {
 }
 
 /** Whether a token's condition is set but the screen's data did not use it
- *  (`applied[field] === false`), so the sentence strikes it through. An
- *  absent `applied` means every condition was used. */
+ *  (`applied[field] === false`), so a snapshot's statement strikes it
+ *  through. An absent `applied` means every condition was used. */
 export function isScopeConditionOff(token: ScopeToken, scope: Scope, applied: ScopeApplied): boolean {
   return token.field != null && applied?.[token.field] === false && conditionIsSet(token.key, scope);
 }
 
-/** A locale template's text runs and `[slot]` placeholders, in order. Square
- *  brackets rather than `{{ }}` so i18next leaves the slots alone. */
-export function sentenceParts(template: string): ({ text: string } | { slot: string })[] {
-  const parts: ({ text: string } | { slot: string })[] = [];
-  let last = 0;
-  for (const m of template.matchAll(/\[(\w+)\]/g)) {
-    if (m.index > last) parts.push({ text: template.slice(last, m.index) });
-    parts.push({ slot: m[1] });
-    last = m.index + m[0].length;
-  }
-  if (last < template.length) parts.push({ text: template.slice(last) });
-  return parts;
+/** The `scope_applied` fields each condition's control sets. The days
+ *  control also holds the timetable, and the time control sets a band or an
+ *  hour range, so either field keeps it in use. */
+const CONDITION_FIELDS: Record<ConditionKey, readonly ScopeField[]> = {
+  routes: ["routes"],
+  period: ["from", "to"],
+  days: ["dow", "service"],
+  time: ["time_band", "hour"],
+  service: ["service"],
+  stop: ["stop"],
+  dir: ["dir"],
+  early: ["early"],
+  tolerance: ["late"],
+};
+
+/** Whether a screen's data uses a condition, so the scope bar shows it. An
+ *  absent `applied` means every condition is used. */
+export function conditionUsed(key: ConditionKey, applied: ScopeApplied): boolean {
+  return applied == null || CONDITION_FIELDS[key].some((field) => applied[field] !== false);
 }
 
 /** The period's length in days, both ends included. */

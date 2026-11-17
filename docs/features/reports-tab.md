@@ -111,7 +111,7 @@ combined CSV always carries it.
   (`compute_delay_certificate`'s `stop_name`/`stop_is_first`, named only when
   the loaded timetable runs the trip that day, as above); the CSV keeps both
   columns. The record's day and route are its whole scope, so this document has
-  no scope sentence.
+  no scope bar.
 - The council document's planned trips, executed trips and service-delivered
   rate count only the days a timetable plans: a day's count saved in
   `planned_trips_daily` while its timetable was loaded, or else the loaded
@@ -225,8 +225,8 @@ What the user sees/does:
     (trend + ranking rows), a "Create share link" item that copies the
     current URL with its filter query string, and "Print / Save as PDF"
     (`window.print()`).
-  - **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`,
-    greying what the trend report's `scope_applied` did not use.
+  - **Scope bar** — `frontend/src/components/scope/ScopeBar.tsx`, leaving out
+    of the row what the trend report's `scope_applied` did not use.
   - **Trend section** — a daily mean-delay line chart
     (`frontend/src/components/analysis/PeriodChart.tsx`). Under it, the day
     whose mean rose furthest above its 7-day moving average
@@ -258,7 +258,7 @@ What the user sees/does:
   `EmptyState` ("Save filters on a route's page to see them here") shows
   when none exist for this agency. A note under the local-only one tells
   these 「保存した分析」 apart from 「保存したビュー」, the other browser-local
-  views kept under the scope sentence's "Saved views ▾", which this tab does
+  views kept under the scope bar's "Saved views ▾", which this tab does
   not list; the names are the privacy policy's. Bookmarks are
   browser-local filter snapshots, not immutable historical results —
   opening one re-queries the API with today's data under that filter.
@@ -291,7 +291,7 @@ than issuing their own requests.
 | `frontend/src/components/analysis/savedAnalyses.ts` | Browser-local saved-analysis read/write/delete |
 | `frontend/src/components/analysis/csv.ts` | `downloadCsv()`, the browser-side CSV download this screen shares with the route dossier, Live and Ask (the `AnalysisTab` screens link to the API's `?format=csv` instead) |
 | `frontend/src/components/DefinitionMetaBlock.tsx` | Renders the on-time/late definition metadata block |
-| `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
+| `frontend/src/components/scope/ScopeBar.tsx` | The scope bar, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useReport`, `useAgencies` |
 
 **Backend**
@@ -327,7 +327,7 @@ than issuing their own requests.
 2. Click "Reports" in the rail → URL `/agencies/:agencyId/reports`;
    expect the trend chart and routes-to-check table to populate (or the
    empty state with no data).
-3. Change the scope sentence's period / days / time / routes —
+3. Change the scope bar's period / days / time / routes —
    expect both sections to refetch.
 4. Click a row's "Open analysis →" link in the routes-to-check table —
    expect navigation to that route's dossier,

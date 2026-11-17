@@ -53,7 +53,7 @@ civic tech. It is not SaaS sold to operators.
 - **Desk first.** Print, PDF and definition-stamped CSV come before phone polish and
   animated map styles.
 - **One period everywhere.** The screen a user lands on, its headline figures and the
-  scope sentence above them describe the same period.
+  scope bar above them describe the same period.
 - **Numbers carry their basis.** Each figure states its definition, its period and the
   data behind it. A figure resting on thin data says so rather than ranking anything.
 - **The deliverable is close.** The council report is the persona's output, so it is

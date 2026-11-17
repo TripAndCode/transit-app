@@ -115,16 +115,17 @@ What the user sees/does:
   path is entirely the parameterized card/chip templates
   (`frontend/src/components/askCardTemplates.ts`). Free text only appears
   in the follow-up box.
-- Conditions: the shared scope sentence (`ScopeSentence`; see
-  `analysis-tab.md` ▸ The scope sentence) shows and edits the open thread's
-  `filter_ctx`, its period, days, timetable, time band and routes, through
-  `threadScope`/`patchThreadFilter` in `frontend/src/tabs/ask/filterCtx.ts`,
-  which read a stored filter through the URL scope's own parser. With no
-  thread open it shows the screen's URL scope whole (`notebookScope`), which
-  seeds the next new thread (`rangeCtxToFilterCtx`); a stop, direction,
-  hour or tolerance in it, which a thread does not store, is named as
-  unused, and clearing one writes the URL (`splitNotebookPatch`); an edit
-  made with no thread open stays on the screen until it seeds one.
+- Conditions: the shared scope bar (`ScopeBar`, `frontend/src/components/scope/ScopeBar.tsx`;
+  see `analysis-tab.md`'s "The scope bar" section) shows and edits the open
+  thread's `filter_ctx`, its period, days, timetable, time band and routes,
+  through `threadScope`/`patchThreadFilter` in `frontend/src/tabs/ask/filterCtx.ts`,
+  which read a stored filter through the URL scope's own parser. The bar
+  leaves out a stop, direction, hour or tolerance condition, which a thread
+  does not store, whether or not a thread is open. With no thread open the
+  bar shows the screen's URL scope whole (`notebookScope`), which keeps any
+  such condition's value and seeds the next new thread (`rangeCtxToFilterCtx`);
+  clearing one writes the URL (`splitNotebookPatch`); an edit made with no
+  thread open stays on the screen until it seeds one.
   On an open thread each edit is saved as it is made (`useThreadFilter` in
   `frontend/src/api/hooks.ts`) and shown at once through the conversation's
   cached copy, which a refetch keeps while a save is pending. The saves go
@@ -136,10 +137,10 @@ What the user sees/does:
   awaits `flush`, which resolves once the thread's saves have landed; if the
   last one failed it is sent again, and a second failure stops the dispatch
   with a retry of the whole submission. While a dispatch waits, the dock and
-  the sentence count as busy, so a second press sends nothing. Deleting a
+  the bar count as busy, so a second press sends nothing. Deleting a
   thread drops its queued save and ignores its running one, with no error.
   A reload or a closed tab loses at most the save still in flight. A thread stores no on-time tolerance,
-  so its sentence has no tolerance clause, and it carries no saved views or
+  so its bar has no tolerance token, and it carries no saved views or
   pin; its tokens, Reset and any open popover's controls are disabled while a
   question is being sent or waits for its thread's saves.
 
@@ -314,7 +315,7 @@ so it is a separate mechanism to build, not a knob to turn on.
 | `frontend/src/components/paramPills/*.tsx` | Individual param controls (segmented/limit/route picker) |
 | `frontend/src/components/askCardTemplates.ts` | Declarative chip templates (tool + args + i18n keys) |
 | `frontend/src/components/ThreadSidebar.tsx` | Conversation list (anon localStorage ↔ server) |
-| `frontend/src/tabs/ask/filterCtx.ts` | A thread's `filter_ctx` as the scope the scope sentence reads and writes |
+| `frontend/src/tabs/ask/filterCtx.ts` | A thread's `filter_ctx` as the scope the scope bar reads and writes |
 | `frontend/src/api/hooks.ts` | TanStack Query hooks for all `/ask` + `/conversations` endpoints |
 | `frontend/src/api/conversationsAnon.ts` | localStorage-backed anon conversation store |
 
