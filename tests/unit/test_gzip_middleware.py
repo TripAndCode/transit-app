@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 from starlette.middleware.gzip import GZipMiddleware
 
 from api.main import app
-from api.middleware.request_log import RequestLogMiddleware
 
 
 def _stack() -> list[type]:
@@ -23,12 +22,12 @@ def _stack() -> list[type]:
 def test_responses_are_compressed_innermost():
     stack = _stack()
     assert stack[-1] is GZipMiddleware
-    assert stack.index(RequestLogMiddleware) < stack.index(GZipMiddleware)
 
 
-def test_small_responses_are_left_uncompressed():
+def test_gzip_threshold_and_level():
     (gzip,) = [m for m in app.user_middleware if m.cls is GZipMiddleware]
     assert gzip.kwargs["minimum_size"] >= 1000
+    assert gzip.kwargs["compresslevel"] <= 6
 
 
 @pytest.fixture

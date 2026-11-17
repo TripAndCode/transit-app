@@ -338,8 +338,9 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 # Innermost, next to the routers, so it sees each response whole: the outer
 # middlewares stream the body, and a streamed body is compressed whatever its
 # size. Map and report payloads run to megabytes; small ones aren't worth the
-# CPU, and Starlette leaves event streams alone.
-app.add_middleware(GZipMiddleware, minimum_size=1024)
+# CPU, and Starlette leaves event streams alone. Level 6: most of level 9's
+# saving, at a fraction of the event-loop time small bodies are compressed in.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
 app.add_middleware(UsageCountMiddleware)
