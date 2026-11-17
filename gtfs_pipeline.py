@@ -322,9 +322,9 @@ def _add_agency_probed(args) -> None:
         sys.exit(1)
     sys.stdout.write(
         f"agency_id: {result.agency_id}\n"
-        "Next: the poller picks the agency up on its next cycle and Pulse shows its polls as they arrive. "
-        "Each JST day reaches history at the following JST midnight, and the archive replaces it once the "
-        "UTC day has closed.\n"
+        "Next: the poller picks the agency up on its next cycle.\n"
+        "Live shows its trips within minutes.\n"
+        "Pulse and Reports show a day only after that JST day has closed.\n"
     )
 
 

@@ -72,7 +72,9 @@ Readers need no sign-in. Administrators use `/login` to reach the admin pages (t
 
 ## 5. When data appears
 
-The poller reads the agency list every cycle, so it picks the agency up within a minute of being added, and the dashboard's live view (Pulse) shows today's data from the polls that follow. Allow the first few polls, not hours. A feed outside service hours has nothing to show until its first trips run. Closed days are finalized automatically overnight.
+The poller reads the agency list every cycle, so it picks the agency up within a minute of being added. The Live view (live delays) shows today's trips within a few minutes of `add_agency`.
+
+Pulse and Reports read daily aggregates, so they show a day only after it closes: after the first JST midnight following the first poll. Until then they show 0 samples, which is expected. The archive then replaces that day once the UTC day closes. A feed outside service hours has nothing to show until its first trips run.
 
 Check progress with `docker compose --profile standalone logs -f poller`.
 
