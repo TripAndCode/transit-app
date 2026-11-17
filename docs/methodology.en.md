@@ -222,7 +222,7 @@ When a period spans a timetable revision, only the days of the timetable in forc
 
 **Slow segments** (**Why**, "Slow segments"): the running time per segment above, taken per stop pair of the agency over every route through it. It is read per time band (of the scheduled departure from the first stop) and per day type (weekdays, or weekends and holidays, by the calendar).
 
-- The period is the 8 complete weeks (Monday to Sunday) up to yesterday (Japan time). A week not yet over is not read.
+- The period is the newest 8 complete weeks (Monday to Sunday). A week is complete once the Monday after it has closed too: a Sunday service day's runs after midnight arrive with Monday's. A week not yet over is not read.
 - Each week gives the median of every running time observed on its dates of the day type, and the mean scheduled running time of the same trips. When the timetable is revised within a week, only the days of the timetable in force on the last day read that week are used.
 - Over the timetable: the week's median running time − the scheduled running time (the padding above with its sign reversed).
 - **Slow week**: a week with 21 or more runs, on a segment the timetable gives at least 60 seconds, that is 60 seconds or more over the timetable. Timetables are often written to the minute, which alone can put nearly a minute on one segment and take it off the next, hence the one-minute floor. A segment the timetable gives under a minute is mostly rounding, so it is not judged.

@@ -1,10 +1,8 @@
 import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet } from "../../api/client";
+import type { Band } from "../../api/timeBands";
 import type { CoverageGapReason } from "../../api/types";
 
-/** api.routers.segments.TimeBand: the stored bands, without "all". */
-export const SLOW_ZONE_BANDS = ["morning", "forenoon", "noon", "afternoon", "evening", "night", "late_night"] as const;
-export type SlowZoneBand = (typeof SLOW_ZONE_BANDS)[number];
 export const SLOW_ZONE_DAY_TYPES = ["weekday", "weekend_holiday"] as const;
 export type SlowZoneDayType = (typeof SLOW_ZONE_DAY_TYPES)[number];
 
@@ -34,10 +32,12 @@ export interface SlowZoneSegmentData {
   distance_m: number | null;
   routes: string[];
   latest: SegmentWeek | null;
-  /** One per response week, oldest first; null for a week with too few runs. */
-  weekly_excess_sec: (number | null)[];
   slow_weeks: number;
-  slow_since: string | null;
+  /** A slow zone's alone: the first week of its streak. */
+  slow_since?: string;
+  /** A slow zone's alone: one per response week, oldest first; null for a
+   *  week with too few runs. */
+  weekly_excess_sec?: (number | null)[];
 }
 
 export interface SlowZonesResponse {
@@ -46,7 +46,7 @@ export interface SlowZonesResponse {
   last_checked: string | null;
   value_basis: "feed_prediction";
   day_type: SlowZoneDayType;
-  time_band: SlowZoneBand;
+  time_band: Band;
   /** The Mondays of the weeks read, oldest first. */
   weeks: string[];
   thresholds: { excess_sec: number; min_scheduled_sec: number; min_weeks: number; min_samples: number };
@@ -55,13 +55,13 @@ export interface SlowZonesResponse {
   slow_zones: [string, string][];
 }
 
-export function slowZonesPath(agencyId: number, band: SlowZoneBand, dayType: SlowZoneDayType): string {
+export function slowZonesPath(agencyId: number, band: Band, dayType: SlowZoneDayType): string {
   return `/api/${agencyId}/segments/slow-zones?${new URLSearchParams({ time_band: band, day_type: dayType }).toString()}`;
 }
 
 export function useSlowZones(
   agencyId: number | null,
-  band: SlowZoneBand,
+  band: Band,
   dayType: SlowZoneDayType,
 ): UseQueryResult<SlowZonesResponse> {
   return useQuery({

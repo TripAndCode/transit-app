@@ -1,24 +1,15 @@
-"""Slow zones: timetable segments whose running time stays over the timetable
-for weeks, read from the running time per timetable segment
-(`agg_route_segment_runtime`, read for one route by
-`pipeline.reports.segment_runtime`). docs/methodology.md defines each figure.
+"""Slow zones: an agency's timetable segments whose running time stays over
+the timetable for weeks, read from the running time per timetable segment
+through the CTEs `pipeline.reports.segment_runtime.runtime_ctes` builds.
 
-A segment here is an agency's stop pair, pooled over every route that runs
-it, for one time band and one day type. Each of the last ``WINDOW_WEEKS``
-complete weeks (Monday to Sunday) gets the observed running time's median
-and the scheduled running time of the same trip-days. A week is slow when the
-median exceeds the timetable by ``SLOW_EXCESS_SEC`` or more, on at least
-``MIN_WEEK_SAMPLES`` runs of a segment the timetable gives at least
-``MIN_SCHEDULED_SEC``; a segment is a slow zone when its newest
-``MIN_SLOW_WEEKS`` or more weeks were all slow.
+A segment here is a stop pair pooled over every route that runs it, per time
+band and day type, week by week. `is_slow_week` and `slow_streak` hold the
+rule; docs/methodology.md ("区間の遅い状態") states it with its rationale.
+Distance is the straight line between the loaded timetable's two stops and no
+slow-zone rule reads it.
 
-Distance is the straight line between the two stops of the loaded timetable,
-so the speed it gives is a lower bound on a winding road. No slow-zone rule
-reads the distance.
-
-Every figure is the feed's prediction (`value_basis`), not an observed
-passage, until the agency's predictions are validated against observed
-positions. Segments are not ranked as bus-priority candidates here.
+Every figure is the feed's prediction (`value_basis`). Segments are not
+ranked as bus-priority candidates here.
 """
 
 from __future__ import annotations
@@ -34,6 +25,7 @@ from pipeline.cache import async_lru_cache
 from pipeline.day_types import fallback_day_type, public_holidays_between
 from pipeline.reports.definition import VALUE_BASIS
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
+from pipeline.reports.segment_runtime import runtime_ctes, scheduled_run_sec
 from pipeline.strategies.static_join import rt_field_coverage_gap
 
 # How many complete weeks a read covers, and so the longest streak it can see.
@@ -55,7 +47,7 @@ _DAY_TYPE_DATES: dict[SlowZoneDayType, frozenset[str]] = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SegmentWeek:
     """One segment's running time over one week's dates of the day type.
     ``days`` is how many of those dates have a run of it."""
@@ -124,10 +116,12 @@ def minutes_lost_per_day(week: SegmentWeek) -> float | None:
 
 
 def window_weeks(last_day: date) -> list[date]:
-    """The Mondays of the ``WINDOW_WEEKS`` complete weeks ending on or before
-    *last_day*, oldest first. The week *last_day* is in counts only when
-    *last_day* is its Sunday."""
-    last_sunday = last_day - timedelta(days=last_day.isoweekday() % 7)
+    """The Mondays of the ``WINDOW_WEEKS`` complete weeks by *last_day*, the
+    newest closed day, oldest first. A week is complete once the day after its
+    Sunday has closed too: a service day's runs after midnight are filed only
+    with the next day's, so on the Monday a closed Sunday still lacks them."""
+    reference = last_day - timedelta(days=1)
+    last_sunday = reference - timedelta(days=reference.isoweekday() % 7)
     newest = last_sunday - timedelta(days=6)
     return [newest - timedelta(weeks=i) for i in reversed(range(WINDOW_WEEKS))]
 
@@ -144,7 +138,7 @@ def window_dates(weeks: Sequence[date], day_type: SlowZoneDayType) -> list[date]
     return [d for d in days if fallback_day_type(d, holidays) in wanted]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SlowZoneSegment:
     from_stop_id: str
     to_stop_id: str
@@ -173,7 +167,7 @@ class SlowZoneSegment:
         return self.slow_weeks >= MIN_SLOW_WEEKS
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SlowZones:
     """``available`` False means the agency's arrival data is not trusted,
     for ``unavailable_reason`` (``pipeline.strategies.static_join.CoverageGap``)."""
@@ -197,40 +191,23 @@ class SlowZones:
         )
 
 
-_SQL = """
-WITH weeks AS (
-    -- The timetable in force on each week's last date read: a week spanning
-    -- a revision is read under the newer timetable alone.
-    SELECT w.week_start,
-           (SELECT r.static_version_id FROM agg_schedule_revision_daily r
-            WHERE r.agency_id = $1 AND r.date <= w.last_day
-            ORDER BY r.date DESC LIMIT 1) AS static_version_id
-    FROM unnest($3::date[], $4::date[]) AS w(week_start, last_day)
-),
-kept AS (
-    SELECT s.from_stop_id, s.to_stop_id, s.route_code, s.date, w.week_start,
-           s.run_sec, s.scheduled_samples, s.scheduled_sum_sec
-    FROM agg_route_segment_runtime s
-    JOIN weeks w ON w.week_start = date_trunc('week', s.date)::date
-    LEFT JOIN agg_schedule_revision_daily r ON r.agency_id = s.agency_id AND r.date = s.date
-    WHERE s.agency_id = $1 AND s.date = ANY($2::date[]) AND s.time_band = $5
-      AND r.static_version_id IS NOT DISTINCT FROM w.static_version_id
-),
-pooled AS (
-    SELECT from_stop_id, to_stop_id, week_start,
-           COUNT(DISTINCT date) FILTER (WHERE cardinality(run_sec) > 0) AS days,
-           SUM(scheduled_samples) AS scheduled_samples, SUM(scheduled_sum_sec) AS scheduled_sum_sec,
-           array_agg(DISTINCT route_code) AS routes
-    FROM kept GROUP BY from_stop_id, to_stop_id, week_start
-),
-runs AS (
-    SELECT from_stop_id, to_stop_id, week_start, COUNT(*) AS samples,
-           percentile_cont(0.5) WITHIN GROUP (ORDER BY x) AS p50,
-           percentile_cont(0.85) WITHIN GROUP (ORDER BY x) AS p85
-    FROM kept, unnest(run_sec) AS x
-    GROUP BY from_stop_id, to_stop_id, week_start
-)
-SELECT p.from_stop_id, p.to_stop_id, p.week_start, p.days, p.scheduled_samples, p.scheduled_sum_sec, p.routes,
+_SQL = (
+    "WITH weeks AS (\n"
+    # The timetable in force on each week's last date read.
+    "    SELECT w.week_start,\n"
+    "           (SELECT r.static_version_id FROM agg_schedule_revision_daily r\n"
+    "            WHERE r.agency_id = $1 AND r.date <= w.last_day\n"
+    "            ORDER BY r.date DESC LIMIT 1) AS static_version_id\n"
+    "    FROM unnest($3::date[], $4::date[]) AS w(week_start, last_day)\n"
+    "),\n"
+    + runtime_ctes(
+        "SELECT *, date_trunc('week', date)::date AS week_start FROM agg_route_segment_runtime "
+        "WHERE agency_id = $1 AND date = ANY($2::date[]) AND time_band = $5",
+        key="week_start",
+        version="(SELECT w.static_version_id FROM weeks w WHERE w.week_start = s.week_start)",
+    )
+    + """
+SELECT p.from_stop_id, p.to_stop_id, p.week_start, p.run_days, p.scheduled_samples, p.scheduled_sum_sec, p.routes,
        COALESCE(r.samples, 0) AS samples, r.p50, r.p85,
        fs.stop_name AS from_stop_name, ST_X(fs.geom) AS from_lon, ST_Y(fs.geom) AS from_lat,
        ts.stop_name AS to_stop_name, ST_X(ts.geom) AS to_lon, ST_Y(ts.geom) AS to_lat,
@@ -240,6 +217,7 @@ LEFT JOIN runs r USING (from_stop_id, to_stop_id, week_start)
 LEFT JOIN static_stops fs ON fs.agency_id = $1 AND fs.stop_id = p.from_stop_id
 LEFT JOIN static_stops ts ON ts.agency_id = $1 AND ts.stop_id = p.to_stop_id
 """
+)
 
 
 def _float(value) -> float | None:
@@ -247,7 +225,7 @@ def _float(value) -> float | None:
 
 
 @perf.timed("reports.slow_zones")
-@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
+@async_lru_cache(maxsize=16, ttl_seconds=300, agency_arg="agency_id")
 async def read_slow_zones(
     agency_id: int, conn, *, last_day: date, day_type: SlowZoneDayType, time_band: str
 ) -> SlowZones:
@@ -284,18 +262,18 @@ async def read_slow_zones(
         series: list[SegmentWeek | None] = [None] * len(weeks)
         routes: set[str] = set()
         for r in pair_rows:
-            routes.update(r["routes"])
             if not r["samples"]:
                 continue
+            routes.update(r["routes"])
             series[position[r["week_start"]]] = SegmentWeek(
                 samples=r["samples"],
-                days=r["days"],
+                days=r["run_days"],
                 run_p50_sec=_float(r["p50"]),
                 run_p85_sec=_float(r["p85"]),
-                scheduled_run_sec=(
-                    float(r["scheduled_sum_sec"] / r["scheduled_samples"]) if r["scheduled_samples"] else None
-                ),
+                scheduled_run_sec=scheduled_run_sec(r),
             )
+        if all(week is None for week in series):
+            continue
         first = pair_rows[0]
         segments.append(
             SlowZoneSegment(

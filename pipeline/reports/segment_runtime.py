@@ -22,6 +22,7 @@ positions. No recommendation is derived from them here.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Literal
 
 from api.range import TIME_BAND_RANGES, RangeCtx
 from pipeline import perf
@@ -31,6 +32,47 @@ from pipeline.reports.filters import _dated_agg_filter
 from pipeline.strategies.static_join import rt_field_coverage_gap
 
 _BAND_ORDER = {band: i for i, band in enumerate(TIME_BAND_RANGES)}
+
+
+def runtime_ctes(rows: str, *, key: Literal["time_band", "week_start"], version: str) -> str:
+    """The CTEs ``ranged``, ``kept``, ``pooled`` and ``runs`` over *rows*, a
+    SELECT of ``agg_route_segment_runtime`` rows carrying a *key* column.
+
+    ``kept`` holds the rows dated under the timetable *version* names: a SQL
+    expression evaluated per row (aliased ``s``), so one version can cover a
+    whole range or each row's week its own. Pooling two timetables' scheduled
+    times would state a timetable neither ran. ``pooled`` and ``runs`` group
+    by stop pair and *key*: ``runs`` takes the exact, linearly interpolated
+    median and 85th percentile of every pooled ``run_sec`` (Postgres
+    ``percentile_cont``); ``pooled`` the scheduled sums, holds, the dates (``run_days``) and
+    the routes with an observed run, and the lowest ``to_stop_sequence``.
+    """
+    return f"""ranged AS (
+    SELECT s.*, r.static_version_id
+    FROM ({rows}) s
+    LEFT JOIN agg_schedule_revision_daily r ON r.agency_id = s.agency_id AND r.date = s.date
+),
+kept AS (SELECT * FROM ranged s WHERE s.static_version_id IS NOT DISTINCT FROM {version}),
+pooled AS (
+    SELECT from_stop_id, to_stop_id, {key}, MIN(to_stop_sequence) AS to_stop_sequence,
+           COUNT(DISTINCT date) FILTER (WHERE cardinality(run_sec) > 0) AS run_days,
+           array_agg(DISTINCT route_code) FILTER (WHERE cardinality(run_sec) > 0) AS routes,
+           SUM(scheduled_samples) AS scheduled_samples, SUM(scheduled_sum_sec) AS scheduled_sum_sec,
+           SUM(hold_eligible) AS hold_eligible, SUM(holds) AS holds
+    FROM kept GROUP BY from_stop_id, to_stop_id, {key}
+),
+runs AS (
+    SELECT from_stop_id, to_stop_id, {key}, COUNT(*) AS samples,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY x) AS p50,
+           percentile_cont(0.85) WITHIN GROUP (ORDER BY x) AS p85
+    FROM kept, unnest(run_sec) AS x
+    GROUP BY from_stop_id, to_stop_id, {key}
+)"""
+
+
+def scheduled_run_sec(row) -> float | None:
+    """A ``pooled`` row's mean scheduled running time, None without a sample."""
+    return float(row["scheduled_sum_sec"] / row["scheduled_samples"]) if row["scheduled_samples"] else None
 
 
 @perf.timed("reports.segment_runtime")
@@ -89,27 +131,13 @@ async def compute_segment_runtime(agency_id: int, ctx: RangeCtx, conn, *, route:
         band_sql = f" AND time_band = ${n}"
         params.append(ctx.time_band)
     rows = await conn.fetch(
-        "WITH ranged AS (\n"
-        "    SELECT s.*, r.static_version_id\n"
-        "    FROM (SELECT * FROM agg_route_segment_runtime\n"
-        f"          WHERE agency_id = $1 AND route_code = $2 AND {where}{band_sql}) s\n"
-        "    LEFT JOIN agg_schedule_revision_daily r ON r.agency_id = s.agency_id AND r.date = s.date\n"
-        "),\n"
-        "kept AS (SELECT * FROM ranged WHERE static_version_id IS NOT DISTINCT FROM $3::text),\n"
-        "pooled AS (\n"
-        "    SELECT from_stop_id, to_stop_id, time_band, MIN(to_stop_sequence) AS to_stop_sequence,\n"
-        "           SUM(scheduled_samples) AS scheduled_samples, SUM(scheduled_sum_sec) AS scheduled_sum_sec,\n"
-        "           SUM(hold_eligible) AS hold_eligible, SUM(holds) AS holds\n"
-        "    FROM kept GROUP BY from_stop_id, to_stop_id, time_band\n"
-        "),\n"
-        "runs AS (\n"
-        "    SELECT from_stop_id, to_stop_id, time_band, COUNT(*) AS samples,\n"
-        "           percentile_cont(0.5) WITHIN GROUP (ORDER BY x) AS p50,\n"
-        "           percentile_cont(0.85) WITHIN GROUP (ORDER BY x) AS p85\n"
-        "    FROM kept, unnest(run_sec) AS x\n"
-        "    GROUP BY from_stop_id, to_stop_id, time_band\n"
-        ")\n"
-        "SELECT p.*, COALESCE(r.samples, 0) AS samples, r.p50, r.p85,\n"
+        "WITH "
+        + runtime_ctes(
+            f"SELECT * FROM agg_route_segment_runtime WHERE agency_id = $1 AND route_code = $2 AND {where}{band_sql}",
+            key="time_band",
+            version="$3::text",
+        )
+        + "\nSELECT p.*, COALESCE(r.samples, 0) AS samples, r.p50, r.p85,\n"
         "       fs.stop_name AS from_stop_name, ts.stop_name AS to_stop_name,\n"
         "       (SELECT COUNT(DISTINCT date) FROM kept) AS days,\n"
         "       (SELECT SUM(terminal_arrivals) FROM kept) AS terminus_arrivals,\n"
@@ -128,7 +156,7 @@ async def compute_segment_runtime(agency_id: int, ctx: RangeCtx, conn, *, route:
 
     segments = []
     for r in rows:
-        scheduled = float(r["scheduled_sum_sec"] / r["scheduled_samples"]) if r["scheduled_samples"] else None
+        scheduled = scheduled_run_sec(r)
         p50 = float(r["p50"]) if r["p50"] is not None else None
         p85 = float(r["p85"]) if r["p85"] is not None else None
         segments.append(

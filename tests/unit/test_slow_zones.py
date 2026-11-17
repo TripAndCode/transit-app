@@ -123,8 +123,10 @@ def test_the_window_is_the_complete_weeks_before_the_last_day():
     assert all(w.isoweekday() == 1 for w in weeks)
 
 
-def test_a_sunday_completes_its_own_week():
-    assert window_weeks(date(2026, 4, 12))[-1] == date(2026, 4, 6)
+def test_a_week_is_complete_once_the_monday_after_it_has_closed():
+    """On Monday 2026-04-13 the newest closed day is Sunday 04-12, whose runs
+    after midnight are filed with Monday's: its week is not complete yet."""
+    assert window_weeks(date(2026, 4, 12))[-1] == date(2026, 3, 30)
     assert window_weeks(date(2026, 4, 13))[-1] == date(2026, 4, 6)
 
 

@@ -20,12 +20,12 @@ import { EM_DASH, formatDate, formatNumber } from "../../utils/format";
 import { createSafeMap } from "../map/createSafeMap";
 import { repaintLayer } from "../map/repaintLayer";
 import { whenStyleReady } from "../map/styleReady";
+import type { Band } from "../../api/timeBands";
+import { buildTimeBandOptions } from "../../components/timeBandOptions";
 import {
-  SLOW_ZONE_BANDS,
   SLOW_ZONE_DAY_TYPES,
   useSlowZones,
   type SegmentWeek,
-  type SlowZoneBand,
   type SlowZoneDayType,
   type SlowZoneSegmentData,
 } from "./slowZonesApi";
@@ -103,7 +103,7 @@ function stopPair(s: SlowZoneSegmentData): string {
 export function SlowZonesView() {
   const { t, i18n } = useTranslation();
   const id = useAgencyId();
-  const [band, setBand] = useState<SlowZoneBand>("morning");
+  const [band, setBand] = useState<Band>("morning");
   const [dayType, setDayType] = useState<SlowZoneDayType>("weekday");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const query = useSlowZones(id, band, dayType);
@@ -118,7 +118,9 @@ export function SlowZonesView() {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const initialLanguage = useRef(i18n.language);
+  const firstStyleRun = useRef(true);
   const [failed, setFailed] = useState(false);
+  const [styleEpoch, setStyleEpoch] = useState(0);
   const theme = useThemeSignal();
   const onSegmentClick = useEffectEvent((key: string | null) => setSelectedKey(key));
 
@@ -149,25 +151,54 @@ export function SlowZonesView() {
       observer?.disconnect();
       instance.remove();
       map.current = null;
+      firstStyleRun.current = true;
     };
   }, []);
+
+  // A language change re-labels the basemap. The new style drops the
+  // segments' source and layer, which the bumped epoch re-adds.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    if (firstStyleRun.current) {
+      firstStyleRun.current = false;
+      return;
+    }
+    if (getMapStyleOverride()) return;
+    instance.setStyle(buildStyle(readMapStylePref(), i18n.language), { diff: false });
+    instance.once("style.load", () => setStyleEpoch((epoch) => epoch + 1));
+  }, [i18n.language]);
 
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;
     const collection = segmentFeatures(data);
     return whenStyleReady(instance, () => {
-      const paint = linePaint();
       const source = instance.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (source) {
         source.setData(collection);
-        repaintLayer(instance, LAYER, paint);
         return;
       }
       instance.addSource(SOURCE, { type: "geojson", data: collection });
-      instance.addLayer({ id: LAYER, type: "line", source: SOURCE, layout: { "line-cap": "round" }, paint });
+      instance.addLayer({
+        id: LAYER,
+        type: "line",
+        source: SOURCE,
+        layout: { "line-cap": "round" },
+        paint: linePaint(),
+      });
     });
-  }, [data, theme]);
+  }, [data, styleEpoch]);
+
+  // Colour tokens resolve when the paint is written, so only a theme change
+  // re-writes it.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    return whenStyleReady(instance, () => {
+      if (instance.getLayer(LAYER)) repaintLayer(instance, LAYER, linePaint());
+    });
+  }, [theme]);
 
   const bounds = segmentBounds(segments);
   const boundsKey = bounds?.join(",") ?? "";
@@ -205,12 +236,14 @@ export function SlowZonesView() {
         </label>
         <label style={FIELD}>
           {t("slow_zones.band_label")}
-          <select value={band} onChange={(e) => setBand(e.target.value as SlowZoneBand)}>
-            {SLOW_ZONE_BANDS.map((b) => (
-              <option key={b} value={b}>
-                {t(`filters.time_band.${b}`)}
-              </option>
-            ))}
+          <select value={band} onChange={(e) => setBand(e.target.value as Band)}>
+            {buildTimeBandOptions(t)
+              .filter((option) => option.value !== "all")
+              .map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
           </select>
         </label>
         <CsvLink href={apiUrl(`/api/${id}/segments/slow-zones?${csv.toString()}`)} />

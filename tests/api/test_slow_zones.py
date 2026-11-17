@@ -1,8 +1,8 @@
 """Slow zones read from agg_route_segment_runtime (pipeline.reports.slow_zones,
 api.routers.segments).
 
-The window ending Sunday 2026-04-12 covers the eight weeks from Monday
-2026-02-16 to Monday 2026-04-06. S1 and S2 sit about 460 m apart on one
+With Monday 2026-04-13 closed, the window covers the eight weeks from Monday
+2026-02-16 to the week of Monday 2026-04-06. S1 and S2 sit about 460 m apart on one
 parallel, and every timetable gives the segment 120 s.
 """
 
@@ -17,10 +17,11 @@ import pytest
 from api.range import jst_today
 from api.routers.segments import UNAVAILABLE_CSV
 from pipeline.agg_registry import METHOD_VERSION
+from pipeline.reports.definition import METHODOLOGY_URLS, value_basis_text
 from pipeline.reports.slow_zones import read_slow_zones, window_dates, window_weeks
 from tests.conftest import confirm_rt_field_coverage
 
-LAST = date(2026, 4, 12)
+LAST = date(2026, 4, 13)
 SCHEDULED = 120
 
 
@@ -62,12 +63,15 @@ def _read(conn, agency_id, *, last_day=LAST, day_type="weekday", band="morning")
 @pytest.mark.asyncio
 async def test_a_segment_slow_three_weeks_running_is_a_slow_zone(aconn, aagency_id):
     """Two routes share S1→S2. Each week neither alone reaches the 21-run
-    floor; pooled, they do. Each run takes 200 s, 80 s over the timetable."""
+    floor; pooled, they do. R1's 11 runs take 200 s, 80 s over the timetable.
+    In the newest week R2's 10 take 140 s, so of the 21 pooled runs the
+    median (the 11th) is still R1's 200 s, and a lower percentile is not."""
     await _trusted(aconn, aagency_id)
     await _stops(aconn, aagency_id)
     for monday in (date(2026, 3, 23), date(2026, 3, 30), date(2026, 4, 6)):
+        r2 = [140] * 10 if monday == date(2026, 4, 6) else [200] * 10
         await _runs(aconn, aagency_id, monday, [200] * 11, route="R1")
-        await _runs(aconn, aagency_id, monday + timedelta(days=1), [200] * 10, route="R2")
+        await _runs(aconn, aagency_id, monday + timedelta(days=1), r2, route="R2")
     await _runs(aconn, aagency_id, date(2026, 4, 11), [900] * 30)  # a Saturday
     await _runs(aconn, aagency_id, date(2026, 4, 6), [900] * 30, band="evening")
 
@@ -121,6 +125,23 @@ async def test_a_week_under_two_timetables_reads_the_newer_one_alone(aconn, aage
 
 
 @pytest.mark.asyncio
+async def test_a_route_or_pair_with_no_observed_run_is_left_out(aconn, aagency_id):
+    """R9 passes S1→S2 but the feed reported none of its runs there, and no
+    route's run of S2→S3 was observed: neither names a route or a segment."""
+    await _trusted(aconn, aagency_id)
+    await _runs(aconn, aagency_id, date(2026, 4, 6), [200] * 21, route="R1")
+    await _runs(aconn, aagency_id, date(2026, 4, 7), [], route="R9")
+    await _runs(aconn, aagency_id, date(2026, 3, 30), [], route="R9")
+    await _runs(aconn, aagency_id, date(2026, 4, 6), [], route="R1", pair=("S2", "S3"))
+
+    [segment] = (await _read(aconn, aagency_id)).segments
+
+    assert (segment.from_stop_id, segment.to_stop_id) == ("S1", "S2")
+    assert segment.routes == ["R1"]
+    assert segment.weeks[-2] is None
+
+
+@pytest.mark.asyncio
 async def test_an_untrusted_feed_reads_nothing(aconn, aagency_id):
     await _runs(aconn, aagency_id, date(2026, 4, 6), [200] * 30)
 
@@ -146,6 +167,8 @@ async def test_the_endpoint_reads_the_weeks_before_the_last_closed_day(client, a
     await _trusted(aconn, aagency_id)
     await _stops(aconn, aagency_id)
     weeks = await _seed_recent_slow_zone(aconn, aagency_id)
+    newest_day = window_dates([weeks[-1]], "weekday")[0]
+    await _runs(aconn, aagency_id, newest_day, [120] * 21, pair=("S2", "S3"))
 
     r = await client.get(f"/api/{aagency_id}/segments/slow-zones")
 
@@ -156,7 +179,10 @@ async def test_the_endpoint_reads_the_weeks_before_the_last_closed_day(client, a
     assert body["weeks"][-1] == weeks[-1].isoformat()
     assert body["thresholds"] == {"excess_sec": 60, "min_scheduled_sec": 60, "min_weeks": 3, "min_samples": 21}
     assert body["slow_zones"] == [["S1", "S2"]]
-    [segment] = body["segments"]
+    segment, fine = body["segments"]
+    assert fine["to_stop_id"] == "S3" and fine["slow_weeks"] == 0
+    # Only a slow zone carries its weeks; the map needs none of them.
+    assert "weekly_excess_sec" not in fine and "slow_since" not in fine
     assert segment["slow_weeks"] == 3
     assert segment["slow_since"] == weeks[0].isoformat()
     assert segment["weekly_excess_sec"][-3:] == [80.0, 80.0, 80.0]
@@ -181,8 +207,10 @@ async def test_the_csv_lists_the_slow_zones_as_feed_based_estimates(client, acon
     assert r.headers["content-type"].startswith("text/csv")
     rows = list(csv.reader(io.StringIO(r.text.lstrip("﻿"))))
     header = rows.index(next(row for row in rows if row and row[0] == "始点停留所ID"))
-    assert any("feed_prediction" in row[0] for row in rows[:header])
-    assert [f"算出方法：{METHOD_VERSION}"] in rows[:header]
+    definition = next(row[0] for row in rows[:header] if row[0].startswith("値の根拠="))
+    assert value_basis_text("feed_prediction", "ja") in definition
+    assert f"算出方法の説明={METHODOLOGY_URLS['ja']}" in definition
+    assert definition.endswith(f"算出方法={METHOD_VERSION}")
     [data] = rows[header + 1 :]
     assert data[:7] == ["S1", "紙屋町", "S2", "八丁堀", "R1", "3", weeks[0].isoformat()]
     assert data[9] == "80.0"

@@ -36,7 +36,6 @@ function segment(over: Partial<SlowZoneSegmentData> = {}, excess: number | null 
     },
     weekly_excess_sec: [null, 70, 80],
     slow_weeks: 2,
-    slow_since: null,
     ...over,
   };
 }

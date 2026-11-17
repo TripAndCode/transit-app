@@ -54,7 +54,7 @@ const slow: SlowZoneSegmentData = {
   slow_since: "2026-03-23",
 };
 
-const fine: SlowZoneSegmentData = { ...slow, from_stop_id: "S2", from_stop_name: "八丁堀", to_stop_id: "S3", to_stop_name: "胡町", slow_weeks: 0, slow_since: null };
+const fine: SlowZoneSegmentData = { ...slow, from_stop_id: "S2", from_stop_name: "八丁堀", to_stop_id: "S3", to_stop_name: "胡町", slow_weeks: 0, slow_since: undefined, weekly_excess_sec: undefined };
 
 const response: SlowZonesResponse = {
   available: true,
@@ -120,6 +120,16 @@ describe("SlowZonesView", () => {
     const click = maps[0].handlers.click[0];
     act(() => click({ features: [{ properties: { key: "S2\u0000S3" } }] }));
     expect(screen.getByText(/八丁堀 → 胡町 \(R1, R2\), newest week: median 200 s/)).toBeInTheDocument();
+  });
+
+  it("re-labels the basemap when the language changes", async () => {
+    stub(response);
+    open();
+    const setStyle = vi.spyOn(maps[0] as unknown as { setStyle: () => void }, "setStyle");
+    await act(async () => {
+      await i18n.changeLanguage("ja");
+    });
+    expect(setStyle).toHaveBeenCalledTimes(1);
   });
 
   it("says when nothing has stayed slow", () => {

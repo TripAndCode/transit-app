@@ -22,6 +22,7 @@ from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import DAY_TYPE_SERVICE, TIME_BAND_RANGES, last_closed_jst_day
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.data_sources import credit_line
+from pipeline.reports.definition import METHODOLOGY_URLS, value_basis_text
 from pipeline.reports.slow_zones import (
     MIN_SCHEDULED_SEC,
     MIN_SLOW_WEEKS,
@@ -63,9 +64,9 @@ class SegmentWeekOut(BaseModel):
 class SegmentOut(BaseModel):
     """A stop pair of the agency, over every route that runs it.
     Coordinates and names are the loaded timetable's, None for a stop it
-    lacks. ``weekly_excess_sec`` has one entry per response week, None for a
-    week with no run or too few. ``slow_weeks`` is the newest weeks slow in a
-    row; ``slow_since`` the first of them when it makes a slow zone."""
+    lacks. ``slow_weeks`` is the newest weeks slow in a row. A slow zone alone
+    carries ``slow_since``, the first of them, and ``weekly_excess_sec``, one
+    entry per response week, None for a week with no run or too few."""
 
     from_stop_id: str
     from_stop_name: str | None
@@ -78,16 +79,16 @@ class SegmentOut(BaseModel):
     distance_m: float | None
     routes: list[str]
     latest: SegmentWeekOut | None
-    weekly_excess_sec: list[float | None]
     slow_weeks: int
-    slow_since: date | None
+    slow_since: date | None = None
+    weekly_excess_sec: list[float | None] | None = None
 
 
 class SlowZoneThresholds(BaseModel):
-    excess_sec: int = SLOW_EXCESS_SEC
-    min_scheduled_sec: int = MIN_SCHEDULED_SEC
-    min_weeks: int = MIN_SLOW_WEEKS
-    min_samples: int = MIN_WEEK_SAMPLES
+    excess_sec: int
+    min_scheduled_sec: int
+    min_weeks: int
+    min_samples: int
 
 
 class SlowZonesResponse(BaseModel):
@@ -128,7 +129,7 @@ def _week(week: SegmentWeek, distance_m: float | None) -> SegmentWeekOut:
 
 def _segment(s: SlowZoneSegment, weeks: list[date]) -> SegmentOut:
     latest = s.latest
-    return SegmentOut(
+    out = SegmentOut(
         from_stop_id=s.from_stop_id,
         from_stop_name=s.from_stop_name,
         from_lon=s.from_lon,
@@ -140,10 +141,13 @@ def _segment(s: SlowZoneSegment, weeks: list[date]) -> SegmentOut:
         distance_m=_round(s.distance_m, 0),
         routes=s.routes,
         latest=None if latest is None else _week(latest, s.distance_m),
-        weekly_excess_sec=[_round(w.excess_sec) if w is not None and w.enough_samples else None for w in s.weeks],
         slow_weeks=s.slow_weeks,
-        slow_since=weeks[-s.slow_weeks] if s.is_slow_zone else None,
     )
+    if s.is_slow_zone:
+        # Set only here, so the response (exclude_unset) carries them for the list alone.
+        out.slow_since = weeks[-s.slow_weeks]
+        out.weekly_excess_sec = [_round(w.excess_sec) if w is not None and w.enough_samples else None for w in s.weeks]
+    return out
 
 
 _CSV_COLUMNS = [
@@ -207,9 +211,9 @@ def _preamble(result: SlowZones) -> list[str]:
         f"{first.isoformat()}の週から{last.isoformat()}の週まで",
         f"条件：中央値が時刻表より{SLOW_EXCESS_SEC}秒以上長い週（時刻表の走行時間{MIN_SCHEDULED_SEC}秒以上、"
         f"週{MIN_WEEK_SAMPLES}便以上）が、最新の週まで{MIN_SLOW_WEEKS}週以上続いた区間",
-        "値の根拠：事業者のフィードが配信した遅延の予測値にもとづく推定（feed_prediction）。"
         "予測値の検証を終えるまで、バス優先策の候補の順位付けには使いません。",
-        f"算出方法：{METHOD_VERSION}",
+        f"値の根拠={value_basis_text(result.value_basis, 'ja')}; "
+        f"算出方法の説明={METHODOLOGY_URLS['ja']}; 算出方法={METHOD_VERSION}",
     ]
 
 
@@ -233,7 +237,7 @@ def _csv_response(result: SlowZones, credit: str | None, message: str | None) ->
     )
 
 
-@router.get("/segments/slow-zones", response_model=SlowZonesResponse)
+@router.get("/segments/slow-zones", response_model=SlowZonesResponse, response_model_exclude_unset=True)
 @limiter.limit(DEFAULT_LIMIT)
 async def slow_zones(
     request: Request,
@@ -271,7 +275,12 @@ async def slow_zones(
         day_type=result.day_type,
         time_band=time_band,
         weeks=result.weeks,
-        thresholds=SlowZoneThresholds(),
+        thresholds=SlowZoneThresholds(
+            excess_sec=SLOW_EXCESS_SEC,
+            min_scheduled_sec=MIN_SCHEDULED_SEC,
+            min_weeks=MIN_SLOW_WEEKS,
+            min_samples=MIN_WEEK_SAMPLES,
+        ),
         segments=[_segment(s, result.weeks) for s in result.segments],
         slow_zones=[(s.from_stop_id, s.to_stop_id) for s in result.slow_zones],
     )

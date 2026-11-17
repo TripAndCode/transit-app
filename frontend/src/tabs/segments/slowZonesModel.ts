@@ -72,7 +72,7 @@ export function slowZoneSegments(data: SlowZonesResponse | undefined): SlowZoneS
 
 /** The observed weeks' excess, oldest first, for a sparkline. */
 export function observedExcess(segment: SlowZoneSegmentData): number[] {
-  return segment.weekly_excess_sec.filter((v): v is number => v != null);
+  return (segment.weekly_excess_sec ?? []).filter((v): v is number => v != null);
 }
 
 /** Whether the streak runs back to the first week read, so it may have
