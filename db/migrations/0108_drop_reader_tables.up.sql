@@ -22,6 +22,11 @@ DROP TABLE IF EXISTS api_keys;
 -- Its trigger went with the table; the function is left without a caller.
 DROP FUNCTION IF EXISTS api_keys_fill_key_hash();
 
+-- Overrides of switches `pipeline.flags.REGISTRY` no longer has; nothing
+-- reads them. Deleted before the readers are chosen below, so an account
+-- whose only admin record was setting one of them is not kept for it.
+DELETE FROM feature_flags WHERE key IN ('login_required', 'copilot_insight_enabled');
+
 -- A reader account is a 'user' row that no admin-only record attributes an
 -- action to. An admin who was later demoted is still named by what they did
 -- (admin_audit, the other admin-only actor columns, and login_events written
@@ -82,6 +87,3 @@ ALTER TABLE user_activity_daily DROP COLUMN IF EXISTS via_api_key;
 CREATE UNIQUE INDEX IF NOT EXISTS user_activity_daily_key
     ON user_activity_daily (user_id, day, route, method, (COALESCE(agency_id, 0)));
 
--- Overrides of switches `pipeline.flags.REGISTRY` no longer has; nothing
--- reads them.
-DELETE FROM feature_flags WHERE key IN ('login_required', 'copilot_insight_enabled');

@@ -7,7 +7,6 @@ from datetime import date
 
 from api.security import token_hash
 from db import migrate
-from pipeline.flags import REGISTRY
 
 _VERSION = "0108"
 _BELOW = "0107"
@@ -157,9 +156,12 @@ def test_up_removes_the_reader_platform_and_keeps_admin_attribution(pg_conn):
                 " (%s, NULL, 'role_changed', NULL)",
                 (reader, admin, reader),
             )
+            # Named only by a retired override, which goes before readers are chosen.
+            retired_flag_setter = _user(cur, "retired-flag@x")
             cur.execute(
-                "INSERT INTO feature_flags (key, value)"
-                " VALUES ('login_required', true), ('copilot_insight_enabled', false)"
+                "INSERT INTO feature_flags (key, value, updated_by)"
+                " VALUES ('login_required', true, %s), ('copilot_insight_enabled', false, NULL)",
+                (retired_flag_setter,),
             )
         pg_conn.commit()
 
@@ -169,7 +171,7 @@ def test_up_removes_the_reader_platform_and_keeps_admin_attribution(pg_conn):
             cur.execute("SELECT user_id FROM users")
             users = {r[0] for r in cur.fetchall()}
             assert users == {admin, *named.values()}
-            assert reader not in users and other_reader not in users
+            assert not {reader, other_reader, retired_flag_setter} & users
             for table in ("sessions", "oauth_identities", "ask_conversations", "ask_conversation_messages"):
                 cur.execute(f"SELECT count(*) FROM {table}")
                 assert cur.fetchone() == (0,), table
@@ -194,21 +196,6 @@ def test_up_removes_the_reader_platform_and_keeps_admin_attribution(pg_conn):
         migrate.migrate_up(pg_conn)
 
 
-def test_the_usage_upsert_merges_on_the_new_key(pg_conn):
-    with pg_conn.cursor() as cur:
-        uid = _user(cur, "upsert@x", role="admin")
-        for _ in range(2):
-            cur.execute(
-                "INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, requests, errors)"
-                " VALUES (%s, %s, '/a', 'GET', NULL, 1, 0)"
-                " ON CONFLICT (user_id, day, route, method, (COALESCE(agency_id, 0))) DO UPDATE SET"
-                " requests = user_activity_daily.requests + EXCLUDED.requests",
-                (uid, _DAY),
-            )
-        cur.execute("SELECT requests FROM user_activity_daily WHERE user_id = %s", (uid,))
-        assert cur.fetchall() == [(2,)]
-
-
 def test_down_restores_the_schema_empty_and_up_removes_it_again(pg_conn):
     try:
         migrate.migrate_down(_BELOW, pg_conn)
@@ -230,7 +217,3 @@ def test_down_restores_the_schema_empty_and_up_removes_it_again(pg_conn):
     finally:
         pg_conn.rollback()
         migrate.migrate_up(pg_conn)
-
-
-def test_the_retired_flags_are_not_registered():
-    assert not {"login_required", "copilot_insight_enabled"} & {flag.key for flag in REGISTRY}

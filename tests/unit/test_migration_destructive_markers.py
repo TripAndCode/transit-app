@@ -176,11 +176,11 @@ def test_the_up_migrations_that_lose_data_are_pinned():
             "user_llm_keys",
             "user_invites",
             "api_keys",
+            "feature_flags",
             "login_events",
             "users",
             "user_activity_daily",
             "user_activity_daily",
-            "feature_flags",
         ],
     }
 
