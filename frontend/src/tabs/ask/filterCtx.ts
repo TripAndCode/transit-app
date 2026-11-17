@@ -70,9 +70,10 @@ export const THREAD_SCOPE_APPLIED: ScopeApplied = {
 /** The conditions a thread does not store. */
 const NOT_STORED = ["hour", "stop", "dir", "late", "early"] as const;
 
-/** The scope the notebook's scope bar shows. With no thread open it shows the
- *  screen's URL scope whole, so the conditions a thread would not store
- *  still appear and are named as unused; an open thread has none of them. */
+/** The scope the notebook's scope bar shows. With no thread open it keeps
+ *  the screen's URL values for the conditions a thread would not store,
+ *  which the bar leaves out (`THREAD_SCOPE_APPLIED`); an open thread has
+ *  none of them. */
 export function notebookScope(fc: FilterCtx, urlScope: Scope | null, dataEnd: string | null): Scope {
   const scope = threadScope(fc, dataEnd);
   if (!urlScope) return scope;

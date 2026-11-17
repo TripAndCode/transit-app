@@ -143,7 +143,7 @@ The live page fetches through hooks and hands the same parts its responses.
 - **No live links.** The strip's links on to the route's reports are left
   out, and the variant is named in a disabled picker with no other-direction
   button.
-- **The scope sentence** strikes nothing through: the panels each honour
+- **The scope statement** strikes nothing through: the panels each honour
   their own part of the scope, so no one panel's `scope_applied` speaks for
   the page.
 
