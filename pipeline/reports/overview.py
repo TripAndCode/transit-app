@@ -1635,7 +1635,7 @@ async def compute_overview_summary(
     anchor = latest if latest is not None else ctx.to_date
 
     # The current window is the scope period up to its last day with data, so
-    # the headline describes the period the scope sentence names.
+    # the headline describes the period the scope bar names.
     cur_ctx = RangeCtx(
         from_date=ctx.from_date,
         to_date=anchor,

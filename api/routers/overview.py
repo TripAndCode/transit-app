@@ -62,7 +62,7 @@ class Headline(BaseModel):
 
     ``window_from`` / ``window_to`` are the ISO dates of the window the
     headline covers: the requested period up to its last day with data, so
-    the hero row and the scope sentence describe the same period. The
+    the hero row and the scope bar describe the same period. The
     baseline is the same number of days immediately before it. Surfaced so the
     frontend labels the headline by the days it actually averages.
     """
