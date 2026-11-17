@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -821,7 +821,7 @@ describe("NetworkTab", () => {
     expect(screen.getAllByTestId("network-row").map((r) => r.dataset.flipKey)).toEqual(["7", "9"]);
   });
 
-  describe("scope sentence", () => {
+  describe("scope bar", () => {
     const BOARD_APPLIED = {
       from: true, to: true, dow: false, time_band: false, hour: false, service: false,
       routes: false, stop: false, dir: false, late: false, early: false,
@@ -853,29 +853,30 @@ describe("NetworkTab", () => {
 
     it("states the board's scope in its own words, with the period as its one condition", () => {
       renderBoard("?from=2026-04-01&to=2026-04-07");
-      expect(region()).toHaveTextContent("Comparing every agency over 4/1 – 4/7 7 days");
-      expect(screen.getByRole("button", { name: "4/1 – 4/7 7 days" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "all routes" })).toBeNull();
+      const bar = within(region());
+      expect(bar.getByRole("button", { name: "Period 4/1 – 4/7 7 days" })).toBeInTheDocument();
+      expect(bar.queryByRole("button", { name: /^Routes/ })).toBeNull();
       expect(document.querySelectorAll("input[type='date']")).toHaveLength(0);
-      expect(screen.queryByText(/Not used on this screen/)).toBeNull();
     });
 
-    it("names every condition set elsewhere that the board does not apply", () => {
+    it("hides every condition set elsewhere that the board does not apply", () => {
       renderBoard("?from=2026-04-01&to=2026-04-07&dow=weekday&time_band=morning&routes=50&stop=S1&late=60");
-      expect(region()).toHaveTextContent(
-        "Not used on this screen: Routes, Days and timetable, Time of day, Stop, On-time tolerance",
-      );
+      const bar = within(region());
+      for (const name of [/^Routes/, /^Days/, /^Time/, /^Stop/, /^On time/]) {
+        expect(bar.queryByRole("button", { name })).toBeNull();
+      }
+      expect(bar.getByRole("button", { name: /^Period/ })).toBeInTheDocument();
     });
 
     it("draws no one agency's figures into the period control", () => {
       const summary = vi.spyOn(hooks, "useScopeSummary");
       renderBoard("?from=2026-04-01&to=2026-04-07");
-      fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));
+      fireEvent.click(screen.getByRole("button", { name: "Period 4/1 – 4/7 7 days" }));
       expect(summary).toHaveBeenCalled();
       expect(summary.mock.calls.every(([, , enabled]) => enabled === false)).toBe(true);
     });
 
-    it("asks for no agency's routes, since its sentence names none", () => {
+    it("asks for no agency's routes, since its bar names none", () => {
       const routes = vi.spyOn(hooks, "useRoutes");
       renderBoard("?from=2026-04-01&to=2026-04-07&routes=50");
       expect(routes.mock.calls.every(([agencyId]) => agencyId == null)).toBe(true);
@@ -883,7 +884,7 @@ describe("NetworkTab", () => {
 
     it("writes the period it is given as the canonical from and to", () => {
       renderBoard("?from=2026-04-01&to=2026-04-07");
-      fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));
+      fireEvent.click(screen.getByRole("button", { name: "Period 4/1 – 4/7 7 days" }));
       fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-03-25" } });
       const params = new URLSearchParams(screen.getByTestId("params").textContent ?? "");
       expect(params.get("from")).toBe("2026-03-25");
@@ -920,7 +921,7 @@ describe("NetworkTab", () => {
     rerender(ui());
     expect(screen.getAllByTestId("network-row")).toHaveLength(250);
 
-    fireEvent.click(screen.getByRole("button", { name: "4/1 – 4/7 7 days" }));
+    fireEvent.click(screen.getByRole("button", { name: "Period 4/1 – 4/7 7 days" }));
     fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-03-25" } });
     expect(screen.getAllByTestId("network-row")).toHaveLength(200);
     // The cap is 200 rows, so proving it renders a few hundred rows several

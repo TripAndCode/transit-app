@@ -12,7 +12,7 @@ describe("shared print stylesheet", () => {
     expect(focusedAnalysisCss.match(/@media print/g)).toBeNull();
   });
 
-  it("hides an admin's raw ids in the scope sentence when printing", () => {
+  it("hides an admin's raw ids in the scope bar when printing", () => {
     const start = globalCss.indexOf("@media print");
     const block = globalCss.slice(start, globalCss.indexOf("\n}\n", start));
     expect(block).toMatch(/\.scope-id\s*\{\s*display:\s*none/);

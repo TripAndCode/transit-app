@@ -16,7 +16,7 @@ import { PinRouteButton } from "../components/PinRouteButton";
 import { ExportMenu } from "../components/ExportMenu";
 import { useScreenQuery, withQuery } from "../api/screenScope";
 import type { RouteShapeStop } from "../api/types";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { RiseHeadline, SelectedStopAside, StopDelayTable, StopDelayTrend } from "../components/analysis/RouteStopDelay";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
@@ -88,15 +88,10 @@ export function RouteAnalysisTab() {
   // read here for the conditions their figures used.
   const onTimeList = useAgencyOnTime(route == null ? null : id, ctx);
   const standards = usePerformanceStandards(id, ctx, route != null, route ?? undefined);
-  // A section that failed used nothing. While a section reloads, the last
-  // complete answer stands, so the strike-through does not flicker off and
-  // back on with every change.
+  // A section that failed used nothing, so the others still decide.
   const sectionApplied = (section: { data?: { scope_applied?: ScopeApplied }; error: unknown }) =>
     section.error ? {} : section.data?.scope_applied;
-  const mergedApplied = mergeScopeApplied(sectionApplied(query), sectionApplied(onTimeList), sectionApplied(standards));
-  const [heldApplied, setHeldApplied] = useState<ScopeApplied>(undefined);
-  if (mergedApplied != null && JSON.stringify(mergedApplied) !== JSON.stringify(heldApplied)) setHeldApplied(mergedApplied);
-  const scopeApplied = mergedApplied ?? heldApplied;
+  const scopeApplied = mergeScopeApplied(sectionApplied(query), sectionApplied(onTimeList), sectionApplied(standards));
   const names = useRouteNames(id);
   const { stopName, settled: stopNamesSettled } = usePlaceLabels(id, ctx.stop != null);
   const isAdmin = useIsAdmin();
@@ -214,7 +209,7 @@ export function RouteAnalysisTab() {
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
     {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
-    <ScopeSentence applied={scopeApplied} actions={false} />
+    <ScopeBar applied={scopeApplied} actions={false} />
     {!route ? <EmptyState title={t("choose")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}
       reasons={buildFilterCtxReasons(ctx, t, names.format)}
       recoveries={buildFilterCtxRecoveries({

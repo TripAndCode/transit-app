@@ -10,7 +10,7 @@ import { useRouteNames } from "../api/useRouteNames";
 import { RouteLabel } from "../components/RouteLabel";
 import { useAgencyId } from "../api/useAgencyId";
 import type { RankingRow, TrendDay } from "../api/types";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { buildCsv, type CsvColumn } from "../components/analysis/csv";
 import { ExportMenu } from "../components/ExportMenu";
 import { deleteAnalysis, readAnalyses } from "../components/analysis/savedAnalyses";
@@ -130,7 +130,7 @@ export function ReportsHomeTab() {
         <button aria-label={`${t("remove")}: ${s.title}`} onClick={() => { if (deleteAnalysis(s.id)) setSaved(readAnalyses()); else setNotice(t("saveFailed")); }}>{t("remove")}</button>
       </li>)}</ul>
     </section> : <>
-      <ScopeSentence applied={trend.data?.scope_applied} />
+      <ScopeBar applied={trend.data?.scope_applied} />
       <h2>{agencies.data?.find((a) => a.agency_id === id)?.agency_name}{FILTER_SEPARATOR}{formatDateRange(ctx.from, ctx.to)}</h2>
       <section><h2>{t("trend")}</h2>
       <AsyncSection loading={trend.isPending} error={trend.error} onRetry={() => void trend.refetch()} data={trend.data} hasContent={() => days.length > 0} empty={<EmptyState title={t("empty")} reasons={emptyReasons} recoveries={emptyRecoveries} />}>

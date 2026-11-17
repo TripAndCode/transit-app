@@ -41,12 +41,12 @@ function filterCtxParams(fc: FilterCtx): URLSearchParams {
   return params;
 }
 
-/** A thread's conditions as the scope the scope sentence reads. */
+/** A thread's conditions as the scope the scope bar reads. */
 export function threadScope(fc: FilterCtx, dataEnd: string | null): Scope {
   return parseScope(filterCtxParams(fc), defaultPeriod(dataEnd));
 }
 
-/** A thread's conditions after a scope sentence change. */
+/** A thread's conditions after a scope bar change. */
 export function patchThreadFilter(fc: FilterCtx, patch: ScopePatch, dataEnd: string | null): FilterCtx {
   return rangeCtxToFilterCtx(parseScope(applyScopePatch(filterCtxParams(fc), patch), defaultPeriod(dataEnd)));
 }
@@ -70,9 +70,10 @@ export const THREAD_SCOPE_APPLIED: ScopeApplied = {
 /** The conditions a thread does not store. */
 const NOT_STORED = ["hour", "stop", "dir", "late", "early"] as const;
 
-/** The scope the notebook's sentence shows. With no thread open it shows the
- *  screen's URL scope whole, so the conditions a thread would not store
- *  still appear and are named as unused; an open thread has none of them. */
+/** The scope the notebook's scope bar shows. With no thread open it keeps
+ *  the screen's URL values for the conditions a thread would not store,
+ *  which the bar leaves out (`THREAD_SCOPE_APPLIED`); an open thread has
+ *  none of them. */
 export function notebookScope(fc: FilterCtx, urlScope: Scope | null, dataEnd: string | null): Scope {
   const scope = threadScope(fc, dataEnd);
   if (!urlScope) return scope;
@@ -80,7 +81,7 @@ export function notebookScope(fc: FilterCtx, urlScope: Scope | null, dataEnd: st
   return { ...scope, ...kept };
 }
 
-/** A sentence change split into what a thread stores and the rest, which
+/** A scope bar change split into what a thread stores and the rest, which
  *  only the URL scope can hold. */
 export function splitNotebookPatch(patch: ScopePatch): { thread: ScopePatch; url: ScopePatch } {
   const thread: ScopePatch = { ...patch };

@@ -20,7 +20,7 @@ export function PresetMenu({
 }: {
   agencyId: number;
   currentRangeCtx: Scope;
-  /** How the scope sentence says conditions, so a view reads the same. */
+  /** How the scope bar says conditions, so a view reads the same. */
   phrases: PhraseCtx;
   /** What a reset gives back, or null while unknown; it decides which
    *  conditions the suggested name mentions. */
@@ -99,7 +99,7 @@ export function PresetMenu({
   }
 
   return (
-    <span className="scope-token-wrap" onBlur={onBlur}>
+    <span className="scope-trigger-wrap" onBlur={onBlur}>
       <button
         ref={triggerRef}
         type="button"

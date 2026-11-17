@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { routeHref } from "../routes/destinations";
 import { useTranslation } from "react-i18next";
 import { Download, Maximize2, RefreshCw } from "lucide-react";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { applyLiveScopePatch, LIVE_SCOPE_APPLIED, liveShapeScope } from "./map/liveScope";
 import { PlaybackToggle } from "./map/PlaybackToggle";
 import { buildCsv, downloadCsv, type CsvColumn } from "../components/analysis/csv";
@@ -709,7 +709,7 @@ export function MapTab() {
         )}
       </header>
 
-      <ScopeSentence source={{ scope: ctx, update: updateScope }} applied={LIVE_SCOPE_APPLIED} template="live" actions={false} />
+      <ScopeBar source={{ scope: ctx, update: updateScope }} applied={LIVE_SCOPE_APPLIED} actions={false} figures={false} />
 
       {(liveQuery.error || summaryQuery.error) && (
         <ErrorBanner

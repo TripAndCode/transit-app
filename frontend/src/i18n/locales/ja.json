@@ -292,7 +292,7 @@
     },
     "scope": {
       "title": "この画面が数えている範囲",
-      "body": "この一文が、どの路線・曜日・時間帯を、どの期間で数えているかを示します。概況は、その期間を直前の同じ日数と比べます。▼の付いた部分をクリックすると変えられます。"
+      "body": "これらの項目が、どの路線・曜日・時間帯を、どの期間で数えているかを示します。概況は、その期間を直前の同じ日数と比べます。クリックすると変えられます。"
     }
   },
   "forecast": {
@@ -2452,7 +2452,6 @@
   },
   "scope": {
     "label": "表示の条件",
-    "sentence": "[agency]の[routes]を、[period]の[days]・[time][extras]で、定時は[tolerance]として見る",
     "routes_all": "全路線",
     "routes_count": "{{count}}路線",
     "period": "{{from}}〜{{to}}",
@@ -2518,13 +2517,24 @@
       "early": "早発の幅",
       "tolerance": "定時の幅"
     },
-    "unapplied_note": "この画面では使いません：{{list}}",
-    "sentence_no_tolerance": "[agency]の[routes]を、[period]の[days]・[time][extras]で見る",
     "stop_unnamed": "選択した停留所",
     "dir_unnamed": "方面{{letter}}",
     "id_tag": "（{{id}}）",
-    "sentence_live": "[agency]の[routes]を、リアルタイム[extras]で、定時は[tolerance]として見る",
-    "sentence_board": "全事業者を[period]で比較する"
+    "bar": {
+      "routes": "路線",
+      "period": "期間",
+      "days": "曜日",
+      "time": "時間帯",
+      "service": "ダイヤ",
+      "stop": "停留所",
+      "dir": "方向",
+      "early": "早発",
+      "tolerance": "定時の幅",
+      "all": "すべて",
+      "all_day": "全日",
+      "early_up_to": "{{span}}まで",
+      "early_any": "すべて定時扱い"
+    }
   },
   "print": {
     "generated_at": "作成日時 {{time}}",

@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import i18n from "../../i18n";
 import { SCOPE_EXTRAS_NONE, type Scope } from "../../api/scope";
 import {
+  conditionUsed,
   durationLabel,
   isScopeConditionOff,
   mergeScopeApplied,
   periodDays,
-  routeTokenPlates,
   scopeTitle,
   scopeTokens,
-  sentenceParts,
   suggestedViewName,
   tokenChanged,
 } from "./scopePhrases";
@@ -149,18 +148,6 @@ describe("scopeTokens", () => {
   });
 });
 
-describe("sentenceParts", () => {
-  it("splits a template into text and slots", () => {
-    expect(sentenceParts("見ているのは[agency]の[routes]を")).toEqual([
-      { text: "見ているのは" },
-      { slot: "agency" },
-      { text: "の" },
-      { slot: "routes" },
-      { text: "を" },
-    ]);
-  });
-});
-
 describe("scopeTitle", () => {
   it("joins the conditions for a saved-analysis title", () => {
     const t = i18n.getFixedT("ja");
@@ -229,7 +216,7 @@ describe("suggestedViewName", () => {
 describe("isScopeConditionOff", () => {
   const token = (scope: Partial<Scope>, key: string) => tokens("en", scope).find((tok) => tok.key === key)!;
 
-  it("strikes a set condition the screen's data reports it did not use", () => {
+  it("marks a set condition the screen's data reports it did not use", () => {
     const scope = { ...base, time_band: "morning" } as Scope;
     expect(isScopeConditionOff(token(scope, "time"), scope, { time_band: false })).toBe(true);
   });
@@ -243,61 +230,28 @@ describe("isScopeConditionOff", () => {
   });
 });
 
-describe("routeTokenPlates", () => {
-  const PLATES: Record<string, string> = { "50": "50", "51": "51", "61": "K37", "62": "K37", "63": "K38", "70": "A1" };
-  const plateCtx = {
-    t: i18n.getFixedT("ja"),
-    agencyName: "x",
-    routeLabel: (c: string) => `R${c}`,
-    routeGroup: (c: string) => GROUPS[c],
-    routePlate: (c: string) => PLATES[c] ?? null,
-  };
-
-  it("shows nothing for no routes picked", () => {
-    expect(routeTokenPlates([], plateCtx)).toEqual({ plates: [], more: 0 });
+describe("conditionUsed", () => {
+  it("counts every condition used while the screen has said nothing", () => {
+    expect(conditionUsed("days", undefined)).toBe(true);
+    expect(conditionUsed("stop", null)).toBe(true);
   });
 
-  it("shows one plate for one route, grouped or not", () => {
-    expect(routeTokenPlates(["50"], plateCtx)).toEqual({ plates: ["50"], more: 0 });
+  it("drops a condition only when every field its control sets went unused", () => {
+    expect(conditionUsed("days", { dow: false, service: true })).toBe(true);
+    expect(conditionUsed("days", { dow: false, service: false })).toBe(false);
+    expect(conditionUsed("time", { time_band: false, hour: true })).toBe(true);
+    expect(conditionUsed("time", { time_band: false, hour: false })).toBe(false);
+    expect(conditionUsed("period", { from: false, to: false })).toBe(false);
+    expect(conditionUsed("tolerance", { late: false })).toBe(false);
   });
 
-  it("dedupes a single line's variants that all plate the same, instead of stacking the same plate three times", () => {
-    expect(routeTokenPlates(["61", "62"], plateCtx)).toEqual({ plates: ["K37"], more: 0 });
-  });
-
-  it("shows a single line's distinct variant plates, up to three", () => {
-    expect(routeTokenPlates(["61", "62", "63"], plateCtx)).toEqual({ plates: ["K37", "K38"], more: 0 });
-  });
-
-  it("shows one plate per line for a few different lines", () => {
-    expect(routeTokenPlates(["50", "61", "70"], plateCtx)).toEqual({ plates: ["50", "K37", "A1"], more: 0 });
-  });
-
-  it("folds a line past the third into a +N plate, keeping the first two", () => {
-    expect(routeTokenPlates(["50", "51", "61", "70"], plateCtx)).toEqual({ plates: ["50", "51"], more: 2 });
-  });
-
-  it("folds a line with no plate of its own into the +N count, never dropping it", () => {
-    const ctx = { ...plateCtx, routePlate: (c: string) => (c === "x1" || c === "x2" ? null : (PLATES[c] ?? null)) };
-    expect(routeTokenPlates(["50", "70", "x1", "x2"], ctx)).toEqual({ plates: ["50", "A1"], more: 2 });
-    expect(routeTokenPlates(["50", "x1"], ctx)).toEqual({ plates: ["50"], more: 1 });
-  });
-
-  it("shows nothing for a single line whose variants have no plate, since the label names it", () => {
-    const ctx = { ...plateCtx, routeGroup: () => "X line", routePlate: () => null };
-    expect(routeTokenPlates(["x1", "x2"], ctx)).toEqual({ plates: [], more: 0 });
-  });
-
-  it("falls back to the route code itself when the context names no plate", () => {
-    expect(routeTokenPlates(["50", "70"], { t: i18n.getFixedT("ja"), agencyName: "x", routeLabel: (c) => c })).toEqual({
-      plates: ["50", "70"],
-      more: 0,
-    });
+  it("counts a field the screen did not report on as used", () => {
+    expect(conditionUsed("routes", { dow: false })).toBe(true);
   });
 });
 
 describe("durationLabel", () => {
-  it("prints a span the way the scope sentence does, seconds under a minute and else minutes to a tenth, its figure held to its unit", () => {
+  it("prints a span the way the scope bar does, seconds under a minute and else minutes to a tenth, its figure held to its unit", () => {
     const en = i18n.getFixedT("en");
     const ja = i18n.getFixedT("ja");
     expect([45, 60, 90, 300].map((sec) => durationLabel(sec, en))).toEqual(["45\u00a0s", "1\u00a0min", "1.5\u00a0min", "5\u00a0min"]);

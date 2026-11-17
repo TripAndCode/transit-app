@@ -1467,7 +1467,7 @@ async def compute_overview_summary(
     """Build the 概況 payload for one agency over ``ctx``.
 
     The headline covers the scope period itself (``cur_ctx``: ``ctx`` up to
-    its last day with data), so the hero row and the scope sentence describe
+    its last day with data), so the hero row and the scope bar describe
     the same period, and compares it against a window of the SAME WIDTH
     immediately before it (``base_ctx``). Equal widths keep the "vs. the
     period before it" copy honest: two windows of different lengths differ in
@@ -1635,7 +1635,7 @@ async def compute_overview_summary(
     anchor = latest if latest is not None else ctx.to_date
 
     # The current window is the scope period up to its last day with data, so
-    # the headline describes the period the scope sentence names.
+    # the headline describes the period the scope bar names.
     cur_ctx = RangeCtx(
         from_date=ctx.from_date,
         to_date=anchor,

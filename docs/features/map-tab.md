@@ -58,20 +58,20 @@ but are not plotted.
   still opens on the agency's own network. Only an agency with no located
   stop is framed on its live trips instead, and a selected route frames its
   own shape rather than the agency.
-- The scope sentence above the map (`ScopeSentence` with `template="live"`;
-  see `docs/features/analysis-tab.md`) holds Live's filters, in words of its
-  own: Live counts the trips reporting now, by their routes and the on-time
-  window, over no period. Its routes control is the one every screen uses:
-  each line's row carries its route number, a line expands to its service
-  patterns, and picks stay staged until **Apply**, so a half-built pick never
-  re-derives the counters. A change to the routes also drops the map's
-  focused route, direction and trip, in the same URL write
+- The scope bar above the map (`ScopeBar`, `frontend/src/components/scope/ScopeBar.tsx`;
+  see `docs/features/analysis-tab.md`'s "The scope bar" section) holds Live's
+  filters: Live counts the trips reporting now, by their routes and the
+  on-time window, over no period. Its routes control is the one every screen
+  uses: each line's row carries its route number, a line expands to its
+  service patterns, and picks stay staged until **Apply**, so a half-built
+  pick never re-derives the counters. A change to the routes also drops the
+  map's focused route, direction and trip, in the same URL write
   (`frontend/src/tabs/map/liveScope.ts`).
-- Live honours `routes`, `late` and `early` (`LIVE_SCOPE_APPLIED`). A day,
-  time, timetable, stop or direction condition carried over from another
-  screen is named in the sentence's "Not used on this screen" note rather
-  than ignored silently. The period is left out of that note: the sentence
-  says "live" where other screens name it.
+- Live honours `routes`, `late` and `early` (`LIVE_SCOPE_APPLIED`), so its bar
+  shows only those three conditions. A day, time, timetable, stop or
+  direction condition carried over from another screen is left out of the
+  bar rather than shown unused; it keeps its value and still applies
+  wherever it is used.
 - With all routes selected, the right panel lists routes from the latest
   observation by maximum delay instead of leaving the panel empty.
 - Selecting a route groups simultaneous trips by GTFS `direction_id`, falling

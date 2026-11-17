@@ -7,7 +7,7 @@ import "./sidebarLineMap.css";
 
 /** The agency picker and the period the screen on show covers, as one
  *  ticket at the head of the rail. The period is read-only here: the
- *  screen's own scope sentence edits it. Off an agency's pages there is no
+ *  screen's own scope bar edits it. Off an agency's pages there is no
  *  period to show. */
 export function SidebarTicket() {
   const { t } = useTranslation();
