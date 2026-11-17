@@ -26,3 +26,4 @@ frontend/dist
 api/static
 .claude
 /archive/
+/backup/

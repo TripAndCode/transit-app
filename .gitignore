@@ -102,3 +102,4 @@ client_secret_*.json
 scripts/review-*-pass*/
 scripts/.review-scratch/
 /archive/
+/backup/

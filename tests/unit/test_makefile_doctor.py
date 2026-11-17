@@ -3,8 +3,9 @@
 The sign-in lines read what Make exported from `.env`, and the ClickHouse
 line counts matching `.env` lines with `grep -c`, which prints no count at
 all when the file is absent, so both are exercised with and without a `.env`
-rather than read as text. Each run copies the
-Makefile into `tmp_path`, so no real `.env` is ever read or written.
+rather than read as text. The standalone section runs against a stub `docker`
+that reports chosen services and states. Each run copies the Makefile into
+`tmp_path`, so no real `.env` is ever read or written.
 """
 
 from __future__ import annotations
@@ -24,14 +25,14 @@ CLICKHOUSE_VARS = ("CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABAS
 # A pytest run started under `make … VAR=x` hands its command-line overrides to
 # the nested make through these, and they outrank the test's `.env`.
 MAKE_VARS = ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "MAKELEVEL")
+STRIPPED = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_ENV, *CLICKHOUSE_VARS, *MAKE_VARS)
 
 
 def _doctor(checkout: Path, env_file: str | None) -> list[str]:
     shutil.copy(REPO_ROOT / "Makefile", checkout / "Makefile")
     if env_file is not None:
         (checkout / ".env").write_text(env_file)
-    stripped = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_ENV, *CLICKHOUSE_VARS, *MAKE_VARS)
-    env = {k: v for k, v in os.environ.items() if k not in stripped}
+    env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
     result = subprocess.run(["make", "-s", "doctor"], cwd=checkout, env=env, capture_output=True, text=True, check=True)
     return [line.strip() for line in result.stdout.splitlines()]
 
@@ -135,3 +136,58 @@ def test_doctor_env_counts(tmp_path, env_file, sso, key, clickhouse):
     assert _line(lines, "SSO env:") == sso
     assert _line(lines, "SESSION_SIGNING_KEY:") == key
     assert _line(lines, "CLICKHOUSE env:") == clickhouse
+
+
+def _doctor_with_docker(checkout: Path, services: str, states: str) -> list[str]:
+    """Run doctor with a stand-in `docker` that answers `ps --services` and
+    `ps --format` (one `service state exit-code` line each) from the given text."""
+    shutil.copy(REPO_ROOT / "Makefile", checkout / "Makefile")
+    bin_dir = checkout / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "docker"
+    fake.write_text(
+        '#!/bin/sh\ncase "$*" in\n'
+        f"  *--services*) printf '%s' '{services}' ;;\n"
+        f"  *--format*) printf '%s' '{states}' ;;\n"
+        "esac\n"
+    )
+    fake.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k not in STRIPPED}
+    env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(["make", "-s", "doctor"], cwd=checkout, env=env, capture_output=True, text=True, check=True)
+    return [line.strip() for line in result.stdout.splitlines()]
+
+
+def _standalone_lines(lines: list[str]) -> list[str]:
+    start = next(i for i, line in enumerate(lines) if line.startswith("── standalone"))
+    end = next(i for i, line in enumerate(lines) if line.startswith("── port 8000"))
+    return lines[start + 1 : end]
+
+
+def test_doctor_names_the_guide_when_the_standalone_services_are_not_running(tmp_path):
+    lines = _doctor_with_docker(tmp_path, "", "")
+    assert _standalone_lines(lines) == [
+        "app/poller not running — only a standalone deployment needs them; see docs/deploy-standalone.en.md"
+    ]
+
+
+def test_doctor_reports_running_standalone_services_and_no_failure(tmp_path):
+    lines = _doctor_with_docker(tmp_path, "app\npoller\n", "migrate exited 0\napp running 0\npoller running 0\n")
+    assert _standalone_lines(lines) == ["app and poller: running"]
+
+
+def test_doctor_does_not_call_one_running_service_enough(tmp_path):
+    lines = _doctor_with_docker(tmp_path, "app\n", "app running 0\npoller exited 1\n")
+    assert _line(lines, "app/poller not running")
+
+
+def test_doctor_points_at_the_migrate_log_when_the_schema_step_failed(tmp_path):
+    lines = _doctor_with_docker(tmp_path, "", "migrate exited 1\n")
+    assert "logs migrate" in _line(lines, "schema step (migrate) FAILED")
+
+
+@pytest.mark.parametrize("service", ["app", "poller"])
+@pytest.mark.parametrize("state", ["restarting", "exited"])
+def test_doctor_points_at_the_log_of_a_service_that_is_down(tmp_path, service, state):
+    lines = _doctor_with_docker(tmp_path, "", f"{service} {state} 1\n")
+    assert f"logs {service}" in _line(lines, f"{service} is restarting or has exited")
