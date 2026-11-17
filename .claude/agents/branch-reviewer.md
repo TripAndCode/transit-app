@@ -99,7 +99,7 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   follow; for a finding with no runtime failure it names the concrete mismatch
   instead — what the comment claims versus what the code does, or the rule broken and
   the line that breaks it. A finding that can state neither is speculation and does
-  not qualify, except the unconfirmed-absence case below. Name the single dimension
+  not qualify, except the unconfirmed cases below. Name the single dimension
   the finding belongs to even when several were assigned, because the caller
   deduplicates on file, line, and dimension together; under a brief instead of a named
   dimension, name the brief's own category (e.g. `regressions`) in that slot.
@@ -112,12 +112,14 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   speculation or asserting the absence outright — name the window you read and the
   caller you could not check as its failure statement. A caller's synthesis step is
   expected not to discard this specific case as low-confidence noise.
-- Any SQL investigation is read-only against dev Postgres/ClickHouse. Tests use only
-  the throwaway databases described in `transit-app-gotchas`.
-- Never start, stop, or remove a Docker container or volume, directly or through a
+- Any SQL investigation is read-only against dev Postgres/ClickHouse.
+- Run no test that needs a database; the coordinator runs those after the review.
+  Never start, stop, or remove a Docker container or volume, directly or through a
   script that does (`scripts/run_full_ci.sh`, `make ch-test`), and never install an
-  environment (`poetry install`, `npm ci`, a new virtualenv). Containers and
-  environments on this host belong to every session on it. When a question needs a
-  database or a dependency the worktree lacks, report it as an unconfirmed finding at
-  `confidence: low`.
+  environment: no `poetry install` or `npm ci`, and no bare `poetry run` in a
+  worktree, which creates an empty virtualenv there (`AGENTS.md` says how to route
+  it). Containers, the shared test databases and environments on this host belong to
+  every session on it. A question that needs one of them is an unconfirmed finding,
+  reported like an unconfirmed absence: at `confidence: low`, its failure statement
+  naming the check that would confirm it.
 - Do not edit, commit, or push.
