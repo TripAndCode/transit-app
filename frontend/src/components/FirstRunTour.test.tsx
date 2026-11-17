@@ -17,7 +17,7 @@ function Tour({ onTime = DEFAULT_WINDOW }: { onTime?: typeof DEFAULT_WINDOW }) {
 }
 
 /** The three anchors FirstRunTour looks for, standing in for Pulse's
- *  headline figure, its on-time pointer and its scope sentence. */
+ *  headline figure, its on-time pointer and its scope bar. */
 function renderTourWithAnchors(onTime = DEFAULT_WINDOW) {
   return render(
     <I18nextProvider i18n={i18n}>

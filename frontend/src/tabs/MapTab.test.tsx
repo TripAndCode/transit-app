@@ -194,7 +194,7 @@ function lateTileValue(label: RegExp): string | null {
   return screen.getByText(label).closest(".stat-tile")?.querySelector(".stat-tile__value")?.textContent ?? null;
 }
 
-describe("MapTab scope sentence", () => {
+describe("MapTab scope bar", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -220,15 +220,18 @@ describe("MapTab scope sentence", () => {
 
   const region = () => screen.getByRole("region", { name: "What you're viewing" });
 
-  it("says what Live counts by in the scope sentence, and names a day condition set elsewhere as unused", () => {
+  it("shows only what Live counts by in the scope bar, hiding period and day", () => {
     renderLive("?routes=R1&from=2026-09-01&to=2026-09-30&dow=weekday&late=120");
-    expect(region()).toHaveTextContent("Viewing R1 of");
-    expect(region()).toHaveTextContent("live, counting on-time as within 2 min");
-    expect(region()).toHaveTextContent("Not used on this screen: Days and timetable");
+    const bar = within(region());
+    expect(bar.getByRole("button", { name: "Routes R1" })).toBeInTheDocument();
+    expect(bar.getByRole("button", { name: "On time within 2 min" })).toBeInTheDocument();
+    expect(bar.queryByRole("button", { name: /^Days/ })).toBeNull();
+    expect(bar.queryByRole("button", { name: /^Period/ })).toBeNull();
+    expect(bar.queryByRole("button", { name: /^Time/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /9\/1/ })).toBeNull();
     // The routes control stages a pick behind its own Apply, which stays
     // disabled until the pick differs from what the screen shows.
-    fireEvent.click(screen.getByRole("button", { name: "R1" }));
+    fireEvent.click(bar.getByRole("button", { name: "Routes R1" }));
     const picker = screen.getByRole("dialog", { name: "Routes" });
     expect(within(picker).getByRole("button", { name: /^Apply/ })).toBeDisabled();
   });

@@ -8,7 +8,8 @@ import { StillWorking } from "../components/StillWorking";
 import { AsyncSection } from "../components/AsyncSection";
 import { Tooltip } from "../components/Tooltip";
 import { DefinitionMetaBlock } from "../components/DefinitionMetaBlock";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
+import type { ScopeApplied } from "../components/scope/scopePhrases";
 import { Section } from "../components/ui/Section";
 import { delayRampVar } from "../styles/tokens";
 import { useCountUp } from "../hooks/useCountUp";
@@ -27,6 +28,23 @@ const CLAMP_NOTABLE_PCT = 1; // show a marker when ≥1% of readings were implau
 /** The severity threshold the product treats as "late", marked on the axis so
  *  a bar can be read against it without a legend. */
 const AXIS_MARK_MIN = 5;
+
+/** What the board counts by until its answer names it: the period alone
+ *  (api/routers/network.py), so the bar does not show every condition while
+ *  the board loads. */
+const BOARD_SCOPE_APPLIED: ScopeApplied = {
+  from: true,
+  to: true,
+  dow: false,
+  time_band: false,
+  hour: false,
+  service: false,
+  routes: false,
+  stop: false,
+  dir: false,
+  late: false,
+  early: false,
+};
 
 /** Worst first, then agencies with no data in range -- ordering by a metric
  *  puts the rows that need attention where the eye lands first, and a null
@@ -361,10 +379,9 @@ export function NetworkTab() {
         </ul>
       </details>
 
-      {/* Its own words, since the board ranks every agency rather than one
-          agency's routes; a condition set on another screen that the board
-          does not apply is named in the sentence's not-used note. */}
-      <ScopeSentence applied={data?.scope_applied} template="board" actions={false} />
+      {/* The board ranks every agency over one period, so the period is its
+          only condition, and it draws no one agency's figures. */}
+      <ScopeBar applied={data?.scope_applied ?? BOARD_SCOPE_APPLIED} actions={false} figures={false} />
 
       {ridershipWeightingAvailable && (
         <div className="network-controls">

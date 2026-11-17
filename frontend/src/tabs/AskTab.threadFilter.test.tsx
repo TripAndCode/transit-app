@@ -117,10 +117,10 @@ async function openHistory() {
 describe("AskTab thread filter saves", () => {
   it("saves a burst of edits as at most two PATCHes, ending with the last value", async () => {
     renderWithProviders(tree());
-    await pick("every day", "Weekdays");
-    await pick("all hours", "Evening (17–20)");
-    await pick("weekdays", "Weekend");
-    expect(screen.getByRole("button", { name: "weekends" })).toBeInTheDocument();
+    await pick("Days All", "Weekdays");
+    await pick("Time All day", "Evening (17–20)");
+    await pick("Days weekdays", "Weekend");
+    expect(screen.getByRole("button", { name: "Days weekends" })).toBeInTheDocument();
     expect(patchedFilters()).toEqual([expect.objectContaining({ dow: "weekday" })]);
 
     await act(async () => client.patches[0].resolve());
@@ -132,22 +132,22 @@ describe("AskTab thread filter saves", () => {
 
   it("shows, after a re-pick of the open thread, the filter the dispatch then saves", async () => {
     renderWithProviders(tree());
-    await pick("every day", "Weekdays");
+    await pick("Days All", "Weekdays");
     await userEvent.click(await openHistory());
-    expect(screen.getByRole("button", { name: "weekdays" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Days weekdays" })).toBeInTheDocument();
 
     await userEvent.click(runCard());
     expect(appendMutate).not.toHaveBeenCalled();
     await act(async () => client.patches[0].resolve());
     await waitFor(() => expect(appendMutate).toHaveBeenCalledTimes(1));
     expect(patchedFilters().at(-1)).toMatchObject({ dow: "weekday" });
-    expect(screen.getByRole("button", { name: "weekdays" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Days weekdays" })).toBeInTheDocument();
   });
 
   it("raises no alert when the open thread is deleted while its save is in flight", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderWithProviders(tree());
-    await pick("every day", "Weekdays");
+    await pick("Days All", "Weekdays");
     const history = await openHistory();
     await userEvent.click(within(history.parentElement!).getByRole("button", { name: "More options" }));
     await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
@@ -157,11 +157,11 @@ describe("AskTab thread filter saves", () => {
 
   it("keeps a remounted screen's save behind the one still in flight", async () => {
     const first = renderWithProviders(tree());
-    await pick("every day", "Weekdays");
+    await pick("Days All", "Weekdays");
     first.unmount();
 
     renderWithProviders(tree());
-    await pick("weekdays", "Weekend");
+    await pick("Days weekdays", "Weekend");
     expect(client.patches).toHaveLength(1);
     await act(async () => client.patches[0].resolve());
     await waitFor(() => expect(client.patches).toHaveLength(2));
@@ -172,13 +172,13 @@ describe("AskTab thread filter saves", () => {
     session.signedIn = false;
     const thread = conversationsAnon.create(5, "Local thread");
     renderWithProviders(tree(thread.client_id));
-    await pick("every day", "Weekdays");
+    await pick("Days All", "Weekdays");
     expect(conversationsAnon.get(thread.client_id, 5)?.filter_ctx).toMatchObject({ dow: "weekday" });
   });
 
   it("blocks the dispatch when the save failed, and its retry saves again and asks once", async () => {
     renderWithProviders(tree());
-    await pick("every day", "Weekdays");
+    await pick("Days All", "Weekdays");
     await act(async () => client.patches[0].reject(new Error("save failed")));
 
     await userEvent.click(runCard());
@@ -196,7 +196,7 @@ describe("AskTab thread filter saves", () => {
 
   it("sends one question for a double press while the save is still landing", async () => {
     renderWithProviders(tree());
-    await pick("every day", "Weekdays");
+    await pick("Days All", "Weekdays");
     const card = runCard();
     fireEvent.click(card);
     fireEvent.click(card);

@@ -31,7 +31,7 @@ import { useAgencyId } from "../api/useAgencyId";
 import { conversationsAnon } from "../api/conversationsAnon";
 import type { FilterCtx } from "../api/types";
 import { ThreadSidebar } from "../components/ThreadSidebar";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { QuestionDock } from "../components/QuestionDock";
 import { buildCardTemplates, defaultsFor, type CardTemplate } from "../components/askCardTemplates";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -131,7 +131,7 @@ export function AskTab() {
   // ── Filter context (derived, no sync effects) ─────────────────────────────
   // An open thread's filter is its stored one: each edit is saved as it is
   // made and shown at once through the conversation's cached copy
-  // (`useThreadFilter`), so what the sentence shows is what the thread's saves
+  // (`useThreadFilter`), so what the scope bar shows is what the thread's saves
   // leave it with. With no thread open, an edit stays on this screen and
   // seeds the next new thread; before any edit, that is the URL's scope.
   const threadFilter = useThreadFilter(id ?? 0);
@@ -367,7 +367,7 @@ export function AskTab() {
         <div style={{ padding: "8px 16px 0", flexShrink: 0 }}>
           {/* The thread's own conditions, not the URL's: a new thread starts
               from the screen's scope, and each change saves to the thread. */}
-          <ScopeSentence
+          <ScopeBar
             source={{
               scope: notebookScope(filterCtx, activeId ? null : rangeCtx, dataEnd),
               update: (patch) => {

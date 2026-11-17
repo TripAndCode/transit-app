@@ -30,14 +30,15 @@ rail's first destination, while the rail's Live entry opens the realtime map
 
 What the user sees/does:
 
-- **Scope sentence** — `frontend/src/components/scope/ScopeSentence.tsx`
-  states the shared scope as one sentence (see `analysis-tab.md` ▸ Scope),
-  greying the conditions `useOverviewSummary`'s `scope_applied` did not apply.
+- **Scope bar** — `frontend/src/components/scope/ScopeBar.tsx` shows the
+  shared scope as a row of labelled conditions (see `analysis-tab.md`'s "The
+  scope bar" section), leaving out of the row any condition
+  `useOverviewSummary`'s `scope_applied` marks as unused.
 - **First-visit tour** — `frontend/src/components/FirstRunTour.tsx`, three
   steps about meaning rather than controls: what one delay is (on the headline
   figure), what on time means (on the pointer to on-time % on Routes, worded
   from the on-time window the Routes link carries, since Pulse itself applies
-  none) and what the screen counts (on the scope sentence). `OverviewTab`
+  none) and what the screen counts (on the scope bar). `OverviewTab`
   mounts it inside the branch that renders the figures, so every anchor
   (`data-tour="pulse-*"`) exists whenever the tour does. Finishing it, ×, or
   Escape stores `transit.pulseTourSeen` (`frontend/src/api/tourSeen.ts`);
@@ -56,7 +57,7 @@ What the user sees/does:
 - **Hero row** — `frontend/src/components/OverviewHeroRow.tsx`: the headline
   avg-delay over the scope period (through its last day with data) and its
   delta vs. the same number of days just before it, delayed-route count, and
-  a sparkline, so the hero and the scope sentence describe the same period.
+  a sparkline, so the hero and the scope bar describe the same period.
   Every fact value, the delayed-route count included, prints in ink. The
   sparkline and the day-pulse ribbon under it are glances: a "See the trend on
   Time" link and the heaviest-hour fact row both open Time's `trend` report
@@ -168,7 +169,7 @@ What the user sees/does:
 | `frontend/src/components/ServiceSplit.tsx` | The day-type sentence, each day type's mean, and the link to Day types & agencies |
 | `frontend/src/components/OverviewModal.tsx` | Modal chrome the concentration card opens into |
 | `frontend/src/components/overview/RevealSection.tsx` | Scroll-triggered, staggered entrance for each module section; content stays visible at rest |
-| `frontend/src/components/scope/ScopeSentence.tsx` | The scope sentence, its popovers and pinned strip |
+| `frontend/src/components/scope/ScopeBar.tsx` | The scope bar, its popovers and pinned strip |
 | `frontend/src/api/hooks.ts` | `useOverviewSummary`, `useReport` |
 | `frontend/src/styles/overview.css` | Overview-specific layout/spacing |
 
@@ -215,7 +216,7 @@ alone for single-origin):
    on Time" and the day-type card's link — expect each destination to show
    the same period and filters, and the Routes table to open with the
    preview's routes and figures at its top.
-6. Change the scope sentence's period / days / time / routes —
+6. Change the scope bar's period / days / time / routes —
    expect every module to refetch via `useOverviewSummary`.
 
 ## i18n
@@ -223,7 +224,7 @@ alone for single-origin):
 - Frontend strings live under the `overview.*` namespace in
   `frontend/src/i18n/locales/{ja,en}.json` (key parity CI-linted via
   `npm run lint:i18n`), plus `nav.pulse` for the rail entry, and the shared
-  `scope.*` namespace used by the scope sentence.
+  `scope.*` namespace used by the scope bar.
 - No server-side `_LOCALES` strings for this tab — `overview_summary` takes
   no locale, since nothing in its payload is worded on the server
   (`api/routers/overview.py`'s docstring); the payload is numeric/string

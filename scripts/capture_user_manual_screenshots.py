@@ -152,14 +152,13 @@ def capture(base: str, locale: str) -> None:
         page.wait_for_timeout(500)
         shot(page, "02-pulse", locale)
 
-        # 03: scope sentence, period popover open. The period token is the
-        # second `.scope-token` button in the sentence (route, period, dow,
-        # time band, ...) -- located by that stable structural position,
-        # never by its rendered text, which is the dataset's own date range
-        # and moves every time this script's objective runs it again.
-        page.locator(".scope-token").nth(1).click()
+        # 03: scope bar, period popover open. The period is the bar's first
+        # control (period, days, time, routes, ...) -- located by that stable
+        # structural position, never by its rendered text, which is the
+        # dataset's own date range and moves every time this script runs.
+        page.locator(".scope-bar__control").first.click()
         page.wait_for_timeout(400)
-        shot(page, "03-scope-sentence", locale)
+        shot(page, "03-scope-bar", locale)
         page.keyboard.press("Escape")
         page.wait_for_timeout(300)
 

@@ -2,7 +2,7 @@ import { readStorage, writeStorage } from "../../utils/safeStorage";
 
 const PIN_KEY = "transit.scopePinned";
 
-/** Whether the scope controls sit inline under the sentence. Fails open to
+/** Whether the scope controls sit inline under the scope bar. Fails open to
  *  unpinned when storage is unavailable, like the sidebar's collapse pref. */
 export function readScopePinned(): boolean {
   return readStorage("localStorage", PIN_KEY) === "1";

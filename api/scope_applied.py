@@ -1,8 +1,9 @@
 """Which scope fields a screen's endpoint honoured.
 
 Every endpoint behind an analysis screen answers with ``scope_applied``: one
-boolean per field of the shared URL scope, so the scope bar can grey a
-condition the screen did not use instead of the endpoint ignoring it silently.
+boolean per field of the shared URL scope, so the scope bar can hide a
+condition the screen did not use instead of offering a control that changes
+nothing.
 The field names are the URL parameter names.
 """
 

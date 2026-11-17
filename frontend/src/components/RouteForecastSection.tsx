@@ -10,8 +10,8 @@
  * ctx.routes itself, no props needed beyond `aid`). Migrated from the former
  * ForecastTab.tsx; picking a route updates the shared ctx.routes filter, so
  * it also filters every other report type/tab — a deliberate, shared-filter
- * consequence, not a bug. The section's route picker is the way back to all
- * routes, as is clearing the route chip in the shared Filters bar.
+ * consequence, not a bug. The section has no scope bar, so its route picker
+ * is the way back to all routes.
  */
 import { useState } from "react";
 import { useTranslation } from "react-i18next";

@@ -291,7 +291,7 @@
     },
     "scope": {
       "title": "What this screen covers",
-      "body": "This sentence says which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any part marked ▼ to change it."
+      "body": "These controls say which routes, days and hours are counted, and over which period. Pulse compares that period with the same number of days just before it. Click any one to change it."
     }
   },
   "forecast": {
@@ -2415,7 +2415,6 @@
   },
   "scope": {
     "label": "What you're viewing",
-    "sentence": "Viewing [routes] of [agency], [period], [days], [time][extras], counting on-time as [tolerance]",
     "routes_all": "all routes",
     "routes_count": "{{count}} routes",
     "period": "{{from}} – {{to}}",
@@ -2481,13 +2480,24 @@
       "early": "Early tolerance",
       "tolerance": "On-time tolerance"
     },
-    "unapplied_note": "Not used on this screen: {{list}}",
-    "sentence_no_tolerance": "Viewing [routes] of [agency], [period], [days], [time][extras]",
     "stop_unnamed": "selected stop",
     "dir_unnamed": "Direction {{letter}}",
     "id_tag": "({{id}})",
-    "sentence_live": "Viewing [routes] of [agency] live[extras], counting on-time as [tolerance]",
-    "sentence_board": "Comparing every agency over [period]"
+    "bar": {
+      "routes": "Routes",
+      "period": "Period",
+      "days": "Days",
+      "time": "Time",
+      "service": "Timetable",
+      "stop": "Stop",
+      "dir": "Direction",
+      "early": "Early",
+      "tolerance": "On time",
+      "all": "All",
+      "all_day": "All day",
+      "early_up_to": "up to {{span}}",
+      "early_any": "All on time"
+    }
   },
   "print": {
     "generated_at": "Generated {{time}}",

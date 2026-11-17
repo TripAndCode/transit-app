@@ -22,7 +22,7 @@ export function useStopNames(agencyId: number | null, needsNames: boolean) {
   };
 }
 
-/** The stop and direction wording of a scope sentence: the stop names, and
+/** The stop and direction wording of the scope's conditions: the stop names, and
  *  whether ids may follow a name as secondary text, which only an admin sees. */
 export function usePlaceLabels(agencyId: number | null, needsNames: boolean) {
   const isAdmin = useIsAdmin();

@@ -219,10 +219,11 @@ function storedRoute(params: Record<string, unknown>): string | null {
   return Array.isArray(routes) && routes.length === 1 ? String(routes[0]) : null;
 }
 
-/** The live screen's scope sentence, read-only: every condition the figures
- *  were computed under, one the screen's data did not use struck through. A
- *  route page's panels each honour their own part of the scope, so its
- *  sentence strikes nothing through. */
+/** The snapshot's scope as a read-only statement: every condition the
+ *  figures were computed under, since a snapshot records what was asked, and
+ *  one the screen's data did not use struck through. A route page's panels
+ *  each honour their own part of the scope, so its statement strikes nothing
+ *  through. */
 function ScopeStatement({ snapshot, report, names }: { snapshot: Snapshot; report: ReportResponse | undefined; names: RouteNames }) {
   const { t } = useTranslation();
   const scope = storedScope(snapshot.params, report);
