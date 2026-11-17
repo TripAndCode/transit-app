@@ -145,8 +145,9 @@ services:
     <<: *standalone-app
     environment:
       <<: *standalone-env
-      # Nothing proxies this port, so no X-Forwarded-For entry is trusted.
-      FORWARDED_HOPS: "0"
+      # Nothing proxies this port by default, so no X-Forwarded-For entry is
+      # trusted; `.env` raises it behind a reverse proxy.
+      FORWARDED_HOPS: ${FORWARDED_HOPS:-0}
     ports:
       - "127.0.0.1:${STANDALONE_PORT:-8000}:8000"
 

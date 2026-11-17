@@ -100,10 +100,10 @@ doctor:
 		echo "$$running" | grep -qx clickhouse && echo "  clickhouse: running" || echo "  clickhouse NOT running — \`make db\`"
 	@echo "── standalone (docs/deploy-standalone.en.md) ──"
 	@running=$$(docker compose --profile standalone ps --services --filter status=running 2>/dev/null); \
-		for s in app poller; do \
-			echo "$$running" | grep -qx $$s && echo "  $$s: running" \
-				|| echo "  $$s not running — only the standalone deployment needs it: \`docker compose --profile standalone up -d --build app poller\`"; \
-		done
+		if echo "$$running" | grep -qx app && echo "$$running" | grep -qx poller; then echo "  app and poller: running"; \
+		else echo "  app/poller not running — only a standalone deployment needs them; see docs/deploy-standalone.en.md"; fi; \
+		docker compose --profile standalone ps -a --format '{{.Service}} {{.ExitCode}}' 2>/dev/null | grep -qE '^migrate [1-9]' \
+			&& echo "  schema step (migrate) FAILED — \`docker compose --profile standalone logs migrate\`" || true
 	@echo "── port 8000 ──"
 	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
 		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \

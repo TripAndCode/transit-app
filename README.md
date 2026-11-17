@@ -448,7 +448,7 @@ the Oracle-to-R2 archive path.
 One machine with Docker runs the whole app for your own feeds, with no Oracle
 collector, R2, VPS or LLM key. [docs/deploy-standalone.en.md](docs/deploy-standalone.en.md) (日本語:
 [docs/deploy-standalone.md](docs/deploy-standalone.md)) is the one page for it:
-clone, `.env`, `docker compose --profile standalone up`, adding an agency with `add_agency` and reading its verdicts, signing in as
+clone, `.env`, `docker compose --profile standalone up -d --build app poller`, adding an agency with `add_agency` and reading its verdicts, signing in as
 administrator, backups, upgrades and what is not automated.
 [`feeds/`](feeds/README.en.md) is the catalogue of known feeds.
 

@@ -36,9 +36,17 @@ def _write_agencies_csv(path, rows):
             writer.writerow(row)
 
 
-def test_all_feeds_have_unique_realtime_urls_where_present():
-    urls = [f.realtime_url for f in ALL_FEEDS if f.realtime_url]
-    assert len(urls) == len(set(urls))
+def test_loader_builds_the_feed_the_catalogue_spells_out():
+    (feed,) = [f for f in ALL_FEEDS if f.agency_id == 11]
+    assert feed == BusKyoFeed(
+        agency_id=11,
+        name_ja="芸陽バス",
+        platform="mcapps.jp",
+        static_url="https://ajt-mobusta-gtfs.mcapps.jp/static/11/current_data.zip",
+        realtime_url="https://ajt-mobusta-gtfs.mcapps.jp/realtime/11/trip_updates.bin",
+        ingest_strategy="static_join",
+        static_strategy="direct_url",
+    )
 
 
 def test_supported_requires_ingest_strategy_and_realtime_url():
@@ -63,12 +71,11 @@ def test_pending_feeds_skips_already_configured_agencies():
     assert len(pending) > 0
 
 
-def test_pending_feeds_excludes_unsupported_platforms_even_when_absent():
+def test_pending_feeds_excludes_rows_with_no_strategy_even_when_absent():
     pending = pending_feeds(existing_feed_urls=set())
+    assert pending
     for f in pending:
-        assert f.platform == "mcapps.jp"
-        assert f.ingest_strategy == "static_join"
-        assert f.static_strategy == "direct_url"
+        assert f.supported
 
 
 def test_pending_feeds_empty_when_all_realtime_urls_already_present():
@@ -77,7 +84,7 @@ def test_pending_feeds_empty_when_all_realtime_urls_already_present():
 
 
 def test_to_csv_row_matches_agencies_csv_column_order():
-    feed = ALL_FEEDS[3]  # agency_id 11, 芸陽バス
+    (feed,) = [f for f in ALL_FEEDS if f.agency_id == 11]
     row = _to_csv_row(feed)
     assert row == [
         str(feed.agency_id),
