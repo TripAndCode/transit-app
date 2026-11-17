@@ -166,14 +166,18 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
    ```
    - `PORT` is injected by Railway automatically; the Dockerfile's
      `--port ${PORT:-8000}` honours it. Don't set it yourself.
-   - SSO is optional. To enable it, also set `SESSION_SIGNING_KEY`,
+   - Any sign-in method, SSO or the local admin below, needs
+     `SESSION_SIGNING_KEY=<openssl rand -hex 32>`. Startup refuses to boot
+     with sign-in on while it is unset or the dev default.
+   - SSO is optional. To enable it, also set all four
      `GOOGLE_/GITHUB_CLIENT_ID/SECRET`, `ADMIN_EMAILS`, and
-     `PUBLIC_BASE_URL=https://<your-railway-domain>` (a *partial* OAuth set
-     is rejected at startup). Add the
+     `PUBLIC_BASE_URL=https://<your-railway-domain>` (a *partial* set of the
+     four client variables is rejected at startup). Add the
      `https://<domain>/api/auth/{google,github}/callback` redirect URIs at
      the provider. See README ▸ Configuration.
    - `DEFAULT_ADMIN_USERNAME`/`DEFAULT_ADMIN_PASSWORD` are an optional
-     break-glass local-admin login, independent of SSO — see README ▸
+     break-glass local-admin login, independent of SSO but not of
+     `SESSION_SIGNING_KEY` — see README ▸
      Configuration. Never set `DEFAULT_ADMIN_USERNAME` to a real SSO user's
      email; rotate the password by editing the Railway variable and
      redeploying.
