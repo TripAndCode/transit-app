@@ -25,6 +25,9 @@ this page holds the thresholds, their sources and where each piece lives.
     the data-source credit.
   - A month must be closed: every one of its days has closed. An open month
     answers 422 `month_not_closed` with the newest closed month.
+  - Every read is of the Postgres aggregates, none of ClickHouse, so a month
+    before the retention floor still has a card from the aggregates kept for
+    it, with bunching not measured where its days were never rebuilt.
 
 ## How it is computed
 
