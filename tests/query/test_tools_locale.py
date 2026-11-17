@@ -68,6 +68,16 @@ def test_summary_schedule_realism_padding_exact_strings():
         _summary("schedule_realism_terminus_suffix", lang="en", pct=40, n=5)
         == " — terminus early-arrival rate 40% (n=5)"
     )
+    assert (
+        _summary("schedule_realism_timetable_suffix", lang="ja", version="gtfs_20261101", days=14)
+        == "／ダイヤ gtfs_20261101（14日分）"
+    )
+    assert (
+        _summary("schedule_realism_timetable_suffix", lang="en", version="gtfs_20261101", days=14)
+        == " — timetable gtfs_20261101 (14 days)"
+    )
+    assert _summary("schedule_realism_feed_estimate", lang="ja") == "／フィードの予測値に基づく推定値"
+    assert _summary("schedule_realism_feed_estimate", lang="en") == " — feed-based estimate"
 
 
 def test_dispatch_unknown_tool_returns_en_message():

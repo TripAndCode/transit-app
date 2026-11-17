@@ -1111,7 +1111,10 @@
       "actual_run_p85_min": "所要時間(実績p85・分)",
       "padding_min": "余裕時間(分)",
       "time_adjustment_rate": "調整停車率",
-      "low_confidence": "誤差"
+      "low_confidence": "誤差",
+      "from_stop": "区間の始点",
+      "to_stop": "区間の終点",
+      "time_band": "時間帯"
     },
     "low_confidence_mark": "誤差大",
     "more_rows": "…他{{count}}件",

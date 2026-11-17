@@ -7,16 +7,14 @@ actual arrival minus the PREVIOUS stop visit's actual departure (same trip,
 same service day). Both derive an "actual" timestamp (seconds since the
 service day's midnight) from the static schedule's arrival_time/
 departure_time plus the RT feed's `arr_delay`/`dep_delay` for that stop
-visit. Each reader takes the schedule from its own source:
-`agg_route_daily_dwell_run` from the archived timetable the visit's version
-name maps to (`build_stop_visits_ch_sql(join_schedule=True)`),
-`schedule_realism_padding` from the loaded ``static_stop_times``.
+visit. The schedule is the archived timetable the visit's version name maps
+to (`build_stop_visits_ch_sql(join_schedule=True)`).
 
 The feed reports a stop's arrival and its departure in separate polls, never
 on one row, and a trip's last stop only as an arrival.
-`pipeline.db.build_stop_visits_ch_sql` pairs the two per stop visit; both
-readers (analyze()'s `agg_route_daily_dwell_run` and the Ask tool's
-`schedule_realism_padding`) take their visits from it. A visit can therefore
+`pipeline.db.build_stop_visits_ch_sql` pairs the two per stop visit; its
+readers (analyze()'s `agg_route_daily_dwell_run` and
+`agg_route_segment_runtime`) take their visits from it. A visit can therefore
 lack either side:
 
 - with both, it yields a running time when the previous visit's departure

@@ -38,7 +38,15 @@ from zoneinfo import ZoneInfo
 import asyncpg
 import clickhouse_connect
 
-from api.range import RangeCtx, ServiceType, clamp_range_ctx, hour_param, last_closed_jst_day, resolve_service_dates
+from api.range import (
+    TIME_BAND_RANGES,
+    RangeCtx,
+    ServiceType,
+    clamp_range_ctx,
+    hour_param,
+    last_closed_jst_day,
+    resolve_service_dates,
+)
 from pipeline import perf, retained_reads
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
@@ -50,7 +58,6 @@ from pipeline.query.tool_queries import (
     route_hour_dow_pattern,
     route_info,
     route_trend_shift,
-    schedule_realism_padding,
     schedule_realism_segments,
     segment_hotspots,
 )
@@ -62,9 +69,16 @@ from pipeline.reports import (
     compute_worst_5min,
 )
 from pipeline.reports.definition import DefinitionMeta
-from pipeline.reports.rankings import MIN_GROUP_SAMPLES, _weighted_avg_min, on_time_window, threshold_aggregates_serve
+from pipeline.reports.rankings import (
+    MIN_GROUP_SAMPLES,
+    _round2,
+    _weighted_avg_min,
+    on_time_window,
+    threshold_aggregates_serve,
+)
 from pipeline.reports.report_stamp import report_definition
 from pipeline.reports.savepoint import savepoint
+from pipeline.reports.segment_runtime import compute_segment_runtime
 from pipeline.retained_reads import RangeNotRetained
 from pipeline.route_catalog import left_out_unless_named, route_list, rows_to_fetch
 from pipeline.stats import annotate_on_time_pct_confidence
@@ -182,6 +196,10 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("schedule_realism_padding_summary", "en"): "Schedule realism — route {route} (padding view)",
     ("schedule_realism_terminus_suffix", "ja"): "／終点早着率 {pct}%（{n}件中）",
     ("schedule_realism_terminus_suffix", "en"): " — terminus early-arrival rate {pct}% (n={n})",
+    ("schedule_realism_timetable_suffix", "ja"): "／ダイヤ {version}（{days}日分）",
+    ("schedule_realism_timetable_suffix", "en"): " — timetable {version} ({days} days)",
+    ("schedule_realism_feed_estimate", "ja"): "／フィードの予測値に基づく推定値",
+    ("schedule_realism_feed_estimate", "en"): " — feed-based estimate",
     ("trend_shift_summary", "ja"): "路線{route} トレンド変化",
     ("trend_shift_summary", "en"): "Trend shift — route {route}",
     ("trend_shift_no_data", "ja"): "路線{route} のトレンドデータが選択期間にありません。",
@@ -661,11 +679,13 @@ TOOLS: list[dict] = [
                 "over the request window and UI filters. Unlike segment_hotspots, which ranks the "
                 "absolute delay level at each stop (including delay carried from upstream), this "
                 "looks at each stop-to-stop segment on its own. For agencies whose feed reports "
-                "arrival times, returns every segment × scheduled hour with the scheduled running "
+                "arrival times, returns every timetable segment × time band with the scheduled running "
                 "time, observed median and 85th-percentile running time, padding_min (scheduled "
                 "minus observed median: positive = slack, negative = too tight) and the share of "
                 "on-time-or-early arrivals then held more than 60 s beyond the scheduled dwell, plus "
-                "the route's rate of trips reaching the terminus early. For other agencies it falls "
+                "the route's rate of trips reaching the terminus early, under the timetable in force "
+                "on the window's newest date. The figures are feed-based estimates, not observed "
+                "passages. For other agencies it falls "
                 "back to the up to 5 segments where delay grows the most between consecutive stops "
                 "(avg_added_min, segments with more than 5 samples). Use for '時刻表がおかしい', "
                 "'余裕時間が足りない'."
@@ -1390,36 +1410,41 @@ async def _tool_time_pattern(args: dict, ctx: RangeCtx, conn, agency_id: int, lo
 
 
 async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:
-    """Schedule-padding view (`schedule_realism_padding`) when the agency's
-    ingest strategy makes it available and there's at least one segment to
-    show; otherwise the dep_delay-only `schedule_realism_segments` view,
-    which works for every ingest strategy but can't distinguish deliberate
-    timetable slack from delay that started upstream (see that function's
-    own docstring) — the same "richer view when available, degrade
-    gracefully otherwise" pattern `pipeline.reports.dwell_run` uses.
+    """Running time per timetable segment and time band
+    (`pipeline.reports.segment_runtime`, read from analyze's aggregate) when
+    the agency's feed is confirmed to send arrivals and the route has a
+    segment in range; otherwise the dep_delay-only `schedule_realism_segments`
+    view, which works for every ingest strategy but can't distinguish
+    deliberate timetable slack from delay that started upstream (see that
+    function's own docstring).
     """
     route = await _require_registered_route(args, conn, agency_id, locale, ch=ch)
     if isinstance(route, ToolResult):
         return route
 
-    padding = await schedule_realism_padding(agency_id, ctx, conn, ch, route=str(route))
-    if padding["available"] and padding["rows"]:
+    fit = await compute_segment_runtime(agency_id, ctx, conn, route=str(route))
+    if fit["available"] and fit["segments"]:
         summary = _summary("schedule_realism_padding_summary", lang=locale, route=route)
-        if padding["terminus_early_rate"] is not None:
+        if fit["static_version_id"] is not None:
+            summary += _summary(
+                "schedule_realism_timetable_suffix", lang=locale, version=fit["static_version_id"], days=fit["days"]
+            )
+        if fit["terminus_early_rate"] is not None:
             summary += _summary(
                 "schedule_realism_terminus_suffix",
                 lang=locale,
-                pct=round(padding["terminus_early_rate"] * 100),
-                n=padding["terminus_samples"],
+                pct=round(fit["terminus_early_rate"] * 100),
+                n=fit["terminus_arrivals"],
             )
+        summary += _summary("schedule_realism_feed_estimate", lang=locale)
         return ToolResult(
             kind="table",
             summary=summary,
-            rows=[list(r) for r in padding["rows"]],
+            rows=[_segment_row(seg) for seg in fit["segments"]],
             columns=[
-                "stop_sequence",
-                "next_stop_sequence",
-                "hour",
+                "from_stop",
+                "to_stop",
+                "time_band",
                 "scheduled_run_min",
                 "actual_run_p50_min",
                 "actual_run_p85_min",
@@ -1438,6 +1463,26 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
         rows=[list(r) for r in rows],
         columns=["stop_sequence", "next_stop_sequence", "avg_added_min", "samples"],
     )
+
+
+def _minutes(seconds: float | None) -> float | None:
+    return float(_round2(seconds / 60.0)) if seconds is not None else None
+
+
+def _segment_row(seg: dict) -> list:
+    """One segment's table row; its band is written as the clock range it covers."""
+    band = seg["time_band"]
+    return [
+        seg["from_stop_name"] or seg["from_stop_id"],
+        seg["to_stop_name"] or seg["to_stop_id"],
+        "–".join(TIME_BAND_RANGES[band]) if band is not None else None,
+        _minutes(seg["scheduled_run_sec"]),
+        _minutes(seg["run_p50_sec"]),
+        _minutes(seg["run_p85_sec"]),
+        seg["samples"],
+        _minutes(seg["padding_sec"]),
+        float(_round2(seg["hold_rate"])) if seg["hold_rate"] is not None else None,
+    ]
 
 
 async def _tool_trend_shift(args: dict, ctx: RangeCtx, conn, agency_id: int, locale: str, ch=None) -> ToolResult:

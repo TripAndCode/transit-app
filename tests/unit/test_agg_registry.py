@@ -9,7 +9,11 @@ from pipeline import agg_registry, ch_aggregates, feed_quality
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.analyze import _AGG_TABLES_ORDERED, _STATIC_ONLY_AGG_TABLES
 
-ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {"agg_route_headway_daily", "agg_route_daily_dwell_run"}
+ARCHIVE_JOINED = set(ch_aggregates.STATIC_JOINED_TABLES) | {
+    "agg_route_headway_daily",
+    "agg_route_daily_dwell_run",
+    "agg_route_segment_runtime",
+}
 
 
 def test_every_table_analyze_builds_is_registered_and_nothing_else():
@@ -146,11 +150,34 @@ def test_stop_route_days_carry_the_stop_routes():
     assert scopes["agg_stop_routes"] is None
 
 
+def test_the_visits_tables_share_one_scan():
+    sharing = {n for n, t in agg_registry.TABLES.items() if t.scan == agg_registry.VISITS_SCAN}
+    assert sharing == {"agg_route_daily_dwell_run", "agg_route_segment_runtime"}
+
+
+def test_a_table_rebuilt_in_full_takes_the_tables_sharing_its_scan():
+    stored = _current()
+    del stored["agg_route_segment_runtime"]
+    scopes, reasons = agg_registry.table_scopes(_current(), stored, [D])
+    assert scopes["agg_route_segment_runtime"] is None and reasons["agg_route_segment_runtime"] == "new"
+    assert scopes["agg_route_daily_dwell_run"] is None
+    assert reasons["agg_route_daily_dwell_run"] == "shares its scan with agg_route_segment_runtime"
+    assert scopes["agg_route_daily"] == [D]
+
+
+def test_tables_sharing_a_scan_take_the_union_of_their_dates():
+    later = date(2026, 10, 2)
+    scopes, reasons = agg_registry.table_scopes(_current(), _current(), [D], {"agg_route_daily_dwell_run": [later]})
+    assert scopes["agg_route_daily_dwell_run"] == scopes["agg_route_segment_runtime"] == [D, later]
+    assert "agg_route_daily_dwell_run" not in reasons and "agg_route_segment_runtime" not in reasons
+
+
 def test_each_archive_joined_table_names_what_it_reads_of_its_timetable():
     inputs = {n: t.archived_input for n, t in agg_registry.TABLES.items() if t.timetable is Timetable.ARCHIVED}
     assert inputs == {
         **dict.fromkeys(ch_aggregates.STATIC_JOINED_TABLES, ArchivedInput.STOP_TIMES),
         "agg_route_daily_dwell_run": ArchivedInput.STOP_TIMES,
+        "agg_route_segment_runtime": ArchivedInput.STOP_TIMES,
         "agg_route_headway_daily": ArchivedInput.MEDIANS,
     }
     assert all(t.archived_input is None for t in agg_registry.TABLES.values() if t.timetable is not Timetable.ARCHIVED)

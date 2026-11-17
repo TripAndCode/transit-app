@@ -92,6 +92,10 @@ class AggTable:
     # rebuilt (pipeline.analyze), and so is the table when a version's content
     # changes under its name (static_archive.clear_archive_joined_states).
     in_force: bool = False
+    # The name of a scan analyze loads once for every table naming it. Such
+    # tables rebuild the same dates (table_scopes): each builder reads the
+    # whole scan, so a date one of them did not purge would be inserted twice.
+    scan: str | None = None
 
 
 def _monthly(name: str) -> Callable[[], list[str]]:
@@ -150,6 +154,14 @@ def _feed_quality() -> list[str]:
     return feed_quality.render()
 
 
+# The stop visits analyze loads into its _analyze_visits temp table.
+VISITS_SCAN = "visits"
+
+
+def _visits() -> list[str]:
+    return [build_stop_visits_ch_sql(extra_where="", join_schedule=True, stamp=stamp) for stamp in Stamp]
+
+
 def _timetable_of(name: str) -> Timetable:
     return Timetable.ARCHIVED if name in ch_aggregates.STATIC_JOINED_TABLES else Timetable.NONE
 
@@ -200,15 +212,23 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_daily_dwell_run",
-            5,
+            6,
             Kind.DATED,
             Timetable.ARCHIVED,
-            lambda: [
-                agg_sql.dwell_run_sql(),
-                *(build_stop_visits_ch_sql(extra_where="", join_schedule=True, stamp=stamp) for stamp in Stamp),
-            ],
+            lambda: [agg_sql.dwell_run_sql(), *_visits()],
             archived_input=ArchivedInput.STOP_TIMES,
             in_force=True,
+            scan=VISITS_SCAN,
+        ),
+        AggTable(
+            "agg_route_segment_runtime",
+            1,
+            Kind.DATED,
+            Timetable.ARCHIVED,
+            lambda: [agg_sql.segment_runtime_sql(), *_visits()],
+            archived_input=ArchivedInput.STOP_TIMES,
+            in_force=True,
+            scan=VISITS_SCAN,
         ),
         AggTable(
             "feed_quality_monthly",
@@ -415,6 +435,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
     MethodVersion("2026.11.16", {"feed_quality_monthly": 8}),
     MethodVersion("2026.11.17", {"feed_quality_monthly": 9}),
+    MethodVersion("2026.11.18", {"agg_route_daily_dwell_run": 6, "agg_route_segment_runtime": 1}),
 )
 
 # The method every report, CSV and council document names beside its figures
@@ -436,7 +457,9 @@ def table_scopes(
     or when a table it is computed from goes in full. A dated table otherwise
     takes the ledger's changed dates, and *extra_dates*' for it; a
     whole-history table is rebuilt when its source rebuilds any date; a table
-    built from the timetable alone stands.
+    built from the timetable alone stands. Tables sharing a scan then take one
+    scope, the union of theirs: rebuilding a date one of them did not need
+    yields the rows it already held.
     """
     reasons: dict[str, str] = {}
     for name in TABLES:
@@ -464,6 +487,14 @@ def table_scopes(
             scopes[name] = sorted({*(ledger_dates or []), *(extra_dates or {}).get(name, [])})
         elif table.kind is Kind.STATIC_ONLY:
             scopes[name] = []
+    for scan in {table.scan for table in TABLES.values()} - {None}:
+        sharing = [name for name, table in TABLES.items() if table.scan == scan]
+        full = next((name for name in sharing if scopes[name] is None), None)
+        dates = None if full is not None else sorted({day for name in sharing for day in scopes[name] or ()})
+        for name in sharing:
+            if full is not None and name not in reasons:
+                reasons[name] = f"shares its scan with {full}"
+            scopes[name] = dates
     for name, table in TABLES.items():
         if table.kind is Kind.WHOLE and name not in scopes:
             if any(scopes[source] != [] for source in table.depends_on):
