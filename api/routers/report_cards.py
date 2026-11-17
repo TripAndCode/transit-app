@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, last_closed_jst_day
+from api.scope_applied import scope_applied
 from api.security import User, require_admin
 from pipeline.data_sources import credit_line
 from pipeline.reports.definition import DefinitionMeta, format_definition_csv_line
@@ -53,6 +54,9 @@ from pipeline.route_grade import (
 router = APIRouter(prefix="/api/{agency_id}", tags=["report_cards"])
 
 _MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
+_NO_SCOPE = scope_applied()
 
 
 class SubScoreOut(BaseModel):
@@ -141,6 +145,9 @@ class RouteReportCardResponse(BaseModel):
     history: list[MonthGradeOut]
     rules: GradingRules
     definition: DefinitionMeta
+    # A card reads its own month, none of the shared scope, so the scope bar
+    # offers none of its conditions beside it.
+    scope_applied: dict[str, bool] = _NO_SCOPE
 
 
 class ReportCardListResponse(BaseModel):
@@ -149,6 +156,9 @@ class ReportCardListResponse(BaseModel):
     cards: list[RouteCardOut]
     rules: GradingRules
     definition: DefinitionMeta
+    # A card reads its own month, none of the shared scope, so the scope bar
+    # offers none of its conditions beside it.
+    scope_applied: dict[str, bool] = _NO_SCOPE
 
 
 _RULES = GradingRules(

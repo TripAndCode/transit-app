@@ -1,6 +1,7 @@
 import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet } from "../../api/client";
 import type { DefinitionMeta } from "../../api/types";
+import type { ScopeApplied } from "../scope/scopePhrases";
 
 export const GRADES = ["A", "B", "C", "D", "F"] as const;
 export type Grade = (typeof GRADES)[number];
@@ -68,6 +69,8 @@ export interface RouteReportCardResponse {
   history: { month: string; grade: Grade | null; not_graded: NotGradedReason | null }[];
   rules: GradingRules;
   definition: DefinitionMeta;
+  /** Every field false: a card reads its own month, none of the shared scope. */
+  scope_applied?: ScopeApplied;
 }
 
 export interface ReportCardListResponse {
@@ -76,6 +79,8 @@ export interface ReportCardListResponse {
   cards: RouteCard[];
   rules: GradingRules;
   definition: DefinitionMeta;
+  /** Every field false: a card reads its own month, none of the shared scope. */
+  scope_applied?: ScopeApplied;
 }
 
 function monthQuery(month: string | null): string {

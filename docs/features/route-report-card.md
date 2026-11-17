@@ -22,6 +22,10 @@ reply. `tests/unit/test_agency_feed_quality.py` holds every response carrying a
 - The list: **Routes** → "Report cards" (`by=report_cards`, the lazy
   `frontend/src/tabs/reportCards/ReportCardsView.tsx`), one row per route with
   its grade or why it has none, and a CSV.
+- Both read their own month and none of the shared scope: the responses'
+  `scope_applied` is false for every field, so the route page's scope bar
+  offers nothing on the card's account, and the list, like the other views with
+  their own controls, shows no scope bar.
 - API (`api/routers/report_cards.py`):
   - `GET /api/{agency_id}/routes/{route}/report-card?month=YYYY-MM`: the card
     and its three-month history;

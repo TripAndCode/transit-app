@@ -209,6 +209,8 @@ async def test_a_routes_card_matches_the_list_and_carries_three_months(card_clie
     assert body["definition"]["value_basis"] == "feed_prediction"
     assert body["definition"]["preset"] == "standard_m1_p5"
     assert body["rules"]["bunching_pct_edges"] == [5.0, 10.0, 15.0, 20.0]
+    # Its own month, none of the shared scope's conditions.
+    assert not any(body["scope_applied"].values())
 
 
 async def test_a_route_with_nothing_that_month_has_no_card(card_client):
