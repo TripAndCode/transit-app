@@ -48,7 +48,7 @@ export function RevisionRoutes({ agencyId, on, dayType }: { agencyId: number; on
         <SkeletonTable />
       ) : (
         <div aria-busy={query.isPlaceholderData} style={{ opacity: query.isPlaceholderData ? 0.5 : 1 }}>
-          <RoutesBody key={dayType} data={query.data} agencyId={agencyId} />
+          <RoutesBody key={`${on}:${dayType}`} data={query.data} agencyId={agencyId} />
         </div>
       )}
     </section>
@@ -74,7 +74,8 @@ function ObservedStatus({ data }: { data: TimetableRevisionRoutes }) {
           date,
         }),
   ];
-  if (data.capped_by != null) lines.push(t(`revisions.observed_capped_${data.capped_by}`));
+  // Under a week, observed_none already says why nothing can be compared.
+  if (data.capped_by != null && data.weeks_cap >= 1) lines.push(t(`revisions.observed_capped_${data.capped_by}`));
   return <p className="focus-muted">{lines.join(" ")}</p>;
 }
 

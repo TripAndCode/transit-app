@@ -416,9 +416,22 @@ _OBSERVED_SQL = f"""
 """
 
 
+# The newest date analyze has built: the later of the newest aggregated row
+# and the last JST day closed when analyze last ran. A day with no departure
+# (a weekday-only agency's Sunday, a stalled feed) has no row yet is built.
+_AGGREGATED_SQL = """
+    SELECT (SELECT min(date) FROM agg_route_daily_dist WHERE agency_id = $1),
+           GREATEST(
+               (SELECT max(date) FROM agg_route_daily_dist WHERE agency_id = $1),
+               (SELECT (analyzed_at AT TIME ZONE 'Asia/Tokyo')::date - 1 FROM agg_meta WHERE agency_id = $1)
+           )
+"""
+
+
 async def aggregated_days(conn, agency_id: int) -> tuple[date | None, date | None]:
-    """The agency's first and last aggregated service dates."""
-    row = await conn.fetchrow("SELECT min(date), max(date) FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
+    """The agency's first aggregated service date, and the newest date
+    analyze has built."""
+    row = await conn.fetchrow(_AGGREGATED_SQL, agency_id)
     return row[0], row[1]
 
 

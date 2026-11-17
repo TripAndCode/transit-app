@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { act, fireEvent, render as renderPlain, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nextProvider } from "react-i18next";
+import i18n from "../../i18n";
+import { createMemoryRouter, RouterProvider, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import type { DefinitionMeta, RevisionRouteRow, RevisionTally, TimetableRevisionRoutes } from "../../api/types";
 import { RevisionRoutes } from "./RevisionRoutes";
@@ -65,7 +68,7 @@ const OBSERVED: TimetableRevisionRoutes = {
   definition: DEFINITION,
 };
 
-function render(body: TimetableRevisionRoutes) {
+function render(body: TimetableRevisionRoutes, on = "2026-04-01", { keepCache = false } = {}) {
   const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
   const fetchMock = vi.fn((url: string) => {
     if (url.includes("/timetable-revisions/routes")) return Promise.resolve(json(body));
@@ -74,11 +77,30 @@ function render(body: TimetableRevisionRoutes) {
   });
   vi.stubGlobal("fetch", fetchMock);
   const router = createMemoryRouter(
-    [{ path: "agencies/:agencyId/reports", element: <RevisionRoutes agencyId={9} on="2026-04-01" dayType="weekday" /> }],
+    [{ path: "agencies/:agencyId/reports", element: <OnFromUrl fallback={on} /> }],
     { initialEntries: ["/agencies/9/reports?doc=revisions"] },
   );
-  renderWithProviders(<RouterProvider router={router} />);
-  return fetchMock;
+  if (keepCache) {
+    // The shared helper's client drops an unobserved query at once; this one
+    // keeps it, as the app's does, so a revision visited before is at hand.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPlain(
+      <QueryClientProvider client={client}>
+        <I18nextProvider i18n={i18n}>
+          <RouterProvider router={router} />
+        </I18nextProvider>
+      </QueryClientProvider>,
+    );
+  } else {
+    renderWithProviders(<RouterProvider router={router} />);
+  }
+  return Object.assign(fetchMock, { router });
+}
+
+/** The section for the revision `on` names in the URL, as the page passes it. */
+function OnFromUrl({ fallback }: { fallback: string }) {
+  const [params] = useSearchParams();
+  return <RevisionRoutes agencyId={9} on={params.get("on") ?? fallback} dayType="weekday" />;
 }
 
 describe("RevisionRoutes", () => {
@@ -122,8 +144,9 @@ describe("RevisionRoutes", () => {
 
   it("says no whole week can be compared when the cap is under a week", async () => {
     render({ ...OBSERVED, weeks_cap: 0, capped_by: "timetable", full_through: null, complete: false, window: null, classes: [], definition: null });
-    expect(await screen.findByText(/There is no whole week to compare/)).toBeInTheDocument();
+    const status = await screen.findByText(/There is no whole week to compare/);
     expect(screen.queryByText(/once a whole week/)).not.toBeInTheDocument();
+    expect(status).not.toHaveTextContent(/no more weeks can be compared/);
   });
 
   it("names the agency's history when it holds the cap", async () => {
@@ -138,6 +161,20 @@ describe("RevisionRoutes", () => {
     expect(screen.queryByText(/Stop 50/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show all 51 routes" }));
     expect(screen.getByText(/Stop 50/)).toBeInTheDocument();
+  });
+
+  it("lists fifty again for another revision after the reader showed them all", async () => {
+    const many = Array.from({ length: 51 }, (_, i) => route({ route_code: `X${i}`, main_stop_name: `Stop ${i}` }));
+    const { router } = render({ ...OBSERVED, routes: many }, "2026-04-01", { keepCache: true });
+    await screen.findByText(/Stop 0/);
+    await act(() => router.navigate("/agencies/9/reports?doc=revisions&on=2026-10-01"));
+    await screen.findByText(/Stop 0/);
+    fireEvent.click(screen.getByRole("button", { name: "Show all 51 routes" }));
+    expect(screen.getByText(/Stop 50/)).toBeInTheDocument();
+    // Back to a revision already fetched: its data is at hand, so the section never unmounts.
+    await act(() => router.navigate("/agencies/9/reports?doc=revisions&on=2026-04-01"));
+    await waitFor(() => expect(screen.queryByText(/Stop 50/)).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Show all 51 routes" })).toBeInTheDocument();
   });
 
   it("leaves an unknown day type to the stop comparison's explanation", async () => {
