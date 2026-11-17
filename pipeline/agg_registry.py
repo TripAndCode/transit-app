@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import NamedTuple
 
-from pipeline import agg_sql, ch_aggregates, db, headways, static_archive, static_headways
+from pipeline import agg_sql, ch_aggregates, db, headways, static_archive, static_headways, stop_supply
 from pipeline.db import build_stop_visits_ch_sql
 from pipeline.static_archive import Stamp
 
@@ -50,7 +50,7 @@ _RENDER_MONTH = 202601
 class Kind(str, Enum):
     DATED = "dated"  # rows keyed by service date, rebuilt per changed date
     WHOLE = "whole"  # whole history, finalized from an internal ClickHouse table
-    STATIC_ONLY = "static_only"  # built from the loaded timetable alone
+    STATIC_ONLY = "static_only"  # no date scope: built from timetables (loaded or archived) alone
 
 
 class Timetable(str, Enum):
@@ -63,6 +63,11 @@ class Timetable(str, Enum):
     # timetable changes no built row, except where the ingest stamps no version
     # and every row falls back to the loaded one.
     ARCHIVED = "archived"
+    # Each archived version in force, its rows kept under it
+    # (pipeline.stop_supply), so the fingerprint carries no timetable: a new
+    # version adds its own rows, and another version is rebuilt only where the
+    # dates it is in force on moved its typical days.
+    VERSIONS = "versions"
 
 
 class ArchivedInput(str, Enum):
@@ -150,6 +155,15 @@ def _feed_quality() -> list[str]:
     return feed_quality.render()
 
 
+def _visits(builder: Callable[..., str]) -> list[str]:
+    """A visits builder, whole and scoped to its dates, and the visits scan it reads."""
+    return [
+        builder(scoped=False),
+        builder(scoped=True),
+        *(build_stop_visits_ch_sql(extra_where="", join_schedule=True, stamp=stamp) for stamp in Stamp),
+    ]
+
+
 def _timetable_of(name: str) -> Timetable:
     return Timetable.ARCHIVED if name in ch_aggregates.STATIC_JOINED_TABLES else Timetable.NONE
 
@@ -200,13 +214,19 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_daily_dwell_run",
-            5,
+            6,
             Kind.DATED,
             Timetable.ARCHIVED,
-            lambda: [
-                agg_sql.dwell_run_sql(),
-                *(build_stop_visits_ch_sql(extra_where="", join_schedule=True, stamp=stamp) for stamp in Stamp),
-            ],
+            lambda: _visits(agg_sql.dwell_run_sql),
+            archived_input=ArchivedInput.STOP_TIMES,
+            in_force=True,
+        ),
+        AggTable(
+            "agg_route_segment_runtime",
+            1,
+            Kind.DATED,
+            Timetable.ARCHIVED,
+            lambda: _visits(agg_sql.segment_runtime_sql),
             archived_input=ArchivedInput.STOP_TIMES,
             in_force=True,
         ),
@@ -222,6 +242,15 @@ def _entries() -> list[AggTable]:
             Timetable.LOADED,
             _feed_quality,
             depends_on=("agg_route_daily", "agg_route_daily_dist", "agg_feed_health"),
+        ),
+        AggTable(stop_supply.DAYS_TABLE, 1, Kind.STATIC_ONLY, Timetable.VERSIONS, stop_supply.render_days),
+        AggTable(
+            stop_supply.TABLE,
+            1,
+            Kind.STATIC_ONLY,
+            Timetable.VERSIONS,
+            stop_supply.render,
+            depends_on=(stop_supply.DAYS_TABLE,),
         ),
     ]
     for name in ch_aggregates.MONTHLY_TABLES:
@@ -415,6 +444,8 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.15", {"agg_route_band_daily": 1}),
     MethodVersion("2026.11.16", {"feed_quality_monthly": 8}),
     MethodVersion("2026.11.17", {"feed_quality_monthly": 9}),
+    MethodVersion("2026.11.18", {"agg_route_daily_dwell_run": 6, "agg_route_segment_runtime": 1}),
+    MethodVersion("2026.11.19", {"agg_stop_supply_days": 1, "agg_stop_supply_hourly": 1}),
 )
 
 # The method every report, CSV and council document names beside its figures

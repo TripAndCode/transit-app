@@ -6,7 +6,7 @@ from pipeline.day_types import (
     THREE_WAY,
     TWO_WAY,
     WeeklyService,
-    _gtfs_date,
+    calendar_dates_day,
     fallback_day_type,
     public_holidays_between,
     resolve_day_types,
@@ -265,4 +265,13 @@ def test_a_removal_wins_over_the_weekly_flags():
 def test_a_calendar_dates_value_is_read_only_as_eight_digits(value, expected):
     """A row the reports' SQL cannot match as YYYYMMDD text is malformed here too,
     so the day split and the planned-trip count agree on which rows exist."""
-    assert _gtfs_date(value) == expected
+    assert calendar_dates_day(value) == expected
+
+
+def test_an_exception_of_no_known_type_does_not_widen_the_calendars_extent():
+    from pipeline.day_types import ServiceCalendar
+
+    weekly = [WeeklyService("w", WEEKDAYS, CAL_START, CAL_END)]
+    calendar = ServiceCalendar.of(weekly, [("w", CAL_END + timedelta(days=30), 3)])
+    assert calendar.extent == (CAL_START, CAL_END)
+    assert not calendar.covers(CAL_END + timedelta(days=1))

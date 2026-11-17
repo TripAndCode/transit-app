@@ -12,7 +12,7 @@ from api.range import (
     updates_filter_ch,
 )
 from pipeline.clickhouse import UPDATES_TABLE
-from pipeline.db import build_dedup_ch_sql, build_stop_visits_ch_sql
+from pipeline.db import build_dedup_ch_sql
 from pipeline.live_filing import Filing, band_candidates, filing
 
 # 2-dp minutes, matching the live ROUND(..., 2). Shared by every reports
@@ -68,7 +68,8 @@ def _dedup_cte_ch(
     ``include_scheduled_sec`` forwards straight to `build_dedup_ch_sql` — pass
     it when the caller needs an hour-of-day bucket that doesn't silently drop
     after-midnight extended-hour trips (see that function's own docstring).
-    A caller that needs arrivals reads :func:`_stop_visits_cte_ch` instead.
+    It reads departures only: arrivals are paired with them only in analyze
+    (`pipeline.db.build_stop_visits_ch_sql`).
 
     Returns ``(cte_sql, parameters)`` instead of a bare CTE fragment string,
     because ClickHouse parameters are a ``{name: value}`` dict passed to
@@ -97,31 +98,6 @@ def _dedup_cte_ch(
 async def ctx_filing(conn, ch, agency_id: int, ctx: RangeCtx, *, table: str = UPDATES_TABLE) -> Filing:
     """How a read of ``ctx``'s service dates in ``table`` files its rows (`pipeline.live_filing.filing`)."""
     return await filing(conn, ch, agency_id, ctx.from_date, ctx.to_date, table=table)
-
-
-def _stop_visits_cte_ch(
-    ctx: RangeCtx,
-    filing: Filing,
-    *,
-    include_scheduled_sec: bool = False,
-    table: str = UPDATES_TABLE,
-) -> tuple[str, dict]:
-    """:func:`_dedup_cte_ch`'s counterpart for a reader that pairs a stop's
-    arrival with its departure: a ``visits`` CTE over
-    `pipeline.db.build_stop_visits_ch_sql`, filtered and filed by ``ctx`` and
-    ``filing`` the same way. Returns ``(cte_sql, parameters)``; ``agency_id``
-    is the caller's to add."""
-    filing.check(ctx.from_date, ctx.to_date)
-    where = band_candidates(updates_filter_ch(ctx, refit=filing.stamp.refiles), ctx.time_band, filing)
-    body = build_stop_visits_ch_sql(
-        extra_where=where.raw,
-        include_scheduled_sec=include_scheduled_sec,
-        table=table,
-        stamp=filing.stamp,
-        filed_where=where.filed,
-        live_form=True,
-    )
-    return f"visits AS ({body})", {**where.params, **filing.params}
 
 
 def _ch_rows(result) -> list[dict]:

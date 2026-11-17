@@ -1501,3 +1501,69 @@ export interface MlEvaluations {
   forecast_in_use: boolean;
   live: MlLiveScorecard | null;
 }
+
+/** The day types a timetable revision is compared on (api/routers/timetable_revisions.py). */
+export type RevisionDayType = "weekday" | "saturday" | "sunday_holiday";
+
+/** One side of a timetable revision: the version first in force over its run
+ *  of service dates, its short content hash, and that run. */
+interface RevisionVersion {
+  version: string;
+  content: string;
+  first_day: string;
+  last_day: string;
+}
+
+export interface TimetableRevision {
+  first_day: string;
+  before: RevisionVersion;
+  after: RevisionVersion;
+}
+
+export interface TimetableRevisionsResponse {
+  revisions: TimetableRevision[];
+}
+
+interface RevisionHourChange {
+  hour: number;
+  before: number;
+  after: number;
+}
+
+/** A stop's departures on one day type's typical day before and after a
+ *  revision. Times are seconds after the service day's midnight. */
+export interface RevisionStopChange {
+  stop_id: string;
+  stop_name: string | null;
+  day_type: RevisionDayType;
+  before: number;
+  after: number;
+  lost: number;
+  gained: number;
+  first_before: number | null;
+  first_after: number | null;
+  last_before: number | null;
+  last_after: number | null;
+  last_shift_min: number | null;
+  ended: boolean;
+  hours: RevisionHourChange[];
+}
+
+/** A day type's totals; a side with no typical day leaves its figures null. */
+export interface RevisionDayTypeSummary {
+  day_type: RevisionDayType;
+  before_date: string | null;
+  after_date: string | null;
+  departures_before: number | null;
+  departures_after: number | null;
+  stops_ended: number | null;
+  last_earlier: number | null;
+}
+
+export interface TimetableRevisionDiff {
+  available: boolean;
+  reason: "no_revision" | "no_calendar" | null;
+  revision: TimetableRevision | null;
+  day_types: RevisionDayTypeSummary[];
+  stops: RevisionStopChange[];
+}

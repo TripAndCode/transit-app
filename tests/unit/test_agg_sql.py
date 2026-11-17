@@ -83,16 +83,20 @@ def test_headway_daily_reads_the_rows_every_stop_event_dedup_reads():
 
 PG_BUILDERS = {
     "route_headway": lambda: agg_sql.route_headway_sql(),
-    "dwell_run": lambda: agg_sql.dwell_run_sql(),
+    "dwell_run": lambda: agg_sql.dwell_run_sql(scoped=False),
+    "dwell_run scoped": lambda: agg_sql.dwell_run_sql(scoped=True),
+    "segment_runtime": lambda: agg_sql.segment_runtime_sql(scoped=False),
+    "segment_runtime scoped": lambda: agg_sql.segment_runtime_sql(scoped=True),
     "static_version_summary": lambda: agg_sql.STATIC_VERSION_SUMMARY_SQL,
 }
 
 
 @pytest.mark.parametrize("name", PG_BUILDERS)
-def test_postgres_statements_bind_the_agency_by_name(name):
+def test_postgres_statements_bind_their_parameters_by_name(name):
     sql = PG_BUILDERS[name]()
     assert "%(agency_id)s" in sql
-    assert sql.replace("%(agency_id)s", "").count("%") == 0
+    assert ("%(rebuild_dates)s" in sql) is name.endswith(" scoped")
+    assert sql.replace("%(agency_id)s", "").replace("%(rebuild_dates)s", "").count("%") == 0
 
 
 def test_route_headway_reads_the_dominant_service_and_the_high_frequency_bound():
@@ -103,7 +107,7 @@ def test_route_headway_reads_the_dominant_service_and_the_high_frequency_bound()
 
 
 def test_dwell_run_buckets_with_the_shared_histogram_bounds():
-    sql = agg_sql.dwell_run_sql()
+    sql = agg_sql.dwell_run_sql(scoped=False)
     assert bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH) in sql
     assert bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH) in sql
     assert hist_array_sql("bd", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH) in sql
@@ -111,7 +115,7 @@ def test_dwell_run_buckets_with_the_shared_histogram_bounds():
 
 
 def test_dwell_run_places_scheduled_times_on_the_service_day():
-    sql = agg_sql.dwell_run_sql()
+    sql = agg_sql.dwell_run_sql(scoped=False)
     assert service_day_seconds_sql(hms_to_sec_sql("d.sched_arrival_time")) + " AS sched_arr_sec" in sql
     assert service_day_seconds_sql(hms_to_sec_sql("d.sched_departure_time")) + " AS sched_dep_sec" in sql
 

@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware as StarletteSessionMiddleware
 
 from api import activity, retention
@@ -58,9 +59,11 @@ from api.routers.overview import router as overview_router
 from api.routers.replay import router as replay_router
 from api.routers.reports import router as reports_router
 from api.routers.scope_summary import router as scope_summary_router
+from api.routers.segments import router as segments_router
 from api.routers.snapshots import admin_router as admin_snapshots_router
 from api.routers.snapshots import router as snapshots_router
 from api.routers.static import router as static_router
+from api.routers.timetable_revisions import router as timetable_revisions_router
 from api.security import cookie_secure
 from api.sso import DEV_SIGNING_KEY as _DEV_SIGNING_KEY
 from api.sso import SSO_ENV as _AUTH_ENV
@@ -330,8 +333,15 @@ app.add_exception_handler(RangeNotRetained, range_not_retained_handler)
 #                                    cancel the asyncpg query instead of letting
 #                                    heavy scans run to completion; GET-only by
 #                                    design — see api/middleware/cancel_on_disconnect.py)
+#   GZipMiddleware                 (compresses responses for clients that accept gzip)
 # That means require_user/require_admin see request.state.user before any
 # router runs, which is what we want.
+# Innermost, next to the routers, so it sees each response whole: the outer
+# middlewares stream the body, and a streamed body is compressed whatever its
+# size. Map and report payloads run to megabytes; small ones aren't worth the
+# CPU, and Starlette leaves event streams alone. Level 6: most of level 9's
+# saving, at a fraction of the event-loop time small bodies are compressed in.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 app.add_middleware(CancelGETOnDisconnectMiddleware)
 app.add_middleware(LocaleMiddleware)
 app.add_middleware(UsageCountMiddleware)
@@ -387,6 +397,8 @@ app.include_router(reports_router)
 app.include_router(scope_summary_router)
 app.include_router(snapshots_router)
 app.include_router(static_router)
+app.include_router(timetable_revisions_router)
+app.include_router(segments_router)
 app.include_router(internal_router)
 app.include_router(collector_router)
 

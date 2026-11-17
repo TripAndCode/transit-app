@@ -302,11 +302,21 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 - When dwell/running time can’t be shown, **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1) are offered.
 - The split cannot be narrowed to one time band. With a time band chosen, the report says so; choose “All hours” in the scope sentence to see it.
 
+### 7-1. Slow segments
+
+Choose **Slow segments** in the switch at the top to see, on a map, how far the running time between each pair of stops (a segment) exceeds the timetable. The routes through a segment are taken together.
+
+- Choose the **Days** (weekdays, or weekends and holidays) and the **Departure time band**. The period is the newest 8 complete weeks. This view does not follow the period or routes of the scope sentence.
+- A line is darker the more the newest week exceeds the timetable, and faint where there were too few runs. Segments that stayed slow are drawn wider. Click a line for its median, scheduled running time, speed and more.
+- “Segments that stayed slow” lists the segments whose median running time stayed over the timetable for several weeks in a row, up to the newest (the thresholds are in the methodology). They are listed longest-standing first, with the minutes lost per day and the weekly excess. **Download CSV** saves the same list.
+- Speed uses the straight line between the two stops, so it reads low on a winding road.
+- The values are feed-based estimates. Until the predictions are validated, segments are not ranked as bus-priority candidates. The methodology gives each definition.
+
 ---
 
 ## 8. Day types & agencies — side by side
 
-Two buttons at the top switch between **Weekdays and weekends/holidays** and **Agencies**.
+Three buttons at the top switch between **Weekdays and weekends/holidays**, **Agencies** and **Planned departures**.
 
 ### 8-1. Weekdays and weekends/holidays
 
@@ -323,6 +333,16 @@ Below them, under “Not ranked: the data does not support a comparison”, the 
 Each row shows “Avg delay (min)” with its bar, “On-time %” with its 95% interval under it, “Observation coverage” (the trips the feed reported out of those the timetable planned), “Planned trips”, “Service delivered %”, “Vehicle-km delivered %” and “Observations”. Every bar shares one axis, 6, 12, 18 or 24 minutes, whichever holds the latest-running agency. Where an agency has data for only part of the period, its own dates are shown too. Planned trips are the trips the timetable planned over the period; where a timetable plans only some of its days, the figure says so, such as “16/30 days a timetable plans”. Where Service delivered % cannot be shown, “—” is followed by the reason (“no timetable plans this period”, “this feed format cannot report cancellations”, “the feed is not yet checked for cancellations” or “this feed doesn't report cancellations”). Vehicle-km delivered % appears only where Service delivered % does. A “Behind” badge means that agency’s totals have not caught up with its latest data yet. “How to read this” explains each figure. Where ridership weights have been set up, “Weight by ridership” switches the on-time figure to a ridership-weighted one.
 
 Click an agency’s name to open that agency’s **Live** screen.
+
+### 8-3. Planned departures
+
+A map of every operator’s stops by the departures their timetables plan, for a band of hours on a weekday, a Saturday or a Sunday & holiday (by default weekdays, 10:00 to 16:00). It reads the timetable each operator has in force on **Timetable in force on** (today when left empty), on a typical day of the day type: an ordinary day of that type early in that timetable, so a holiday timetable or a one-off service day does not stand for it. **Timetables read** lists each operator’s timetable and typical day.
+
+- **Departures per hour** shades each stop by its departures in the band divided by its hours: none, under 1, 1 to 2, 2 to 3, and 3 or more an hour.
+- **Longest gap** brings forward the stops whose longest stretch of the band without a departure is over the threshold chosen under **Highlight gaps over** (60 min by default). A band with no departure at a stop is one gap the length of the band.
+- Hours after midnight read 24:00 and later, so a band can run into the night. Click a stop for its departures, longest gap and first and last departure of the day.
+- An operator whose timetable cannot be read for the date and day type is listed under **Operators not shown** with the reason, never drawn as a stop without service. A stop the current timetable gives no position is counted below the map.
+- A trip’s last stop is not counted as a departure. Each operator’s stops are shown on their own: two operators’ stops at one place are not added together.
 
 ---
 
@@ -344,7 +364,7 @@ When no vehicle is reporting, the map says why, going by the agency’s timetabl
 
 ## 10. Reports — documents to hand on
 
-Three tabs along the top: **Period summary**, **Saved analyses** and **Council report & delay record**.
+Four tabs along the top: **Period summary**, **Saved analyses**, **Council report & delay record** and **Timetable revisions**.
 
 A printed page (“Print / Save as PDF”) ends with its data source: who publishes the agency’s data, with the URLs of the data and of its licence. A CSV that opens with notes (a report’s **Download CSV**, and each table’s CSV in the **Notebook**) carries the same credit as its last note. A CSV whose first row is the table (the period summary, a route’s page, **Live**) has no credit added, so it still loads straight into a spreadsheet or another tool.
 
@@ -399,6 +419,16 @@ When the trip can’t be matched to that day’s timetable, as on a day before t
 If the route has no real-time data that day, the page says so.
 
 For staff, “Late departures (delay at each trip's first recorded stop)” opens every route’s late departures on the chosen day, with **Download CSV**. The list loads only when it is opened. It picks late trips by their delay at the first stop the real-time data recorded for each, so a trip that left its first stop on time and fell behind later is not in it. In its table, the “Recorded stop” carries “trip start” when the timetable starts that trip there.
+
+### 10-4. Timetable revisions
+
+For each day another timetable took effect (a revision), the timetables before and after it are compared stop by stop. **Revision** picks the one to compare; the newest opens first.
+
+- The **By day type** table gives, for weekdays, Saturdays and Sundays & holidays, the typical day (before → after), the departures and their change, how many stops were left with none, and how many have an earlier last bus. A typical day is an ordinary day of that type under each timetable, near the revision. These day types are fixed by the date alone, unlike the day types elsewhere, which follow the operator’s calendar and may merge Saturday with Sunday & holiday.
+- **Stops that changed** lists, for the day type chosen, every stop whose departures, first departure or last departure changed, those that lost the most first. The first and last departures read before → after. **Change by hour** shows only the hours whose count changed, as in “7:00 -1, 8:00 +1”. A stop left with no departures says so.
+- A day type with no day in force under one of the timetables shows a dash and is not compared.
+- **Download CSV** saves the changed stops, with the versions compared, their typical days and the data source in its notes: a draft of a monitoring list.
+- Stop names are the current timetable’s; a stop it no longer has shows its ID. A trip’s last stop is not counted as a departure.
 
 ---
 

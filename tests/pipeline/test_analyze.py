@@ -503,6 +503,12 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "(%s, '2099-01-01', 'GHOST', 'morning', 100, 999, 999)",
         ),
         (
+            "agg_route_segment_runtime",
+            "(agency_id, date, route_code, from_stop_id, to_stop_id, time_band, to_stop_sequence, run_sec, "
+            "scheduled_samples, scheduled_sum_sec, hold_eligible, holds, terminal_arrivals, terminal_early)",
+            "(%s, '2099-01-01', 'GHOST', 'A', 'B', 'morning', 2, '{60}', 1, 60, 0, 0, 0, 0)",
+        ),
+        (
             "agg_stop_daily",
             "(agency_id, stop_id, date, service_type, time_band, delay_sum, samples)",
             "(%s, 'GHOST_STOP', '2099-01-01', '平日', 'morning', 999, 100)",
@@ -2675,9 +2681,14 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     totals_reads = tuple(f"FROM {t} " for t in (*ch_aggregates.INTERNAL_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES))
     probes = ("SELECT count(), ", *(f"SELECT {e} FROM {t} " for t, (_, e, _) in ch_aggregates.REFERENCES.items()))
     # The archive's stop times and schedules are read for one content, or listed
-    # by content; its version map and spans hold a row per version name.
+    # by content; its version map and spans hold a row per version name, as does
+    # the stop supply's listing of the versions whose calendar is kept.
     archive_reads = (f"FROM {static_archive.ARCHIVE} ", f"FROM {static_archive.SCHEDULE} ")
-    name_reads = (f"FROM {static_archive.VERSION_MAP} ", f"FROM {static_archive.SPANS} ")
+    name_reads = (
+        f"FROM {static_archive.VERSION_MAP} ",
+        f"FROM {static_archive.SPANS} ",
+        f"FROM {static_archive.CALENDAR} ",
+    )
     assert all(
         s.rstrip().endswith("LIMIT 1")
         or (
@@ -2796,8 +2807,9 @@ def test_a_changed_static_schedule_needs_every_date_of_the_tables_that_read_it(p
     pg_conn.commit()
 
     plan = _plan(agency_id, pg_conn, ch_client, _static_loaded(pg_conn, agency_id), strategy)
-    # The agency_id fixture's ingest stamps no version, so every timetable reader rebuilds.
-    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable is not Timetable.NONE}
+    # The agency_id fixture's ingest stamps no version, so every timetable reader
+    # rebuilds but those kept per archived version, which add the new content's rows.
+    readers = {n for n, t in agg_registry.TABLES.items() if t.timetable not in (Timetable.NONE, Timetable.VERSIONS)}
     assert {n for n, scope in plan.scopes.items() if scope is None} == readers
 
 

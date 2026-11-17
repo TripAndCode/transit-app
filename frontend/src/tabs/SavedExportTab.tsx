@@ -4,15 +4,17 @@ import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { scopeToQueryString, useScope } from "../api/scope";
 import { useAgencyId } from "../api/useAgencyId";
 import { REPORTS_VIEWS, SAVED_REPORT_TYPES, destHref, reportsView, savedTarget } from "../routes/destinations";
-import { loadAnalysisTab, loadReportsHomeTab } from "../routes/lazyTabs";
+import { loadAnalysisTab, loadReportsHomeTab, loadRevisionsView } from "../routes/lazyTabs";
 import { SCREEN_STRIP_STYLE, screenStripLinkStyle } from "../components/screenStrip";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 
 const ReportsHomeTab = lazy(loadReportsHomeTab);
 const AnalysisTab = lazy(loadAnalysisTab);
+const RevisionsView = lazy(loadRevisionsView);
 
-/** Reports: the printable period summary, the saved analyses list, and the
- *  export documents (council summary, delay reference), picked by `doc`.
+/** Reports: the printable period summary, the saved analyses list, the
+ *  export documents (council summary, delay reference), and the timetable
+ *  revisions compared stop by stop, picked by `doc`.
  *  The document links carry only the shared scope plus `doc`: every
  *  document shares one path, and a leftover `report` would force the
  *  export view. */
@@ -50,6 +52,8 @@ export function SavedExportTab() {
               reportTypes={SAVED_REPORT_TYPES}
               defaultReport={doc === "certificate" ? "delay_certificate" : "council_summary"}
             />
+          ) : view === "revisions" ? (
+            <RevisionsView />
           ) : (
             <ReportsHomeTab />
           )}

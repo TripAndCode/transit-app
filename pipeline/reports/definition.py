@@ -78,6 +78,13 @@ _VALUE_BASIS_TEXT: dict[tuple[str, str], str] = {
     ),
 }
 
+
+def value_basis_text(basis: str, locale: str) -> str:
+    """What *basis* (``VALUE_BASIS``) means, in *locale* ("ja" or "en"), as the
+    report definitions state it."""
+    return _VALUE_BASIS_TEXT[(basis, locale)]
+
+
 # format_definition_csv_line's own Japanese-only lookups: a plain
 # {value: text} dict, so an unrecognized value raises KeyError, sourced from
 # the locale-aware dicts above's "ja" slice instead of repeating either string
@@ -524,6 +531,14 @@ def _source_mix(rows: list, from_date: date, to_date: date) -> list[SourceMix]:
             SourceMix(agency_id=agency_id, archive_days=archive, live_days=live, none_days=range_days - archive - live)
         )
     return mix
+
+
+async def forget_stale_builds(conn) -> None:
+    """For a read that stamps no build of its own: forget, as stamp_build
+    does, the cached results a build since this process last looked can have
+    made stale. Call it before reading a cache."""
+    rows = await conn.fetch(_BUILDS_SQL)
+    _note_builds({row[0]: (row[1], row[2]) for row in rows})
 
 
 def _note_builds(builds: dict[int, tuple]) -> None:

@@ -9,7 +9,7 @@ shared dedup's: for every visit with a departure, the delay, the schedule and
 the row count are exactly what build_dedup_ch_sql resolves."""
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import clickhouse_connect
 import pytest
@@ -212,10 +212,10 @@ def test_stop_visits_keep_one_row_per_trip_stop_and_service_day():
         _poll("p2.pb", _at(30), 2, arr=20, scheduled_time="10:05", scheduled_sec=36300),
         _poll("p3.pb", _at(60), 2, dep=70, scheduled_time="10:06", scheduled_sec=36360, service_type="holiday"),
     ]
-    rows = _visits(polls, include_scheduled_sec=True)
-    assert [
-        (r["service_type"], r["scheduled_time"], r["scheduled_sec"], r["dep_delay"], r["arr_delay"]) for r in rows
-    ] == [("holiday", "10:06", 36360, 70, 20)]
+    rows = _visits(polls)
+    assert [(r["service_type"], r["scheduled_time"], r["dep_delay"], r["arr_delay"]) for r in rows] == [
+        ("holiday", "10:06", 70, 20)
+    ]
 
 
 def test_stop_visits_file_an_arrival_only_visit_under_its_latest_arrival_poll():
@@ -223,10 +223,8 @@ def test_stop_visits_file_an_arrival_only_visit_under_its_latest_arrival_poll():
         _poll("p1.pb", _at(0), 3, arr=30, route_code="R1", scheduled_time="10:10"),
         _poll("p2.pb", _at(60), 3, arr=45, route_code="R2", scheduled_time="10:11"),
     ]
-    rows = _visits(polls, include_scheduled_sec=True)
-    assert [(r["route_code"], r["scheduled_time"], r["scheduled_sec"], r["arr_delay"]) for r in rows] == [
-        ("R2", "10:11", None, 45)
-    ]
+    rows = _visits(polls)
+    assert [(r["route_code"], r["scheduled_time"], r["arr_delay"]) for r in rows] == [("R2", "10:11", 45)]
 
 
 def _observed(polls):
@@ -335,8 +333,6 @@ def test_stop_visits_keep_the_dedups_column_order():
         "arr_delay",
         "dep_observed",
     ]
-    rows = _query([_poll("p1.pb", _at(0), 2, dep=50)], build_stop_visits_ch_sql(include_scheduled_sec=True))
-    assert list(rows[0])[-3:] == ["scheduled_sec", "arr_delay", "dep_observed"]
 
 
 def _parity_polls():
@@ -380,21 +376,18 @@ def _parity_polls():
     return polls
 
 
-@pytest.mark.parametrize("include_scheduled_sec", [False, True])
-def test_stop_visits_departures_match_the_shared_dedup_row_for_row(include_scheduled_sec):
+def test_stop_visits_departures_match_the_shared_dedup_row_for_row():
     """Wherever a visit has a departure, its row is the shared dedup's row: the
     same key columns, the same winning delay and schedule, the same count of
     visits. Arrival-only visits are the only rows the dedup does not have."""
     polls = _parity_polls()
     dedup_columns = ["route_code", "service_type", "scheduled_time", "trip_id", "date", "stop_sequence", "dep_delay"]
-    if include_scheduled_sec:
-        dedup_columns.append("scheduled_sec")
 
     def keyed(rows):
         return sorted((tuple(r[c] for c in dedup_columns) for r in rows), key=repr)
 
-    dedup = _query(polls, build_dedup_ch_sql(include_scheduled_sec=include_scheduled_sec))
-    visits = _query(polls, build_stop_visits_ch_sql(include_scheduled_sec=include_scheduled_sec))
+    dedup = _query(polls, build_dedup_ch_sql())
+    visits = _query(polls, build_stop_visits_ch_sql())
     with_departure = [r for r in visits if r["dep_delay"] is not None]
 
     assert keyed(with_departure) == keyed(dedup)
@@ -403,31 +396,3 @@ def test_stop_visits_departures_match_the_shared_dedup_row_for_row(include_sched
     assert tie_and_spike == {1: 1, 2: 32, 3: 99}
     arrival_only = sorted((r["trip_id"], r["stop_sequence"]) for r in visits if r["dep_delay"] is None)
     assert arrival_only == [("T1", 4), ("T2", 4), ("T3", 4)]
-
-
-def test_stop_visits_cte_applies_the_range_filter():
-    from api.range import RangeCtx
-    from pipeline.live_filing import AS_INGESTED
-    from pipeline.reports.filters import _stop_visits_cte_ch
-
-    polls = [
-        _poll("p1.pb", _at(0), 2, dep=50),
-        _poll("p2.pb", _at(60), 2, arr=20),
-        _poll("p3.pb", _at(60), 3, arr=30, route_code="R2"),
-        _poll("p4.pb", _at(86400), 2, arr=99),
-    ]
-    ctx = RangeCtx(from_date=date(2026, 4, 1), to_date=date(2026, 4, 1), routes=("R1",))
-    cte_sql, params = _stop_visits_cte_ch(ctx, AS_INGESTED)
-    rows = _query(
-        polls,
-        f"WITH {cte_sql} SELECT stop_sequence, dep_delay, arr_delay FROM visits ORDER BY stop_sequence",
-        params,
-    )
-    assert [(r["stop_sequence"], r["dep_delay"], r["arr_delay"]) for r in rows] == [(2, 50, 20)]
-
-
-def test_stop_visits_read_the_table_they_are_given():
-    assert "FROM updates AS u" in build_stop_visits_ch_sql()
-    assert "FROM updates_live AS u" in build_stop_visits_ch_sql(table="updates_live")
-    with pytest.raises(ValueError):
-        build_stop_visits_ch_sql(table="agg_route_daily")

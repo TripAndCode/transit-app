@@ -7,10 +7,12 @@ import {
   ROUTE_TABLE_SORTS,
   ROUTE_TABLE_SORT_LABELS,
   TIME_REPORT_TYPES,
+  WHY_MODES,
   compareMode,
   pickReport,
   reportsView,
   routeTableView,
+  whyMode,
   type Destination,
 } from "../routes/destinations";
 import { screenOf } from "../api/screenScope";
@@ -33,6 +35,7 @@ function reportStops(types: readonly string[]): RailStop[] {
 export const RAIL_STOPS: Partial<Record<Destination, readonly RailStop[]>> = {
   routes: ROUTE_TABLE_SORTS.map((sort) => ({ id: sort, label: (t) => t(ROUTE_TABLE_SORT_LABELS[sort]), extra: { sort } })),
   time: reportStops(TIME_REPORT_TYPES),
+  why: WHY_MODES.map(({ mode, labelKey }) => ({ id: mode, label: (t) => t(labelKey), extra: { by: mode } })),
   compare: COMPARE_MODES.map(({ mode, labelKey }) => ({ id: mode, label: (t) => t(labelKey), extra: { by: mode } })),
   reports: REPORTS_VIEWS.map(({ view, labelKey, extra }) => ({ id: view, label: (t) => t(labelKey), extra })),
 };
@@ -46,6 +49,8 @@ export function currentStop(dest: Destination, search: string): string | null {
       return routeTableView(params).sort;
     case "time":
       return pickReport(params.get("report"), TIME_REPORT_TYPES);
+    case "why":
+      return whyMode(params.get("by"));
     case "compare":
       return compareMode(params.get("by"));
     case "reports":

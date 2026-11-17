@@ -45,7 +45,10 @@ Aggregation tables produced:
 - agg_route_headway_daily — per-day reconstructed ACTUAL headway median + sufficient statistics for
   excess-wait/CoV/long-gap pooling (static_join agencies only)
 - agg_route_daily_dwell_run — per-day dwell/running-time distribution (decomposition view; static_join agencies only)
+- agg_route_segment_runtime — per-day running time per timetable segment and time band (static_join agencies only)
 - agg_schedule_revision_daily — per-day dominant static_version_id (schedule-revision boundary markers)
+- agg_stop_supply_days / agg_stop_supply_hourly — per timetable version in force, the typical day of each
+  day type and each stop's planned departures per hour on it (pipeline/stop_supply.py)
 - agg_static_version_summary — per-static-version planned trip count / vehicle-km (UPSERT-only; see its own
   section below for why it's exempt from the wipe-and-rewrite loop every other table here follows)
 - feed_quality_monthly — per-month feed-quality scorecard (pipeline/feed_quality.py)
@@ -88,7 +91,7 @@ lateness contribution instead of counting it.
 import io
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import NamedTuple
@@ -105,6 +108,7 @@ from pipeline import (
     retention,
     static_archive,
     static_headways,
+    stop_supply,
 )
 from pipeline.agg_registry import ArchivedInput, Kind, Timetable
 from pipeline.clickhouse import max_captured_at as ch_max_captured_at
@@ -160,9 +164,10 @@ _SERVICE_DATE = service_date_ch()
 
 
 # The stop visits of the dates being rebuilt are materialised into a Postgres
-# TEMP TABLE, _analyze_visits (see analyze()), for agg_route_daily_dwell_run, the
-# Postgres builder that pairs RT arrivals and departures with each visit's
-# own archived timetable, and only for an agency that builder runs for. The visits are resolved in ClickHouse
+# TEMP TABLE, _analyze_visits (see analyze()), for agg_route_daily_dwell_run and
+# agg_route_segment_runtime, the Postgres builders that pair RT arrivals and
+# departures with each visit's own archived timetable, and only for an agency
+# they run for. The visits are resolved in ClickHouse
 # (build_stop_visits_ch_sql, the `updates` fact table's home) and streamed into
 # the temp table, so no builder here reads `updates` row by row. They carry
 # arrival-only visits, so they are not the departure dedup: the departure-derived
@@ -193,9 +198,23 @@ _AGG_TABLES_ORDERED = (
     "agg_route_headway",
     "agg_route_headway_daily",
     "agg_route_daily_dwell_run",
+    "agg_route_segment_runtime",
     "agg_schedule_revision_daily",
+    stop_supply.DAYS_TABLE,
+    stop_supply.TABLE,
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
+
+# The tables built from _analyze_visits.
+_VISITS_TABLES = ("agg_route_daily_dwell_run", "agg_route_segment_runtime")
+# _analyze_visits' columns, in the order build_stop_visits_ch_sql(join_schedule=True) selects them.
+VISITS_COLUMNS = (
+    "route_code text, service_type text, scheduled_time time, "
+    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
+    "dep_observed boolean, sched_arrival_time text, sched_departure_time text, "
+    "sched_stop_id text, sched_prev_stop_sequence int, sched_prev_stop_id text, "
+    "sched_prev_departure_time text, sched_is_last boolean"
+)
 
 # Aggregates rebuilt only for the dates whose source rows changed: a listed
 # table's purge and build are both date-restricted, so the staleness signal must
@@ -214,6 +233,7 @@ _INCREMENTAL_AGG_TABLES = frozenset(
         "agg_route_daily_dist",
         "agg_route_daily_dwell_run",
         "agg_route_headway_daily",
+        "agg_route_segment_runtime",
         "agg_route_stop_daily",
         "agg_schedule_revision_daily",
         "agg_service_delivered_daily",
@@ -225,15 +245,19 @@ _INCREMENTAL_AGG_TABLES = frozenset(
 # survives `static_loader.load_static()` overwriting the raw static_* tables
 # on the next reload (db/migrations/0037_agg_static_version_summary.up.sql).
 
-# Aggregates built from the static schedule alone. Every column they read is
-# in pipeline.static_content.STATIC_DEPENDENCY_COLUMNS, plus constants their registry version covers
-# (e.g. agg_route_headway's HIGH_FREQUENCY_HEADWAY_SEC threshold) -- so while
-# their fingerprint matches, a rebuild would produce what already stands.
-_STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway"})
+# Aggregates built from the static schedule alone. agg_route_headway reads
+# only columns in pipeline.static_content.STATIC_DEPENDENCY_COLUMNS, plus
+# constants its registry version covers (e.g. its HIGH_FREQUENCY_HEADWAY_SEC
+# threshold) -- so while its fingerprint matches, a rebuild would produce what
+# already stands. The stop supply tables keep rows per archived version, and
+# stop_supply.rebuild adds and drops versions on a run that leaves them standing.
+_STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway", stop_supply.DAYS_TABLE, stop_supply.TABLE})
 
 # What a table whose scope is [] may leave standing: a date-scoped table with
 # no date of its own to rebuild, or a static-only table whose fingerprint, and
-# so its whole input, is unchanged.
+# so its whole input, is unchanged. The exception is the Timetable.VERSIONS
+# tables, whose builder still runs to add, drop or rebuild versions; only the
+# purge is skipped.
 _NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
 
 # Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
@@ -383,6 +407,35 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn, rebu
         rows = _run_query(sql, p, conn)
     _insert_agg(table, col_names, rows, conn)  # times itself
     logger.info(f"  {table}: {len(rows)} rows")
+
+
+def _insert_visits_table(
+    builder: Callable[..., str], table: str, col_names: list, p: dict, conn, rebuild_dates: list | None
+) -> None:
+    """Build *table* from `_analyze_visits` as one INSERT ... SELECT, so its rows
+    never leave Postgres: a full rebuild spans the agency's whole history.
+
+    *builder* reads only *rebuild_dates* (every date for None), which is
+    exactly what the purge deleted: the temp table holds the union of the
+    dates every visits table rebuilds."""
+    if _nothing_to_rebuild(table, rebuild_dates):
+        logger.info(f"  {table}: unchanged, not rebuilt")
+        return
+    if table not in _VALID_AGG_TABLES:
+        raise ValueError(f"Unknown aggregation table: {table!r}")
+    params = p if rebuild_dates is None else {**p, "rebuild_dates": rebuild_dates}
+    with _step(f"{table}: build+insert"), conn.cursor() as cur:
+        cur.execute(f"INSERT INTO {table} ({', '.join(col_names)}) {builder(scoped=rebuild_dates is not None)}", params)
+        inserted = cur.rowcount
+    logger.info(f"  {table}: {inserted} rows")
+
+
+def _visits_scope(scopes: list[list | None]) -> list | None:
+    """The dates `_analyze_visits` loads for tables with these scopes: every
+    date when any rebuilds in full, else the union of theirs."""
+    if any(scope is None for scope in scopes):
+        return None
+    return sorted({day for scope in scopes for day in scope or ()})
 
 
 def _legacy_fingerprint(ingest_strategy: str | None, static_parts: list[str]) -> str:
@@ -975,7 +1028,9 @@ def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
 
     Membership in :data:`_NOOP_SKIPPABLE_AGG_TABLES` is what makes the answer
     safe, and it binds the purge as well as the build: a table whose build is
-    skipped must not have its rows deleted, or the run empties it.
+    skipped must not have its rows deleted, or the run empties it. The
+    Timetable.VERSIONS tables are skipped by the purge only: stop_supply.rebuild
+    runs on every run and changes only the versions that moved.
     """
     return rebuild_dates == [] and table in _NOOP_SKIPPABLE_AGG_TABLES
 
@@ -1607,14 +1662,14 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
 
         # ── Materialise the stop visits ──────────────────────────────────
         # Every column, NULL-service rows included, for only the dates being rebuilt.
-        # agg_route_daily_dwell_run is the only reader, so an agency it is not
-        # built for gets the empty table without the scan.
-        builds_dwell_run = has_static and ingest_strategy in RT_INGEST_STRATEGIES
-        dwell_scope = scopes["agg_route_daily_dwell_run"]
-        scans_visits = builds_dwell_run and dwell_scope != []
+        # _VISITS_TABLES are the only readers, so an agency they are not built
+        # for gets the empty table without the scan.
+        builds_visit_tables = has_static and ingest_strategy in RT_INGEST_STRATEGIES
+        visits_scope = _visits_scope([scopes[name] for name in _VISITS_TABLES])
+        scans_visits = builds_visit_tables and visits_scope != []
         join, refit = _refile(agency_id, ch_client, plan.join, {**scopes, **ch_scopes})
         visit_reads = []
-        for read in _reads(agency_id, ch_client, join, refit, dwell_scope) if scans_visits else []:
+        for read in _reads(agency_id, ch_client, join, refit, visits_scope) if scans_visits else []:
             stems = ch_aggregates.version_names(
                 ch_client, agency_id, read.where, read.params, join, read.stamp, read.between
             )
@@ -1628,16 +1683,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             _load_temp_table(
                 cur,
                 ch_client,
-                # Column order must match build_stop_visits_ch_sql's SELECT list exactly:
-                # route_code, service_type, scheduled_time, trip_id, date,
-                # stop_sequence, dep_delay, arr_delay, dep_observed,
-                # sched_arrival_time, sched_departure_time.
                 table="_analyze_visits",
-                columns=(
-                    "route_code text, service_type text, scheduled_time time, "
-                    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
-                    "dep_observed boolean, sched_arrival_time text, sched_departure_time text"
-                ),
+                columns=VISITS_COLUMNS,
                 reads=visit_reads,
                 # An empty rebuild list selects no rows at all, so the scan is
                 # skipped rather than asked to prove it — the run where nothing
@@ -1737,7 +1784,7 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         # nothing.
         # Materialization here is gated on ingest_strategy alone, not on the
         # per-agency probe verdicts in rt_field_coverage_probes (see
-        # pipeline.strategies.static_join.rt_field_coverage_confirmed)
+        # pipeline.strategies.static_join.rt_field_coverage_gap)
         # -- sharing an ingest strategy does not by itself prove a given agency's
         # feed actually populates these fields. Today this is safe because every
         # reader of this table (pipeline.reports.service_delivered) re-applies
@@ -1795,9 +1842,9 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         # coverage, so pipeline.reports.dwell_run's reader additionally
         # requires a live rt_field_coverage_probes verdict before trusting
         # these rows.
-        if builds_dwell_run:
-            _build_and_insert(
-                agg_sql.dwell_run_sql(),
+        if builds_visit_tables:
+            _insert_visits_table(
+                agg_sql.dwell_run_sql,
                 "agg_route_daily_dwell_run",
                 [
                     "agency_id",
@@ -1813,10 +1860,41 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                 ],
                 p,
                 conn,
-                dwell_scope,
+                scopes["agg_route_daily_dwell_run"],
             )
         else:
             logger.info("  agg_route_daily_dwell_run: 0 rows (needs static schedule + ingest_strategy=static_join)")
+
+        # ── agg_route_segment_runtime (running time per timetable segment) ──
+        # Built for every agency with a static schedule and an ingest strategy
+        # in RT_INGEST_STRATEGIES; its reader (pipeline.reports.segment_runtime)
+        # also requires the agency's live rt_field_coverage_probes verdict.
+        if builds_visit_tables:
+            _insert_visits_table(
+                agg_sql.segment_runtime_sql,
+                "agg_route_segment_runtime",
+                [
+                    "agency_id",
+                    "date",
+                    "route_code",
+                    "from_stop_id",
+                    "to_stop_id",
+                    "time_band",
+                    "to_stop_sequence",
+                    "run_sec",
+                    "scheduled_samples",
+                    "scheduled_sum_sec",
+                    "hold_eligible",
+                    "holds",
+                    "terminal_arrivals",
+                    "terminal_early",
+                ],
+                p,
+                conn,
+                scopes["agg_route_segment_runtime"],
+            )
+        else:
+            logger.info("  agg_route_segment_runtime: 0 rows (needs static schedule + ingest_strategy=static_join)")
 
         # ── agg_route_headway_daily (per-day reconstructed ACTUAL headway) ──
         # Supports a later excess-wait-time computation (actual vs. scheduled
@@ -1960,6 +2038,14 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         else:
             logger.info("  agg_static_version_summary: 0 rows (no static schedule loaded)")
 
+        # ── agg_stop_supply_days / agg_stop_supply_hourly ──
+        # From the archive alone, whatever is loaded now or ingested: every
+        # version in force keeps its rows, and a version new since the last run
+        # is added on a run that otherwise leaves the tables standing.
+        with _step(f"{stop_supply.TABLE}: build"):
+            supply_full = scopes[stop_supply.TABLE] is None or scopes[stop_supply.DAYS_TABLE] is None
+            supply_rewritten = stop_supply.rebuild(conn, ch_client, agency_id, full=supply_full)
+
         # ── ClickHouse-computed aggregates (pipeline/ch_aggregates.py) ──
         # After every Postgres builder but the scorecard, which reads their
         # copy, so one that fails above leaves ClickHouse untouched too.
@@ -1999,6 +2085,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                 rewritten.add(feed_quality.TABLE)
             else:
                 rewritten.discard(feed_quality.TABLE)
+            if supply_rewritten:
+                rewritten |= {stop_supply.DAYS_TABLE, stop_supply.TABLE}
             _record_fingerprints(conn, agency_id, plan.current, rewritten)
             _record_in_force(conn, agency_id, join)
             cur.execute(

@@ -5,7 +5,7 @@ import { RAIL_STOPS, currentStop, railPlace } from "./railStops";
 describe("RAIL_STOPS", () => {
   it("gives only the screens that switch between views any stops", () => {
     const withStops = DESTINATIONS.filter((dest) => RAIL_STOPS[dest] != null);
-    expect(withStops).toEqual(["routes", "time", "compare", "reports"]);
+    expect(withStops).toEqual(["routes", "time", "why", "compare", "reports"]);
   });
 
   it("opens each sort of the Routes table by `sort`, and each report of Time by `report`, in the screen's own order", () => {
@@ -13,9 +13,10 @@ describe("RAIL_STOPS", () => {
     expect(RAIL_STOPS.time?.map((stop) => stop.extra)).toEqual(TIME_REPORT_TYPES.map((report) => ({ report })));
   });
 
-  it("opens Compare's boards by `by` and Reports' views by `doc`", () => {
-    expect(RAIL_STOPS.compare?.map((stop) => stop.extra)).toEqual([{ by: "periods" }, { by: "agencies" }]);
-    expect(RAIL_STOPS.reports?.map((stop) => stop.extra)).toEqual([{}, { doc: "saved" }, { doc: "council" }]);
+  it("opens Why's and Compare's views by `by` and Reports' views by `doc`", () => {
+    expect(RAIL_STOPS.why?.map((stop) => stop.extra)).toEqual([{ by: "dwell_run" }, { by: "segments" }]);
+    expect(RAIL_STOPS.compare?.map((stop) => stop.extra)).toEqual([{ by: "periods" }, { by: "agencies" }, { by: "supply" }]);
+    expect(RAIL_STOPS.reports?.map((stop) => stop.extra)).toEqual([{}, { doc: "saved" }, { doc: "council" }, { doc: "revisions" }]);
   });
 });
 
@@ -28,7 +29,10 @@ describe("currentStop", () => {
     ["routes", "", "avg"],
     ["time", "report=route_forecast", "route_forecast"],
     ["time", "", "trend"],
+    ["why", "by=segments", "segments"],
+    ["why", "", "dwell_run"],
     ["compare", "by=agencies", "agencies"],
+    ["compare", "by=supply", "supply"],
     ["compare", "by=anything", "periods"],
     ["reports", "doc=saved", "saved"],
     ["reports", "doc=certificate", "reports"],
