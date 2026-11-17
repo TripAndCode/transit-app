@@ -53,56 +53,61 @@
   outline: none;
 }
 
-.scope-nowrap {
-  white-space: nowrap;
-}
-
 .scope-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2) var(--space-4);
 }
 
-.scope-sentence {
+/* The conditions as one row of labelled dropdowns, wrapping on a narrow
+   screen; Reset ends the row. */
+.scope-bar {
+  display: flex;
   flex: 1 1 420px;
-  margin: 0;
-  font-size: var(--text-base);
-  line-height: 2.3;
-  color: var(--text-secondary);
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  min-width: 0;
 }
 
-.scope-agency {
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-.scope-token-wrap {
-  display: inline-block;
-  white-space: normal;
-}
-
-/* A condition is a chip with a caret, so it reads as a control. The caret is
-   drawn, not typed, so it stays out of the button's name and the text. */
-.scope-token {
+.scope-bar__item,
+.scope-trigger-wrap {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   max-width: 100%;
-  margin: 0 2px;
-  padding: 1px 9px;
+}
+
+.scope-bar__label {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* The caret is drawn, not typed, so it stays out of the control's name. */
+.scope-bar__control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--control-h-sm);
+  padding: 0 10px;
   font: inherit;
-  font-weight: 700;
-  line-height: 1.6;
-  text-align: start;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.2;
   color: var(--text-primary);
+  white-space: nowrap;
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
+  border-radius: var(--control-radius-sm);
   cursor: pointer;
 }
 
-.scope-token::after {
+.scope-bar__control::after {
   content: "";
   flex: none;
   border-top: 5px solid var(--text-tertiary);
@@ -110,40 +115,48 @@
   border-left: 4px solid transparent;
 }
 
-.scope-token:hover,
-.scope-token[aria-expanded="true"] {
+.scope-bar__control:hover,
+.scope-bar__control[aria-expanded="true"] {
   border-color: var(--accent);
 }
 
 /* Changed from the default, so a narrowed view shows at a glance. */
-.scope-token--on {
+.scope-bar__control--changed {
   color: var(--accent-strong);
-  background: var(--accent-soft);
   border-color: var(--accent);
 }
 
-.scope-token--on::after {
+.scope-bar__control--changed::after {
   border-top-color: var(--accent);
 }
 
-.scope-token--off {
-  color: var(--text-tertiary);
-  border-style: dashed;
+.scope-bar__text {
+  min-width: 0;
+  overflow: hidden;
 }
 
-.scope-token--off .scope-token__label {
-  text-decoration: line-through;
+/* An inline-block, so a value can be cut short on its own and so English,
+   whose values are written as lowercase phrases, starts with a capital. */
+.scope-bar__value {
+  display: inline-block;
+  max-width: 18em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
 }
 
-.scope-token__hint {
+.scope-bar__value::first-letter {
+  text-transform: uppercase;
+}
+
+.scope-bar__hint {
   font-family: var(--font-num);
-  font-size: var(--text-sm);
-  font-weight: 500;
+  font-size: var(--text-xs);
+  font-weight: 400;
   color: var(--text-tertiary);
 }
 
 .scope-reset {
-  margin-left: var(--space-2);
   padding: 0;
   font: inherit;
   font-size: var(--text-sm);
@@ -179,8 +192,9 @@
   gap: var(--space-2);
 }
 
-/* The heading whose row holds the sentence's actions: their popovers measure
-   and place themselves against this row, which is as wide as the page. */
+/* The heading whose row holds the scope bar's actions: their popovers
+   measure and place themselves against this row, which is as wide as the
+   page. */
 .scope-page-head {
   position: relative;
 }
@@ -201,11 +215,6 @@
   font-size: var(--text-xs);
   font-weight: 700;
   color: var(--text-secondary);
-}
-
-.scope-strip__label--off {
-  color: var(--text-tertiary);
-  text-decoration: line-through;
 }
 
 /* A staged control's own footer: its draft commits only here, so it stays
@@ -239,29 +248,6 @@
   min-width: 0;
   font-size: var(--text-xs);
   color: var(--text-tertiary);
-}
-
-/* Decorative plates shown beside the routes token's own label text, which
-   stays exactly as scopePhrases.ts renders it (see routeTokenPlates). */
-.scope-token__plates {
-  display: inline-flex;
-  align-items: center;
-}
-
-.scope-token__plate {
-  margin-inline-start: var(--space-1);
-  background: var(--bg-surface);
-  box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-.scope-token__plate + .scope-token__plate {
-  margin-inline-start: -6px;
-}
-
-.scope-token__plate--more {
-  color: var(--on-accent);
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
 }
 
 /* BP.sm, phone width (kept in sync with styles/breakpoints.ts's BP.sm; the

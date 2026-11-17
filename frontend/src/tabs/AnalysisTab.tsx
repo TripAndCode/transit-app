@@ -4,8 +4,6 @@ import { useTranslation } from "react-i18next";
 import {
   REPORT_ROWS_MAX,
   reportQueryString,
-  useForecastHeatmap,
-  useForecastOverview,
   useReport,
   useReports,
   type ReportOptions,
@@ -14,7 +12,7 @@ import { apiUrl } from "../api/client";
 import { useJumpToLatestDataRange } from "../api/latestDataWindow";
 import { DataEndContext, defaultPeriod, scopeToQueryString, useScope, type Scope } from "../api/scope";
 import type { ReportResponse, TrendPayload } from "../api/types";
-import { ScopeSentence } from "../components/scope/ScopeSentence";
+import { ScopeBar } from "../components/scope/ScopeBar";
 import { EmptyState } from "../components/EmptyState";
 import { buildFilterCtxRecoveries, buildFilterCtxReasons } from "../components/emptyStateRecoveries";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -150,7 +148,7 @@ export function SingleReportScreen({ reportType }: { reportType: string }) {
   return <ReportScreen reportType={reportType} />;
 }
 
-/** The open report with its scope sentence, and `aside` (a report list)
+/** The open report with its scope bar, and `aside` (a report list)
  *  beside it when the screen has several. */
 function ReportScreen({ reportType, aside }: { reportType: string | null; aside?: ReactNode }) {
   const { t } = useTranslation();
@@ -173,10 +171,11 @@ function ReportScreen({ reportType, aside }: { reportType: string | null; aside?
     includeRetired: searchParams.get("retired") === "1",
     includeZeroDelay: searchParams.get("zero_delay") === "1",
   };
-  // The certificate, like route_forecast, owns its section and its queries.
-  // Its day and route are its own scope, so the screen's period sentence,
-  // which nothing on it reads, is left off.
+  // The certificate and route_forecast each own their section and its
+  // queries, and pick their own day or route there, so the scope bar,
+  // which nothing on them reads, is left off.
   const isCertificate = reportType === "delay_certificate";
+  const ownsScope = isCertificate || reportType === "route_forecast";
   const detail = useReport(
     id,
     reportType && reportType !== "route_forecast" && !isCertificate ? reportType : null,
@@ -191,22 +190,9 @@ function ReportScreen({ reportType, aside }: { reportType: string | null; aside?
     isAdmin && id != null && detail.data?.report_type === "council_summary"
       ? { screen: "council_report", agencyId: id, query: reportQueryString(ctx, rankingOptions(detail.data.report_type, kept)) }
       : null;
-  // route_forecast is served by the forecast endpoints, so their own map
-  // applies: one chosen route opens that route's forecast, which honours the
-  // route; otherwise the agency-wide overview. A report's map counts only
-  // once that report's response is the one on screen, not the previous
-  // report kept as placeholder data.
-  const forecastRoute = reportType === "route_forecast" && ctx.routes.length === 1 ? ctx.routes[0] : null;
-  const forecast = useForecastOverview(reportType === "route_forecast" ? id : null);
-  const routeForecast = useForecastHeatmap(forecastRoute != null ? id : null, forecastRoute ?? "");
-  const scopeApplied =
-    reportType === "route_forecast"
-      ? forecastRoute != null
-        ? routeForecast.data?.scope_applied
-        : forecast.data?.scope_applied
-      : detail.data?.report_type === reportType
-        ? detail.data.scope_applied
-        : undefined;
+  // A report's map counts only once that report's response is the one on
+  // screen, not the previous report kept as placeholder data.
+  const scopeApplied = detail.data?.report_type === reportType ? detail.data.scope_applied : undefined;
 
   function csvHref(type: string): string {
     return apiUrl(`/api/${id}/reports/${type}?${reportQueryString(ctx, rankingOptions(type, kept))}&format=csv`);
@@ -214,7 +200,7 @@ function ReportScreen({ reportType, aside }: { reportType: string | null; aside?
 
   return (
     <div className="analysis-tab" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {!isCertificate && <ScopeSentence applied={scopeApplied} />}
+      {!ownsScope && <ScopeBar applied={scopeApplied} />}
       <div className="analysis-body" style={{ display: "flex", gap: 16, flex: 1, minHeight: 0 }}>
       {aside}
 

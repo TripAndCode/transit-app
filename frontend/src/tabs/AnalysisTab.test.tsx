@@ -146,7 +146,7 @@ describe("AnalysisTab", () => {
     expect(screen.getByText("few data")).toHaveClass("caveat-badge");
   });
 
-  it("greys the scope conditions the open report did not use", () => {
+  it("hides the scope conditions the open report did not use", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({
@@ -156,43 +156,12 @@ describe("AnalysisTab", () => {
       refetch: vi.fn(),
     } as never);
     renderAnalysis("/agencies/1/analysis/when?report=dow_weekday&dow=weekday&routes=R1", ["dow_weekday"]);
-    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "weekdays" })).toHaveClass("scope-token--off");
-    expect(screen.getByRole("button", { name: /R1/ })).not.toHaveClass("scope-token--off");
+    const bar = within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar.queryByRole("button", { name: /^Days/ })).toBeNull();
+    expect(bar.getByRole("button", { name: /^Routes/ })).toBeInTheDocument();
   });
 
-  it("greys by the forecast's own scope on the route forecast, not the last report's", () => {
-    mockSupportHooks();
-    vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "useReport").mockReturnValue({
-      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, time_band: true } },
-      isFetching: false,
-      error: null,
-      refetch: vi.fn(),
-    } as never);
-    vi.spyOn(hooks, "useForecastOverview").mockReturnValue({
-      data: {
-        grid: [],
-        worst: null,
-        routes: [],
-        forecast_days: [],
-        history_from: null,
-        history_to: null,
-        recent_from: null,
-        recent_to: null,
-        disclaimer: "",
-        scope_applied: { from: false, to: false, dow: false, time_band: false, routes: false },
-      },
-      isPending: false,
-      error: null,
-      refetch: vi.fn(),
-    } as never);
-    vi.spyOn(hooks, "useForecastHeatmap").mockReturnValue({ data: undefined, isPending: false, error: null, refetch: vi.fn() } as never);
-    renderAnalysis("/agencies/1/analysis/when?report=route_forecast&time_band=morning", ["dow_weekday", "route_forecast"]);
-    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
-  });
-
-  it("counts a chosen route as used on the route forecast, whose route view honours it", () => {
+  it("shows no scope bar on the route forecast, whose route picker is its own control", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [], isLoading: false, error: null, refetch: vi.fn() } as never);
     vi.spyOn(hooks, "useReport").mockReturnValue({ data: undefined, isFetching: false, error: null, refetch: vi.fn() } as never);
@@ -227,20 +196,46 @@ describe("AnalysisTab", () => {
       refetch: vi.fn(),
     } as never);
     renderAnalysis("/agencies/1/analysis/when?report=route_forecast&routes=44242", ["route_forecast"]);
-    expect(screen.getByText(/Not used on this screen/)).not.toHaveTextContent("Routes");
+    expect(document.querySelector(".scope-bar")).toBeNull();
+    expect(screen.queryByRole("region", { name: "What you're viewing" })).toBeNull();
   });
 
-  it("greys nothing while a different report's response is still on screen", () => {
+  it("keeps the previous report's hidden conditions while a new report's response is still on screen, then follows the new report once it answers", async () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useReports").mockReturnValue({ data: [reportMeta("trend"), reportMeta("dow_weekday")], isLoading: false, error: null, refetch: vi.fn() } as never);
-    vi.spyOn(hooks, "useReport").mockReturnValue({
-      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false } },
+    const useReport = vi.spyOn(hooks, "useReport").mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, service: false } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    const { router } = renderAnalysis("/agencies/1/analysis/when?report=dow_weekday&dow=weekday", ["trend", "dow_weekday"]);
+    const bar = () => within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar().queryByRole("button", { name: /^Days/ })).toBeNull();
+
+    // Switching to "trend" leaves its own answer still in flight: react-query
+    // keeps the previous report's data on screen (`detail.data.report_type`
+    // not yet "trend"), so this component's own `scopeApplied` goes `undefined`
+    // for this render. The bar is not told anything changed, so it keeps
+    // showing what it last knew rather than flashing every condition back on.
+    useReport.mockReturnValue({
+      data: { ...reportResponse("dow_weekday"), scope_applied: { from: true, to: true, dow: false, service: false } },
       isFetching: true,
       error: null,
       refetch: vi.fn(),
     } as never);
-    renderAnalysis("/agencies/1/analysis/when?report=trend&dow=weekday", ["trend", "dow_weekday"]);
-    expect(screen.getByRole("button", { name: "weekdays" })).not.toHaveClass("scope-token--off");
+    await act(() => router.navigate("/agencies/1/analysis/when?report=trend"));
+    expect(bar().queryByRole("button", { name: /^Days/ })).toBeNull();
+
+    // Once "trend" answers for itself, the bar follows its own scope_applied.
+    useReport.mockReturnValue({
+      data: { ...reportResponse("trend"), scope_applied: { from: true, to: true, dow: true, service: true } },
+      isFetching: false,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    await act(() => router.navigate("/agencies/1/analysis/when?report=trend&v=2"));
+    expect(bar().getByRole("button", { name: /^Days/ })).toBeInTheDocument();
   });
 
   it("lists only the report types it is given", () => {
@@ -1326,11 +1321,11 @@ describe("AnalysisTab delay record", () => {
     expect(screen.getByText(STAFF_LIST).closest("details")).not.toHaveAttribute("open");
   });
 
-  it("leaves the screen's period sentence off the record, whose own day and route are its scope", async () => {
+  it("leaves the screen's period bar off the record, whose own day and route are its scope", async () => {
     const { router } = showCertificate(["council_summary", "delay_certificate"]);
-    expect(document.querySelector(".scope-sentence")).toBeNull();
+    expect(document.querySelector(".scope-bar")).toBeNull();
     await act(() => router.navigate("/agencies/1/analysis/reports?report=council_summary"));
-    expect(document.querySelector(".scope-sentence")).not.toBeNull();
+    expect(document.querySelector(".scope-bar")).not.toBeNull();
   });
 
   it("labels the late departures by the day their rows are for, not a day still loading", async () => {

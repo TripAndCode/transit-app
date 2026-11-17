@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -67,11 +67,15 @@ describe("ReportsHomeTab", () => {
     vi.restoreAllMocks();
   });
 
-  it("states its scope as a sentence, greying what the trend did not use", () => {
-    mockReports({ ...trendResponse(), scope_applied: { from: true, to: true, time_band: false } } as ReportResponse, rankingResponse());
+  it("hides the scope conditions the trend did not use", () => {
+    mockReports(
+      { ...trendResponse(), scope_applied: { from: true, to: true, time_band: false, hour: false } } as ReportResponse,
+      rankingResponse(),
+    );
     renderTab("/agencies/1/reports?time_band=morning");
-    expect(screen.getByRole("region", { name: "What you're viewing" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Morning (05–09)" })).toHaveClass("scope-token--off");
+    const bar = within(screen.getByRole("region", { name: "What you're viewing" }));
+    expect(bar.queryByRole("button", { name: /^Time/ })).toBeNull();
+    expect(bar.getByRole("button", { name: /^Period/ })).toBeInTheDocument();
   });
 
   it("writes its period the way the rest of the page writes dates", () => {

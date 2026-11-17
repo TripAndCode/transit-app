@@ -1,10 +1,10 @@
 .focused-overview .ops-header { flex-wrap: wrap; }
 .focused-overview .ops-heading h1 { font: 650 28px/1.4 var(--font-body, sans-serif); }
 .focused-overview .ops-freshness { margin-left: auto; }
-/* The page's column gap already spaces the scope sentence from the map. */
+/* The page's column gap already spaces the scope bar from the map. */
 .focused-overview > .scope { margin-bottom: 0; }
 /* The subtraction is the chrome above the workspace: the page header, the
-   scope sentence's row and the column gaps. This rule, not the base
+   scope bar's row and the column gaps. This rule, not the base
    `.ops-workspace` one, is what sizes this screen -- it overrides height,
    min-height and max-height together. */
 .focused-overview .ops-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 11px var(--ops-queue-width, 380px); flex: 1; height: auto; min-height: 340px; max-height: calc(100dvh - 150px); border: 0; background: var(--bg-surface); }

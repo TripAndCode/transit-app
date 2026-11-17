@@ -17,13 +17,14 @@ export function applyLiveScopePatch(prev: URLSearchParams, patch: ScopePatch): U
 }
 
 /** What Live counts by: the routes and the on-time window. It shows the
- *  trips reporting now, so no day, time or timetable condition narrows it.
- *  The period is left out rather than marked unused: Live's sentence says
- *  "live" in its place, so naming it unused would repeat that on every visit. */
+ *  trips reporting now, so no period, day, time or timetable condition
+ *  narrows it. */
 export const LIVE_SCOPE_APPLIED: ScopeApplied = {
   routes: true,
   late: true,
   early: true,
+  from: false,
+  to: false,
   dow: false,
   time_band: false,
   hour: false,
