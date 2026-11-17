@@ -88,14 +88,14 @@ def _write_poll(folder, day: date, trip_id: str, route: str, hh: int, delay: int
 
 @pytest.fixture
 def revised(pg_conn, ch_client, tmp_path) -> tuple[int, date]:
-    """A revision at least a week before yesterday, with every weekday from a
-    week before it through yesterday polled and analyzed. It is moved back
-    until neither week holds a public holiday: a holiday weekday pools with
+    """A revision at least a week before yesterday, with every weekday from
+    two weeks before it through yesterday polled and analyzed. It is moved
+    back until none of those weeks holds a public holiday: a holiday weekday pools with
     Sundays, and two in one week would take a route under the floor of
     weekday observations."""
     yesterday = jst_today() - timedelta(days=1)
     revision = yesterday - timedelta(days=7)
-    while public_holidays_between(revision - timedelta(days=7), revision + timedelta(days=6)):
+    while public_holidays_between(revision - timedelta(days=14), revision + timedelta(days=6)):
         revision -= timedelta(days=1)
     with pg_conn.cursor() as cur:
         cur.execute(
@@ -112,7 +112,9 @@ def revised(pg_conn, ch_client, tmp_path) -> tuple[int, date]:
     load_static(a, agency_id, pg_conn, ch_client=ch_client)
     load_static(b, agency_id, pg_conn, ch_client=ch_client)
     folder = tmp_path / "archive"
-    day = revision - timedelta(days=7)
+    # Two weeks before it, so the agency's aggregated history holds a whole
+    # week before the revision whichever weekday it starts on.
+    day = revision - timedelta(days=14)
     while day <= yesterday:
         if day.weekday() < 5:
             for trip_id, (route, hh) in (_A if day < revision else _B).items():
@@ -150,9 +152,13 @@ async def test_each_routes_timetable_and_observed_shift_across_the_revision(revi
     assert response.status_code == 200
     body = response.json()
     assert body["available"] is True and body["day_type_known"] is True
-    assert body["full_through"] == (revision + timedelta(days=27)).isoformat()
+    # The agency's history before the revision is under four weeks, so it holds the cap.
+    cap = body["weeks_cap"]
+    assert 1 <= cap < 4 and body["capped_by"] == "history"
+    assert body["full_through"] == (revision + timedelta(days=7 * cap - 1)).isoformat()
     window = body["window"]
-    assert window["weeks"] >= 1 and window["complete"] is (window["weeks"] == 4)
+    assert 1 <= window["weeks"] <= cap
+    assert body["complete"] is (window["weeks"] == cap)
     assert window["before_last"] == (revision - timedelta(days=1)).isoformat()
     assert window["after_first"] == revision.isoformat()
 

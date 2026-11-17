@@ -31,12 +31,11 @@ from pipeline.reports.revision_effects import (
     Side,
     Tally,
     Windows,
+    aggregated_days,
     class_tallies,
-    full_through,
-    last_aggregated_day,
     load_observed,
     load_route_timetables,
-    windows,
+    plan,
 )
 from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.timetable_diff import (
@@ -420,7 +419,6 @@ class WindowOut(BaseModel):
     """The whole weeks pooled on each side, both ends inclusive."""
 
     weeks: int
-    complete: bool
     before_first: date
     before_last: date
     after_first: date
@@ -428,15 +426,24 @@ class WindowOut(BaseModel):
 
 
 class RevisionRoutesResponse(BaseModel):
-    """What a revision did to each route on one day type. ``full_through``
-    is the last day the after side needs aggregated for four whole weeks.
-    ``definition`` stamps the observed figures and is None without them."""
+    """What a revision did to each route on one day type.
+
+    ``weeks_cap`` is how many whole weeks each side can ever pool, up to four;
+    ``capped_by`` says what holds it under four for good: ``timetable`` (a
+    timetable's span) or ``history`` (the agency's aggregated days before
+    the revision). ``full_through`` is the last date the after side needs
+    aggregated to reach the cap, None for a cap under one week. ``complete``
+    is whether ``window`` pools the cap. ``definition`` stamps the observed
+    figures and is None without them."""
 
     available: bool
     reason: Literal["no_revision", "no_calendar"] | None = None
     day_type: RevisionDayType
     day_type_known: bool = False
+    weeks_cap: int = 0
+    capped_by: Literal["timetable", "history"] | None = None
     full_through: date | None = None
+    complete: bool = False
     window: WindowOut | None = None
     routes: list[RouteRowOut] = []
     classes: list[ClassOut] = []
@@ -482,7 +489,6 @@ def _class(c: ClassTally) -> ClassOut:
 def _window(spans: Windows) -> WindowOut:
     return WindowOut(
         weeks=spans.weeks,
-        complete=spans.complete,
         before_first=spans.before[0],
         before_last=spans.before[1],
         after_first=spans.after[0],
@@ -504,7 +510,7 @@ async def revision_routes(
     ch: AsyncClient = Depends(get_ch),
 ) -> RevisionRoutesResponse:
     """What a revision did to each route on one day type
-    (pipeline.reports.revision_effects): its trips, first and last trip and
+    (pipeline.reports.revision_effects): its trips, last trip and
     longest gap at its main stop on the typical days before and after, and,
     once a whole week after it is aggregated, its observed on-time rate and
     mean delay over the same whole weeks on each side, with each class of
@@ -517,7 +523,8 @@ async def revision_routes(
     timetables = await load_route_timetables(ch, agency_id, revision)
     if isinstance(timetables, Unavailable):
         return RevisionRoutesResponse(available=False, reason="no_calendar", day_type=day_type)
-    spans = windows(revision, await last_aggregated_day(conn, agency_id))
+    weeks = plan(revision, *await aggregated_days(conn, agency_id))
+    spans = weeks.windows
     observed = {} if spans is None else await load_observed(conn, agency_id, spans)
     on_day, classes = timetables.on(day_type)
     changes = sorted(on_day, key=lambda c: (c.trips_after - c.trips_before, c.route_code))
@@ -531,7 +538,10 @@ async def revision_routes(
         available=True,
         day_type=day_type,
         day_type_known=day_type in timetables.known,
-        full_through=full_through(revision),
+        weeks_cap=weeks.cap,
+        capped_by=weeks.capped_by,
+        full_through=weeks.full_through,
+        complete=weeks.complete,
         window=None if spans is None else _window(spans),
         routes=[_route_row(c, classes[c.route_code], names, observed, spans) for c in changes],
         classes=[] if spans is None else [_class(c) for c in class_tallies(observed, classes, day_type)],

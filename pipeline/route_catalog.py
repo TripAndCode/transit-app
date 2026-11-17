@@ -28,8 +28,8 @@ from pipeline.histogram import bucketize
 
 # The route_code a static route's id maps to. Aomori's ids carry the code in a
 # parenthesised tail ('国道・古川線(1021)'); every other feed's id is its code,
-# which the replace leaves as it is. One pattern for Postgres and ClickHouse
-# (pipeline.reports.revision_effects binds it there).
+# which the replace leaves as it is. Postgres and ClickHouse read the one
+# pattern, so an aggregate's route code and an archived route's agree.
 ROUTE_CODE_PATTERN = r".*\((\d+)\)$"
 ROUTE_CODE_REPLACEMENT = r"\1"
 ROUTE_CODE_SQL = f"regexp_replace({{route_id}}, '{ROUTE_CODE_PATTERN}', '{ROUTE_CODE_REPLACEMENT}')"

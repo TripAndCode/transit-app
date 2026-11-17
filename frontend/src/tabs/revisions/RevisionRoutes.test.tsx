@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import type { DefinitionMeta, RevisionRouteRow, RevisionTally, TimetableRevisionRoutes } from "../../api/types";
@@ -51,8 +51,11 @@ const OBSERVED: TimetableRevisionRoutes = {
   reason: null,
   day_type: "weekday",
   day_type_known: true,
+  weeks_cap: 4,
+  capped_by: null,
   full_through: "2026-04-28",
-  window: { weeks: 4, complete: true, before_first: "2026-03-04", before_last: "2026-03-31", after_first: "2026-04-01", after_last: "2026-04-28" },
+  complete: true,
+  window: { weeks: 4, before_first: "2026-03-04", before_last: "2026-03-31", after_first: "2026-04-01", after_last: "2026-04-28" },
   routes: [route({}), route({ route_code: "R2", route_class: "unchanged", observed_before: tally(null, null, 40), observed_after: tally(90, 45, 120, true) })],
   classes: [
     { route_class: "cut", routes: 1, before: tally(0, 400), after: tally(100, 30) },
@@ -83,7 +86,8 @@ describe("RevisionRoutes", () => {
 
   it("compares each route's timetable and how it ran over the same weeks on each side", async () => {
     const fetchMock = render(OBSERVED);
-    expect(await screen.findByText(/four weeks on each side/)).toBeInTheDocument();
+    expect(await screen.findByText(/over the same 4 whole weeks on each side/)).toBeInTheDocument();
+    expect(screen.queryByText(/aggregated through/)).not.toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/timetable-revisions/routes?on=2026-04-01&day_type=weekday"))).toBe(true);
     const r1 = screen.getAllByText("Fewer trips").map((cell) => cell.closest("tr")!).find((row) => row.textContent?.includes("Station"))!;
     expect(r1).toHaveTextContent("6 → 5");
@@ -98,20 +102,52 @@ describe("RevisionRoutes", () => {
   });
 
   it("says when the observed side appears, before a whole week after the revision is aggregated", async () => {
-    render({ ...OBSERVED, window: null, classes: [], definition: null, routes: [route({ observed_before: null, observed_after: null })] });
-    expect(await screen.findByText(/once a whole week after it is aggregated/)).toBeInTheDocument();
+    render({ ...OBSERVED, complete: false, window: null, classes: [], definition: null, routes: [route({ observed_before: null, observed_after: null })] });
+    expect(await screen.findByText(/once a whole week after it is aggregated\. All 4 whole weeks .* through/)).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "On-time rate" })).not.toBeInTheDocument();
     expect(screen.getByText("Fewer trips")).toBeInTheDocument();
   });
 
-  it("labels a window short of four weeks with how many it holds", async () => {
-    render({ ...OBSERVED, window: { ...OBSERVED.window!, weeks: 2, complete: false } });
-    expect(await screen.findByText(/over 2 of the four weeks/)).toBeInTheDocument();
+  it("labels a window short of its cap with how many it holds and when the rest arrive", async () => {
+    render({ ...OBSERVED, complete: false, window: { ...OBSERVED.window!, weeks: 2 } });
+    expect(await screen.findByText(/over 2 of the 4 whole weeks on each side so far.*All 4 are aggregated through/)).toBeInTheDocument();
   });
 
-  it("says a day type with no typical day on one side is not compared", async () => {
+  it("promises no date past a timetable that caps the comparison, and says why it stops", async () => {
+    render({ ...OBSERVED, weeks_cap: 2, capped_by: "timetable", full_through: "2026-04-14", complete: true, window: { ...OBSERVED.window!, weeks: 2 } });
+    const status = await screen.findByText(/over the same 2 whole weeks on each side/);
+    expect(status).toHaveTextContent("A timetable on one side is in force for under four weeks");
+    expect(status).not.toHaveTextContent(/aggregated through/);
+  });
+
+  it("says no whole week can be compared when the cap is under a week", async () => {
+    render({ ...OBSERVED, weeks_cap: 0, capped_by: "timetable", full_through: null, complete: false, window: null, classes: [], definition: null });
+    expect(await screen.findByText(/There is no whole week to compare/)).toBeInTheDocument();
+    expect(screen.queryByText(/once a whole week/)).not.toBeInTheDocument();
+  });
+
+  it("names the agency's history when it holds the cap", async () => {
+    render({ ...OBSERVED, weeks_cap: 1, capped_by: "history", full_through: "2026-04-07", complete: true, window: { ...OBSERVED.window!, weeks: 1 } });
+    expect(await screen.findByText(/aggregated days before the revision hold under four weeks/)).toBeInTheDocument();
+  });
+
+  it("lists fifty routes and offers the rest", async () => {
+    const many = Array.from({ length: 51 }, (_, i) => route({ route_code: `X${i}`, main_stop_name: `Stop ${i}` }));
+    render({ ...OBSERVED, routes: many });
+    await screen.findByText(/Stop 0/);
+    expect(screen.queryByText(/Stop 50/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show all 51 routes" }));
+    expect(screen.getByText(/Stop 50/)).toBeInTheDocument();
+  });
+
+  it("leaves an unknown day type to the stop comparison's explanation", async () => {
     render({ ...OBSERVED, day_type_known: false, routes: [] });
-    expect(await screen.findByText(/has no day of that type in force/)).toBeInTheDocument();
+    const heading = await screen.findByRole("heading", { name: "Routes" });
+    // The response has arrived once the section holds its (empty) body.
+    await waitFor(() => expect(heading.parentElement!.querySelector("[aria-busy]")).not.toBeNull());
+    expect(heading.parentElement!.querySelector("[aria-busy]")).toBeEmptyDOMElement();
+    expect(screen.queryByText(/has no day of that type in force/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
   it("says no route runs on a day type neither timetable serves", async () => {

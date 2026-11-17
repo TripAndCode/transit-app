@@ -36,15 +36,12 @@ from pipeline.reports.timetable_diff import (
 )
 from pipeline.route_catalog import ROUTE_CODE_PATTERN, ROUTE_CODE_REPLACEMENT
 
-# ── the timetable side ──────────────────────────────────────────────────────
-
 
 class RouteDay(NamedTuple):
-    """One route's trips on one side's typical day, with its first and last
-    trip's start in seconds after the service day's midnight."""
+    """One route's trips on one side's typical day, with its last trip's start
+    in seconds after the service day's midnight."""
 
     trips: int
-    first_start: int
     last_start: int
 
 
@@ -71,13 +68,9 @@ class RouteChange(NamedTuple):
     day_type: RevisionDayType
     trips_before: int
     trips_after: int
-    first_before: int | None
-    first_after: int | None
     last_before: int | None
     last_after: int | None
     main_stop: str | None
-    main_departures_before: int
-    main_departures_after: int
     longest_gap_before: int | None
     longest_gap_after: int | None
 
@@ -117,13 +110,9 @@ def route_changes(
                     day_type,
                     b.trips if b else 0,
                     a.trips if a else 0,
-                    b.first_start if b else None,
-                    a.first_start if a else None,
                     b.last_start if b else None,
                     a.last_start if a else None,
                     stop,
-                    gb.departures if gb else 0,
-                    ga.departures if ga else 0,
                     gb.longest_gap if gb else None,
                     ga.longest_gap if ga else None,
                 )
@@ -164,7 +153,7 @@ _DAY_TYPE_JOIN = (
 # A trip starts at its earliest timed departure; a trip with no route, service
 # or timed stop is no route's trip.
 _ROUTE_TRIPS_SQL = f"""
-    SELECT dt, route_code, toInt64(count()), min(start_sec), max(start_sec)
+    SELECT dt, route_code, toInt64(count()), max(start_sec)
     FROM (
         SELECT s.trip_id AS trip_id, any({_ROUTE_CODE_CH}) AS route_code,
                any(assumeNotNull(s.service_type)) AS service, min(assumeNotNull(s.scheduled_sec)) AS start_sec
@@ -178,47 +167,52 @@ _ROUTE_TRIPS_SQL = f"""
 """
 
 # A departure as the stop comparison counts one: not at the trip's last stop,
-# and at a timed stop.
+# and at a timed stop. One row per day type and route, its stops in an array,
+# so the result stays within the API client's max_result_rows.
 _STOP_GAPS_SQL = f"""
-    SELECT dt, route_code, stop_id, toInt64(length(secs)),
-           if(length(secs) < 2, NULL, arrayMax(arrayPopFront(arrayDifference(secs))))
+    SELECT dt, route_code, groupArray((stop_id, departures, gap))
     FROM (
-        SELECT dt, route_code, stop_id, arraySort(groupArray(sec)) AS secs
+        SELECT dt, route_code, stop_id, toInt64(length(secs)) AS departures,
+               if(length(secs) < 2, NULL, arrayMax(arrayPopFront(arrayDifference(secs)))) AS gap
         FROM (
-            SELECT st.stop_id AS stop_id, {_ROUTE_CODE_CH} AS route_code,
-                   assumeNotNull(s.service_type) AS service, assumeNotNull(s.scheduled_sec) AS sec
-            FROM {static_archive.SCHEDULE} AS s
-            INNER JOIN (
-                SELECT trip_id, stop_sequence, stop_id,
-                       max(stop_sequence) OVER (PARTITION BY trip_id) AS last_sequence
-                FROM {static_archive.ARCHIVE}
-                WHERE agency_id = {{agency:Int32}} AND content_hash = {{content:String}}
-            ) AS st ON st.trip_id = s.trip_id AND st.stop_sequence = s.stop_sequence
-            WHERE s.agency_id = {{agency:Int32}} AND s.content_hash = {{content:String}}
-              AND s.route_id IS NOT NULL AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
-              AND st.stop_sequence < st.last_sequence
+            SELECT dt, route_code, stop_id, arraySort(groupArray(sec)) AS secs
+            FROM (
+                SELECT st.stop_id AS stop_id, {_ROUTE_CODE_CH} AS route_code,
+                       assumeNotNull(s.service_type) AS service, assumeNotNull(s.scheduled_sec) AS sec
+                FROM {static_archive.SCHEDULE} AS s
+                INNER JOIN (
+                    SELECT trip_id, stop_sequence, stop_id,
+                           max(stop_sequence) OVER (PARTITION BY trip_id) AS last_sequence
+                    FROM {static_archive.ARCHIVE}
+                    WHERE agency_id = {{agency:Int32}} AND content_hash = {{content:String}}
+                ) AS st ON st.trip_id = s.trip_id AND st.stop_sequence = s.stop_sequence
+                WHERE s.agency_id = {{agency:Int32}} AND s.content_hash = {{content:String}}
+                  AND s.route_id IS NOT NULL AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
+                  AND st.stop_sequence < st.last_sequence
+            )
+            {_DAY_TYPE_JOIN}
+            GROUP BY dt, route_code, stop_id
         )
-        {_DAY_TYPE_JOIN}
-        GROUP BY dt, route_code, stop_id
     )
+    GROUP BY dt, route_code
 """
 
 
 def route_counts_of(rows: Iterable[tuple]) -> dict[RevisionDayType, dict[str, RouteDay]]:
     """_ROUTE_TRIPS_SQL's rows as RouteCounts."""
     out: dict[RevisionDayType, dict[str, RouteDay]] = {day_type: {} for day_type in DAY_TYPES}
-    for index, route, trips, first, last in rows:
-        out[DAY_TYPES[index - 1]][route] = RouteDay(int(trips), int(first), int(last))
+    for index, route, trips, last in rows:
+        out[DAY_TYPES[index - 1]][route] = RouteDay(int(trips), int(last))
     return out
 
 
 def stop_counts_of(rows: Iterable[tuple]) -> dict[RevisionDayType, dict[str, dict[str, StopGaps]]]:
     """_STOP_GAPS_SQL's rows as StopCounts."""
     out: dict[RevisionDayType, dict[str, dict[str, StopGaps]]] = {day_type: {} for day_type in DAY_TYPES}
-    for index, route, stop_id, departures, gap in rows:
-        out[DAY_TYPES[index - 1]].setdefault(route, {})[stop_id] = StopGaps(
-            int(departures), None if gap is None else int(gap)
-        )
+    for index, route, stops in rows:
+        out[DAY_TYPES[index - 1]][route] = {
+            stop_id: StopGaps(int(departures), None if gap is None else int(gap)) for stop_id, departures, gap in stops
+        }
     return out
 
 
@@ -237,7 +231,6 @@ async def _query(ch, sql: str, agency_id: int, content: str, days: Mapping[Revis
 
 
 class RouteTimetables(NamedTuple):
-    revision: Revision
     known: tuple[RevisionDayType, ...]
     changes: tuple[RouteChange, ...]
 
@@ -247,7 +240,8 @@ class RouteTimetables(NamedTuple):
         return changes, route_classes(changes)
 
 
-# Keyed by the revision, which fixes its timetables (load_comparison's cache).
+# A revision names both contents and both calendar digests, which together fix
+# its timetables, so an entry never goes stale through a rebuild.
 @async_lru_cache(maxsize=16, ttl_seconds=24 * 3600, agency_arg="agency_id", rebuild="never")
 async def load_route_timetables(ch, agency_id: int, revision: Revision) -> RouteTimetables | Unavailable:
     """Every route's timetable on both sides of *revision*, or why there is
@@ -269,10 +263,8 @@ async def load_route_timetables(ch, agency_id: int, revision: Revision) -> Route
         stop_counts_of(after_stops),
         known,
     )
-    return RouteTimetables(revision, known, tuple(changes))
+    return RouteTimetables(known, tuple(changes))
 
-
-# ── the observed side ───────────────────────────────────────────────────────
 
 # How many whole weeks on each side the observed figures pool at most: four,
 # enough for a month of each weekday to settle.
@@ -288,32 +280,54 @@ class Windows(NamedTuple):
     before: tuple[date, date]
     after: tuple[date, date]
 
+
+Cap = Literal["timetable", "history"]
+
+
+class Plan(NamedTuple):
+    """How many whole weeks a revision's sides can ever pool (*cap*), up to
+    WEEKS, and the weeks they pool now. *capped_by* names what holds *cap*
+    under WEEKS for good: the timetables' spans, or the agency's aggregated
+    history before the revision; None when it is WEEKS. *full_through* is the
+    last date the after side needs aggregated to reach *cap*, None for a cap
+    under one week. *windows* is None until a whole week is aggregated."""
+
+    cap: int
+    capped_by: Cap | None
+    full_through: date | None
+    windows: Windows | None
+
     @property
     def complete(self) -> bool:
-        return self.weeks == WEEKS
+        return self.windows is not None and self.windows.weeks == self.cap
 
 
-def windows(revision: Revision, last_data_day: date | None) -> Windows | None:
-    """The weeks pooled on each side of *revision*: as many whole weeks, up to
-    WEEKS, as both the timetable before it and the aggregated days after it,
-    which end on *last_data_day*, hold. None when either holds less than one."""
-    if last_data_day is None:
-        return None
-    before_weeks = ((revision.before.last - revision.before.first).days + 1) // 7
-    after_end = min(revision.after.last, last_data_day)
-    after_weeks = ((after_end - revision.first_day).days + 1) // 7
-    weeks = min(WEEKS, before_weeks, after_weeks)
+def _weeks(first: date, last: date) -> int:
+    return max(0, ((last - first).days + 1) // 7)
+
+
+def plan(revision: Revision, first_data_day: date | None, last_data_day: date | None) -> Plan:
+    """The weeks pooled on each side of *revision*. The before side holds as
+    many whole weeks as the timetable before it was in force and aggregated,
+    from *first_data_day*; the after side as many as the timetable after it
+    is in force, of which those through *last_data_day* are aggregated now."""
+    before_first = revision.before.first if first_data_day is None else max(revision.before.first, first_data_day)
+    timetable_cap = min(
+        WEEKS, _weeks(revision.before.first, revision.before.last), _weeks(revision.first_day, revision.after.last)
+    )
+    cap = min(timetable_cap, _weeks(before_first, revision.before.last))
+    capped_by: Cap | None = None if cap == WEEKS else "timetable" if cap == timetable_cap else "history"
+    full = None if cap < 1 else revision.first_day + timedelta(days=7 * cap - 1)
+    weeks = (
+        0 if last_data_day is None else min(cap, _weeks(revision.first_day, min(revision.after.last, last_data_day)))
+    )
     if weeks < 1:
-        return None
+        return Plan(cap, capped_by, full, None)
     span = timedelta(days=7 * weeks - 1)
-    return Windows(
+    spans = Windows(
         weeks, (revision.before.last - span, revision.before.last), (revision.first_day, revision.first_day + span)
     )
-
-
-def full_through(revision: Revision) -> date:
-    """The last date the after side needs aggregated for WEEKS whole weeks."""
-    return revision.first_day + timedelta(days=7 * WEEKS - 1)
+    return Plan(cap, capped_by, full, spans)
 
 
 class Tally(NamedTuple):
@@ -402,8 +416,10 @@ _OBSERVED_SQL = f"""
 """
 
 
-async def last_aggregated_day(conn, agency_id: int) -> date | None:
-    return await conn.fetchval("SELECT max(date) FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
+async def aggregated_days(conn, agency_id: int) -> tuple[date | None, date | None]:
+    """The agency's first and last aggregated service dates."""
+    row = await conn.fetchrow("SELECT min(date), max(date) FROM agg_route_daily_dist WHERE agency_id = $1", agency_id)
+    return row[0], row[1]
 
 
 @async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")

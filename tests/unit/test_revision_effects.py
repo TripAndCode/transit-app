@@ -7,20 +7,20 @@ from datetime import date
 import pytest
 
 from pipeline.reports.revision_effects import (
+    Plan,
     RouteChange,
     RouteDay,
     StopGaps,
     Tally,
     Windows,
     class_tallies,
-    full_through,
     main_stop,
+    plan,
     pool,
     route_changes,
     route_classes,
     route_counts_of,
     stop_counts_of,
-    windows,
 )
 from pipeline.reports.timetable_diff import Revision, Run
 
@@ -28,9 +28,6 @@ REVISION = Revision(
     Run(date(2026, 1, 1), date(2026, 3, 31), "v1", "c1", "d1"),
     Run(date(2026, 4, 1), date(2026, 9, 30), "v2", "c2", "d2"),
 )
-
-
-# ── main stop and route changes ─────────────────────────────────────────────
 
 
 def test_the_main_stop_is_the_one_departed_most_before_lowest_id_on_a_tie():
@@ -44,44 +41,39 @@ def test_a_route_new_after_the_revision_is_measured_at_its_after_sides_main_stop
 
 
 def test_the_gap_is_compared_at_one_stop_on_both_sides():
-    before = {"weekday": {"R1": RouteDay(10, 21600, 75600)}}
-    after = {"weekday": {"R1": RouteDay(6, 21600, 72000)}}
+    before = {"weekday": {"R1": RouteDay(10, 75600)}}
+    after = {"weekday": {"R1": RouteDay(6, 72000)}}
     # The after side's busiest stop is another one; the gap is still read at the before side's.
     before_stops = {"weekday": {"R1": {"S1": StopGaps(10, 3600), "S2": StopGaps(8, 3600)}}}
     after_stops = {"weekday": {"R1": {"S1": StopGaps(5, 7200), "S2": StopGaps(6, 5400)}}}
     [change] = route_changes(before, after, before_stops, after_stops, ["weekday"])
     assert change.main_stop == "S1"
-    assert (change.main_departures_before, change.main_departures_after) == (10, 5)
     assert (change.longest_gap_before, change.longest_gap_after) == (3600, 7200)
     assert (change.trips_before, change.trips_after, change.last_before, change.last_after) == (10, 6, 75600, 72000)
 
 
 def test_a_route_gone_after_the_revision_keeps_its_before_side_and_none_after():
-    before = {"saturday": {"R9": RouteDay(4, 30000, 60000)}}
+    before = {"saturday": {"R9": RouteDay(4, 60000)}}
     before_stops = {"saturday": {"R9": {"S1": StopGaps(4, 9000)}}}
     [change] = route_changes(before, {}, before_stops, {}, ["saturday"])
-    assert (change.trips_before, change.trips_after, change.first_after, change.longest_gap_after) == (4, 0, None, None)
-    assert change.main_departures_after == 0
+    assert (change.trips_before, change.trips_after, change.last_after, change.longest_gap_after) == (4, 0, None, None)
 
 
 def test_only_the_day_types_given_are_compared():
-    before = {"weekday": {"R1": RouteDay(1, 1, 1)}, "saturday": {"R1": RouteDay(1, 1, 1)}}
+    before = {"weekday": {"R1": RouteDay(1, 1)}, "saturday": {"R1": RouteDay(1, 1)}}
     assert {c.day_type for c in route_changes(before, before, {}, {}, ["weekday"])} == {"weekday"}
 
 
 def test_the_archive_rows_read_by_day_type_in_their_order():
-    routes = route_counts_of([(1, "R1", 5, 21600, 72000), (3, "R1", 2, 30000, 50000)])
-    assert routes["weekday"]["R1"] == RouteDay(5, 21600, 72000)
-    assert routes["sunday_holiday"]["R1"] == RouteDay(2, 30000, 50000)
-    stops = stop_counts_of([(2, "R1", "S1", 1, None), (2, "R1", "S2", 3, 1800)])
+    routes = route_counts_of([(1, "R1", 5, 72000), (3, "R1", 2, 50000)])
+    assert routes["weekday"]["R1"] == RouteDay(5, 72000)
+    assert routes["sunday_holiday"]["R1"] == RouteDay(2, 50000)
+    stops = stop_counts_of([(2, "R1", [("S1", 1, None), ("S2", 3, 1800)])])
     assert stops["saturday"]["R1"] == {"S1": StopGaps(1, None), "S2": StopGaps(3, 1800)}
 
 
-# ── route classes ───────────────────────────────────────────────────────────
-
-
 def _change(route: str, day_type, before: int, after: int) -> RouteChange:
-    return RouteChange(route, day_type, before, after, None, None, None, None, None, 0, 0, None, None)
+    return RouteChange(route, day_type, before, after, None, None, None, None, None)
 
 
 @pytest.mark.parametrize(
@@ -103,7 +95,6 @@ def test_route_timetables_class_each_day_type_on_its_own_routes():
     from pipeline.reports.revision_effects import RouteTimetables
 
     timetables = RouteTimetables(
-        REVISION,
         ("weekday", "saturday"),
         (_change("R", "weekday", 10, 10), _change("R", "saturday", 8, 4), _change("S", "saturday", 0, 2)),
     )
@@ -113,42 +104,67 @@ def test_route_timetables_class_each_day_type_on_its_own_routes():
     assert timetables.on("weekday")[1] == {"R": "unchanged"}
 
 
-# ── windows ─────────────────────────────────────────────────────────────────
+LONG_AGO = date(2025, 1, 1)
 
 
 def test_four_whole_weeks_on_each_side_once_the_aggregates_reach_them():
-    found = windows(REVISION, date(2026, 4, 28))
-    assert found == Windows(4, (date(2026, 3, 4), date(2026, 3, 31)), (date(2026, 4, 1), date(2026, 4, 28)))
+    found = plan(REVISION, LONG_AGO, date(2026, 4, 28))
+    assert found == Plan(
+        4,
+        None,
+        date(2026, 4, 28),
+        Windows(4, (date(2026, 3, 4), date(2026, 3, 31)), (date(2026, 4, 1), date(2026, 4, 28))),
+    )
     assert found.complete
-    assert full_through(REVISION) == date(2026, 4, 28)
 
 
-def test_a_day_short_of_a_week_after_counts_one_week_fewer():
-    found = windows(REVISION, date(2026, 4, 27))
-    assert found is not None and found.weeks == 3 and not found.complete
-    assert found.before == (date(2026, 3, 11), date(2026, 3, 31))
-    assert found.after == (date(2026, 4, 1), date(2026, 4, 21))
+def test_a_day_short_of_a_week_after_counts_one_week_fewer_and_is_not_complete():
+    found = plan(REVISION, LONG_AGO, date(2026, 4, 27))
+    assert (found.cap, found.windows.weeks, found.complete) == (4, 3, False)
+    assert found.windows.before == (date(2026, 3, 11), date(2026, 3, 31))
+    assert found.windows.after == (date(2026, 4, 1), date(2026, 4, 21))
+    assert found.full_through == date(2026, 4, 28)
 
 
 def test_no_window_before_a_whole_week_after_or_with_no_aggregates():
-    assert windows(REVISION, date(2026, 4, 6)) is None
-    assert windows(REVISION, None) is None
-    assert windows(REVISION, date(2026, 4, 7)).weeks == 1
+    assert plan(REVISION, LONG_AGO, date(2026, 4, 6)).windows is None
+    assert plan(REVISION, None, None).windows is None
+    assert plan(REVISION, None, None).full_through == date(2026, 4, 28)
+    assert plan(REVISION, LONG_AGO, date(2026, 4, 7)).windows.weeks == 1
 
 
-def test_a_short_timetable_before_bounds_both_sides():
+def test_a_short_timetable_before_caps_both_sides_for_good():
+    # In force 14 days: two weeks is all there will ever be.
     short = REVISION._replace(before=REVISION.before._replace(first=date(2026, 3, 18)))
-    found = windows(short, date(2026, 6, 1))
-    assert found.weeks == 2
-    assert found.before == (date(2026, 3, 18), date(2026, 3, 31))
+    found = plan(short, LONG_AGO, date(2026, 6, 1))
+    assert (found.cap, found.capped_by, found.full_through) == (2, "timetable", date(2026, 4, 14))
+    assert found.windows.before == (date(2026, 3, 18), date(2026, 3, 31))
+    assert found.complete
 
 
-def test_the_after_side_stops_where_its_timetable_does():
+def test_a_timetable_after_that_ends_within_four_weeks_caps_the_comparison():
     brief = REVISION._replace(after=REVISION.after._replace(last=date(2026, 4, 15)))
-    assert windows(brief, date(2026, 6, 1)).weeks == 2
+    found = plan(brief, LONG_AGO, date(2026, 4, 10))
+    assert (found.cap, found.capped_by, found.full_through) == (2, "timetable", date(2026, 4, 14))
+    assert (found.windows.weeks, found.complete) == (1, False)
+    assert plan(brief, LONG_AGO, date(2026, 6, 1)).complete
 
 
-# ── pooling ─────────────────────────────────────────────────────────────────
+def test_a_timetable_in_force_under_a_week_leaves_no_comparable_week():
+    tiny = REVISION._replace(before=REVISION.before._replace(first=date(2026, 3, 27)))
+    found = plan(tiny, LONG_AGO, date(2026, 6, 1))
+    assert (found.cap, found.capped_by, found.full_through, found.windows) == (0, "timetable", None, None)
+    assert not found.complete
+
+
+def test_the_agencys_first_aggregated_day_caps_the_side_before():
+    # Aggregated from 2026-03-20: twelve days before the revision, one whole week.
+    found = plan(REVISION, date(2026, 3, 20), date(2026, 6, 1))
+    assert (found.cap, found.capped_by, found.full_through) == (1, "history", date(2026, 4, 7))
+    assert found.windows.before == (date(2026, 3, 25), date(2026, 3, 31))
+    assert found.complete
+    assert plan(REVISION, date(2026, 3, 30), date(2026, 6, 1)).windows is None
+
 
 _ONE_WEEK = Windows(1, (date(2026, 3, 25), date(2026, 3, 31)), (date(2026, 4, 1), date(2026, 4, 7)))
 

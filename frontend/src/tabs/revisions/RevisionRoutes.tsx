@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTimetableRevisionRoutes } from "../../api/hooks";
 import type { RevisionDayType, RevisionTally, TimetableRevisionRoutes } from "../../api/types";
@@ -10,13 +11,16 @@ import { SHARED_TABLE, td, th } from "../../components/tableStyles";
 import { EM_DASH, fixedTenth, formatDate, formatDateRange, formatDuration, formatNumber } from "../../utils/format";
 import { serviceClock } from "./revisionModel";
 
+/** How many routes the table lists before "show all". */
+const TABLE_ROWS = 50;
+
 function Pct({ tally }: { tally: RevisionTally | null }) {
   const { t } = useTranslation();
   if (tally?.on_time_pct == null) return <>{EM_DASH}</>;
   return (
     <>
       {`${fixedTenth(tally.on_time_pct)}%`}
-      {tally.uncertain && <span className="focus-muted"> ({t("revisions.uncertain")})</span>}
+      {tally.uncertain && <span className="focus-muted"> ({t("reports.wide_margin_mark")})</span>}
     </>
   );
 }
@@ -44,33 +48,48 @@ export function RevisionRoutes({ agencyId, on, dayType }: { agencyId: number; on
         <SkeletonTable />
       ) : (
         <div aria-busy={query.isPlaceholderData} style={{ opacity: query.isPlaceholderData ? 0.5 : 1 }}>
-          <RoutesBody data={query.data} agencyId={agencyId} />
+          <RoutesBody key={dayType} data={query.data} agencyId={agencyId} />
         </div>
       )}
     </section>
   );
 }
 
+/** What the observed side holds, and when it will hold all it can: never a
+ *  date the comparison cannot reach. */
+function ObservedStatus({ data }: { data: TimetableRevisionRoutes }) {
+  const { t } = useTranslation();
+  const weeks = data.window;
+  const date = data.full_through == null ? "" : formatDate(data.full_through);
+  const lines = [
+    weeks == null
+      ? data.weeks_cap < 1
+        ? t("revisions.observed_none")
+        : t("revisions.observed_pending", { cap: data.weeks_cap, date })
+      : t(data.complete ? "revisions.observed_window" : "revisions.observed_window_partial", {
+          weeks: weeks.weeks,
+          cap: data.weeks_cap,
+          before: formatDateRange(weeks.before_first, weeks.before_last),
+          after: formatDateRange(weeks.after_first, weeks.after_last),
+          date,
+        }),
+  ];
+  if (data.capped_by != null) lines.push(t(`revisions.observed_capped_${data.capped_by}`));
+  return <p className="focus-muted">{lines.join(" ")}</p>;
+}
+
 function RoutesBody({ data, agencyId }: { data: TimetableRevisionRoutes; agencyId: number }) {
   const { t } = useTranslation();
   const names = useRouteNames(agencyId);
-  if (!data.available) return null;
-  if (!data.day_type_known) return <p className="focus-muted">{t("revisions.unknown_day_type")}</p>;
+  const [showAll, setShowAll] = useState(false);
+  // An unknown day type is explained once, by the stop comparison above.
+  if (!data.available || !data.day_type_known) return null;
   if (data.routes.length === 0) return <p className="focus-muted">{t("revisions.routes_none")}</p>;
-  const weeks = data.window;
-  const observed = weeks != null;
+  const observed = data.window != null;
+  const shown = showAll ? data.routes : data.routes.slice(0, TABLE_ROWS);
   return (
     <>
-      <p className="focus-muted">
-        {weeks == null
-          ? t("revisions.observed_pending", { date: formatDate(data.full_through ?? "") })
-          : t(weeks.complete ? "revisions.observed_window" : "revisions.observed_window_partial", {
-              weeks: weeks.weeks,
-              before: formatDateRange(weeks.before_first, weeks.before_last),
-              after: formatDateRange(weeks.after_first, weeks.after_last),
-              date: formatDate(data.full_through ?? ""),
-            })}
-      </p>
+      <ObservedStatus data={data} />
       {observed && data.classes.length > 0 && (
         <div className="focus-table-wrap">
           <table style={SHARED_TABLE}>
@@ -113,7 +132,7 @@ function RoutesBody({ data, agencyId }: { data: TimetableRevisionRoutes; agencyI
             </tr>
           </thead>
           <tbody>
-            {data.routes.map((r) => (
+            {shown.map((r) => (
               <tr key={r.route_code}>
                 <td style={td()}>
                   <RouteLabel code={r.route_code} names={names} compact />
@@ -146,6 +165,13 @@ function RoutesBody({ data, agencyId }: { data: TimetableRevisionRoutes; agencyI
           </tbody>
         </table>
       </div>
+      {!showAll && data.routes.length > TABLE_ROWS && (
+        <div className="focus-actions">
+          <button type="button" onClick={() => setShowAll(true)}>
+            {t("revisions.show_all_routes", { count: data.routes.length })}
+          </button>
+        </div>
+      )}
       {observed && <p className="focus-muted">{t("revisions.observed_note")}</p>}
       {data.definition && <DefinitionMetaBlock definition={data.definition} />}
     </>

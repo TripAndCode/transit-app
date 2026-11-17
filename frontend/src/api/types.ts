@@ -1606,7 +1606,6 @@ interface RevisionClassRow {
 
 interface RevisionWindow {
   weeks: number;
-  complete: boolean;
   before_first: string;
   before_last: string;
   after_first: string;
@@ -1618,7 +1617,12 @@ export interface TimetableRevisionRoutes {
   reason: "no_revision" | "no_calendar" | null;
   day_type: RevisionDayType;
   day_type_known: boolean;
+  /** Whole weeks each side can ever pool, up to four, and what holds it
+   *  under four for good. */
+  weeks_cap: number;
+  capped_by: "timetable" | "history" | null;
   full_through: string | null;
+  complete: boolean;
   window: RevisionWindow | null;
   routes: RevisionRouteRow[];
   classes: RevisionClassRow[];

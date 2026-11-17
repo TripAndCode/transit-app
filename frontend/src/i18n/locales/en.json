@@ -2665,9 +2665,9 @@
     "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list.",
     "routes_title": "Routes",
     "routes_none": "No route runs on this day type under either timetable.",
-    "observed_pending": "How the routes ran after the revision appears once a whole week after it is aggregated; four weeks are aggregated through {{date}}.",
-    "observed_window": "How the routes ran over the four weeks on each side: {{before}} and {{after}}.",
-    "observed_window_partial": "How the routes ran over {{weeks}} of the four weeks on each side so far: {{before}} and {{after}}. All four are aggregated through {{date}}.",
+    "observed_pending": "How the routes ran after the revision appears once a whole week after it is aggregated. All {{cap}} whole weeks that can be compared are aggregated through {{date}}.",
+    "observed_window": "How the routes ran over the same {{weeks}} whole weeks on each side: {{before}} and {{after}}.",
+    "observed_window_partial": "How the routes ran over {{weeks}} of the {{cap}} whole weeks on each side so far: {{before}} and {{after}}. All {{cap}} are aggregated through {{date}}.",
     "observed_note": "The on-time rate and mean delay come from the delays the operator's real-time feed predicted, pooled over each side's days of this day type; a dash marks a route with fewer than 100 observations on that side. A class pools only its routes observed on both sides.",
     "route_class": {
       "cut": "Fewer trips",
@@ -2676,6 +2676,9 @@
       "new": "New route",
       "removed": "No trips left"
     },
-    "uncertain": "wide margin"
+    "observed_none": "There is no whole week to compare how the routes ran: a timetable on one side is in force for less than a week, or the agency's aggregated days before the revision hold less than one.",
+    "observed_capped_timetable": "A timetable on one side is in force for under four weeks, so no more weeks can be compared.",
+    "observed_capped_history": "The agency's aggregated days before the revision hold under four weeks, so no more weeks can be compared.",
+    "show_all_routes": "Show all {{count}} routes"
   }
 }
