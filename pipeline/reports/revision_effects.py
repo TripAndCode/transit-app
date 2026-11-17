@@ -3,9 +3,10 @@ read on the typical days the stop comparison reads
 (pipeline.reports.timetable_diff), and how its departures ran in the weeks
 before and after.
 
-The timetable side counts each route's trips, its first and last trip, and
-the longest gap between departures at its main stop, the same stop on both
-sides. The observed side pools the aggregates' exact counts
+The timetable side counts each route's trips, its last trip, and the
+longest gap between departures at its main stop, the same stop on both
+sides, all from the departures pipeline.timetable_sampling counts, in
+service-day seconds. The observed side pools the aggregates' exact counts
 (agg_route_daily_dist) over whole weeks on each side of the revision, each
 date filed under the timetable in force on it like every aggregate, so its
 figures are the feed's predicted delays (pipeline.reports.definition.VALUE_BASIS).
@@ -21,7 +22,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
 from typing import Literal, NamedTuple, cast
 
-from pipeline import static_archive
+from pipeline import timetable_sampling
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import fallback_day_type, public_holidays_between
 from pipeline.histogram import on_time_count_sql
@@ -145,31 +146,29 @@ def route_classes(changes: Iterable[RouteChange]) -> dict[str, RouteClass]:
     return classes
 
 
-_ROUTE_CODE_CH = "replaceRegexpOne(assumeNotNull(s.route_id), {pattern:String}, {replacement:String})"
-_DAY_TYPE_JOIN = (
-    "ARRAY JOIN arrayFilter(i -> has({services:Array(Array(String))}[i], service), "
-    f"range(1, {len(DAY_TYPES) + 1})) AS dt"
-)
+_ROUTE_CODE_CH = "replaceRegexpOne(assumeNotNull(route_id), {pattern:String}, {replacement:String})"
 
-# A trip starts at its earliest timed departure; a trip with no route, service
-# or timed stop is no route's trip.
+# Each departure timetable_sampling counts, with its route's code; a
+# departure of a trip whose timetable names no route is no route's.
+_ROUTE_DEPARTURES = f"""
+    SELECT dt, stop_id, sec, trip_id, {_ROUTE_CODE_CH} AS route_code
+    FROM ({timetable_sampling.stop_departures(trips=True)})
+    WHERE route_id IS NOT NULL
+"""
+
+# A trip starts at its first departure, in service-day seconds.
 _ROUTE_TRIPS_SQL = f"""
     SELECT dt, route_code, toInt64(count()), max(start_sec)
     FROM (
-        SELECT s.trip_id AS trip_id, any({_ROUTE_CODE_CH}) AS route_code,
-               any(assumeNotNull(s.service_type)) AS service, min(assumeNotNull(s.scheduled_sec)) AS start_sec
-        FROM {static_archive.SCHEDULE} AS s
-        WHERE s.agency_id = {{agency:Int32}} AND s.content_hash = {{content:String}}
-          AND s.route_id IS NOT NULL AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
-        GROUP BY s.trip_id
+        SELECT dt, trip_id, any(route_code) AS route_code, min(sec) AS start_sec
+        FROM ({_ROUTE_DEPARTURES})
+        GROUP BY dt, trip_id
     )
-    {_DAY_TYPE_JOIN}
     GROUP BY dt, route_code
 """
 
-# A departure as the stop comparison counts one: not at the trip's last stop,
-# and at a timed stop. One row per day type and route, its stops in an array,
-# so the result stays within the API client's max_result_rows.
+# One row per day type and route, its stops in an array, so the result stays
+# within the API client's max_result_rows.
 _STOP_GAPS_SQL = f"""
     SELECT dt, route_code, groupArray((stop_id, departures, gap))
     FROM (
@@ -177,21 +176,7 @@ _STOP_GAPS_SQL = f"""
                if(length(secs) < 2, NULL, arrayMax(arrayPopFront(arrayDifference(secs)))) AS gap
         FROM (
             SELECT dt, route_code, stop_id, arraySort(groupArray(sec)) AS secs
-            FROM (
-                SELECT st.stop_id AS stop_id, {_ROUTE_CODE_CH} AS route_code,
-                       assumeNotNull(s.service_type) AS service, assumeNotNull(s.scheduled_sec) AS sec
-                FROM {static_archive.SCHEDULE} AS s
-                INNER JOIN (
-                    SELECT trip_id, stop_sequence, stop_id,
-                           max(stop_sequence) OVER (PARTITION BY trip_id) AS last_sequence
-                    FROM {static_archive.ARCHIVE}
-                    WHERE agency_id = {{agency:Int32}} AND content_hash = {{content:String}}
-                ) AS st ON st.trip_id = s.trip_id AND st.stop_sequence = s.stop_sequence
-                WHERE s.agency_id = {{agency:Int32}} AND s.content_hash = {{content:String}}
-                  AND s.route_id IS NOT NULL AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
-                  AND st.stop_sequence < st.last_sequence
-            )
-            {_DAY_TYPE_JOIN}
+            FROM ({_ROUTE_DEPARTURES})
             GROUP BY dt, route_code, stop_id
         )
     )
@@ -218,7 +203,7 @@ def stop_counts_of(rows: Iterable[tuple]) -> dict[RevisionDayType, dict[str, dic
 
 
 async def _query(ch, sql: str, agency_id: int, content: str, days: Mapping[RevisionDayType, TypicalDay | None]):
-    services = [sorted(day.services) if (day := days.get(day_type)) is not None else [] for day_type in DAY_TYPES]
+    services = timetable_sampling.services_by_day_type(days)
     if not any(services):
         return []
     parameters = {

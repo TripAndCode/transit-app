@@ -285,3 +285,57 @@ async def test_the_after_side_reaches_the_last_day_analyze_built_not_only_the_ne
         "UPDATE agg_meta SET analyzed_at = $2 WHERE agency_id = $1", aagency_id, datetime(2026, 3, 9, 3, 0, tzinfo=JST)
     )
     assert await aggregated_days(aconn, aagency_id) == (date(2026, 3, 2), date(2026, 3, 7))
+
+
+def _night_zip(tmp_path, stem: str, first: date, last: date, starts: dict[str, str]) -> str:
+    """Route R3, weekdays, each trip leaving S1 at its start (HH:MM, as the
+    feed writes it) and reaching S2 two minutes later."""
+
+    def at(start: str, plus: int) -> str:
+        hh, mm = (int(x) for x in start.split(":"))
+        minutes = hh * 60 + mm + plus
+        return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
+
+    files = {
+        "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\nS1,S1,34.40,132.40\nS2,S2,34.41,132.41",
+        "routes.txt": "route_id,route_short_name\nR3,R3",
+        "trips.txt": "trip_id,route_id,service_id\n" + "\n".join(f"{t},R3,{SERVICE}" for t in starts),
+        "stop_times.txt": "trip_id,stop_sequence,stop_id,arrival_time,departure_time\n"
+        + "\n".join(f"{t},1,S1,{at(s, 0)},{at(s, 0)}\n{t},2,S2,{at(s, 2)},{at(s, 2)}" for t, s in starts.items()),
+        "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+        f"{SERVICE},1,1,1,1,1,0,0,{first:%Y%m%d},{last:%Y%m%d}",
+        "feed_info.txt": "feed_publisher_name,feed_publisher_url,feed_lang,feed_start_date,feed_end_date\n"
+        f"test,https://example.com,ja,{first:%Y%m%d},{last:%Y%m%d}",
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, text in files.items():
+            zf.writestr(name, text)
+    path = tmp_path / f"{stem}.zip"
+    path.write_bytes(buf.getvalue())
+    return str(path)
+
+
+async def test_a_trip_written_after_midnight_at_face_value_is_the_nights_last(pg_conn, ch_client, tmp_path, api):
+    revision = date(2026, 4, 1)
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url, ingest_strategy) "
+            "VALUES ('night route', 'https://night.example.com/tu.pb', 'static_join') RETURNING agency_id"
+        )
+        agency_id = cur.fetchone()[0]
+    pg_conn.commit()
+    before = {"day": "07:00", "late": "23:50", "night": "00:30"}
+    after = {"late": "23:50", "night": "00:30"}
+    a = _night_zip(tmp_path, "gtfs_static_20260101", date(2026, 1, 1), date(2026, 3, 31), before)
+    b = _night_zip(tmp_path, "gtfs_static_20260301", revision, date(2026, 9, 30), after)
+    load_static(a, agency_id, pg_conn, ch_client=ch_client)
+    load_static(b, agency_id, pg_conn, ch_client=ch_client)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    pg_conn.commit()
+    body = (await api.get(f"/api/{agency_id}/timetable-revisions/routes?on={revision}")).json()
+    [r3] = body["routes"]
+    # 00:30 is the night's 24:30: the last trip, forty minutes after the 23:50.
+    assert (r3["last_before"], r3["last_after"]) == (24 * 3600 + 1800, 24 * 3600 + 1800)
+    assert (r3["main_stop_id"], r3["longest_gap_after"]) == ("S1", 40 * 60)
+    assert (r3["trips_before"], r3["trips_after"], r3["route_class"]) == (3, 2, "cut")

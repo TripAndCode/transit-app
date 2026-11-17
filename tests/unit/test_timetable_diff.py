@@ -14,19 +14,17 @@ from pipeline.reports.timetable_diff import (
     Comparison,
     Revision,
     Run,
-    TypicalDay,
     Unavailable,
     compare,
     counts_of,
     load_comparison,
     revisions,
     runs,
-    service_calendar,
     stop_changes,
-    typical_day,
     typical_days,
 )
 from pipeline.static_archive import ArchivedCalendar
+from pipeline.timetable_sampling import TypicalDay, service_calendar, typical_day
 
 WEEKDAYS = (True, True, True, True, True, False, False)
 SATURDAY = (False, False, False, False, False, True, False)
@@ -420,3 +418,15 @@ async def test_a_side_with_no_kept_calendar_is_unavailable(missing):
     run = getattr(revision, missing)._replace(calendar=None)
     result = await load_comparison(_FakeArchive(), 1, revision._replace(**{missing: run}))
     assert result.value == "no_calendar"
+
+
+def test_the_departures_are_read_in_service_day_seconds():
+    """A face-value 00:30 is the night's 24:30 in both departure reads, so it is
+    hour 24 and can be a last bus, never hour 0 and a first; the read itself is
+    exercised against ClickHouse in tests/api/test_timetable_revisions.py."""
+    from pipeline import timetable_sampling
+    from pipeline.service_day import service_day_offset_ch
+
+    offset = service_day_offset_ch("s.scheduled_sec")
+    assert offset in timetable_sampling.DEPARTURE_HOURS_SQL
+    assert offset in timetable_sampling.DEPARTURE_SECONDS_SQL
