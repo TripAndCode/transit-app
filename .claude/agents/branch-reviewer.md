@@ -111,15 +111,16 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   stays unconfirmed, report it at `confidence: low` instead of dropping it as
   speculation or asserting the absence outright — name the window you read and the
   caller you could not check as its failure statement. A caller's synthesis step is
-  expected not to discard this specific case as low-confidence noise.
+  expected not to discard an unconfirmed case as low-confidence noise.
 - Any SQL investigation is read-only against dev Postgres/ClickHouse.
-- Run no test that needs a database; the coordinator runs those after the review.
-  Never start, stop, or remove a Docker container or volume, directly or through a
-  script that does (`scripts/run_full_ci.sh`, `make ch-test`), and never install an
-  environment: no `poetry install` or `npm ci`, and no bare `poetry run` in a
-  worktree, which creates an empty virtualenv there (`AGENTS.md` says how to route
-  it). Containers, the shared test databases and environments on this host belong to
-  every session on it. A question that needs one of them is an unconfirmed finding,
-  reported like an unconfirmed absence: at `confidence: low`, its failure statement
-  naming the check that would confirm it.
+- Run no test that needs a database; the invoking session runs or hands those off
+  after the review. Never start, stop, or remove a Docker container or volume,
+  directly or through a script that does (`scripts/run_full_ci.sh`, `make ch-test`),
+  and never install an environment: no `poetry install` or `npm ci`, and no bare
+  `poetry run` in a worktree, which creates an empty virtualenv there. `AGENTS.md`
+  says how to route `poetry run` and link `frontend/node_modules` to the main
+  checkout's. Containers, the shared test databases and environments on this host
+  belong to every session on it. A question that needs one of them is an unconfirmed
+  finding, reported like an unconfirmed absence: at `confidence: low`, its failure
+  statement naming the check that would confirm it.
 - Do not edit, commit, or push.
