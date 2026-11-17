@@ -9,7 +9,8 @@ positions is indexed by constants (timetable_sampling.stop_departures).
 
 The scan reads each source file's own text, so it misses a lambda that only
 meets the parameter through Python, such as a constant spliced into an
-f-string from another name.
+f-string from another name, and a parenthesis inside a SQL string literal
+ends the call it sits in.
 """
 
 from __future__ import annotations
@@ -26,8 +27,10 @@ ROOT = Path(__file__).resolve().parents[2]
 _LAMBDA_CALL = re.compile(r"\barray[A-Z]\w*\((?=\s*(?:\w+|\([\w\s,]+\))\s*->)")
 _ARRAY_PARAMETER = re.compile(r"\{\{?\w+:Array(?=\()")
 _CONSTANT_INDEX = re.compile(r"\}\}?\[\d+\]")
-# Parameter arrays whose length stays a handful whatever the data: one element
-# per timetable version in force for the scanned span.
+# Parameter arrays that grow with an agency's timetable revisions rather than
+# with the rows read: one element per version in force over the read, or over
+# the agency's whole history for a read with no date bound
+# (ScheduleJoin.force_params).
 ALLOWED = {
     ("pipeline/static_archive.py", "force_firsts:Array(Date32)"),
     ("pipeline/static_archive.py", "force_lasts:Array(Date32)"),
