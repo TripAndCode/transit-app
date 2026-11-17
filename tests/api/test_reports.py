@@ -61,7 +61,7 @@ async def reports_app(apply_schema):
             "TRUNCATE agencies, updates, static_stops, static_stop_times, "
             "static_trips, static_routes, static_calendar_dates, "
             "agg_route_stats, agg_route_hour, "
-            "agg_daily_trend, agg_route_daily_dist, rag_chunks, api_keys CASCADE"
+            "agg_daily_trend, agg_route_daily_dist, rag_chunks CASCADE"
         )
     await pool.close()
 

@@ -87,6 +87,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ask_query_log_created_id
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_sid
     ON sessions (sid) WHERE sid IS NOT NULL;
 
+-- 0108 drops api_keys, and this index with it, later in the same `migrate
+-- up`; until then a release that predates 0053 still looks keys up by value.
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_api_keys_key
     ON api_keys (key) WHERE key IS NOT NULL;
 \endif

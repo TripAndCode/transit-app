@@ -550,3 +550,8 @@ def test_a_superseded_first_refresh_resolves_from_env_rather_than_raising(monkey
 def test_ml_forecast_is_registered_and_defaults_off():
     assert flags._BY_KEY["ml_forecast"].env_default is False
     assert flags.flag("ml_forecast", False) is False
+
+
+def test_the_retired_flags_are_not_registered():
+    """Migration 0108 deletes these overrides because no switch reads them."""
+    assert not {"login_required", "copilot_insight_enabled"} & {flag.key for flag in flags.REGISTRY}

@@ -30,7 +30,7 @@ def pg(apply_schema):
             "static_trips, static_routes, static_calendar_dates, static_shapes, "
             "agg_route_stats, agg_route_hour, agg_route_hour_dow, "
             "agg_daily_trend, agg_stop_daily, agg_stop_routes, "
-            "rag_chunks, api_keys, filter_presets, login_events, sessions, "
+            "rag_chunks, login_events, sessions, "
             "oauth_identities, users CASCADE"
         )
     conn.commit()
