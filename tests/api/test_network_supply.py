@@ -3,8 +3,9 @@ and read for every operator on one map (GET /api/network/supply).
 
 Timetable A is in force until 2026-03-31 and B from 2026-04-01. Each trip
 serves S1 to S4, two minutes apart, so S4, where every trip ends, departs
-nothing. A's last weekday trip leaves S1 at 24:20, the same night's. B drops
-the Saturday trip while keeping the Saturday service in its calendar.
+nothing. A's last two weekday trips leave S1 at 24:20, written as GTFS's
+extended hour, and at 00:30, written at face value: both the same night's.
+B drops the Saturday trip while keeping the Saturday service in its calendar.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ _A = {
     "w1": (WEEKDAY, "07:00"),
     "w2": (WEEKDAY, "07:30"),
     "w3": (WEEKDAY, "24:20"),
+    "w4": (WEEKDAY, "00:30"),
     "s1": (SATURDAY, "09:00"),
     "h1": (SUNDAY, "10:00"),
 }
@@ -118,6 +120,23 @@ def _hourly(pg_conn, agency_id: int, stem: str, day_type: str) -> dict[tuple[str
         return {(stop, hour): tuple(rest) for stop, hour, *rest in cur.fetchall()}
 
 
+H, MIN = 3600, 60
+
+
+def _stops(body: dict, agency_id: int) -> dict[str, dict]:
+    """The map's columns of one operator as a dict per stop."""
+    (agency,) = [a for a in body["agencies"] if a["agency_id"] == agency_id]
+    columns = agency["stops"]
+    return {
+        stop_id: {name: values[i] for name, values in columns.items()} for i, stop_id in enumerate(columns["stop_id"])
+    }
+
+
+def _agency(body: dict, agency_id: int) -> dict:
+    (agency,) = [a for a in body["agencies"] if a["agency_id"] == agency_id]
+    return agency
+
+
 def test_analyze_builds_each_version_in_forces_supply(revised, pg_conn, ch_client):
     from pipeline.analyze import analyze
 
@@ -126,9 +145,9 @@ def test_analyze_builds_each_version_in_forces_supply(revised, pg_conn, ch_clien
     assert {stem for stem, _ in days} == {A, B}
     assert all(day is not None for day in days.values())
     weekday = _hourly(pg_conn, revised, A, "weekday")
-    assert weekday[("S1", 7)] == (2, 7 * 3600, 7 * 3600 + 30 * 60, 30 * 60)
-    # The 24:20 trip is the same night's, hour 24 rather than 0.
-    assert weekday[("S1", 24)] == (1, 24 * 3600 + 20 * 60, 24 * 3600 + 20 * 60, None)
+    assert weekday[("S1", 7)] == (2, 7 * H, 7 * H + 30 * MIN, 30 * MIN)
+    # 24:20 and a face-value 00:30 are both the same night's hour 24.
+    assert weekday[("S1", 24)] == (2, 24 * H + 20 * MIN, 24 * H + 30 * MIN, 10 * MIN)
     assert not any(stop == "S4" for stop, _ in weekday)
     assert not any(hour < 4 for _, hour in weekday)
 
@@ -144,7 +163,16 @@ def test_a_new_version_is_added_and_one_no_longer_in_force_dropped(revised, pg_c
     assert stop_supply.rebuild(pg_conn, ch_client, revised, full=False)
     assert {stem for stem, _ in _days(pg_conn, revised)} == {A, C}
     assert _hourly(pg_conn, revised, A, "weekday") == before
-    assert _hourly(pg_conn, revised, C, "weekday")[("S1", 7)] == (1, 7 * 3600, 7 * 3600, None)
+    assert _hourly(pg_conn, revised, C, "weekday")[("S1", 7)] == (1, 7 * H, 7 * H, None)
+
+
+def test_a_run_with_nothing_moved_reads_no_calendar(revised, pg_conn, ch_client, monkeypatch):
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    reads = []
+    real = static_archive.archived_calendar
+    monkeypatch.setattr(static_archive, "archived_calendar", lambda *a: reads.append(a) or real(*a))
+    assert stop_supply.rebuild(pg_conn, ch_client, revised, full=False) is False
+    assert reads == []
 
 
 async def test_the_map_reads_the_version_in_force_on_the_date(revised, pg_conn, ch_client, api):
@@ -155,14 +183,26 @@ async def test_the_map_reads_the_version_in_force_on_the_date(revised, pg_conn, 
     )
     assert response.status_code == 200
     body = response.json()
-    (agency,) = [a for a in body["agencies"] if a["agency_id"] == revised]
+    agency = _agency(body, revised)
     assert agency["status"] == "ok" and agency["static_version_id"] == A
-    stops = {s["stop_id"]: s for s in body["stops"] if s["agency_id"] == revised}
+    stops = _stops(body, revised)
     assert set(stops) == {"S1", "S2", "S3"}
-    s1 = stops["S1"]
-    assert (s1["departures"], s1["per_hour"], s1["longest_gap_min"]) == (2, 1.0, 90.0)
-    assert (s1["first_sec"], s1["last_sec"]) == (7 * 3600, 24 * 3600 + 20 * 60)
-    assert (s1["lat"], s1["lon"]) == (34.40, 132.40)
+    assert stops["S1"] == {"stop_id": "S1", "lat": 34.4, "lon": 132.4, "departures": 2, "longest_gap_min": 90.0}
+
+
+async def test_an_opened_stop_names_itself_and_its_first_and_last_departure(revised, pg_conn, ch_client, api):
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    pg_conn.commit()
+    params = {"agency_id": revised, "stop_id": "S1", "date": "2026-02-10", "from_hour": 23, "to_hour": 26}
+    response = await api.get("/api/network/supply/stop", params=params)
+    assert response.status_code == 200
+    stop = response.json()
+    assert stop["stop_name"] == "S1前"
+    assert (stop["departures"], stop["per_hour"], stop["longest_gap_min"]) == (2, 0.67, 90.0)
+    # The face-value 00:30 is the day's last departure, not its first.
+    assert (stop["first_sec"], stop["last_sec"]) == (7 * H, 24 * H + 30 * MIN)
+    missing = await api.get("/api/network/supply/stop", params={**params, "stop_id": "S4"})
+    assert missing.status_code == 404
 
 
 async def test_a_day_type_with_no_trip_is_zero_not_missing(revised, pg_conn, ch_client, api):
@@ -170,19 +210,57 @@ async def test_a_day_type_with_no_trip_is_zero_not_missing(revised, pg_conn, ch_
     pg_conn.commit()
     response = await api.get("/api/network/supply", params={"date": "2026-05-12", "day_type": "saturday"})
     body = response.json()
-    (agency,) = [a for a in body["agencies"] if a["agency_id"] == revised]
+    agency = _agency(body, revised)
     assert agency["status"] == "ok" and agency["static_version_id"] == B
-    s1 = next(s for s in body["stops"] if s["agency_id"] == revised and s["stop_id"] == "S1")
-    assert (s1["departures"], s1["longest_gap_min"], s1["first_sec"]) == (0, 360.0, None)
+    s1 = _stops(body, revised)["S1"]
+    assert (s1["departures"], s1["longest_gap_min"]) == (0, 360.0)
+    stop = await api.get(
+        "/api/network/supply/stop",
+        params={"agency_id": revised, "stop_id": "S1", "date": "2026-05-12", "day_type": "saturday"},
+    )
+    assert (stop.json()["first_sec"], stop.json()["last_sec"]) == (None, None)
+
+
+async def test_each_band_and_day_type_is_its_own_answer(revised, pg_conn, ch_client, api):
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    pg_conn.commit()
+    base = {"date": "2026-02-10", "from_hour": 7, "to_hour": 9}
+    weekday = await api.get("/api/network/supply", params=base)
+    sunday = await api.get("/api/network/supply", params={**base, "day_type": "sunday_holiday"})
+    night = await api.get("/api/network/supply", params={**base, "from_hour": 24, "to_hour": 25})
+    assert _stops(weekday.json(), revised)["S1"]["departures"] == 2
+    assert _stops(sunday.json(), revised)["S1"]["departures"] == 0
+    assert _stops(night.json(), revised)["S1"]["departures"] == 2
+
+
+async def test_the_map_is_read_again_once_analyze_rewrites_a_table(revised, pg_conn, ch_client, api):
+    stop_supply.rebuild(pg_conn, ch_client, revised, full=True)
+    pg_conn.commit()
+    params = {"date": "2026-02-10", "from_hour": 7, "to_hour": 9}
+    first = await api.get("/api/network/supply", params=params)
+    with pg_conn.cursor() as cur:
+        cur.execute("DELETE FROM agg_stop_supply_hourly WHERE agency_id = %s AND stop_id = 'S2'", (revised,))
+    pg_conn.commit()
+    cached = await api.get("/api/network/supply", params=params)
+    assert cached.json() == first.json()
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agg_table_state (agency_id, table_name, fingerprint, built_at) "
+            "VALUES (%s, 'agg_stop_supply_hourly', 'test', clock_timestamp()) "
+            "ON CONFLICT (agency_id, table_name) DO UPDATE SET built_at = clock_timestamp()",
+            (revised,),
+        )
+    pg_conn.commit()
+    rebuilt = await api.get("/api/network/supply", params=params)
+    assert set(_stops(rebuilt.json(), revised)) == {"S1", "S3"}
 
 
 async def test_an_operator_without_a_version_or_a_build_says_so(revised, api):
     response = await api.get("/api/network/supply", params={"date": "2026-02-10"})
-    (agency,) = [a for a in response.json()["agencies"] if a["agency_id"] == revised]
-    assert agency["status"] == "not_built"
+    agency = _agency(response.json(), revised)
+    assert (agency["status"], agency["stops"]) == ("not_built", None)
     response = await api.get("/api/network/supply", params={"date": "2030-01-01"})
-    (agency,) = [a for a in response.json()["agencies"] if a["agency_id"] == revised]
-    assert agency["status"] == "no_timetable"
+    assert _agency(response.json(), revised)["status"] == "no_timetable"
 
 
 async def test_a_band_ending_before_it_starts_is_refused(api):

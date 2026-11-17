@@ -6,13 +6,17 @@
 -- (weekday, saturday, sunday_holiday, by the weekday rule), the typical day
 -- its rows are read on. A NULL typical_day is a day type the version cannot
 -- tell (no date of that type in force within its calendar, or no calendar
--- kept), which a reader never takes as zero departures.
+-- kept), which a reader never takes as zero departures. segments is the
+-- dates the version was in force on when they were read
+-- (pipeline.stop_supply.segments_digest), the same on each of its rows: a
+-- run reads its calendar again only once they move.
 CREATE TABLE IF NOT EXISTS agg_stop_supply_days (
     agency_id         INTEGER NOT NULL REFERENCES agencies(agency_id),
     static_version_id TEXT    NOT NULL,
     content_hash      TEXT    NOT NULL,
     day_type          TEXT    NOT NULL CHECK (day_type IN ('weekday', 'saturday', 'sunday_holiday')),
     typical_day       DATE,
+    segments          TEXT    NOT NULL,
     PRIMARY KEY (agency_id, static_version_id, content_hash, day_type)
 );
 

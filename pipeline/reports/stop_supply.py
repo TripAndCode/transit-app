@@ -5,22 +5,31 @@ version's typical day of a day type (pipeline.stop_supply).
 Each operator's stops stand alone: two operators' stops at one place are two
 stops, their departures not added together, since nothing yet tells which
 stops of different operators are one place.
+
+The map carries every stop of every operator, so it sends each operator's
+stops as columns (one array per field, no repeated keys) with only what the
+map draws; a stop's name and its first and last departure come from the stop
+read (read_supply_stop) when one is opened.
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from enum import Enum
-from typing import NamedTuple
+from typing import Any
 
 from pipeline import static_archive
 from pipeline.cache import async_lru_cache
-from pipeline.stop_supply import DAY_TYPES, BandSupply, HourCell, SupplyDayType, band_supply
+from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS
+from pipeline.stop_supply import DAY_TYPES, HourCell, SupplyDayType, band_supply
 
-# The service-day hours a band may span: from the 04:00 cutover to the next
-# one, whose after-midnight hours are 24 to 27.
-FIRST_HOUR = 4
-LAST_HOUR = 28
+# The service-day hours a band may span: from the cutover to the next one,
+# whose after-midnight hours are 24 and later.
+FIRST_HOUR = SERVICE_DAY_CUTOVER_HOURS
+LAST_HOUR = FIRST_HOUR + 24
+# Five decimals of a degree are about a metre, finer than a stop pole.
+_COORD_DECIMALS = 5
 
 
 class AgencyStatus(str, Enum):
@@ -36,32 +45,6 @@ class AgencyStatus(str, Enum):
     UNKNOWN_DAY = "unknown_day"
 
 
-class AgencySupply(NamedTuple):
-    agency_id: int
-    agency_name: str
-    status: AgencyStatus
-    static_version_id: str | None
-    typical_day: date | None
-
-
-class StopSupply(NamedTuple):
-    agency_id: int
-    stop_id: str
-    stop_name: str | None
-    lat: float | None
-    lon: float | None
-    band: BandSupply
-    # The day's first and last departure in service-day seconds, None for a
-    # stop of the version with no departure on this day type.
-    first_sec: int | None
-    last_sec: int | None
-
-
-class SupplyMap(NamedTuple):
-    agencies: list[AgencySupply]
-    stops: list[StopSupply]
-
-
 @async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def _in_force(ch, agency_id: int) -> list[tuple[date, date, str, str]]:
     join = await static_archive.schedule_join_async(ch, agency_id, None, by_service_date=True)
@@ -73,19 +56,72 @@ def version_on(segments: list[tuple[date, date, str, str]], day: date) -> tuple[
     return next(((stem, content) for first, last, stem, content in segments if first <= day <= last), None)
 
 
+def _check(day_type: str, from_hour: int, to_hour: int) -> None:
+    if day_type not in DAY_TYPES:
+        raise ValueError(f"unknown day type {day_type!r}")
+    if not FIRST_HOUR <= from_hour < to_hour <= LAST_HOUR:
+        raise ValueError(f"band [{from_hour}, {to_hour}) outside [{FIRST_HOUR}, {LAST_HOUR})")
+
+
 _DAYS_SQL = """
-    SELECT c.agency_id, c.stem, d.typical_day, d.day_type IS NOT NULL AS built
+    SELECT c.agency_id, d.typical_day, d.day_type IS NOT NULL AS built
     FROM unnest($1::int[], $2::text[], $3::text[]) AS c(agency_id, stem, content)
     LEFT JOIN agg_stop_supply_days d
       ON d.agency_id = c.agency_id AND d.static_version_id = c.stem AND d.content_hash = c.content
      AND d.day_type = $4
 """
 
+
+async def _statuses(conn, ch, day: date, day_type: str) -> tuple[list[dict[str, Any]], dict[int, tuple[str, str]]]:
+    """Each active operator's status for *day* and *day_type*, and the version
+    of each that can be read."""
+    agencies = await conn.fetch(
+        "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
+    )
+    segments = await asyncio.gather(*(_in_force(ch, row["agency_id"]) for row in agencies))
+    chosen = {
+        row["agency_id"]: version
+        for row, found in zip(agencies, segments, strict=True)
+        if (version := version_on(found, day)) is not None
+    }
+    ids = list(chosen)
+    days = {
+        r["agency_id"]: r
+        for r in await conn.fetch(_DAYS_SQL, ids, [chosen[a][0] for a in ids], [chosen[a][1] for a in ids], day_type)
+    }
+    out: list[dict[str, Any]] = []
+    readable: dict[int, tuple[str, str]] = {}
+    for row in agencies:
+        agency_id = row["agency_id"]
+        version = chosen.get(agency_id)
+        built = days.get(agency_id)
+        typical_day = None
+        if version is None:
+            status = AgencyStatus.NO_TIMETABLE
+        elif built is None or not built["built"]:
+            status = AgencyStatus.NOT_BUILT
+        elif built["typical_day"] is None:
+            status = AgencyStatus.UNKNOWN_DAY
+        else:
+            status = AgencyStatus.OK
+            typical_day = built["typical_day"].isoformat()
+            readable[agency_id] = version
+        out.append(
+            {
+                "agency_id": agency_id,
+                "agency_name": row["agency_name"],
+                "status": status.value,
+                "static_version_id": None if version is None else version[0],
+                "typical_day": typical_day,
+            }
+        )
+    return out, readable
+
+
 # Every stop with a departure on any day type of the chosen version, so a
 # stop with none on this day type reads as zero rather than vanishing; its
-# position and name from the loaded timetable, absent for a stop it no longer
-# has. The band's hours come as (hour, departures, first_sec, last_sec,
-# max_gap_sec) rows.
+# position from the loaded timetable, absent for a stop it no longer has. The
+# band's hours come as (hour, departures, first_sec, last_sec, max_gap_sec).
 _STOPS_SQL = """
     WITH chosen AS (
         SELECT * FROM unnest($1::int[], $2::text[], $3::text[]) AS c(agency_id, stem, content)
@@ -95,8 +131,7 @@ _STOPS_SQL = """
         FROM agg_stop_supply_hourly h
         JOIN chosen c ON c.agency_id = h.agency_id AND c.stem = h.static_version_id AND c.content = h.content_hash
     )
-    SELECT v.agency_id, v.stop_id, s.stop_name, s.stop_lat, s.stop_lon,
-           MIN(h.first_sec) AS first_sec, MAX(h.last_sec) AS last_sec,
+    SELECT v.agency_id, v.stop_id, s.stop_lat, s.stop_lon,
            COALESCE(
                array_agg(ARRAY[h.hour, h.departures, h.first_sec, h.last_sec, h.max_gap_sec] ORDER BY h.hour)
                    FILTER (WHERE h.hour >= $5 AND h.hour < $6),
@@ -107,74 +142,104 @@ _STOPS_SQL = """
       ON h.agency_id = v.agency_id AND h.static_version_id = v.static_version_id
      AND h.content_hash = v.content_hash AND h.day_type = $4 AND h.stop_id = v.stop_id
     LEFT JOIN static_stops s ON s.agency_id = v.agency_id AND s.stop_id = v.stop_id
-    GROUP BY v.agency_id, v.stop_id, s.stop_name, s.stop_lat, s.stop_lon
+    GROUP BY v.agency_id, v.stop_id, s.stop_lat, s.stop_lon
     ORDER BY v.agency_id, v.stop_id
 """
 
 
-def _cells(band: list[list[int | None]]) -> dict[int, HourCell]:
-    return {
-        int(hour): HourCell(int(departures), int(first), int(last), None if gap is None else int(gap))
-        for hour, departures, first, last, gap in band
-        if hour is not None and departures is not None and first is not None and last is not None
-    }
+def _cells(hours: list[list[Any]]) -> dict[int, HourCell]:
+    """_STOPS_SQL's band as HourCells. Only max_gap_sec may be NULL: the rest
+    are NOT NULL columns of a matched row, and FILTER leaves out the unmatched."""
+    return {hour: HourCell(departures, first, last, gap) for hour, departures, first, last, gap in hours}
 
 
-async def read_supply_map(conn, ch, day: date, day_type: SupplyDayType, from_hour: int, to_hour: int) -> SupplyMap:
-    """Each active operator's status and every stop of those that are OK."""
-    if day_type not in DAY_TYPES:
-        raise ValueError(f"unknown day type {day_type!r}")
-    if not FIRST_HOUR <= from_hour < to_hour <= LAST_HOUR:
-        raise ValueError(f"band [{from_hour}, {to_hour}) outside [{FIRST_HOUR}, {LAST_HOUR})")
-    agencies = await conn.fetch(
-        "SELECT agency_id, agency_name FROM agencies WHERE deleted_at IS NULL ORDER BY agency_id"
-    )
-    chosen: dict[int, tuple[str, str]] = {}
-    for row in agencies:
-        version = version_on(await _in_force(ch, row["agency_id"]), day)
-        if version is not None:
-            chosen[row["agency_id"]] = version
-    ids = list(chosen)
-    stems = [chosen[a][0] for a in ids]
-    contents = [chosen[a][1] for a in ids]
-    days = {r["agency_id"]: r for r in await conn.fetch(_DAYS_SQL, ids, stems, contents, day_type)}
-    out: list[AgencySupply] = []
-    readable: list[int] = []
-    for row in agencies:
-        agency_id = row["agency_id"]
-        name = row["agency_name"]
-        if agency_id not in chosen:
-            out.append(AgencySupply(agency_id, name, AgencyStatus.NO_TIMETABLE, None, None))
-            continue
-        stem = chosen[agency_id][0]
-        built = days.get(agency_id)
-        if built is None or not built["built"]:
-            out.append(AgencySupply(agency_id, name, AgencyStatus.NOT_BUILT, stem, None))
-        elif built["typical_day"] is None:
-            out.append(AgencySupply(agency_id, name, AgencyStatus.UNKNOWN_DAY, stem, None))
-        else:
-            out.append(AgencySupply(agency_id, name, AgencyStatus.OK, stem, built["typical_day"]))
-            readable.append(agency_id)
+def _coord(value: float | None) -> float | None:
+    return None if value is None else round(value, _COORD_DECIMALS)
+
+
+@async_lru_cache(maxsize=32, ttl_seconds=300)
+async def read_supply_map(conn, ch, day: date, day_type: SupplyDayType, from_hour: int, to_hour: int) -> dict:
+    """The map's payload: each active operator's status, and the stops of
+    those that are OK as columns of stop_id, lat, lon, departures and
+    longest_gap_min over [*from_hour*, *to_hour*). Cached like the reports and
+    dropped by every analyze rebuild; the result is shared by every caller and
+    must not be modified."""
+    _check(day_type, from_hour, to_hour)
+    agencies, readable = await _statuses(conn, ch, day, day_type)
+    ids = list(readable)
     rows = await conn.fetch(
         _STOPS_SQL,
-        readable,
-        [chosen[a][0] for a in readable],
-        [chosen[a][1] for a in readable],
+        ids,
+        [readable[a][0] for a in ids],
+        [readable[a][1] for a in ids],
         day_type,
         from_hour,
         to_hour,
     )
-    stops = [
-        StopSupply(
-            r["agency_id"],
-            r["stop_id"],
-            r["stop_name"],
-            r["stop_lat"],
-            r["stop_lon"],
-            band_supply(_cells(r["band"]), from_hour, to_hour),
-            r["first_sec"],
-            r["last_sec"],
-        )
-        for r in rows
-    ]
-    return SupplyMap(out, stops)
+    columns: dict[int, dict[str, list]] = {
+        a: {"stop_id": [], "lat": [], "lon": [], "departures": [], "longest_gap_min": []} for a in ids
+    }
+    for r in rows:
+        supply = band_supply(_cells(r["band"]), from_hour, to_hour)
+        stops = columns[r["agency_id"]]
+        stops["stop_id"].append(r["stop_id"])
+        stops["lat"].append(_coord(r["stop_lat"]))
+        stops["lon"].append(_coord(r["stop_lon"]))
+        stops["departures"].append(supply.departures)
+        stops["longest_gap_min"].append(round(supply.longest_gap_sec / 60, 1))
+    for agency in agencies:
+        agency["stops"] = columns.get(agency["agency_id"])
+    return {
+        "date": day.isoformat(),
+        "day_type": day_type,
+        "from_hour": from_hour,
+        "to_hour": to_hour,
+        "agencies": agencies,
+    }
+
+
+_STOP_SQL = """
+    SELECT h.hour, h.departures, h.first_sec, h.last_sec, h.max_gap_sec
+    FROM agg_stop_supply_hourly h
+    WHERE h.agency_id = $1 AND h.static_version_id = $2 AND h.content_hash = $3 AND h.day_type = $4
+      AND h.stop_id = $5
+"""
+_STOP_KNOWN_SQL = """
+    SELECT (SELECT stop_name FROM static_stops WHERE agency_id = $1 AND stop_id = $5) AS stop_name,
+           EXISTS (
+               SELECT 1 FROM agg_stop_supply_hourly
+               WHERE agency_id = $1 AND static_version_id = $2 AND content_hash = $3 AND stop_id = $5
+           ) AS known,
+           (SELECT typical_day FROM agg_stop_supply_days
+            WHERE agency_id = $1 AND static_version_id = $2 AND content_hash = $3 AND day_type = $4) AS typical_day
+"""
+
+
+async def read_supply_stop(
+    conn, ch, agency_id: int, stop_id: str, day: date, day_type: SupplyDayType, from_hour: int, to_hour: int
+) -> dict | None:
+    """One stop of the map, opened: its name, its supply over the band, and
+    the day's first and last departure in service-day seconds (None with no
+    departure on the day type). None when the operator's version in force on
+    *day* has no such stop or cannot be read for *day_type*."""
+    _check(day_type, from_hour, to_hour)
+    version = version_on(await _in_force(ch, agency_id), day)
+    if version is None:
+        return None
+    args = (agency_id, *version, day_type, stop_id)
+    known = await conn.fetchrow(_STOP_KNOWN_SQL, *args)
+    if not known["known"] or known["typical_day"] is None:
+        return None
+    hours = await conn.fetch(_STOP_SQL, *args)
+    cells = {r["hour"]: HourCell(r["departures"], r["first_sec"], r["last_sec"], r["max_gap_sec"]) for r in hours}
+    supply = band_supply(cells, from_hour, to_hour)
+    return {
+        "agency_id": agency_id,
+        "stop_id": stop_id,
+        "stop_name": known["stop_name"],
+        "departures": supply.departures,
+        "per_hour": round(supply.per_hour, 2),
+        "longest_gap_min": round(supply.longest_gap_sec / 60, 1),
+        "first_sec": min((c.first_sec for c in cells.values()), default=None),
+        "last_sec": max((c.last_sec for c in cells.values()), default=None),
+    }

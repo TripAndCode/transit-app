@@ -31,7 +31,6 @@ from pipeline.cache import async_lru_cache, cache_briefly
 from pipeline.day_types import ServiceCalendar
 from pipeline.timetable_sampling import DAY_TYPES, MAX_WALK_DAYS, TypicalDay, service_calendar
 from pipeline.timetable_sampling import DayType as RevisionDayType
-from pipeline.timetable_sampling import typical_day as typical_day
 
 
 class Run(NamedTuple):
@@ -111,9 +110,8 @@ def revisions(in_order: Sequence[Run]) -> list[Revision]:
 def typical_days(run: Run, calendar: ServiceCalendar, *, latest: bool) -> dict[RevisionDayType, TypicalDay | None]:
     """*run*'s typical day of each day type, chosen among the dates of that
     type within *calendar*'s extent nearest the run's end when *latest* (the
-    side before a revision), else nearest its start: up to SAMPLE_DATES of
-    each weekday Monday to Friday for the weekday type, up to SAMPLE_DATES
-    for each other type."""
+    side before a revision), else nearest its start, by
+    timetable_sampling.typical_days' quotas."""
     if latest:
         lo, hi = max(run.first, run.last - timedelta(days=MAX_WALK_DAYS)), run.last
     else:

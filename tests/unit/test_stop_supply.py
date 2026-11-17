@@ -33,18 +33,15 @@ def test_departures_bucket_by_hour_with_first_last_and_inner_gap():
     }
 
 
-def test_an_after_midnight_time_written_at_face_value_is_the_same_nights():
-    cells = hour_cells([hm(0, 10), hm(23, 50)])
-    assert cells == {23: HourCell(1, hm(23, 50), hm(23, 50), None), 24: HourCell(1, hm(24, 10), hm(24, 10), None)}
-
-
-def test_an_extended_hour_and_its_face_value_land_in_the_same_hour():
-    assert hour_cells([hm(24, 10), hm(0, 40)]) == {24: HourCell(2, hm(24, 10), hm(24, 40), 30 * M)}
-
-
-def test_the_cutover_hour_is_the_morning_and_the_hour_before_it_the_night():
-    cells = hour_cells([hm(4, 0), hm(3, 59)])
-    assert set(cells) == {4, 27}
+def test_after_midnight_departures_are_hours_24_and_later():
+    # Service-day seconds: the departures SQL has already moved a face-value
+    # 00:10 to 24:10 (pipeline.timetable_sampling).
+    cells = hour_cells([hm(24, 10), hm(23, 50), hm(27, 59)])
+    assert cells == {
+        23: HourCell(1, hm(23, 50), hm(23, 50), None),
+        24: HourCell(1, hm(24, 10), hm(24, 10), None),
+        27: HourCell(1, hm(27, 59), hm(27, 59), None),
+    }
 
 
 def test_two_departures_at_one_time_wait_nothing_between_them():
@@ -99,7 +96,7 @@ def test_departures_per_hour_are_the_bands_count_over_its_hours():
 
 
 def test_a_night_band_reads_after_midnight_departures():
-    cells = hour_cells([hm(23, 30), hm(0, 15)])
+    cells = hour_cells([hm(23, 30), hm(24, 15)])
     assert band_supply(cells, 23, 25) == BandSupply(2, 1.0, 45 * M)
 
 
@@ -214,18 +211,34 @@ def test_the_version_on_a_date_is_the_segment_covering_it():
 
 
 def test_rows_carry_their_day_type_in_day_type_order():
-    rows = hourly_rows(7, "S", "c", [(1, "s1", [hm(10)]), (3, "s1", [hm(0, 30)])])
+    rows = hourly_rows(7, "S", "c", [(1, "s1", [hm(10)]), (3, "s1", [hm(24, 30)])])
     assert rows == [
         (7, "S", "c", "weekday", "s1", 10, 1, hm(10), hm(10), None),
         (7, "S", "c", "sunday_holiday", "s1", 24, 1, hm(24, 30), hm(24, 30), None),
     ]
 
 
-def test_both_tables_fingerprint_the_shared_timetable_reading():
+def test_the_tables_fingerprint_what_decides_their_rows():
     import inspect
 
     from pipeline import stop_supply, timetable_sampling
 
-    shared = inspect.getsource(timetable_sampling)
-    assert shared in stop_supply.render_days()
-    assert shared in stop_supply.render()
+    days = stop_supply.render_days()
+    for shared in (
+        timetable_sampling.typical_days,
+        timetable_sampling.typical_day,
+        timetable_sampling.service_calendar,
+    ):
+        assert inspect.getsource(shared) in days
+    hourly = stop_supply.render()
+    assert timetable_sampling.DEPARTURE_SECONDS_SQL in hourly
+    assert inspect.getsource(timetable_sampling.services_by_day_type) in hourly
+    assert not set(days) & set(hourly)
+
+
+def test_a_versions_dates_in_force_read_as_one_digest():
+    from pipeline.stop_supply import segments_digest
+
+    assert segments_digest([(MON, MON + timedelta(days=9)), (MON + timedelta(days=20), MON + timedelta(days=30))]) == (
+        "2026-06-01/2026-06-10,2026-06-21/2026-07-01"
+    )

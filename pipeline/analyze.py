@@ -255,7 +255,9 @@ _STATIC_ONLY_AGG_TABLES = frozenset({"agg_route_headway", stop_supply.DAYS_TABLE
 
 # What a table whose scope is [] may leave standing: a date-scoped table with
 # no date of its own to rebuild, or a static-only table whose fingerprint, and
-# so its whole input, is unchanged.
+# so its whole input, is unchanged. The exception is the Timetable.VERSIONS
+# tables, whose builder still runs to add, drop or rebuild versions; only the
+# purge is skipped.
 _NOOP_SKIPPABLE_AGG_TABLES = _INCREMENTAL_AGG_TABLES | _STATIC_ONLY_AGG_TABLES
 
 # Computed and stored in ClickHouse (pipeline/ch_aggregates.py). Their Postgres
@@ -1026,7 +1028,9 @@ def _nothing_to_rebuild(table: str, rebuild_dates: list | None) -> bool:
 
     Membership in :data:`_NOOP_SKIPPABLE_AGG_TABLES` is what makes the answer
     safe, and it binds the purge as well as the build: a table whose build is
-    skipped must not have its rows deleted, or the run empties it.
+    skipped must not have its rows deleted, or the run empties it. The
+    Timetable.VERSIONS tables are skipped by the purge only: stop_supply.rebuild
+    runs on every run and changes only the versions that moved.
     """
     return rebuild_dates == [] and table in _NOOP_SKIPPABLE_AGG_TABLES
 

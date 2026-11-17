@@ -526,6 +526,14 @@ def _source_mix(rows: list, from_date: date, to_date: date) -> list[SourceMix]:
     return mix
 
 
+async def forget_stale_builds(conn) -> None:
+    """For a read that stamps no build of its own: forget, as stamp_build
+    does, the cached results a build since this process last looked can have
+    made stale. Call it before reading a cache."""
+    rows = await conn.fetch(_BUILDS_SQL)
+    _note_builds({row[0]: (row[1], row[2]) for row in rows})
+
+
 def _note_builds(builds: dict[int, tuple]) -> None:
     """Forget the cached compute results a build since this process last looked
     can have made stale: the entries of each agency whose builds moved or

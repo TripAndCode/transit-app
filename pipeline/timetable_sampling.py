@@ -2,8 +2,10 @@
 departures it plans there at every stop.
 
 Shared by the timetable revision comparison (pipeline.reports.timetable_diff)
-and the planned stop supply (pipeline.stop_supply), so the two read the same
-day of a timetable and count the same departures on it.
+and the planned stop supply (pipeline.stop_supply), so the two pick a typical
+day by the same rule and count the same departures on it, in service-day
+seconds. They seek the sample dates in different places: the comparison
+nearest its revision, the supply from where a version comes into force.
 
 Day types follow the weekday rule (pipeline.day_types.fallback_day_type), the
 same three for every feed. A typical day is, among sample dates of a type, the
@@ -28,6 +30,7 @@ from pipeline.day_types import (
     fallback_day_type,
     public_holidays_between,
 )
+from pipeline.service_day import service_day_offset_ch
 
 DayType = Literal["weekday", "saturday", "sunday_holiday"]
 DAY_TYPES: tuple[DayType, ...] = ("weekday", "saturday", "sunday_holiday")
@@ -105,12 +108,13 @@ def typical_days(
 # A trip's last stop is where it arrives, so it departs nowhere; an untimed
 # stop time departs at no known hour. {services} holds each day type's
 # running services, in DAY_TYPES order. Each row is one departure: its day
-# type's index, its stop and its second from midnight as the feed wrote it.
+# type's index, its stop and its service-day second (pipeline.service_day), so
+# 00:40 written at face value is the same night's 24:40.
 _STOP_DEPARTURES = f"""
     SELECT dt, stop_id, sec
     FROM (
         SELECT st.stop_id AS stop_id, assumeNotNull(s.service_type) AS service,
-               assumeNotNull(s.scheduled_sec) AS sec
+               assumeNotNull({service_day_offset_ch("s.scheduled_sec")}) AS sec
         FROM {static_archive.SCHEDULE} AS s
         INNER JOIN (
             SELECT trip_id, stop_sequence, stop_id,
@@ -127,12 +131,11 @@ _STOP_DEPARTURES = f"""
     ) AS dt
 """
 
-# One row per day type and stop. A row holds the stop's departures in an
-# array, so the result stays a few times the stop count, within the API
-# client's max_result_rows.
+# One row per day type and stop, its departures in an array.
 DEPARTURE_SECONDS_SQL = f"SELECT dt, stop_id, groupArray(sec) FROM ({_STOP_DEPARTURES}) GROUP BY dt, stop_id"
-# The same per clock hour as written (intDiv(sec, 3600)): each hour's
-# (hour, departures, first second, last second).
+# One row per day type and stop, its service-day hours' (hour, departures,
+# first second, last second) in an array, so the result stays a few times the
+# stop count, within the API client's max_result_rows.
 DEPARTURE_HOURS_SQL = f"""
     SELECT dt, stop_id, groupArray((hour, departures, first_sec, last_sec))
     FROM (

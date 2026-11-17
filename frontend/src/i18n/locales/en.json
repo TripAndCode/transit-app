@@ -2687,8 +2687,7 @@
       "over_gap": "A gap over {{minutes}} min",
       "within_gap": "No gap over {{minutes}} min"
     },
-    "summary": "{{stops}} stops of {{agencies}} operators, {{over}} of them with a gap over {{minutes}} min",
-    "unplaced": "{{count}} stops have no position in the current timetable and are not drawn.",
+    "summary": "Operators read: {{agencies}} · stops: {{stops}} · with a gap over {{minutes}} min: {{over}}",
     "not_shown": "Operators not shown",
     "status": {
       "no_timetable": "{{name}}: no timetable in force on this date",
@@ -2700,6 +2699,8 @@
     "stop_detail": "{{name}}: {{departures}} departures in the hours ({{perHour}} an hour), longest gap {{gap}} min, first {{first}}, last {{last}}",
     "no_departure_day": "none",
     "note": "Planned departures from each operator's timetable, read on a typical day of the day type. A trip's last stop is not a departure, and the stops of different operators are not added together.",
-    "empty": "No operator's stops can be read for this date and day type."
+    "empty": "No operator's stops can be read for this date and day type.",
+    "unplaced_one": "{{count}} stop has no position in the current timetable and is not drawn.",
+    "unplaced_other": "{{count}} stops have no position in the current timetable and are not drawn."
   }
 }

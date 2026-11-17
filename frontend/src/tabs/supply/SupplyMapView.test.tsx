@@ -5,18 +5,27 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import i18n from "../../i18n";
 import * as supplyApi from "./supplyApi";
-import type { SupplyMapResponse } from "./supplyApi";
+import type { SupplyMapResponse, SupplyStopDetail } from "./supplyApi";
 import { SupplyMapView } from "./SupplyMapView";
 
 type Handler = (event?: unknown) => void;
-const maps: Array<{ handlers: Record<string, Handler[]> }> = [];
+type Captured = {
+  handlers: Record<string, Handler[]>;
+  setStyle: ReturnType<typeof vi.fn>;
+  setPaintProperty: ReturnType<typeof vi.fn>;
+};
+const maps: Captured[] = [];
 
 vi.mock("maplibre-gl", async () => {
   const mock = await import("../../test/maplibreMock");
   class CapturedMap extends mock.MockMap {
+    setStyle = vi.fn();
+    setPaintProperty = vi.fn();
+    // The layer the view adds is there to repaint.
+    getLayer = vi.fn(() => ({}) as unknown as undefined);
     constructor(options: Record<string, unknown>) {
       super(options);
-      maps.push(this as unknown as { handlers: Record<string, Handler[]> });
+      maps.push(this as unknown as Captured);
     }
   }
   return { ...mock, Map: CapturedMap };
@@ -28,27 +37,40 @@ const response: SupplyMapResponse = {
   from_hour: 10,
   to_hour: 16,
   agencies: [
-    { agency_id: 1, agency_name: "広島バス", status: "ok", static_version_id: "gtfs_static_20260401", typical_day: "2026-04-06" },
-    { agency_id: 2, agency_name: "芸陽バス", status: "not_built", static_version_id: "gtfs_static_20260402", typical_day: null },
-    { agency_id: 3, agency_name: "備北交通", status: "no_timetable", static_version_id: null, typical_day: null },
-  ],
-  stops: [
     {
-      agency_id: 1, stop_id: "S1", stop_name: "紙屋町", lat: 34.39, lon: 132.45,
-      departures: 24, per_hour: 4, longest_gap_min: 25, first_sec: 6 * 3600, last_sec: 24 * 3600 + 20 * 60,
+      agency_id: 1,
+      agency_name: "広島バス",
+      status: "ok",
+      static_version_id: "gtfs_static_20260401",
+      typical_day: "2026-04-06",
+      stops: {
+        stop_id: ["S1", "S2", "S3"],
+        lat: [34.39, 34.6, null],
+        lon: [132.45, 132.7, null],
+        departures: [24, 1, 0],
+        longest_gap_min: [25, 240, 360],
+      },
     },
-    {
-      agency_id: 1, stop_id: "S2", stop_name: "山奥", lat: 34.6, lon: 132.7,
-      departures: 1, per_hour: 0.17, longest_gap_min: 240, first_sec: 7 * 3600, last_sec: 12 * 3600,
-    },
-    {
-      agency_id: 1, stop_id: "S3", stop_name: null, lat: null, lon: null,
-      departures: 0, per_hour: 0, longest_gap_min: 360, first_sec: null, last_sec: null,
-    },
+    { agency_id: 2, agency_name: "芸陽バス", status: "not_built", static_version_id: "gtfs_static_20260402", typical_day: null, stops: null },
+    { agency_id: 3, agency_name: "備北交通", status: "no_timetable", static_version_id: null, typical_day: null, stops: null },
   ],
 };
 
+const detail: SupplyStopDetail = {
+  agency_id: 1,
+  stop_id: "S1",
+  stop_name: "紙屋町",
+  departures: 24,
+  per_hour: 4,
+  longest_gap_min: 25,
+  first_sec: 6 * 3600,
+  last_sec: 24 * 3600 + 20 * 60,
+};
+
 function stubSupply(data: SupplyMapResponse | undefined) {
+  vi.spyOn(supplyApi, "useSupplyStop").mockImplementation(
+    (_query, stop) => ({ data: stop?.stopId === "S1" ? detail : undefined }) as unknown as UseQueryResult<SupplyStopDetail>,
+  );
   return vi.spyOn(supplyApi, "useNetworkSupply").mockReturnValue({
     data,
     error: null,
@@ -67,8 +89,8 @@ describe("SupplyMapView", () => {
     const hook = stubSupply(response);
     renderWithProviders(<SupplyMapView />);
     expect(hook).toHaveBeenCalledWith({ date: "", dayType: "weekday", fromHour: 10, toHour: 16 });
-    expect(screen.getByText("3 stops of 1 operators, 2 of them with a gap over 60 min")).toBeInTheDocument();
-    expect(screen.getByText("1 stops have no position in the current timetable and are not drawn.")).toBeInTheDocument();
+    expect(screen.getByText("Operators read: 1 · stops: 3 · with a gap over 60 min: 2")).toBeInTheDocument();
+    expect(screen.getByText("1 stop has no position in the current timetable and is not drawn.")).toBeInTheDocument();
   });
 
   it("names the operators it cannot show and why, never as zero", () => {
@@ -83,21 +105,24 @@ describe("SupplyMapView", () => {
     const hook = stubSupply(response);
     renderWithProviders(<SupplyMapView />);
     await userEvent.selectOptions(screen.getByLabelText("Highlight gaps over"), "20");
-    expect(screen.getByText("3 stops of 1 operators, 3 of them with a gap over 20 min")).toBeInTheDocument();
+    expect(screen.getByText("Operators read: 1 · stops: 3 · with a gap over 20 min: 3")).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Day type"), "saturday");
     await userEvent.selectOptions(screen.getByLabelText("To"), "25");
     expect(hook).toHaveBeenLastCalledWith({ date: "", dayType: "saturday", fromHour: 10, toHour: 25 });
   });
 
-  it("says when the band ends before it starts", async () => {
+  it("shows nothing of the last band once the band ends before it starts", async () => {
     stubSupply(response);
     renderWithProviders(<SupplyMapView />);
     await userEvent.selectOptions(screen.getByLabelText("From"), "16");
     await userEvent.selectOptions(screen.getByLabelText("To"), "10");
     expect(screen.getByRole("alert")).toHaveTextContent("The end must be after the start.");
+    expect(screen.queryByText(/^Operators read:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/has no position/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/芸陽バス/)).not.toBeInTheDocument();
   });
 
-  it("describes a stop clicked on the map, its last departure past midnight", () => {
+  it("opens a stop clicked on the map, its last departure past midnight", () => {
     stubSupply(response);
     renderWithProviders(<SupplyMapView />);
     const click = maps[0].handlers.click[0];
@@ -105,19 +130,38 @@ describe("SupplyMapView", () => {
     expect(
       screen.getByText("紙屋町: 24 departures in the hours (4 an hour), longest gap 25 min, first 6:00, last 24:20"),
     ).toBeInTheDocument();
+    expect(supplyApi.useSupplyStop).toHaveBeenLastCalledWith(
+      { date: "", dayType: "weekday", fromHour: 10, toHour: 16 },
+      { agencyId: 1, stopId: "S1" },
+    );
   });
 
-  it("switches the legend to the gap threshold", async () => {
+  it("repaints rather than reloading the stops when the mode changes, and switches the legend", async () => {
     stubSupply(response);
     renderWithProviders(<SupplyMapView />);
     expect(screen.getByText("3 or more an hour")).toBeInTheDocument();
+    const map = maps[0];
+    map.setPaintProperty.mockClear();
     await userEvent.selectOptions(screen.getByLabelText("Show"), "gap");
     expect(screen.getByText("A gap over 60 min")).toBeInTheDocument();
     expect(screen.queryByText("3 or more an hour")).not.toBeInTheDocument();
+    expect(map.setPaintProperty).toHaveBeenCalledWith(
+      "supply-stops-circles",
+      "circle-opacity",
+      ["case", [">", ["get", "gap"], 60], 0.9, 0.18],
+    );
+  });
+
+  it("restyles the basemap in the new language", async () => {
+    stubSupply(response);
+    renderWithProviders(<SupplyMapView />);
+    await act(() => i18n.changeLanguage("ja"));
+    expect(maps[0].setStyle).toHaveBeenCalledTimes(1);
+    await act(() => i18n.changeLanguage("en"));
   });
 
   it("says when no operator's stops can be read", () => {
-    stubSupply({ ...response, agencies: [response.agencies[2]], stops: [] });
+    stubSupply({ ...response, agencies: [response.agencies[2]] });
     renderWithProviders(<SupplyMapView />);
     expect(screen.getByText("No operator's stops can be read for this date and day type.")).toBeInTheDocument();
   });

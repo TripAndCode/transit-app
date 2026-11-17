@@ -2681,9 +2681,8 @@ def test_a_second_analyze_leaves_the_aggregates_identical(pg_conn, agency_id, ch
     totals_reads = tuple(f"FROM {t} " for t in (*ch_aggregates.INTERNAL_TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES))
     probes = ("SELECT count(), ", *(f"SELECT {e} FROM {t} " for t, (_, e, _) in ch_aggregates.REFERENCES.items()))
     # The archive's stop times and schedules are read for one content, or listed
-    # by content; its version map and spans hold a row per version name, and its
-    # calendars a row per service or exception date of each version, which the
-    # stop supply reads to tell whether a version's typical days moved.
+    # by content; its version map and spans hold a row per version name, as does
+    # the stop supply's listing of the versions whose calendar is kept.
     archive_reads = (f"FROM {static_archive.ARCHIVE} ", f"FROM {static_archive.SCHEDULE} ")
     name_reads = (
         f"FROM {static_archive.VERSION_MAP} ",

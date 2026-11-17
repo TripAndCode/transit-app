@@ -10,17 +10,27 @@ import { createSafeMap } from "../map/createSafeMap";
 import { whenStyleReady } from "../map/styleReady";
 import { repaintLayer } from "../map/repaintLayer";
 import { ErrorBanner } from "../../components/ErrorBanner";
-import { SUPPLY_DAY_TYPES, useNetworkSupply, type SupplyDayType, type SupplyStop } from "./supplyApi";
+import {
+  SUPPLY_DAY_TYPES,
+  useNetworkSupply,
+  useSupplyStop,
+  type SupplyDayType,
+  type SupplyQuery,
+  type SupplyStopDetail,
+} from "./supplyApi";
 import {
   DEFAULT_BAND,
   DEFAULT_GAP_MIN,
   FIRST_HOUR,
   GAP_THRESHOLDS_MIN,
   LAST_HOUR,
-  serviceClock,
+  PER_HOUR_CLASSES,
   hourLabel,
+  mapStops,
+  overGapExpression,
+  perHourClassExpression,
+  serviceClock,
   stopBounds,
-  stopKey,
   supplyFeatures,
   supplySummary,
   type SupplyMode,
@@ -31,27 +41,34 @@ const LAYER = "supply-stops-circles";
 // The whole prefecture-scale network at once, before the stops fit it.
 const INITIAL_VIEW = { center: [132.46, 34.4] as [number, number], zoom: 10 };
 
+// Per departures-per-hour class: none, then deepening with frequency.
+const CLASS_OPACITY = [0.12, 0.3, 0.5, 0.7, 0.95];
+const CLASS_RADIUS = [2.5, 3.5, 4, 4.5, 5.5];
+const CLASS_LEGEND_SIZE = [5, 7, 8, 9, 11];
+
 type CirclePaint = NonNullable<Extract<LayerSpecification, { type: "circle" }>["paint"]>;
 
 /** Departures per hour deepen the accent by class; a gap over the threshold
  *  carries the accent and every other stop recedes, so neither mode leans on
- *  an alarm colour. */
-function circlePaint(mode: SupplyMode): CirclePaint {
+ *  an alarm colour. The classing is in the expressions, over the features'
+ *  raw figures. */
+function circlePaint(mode: SupplyMode, gapMin: number, hours: number): CirclePaint {
   const accent = accentColorResolved();
   const surface = surfaceColorResolved();
   if (mode === "gap") {
+    const over = overGapExpression(gapMin);
     return {
-      "circle-radius": ["case", ["get", "over_gap"], 5, 3],
+      "circle-radius": ["case", over, 5, 3],
       "circle-color": accent,
-      "circle-opacity": ["case", ["get", "over_gap"], 0.9, 0.18],
-      "circle-stroke-width": ["case", ["get", "over_gap"], 1, 0],
+      "circle-opacity": ["case", over, 0.9, 0.18],
+      "circle-stroke-width": ["case", over, 1, 0],
       "circle-stroke-color": surface,
     };
   }
   return {
-    "circle-radius": ["step", ["get", "per_hour_class"], 2.5, 1, 3.5, 2, 4, 3, 4.5, 4, 5.5],
+    "circle-radius": perHourClassExpression(hours, CLASS_RADIUS),
     "circle-color": accent,
-    "circle-opacity": ["step", ["get", "per_hour_class"], 0.12, 1, 0.3, 2, 0.5, 3, 0.7, 4, 0.95],
+    "circle-opacity": perHourClassExpression(hours, CLASS_OPACITY),
     "circle-stroke-width": 1,
     "circle-stroke-color": surface,
   };
@@ -73,21 +90,30 @@ export function SupplyMapView() {
   const [toHour, setToHour] = useState<number>(DEFAULT_BAND.toHour);
   const [mode, setMode] = useState<SupplyMode>("departures");
   const [gapMin, setGapMin] = useState<number>(DEFAULT_GAP_MIN);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [opened, setOpened] = useState<{ agencyId: number; stopId: string } | null>(null);
   const bandValid = toHour > fromHour;
-  const query = useNetworkSupply({ date, dayType, fromHour, toHour });
-  const data = query.data;
-  const stops = data?.stops ?? [];
-  const agencies = data?.agencies ?? [];
-  const summary = supplySummary(agencies, stops, gapMin);
-  const selected = stops.find((s) => stopKey(s) === selectedKey);
+  const hours = toHour - fromHour;
+  const supplyQuery: SupplyQuery = { date, dayType, fromHour, toHour };
+  const query = useNetworkSupply(supplyQuery);
+  // An invalid band asks nothing, so the last band's answer must not stand for it.
+  const data = bandValid ? query.data : undefined;
+  const stops = mapStops(data);
+  const summary = supplySummary(data, stops, gapMin);
+  const detail = useSupplyStop(supplyQuery, bandValid ? opened : null);
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const initialLanguage = useRef(i18n.language);
+  const firstLanguageRun = useRef(true);
   const [failed, setFailed] = useState(false);
+  const [styleEpoch, setStyleEpoch] = useState(0);
   const theme = useThemeSignal();
-  const onStopClick = useEffectEvent((key: string | null) => setSelectedKey(key));
+  const onStopClick = useEffectEvent((key: unknown) => {
+    if (typeof key !== "string") return;
+    const at = key.indexOf(":");
+    setOpened({ agencyId: Number(key.slice(0, at)), stopId: key.slice(at + 1) });
+  });
+  const currentPaint = useEffectEvent(() => circlePaint(mode, gapMin, hours));
 
   useEffect(() => {
     if (!container.current) return;
@@ -103,10 +129,7 @@ export function SupplyMapView() {
     const instance = created.map;
     map.current = instance;
     instance.addControl(new maplibregl.NavigationControl({ showCompass: false }));
-    instance.on("click", LAYER, (event) => {
-      const key = event.features?.[0]?.properties?.key;
-      onStopClick(typeof key === "string" ? key : null);
-    });
+    instance.on("click", LAYER, (event) => onStopClick(event.features?.[0]?.properties?.key));
     let observer: ResizeObserver | undefined;
     if (typeof ResizeObserver !== "undefined") {
       observer = new ResizeObserver(() => instance.resize());
@@ -116,28 +139,49 @@ export function SupplyMapView() {
       observer?.disconnect();
       instance.remove();
       map.current = null;
+      firstLanguageRun.current = true;
     };
   }, []);
+
+  // A language switch rebuilds the basemap's labels, which drops the layer;
+  // the bumped epoch attaches it again.
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    if (firstLanguageRun.current) {
+      firstLanguageRun.current = false;
+      return;
+    }
+    if (getMapStyleOverride()) return;
+    instance.setStyle(buildStyle(readMapStylePref(), i18n.language), { diff: false });
+    instance.once("style.load", () => setStyleEpoch((epoch) => epoch + 1));
+  }, [i18n.language]);
 
   useEffect(() => {
     const instance = map.current;
     if (!instance) return;
-    const collection = supplyFeatures(data?.stops ?? [], gapMin);
+    const collection = supplyFeatures(mapStops(data));
     return whenStyleReady(instance, () => {
-      const paint = circlePaint(mode);
       const source = instance.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined;
       if (source) {
         source.setData(collection);
-        repaintLayer(instance, LAYER, paint);
         return;
       }
       instance.addSource(SOURCE, { type: "geojson", data: collection });
-      instance.addLayer({ id: LAYER, type: "circle", source: SOURCE, paint });
+      instance.addLayer({ id: LAYER, type: "circle", source: SOURCE, paint: currentPaint() });
     });
-  }, [data, gapMin, mode, theme]);
+  }, [data, styleEpoch]);
 
-  const bounds = stopBounds(stops);
-  const boundsKey = bounds?.join(",") ?? "";
+  useEffect(() => {
+    const instance = map.current;
+    if (!instance) return;
+    const paint = circlePaint(mode, gapMin, hours);
+    return whenStyleReady(instance, () => {
+      if (instance.getLayer(LAYER)) repaintLayer(instance, LAYER, paint);
+    });
+  }, [mode, gapMin, hours, theme, styleEpoch]);
+
+  const boundsKey = stopBounds(stops)?.join(",") ?? "";
   useEffect(() => {
     const instance = map.current;
     if (!instance || !boundsKey) return;
@@ -153,6 +197,7 @@ export function SupplyMapView() {
     });
   }, [boundsKey]);
 
+  const agencies = data?.agencies ?? [];
   const notShown = agencies.filter((a) => a.status !== "ok");
   const read = agencies.filter((a) => a.status === "ok");
   return (
@@ -213,8 +258,12 @@ export function SupplyMapView() {
           </select>
         </label>
       </div>
-      {!bandValid && <p role="alert" style={MUTED}>{t("supply.band_invalid")}</p>}
-      {query.error ? <ErrorBanner error={query.error} onRetry={() => void query.refetch()} /> : null}
+      {!bandValid && (
+        <p role="alert" style={MUTED}>
+          {t("supply.band_invalid")}
+        </p>
+      )}
+      {bandValid && query.error ? <ErrorBanner error={query.error} onRetry={() => void query.refetch()} /> : null}
       <Legend mode={mode} gapMin={gapMin} />
       <div ref={container} style={{ height: failed ? 0 : 480, borderRadius: 6 }} />
       {failed && <p style={MUTED}>{t("supply.map_unavailable")}</p>}
@@ -230,8 +279,8 @@ export function SupplyMapView() {
               })}
         </p>
       )}
-      {selected && <StopDetail stop={selected} />}
-      {summary.unplaced > 0 && <p style={MUTED}>{t("supply.unplaced", { count: summary.unplaced })}</p>}
+      {data && detail.data && <StopDetail stop={detail.data} />}
+      {data && summary.unplaced > 0 && <p style={MUTED}>{t("supply.unplaced", { count: summary.unplaced })}</p>}
       {notShown.length > 0 && (
         <div style={MUTED}>
           <div>{t("supply.not_shown")}</div>
@@ -259,7 +308,7 @@ export function SupplyMapView() {
   );
 }
 
-function StopDetail({ stop }: { stop: SupplyStop }) {
+function StopDetail({ stop }: { stop: SupplyStopDetail }) {
   const { t } = useTranslation();
   const none = t("supply.no_departure_day");
   return (
@@ -284,10 +333,10 @@ function Legend({ mode, gapMin }: { mode: SupplyMode; gapMin: number }) {
           { label: t("supply.legend.over_gap", { minutes: gapMin }), opacity: 0.9, size: 10 },
           { label: t("supply.legend.within_gap", { minutes: gapMin }), opacity: 0.18, size: 6 },
         ]
-      : [0, 1, 2, 3, 4].map((cls) => ({
+      : Array.from({ length: PER_HOUR_CLASSES }, (_, cls) => ({
           label: t(`supply.legend.class_${cls}`),
-          opacity: [0.12, 0.3, 0.5, 0.7, 0.95][cls],
-          size: [5, 7, 8, 9, 11][cls],
+          opacity: CLASS_OPACITY[cls],
+          size: CLASS_LEGEND_SIZE[cls],
         }));
   return (
     <ul style={{ display: "flex", flexWrap: "wrap", gap: 12, listStyle: "none", margin: 0, padding: 0, ...MUTED }}>

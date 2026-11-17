@@ -10,9 +10,12 @@ dates it is in force on, so operators whose calendars split the week
 differently still read alike on one map. A version whose calendar is not kept
 has every type unknown, which is never read as zero.
 
-Departures are timetable_sampling's. Times are service-day seconds
-(pipeline.service_day): 00:40 written at face value is 24:40, the same
-night's.
+Departures and their service-day seconds are timetable_sampling's: 00:40
+written at face value is the same night's 24:40.
+
+A run re-reads a version's calendar only when the version is new, the dates
+it is in force on moved, or it had no kept calendar and now has one: the
+segments it was read over are kept beside its typical days.
 
 The definitions a reader sees are in docs/methodology.md (停留所の運行本数).
 """
@@ -30,7 +33,6 @@ import psycopg2.extras
 
 from pipeline import static_archive, timetable_sampling
 from pipeline.day_types import ServiceCalendar, fallback_day_type
-from pipeline.service_day import service_day_offset
 from pipeline.timetable_sampling import DAY_TYPES, MAX_WALK_DAYS, TypicalDay, service_calendar
 from pipeline.timetable_sampling import DayType as SupplyDayType
 
@@ -91,10 +93,9 @@ class HourCell(NamedTuple):
 
 
 def hour_cells(departure_secs: Iterable[int]) -> dict[int, HourCell]:
-    """One stop's departures on one day, seconds from midnight as the feed
-    wrote them, as HourCells by service-day hour. A time before the cutover
-    is the same night's, a day later than its face value."""
-    secs = sorted(service_day_offset(sec) for sec in departure_secs)
+    """One stop's departures on one day, in service-day seconds, as HourCells
+    by service-day hour."""
+    secs = sorted(departure_secs)
     by_hour: dict[int, list[int]] = {}
     for sec in secs:
         by_hour.setdefault(sec // 3600, []).append(sec)
@@ -148,53 +149,57 @@ _HOURLY_COLUMNS = (
 
 
 def render() -> list[str]:
-    """What decides agg_stop_supply_hourly's rows, for its registry fingerprint."""
+    """What decides agg_stop_supply_hourly's rows beyond the typical days
+    agg_stop_supply_days holds, which it depends on."""
     return [
+        timetable_sampling.DEPARTURE_SECONDS_SQL,
+        inspect.getsource(timetable_sampling.services_by_day_type),
         inspect.getsource(hour_cells),
-        inspect.getsource(service_day_offset),
-        *render_days(),
+        inspect.getsource(hourly_rows),
+        inspect.getsource(_build),
     ]
 
 
 def render_days() -> list[str]:
-    """What decides agg_stop_supply_days' rows, for its registry fingerprint.
-    The shared module is rendered whole, its departures SQL included, so a
-    change made there for the revision comparison moves these too."""
+    """What decides agg_stop_supply_days' rows: each version's typical days."""
     return [
-        inspect.getsource(timetable_sampling),
         inspect.getsource(versions_in_force),
         inspect.getsource(typical_days),
+        inspect.getsource(timetable_sampling.typical_days),
+        inspect.getsource(timetable_sampling.typical_day),
+        inspect.getsource(timetable_sampling._quota),
+        inspect.getsource(timetable_sampling.service_calendar),
         inspect.getsource(ServiceCalendar),
         inspect.getsource(fallback_day_type),
+        f"SAMPLE_DATES={timetable_sampling.SAMPLE_DATES!r}",
+        f"MAX_WALK_DAYS={MAX_WALK_DAYS!r}",
     ]
 
 
 Days = dict[SupplyDayType, TypicalDay | None]
 
 
-def _desired(ch, agency_id: int) -> dict[tuple[str, str], Days]:
-    """Each version in force with the typical day of each type it is read on."""
-    join = static_archive.schedule_join(ch, agency_id, None, by_service_date=True)
-    kept = static_archive.calendar_versions(ch, agency_id)
-    out: dict[tuple[str, str], Days] = {}
-    for version in versions_in_force(join.in_force()):
-        key = (version.stem, version.content)
-        archived = static_archive.archived_calendar(ch, agency_id, *key) if key in kept else None
-        out[key] = (
-            dict.fromkeys(DAY_TYPES) if archived is None else typical_days(version.segments, service_calendar(archived))
-        )
-    return out
+def segments_digest(segments: Iterable[tuple[date, date]]) -> str:
+    """The dates a version is in force on, as text a run compares with the
+    last one's to tell whether its typical days can have moved."""
+    return ",".join(f"{first.isoformat()}/{last.isoformat()}" for first, last in segments)
 
 
-def _stored(conn, agency_id: int) -> dict[tuple[str, str], dict[str, date | None]]:
+class _Stored(NamedTuple):
+    days: dict[str, date | None]
+    segments: str
+
+
+def _stored(conn, agency_id: int) -> dict[tuple[str, str], _Stored]:
     with conn.cursor() as cur:
         cur.execute(
-            f"SELECT static_version_id, content_hash, day_type, typical_day FROM {DAYS_TABLE} WHERE agency_id = %s",
+            f"SELECT static_version_id, content_hash, day_type, typical_day, segments FROM {DAYS_TABLE} "
+            "WHERE agency_id = %s",
             (agency_id,),
         )
-        out: dict[tuple[str, str], dict[str, date | None]] = {}
-        for stem, content, day_type, day in cur.fetchall():
-            out.setdefault((stem, content), {})[day_type] = day
+        out: dict[tuple[str, str], _Stored] = {}
+        for stem, content, day_type, day, segments in cur.fetchall():
+            out.setdefault((stem, content), _Stored({}, segments)).days[day_type] = day
         return out
 
 
@@ -202,10 +207,18 @@ def _days_of(days: Days) -> dict[str, date | None]:
     return {day_type: None if typical is None else typical.day for day_type, typical in days.items()}
 
 
+def _read_days(ch, agency_id: int, version: VersionInForce, kept: set[tuple[str, str]]) -> Days:
+    key = (version.stem, version.content)
+    archived = static_archive.archived_calendar(ch, agency_id, *key) if key in kept else None
+    if archived is None:
+        return dict.fromkeys(DAY_TYPES)
+    return typical_days(version.segments, service_calendar(archived))
+
+
 def hourly_rows(agency_id: int, stem: str, content: str, rows: Iterable[tuple]) -> list[tuple]:
     """timetable_sampling.DEPARTURE_SECONDS_SQL's rows, (day type index,
-    stop_id, departure seconds), as
-    agg_stop_supply_hourly rows of version *stem* at *content*."""
+    stop_id, departure seconds), as agg_stop_supply_hourly rows of version
+    *stem* at *content*."""
     out = []
     for index, stop_id, secs in rows:
         day_type = DAY_TYPES[index - 1]
@@ -214,18 +227,20 @@ def hourly_rows(agency_id: int, stem: str, content: str, rows: Iterable[tuple]) 
     return out
 
 
-def _build(conn, ch, agency_id: int, stem: str, content: str, days: Days) -> int:
+def _build(conn, ch, agency_id: int, version: VersionInForce, days: Days) -> int:
     services = timetable_sampling.services_by_day_type(days)
     rows: list[tuple] = []
     if any(services):
-        parameters = {"agency": agency_id, "content": content, "services": services}
+        parameters = {"agency": agency_id, "content": version.content, "services": services}
         result = ch.query(timetable_sampling.DEPARTURE_SECONDS_SQL, parameters=parameters)
-        rows = hourly_rows(agency_id, stem, content, result.result_rows)
+        rows = hourly_rows(agency_id, version.stem, version.content, result.result_rows)
+    digest = segments_digest(version.segments)
     with conn.cursor() as cur:
         psycopg2.extras.execute_values(
             cur,
-            f"INSERT INTO {DAYS_TABLE} (agency_id, static_version_id, content_hash, day_type, typical_day) VALUES %s",
-            [(agency_id, stem, content, day_type, day) for day_type, day in _days_of(days).items()],
+            f"INSERT INTO {DAYS_TABLE} (agency_id, static_version_id, content_hash, day_type, typical_day, segments) "
+            "VALUES %s",
+            [(agency_id, version.stem, version.content, dt, day, digest) for dt, day in _days_of(days).items()],
         )
         if rows:
             psycopg2.extras.execute_values(
@@ -247,30 +262,53 @@ def _delete(conn, agency_id: int, versions: Iterable[tuple[str, str]]) -> None:
             )
 
 
+def _record_segments(conn, agency_id: int, version: VersionInForce) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {DAYS_TABLE} SET segments = %s WHERE agency_id = %s AND static_version_id = %s "
+            "AND content_hash = %s",
+            (segments_digest(version.segments), agency_id, version.stem, version.content),
+        )
+
+
 def rebuild(conn, ch, agency_id: int, *, full: bool) -> bool:
     """Bring the agency's rows to the versions in force now, in *conn*'s open
     transaction, without committing; whether any row changed.
 
-    *full* rebuilds every version. Otherwise only a version not built yet, or
-    whose typical day of some type moved because the dates it is in force on
-    did, is built, and the rows of a version no longer in force go.
+    *full* rebuilds every version. Otherwise a version is built when it is new
+    or its typical day of some type moved, its rows go when it is no longer in
+    force, and its calendar is read only when its dates in force moved or it
+    gained a kept calendar since it was built without one.
     """
-    desired = _desired(ch, agency_id)
-    stored: dict[tuple[str, str], dict[str, date | None]] = {}
+    join = static_archive.schedule_join(ch, agency_id, None, by_service_date=True)
+    versions = versions_in_force(join.in_force())
+    kept = static_archive.calendar_versions(ch, agency_id)
+    stored: dict[tuple[str, str], _Stored] = {}
     if full:
         with conn.cursor() as cur:
             for table in (DAYS_TABLE, TABLE):
                 cur.execute(f"DELETE FROM {table} WHERE agency_id = %s", (agency_id,))
     else:
         stored = _stored(conn, agency_id)
-    stale = [key for key, days in stored.items() if key not in desired or days != _days_of(desired[key])]
-    _delete(conn, agency_id, stale)
-    building = [key for key in desired if key not in stored or key in stale]
-    for stem, content in building:
-        count = _build(conn, ch, agency_id, stem, content, desired[(stem, content)])
-        known = [day_type for day_type, typical in desired[(stem, content)].items() if typical is not None]
-        logger.info(f"  {TABLE}: {stem} {count:,} rows (day types read: {', '.join(known) or 'none'})")
-    gone = [key for key in stale if key not in desired]
+    in_force = {(v.stem, v.content) for v in versions}
+    gone = [key for key in stored if key not in in_force]
+    _delete(conn, agency_id, gone)
+    changed = bool(gone)
+    for version in versions:
+        key = (version.stem, version.content)
+        was = stored.get(key)
+        unread = was is not None and all(day is None for day in was.days.values())
+        if was is not None and was.segments == segments_digest(version.segments) and not (unread and key in kept):
+            continue
+        days = _read_days(ch, agency_id, version, kept)
+        if was is not None and was.days == _days_of(days):
+            _record_segments(conn, agency_id, version)
+            continue
+        _delete(conn, agency_id, [key])
+        count = _build(conn, ch, agency_id, version, days)
+        changed = True
+        known = [day_type for day_type, typical in days.items() if typical is not None]
+        logger.info(f"  {TABLE}: {version.stem} {count:,} rows (day types read: {', '.join(known) or 'none'})")
     if gone:
         logger.info(f"  {TABLE}: {len(gone)} version(s) no longer in force dropped")
-    return full or bool(building or gone)
+    return full or changed

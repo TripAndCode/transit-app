@@ -50,7 +50,7 @@ _RENDER_MONTH = 202601
 class Kind(str, Enum):
     DATED = "dated"  # rows keyed by service date, rebuilt per changed date
     WHOLE = "whole"  # whole history, finalized from an internal ClickHouse table
-    STATIC_ONLY = "static_only"  # built from the loaded timetable alone
+    STATIC_ONLY = "static_only"  # no date scope: built from timetables (loaded or archived) alone
 
 
 class Timetable(str, Enum):
@@ -64,8 +64,9 @@ class Timetable(str, Enum):
     # and every row falls back to the loaded one.
     ARCHIVED = "archived"
     # Each archived version in force, its rows kept under it
-    # (pipeline.stop_supply): a new version adds its own rows and changes no
-    # other version's, so the fingerprint carries no timetable.
+    # (pipeline.stop_supply), so the fingerprint carries no timetable: a new
+    # version adds its own rows, and another version is rebuilt only where the
+    # dates it is in force on moved its typical days.
     VERSIONS = "versions"
 
 
