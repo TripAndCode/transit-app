@@ -313,14 +313,19 @@ async def _calendar(ch, agency_id: int, run: Run) -> ServiceCalendar | None:
     return None if kept is None else service_calendar(kept)
 
 
-# A revision names both contents and both calendar digests, which together fix
-# its comparison, so an entry never goes stale through a rebuild.
-@async_lru_cache(maxsize=16, ttl_seconds=24 * 3600, agency_arg="agency_id", rebuild="never")
-async def load_comparison(ch, agency_id: int, revision: Revision) -> Comparison | Unavailable:
-    """*revision*'s comparison, or NO_CALENDAR when either side's calendar is
-    not kept: without it no day can be told to run anything, and reading its
-    departures as none would report every stop cut. The result is shared by
-    every caller and must not be modified."""
+class Sides(NamedTuple):
+    """Each side's typical day of each day type (typical_days)."""
+
+    before: dict[RevisionDayType, TypicalDay | None]
+    after: dict[RevisionDayType, TypicalDay | None]
+
+
+async def load_sides(ch, agency_id: int, revision: Revision) -> Sides | Unavailable:
+    """*revision*'s typical days, or NO_CALENDAR when either side's calendar
+    is not kept: without it no day can be told to run anything, and reading
+    its departures as none would report every stop cut. Called within a
+    cached read, it keeps that read's NO_CALENDAR only briefly when a digest
+    names a calendar the archive did not return, which a later read may find."""
     before_calendar, after_calendar = await asyncio.gather(
         _calendar(ch, agency_id, revision.before), _calendar(ch, agency_id, revision.after)
     )
@@ -328,14 +333,25 @@ async def load_comparison(ch, agency_id: int, revision: Revision) -> Comparison 
         if (revision.before.calendar is not None and before_calendar is None) or (
             revision.after.calendar is not None and after_calendar is None
         ):
-            # The digest names a calendar the archive did not return, which a
-            # later read may find: not an answer to keep for the entry's life.
             cache_briefly()
         return Unavailable.NO_CALENDAR
-    before_days = typical_days(revision.before, before_calendar, latest=True)
-    after_days = typical_days(revision.after, after_calendar, latest=False)
-    before, after = await asyncio.gather(
-        _counts(ch, agency_id, revision.before.content, before_days),
-        _counts(ch, agency_id, revision.after.content, after_days),
+    return Sides(
+        typical_days(revision.before, before_calendar, latest=True),
+        typical_days(revision.after, after_calendar, latest=False),
     )
-    return compare(revision, before_days, after_days, before, after)
+
+
+# A revision names both contents and both calendar digests, which together fix
+# its comparison, so an entry never goes stale through a rebuild.
+@async_lru_cache(maxsize=16, ttl_seconds=24 * 3600, agency_arg="agency_id", rebuild="never")
+async def load_comparison(ch, agency_id: int, revision: Revision) -> Comparison | Unavailable:
+    """*revision*'s comparison, or why it has none (load_sides). The result is
+    shared by every caller and must not be modified."""
+    sides = await load_sides(ch, agency_id, revision)
+    if isinstance(sides, Unavailable):
+        return sides
+    before, after = await asyncio.gather(
+        _counts(ch, agency_id, revision.before.content, sides.before),
+        _counts(ch, agency_id, revision.after.content, sides.after),
+    )
+    return compare(revision, sides.before, sides.after, before, after)

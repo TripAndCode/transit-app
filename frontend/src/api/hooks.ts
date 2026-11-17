@@ -51,6 +51,7 @@ import type {
   StopBoundsResponse,
   RevisionDayType,
   TimetableRevisionDiff,
+  TimetableRevisionRoutes,
   TimetableRevisionsResponse,
   TransferPairsResponse,
   TransferReliability,
@@ -204,6 +205,23 @@ export function useTransferReliability(
       apiGet<TransferReliability>(`/api/${agencyId}/transfer-pairs/${pairId}/reliability${query}`, { signal }),
     enabled: agencyId != null && pairId != null,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** What the revision starting on `on` did to each route on `dayType`. */
+export function useTimetableRevisionRoutes(
+  agencyId: number | null,
+  on: string,
+  dayType: RevisionDayType,
+): UseQueryResult<TimetableRevisionRoutes> {
+  const query = new URLSearchParams({ on, day_type: dayType }).toString();
+  return useQuery({
+    queryKey: ["timetable-revision-routes", agencyId, on, dayType],
+    queryFn: ({ signal }) =>
+      apiGet<TimetableRevisionRoutes>(`/api/${agencyId}/timetable-revisions/routes?${query}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
   });
 }
 

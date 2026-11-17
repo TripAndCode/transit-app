@@ -1627,3 +1627,64 @@ export interface TransferReliability {
   no_plan_days: string[];
   definition: DefinitionMeta;
 }
+
+/** Departures observed on one side of a revision, pooled; the rate and mean
+ *  are null under the ranking floor of observations, and `uncertain` marks a
+ *  shown rate whose interval is too wide to read. */
+export interface RevisionTally {
+  observations: number;
+  on_time_pct: number | null;
+  mean_delay_sec: number | null;
+  uncertain: boolean;
+}
+
+type RevisionRouteClass = "cut" | "added" | "unchanged" | "new" | "removed";
+
+/** One route on a day type's typical days before and after a revision.
+ *  Times and gaps are seconds. */
+export interface RevisionRouteRow {
+  route_code: string;
+  route_class: RevisionRouteClass;
+  trips_before: number;
+  trips_after: number;
+  last_before: number | null;
+  last_after: number | null;
+  main_stop_id: string | null;
+  main_stop_name: string | null;
+  longest_gap_before: number | null;
+  longest_gap_after: number | null;
+  observed_before: RevisionTally | null;
+  observed_after: RevisionTally | null;
+}
+
+interface RevisionClassRow {
+  route_class: RevisionRouteClass;
+  routes: number;
+  before: RevisionTally;
+  after: RevisionTally;
+}
+
+interface RevisionWindow {
+  weeks: number;
+  before_first: string;
+  before_last: string;
+  after_first: string;
+  after_last: string;
+}
+
+export interface TimetableRevisionRoutes {
+  available: boolean;
+  reason: "no_revision" | "no_calendar" | null;
+  day_type: RevisionDayType;
+  day_type_known: boolean;
+  /** Whole weeks each side can ever pool, up to four, and what holds it
+   *  under four for good. */
+  weeks_cap: number;
+  capped_by: "timetable" | "history" | null;
+  full_through: string | null;
+  complete: boolean;
+  window: RevisionWindow | null;
+  routes: RevisionRouteRow[];
+  classes: RevisionClassRow[];
+  definition: DefinitionMeta | null;
+}
