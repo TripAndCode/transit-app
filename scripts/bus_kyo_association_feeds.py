@@ -2,21 +2,20 @@
 feed list.
 
 The association (公益社団法人広島県バス協会, https://www.bus-kyo.or.jp/gtfs-open-data)
-lists 17 operators. This module holds that full list as data (fetched by a
-session with network access) and ``pending_feeds()`` dynamically computes
+lists 17 operators. The list lives in the tracked catalogue ``feeds/japan.csv``
+(rows whose ``source`` is ``bus-kyo.or.jp``), and ``pending_feeds()`` computes
 which of them are both supported (see ``BusKyoFeed.supported``) and not yet
 present in ``agencies.csv`` (matched by ``feed_url``), so a future
-association update only needs a data-table edit here rather than hand-typing
-CSV rows again.
+association update only needs a catalogue edit rather than hand-typing CSV
+rows again.
 
 Most of these operators share one ``mcapps.jp`` platform (same URL shape,
 same protobuf producer) and can reuse the existing
-``static_join``/``direct_url`` strategies unchanged. A few use a different
-platform (``busit.jp``, ``bus-vision.jp``) whose fetch/wire shape hasn't been
-confirmed against ``pipeline/strategies/`` -- those are recorded for
-visibility but marked unsupported (``ingest_strategy=None``) rather than
-guessed at, per this repo's rule against assuming an unconfirmed strategy
-shape.
+``static_join``/``direct_url`` strategies unchanged. The ``busit.jp`` and
+``bus-vision.jp`` rows name no strategy in the catalogue, so this script
+leaves them out of ``agencies.csv``; ``gtfs_pipeline.py add_agency --feed-url
+... --static-url ...`` probes such a feed and chooses the strategies itself,
+and the catalogue records its last verdict.
 
 Even for an ``mcapps.jp`` operator, sharing a platform is not the same as
 sharing confirmed optional-field coverage (see
@@ -44,6 +43,10 @@ import pathlib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+CATALOGUE = ROOT / "feeds" / "japan.csv"
+ASSOCIATION_SOURCE = "bus-kyo.or.jp"
+
+
 @dataclasses.dataclass(frozen=True)
 class BusKyoFeed:
     agency_id: int | None
@@ -59,188 +62,33 @@ class BusKyoFeed:
     def supported(self) -> bool:
         """True when this row is ready to seed into agencies.csv as-is.
 
-        False for a platform whose fetch/wire shape isn't confirmed against
-        pipeline/strategies/ yet (needs a new strategy module first, not a
-        guess at reusing static_join/direct_url for a different shape).
+        False for a feed whose catalogue row names no ingest strategy: the
+        platform's fetch/wire shape is not confirmed against
+        pipeline/strategies/, so reusing static_join/direct_url would be a guess.
         """
         return self.ingest_strategy is not None and self.realtime_url is not None
 
 
-_MCAPPS_BASE = "https://ajt-mobusta-gtfs.mcapps.jp"
+def load_association_feeds(path: pathlib.Path = CATALOGUE) -> tuple[BusKyoFeed, ...]:
+    """The association's rows of the feed catalogue, in file order."""
+    with path.open(encoding="utf-8", newline="") as f:
+        rows = [row for row in csv.DictReader(f) if row["source"] == ASSOCIATION_SOURCE]
+    return tuple(
+        BusKyoFeed(
+            int(row["agency_id"]) if row["agency_id"] else None,
+            row["name_ja"],
+            row["platform"],
+            row["static_url"],
+            row["realtime_url"] or None,
+            row["ingest_strategy"] or None,
+            row["static_strategy"] or None,
+            row["note"],
+        )
+        for row in rows
+    )
 
-ALL_FEEDS: tuple[BusKyoFeed, ...] = (
-    # Operators already in agencies.csv are listed too, so `pending_feeds`
-    # skips them by feed_url.
-    BusKyoFeed(
-        8,
-        "広島電鉄",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/8/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/8/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        9,
-        "広島バス",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/9/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/9/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        10,
-        "広島交通",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/10/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/10/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        11,
-        "芸陽バス",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/11/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/11/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        12,
-        "備北交通",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/12/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/12/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        13,
-        "エイチ・ディー西広島",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/13/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/13/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        14,
-        "フォーブル",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/14/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/14/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        15,
-        "JRバス中国",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/15/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/15/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        17,
-        "ささき観光",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/17/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/17/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        18,
-        "呉市生活バス",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/18/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/18/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        19,
-        "廿日市市自主運行バス",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/19/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/19/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        53,
-        "おのみちバス",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/53/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/53/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    BusKyoFeed(
-        54,
-        "朝日交通",
-        "mcapps.jp",
-        f"{_MCAPPS_BASE}/static/54/current_data.zip",
-        f"{_MCAPPS_BASE}/realtime/54/trip_updates.bin",
-        "static_join",
-        "direct_url",
-    ),
-    # Different platform (busit.jp): fetch/wire shape not confirmed against
-    # pipeline/strategies/ -- direct_url.py's manifest/latest.zip-preference
-    # logic and static_join.py's URL assumptions are both mcapps.jp-shaped.
-    # etajimabus's static endpoint additionally has no separate "future"
-    # variant (only "current"), unlike the mcapps.jp operators.
-    BusKyoFeed(
-        None,
-        "江田島バス",
-        "busit.jp",
-        "https://gtfs-st.busit.jp/api/etajimabus",
-        "https://gtfs-rt.busit.jp/api/Etajimabus/TripUpdates",
-        None,
-        None,
-        note="needs a new ingest/static strategy for busit.jp's shape before onboarding",
-    ),
-    # Different platform (bus-vision.jp): the association's page only gives a
-    # realtime endpoint *family* (TripUpdate/VehiclePosition/ServiceAlert),
-    # not one fixed trip_updates binary path -- the exact URL to fetch isn't
-    # known yet, on top of the same needs-a-new-strategy gap as busit.jp.
-    BusKyoFeed(
-        None,
-        "株式会社中国バス",
-        "bus-vision.jp",
-        "https://bus-vision.jp/gtfs_v2/chugokubus/gtfsFeed",
-        None,
-        None,
-        None,
-        note="needs a new strategy for bus-vision.jp's shape, and the exact "
-        "TripUpdate realtime URL (only a family pattern is known)",
-    ),
-    BusKyoFeed(
-        None,
-        "鞆鉄道",
-        "bus-vision.jp",
-        "https://bus-vision.jp/gtfs_v2/tomotetsubus/gtfsFeed",
-        None,
-        None,
-        None,
-        note="needs a new strategy for bus-vision.jp's shape, and the exact "
-        "TripUpdate realtime URL (only a family pattern is known)",
-    ),
-    BusKyoFeed(
-        None,
-        "株式会社井笠バスカンパニー",
-        "bus-vision.jp",
-        "https://bus-vision.jp/gtfs_v2/ikasabus/gtfsFeed",
-        None,
-        None,
-        None,
-        note="needs a new strategy for bus-vision.jp's shape, and the exact "
-        "TripUpdate realtime URL (only a family pattern is known)",
-    ),
-)
+
+ALL_FEEDS: tuple[BusKyoFeed, ...] = load_association_feeds()
 
 
 def pending_feeds(existing_feed_urls: set[str]) -> list[BusKyoFeed]:

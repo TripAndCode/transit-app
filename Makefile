@@ -98,6 +98,12 @@ doctor:
 	@running=$$(docker compose ps --services --filter status=running 2>/dev/null); \
 		echo "$$running" | grep -qx db && echo "  db: running" || echo "  db NOT running — \`make db\`"; \
 		echo "$$running" | grep -qx clickhouse && echo "  clickhouse: running" || echo "  clickhouse NOT running — \`make db\`"
+	@echo "── standalone (docs/deploy-standalone.en.md) ──"
+	@running=$$(docker compose --profile standalone ps --services --filter status=running 2>/dev/null); \
+		for s in app poller; do \
+			echo "$$running" | grep -qx $$s && echo "  $$s: running" \
+				|| echo "  $$s not running — only the standalone deployment needs it: \`docker compose --profile standalone up -d --build app poller\`"; \
+		done
 	@echo "── port 8000 ──"
 	@pid=$$(lsof -ti :8000 2>/dev/null | tr '\n' ' ' || true); \
 		if [ -n "$$pid" ]; then echo "  in use by PID(s) $${pid}— kill before \`make serve\`"; \

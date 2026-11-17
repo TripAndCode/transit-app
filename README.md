@@ -446,76 +446,11 @@ the Oracle-to-R2 archive path.
 ### Standalone
 
 One machine with Docker runs the whole app for your own feeds, with no Oracle
-collector, R2, VPS or LLM key:
-
-```bash
-git clone https://github.com/TripAndCode/transit-app.git && cd transit-app
-cp .env.example .env
-docker compose --profile standalone up -d --build app poller
-```
-
-Naming `app poller` starts the standalone stack and nothing else: its own
-Postgres and ClickHouse (`standalone-db`, `standalone-clickhouse`, on their own
-volumes and no host port), the schema step (`gtfs_pipeline.py schema-up`), the
-app on <http://localhost:8000> (`STANDALONE_PORT` changes it) and the poller. A
-bare `--profile standalone up` also starts the two development databases
-(`db`, `clickhouse`), which the standalone services never use.
-
-The poller reads the agencies table every `POLL_INTERVAL_SEC` (default 60),
-polls each enabled agency's feed, keeps every poll in the `standalone_archive`
-volume and stores it as live data. At each JST midnight it promotes and
-analyzes the day that closed. After each UTC day it packs that day's tarball,
-then promotes, ingests the tarballs not yet ingested (the archive replaces the
-promoted day), analyzes and checks the aggregates are fresh. Once an hour it
-renews the RT field-coverage verdicts that are due.
-
-Add an agency from its TripUpdates feed and GTFS(-JP) static zip. `add_agency`
-probes the feed against the timetable, chooses the `static_join` and
-`direct_url` strategies when the feed's StopTimeUpdates join the timetable,
-loads the timetable and records the coverage verdict, or refuses with the
-reason ("Load Data" above has the details):
-
-```bash
-docker compose --profile standalone exec app python gtfs_pipeline.py add_agency \
-  --feed-url https://example.test/trip_updates.pb --static-url https://example.test/gtfs.zip
-```
-
-To set the columns yourself instead (another strategy, a `trip_id_pattern`,
-a fixed `agency_id`), seed the agency from a CSV with the same columns as
-`agencies.csv`, then load its timetable:
-
-```bash
-cat > my_agency.csv <<'CSV'
-agency_name,feed_url,static_url,ingest_strategy,static_strategy
-My Agency,https://example.test/trip_updates.pb,https://example.test/gtfs.zip,static_join,direct_url
-CSV
-docker compose --profile standalone cp my_agency.csv app:/tmp/my_agency.csv
-docker compose --profile standalone exec app python gtfs_pipeline.py seed_agencies /tmp/my_agency.csv
-docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static
-```
-
-The next poll picks the agency up, and Pulse shows today's data from the polls
-that follow. Readers need no account. Sign-in is for administrators only: to
-reach the admin pages (the Agencies page edits strategies), set
-`DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD` and a real
-`SESSION_SIGNING_KEY` (`openssl rand -hex 32`) in `.env`, restart `app`, and
-sign in at `/login`. `.env.example` describes these and the OAuth alternative
-(`ADMIN_EMAILS` with Google or GitHub).
-
-If ingest fell behind (the step logs which tarballs each run reads), ingest an
-agency's whole archive by hand:
-
-```bash
-docker compose --profile standalone exec poller python gtfs_pipeline.py ingest /app/archive/<id>/rt --agency-id <id>
-```
-
-Not automated yet:
-- reloading a timetable the agency republishes (run `refresh-static` again);
-- the weather and ML forecast passes the cron poke runs;
-- uploading the tarballs anywhere off the machine.
-
-The `standalone_archive` volume grows by one tarball per agency per day and
-nothing prunes it; back it up to keep the raw polls.
+collector, R2, VPS or LLM key. [docs/deploy-standalone.en.md](docs/deploy-standalone.en.md) (日本語:
+[docs/deploy-standalone.md](docs/deploy-standalone.md)) is the one page for it:
+clone, `.env`, `docker compose --profile standalone up`, adding an agency with `add_agency` and reading its verdicts, signing in as
+administrator, backups, upgrades and what is not automated.
+[`feeds/`](feeds/README.en.md) is the catalogue of known feeds.
 
 ## Repository Map
 
