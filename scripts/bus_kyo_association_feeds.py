@@ -95,8 +95,8 @@ def pending_feeds(existing_feed_urls: set[str]) -> list[BusKyoFeed]:
     """Feeds ready to seed that aren't already in agencies.csv.
 
     Excludes both already-configured feeds (matched by realtime_url against
-    feed_url, which the agencies table holds UNIQUE) and unsupported-platform
-    feeds (see BusKyoFeed.supported).
+    feed_url, which the agencies table holds UNIQUE) and rows with no strategy,
+    which are added with add_agency instead (see BusKyoFeed.supported).
     """
     return [f for f in ALL_FEEDS if f.supported and f.realtime_url not in existing_feed_urls]
 
@@ -149,15 +149,15 @@ def main() -> None:
     csv_path = pathlib.Path(args.agencies_csv)
     existing = _read_existing_feed_urls(csv_path)
     pending = pending_feeds(existing)
-    unsupported = [f for f in ALL_FEEDS if not f.supported and f.realtime_url not in existing]
+    probe_added = [f for f in ALL_FEEDS if not f.supported and f.realtime_url not in existing]
 
     if args.check or not args.write:
         print(f"{len(pending)} new operator(s) ready to add to {csv_path}:")
         for f in pending:
             print(f"  {f.agency_id}: {f.name_ja} ({f.platform})")
-        if unsupported:
-            print(f"\n{len(unsupported)} operator(s) to add with add_agency instead:")
-            for f in unsupported:
+        if probe_added:
+            print(f"\n{len(probe_added)} operator(s) to add with add_agency instead:")
+            for f in probe_added:
                 print(f"  {f.name_ja} ({f.platform}){': ' + f.note if f.note else ''}")
 
     if args.write:

@@ -21,8 +21,8 @@ The stack runs with `.env` as it is. Edit these only if you need them:
 
 | Variable | When |
 | --- | --- |
-| `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`, `SESSION_SIGNING_KEY` | To sign in as an administrator (step 4). Uncomment and set all three; the key comes from `openssl rand -hex 32`. |
-| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `ADMIN_EMAILS`, `SESSION_SIGNING_KEY` | The alternative to the local administrator: Google and GitHub sign-in needs all four client variables and the key. `.env.example` explains them. |
+| `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD`, `SESSION_SIGNING_KEY` | To sign in as an administrator (step 4). Set all three (uncomment the two admin lines); the key comes from `openssl rand -hex 32`. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `ADMIN_EMAILS`, `SESSION_SIGNING_KEY` | The alternative to the local administrator: Google and GitHub sign-in needs all four client variables and the key, and `ADMIN_EMAILS` must list the administrators' email addresses: otherwise every OAuth sign-in is refused. `.env.example` explains them. |
 | `POLL_INTERVAL_SEC` | Seconds between polls (default 60). |
 | `STANDALONE_PORT`, `PUBLIC_BASE_URL` | To use a host port other than 8000 (it is bound to `127.0.0.1`), set both: `STANDALONE_PORT=9000` and `PUBLIC_BASE_URL=http://localhost:9000`. Sign-in only accepts requests from the origin `PUBLIC_BASE_URL` names. |
 | `FORWARDED_HOPS` | The number of reverse proxies in front of the app (default 0). See "What is not automated". |
@@ -62,13 +62,13 @@ Read the last lines of its output. On success it prints `verdict: accept`, the a
 | `stop_id_only` | StopTimeUpdates name stops but no `stop_sequence`, so they cannot join. |
 | `low_join` | Under 80% joined: the timetable and the feed disagree. The output quotes sample misses. |
 
-The exact reason follows each verdict in the output. A refusal writes nothing, and the poller never retries it: fix the cause, then run the command again. If you passed `--dry-run`, run it again without to add the agency. If the output says the agency was added but its timetable did not load, run `docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static --agency-id <id>`.
+The exact reason follows each verdict in the output. A refusal writes nothing, and the poller never retries it: fix the cause, then run the command again. If you passed `--dry-run`, run it again without to add the agency. If the output says nothing was added because the stores cannot take the load, check `docker compose --profile standalone logs migrate` and run the command again. If the output says the agency was added but its timetable did not load, run `docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static --agency-id <id>`.
 
 To set the columns yourself (another strategy, a `trip_id_pattern`, a fixed `agency_id`), write a CSV with the columns of `agencies.csv`, copy it in with `docker compose --profile standalone cp my_agency.csv app:/tmp/my_agency.csv`, then run `seed_agencies /tmp/my_agency.csv` and `refresh-static` the same way as `add_agency` above. This skips the probe.
 
 ## 4. Sign in as administrator
 
-Readers need no sign-in. Administrators use `/login` to reach the admin pages (the Agencies page edits strategies). For the local administrator, set `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD` and a real `SESSION_SIGNING_KEY` in `.env` (all three: without the key, sessions would be signed with a public default), then run `docker compose --profile standalone up -d app`. The Google and GitHub alternative is in `.env.example`.
+Readers need no sign-in. Administrators use `/login` to reach the admin pages (the Agencies page edits strategies). For the local administrator, set `DEFAULT_ADMIN_USERNAME`, `DEFAULT_ADMIN_PASSWORD` and a real `SESSION_SIGNING_KEY` in `.env` (all three: without the key the app refuses to start, and `docker compose --profile standalone logs app` shows why), then run `docker compose --profile standalone up -d app`. The Google and GitHub alternative is in `.env.example`.
 
 ## 5. When data appears
 
@@ -78,7 +78,7 @@ Check progress with `docker compose --profile standalone logs -f poller`.
 
 ## 6. Back up
 
-Three named volumes hold everything: `standalone_pgdata` (agencies, timetables, aggregates), `standalone_chdata` (the polls as data) and `standalone_archive` (the raw polls, one tarball per agency per day). Compose prefixes each with the project name, which is the checkout's directory name. Write backups outside the checkout, so a later build never copies them into the image:
+Three named volumes hold everything: `standalone_pgdata` (agencies, timetables, aggregates), `standalone_chdata` (the polls as data) and `standalone_archive` (the raw polls, one tarball per agency per day). Compose prefixes each with the project name, which is the checkout's directory name. Keep backups outside the checkout, so they are never committed or built into an image:
 
 ```bash
 B=${BACKUP_DIR:-$HOME/transit-backup}
@@ -111,5 +111,6 @@ The schema step (`gtfs_pipeline.py schema-up`) runs before the app and poller re
 
 ## Troubleshooting
 
-- `make doctor` reports whether `app` and `poller` are running.
+- `docker compose --profile standalone ps -a` shows whether `app` and `poller` are running or restarting.
+- If `app` or `poller` keeps restarting, or does not start, read `docker compose --profile standalone logs app` (or `poller`). A missing or default `SESSION_SIGNING_KEY` shows up there.
 - If ingest falls behind, the poller log names the tarballs a run reads. To ingest an agency's whole archive by hand: `docker compose --profile standalone exec poller python gtfs_pipeline.py ingest /app/archive/<id>/rt --agency-id <id>`.

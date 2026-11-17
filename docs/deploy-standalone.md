@@ -21,8 +21,8 @@ cp .env.example .env
 
 | 変数 | いつ |
 | --- | --- |
-| `DEFAULT_ADMIN_USERNAME`、`DEFAULT_ADMIN_PASSWORD`、`SESSION_SIGNING_KEY` | 管理者としてサインインするとき（手順 4）。コメントを外して 3 つとも設定します。キーは `openssl rand -hex 32` で作ります。 |
-| `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`ADMIN_EMAILS`、`SESSION_SIGNING_KEY` | ローカル管理者の代わりに Google と GitHub でサインインする場合。クライアント用の 4 変数とキーがすべて必要です。説明は `.env.example` にあります。 |
+| `DEFAULT_ADMIN_USERNAME`、`DEFAULT_ADMIN_PASSWORD`、`SESSION_SIGNING_KEY` | 管理者としてサインインするとき（手順 4）。3 つとも設定します（管理者の 2 行はコメントを外します）。キーは `openssl rand -hex 32` で作ります。 |
+| `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`ADMIN_EMAILS`、`SESSION_SIGNING_KEY` | ローカル管理者の代わりに Google と GitHub でサインインする場合。クライアント用の 4 変数とキーがすべて必要で、`ADMIN_EMAILS` に管理者のメールアドレスを列挙します。列挙しないと、OAuth のサインインはすべて拒否されます。説明は `.env.example` にあります。 |
 | `POLL_INTERVAL_SEC` | ポーリング間隔の秒数（既定 60）。 |
 | `STANDALONE_PORT`、`PUBLIC_BASE_URL` | 8000 以外のホスト側ポートを使うとき（`127.0.0.1` のみ）。両方を設定します: `STANDALONE_PORT=9000`、`PUBLIC_BASE_URL=http://localhost:9000`。サインインは `PUBLIC_BASE_URL` が示すオリジンからのリクエストだけを受け付けます。 |
 | `FORWARDED_HOPS` | アプリの前にあるリバースプロキシの段数（既定 0）。「自動化されていないこと」を参照してください。 |
@@ -62,13 +62,13 @@ docker compose --profile standalone exec app python gtfs_pipeline.py add_agency 
 | `stop_id_only` | StopTimeUpdate が停留所を示すだけで `stop_sequence` がなく、結合できません。 |
 | `low_join` | 結合したのが 80% 未満です。時刻表とフィードが食い違っています。出力に一致しなかった例が示されます。 |
 
-判定のあとに具体的な理由が出力されます。拒否では何も書き込まれず、ポーラーが再試行することもありません。原因を直してから、もう一度コマンドを実行します。`--dry-run` を付けた場合は、付けずに再実行すると事業者が追加されます。事業者は追加されたが時刻表を読み込めなかった、と出力された場合は、`docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static --agency-id <id>` を実行します。
+判定のあとに具体的な理由が出力されます。拒否では何も書き込まれず、ポーラーが再試行することもありません。原因を直してから、もう一度コマンドを実行します。`--dry-run` を付けた場合は、付けずに再実行すると事業者が追加されます。保存先が読み込みを受け付けられないために何も追加されなかった、と出力された場合は、`docker compose --profile standalone logs migrate` を確認してから、コマンドをもう一度実行します。事業者は追加されたが時刻表を読み込めなかった、と出力された場合は、`docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static --agency-id <id>` を実行します。
 
 列を自分で指定したい場合（別の戦略、`trip_id_pattern`、固定の `agency_id`）は、`agencies.csv` と同じ列の CSV を書き、`docker compose --profile standalone cp my_agency.csv app:/tmp/my_agency.csv` でコピーしてから、上の `add_agency` と同じ要領で `seed_agencies /tmp/my_agency.csv` と `refresh-static` を実行します。この方法ではプローブを行いません。
 
 ## 4. 管理者としてサインインする
 
-閲覧にサインインは要りません。管理者は `/login` から管理ページ（Agencies ページで戦略を編集できます）に入ります。ローカル管理者を使うには、`.env` に `DEFAULT_ADMIN_USERNAME`、`DEFAULT_ADMIN_PASSWORD` と本物の `SESSION_SIGNING_KEY` を設定し（3 つとも必要です。キーがないとセッションが公開の既定値で署名されます）、`docker compose --profile standalone up -d app` を実行します。Google や GitHub を使う方法は `.env.example` に説明があります。
+閲覧にサインインは要りません。管理者は `/login` から管理ページ（Agencies ページで戦略を編集できます）に入ります。ローカル管理者を使うには、`.env` に `DEFAULT_ADMIN_USERNAME`、`DEFAULT_ADMIN_PASSWORD` と本物の `SESSION_SIGNING_KEY` を設定し（3 つとも必要です。キーがないとアプリは起動を拒否し、理由は `docker compose --profile standalone logs app` に出ます）、`docker compose --profile standalone up -d app` を実行します。Google や GitHub を使う方法は `.env.example` に説明があります。
 
 ## 5. データはいつ出るか
 
@@ -78,7 +78,7 @@ docker compose --profile standalone exec app python gtfs_pipeline.py add_agency 
 
 ## 6. バックアップ
 
-すべては 3 つの名前付きボリュームにあります。`standalone_pgdata`（事業者、時刻表、集計）、`standalone_chdata`（データとしてのポーリング結果）、`standalone_archive`（生のポーリング結果。事業者ごと・日ごとに tarball 1 つ）です。Compose はプロジェクト名（チェックアウトのディレクトリ名）を各ボリュームの前に付けます。あとのビルドでイメージに取り込まれないよう、バックアップはチェックアウトの外に書きます。
+すべては 3 つの名前付きボリュームにあります。`standalone_pgdata`（事業者、時刻表、集計）、`standalone_chdata`（データとしてのポーリング結果）、`standalone_archive`（生のポーリング結果。事業者ごと・日ごとに tarball 1 つ）です。Compose はプロジェクト名（チェックアウトのディレクトリ名）を各ボリュームの前に付けます。コミットやイメージのビルドに紛れ込まないよう、バックアップはチェックアウトの外に置きます。
 
 ```bash
 B=${BACKUP_DIR:-$HOME/transit-backup}
@@ -111,5 +111,6 @@ docker compose --profile standalone up -d --build app poller
 
 ## トラブルシューティング
 
-- `make doctor` で `app` と `poller` が動いているか確認できます。
+- `docker compose --profile standalone ps -a` で `app` と `poller` が動いているか、再起動を繰り返していないかを確認できます。
+- `app` や `poller` が再起動を繰り返す、または起動しない場合は、`docker compose --profile standalone logs app`（または `poller`）を読みます。`SESSION_SIGNING_KEY` がない、または既定値のままだと、ここに出ます。
 - 取り込みが遅れた場合、ポーラーのログに各回が読む tarball が出ます。事業者のアーカイブ全体を手で取り込むには、`docker compose --profile standalone exec poller python gtfs_pipeline.py ingest /app/archive/<id>/rt --agency-id <id>` を実行します。

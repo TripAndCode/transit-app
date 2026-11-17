@@ -55,7 +55,7 @@ def test_supported_requires_ingest_strategy_and_realtime_url():
     )
     assert supported.supported
 
-    no_strategy = BusKyoFeed(None, "テスト2", "bus-vision.jp", "http://y/static.zip", None, None, None)
+    no_strategy = BusKyoFeed(None, "テスト2", "bus-vision.jp", "http://y/static.zip", "http://y/rt.bin", None, None)
     assert not no_strategy.supported
 
     no_url_known = BusKyoFeed(

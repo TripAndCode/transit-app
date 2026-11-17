@@ -21,4 +21,4 @@ Columns: `name_ja`, `prefecture` (the operator's head-office prefecture; the ass
 
 - Rows from `bus-kyo.or.jp` come from the Hiroshima Bus Association's list (<https://www.bus-kyo.or.jp/gtfs-open-data>), which states that the data is provided under Creative Commons CC0. The page also says the feeds may be interrupted or stopped without notice, and that the operators and system vendors accept no liability for that.
 - A blank `licence` means the repository records none. Check the publisher's terms before relying on it.
-- Poll gently: one request per feed per minute is the poller's default.
+- Poll gently: the poller's pace is the `POLL_INTERVAL_SEC` row of [the guide](../docs/deploy-standalone.en.md).
