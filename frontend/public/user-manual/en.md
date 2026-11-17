@@ -302,6 +302,16 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 - When dwell/running time can’t be shown, **See when delay happens** (the Time screen) and **Compare weekdays with weekends and holidays** (the comparison in section 8-1) are offered.
 - The split cannot be narrowed to one time band. With a time band chosen, the report says so; choose “All hours” in the scope sentence to see it.
 
+### 7-1. Slow segments
+
+Choose **Slow segments** in the switch at the top to see, on a map, how far the running time between each pair of stops (a segment) exceeds the timetable. The routes through a segment are taken together.
+
+- Choose the **Days** (weekdays, or weekends and holidays) and the **Departure time band**. The period is the newest 8 complete weeks. This view does not follow the period or routes of the scope sentence.
+- A line is darker the more the newest week exceeds the timetable, and faint where there were too few runs. Segments that stayed slow are drawn wider. Click a line for its median, scheduled running time, speed and more.
+- “Segments that stayed slow” lists the segments whose median running time stayed over the timetable for several weeks in a row, up to the newest (the thresholds are in the methodology). They are listed longest-standing first, with the minutes lost per day and the weekly excess. **Download CSV** saves the same list.
+- Speed uses the straight line between the two stops, so it reads low on a winding road.
+- The values are feed-based estimates. Until the predictions are validated, segments are not ranked as bus-priority candidates. The methodology gives each definition.
+
 ---
 
 ## 8. Day types & agencies — side by side

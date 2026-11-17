@@ -123,10 +123,23 @@ export function reportsView(doc: string | null, report: string | null): ReportsV
   return doc === "saved" ? "saved" : "summary";
 }
 
+/** Why's two views, picked by `by`: dwell against running time, and the
+ *  segments that stay slower than the timetable. */
+export const WHY_MODES = [
+  { mode: "dwell_run", labelKey: "reports.type.dwell_run" },
+  { mode: "segments", labelKey: "why.mode_segments" },
+] as const;
+export type WhyMode = (typeof WHY_MODES)[number]["mode"];
+
+/** `by=segments` is the slow segments map; every other `by` is dwell and run. */
+export function whyMode(by: string | null): WhyMode {
+  return by === "segments" ? "segments" : "dwell_run";
+}
+
 /** Where each report type lives. Reports' own documents are picked by
  *  `doc`, the Routes table's lists by `sort` (and `order`), and Time opens
- *  its types by `report`. Why and Compare each show their one report, so a
- *  link to either names only the screen (and Compare's `by`). */
+ *  its types by `report`. Why and Compare each show their one report under
+ *  one of their views, so a link to either names the screen and its `by`. */
 const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<string, string> }> = {
   ranking: { dest: "routes", extra: { sort: "avg" } },
   ranking_best: { dest: "routes", extra: { sort: "avg", order: "best" } },
@@ -136,7 +149,7 @@ const REPORT_HOME: Record<ReportTypeId, { dest: Destination; extra: Record<strin
   dow_weekday: { dest: "time", extra: { report: "dow_weekday" } },
   dow_weekend: { dest: "time", extra: { report: "dow_weekend" } },
   route_forecast: { dest: "time", extra: { report: "route_forecast" } },
-  dwell_run: { dest: "why", extra: {} },
+  dwell_run: { dest: "why", extra: { by: "dwell_run" } },
   compare_ranking: { dest: "compare", extra: { by: "periods" } },
   council_summary: { dest: "reports", extra: { doc: "council" } },
   delay_certificate: { dest: "reports", extra: { doc: "certificate" } },
