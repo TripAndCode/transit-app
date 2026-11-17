@@ -8,14 +8,16 @@ same service day). Both derive an "actual" timestamp (seconds since the
 service day's midnight) from the static schedule's arrival_time/
 departure_time plus the RT feed's `arr_delay`/`dep_delay` for that stop
 visit. The schedule is the archived timetable the visit's version name maps
-to (`build_stop_visits_ch_sql(join_schedule=True)`).
+to (`build_stop_visits_ch_sql(join_schedule=True)`). analyze computes both in
+SQL, in its two builders over the same visits: `pipeline.agg_sql.dwell_run_sql`
+for `agg_route_daily_dwell_run` and `pipeline.agg_sql.segment_runtime_sql` for
+`agg_route_segment_runtime`. This module holds the histogram bounds the first
+one buckets by.
 
 The feed reports a stop's arrival and its departure in separate polls, never
 on one row, and a trip's last stop only as an arrival.
-`pipeline.db.build_stop_visits_ch_sql` pairs the two per stop visit; its
-readers (analyze()'s `agg_route_daily_dwell_run` and
-`agg_route_segment_runtime`) take their visits from it. A visit can therefore
-lack either side:
+`pipeline.db.build_stop_visits_ch_sql` pairs the two per stop visit. A visit
+can therefore lack either side:
 
 - with both, it yields a running time when the previous visit's departure
   is known, and a dwell time when its departure was observed: reported in
@@ -32,9 +34,9 @@ Only ingest strategies confirmed to send `StopTimeUpdate.arrival`
 (`ingest_strategy == 'static_join'` -- same agencies as
 `pipeline.reports.service_delivered`) can ever produce a non-NULL
 `arr_delay`; `aomori_regex` always leaves it NULL (see
-pipeline/strategies/aomori_regex.py). `pipeline.analyze.analyze()`'s
-`agg_route_daily_dwell_run` builder is gated on that same flag, the same
-"not available" pattern `agg_service_delivered_daily` already uses.
+pipeline/strategies/aomori_regex.py). analyze's two builders are gated on
+that same flag, the same "not available" pattern `agg_service_delivered_daily`
+already uses.
 """
 
 from __future__ import annotations
@@ -91,106 +93,3 @@ def percentile_from_run_hist(counts: list[int], q: float) -> float | None:
     """Interpolate a quantile (0..1) from a merged running-time histogram (see
     :func:`pipeline.histogram.percentile_from_hist`)."""
     return percentile_from_hist(counts, q, lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
-
-
-def actual_arrival_sec(sched_arr_sec: int | None, arr_delay: int | None) -> int | None:
-    """Actual arrival time (seconds since the service day's midnight), or
-    ``None`` when the RT feed never sent this stop visit's arrival
-    (`arr_delay` is NULL) or the static schedule has no `arrival_time` for
-    this stop visit."""
-    if sched_arr_sec is None or arr_delay is None:
-        return None
-    return sched_arr_sec + arr_delay
-
-
-def actual_departure_sec(sched_dep_sec: int | None, dep_delay: int | None) -> int | None:
-    """Actual departure time (seconds since the service day's midnight), or
-    ``None`` when the RT feed reported this stop visit only as an arrival
-    (`dep_delay` is NULL) or the static schedule has no `departure_time` for
-    it."""
-    if sched_dep_sec is None or dep_delay is None:
-        return None
-    return sched_dep_sec + dep_delay
-
-
-def dwell_seconds(actual_arr_sec: int | None, actual_dep_sec: int | None) -> int | None:
-    """Time spent at this stop: this visit's departure minus its own
-    arrival. ``None`` when either side is unknown (see
-    :func:`actual_arrival_sec`/:func:`actual_departure_sec`)."""
-    if actual_arr_sec is None or actual_dep_sec is None:
-        return None
-    return actual_dep_sec - actual_arr_sec
-
-
-def running_seconds(prev_actual_dep_sec: int | None, actual_arr_sec: int | None) -> int | None:
-    """Time spent travelling to this stop: this visit's arrival minus the
-    PREVIOUS stop visit's departure (same trip, same service day). ``None``
-    when either side is unknown -- notably, a trip's very first stop always
-    has no previous departure to run from."""
-    if prev_actual_dep_sec is None or actual_arr_sec is None:
-        return None
-    return actual_arr_sec - prev_actual_dep_sec
-
-
-class StopVisit:
-    """One stop visit's schedule + RT delay inputs, to be ordered by
-    `stop_sequence` within a single trip's single service day before being
-    passed to :func:`compute_trip_dwell_running`.
-
-    `sched_arr_sec`/`sched_dep_sec` are the static schedule's arrival_time/
-    departure_time for this stop visit, in seconds since the service day's
-    midnight (``None`` when the schedule has no value for this stop --
-    common for `arrival_time` at non-timepoint stops in some GTFS feeds).
-    `arr_delay` is ``None`` when the RT feed never sent this stop visit's
-    arrival, `dep_delay` when it reported the visit only as an arrival (see
-    the module docstring). `dep_observed` is
-    `pipeline.db.build_stop_visits_ch_sql`'s: true when the departure was
-    reported after the arrival, false when only before it, ``None`` when the
-    visit lacks either side. Only a true one makes a dwell sample.
-    """
-
-    __slots__ = ("arr_delay", "dep_delay", "dep_observed", "sched_arr_sec", "sched_dep_sec", "stop_sequence")
-
-    def __init__(
-        self,
-        stop_sequence: int,
-        sched_arr_sec: int | None,
-        sched_dep_sec: int | None,
-        arr_delay: int | None,
-        dep_delay: int | None,
-        *,
-        dep_observed: bool | None,
-    ) -> None:
-        self.stop_sequence = stop_sequence
-        self.sched_arr_sec = sched_arr_sec
-        self.sched_dep_sec = sched_dep_sec
-        self.arr_delay = arr_delay
-        self.dep_delay = dep_delay
-        self.dep_observed = dep_observed
-
-
-def compute_trip_dwell_running(visits: list[StopVisit]) -> list[dict]:
-    """Return one dict per visit, sorted by `stop_sequence`:
-    ``{"stop_sequence": int, "dwell_sec": int | None, "running_sec": int | None}``.
-
-    `dwell_sec` needs only this visit's own data, and an observed departure
-    (`StopVisit.dep_observed`); `running_sec` additionally needs the
-    PREVIOUS visit's actual departure, observed or not, so a trip's very
-    first stop always has ``running_sec is None`` (there is nothing to run
-    FROM) even when its own arrival is fully known.
-    """
-    ordered = sorted(visits, key=lambda v: v.stop_sequence)
-    out = []
-    prev_actual_dep: int | None = None
-    for v in ordered:
-        actual_arr = actual_arrival_sec(v.sched_arr_sec, v.arr_delay)
-        actual_dep = actual_departure_sec(v.sched_dep_sec, v.dep_delay)
-        out.append(
-            {
-                "stop_sequence": v.stop_sequence,
-                "dwell_sec": dwell_seconds(actual_arr, actual_dep) if v.dep_observed else None,
-                "running_sec": running_seconds(prev_actual_dep, actual_arr),
-            }
-        )
-        prev_actual_dep = actual_dep
-    return out

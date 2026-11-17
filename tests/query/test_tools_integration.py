@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 
 from api.range import RangeCtx
+from pipeline.agg_registry import METHOD_VERSION
 from pipeline.query import tools
 from pipeline.query.results import ToolResult
 from pipeline.query.tools import _is_route_registered, dispatch
@@ -725,6 +726,40 @@ async def test_dispatch_schedule_realism_reads_the_segment_aggregate_for_a_confi
         "路線R1 時刻表の妥当性（余裕時間の可視化）／ダイヤ v1（1日分）／終点早着率 100%（1件中）"
         "／フィードの予測値に基づく推定値"
     )
+    assert result.definition is not None
+    assert (result.definition.method_version, result.definition.value_basis) == (METHOD_VERSION, "feed_prediction")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_schedule_realism_falls_back_when_no_segment_has_a_run(aconn, aagency_id):
+    """A confirmed agency whose only segment in range has no observed run has
+    nothing to show from the aggregate, so the tool takes its fallback (with no
+    ClickHouse attached, that finds no data) instead of a table of blanks."""
+    from tests.conftest import confirm_rt_field_coverage
+
+    await confirm_rt_field_coverage(aconn, aagency_id)
+    await aconn.execute("UPDATE agencies SET ingest_strategy = 'static_join' WHERE agency_id = $1", aagency_id)
+    day = date(2026, 4, 1)
+    await aconn.execute(
+        "INSERT INTO agg_route_daily (agency_id, date, route_code, service_type, avg_delay_sec, worst_delay_sec, "
+        "trips_observed, samples, last_seen_at, sum_delay_sec) VALUES ($1, $2, 'R1', '平日', 0, 0, 1, 1, now(), 0)",
+        aagency_id,
+        day,
+    )
+    await aconn.execute(
+        "INSERT INTO agg_route_segment_runtime (agency_id, date, route_code, from_stop_id, to_stop_id, time_band, "
+        "to_stop_sequence, run_sec, scheduled_samples, scheduled_sum_sec, hold_eligible, holds, "
+        "terminal_arrivals, terminal_early) "
+        "VALUES ($1, $2, 'R1', 'S2', 'S3', 'forenoon', 3, '{}', 0, 0, 0, 0, 1, 0)",
+        aagency_id,
+        day,
+    )
+
+    ctx = RangeCtx(from_date=day, to_date=day)
+    result = await dispatch("schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="en", ch=None)
+
+    assert result.kind == "empty"
+    assert result.summary == "No per-segment data for route R1 in the selected window."
 
 
 @pytest.mark.asyncio

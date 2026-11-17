@@ -89,7 +89,7 @@ lateness contribution instead of counting it.
 import io
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import NamedTuple
@@ -199,6 +199,17 @@ _AGG_TABLES_ORDERED = (
     "agg_schedule_revision_daily",
 )
 _VALID_AGG_TABLES = frozenset(_AGG_TABLES_ORDERED)
+
+# The tables built from _analyze_visits.
+_VISITS_TABLES = ("agg_route_daily_dwell_run", "agg_route_segment_runtime")
+# _analyze_visits' columns, in the order build_stop_visits_ch_sql(join_schedule=True) selects them.
+VISITS_COLUMNS = (
+    "route_code text, service_type text, scheduled_time time, "
+    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
+    "dep_observed boolean, sched_arrival_time text, sched_departure_time text, "
+    "sched_stop_id text, sched_prev_stop_sequence int, sched_prev_stop_id text, "
+    "sched_prev_departure_time text, sched_is_last boolean"
+)
 
 # Aggregates rebuilt only for the dates whose source rows changed: a listed
 # table's purge and build are both date-restricted, so the staleness signal must
@@ -387,6 +398,35 @@ def _build_and_insert(sql: str, table: str, col_names: list, p: dict, conn, rebu
         rows = _run_query(sql, p, conn)
     _insert_agg(table, col_names, rows, conn)  # times itself
     logger.info(f"  {table}: {len(rows)} rows")
+
+
+def _insert_visits_table(
+    builder: Callable[..., str], table: str, col_names: list, p: dict, conn, rebuild_dates: list | None
+) -> None:
+    """Build *table* from `_analyze_visits` as one INSERT ... SELECT, so its rows
+    never leave Postgres: a full rebuild spans the agency's whole history.
+
+    *builder* reads only *rebuild_dates* (every date for None), which is
+    exactly what the purge deleted: the temp table holds the union of the
+    dates every visits table rebuilds."""
+    if _nothing_to_rebuild(table, rebuild_dates):
+        logger.info(f"  {table}: unchanged, not rebuilt")
+        return
+    if table not in _VALID_AGG_TABLES:
+        raise ValueError(f"Unknown aggregation table: {table!r}")
+    params = p if rebuild_dates is None else {**p, "rebuild_dates": rebuild_dates}
+    with _step(f"{table}: build"), conn.cursor() as cur:
+        cur.execute(f"INSERT INTO {table} ({', '.join(col_names)}) {builder(scoped=rebuild_dates is not None)}", params)
+        inserted = cur.rowcount
+    logger.info(f"  {table}: {inserted} rows")
+
+
+def _visits_scope(scopes: list[list | None]) -> list | None:
+    """The dates `_analyze_visits` loads for tables with these scopes: every
+    date when any rebuilds in full, else the union of theirs."""
+    if any(scope is None for scope in scopes):
+        return None
+    return sorted({day for scope in scopes for day in scope or ()})
 
 
 def _legacy_fingerprint(ingest_strategy: str | None, static_parts: list[str]) -> str:
@@ -1611,11 +1651,10 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
 
         # ── Materialise the stop visits ──────────────────────────────────
         # Every column, NULL-service rows included, for only the dates being rebuilt.
-        # The tables sharing the scan (agg_registry.VISITS_SCAN) are its only
-        # readers and share one scope, so an agency they are not built for gets
-        # the empty table without the scan.
+        # _VISITS_TABLES are the only readers, so an agency they are not built
+        # for gets the empty table without the scan.
         builds_visit_tables = has_static and ingest_strategy in RT_INGEST_STRATEGIES
-        visits_scope = scopes["agg_route_daily_dwell_run"]
+        visits_scope = _visits_scope([scopes[name] for name in _VISITS_TABLES])
         scans_visits = builds_visit_tables and visits_scope != []
         join, refit = _refile(agency_id, ch_client, plan.join, {**scopes, **ch_scopes})
         visit_reads = []
@@ -1633,20 +1672,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
             _load_temp_table(
                 cur,
                 ch_client,
-                # Column order must match build_stop_visits_ch_sql's SELECT list exactly:
-                # route_code, service_type, scheduled_time, trip_id, date,
-                # stop_sequence, dep_delay, arr_delay, dep_observed,
-                # sched_arrival_time, sched_departure_time, sched_stop_id,
-                # sched_prev_stop_sequence, sched_prev_stop_id,
-                # sched_prev_departure_time, sched_is_last.
                 table="_analyze_visits",
-                columns=(
-                    "route_code text, service_type text, scheduled_time time, "
-                    "trip_id text, date date, stop_sequence int, dep_delay int, arr_delay int, "
-                    "dep_observed boolean, sched_arrival_time text, sched_departure_time text, "
-                    "sched_stop_id text, sched_prev_stop_sequence int, sched_prev_stop_id text, "
-                    "sched_prev_departure_time text, sched_is_last boolean"
-                ),
+                columns=VISITS_COLUMNS,
                 reads=visit_reads,
                 # An empty rebuild list selects no rows at all, so the scan is
                 # skipped rather than asked to prove it — the run where nothing
@@ -1746,7 +1773,7 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         # nothing.
         # Materialization here is gated on ingest_strategy alone, not on the
         # per-agency probe verdicts in rt_field_coverage_probes (see
-        # pipeline.strategies.static_join.rt_field_coverage_confirmed)
+        # pipeline.strategies.static_join.rt_field_coverage_gap)
         # -- sharing an ingest strategy does not by itself prove a given agency's
         # feed actually populates these fields. Today this is safe because every
         # reader of this table (pipeline.reports.service_delivered) re-applies
@@ -1805,8 +1832,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
         # requires a live rt_field_coverage_probes verdict before trusting
         # these rows.
         if builds_visit_tables:
-            _build_and_insert(
-                agg_sql.dwell_run_sql(),
+            _insert_visits_table(
+                agg_sql.dwell_run_sql,
                 "agg_route_daily_dwell_run",
                 [
                     "agency_id",
@@ -1822,18 +1849,18 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                 ],
                 p,
                 conn,
-                visits_scope,
+                scopes["agg_route_daily_dwell_run"],
             )
         else:
             logger.info("  agg_route_daily_dwell_run: 0 rows (needs static schedule + ingest_strategy=static_join)")
 
         # ── agg_route_segment_runtime (running time per timetable segment) ──
-        # Same visits, gate and read-side caveat as agg_route_daily_dwell_run
-        # above: its reader (pipeline.reports.segment_runtime) requires the
-        # agency's live rt_field_coverage_probes verdict.
+        # Built for every agency with a static schedule and an ingest strategy
+        # in RT_INGEST_STRATEGIES; its reader (pipeline.reports.segment_runtime)
+        # also requires the agency's live rt_field_coverage_probes verdict.
         if builds_visit_tables:
-            _build_and_insert(
-                agg_sql.segment_runtime_sql(),
+            _insert_visits_table(
+                agg_sql.segment_runtime_sql,
                 "agg_route_segment_runtime",
                 [
                     "agency_id",
@@ -1853,7 +1880,7 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                 ],
                 p,
                 conn,
-                visits_scope,
+                scopes["agg_route_segment_runtime"],
             )
         else:
             logger.info("  agg_route_segment_runtime: 0 rows (needs static schedule + ingest_strategy=static_join)")

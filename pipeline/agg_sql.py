@@ -379,7 +379,7 @@ def route_headway_sql(all_routes: bool = False) -> str:
 # Decomposes arr_delay + dep_delay into per-stop-visit dwell time (this
 # visit's departure minus its own arrival) and running time (this
 # visit's arrival minus the PREVIOUS visit's departure) -- see
-# pipeline/dwell_run.py for the shared math this mirrors in SQL. Reads
+# pipeline/dwell_run.py's docstring for the decomposition. Reads
 # the stop visits _analyze_locked materialises once into _analyze_visits
 # before this runs: one row per trip, service day and stop, pairing the arrival and the
 # departure the feed reports in separate polls, with the scheduled times of
@@ -387,7 +387,7 @@ def route_headway_sql(all_routes: bool = False) -> str:
 # when it maps to none). A visit reported only as an arrival (every trip's
 # terminus) has a NULL dep_delay; one reported only as a departure, a NULL
 # arr_delay.
-def dwell_run_sql() -> str:
+def dwell_run_sql(*, scoped: bool) -> str:
     """Per (date, route, service), dwell and running-time sample counts, sums and histograms."""
     dwell_bucket_expr = bucket_case_sql("dwell_sec", lo=DWELL_LO, hi=DWELL_HI, width=DWELL_WIDTH)
     run_bucket_expr = bucket_case_sql("running_sec", lo=RUN_LO, hi=RUN_HI, width=RUN_WIDTH)
@@ -405,7 +405,7 @@ def dwell_run_sql() -> str:
                         d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay, d.dep_observed,
                         {sched_arr_expr} AS sched_arr_sec,
                         {sched_dep_expr} AS sched_dep_sec
-                    FROM _analyze_visits d
+                    {_visits_in_scope(scoped)}
                 ),
                 actuals AS (
                     -- A stop with no archived stop time (the visits scan's
@@ -460,7 +460,7 @@ def dwell_run_sql() -> str:
                 )
                 SELECT
                     %(agency_id)s AS agency_id,
-                    date::text, route_code, service_type,
+                    date, route_code, service_type,
                     COUNT(*) FILTER (WHERE dwell_sec IS NOT NULL) AS dwell_samples,
                     COALESCE(SUM(dwell_sec) FILTER (WHERE dwell_sec IS NOT NULL), 0) AS dwell_sum_sec,
                     {dwell_hist_expr} AS hist_dwell,
@@ -480,43 +480,48 @@ SEGMENT_EARLY_ARRIVAL_SEC = 60
 SEGMENT_HOLD_ALLOWANCE_SEC = 60
 
 
-# Running time per timetable segment: the stop pair the archived timetable in
-# force calls at in turn (_analyze_visits' sched_prev_* columns), not the pair
-# of visits the feed happened to report. A running time is this visit's actual
-# arrival minus the previous visit's actual departure (pipeline/dwell_run.py),
-# and counts only when that previous visit is the segment's own first stop: a
-# stop the feed never reported would otherwise make a two-segment time filed
-# under the second segment. Each row keeps the samples whole, so a reader pools
-# any set of days and takes exact percentiles of them.
-def segment_runtime_sql() -> str:
+def _visits_in_scope(scoped: bool) -> str:
+    """The `_analyze_visits` rows a builder reads: those of the dates it
+    rebuilds when *scoped* (``%(rebuild_dates)s``), else every one. A trip-day's
+    visits share their date, so the filter never splits a trip."""
+    return "FROM _analyze_visits d" + (" WHERE d.date = ANY(%(rebuild_dates)s)" if scoped else "")
+
+
+def _forward_sec(later: str, earlier: str) -> str:
+    """Seconds from timetable clock *earlier* forward to *later*, whichever
+    way either writes a time past midnight or the service-day cutover: a
+    segment runs forward, for less than a day."""
+    return f"mod(mod(({later}) - ({earlier}), 86400) + 86400, 86400)"
+
+
+# Definitions: docs/methodology.md, "Running time per timetable segment". A
+# run counts only when the visit LAG() finds is the segment's own first stop
+# (sched_prev_stop_sequence): a stop the feed did not report would otherwise
+# file a two-segment time under the second segment.
+def segment_runtime_sql(*, scoped: bool) -> str:
     """Per (date, route, from stop, to stop, time band): running-time samples,
     the scheduled running time of the same trip-days, holds at the from stop
     and early arrivals at a terminus."""
-    sched_arr = service_day_seconds_sql(hms_to_sec_sql("d.sched_arrival_time"))
-    sched_dep = service_day_seconds_sql(hms_to_sec_sql("d.sched_departure_time"))
-    sched_prev_dep = service_day_seconds_sql(hms_to_sec_sql("d.sched_prev_departure_time"))
-    # The band is the wall clock of the scheduled departure from the segment's
-    # first stop, as api.range.time_band_ch bands a departure.
+    arr = hms_to_sec_sql("d.sched_arrival_time")
+    dep = hms_to_sec_sql("d.sched_departure_time")
+    prev_dep = hms_to_sec_sql("d.sched_prev_departure_time")
     band = time_band_case_sql("(TIME '00:00' + make_interval(secs => mod(sched_prev_dep_sec, 86400)))")
     return f"""
                 WITH visits AS (
                     SELECT
-                        d.route_code, d.trip_id, d.date, d.stop_sequence, d.arr_delay, d.dep_observed,
+                        d.route_code, d.trip_id, d.date, d.stop_sequence, d.dep_delay, d.arr_delay, d.dep_observed,
                         d.sched_stop_id, d.sched_prev_stop_sequence, d.sched_prev_stop_id, d.sched_is_last,
-                        {sched_arr} AS sched_arr_sec,
-                        {sched_dep} AS sched_dep_sec,
-                        {sched_prev_dep} AS sched_prev_dep_sec,
-                        CASE WHEN d.arr_delay IS NOT NULL THEN {sched_arr} + d.arr_delay END AS actual_arr_sec,
-                        CASE WHEN d.dep_delay IS NOT NULL THEN {sched_dep} + d.dep_delay END AS actual_dep_sec
-                    FROM _analyze_visits d
+                        {arr} AS sched_arr_sec,
+                        {dep} AS sched_dep_sec,
+                        {prev_dep} AS sched_prev_dep_sec
+                    {_visits_in_scope(scoped)}
                 ),
                 with_prev AS (
                     -- Over every visit of the trip-day, a no-route one too, so
                     -- LAG() reaches the visit the feed reported just before.
                     SELECT *,
                         LAG(stop_sequence) OVER w AS prev_stop_sequence,
-                        LAG(actual_arr_sec) OVER w AS prev_actual_arr_sec,
-                        LAG(actual_dep_sec) OVER w AS prev_actual_dep_sec,
+                        LAG(dep_delay) OVER w AS prev_dep_delay,
                         LAG(arr_delay) OVER w AS prev_arr_delay,
                         LAG(dep_observed) OVER w AS prev_dep_observed,
                         LAG(sched_arr_sec) OVER w AS prev_sched_arr_sec,
@@ -529,17 +534,14 @@ def segment_runtime_sql() -> str:
                         route_code, date, sched_prev_stop_id AS from_stop_id, sched_stop_id AS to_stop_id,
                         stop_sequence, sched_prev_dep_sec,
                         CASE WHEN prev_stop_sequence = sched_prev_stop_sequence
-                             THEN actual_arr_sec - prev_actual_dep_sec END AS running_sec,
-                        sched_arr_sec - sched_prev_dep_sec AS scheduled_run_sec,
-                        -- A hold is judged at the segment's first stop, reached
-                        -- on time or early, from a departure the feed reported
-                        -- after the arrival (pipeline/dwell_run.py).
+                             THEN {_forward_sec("sched_arr_sec", "prev_sched_dep_sec")} + arr_delay - prev_dep_delay
+                        END AS running_sec,
+                        {_forward_sec("sched_arr_sec", "sched_prev_dep_sec")} AS scheduled_run_sec,
+                        -- The dwell beyond the scheduled one, at the first stop.
                         CASE WHEN prev_stop_sequence = sched_prev_stop_sequence AND prev_dep_observed
                                   AND prev_arr_delay <= 0
                                   AND prev_sched_arr_sec IS NOT NULL AND prev_sched_dep_sec IS NOT NULL
-                                  AND prev_actual_arr_sec IS NOT NULL AND prev_actual_dep_sec IS NOT NULL
-                             THEN (prev_actual_dep_sec - prev_actual_arr_sec)
-                                  - (prev_sched_dep_sec - prev_sched_arr_sec) END AS excess_dwell_sec,
+                             THEN prev_dep_delay - prev_arr_delay END AS excess_dwell_sec,
                         CASE WHEN sched_is_last THEN arr_delay END AS terminal_arr_delay
                     FROM with_prev
                     WHERE route_code IS NOT NULL
@@ -551,7 +553,7 @@ def segment_runtime_sql() -> str:
                 )
                 SELECT
                     %(agency_id)s AS agency_id,
-                    date::text, route_code, from_stop_id, to_stop_id, time_band,
+                    date, route_code, from_stop_id, to_stop_id, time_band,
                     MIN(stop_sequence) AS to_stop_sequence,
                     COALESCE(
                         array_agg(running_sec ORDER BY running_sec) FILTER (WHERE running_sec IS NOT NULL),

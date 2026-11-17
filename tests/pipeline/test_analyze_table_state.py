@@ -371,5 +371,4 @@ def test_a_carried_fingerprint_whose_timetable_changed_still_rebuilds(pg_conn, a
     with caplog.at_level(logging.INFO, logger="pipeline.analyze"):
         analyze(agency_id, pg_conn, ch_client)
     rebuilt = {name for name, scope in _scopes_logged(caplog).items() if scope.startswith("every date")}
-    # agg_route_segment_runtime shares agg_route_daily_dwell_run's scan, so it rebuilds with it.
-    assert rebuilt == set(_PARTS_FINGERPRINT_TABLES) | {"agg_route_segment_runtime"}
+    assert rebuilt == set(_PARTS_FINGERPRINT_TABLES)

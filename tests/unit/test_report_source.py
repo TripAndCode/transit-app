@@ -67,6 +67,10 @@ def test_dwell_run_has_no_live_scan():
     assert report_reads_aggregates("dwell_run", _BAND)
 
 
+def test_segment_runtime_reads_its_aggregate_for_a_time_band_too():
+    assert report_reads_aggregates("segment_runtime", _BAND)
+
+
 def test_every_report_type_is_answered():
     for report_type in _REPORT_TYPES:
         report_reads_aggregates(report_type, _ALL)

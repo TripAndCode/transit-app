@@ -48,6 +48,7 @@ from api.range import (
     resolve_service_dates,
 )
 from pipeline import perf, retained_reads
+from pipeline.agg_sql import SEGMENT_HOLD_ALLOWANCE_SEC
 from pipeline.query.labels import dow_label
 from pipeline.query.results import ToolResult
 from pipeline.query.stop_patterns import COLUMNS as PATTERN_COLUMNS
@@ -682,7 +683,8 @@ TOOLS: list[dict] = [
                 "arrival times, returns every timetable segment × time band with the scheduled running "
                 "time, observed median and 85th-percentile running time, padding_min (scheduled "
                 "minus observed median: positive = slack, negative = too tight) and the share of "
-                "on-time-or-early arrivals then held more than 60 s beyond the scheduled dwell, plus "
+                f"on-time-or-early arrivals then held more than {SEGMENT_HOLD_ALLOWANCE_SEC} s beyond the "
+                "scheduled dwell, plus "
                 "the route's rate of trips reaching the terminus early, under the timetable in force "
                 "on the window's newest date. The figures are feed-based estimates, not observed "
                 "passages. For other agencies it falls "
@@ -1422,8 +1424,11 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
     if isinstance(route, ToolResult):
         return route
 
+    definition = await _report_stamp("segment_runtime", ctx, conn, agency_id, ch)
     fit = await compute_segment_runtime(agency_id, ctx, conn, route=str(route))
-    if fit["available"] and fit["segments"]:
+    # A segment with no observed run in range has no figure to show.
+    segments = [seg for seg in fit["segments"] if seg["samples"]]
+    if fit["available"] and segments:
         summary = _summary("schedule_realism_padding_summary", lang=locale, route=route)
         if fit["static_version_id"] is not None:
             summary += _summary(
@@ -1440,7 +1445,7 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
         return ToolResult(
             kind="table",
             summary=summary,
-            rows=[_segment_row(seg) for seg in fit["segments"]],
+            rows=[_segment_row(seg) for seg in segments],
             columns=[
                 "from_stop",
                 "to_stop",
@@ -1452,6 +1457,7 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
                 "padding_min",
                 "time_adjustment_rate",
             ],
+            definition=definition,
         )
 
     rows = await schedule_realism_segments(agency_id, ctx, conn, ch, route=str(route))

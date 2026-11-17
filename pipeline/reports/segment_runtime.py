@@ -11,7 +11,8 @@ verdict: only a feed confirmed to send arrivals gives a running time.
 
 A range spanning a timetable revision would average two timetables' scheduled
 times into one neither has, so only the dates under the timetable in force on
-the range's newest date are read, and the result names that timetable.
+the range's last day are read (`agg_schedule_revision_daily`), and the result
+names that timetable.
 
 Every figure is the feed's prediction (`value_basis`), not an observed
 passage, until the agency's predictions are validated against observed
@@ -74,7 +75,15 @@ async def compute_segment_runtime(agency_id: int, ctx: RangeCtx, conn, *, route:
     available = {"available": True, "unavailable_reason": None, "last_checked": None}
 
     # The route is named on its own, so a route filter the request carries does not narrow it away.
-    where, params, n = _dated_agg_filter(replace(ctx, routes=()), next_param=3)
+    # The latest revision on or before the range's last day, whether or not
+    # the route ran under it; None for an agency whose ingest stamps no version.
+    version = await conn.fetchval(
+        "SELECT static_version_id FROM agg_schedule_revision_daily "
+        "WHERE agency_id = $1 AND date <= $2 ORDER BY date DESC LIMIT 1",
+        agency_id,
+        ctx.to_date,
+    )
+    where, params, n = _dated_agg_filter(replace(ctx, routes=()), next_param=4)
     band_sql = ""
     if ctx.time_band in TIME_BAND_RANGES:
         band_sql = f" AND time_band = ${n}"
@@ -86,11 +95,7 @@ async def compute_segment_runtime(agency_id: int, ctx: RangeCtx, conn, *, route:
         f"          WHERE agency_id = $1 AND route_code = $2 AND {where}{band_sql}) s\n"
         "    LEFT JOIN agg_schedule_revision_daily r ON r.agency_id = s.agency_id AND r.date = s.date\n"
         "),\n"
-        "kept AS (\n"
-        "    SELECT * FROM ranged\n"
-        "    WHERE static_version_id IS NOT DISTINCT FROM\n"
-        "          (SELECT static_version_id FROM ranged ORDER BY date DESC LIMIT 1)\n"
-        "),\n"
+        "kept AS (SELECT * FROM ranged WHERE static_version_id IS NOT DISTINCT FROM $3::text),\n"
         "pooled AS (\n"
         "    SELECT from_stop_id, to_stop_id, time_band, MIN(to_stop_sequence) AS to_stop_sequence,\n"
         "           SUM(scheduled_samples) AS scheduled_samples, SUM(scheduled_sum_sec) AS scheduled_sum_sec,\n"
@@ -106,7 +111,6 @@ async def compute_segment_runtime(agency_id: int, ctx: RangeCtx, conn, *, route:
         ")\n"
         "SELECT p.*, COALESCE(r.samples, 0) AS samples, r.p50, r.p85,\n"
         "       fs.stop_name AS from_stop_name, ts.stop_name AS to_stop_name,\n"
-        "       (SELECT static_version_id FROM kept LIMIT 1) AS static_version_id,\n"
         "       (SELECT COUNT(DISTINCT date) FROM kept) AS days,\n"
         "       (SELECT SUM(terminal_arrivals) FROM kept) AS terminus_arrivals,\n"
         "       (SELECT SUM(terminal_early) FROM kept) AS terminus_early\n"
@@ -116,10 +120,11 @@ async def compute_segment_runtime(agency_id: int, ctx: RangeCtx, conn, *, route:
         "LEFT JOIN static_stops ts ON ts.agency_id = $1 AND ts.stop_id = p.to_stop_id",
         agency_id,
         str(route),
+        version,
         *params,
     )
     if not rows:
-        return {**available, **empty}
+        return {**available, **empty, "static_version_id": version}
 
     segments = []
     for r in rows:
@@ -156,7 +161,7 @@ async def compute_segment_runtime(agency_id: int, ctx: RangeCtx, conn, *, route:
     return {
         **available,
         "value_basis": VALUE_BASIS,
-        "static_version_id": first["static_version_id"],
+        "static_version_id": version,
         "days": first["days"],
         "segments": segments,
         "terminus_arrivals": terminus_arrivals,

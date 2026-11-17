@@ -215,7 +215,7 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 - Median and 85th-percentile running time: from every running time observed in the period, linearly interpolated.
 - Scheduled running time: the mean, over the same trips, of the scheduled arrival at the last stop minus the scheduled departure from the first.
 - Padding: scheduled running time − median running time. Positive is slack, negative too tight.
-- Held-for-schedule rate: of the trips reaching the first stop on time or early, the share that stayed more than 60 seconds beyond the scheduled dwell, counting only trips whose departure was reported after the arrival.
+- Held-for-schedule rate: of the trips reaching the first stop on time or early, the share that stayed more than 60 seconds beyond the scheduled dwell, counting only trips whose departure was reported after the arrival and whose next stop the feed reported.
 - Terminus early-arrival rate: the share of arrivals at a trip's last stop at least 60 seconds ahead of the timetable.
 
 When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them until the operator's predictions are validated.

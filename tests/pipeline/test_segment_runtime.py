@@ -240,10 +240,10 @@ def _rows_by_date(pg_conn, agency_id, table):
         return cur.fetchall()
 
 
-def test_a_table_new_to_the_agency_rebuilds_the_visits_tables_together(pg_conn, agency_id, ch_client):
-    """The segment table is new while the dwell table has one changed date:
-    both read one load of the visits, so both rebuild every date, and neither
-    is left empty nor written twice."""
+def test_each_visits_table_rebuilds_only_its_own_dates(pg_conn, agency_id, ch_client):
+    """The segment table is new while the dwell table has one changed date: the
+    visits load both dates, the segment table rebuilds both, and the dwell
+    table only the changed one, leaving its other row as it stood."""
     _seed(pg_conn, agency_id)
     insert_updates(
         ch_client, agency_id, [*_visit(D1, "08:06:00", 2, "S2", arr=0, dep=0), *_visit(D1, "08:10:00", 4, "S4", arr=0)]
@@ -255,6 +255,7 @@ def test_a_table_new_to_the_agency_rebuilds_the_visits_tables_together(pg_conn, 
             (agency_id,),
         )
         cur.execute("DELETE FROM agg_route_segment_runtime WHERE agency_id = %s", (agency_id,))
+        cur.execute("UPDATE agg_route_daily_dwell_run SET run_sum_sec = 12345 WHERE agency_id = %s", (agency_id,))
     pg_conn.commit()
     insert_updates(
         ch_client, agency_id, [*_visit(D2, "08:06:00", 2, "S2", arr=0, dep=0), *_visit(D2, "08:10:00", 4, "S4", arr=0)]
@@ -263,4 +264,59 @@ def test_a_table_new_to_the_agency_rebuilds_the_visits_tables_together(pg_conn, 
     analyze(agency_id, pg_conn, ch_client)
 
     assert _rows_by_date(pg_conn, agency_id, "agg_route_segment_runtime") == [(D1, 2), (D2, 2)]
-    assert _rows_by_date(pg_conn, agency_id, "agg_route_daily_dwell_run") == [(D1, 1), (D2, 1)]
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "SELECT date, run_sum_sec FROM agg_route_daily_dwell_run WHERE agency_id = %s ORDER BY date", (agency_id,)
+        )
+        assert cur.fetchall() == [(D1, 12345), (D2, 240)]
+
+
+def test_the_visits_tables_are_built_without_reading_their_rows_into_python(pg_conn, agency_id, ch_client, monkeypatch):
+    """A full rebuild spans the agency's whole history, so each visits table is
+    one INSERT ... SELECT, and no query over the visits is fetched client-side."""
+    import pipeline.analyze as analyze_module
+
+    fetch = analyze_module._run_query
+
+    def refuse_visits(sql, params, conn):
+        assert "_analyze_visits" not in sql, "a visits table was fetched into Python"
+        return fetch(sql, params, conn)
+
+    monkeypatch.setattr(analyze_module, "_run_query", refuse_visits)
+    _seed(pg_conn, agency_id)
+    insert_updates(
+        ch_client, agency_id, [*_visit(D1, "08:06:00", 2, "S2", arr=0, dep=0), *_visit(D1, "08:10:00", 4, "S4", arr=0)]
+    )
+
+    analyze(agency_id, pg_conn, ch_client)
+
+    assert _rows_by_date(pg_conn, agency_id, "agg_route_segment_runtime") == [(D1, 2)]
+    assert _rows_by_date(pg_conn, agency_id, "agg_route_daily_dwell_run") == [(D1, 1)]
+
+
+@pytest.mark.parametrize(
+    ("departure", "arrival", "run"),
+    [("03:58:00", "04:03:00", 300), ("23:58:00", "00:03:00", 300), ("23:58:00", "24:03:00", 300)],
+    ids=["across the cutover", "across midnight", "extended hours"],
+)
+def test_a_segment_runs_forward_whichever_way_its_clock_wraps(pg_conn, departure, arrival, run):
+    """Two visits of one trip-day, as _analyze_visits holds them: the run and
+    the scheduled time are five minutes, also across the 04:00 service-day
+    cutover, where the departure is on the day's late-night clock and the
+    arrival on its morning one."""
+    from pipeline import agg_sql
+    from pipeline.analyze import VISITS_COLUMNS
+
+    visits = [
+        ("R1", None, None, "T1", D1, 1, 30, None, None, None, departure, "S1", None, None, None, False),
+        ("R1", None, None, "T1", D1, 2, None, 90, None, arrival, None, "S2", 1, "S1", departure, True),
+    ]
+    with pg_conn.cursor() as cur:
+        cur.execute(f"CREATE TEMP TABLE _analyze_visits ({VISITS_COLUMNS}) ON COMMIT DROP")
+        cur.executemany(f"INSERT INTO _analyze_visits VALUES ({', '.join(['%s'] * 16)})", visits)
+        cur.execute(agg_sql.segment_runtime_sql(scoped=False), {"agency_id": 1})
+        rows = cur.fetchall()
+    pg_conn.rollback()
+
+    [(_agency, _date, _route, _from, _to, _band, _seq, run_sec, scheduled_samples, scheduled_sum, *_rest)] = rows
+    assert (run_sec, scheduled_samples, scheduled_sum) == ([run + 90 - 30], 1, run)

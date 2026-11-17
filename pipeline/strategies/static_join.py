@@ -15,9 +15,9 @@ populate them, as recorded in the ``rt_field_coverage_probes`` registry.
 ``ingest_strategy == 'static_join'`` alone means a feed's wire shape
 matches an already-verified agency's; it does NOT mean the feed populates
 these optional fields the same way (see ``field_coverage``'s docstring).
-Every reader that trusts these fields calls ``rt_field_coverage_confirmed``
-below, or ``rt_field_coverage_gap`` when it must also say why the gate is
-closed, rather than re-deriving the check inline, so a newly added reader
+Every reader that trusts these fields calls ``rt_field_coverage_gap`` below,
+or ``rt_field_coverage_confirmed_agencies`` to gate a list of agencies at
+once, rather than re-deriving the check inline, so a newly added reader
 can't silently skip half the gate.
 
 Verifying a feed is an operational act, not a code change: run
@@ -81,7 +81,7 @@ class TripUpdate(NamedTuple):
 # Ingest strategies that CAN ever populate stop_id/arr_delay/
 # schedule_relationship_*/feed_timestamp -- necessary but not sufficient
 # trust; the per-agency probe registry below is the other half of the gate.
-# Shared (via this module, and via rt_field_coverage_confirmed below) by
+# Shared (via this module, and via rt_field_coverage_confirmed_agencies below) by
 # every reader that needs this check so they can't drift apart if a second
 # ingest strategy is ever confirmed.
 RT_INGEST_STRATEGIES = frozenset({"static_join"})
@@ -156,9 +156,9 @@ async def rt_field_coverage_confirmed_agencies(conn, agency_ids) -> set[int]:
     """The subset of *agency_ids* holding a live, complete RT field-coverage
     verdict, resolved in one round trip.
 
-    Batch form of ``rt_field_coverage_confirmed`` for a reader that gates a
-    whole list of agencies at once; both run the same registry query, so a
-    per-agency and a batch caller can never disagree about one agency.
+    Used by a reader that gates a whole list of agencies at once; a reader of
+    one agency gates on ``rt_field_coverage_gap``, which reaches the same
+    verdict.
     """
     ids = list(agency_ids)
     if not ids:
@@ -171,23 +171,6 @@ async def rt_field_coverage_confirmed_agencies(conn, agency_ids) -> set[int]:
         len(RT_COVERAGE_FIELDS),
     )
     return {r["agency_id"] for r in rows}
-
-
-async def rt_field_coverage_confirmed(agency_id: int, conn) -> bool:
-    """True only when *agency_id* both uses an ingest strategy that CAN
-    populate the RT-optional fields (``RT_INGEST_STRATEGIES``) AND has a
-    live, complete verdict in the ``rt_field_coverage_probes`` registry --
-    an ``ingest_strategy`` match alone means a feed's wire shape merely
-    matches a confirmed agency's, not that this agency's own live feed has
-    been probed and found to actually populate these fields.
-
-    The single canonical home for this per-agency check -- every reader that
-    needs it (e.g. dwell time/running time, schedule-realism padding, headway
-    quality) imports and calls this directly rather than re-implementing it,
-    so a newly added reader can't accidentally trust ``ingest_strategy``
-    alone.
-    """
-    return agency_id in await rt_field_coverage_confirmed_agencies(conn, [agency_id])
 
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -216,7 +199,7 @@ class CoverageGap:
 
 
 def coverage_gap(ingest_strategy: str | None, rows: Iterable[Mapping[str, Any]], now: datetime) -> CoverageGap | None:
-    """Why ``rt_field_coverage_confirmed`` says no, or None when it says yes.
+    """Why the gate is closed for an agency, or None when it is open.
 
     *rows* are the agency's ``rt_field_coverage_probes`` rows and *now* the
     database's clock, the one ``expires_at`` is judged by in the gate's SQL.
@@ -282,9 +265,9 @@ async def rt_field_coverage_states(conn, agency_ids: Iterable[int]) -> dict[int,
 async def rt_field_coverage_gap(agency_id: int, conn) -> CoverageGap | None:
     """``coverage_gap`` for *agency_id*, read in one round trip.
 
-    A reader that has to say why it is empty gates on this instead of
-    ``rt_field_coverage_confirmed``: it is None exactly when that gate is
-    open, so the two cannot disagree about whether to show the data.
+    None exactly when *agency_id* is in ``rt_field_coverage_confirmed_agencies``,
+    so a per-agency and a batch reader cannot disagree about whether to show
+    the data, and a reader that is empty can say why.
     """
     state = (await rt_field_coverage_states(conn, [agency_id])).get(agency_id)
     if state is None:
@@ -462,7 +445,7 @@ def field_coverage(pb_bytes: bytes) -> dict:
     exists, which is the point: every reader that trusts an RT-optional
     field gates "is this optional field populated" on a live verdict in the
     ``rt_field_coverage_probes`` registry (this module, via
-    ``rt_field_coverage_confirmed``), not on ``ingest_strategy ==
+    ``rt_field_coverage_gap``), not on ``ingest_strategy ==
     'static_join'`` alone -- sharing this strategy's opaque-trip_id JOIN
     mechanism only means a feed's wire shape matches an already-verified
     agency's (see ``tests/pipeline/test_static_join.py::

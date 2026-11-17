@@ -12,8 +12,9 @@
 -- when the timetable gives none. Every service id of a date pools into one
 -- row, since the service filter selects dates.
 --
--- run_sec holds every observed running time in seconds, sorted, so a reader
--- pools any set of days and takes exact percentiles. scheduled_sum_sec and
+-- run_sec holds every observed running time in seconds, so a reader pools any
+-- set of days and takes exact percentiles; it is sorted, so rebuilding the same
+-- visits writes the same row. scheduled_sum_sec and
 -- scheduled_samples are the scheduled running times of the same trip-days.
 -- holds of hold_eligible count the on-time-or-early arrivals at from_stop_id
 -- that dwelt beyond the scheduled dwell, and terminal_early of

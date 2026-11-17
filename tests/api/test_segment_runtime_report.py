@@ -120,6 +120,30 @@ async def test_only_the_timetable_in_force_on_the_newest_date_is_read(aconn, aag
 
 
 @pytest.mark.asyncio
+async def test_the_timetable_is_the_one_in_force_on_the_last_day_not_the_routes_newest(aconn, aagency_id):
+    """The route ran only on the first day, under v1; v2 came into force on the
+    last day. The figures are v2's, and there are none yet; a revision after
+    the range does not count."""
+    await _trusted(aconn, aagency_id)
+    await aconn.execute(
+        "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) "
+        "VALUES ($1, $2, 'v1'), ($1, $3, 'v2'), ($1, $4, 'v3')",
+        aagency_id,
+        D1,
+        D2,
+        date(2026, 4, 3),
+    )
+    await _segment(aconn, aagency_id, D1, "S2", "S3", "forenoon", [240], scheduled=(1, 300))
+
+    result = await compute_segment_runtime(aagency_id, CTX, aconn, route="R9")
+    first_day = await compute_segment_runtime(aagency_id, RangeCtx(from_date=D1, to_date=D1), aconn, route="R9")
+
+    assert (result["static_version_id"], result["segments"]) == ("v2", [])
+    assert first_day["static_version_id"] == "v1"
+    assert [s["run_p50_sec"] for s in first_day["segments"]] == [240.0]
+
+
+@pytest.mark.asyncio
 async def test_a_time_band_reads_only_its_rows_and_segments_follow_the_route(aconn, aagency_id):
     await _trusted(aconn, aagency_id)
     await _segment(aconn, aagency_id, D1, "S2", "S3", "morning", [100], seq=3)
