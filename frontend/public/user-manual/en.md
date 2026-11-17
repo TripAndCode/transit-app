@@ -306,7 +306,7 @@ When routes tend to run late, by day of week and time of day. “Day × time of 
 
 ## 8. Day types & agencies — side by side
 
-Two buttons at the top switch between **Weekdays and weekends/holidays** and **Agencies**.
+Three buttons at the top switch between **Weekdays and weekends/holidays**, **Agencies** and **Transfers**.
 
 ### 8-1. Weekdays and weekends/holidays
 
@@ -323,6 +323,18 @@ Below them, under “Not ranked: the data does not support a comparison”, the 
 Each row shows “Avg delay (min)” with its bar, “On-time %” with its 95% interval under it, “Observation coverage” (the trips the feed reported out of those the timetable planned), “Planned trips”, “Service delivered %”, “Vehicle-km delivered %” and “Observations”. Every bar shares one axis, 6, 12, 18 or 24 minutes, whichever holds the latest-running agency. Where an agency has data for only part of the period, its own dates are shown too. Planned trips are the trips the timetable planned over the period; where a timetable plans only some of its days, the figure says so, such as “16/30 days a timetable plans”. Where Service delivered % cannot be shown, “—” is followed by the reason (“no timetable plans this period”, “this feed format cannot report cancellations”, “the feed is not yet checked for cancellations” or “this feed doesn't report cancellations”). Vehicle-km delivered % appears only where Service delivered % does. A “Behind” badge means that agency’s totals have not caught up with its latest data yet. “How to read this” explains each figure. Where ridership weights have been set up, “Weight by ridership” switches the on-time figure to a ridership-weighted one.
 
 Click an agency’s name to open that agency’s **Live** screen.
+
+### 8-3. Transfers
+
+For a transfer at a hub, riders leaving one route and boarding another, often of another operator, **Transfers** shows how often the planned connection held. Admins define the transfers under **Transfers** in the admin pages; the list shows those this agency arrives or departs in. **Transfer** picks one, and the day-type buttons switch between the day types it is read on. The period is the last 28 closed days.
+
+- **Connections** counts the connections planned, held, missed and not observed. A connection is held when the second bus was predicted to leave after the first was predicted to arrive, plus the walk between the stops. One with no prediction for either bus is not observed, never held or missed.
+- With enough observed connections, a line such as “A planned buffer of 7 min would have held 95% of observed weekday connections” gives the time to plan between the two buses. It is feed-based: computed from the operators' predicted times, not observed passings.
+- **Held and missed by hour of arrival** draws, for each hour, the connections planned: held, then missed, then not observed. Hours past 24 are after midnight on the same service day.
+- **Realised wait** gives the median and 90th-percentile wait, from stepping off to the departure caught, and the share within 5, 10 and 20 minutes, the waits riders said they would tolerate.
+- **Days with the most missed connections** lists the worst days.
+- **Download CSV** saves each day's counts, with the definition and the data source in its notes: a monitoring list.
+- Below 21 observed connections, the share and the buffer are not given; below 21 known waits, neither are the waits. Days a timetable does not plan are left out and counted under the figures. The definitions are in the methodology.
 
 ---
 

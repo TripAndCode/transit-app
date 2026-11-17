@@ -236,6 +236,21 @@ Each timetable revision is compared stop by stop, the timetable before it agains
 - **Stops left with none**: stops with departures before and none after. On Saturday or Sunday & holiday, these are the stops that lost their weekend service.
 - Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under the old ID and gaining them under the new one. Stop names are the loaded timetable's, so a stop it no longer has shows its ID.
 
+### Connections at transfer hubs
+
+For a transfer an administrator defines, a rider leaving route A at its hub stops and boarding route B at its own, how often the planned connection held (**Day types & agencies**, “Transfers”). Each side names its own operator's stop IDs; the Service does not match a place across operators. Every figure is computed from feed predictions, never from observed passings ([Value basis and validation status](#value-basis-and-validation-status)), and is read when asked for rather than kept as an aggregate.
+
+- **Plan**: each service day ([Service day and time](#service-day-and-time)) the loaded timetables of both operators plan, A's scheduled arrivals at its hub stops and B's scheduled departures at its own, the arrival time when a stop gives one and else the departure time. A day either operator's loaded timetable does not plan is listed as not planned and enters no figure; it never counts as a day with no connections. Days follow the weekday rule (weekday, Saturday, Sunday & holiday, with public holidays as Sunday & holiday), the same for both operators.
+- **Planned connection**: for each A arrival, the first B departure at or after the arrival plus the walk set for the pair, on the same service day. An after-midnight arrival (24:20) connects to an after-midnight departure of the same service day. An arrival with no later B departure that day plans no connection and is counted apart.
+- **Predicted times**: a stop's scheduled time plus the delay the feed last predicted for it. A's arrival uses its arrival delay, or its departure delay when the feed sent no arrival; a bus leaves no earlier than it arrives, so this can only make A look later. B uses its departure delay.
+- **Held**: B's predicted departure is at or after A's predicted arrival plus the walk. **Missed**: it is earlier.
+- **Not observed**: A's arrival or B's planned departure has no prediction. It is counted on its own and is never held or missed. The held share is held over held plus missed.
+- **Realised wait**: from A's predicted arrival to the predicted departure of the first B trip a rider could still catch, the walk included. B's trips are read in timetable order from the planned one; when a trip with no prediction comes before a catchable one, the wait is unknown, since it may have been the one caught. An earlier trip predicted to leave late enough to catch counts too. A missed connection with no later B trip that day has no wait and is counted as stranded.
+- **Survey bands**: the share of known waits at or under 5, 10 and 20 minutes, the waits riders said they would tolerate.
+- **Buffer that would have held 95%**: each observed connection needed a planned buffer (B's scheduled departure minus A's scheduled arrival) of at least A's lateness minus B's lateness plus the walk. The buffer given is, in whole minutes rounded up, the smallest at which at least 95% of the observed connections would have held (the nearest-rank 95th percentile of those needs), and never less than the walk. It takes each day's delays as given, as if B ran as late under another buffer.
+- **Small samples**: with fewer than 21 observed connections, the held share and the buffer are not given; with fewer than 21 known waits, the wait figures are not. Each hour and each day still shows its counts, marked when fewer than 21 were observed. The worst days are those with the most missed connections, a count rather than an estimate.
+- Trips are matched by the trip ID and stop sequence the feed reports against the loaded timetable, so a day whose trips the current timetable no longer has reads as not observed.
+
 ### What is not observed
 
 - A stop with no delay report counts neither as on time nor as late.
@@ -275,7 +290,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
 | Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The monthly feed-quality scorecard and its A–F grade are on the admin pages and are not published |
 | Stating the measurement point and definitions | Partial | "Download CSV" files, the council report, the delay record and the screens' "How this is calculated" block carry the definition stamp. CSVs a screen builds on the spot and chart images do not |
-| Transfers and total travel time | Out of scope | Passengers are not the Service's primary users. Connection reliability at feeder hubs is considered separately |
+| Transfers and total travel time | Partial | Connection reliability for the hub transfers an administrator defines, from feed predictions. Total travel time and origin-destination journeys are not computed: passengers are not the Service's primary users |
 | Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
 | Data coverage | Partial | The Hiroshima Bus Association's thirteen operators and Aomori City Bus. 中国バス and 井笠バスカンパニー, on the association's list, are not ingested |
 | Timetable slack and holding | Partial | Only an analysis on the Notebook screen, against the current timetable. No aggregate and no route-page panel |
