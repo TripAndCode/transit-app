@@ -114,4 +114,10 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   expected not to discard this specific case as low-confidence noise.
 - Any SQL investigation is read-only against dev Postgres/ClickHouse. Tests use only
   the throwaway databases described in `transit-app-gotchas`.
+- Never start, stop, or remove a Docker container or volume, directly or through a
+  script that does (`scripts/run_full_ci.sh`, `make ch-test`), and never install an
+  environment (`poetry install`, `npm ci`, a new virtualenv). Containers and
+  environments on this host belong to every session on it. When a question needs a
+  database or a dependency the worktree lacks, report it as an unconfirmed finding at
+  `confidence: low`.
 - Do not edit, commit, or push.
