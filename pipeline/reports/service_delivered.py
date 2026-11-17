@@ -295,12 +295,15 @@ class RouteDelivered:
     """One route's figures over the days a :class:`RouteDeliveredReading`
     counts: its planned trips; the share of them the feed did not report as
     not run under the route, never below 0 as the agency's, ``None`` without
-    a plan; and the observations the feed reported for the route
-    (``agg_route_daily.samples``)."""
+    a plan; the observations the feed reported for the route
+    (``agg_route_daily.samples``); and the trips it reported them on
+    (``agg_route_daily.trips_observed``), the route's side of the coverage
+    ratio the comparability gate reads."""
 
     planned_trips: int
     service_delivered_pct: float | None
     observations: int
+    trips_observed: int = 0
 
 
 @dataclass(frozen=True)
@@ -368,7 +371,7 @@ _ROUTE_SERVICE_SQL = (
         GROUP BY s.route_code
     ),
     observed AS (
-        SELECT o.route_code, SUM(o.samples) AS observations
+        SELECT o.route_code, SUM(o.samples) AS observations, SUM(o.trips_observed) AS trips_observed
         FROM agg_route_daily o
         JOIN split_days d ON d.day = o.date
         WHERE o.agency_id = $1 AND o.date BETWEEN $2 AND $3
@@ -376,25 +379,26 @@ _ROUTE_SERVICE_SQL = (
     ),
     routes AS (
         SELECT route_code, COALESCE(p.planned, 0) AS planned, COALESCE(m.missed, 0) AS missed,
-               COALESCE(o.observations, 0) AS observations
+               COALESCE(o.observations, 0) AS observations, COALESCE(o.trips_observed, 0) AS trips_observed
         FROM planned p
         FULL JOIN missed m USING (route_code)
         FULL JOIN observed o USING (route_code)
     )
     SELECT (SELECT COUNT(*) FROM plan_days) AS plan_days, (SELECT COUNT(*) FROM split_days) AS split_days,
-           r.route_code, r.planned, r.missed, r.observations
+           r.route_code, r.planned, r.missed, r.observations, r.trips_observed
     FROM (SELECT 1) AS one
     LEFT JOIN routes r ON true
 """
 )
 
 
-def _route_delivered(planned: int, missed: int, observations: int) -> RouteDelivered:
+def _route_delivered(planned: int, missed: int, observations: int, trips_observed: int) -> RouteDelivered:
     executed = max(planned - missed, 0)
     return RouteDelivered(
         planned_trips=planned,
         service_delivered_pct=round(executed / planned * 100, 1) if planned > 0 else None,
         observations=observations,
+        trips_observed=trips_observed,
     )
 
 
@@ -412,7 +416,9 @@ async def compute_service_delivered_by_route(
         plan_days=int(rows[0]["plan_days"]),
         split_days=int(rows[0]["split_days"]),
         routes={
-            r["route_code"]: _route_delivered(int(r["planned"]), int(r["missed"]), int(r["observations"]))
+            r["route_code"]: _route_delivered(
+                int(r["planned"]), int(r["missed"]), int(r["observations"]), int(r["trips_observed"])
+            )
             for r in rows
             if r["route_code"] is not None
         },
