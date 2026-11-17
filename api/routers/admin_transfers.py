@@ -75,6 +75,17 @@ class TransferPairIn(BaseModel):
         return [d for d in _DAY_TYPE_ORDER if d in v]
 
 
+class TransferPairReplace(TransferPairIn):
+    """A replacement definition: every field is required, so a field left out
+    is refused rather than reset to its create default."""
+
+    from_direction: Literal[0, 1] | None
+    to_direction: Literal[0, 1] | None
+    walk_sec: int = Field(ge=0, le=1800)
+    day_types: list[PairDayType] = Field(min_length=1)
+    active: bool
+
+
 class TransferPairOut(TransferPairIn):
     id: int
     created_at: datetime
@@ -183,7 +194,7 @@ def _values(body: TransferPairIn) -> tuple:
 @router.patch("/{pair_id}", response_model=TransferPairOut)
 async def replace_pair(
     pair_id: int,
-    body: TransferPairIn,
+    body: TransferPairReplace,
     request: Request,
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),

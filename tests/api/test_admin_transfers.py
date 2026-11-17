@@ -44,6 +44,12 @@ async def agencies(aconn):
     return bus, tram
 
 
+def _full(bus: int, tram: int, **overrides) -> dict:
+    """A replacement body: every field, as a PATCH needs it."""
+    full = {"from_direction": None, "to_direction": None, "walk_sec": 120, "day_types": ["weekday"], "active": True}
+    return _body(bus, tram, **{**full, **overrides})
+
+
 def _body(bus: int, tram: int, **overrides) -> dict:
     body = {
         "name": "温品四丁目 29 → 2",
@@ -107,7 +113,7 @@ async def test_create_update_delete_each_write_an_audit_row(client, aconn, agenc
 
     updated = await client.patch(
         f"/api/admin/transfer-pairs/{pair['id']}",
-        json=_body(*agencies, walk_sec=180, day_types=["sunday_holiday", "weekday"]),
+        json=_full(*agencies, walk_sec=180, day_types=["sunday_holiday", "weekday"]),
         cookies={"sid": sid},
         headers=_ORIGIN,
     )
@@ -192,8 +198,22 @@ async def test_the_number_of_pairs_is_capped(client, aconn, agencies, monkeypatc
 async def test_missing_pairs_are_404_and_unaudited(client, aconn, agencies):
     sid = (await seed_session(aconn, role="admin")).sid
     put = await client.patch(
-        "/api/admin/transfer-pairs/999", json=_body(*agencies), cookies={"sid": sid}, headers=_ORIGIN
+        "/api/admin/transfer-pairs/999", json=_full(*agencies), cookies={"sid": sid}, headers=_ORIGIN
     )
     delete = await client.delete("/api/admin/transfer-pairs/999", cookies={"sid": sid}, headers=_ORIGIN)
     assert (put.status_code, delete.status_code) == (404, 404)
     assert await _audit(aconn) == []
+
+
+@pytest.mark.asyncio
+async def test_a_replacement_leaving_a_field_out_is_refused_not_reset(client, aconn, agencies):
+    sid = (await seed_session(aconn, role="admin")).sid
+    created = await client.post(
+        "/api/admin/transfer-pairs", json=_body(*agencies, active=False), cookies={"sid": sid}, headers=_ORIGIN
+    )
+    pair_id = created.json()["id"]
+    full = _full(*agencies, active=False)
+    del full["active"]
+    r = await client.patch(f"/api/admin/transfer-pairs/{pair_id}", json=full, cookies={"sid": sid}, headers=_ORIGIN)
+    assert r.status_code == 422
+    assert await aconn.fetchval("SELECT active FROM transfer_pairs WHERE id = $1", pair_id) is False
