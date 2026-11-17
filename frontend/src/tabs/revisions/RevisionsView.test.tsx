@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import type { RevisionStopChange, TimetableRevisionDiff, TimetableRevisionsResponse } from "../../api/types";
@@ -24,7 +24,6 @@ function stop(over: Partial<RevisionStopChange>): RevisionStopChange {
     last_after: 21 * 3600 + 10 * 60,
     last_shift_min: -40,
     ended: false,
-    started: false,
     hours: [
       { hour: 7, before: 2, after: 1 },
       { hour: 8, before: 0, after: 1 },
@@ -38,9 +37,9 @@ const DIFF: TimetableRevisionDiff = {
   reason: null,
   revision: APRIL,
   day_types: [
-    { day_type: "weekday", before_date: "2026-03-31", after_date: "2026-04-01", departures_before: 9, departures_after: 9, stops_ended: 0, stops_started: 0, last_earlier: 3, last_later: 0 },
-    { day_type: "saturday", before_date: "2026-03-28", after_date: "2026-04-04", departures_before: 3, departures_after: 0, stops_ended: 3, stops_started: 0, last_earlier: 0, last_later: 0 },
-    { day_type: "sunday_holiday", before_date: null, after_date: "2026-04-05", departures_before: null, departures_after: 3, stops_ended: null, stops_started: null, last_earlier: null, last_later: null },
+    { day_type: "weekday", before_date: "2026-03-31", after_date: "2026-04-01", departures_before: 9, departures_after: 9, stops_ended: 0, last_earlier: 3 },
+    { day_type: "saturday", before_date: "2026-03-28", after_date: "2026-04-04", departures_before: 3, departures_after: 0, stops_ended: 3, last_earlier: 0 },
+    { day_type: "sunday_holiday", before_date: null, after_date: "2026-04-05", departures_before: null, departures_after: 3, stops_ended: null, last_earlier: null },
   ],
   stops: [
     stop({}),
@@ -50,7 +49,8 @@ const DIFF: TimetableRevisionDiff = {
 
 function stubApi(revisions: TimetableRevisionsResponse, diff: TimetableRevisionDiff = DIFF) {
   const fetchMock = vi.fn((url: string) => {
-    const body = url.includes("/diff") ? diff : revisions;
+    const dayType = new URL(url, "http://test").searchParams.get("day_type");
+    const body = url.includes("/diff") ? { ...diff, stops: diff.stops.filter((s) => s.day_type === dayType) } : revisions;
     return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -82,26 +82,28 @@ describe("RevisionsView", () => {
     expect(saturday).toHaveTextContent("3 → 0");
     expect(within(table).getByRole("row", { name: /Sunday/ })).toHaveTextContent("— → 3");
     expect(screen.getByText(/has no day of that type in force/)).toBeInTheDocument();
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/diff?on=2026-04-01"))).toBe(true);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/diff?on=2026-04-01&day_type=weekday"))).toBe(true);
     expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toContain("on=2026-04-01&format=csv");
   });
 
-  it("lists a day type's changed stops with their lost and gained hours and the last bus", async () => {
-    stubApi({ revisions: [APRIL] });
+  it("lists a day type's changed stops with their lost and gained hours and the first and last bus", async () => {
+    const fetchMock = stubApi({ revisions: [APRIL] });
     open();
     const row = (await screen.findByText("Station")).closest("tr")!;
     expect(row).toHaveTextContent("1 / 1");
+    expect(row).toHaveTextContent("7:00 → 7:00");
     expect(row).toHaveTextContent("21:50 → 21:10");
     expect(row).toHaveTextContent("-40 min");
     expect(row).toHaveTextContent("7:00 -1, 8:00 +1");
 
     fireEvent.click(screen.getByRole("button", { name: "Saturday" }));
-    const ended = screen.getByText("S2").closest("tr")!;
+    const ended = (await screen.findByText("S2")).closest("tr")!;
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("day_type=saturday"))).toBe(true);
     expect(ended).toHaveTextContent("no departures left");
     expect(screen.queryByText("Station")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Sunday & holiday" }));
-    expect(screen.getAllByText(/has no day of that type in force/).length).toBeGreaterThan(1);
+    await waitFor(() => expect(screen.getAllByText(/has no day of that type in force/).length).toBeGreaterThan(1));
   });
 
   it("moves to another revision through the picker", async () => {
@@ -118,6 +120,12 @@ describe("RevisionsView", () => {
     stubApi({ revisions: [APRIL] }, { available: false, reason: "no_calendar", revision: APRIL, day_types: [], stops: [] });
     open();
     expect(await screen.findByText("This revision cannot be compared")).toBeInTheDocument();
+  });
+
+  it("says a revision dropped from the list since the page loaded is no longer listed", async () => {
+    stubApi({ revisions: [APRIL] }, { available: false, reason: "no_revision", revision: null, day_types: [], stops: [] });
+    open();
+    expect(await screen.findByText("This revision is no longer listed")).toBeInTheDocument();
   });
 
   it("offers every stop past the first fifty", async () => {

@@ -404,8 +404,8 @@ For staff, “Late departures (delay at each trip's first recorded stop)” open
 
 For each day another timetable took effect (a revision), the timetables before and after it are compared stop by stop. **Revision** picks the one to compare; the newest opens first.
 
-- The **By day type** table gives, for weekdays, Saturdays and Sundays & holidays, the typical day (before → after), the departures and their change, how many stops were left with none, and how many have an earlier last bus. A typical day is an ordinary day of that type under each timetable, near the revision.
-- **Stops that changed** lists, for the day type chosen, every stop whose departures, first departure or last departure changed, those that lost the most first. **Change by hour** shows only the hours whose count changed, as in “7:00 -1, 8:00 +1”. A stop left with no departures says so.
+- The **By day type** table gives, for weekdays, Saturdays and Sundays & holidays, the typical day (before → after), the departures and their change, how many stops were left with none, and how many have an earlier last bus. A typical day is an ordinary day of that type under each timetable, near the revision. These day types are fixed by the date alone, unlike the day types elsewhere, which follow the operator’s calendar and may merge Saturday with Sunday & holiday.
+- **Stops that changed** lists, for the day type chosen, every stop whose departures, first departure or last departure changed, those that lost the most first. The first and last departures read before → after. **Change by hour** shows only the hours whose count changed, as in “7:00 -1, 8:00 +1”. A stop left with no departures says so.
 - A day type with no day in force under one of the timetables shows a dash and is not compared.
 - **Download CSV** saves the changed stops, with the versions compared, their typical days and the data source in its notes: a draft of a monitoring list.
 - Stop names are the current timetable’s; a stop it no longer has shows its ID. A trip’s last stop is not counted as a departure.

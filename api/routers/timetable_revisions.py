@@ -17,14 +17,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_ch, get_conn
+from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
+from api.range import DAY_TYPE_SERVICE
 from pipeline.data_sources import credit_line
-from pipeline.day_types import DayType
+from pipeline.reports.definition import CONTENT_HASH_DIGITS
 from pipeline.reports.timetable_diff import (
     Comparison,
     DayTypeSummary,
     Revision,
+    RevisionDayType,
     Run,
     StopChange,
     Unavailable,
@@ -34,14 +36,11 @@ from pipeline.reports.timetable_diff import (
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["timetable-revisions"])
 
-# The short content hash the definition stamp names a version's content by.
-_SHORT_CONTENT = 8
-
 
 class RevisionVersion(BaseModel):
-    """One side of a revision: the version name first in force over its run
-    of service dates, its short content hash, and the run, both ends
-    inclusive. A version still in force runs to its span's end."""
+    """One side of a revision: a version name in force over its run of
+    service dates, its short content hash, and the run, both ends inclusive.
+    A version still in force runs to its span's end."""
 
     version: str
     content: str
@@ -75,7 +74,7 @@ class StopChangeOut(BaseModel):
 
     stop_id: str
     stop_name: str | None
-    day_type: DayType
+    day_type: RevisionDayType
     before: int
     after: int
     lost: int
@@ -86,26 +85,26 @@ class StopChangeOut(BaseModel):
     last_after: int | None
     last_shift_min: int | None
     ended: bool
-    started: bool
     hours: list[HourChangeOut]
 
 
 class DayTypeSummaryOut(BaseModel):
     """A day type's totals. A side with no typical day leaves its date and
-    totals None, and the stop counts need both sides."""
+    departures None, and the stop counts need both sides."""
 
-    day_type: DayType
+    day_type: RevisionDayType
     before_date: date | None
     after_date: date | None
     departures_before: int | None
     departures_after: int | None
     stops_ended: int | None
-    stops_started: int | None
     last_earlier: int | None
-    last_later: int | None
 
 
 class RevisionDiffResponse(BaseModel):
+    """``stops`` holds the changed stops of the requested day type, or of
+    every day type when none is requested; ``day_types`` always all three."""
+
     available: bool
     reason: Literal["no_revision", "no_calendar"] | None = None
     revision: RevisionOut | None = None
@@ -115,7 +114,7 @@ class RevisionDiffResponse(BaseModel):
 
 def _version(run: Run) -> RevisionVersion:
     return RevisionVersion(
-        version=run.stem, content=run.content[:_SHORT_CONTENT], first_day=run.first, last_day=run.last
+        version=run.stem, content=run.content[:CONTENT_HASH_DIGITS], first_day=run.first, last_day=run.last
     )
 
 
@@ -146,9 +145,7 @@ def _summary(s: DayTypeSummary) -> DayTypeSummaryOut:
         departures_before=s.departures_before,
         departures_after=s.departures_after,
         stops_ended=s.stops_ended,
-        stops_started=s.stops_started,
         last_earlier=s.last_earlier,
-        last_later=s.last_later,
     )
 
 
@@ -167,7 +164,6 @@ def _stop(s: StopChange, names: dict[str, str | None]) -> StopChangeOut:
         last_after=s.last_after,
         last_shift_min=s.last_shift_min,
         ended=s.ended,
-        started=s.started,
         hours=[HourChangeOut(hour=h.hour, before=h.before, after=h.after) for h in s.hours],
     )
 
@@ -180,13 +176,6 @@ async def _stop_names(conn: asyncpg.Connection, agency_id: int, stop_ids: list[s
     )
     return {r["stop_id"]: r["stop_name"] for r in rows}
 
-
-_DAY_TYPE_LABELS: dict[DayType, str] = {
-    "weekday": "平日",
-    "saturday": "土曜",
-    "sunday_holiday": "日祝",
-    "weekend_holiday": "土日祝",
-}
 
 _CSV_COLUMNS = [
     "停留所ID",
@@ -206,9 +195,15 @@ _CSV_COLUMNS = [
     "時間帯ごとの増減",
 ]
 
-_UNAVAILABLE_CSV = {
-    Unavailable.NO_REVISION: "この事業者の時刻表には、比べられる改正がまだありません。",
-    Unavailable.NO_CALENDAR: "改正の前後どちらかの運行日カレンダーが保存されていないため、比べられません。",
+# The row standing in for the stops when there is no comparison, in the
+# file reader's language, like the data-source credit.
+UNAVAILABLE_CSV: dict[tuple[Unavailable, str], str] = {
+    (Unavailable.NO_REVISION, "ja"): "この事業者の時刻表には、比べられる改正がまだありません。",
+    (Unavailable.NO_REVISION, "en"): "This agency's timetables have no revision to compare yet.",
+    (Unavailable.NO_CALENDAR, "ja"): "改正の前後どちらかの運行日カレンダーが保存されていないため、比べられません。",
+    (Unavailable.NO_CALENDAR, "en"): (
+        "The service calendar of the timetable before or after the revision is not kept, so it cannot be compared."
+    ),
 }
 
 
@@ -225,7 +220,7 @@ def _csv_rows(comparison: Comparison, names: dict[str, str | None]) -> list[list
         [
             s.stop_id,
             names.get(s.stop_id) or "",
-            _DAY_TYPE_LABELS[s.day_type],
+            DAY_TYPE_SERVICE[s.day_type],
             s.before,
             s.after,
             s.after - s.before,
@@ -243,19 +238,21 @@ def _csv_rows(comparison: Comparison, names: dict[str, str | None]) -> list[list
     ]
 
 
-def _preamble(comparison: Comparison) -> list[str]:
-    revision = comparison.revision
+def _version_line(revision: Revision) -> str:
     before, after = revision.before, revision.after
+    return (
+        f"時刻表の改正 {revision.first_day.isoformat()}：{before.stem}（{before.content[:CONTENT_HASH_DIGITS]}）→ "
+        f"{after.stem}（{after.content[:CONTENT_HASH_DIGITS]}）"
+    )
+
+
+def _typical_days_line(comparison: Comparison) -> str:
     days = " / ".join(
-        f"{_DAY_TYPE_LABELS[s.day_type]} "
+        f"{DAY_TYPE_SERVICE[s.day_type]} "
         f"{s.before.day.isoformat() if s.before else '不明'} → {s.after.day.isoformat() if s.after else '不明'}"
         for s in comparison.day_types
     )
-    return [
-        f"時刻表の改正 {revision.first_day.isoformat()}：{before.stem}（{before.content[:_SHORT_CONTENT]}）→ "
-        f"{after.stem}（{after.content[:_SHORT_CONTENT]}）",
-        f"代表日（改正前 → 改正後）：{days}",
-    ]
+    return f"代表日（改正前 → 改正後）：{days}"
 
 
 def _csv_response(
@@ -288,12 +285,19 @@ async def revision_diff(
         default=None,
         description="The revision's first day, as the revisions list gives it. Unset, the newest revision.",
     ),
+    day_type: RevisionDayType | None = Query(
+        default=None,
+        description="JSON only: list the changed stops of this day type alone. The day-type totals and the "
+        "CSV always cover all three.",
+    ),
     format: str | None = Query(default=None, pattern="^(json|csv)$"),
-    lang: str = Query(
-        default="ja",
+    lang: str | None = Query(
+        default=None,
         pattern="^(ja|en)$",
-        description="format=csv only: the language of the data-source credit row. The rest of the file is "
-        "Japanese, like the reports' CSV.",
+        description="format=csv only: the language of the data-source credit and of the row standing in for "
+        "the stops when there is no comparison; the rest of the file is Japanese, like the reports' CSV. The "
+        "app sets it to its UI language because a download link sends the browser's Accept-Language instead. "
+        "Unset, those rows follow Accept-Language.",
     ),
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
@@ -304,6 +308,8 @@ async def revision_diff(
     and gained per hour, the first and last departure, and the stops left with
     none. ``format=csv`` writes the changed stops as a monitoring list. A
     day ``on`` that starts no revision is a 404."""
+    if lang is not None and format != "csv":
+        raise HTTPException(status_code=400, detail="lang only applies to format=csv")
     found = await load_revisions(ch, agency_id)
     if on is None:
         revision = found[-1] if found else None
@@ -312,16 +318,19 @@ async def revision_diff(
         if revision is None:
             raise HTTPException(status_code=404, detail=f"No timetable revision starts on {on.isoformat()}")
     result = Unavailable.NO_REVISION if revision is None else await load_comparison(ch, agency_id, revision)
-    names: dict[str, str | None] = {}
-    if not isinstance(result, Unavailable):
-        names = await _stop_names(conn, agency_id, sorted({s.stop_id for s in result.stops}))
 
     if format == "csv":
-        credit = credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), lang)
+        # A direct read, not Depends(get_locale): the JSON this route returns
+        # holds no localized text, so its client caches it whatever the language.
+        locale = lang or get_locale(request)
+        credit = credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), locale)
         if isinstance(result, Unavailable):
-            first_day = None if revision is None else revision.first_day
-            return _csv_response(first_day, [], credit, [], _UNAVAILABLE_CSV[result])
-        return _csv_response(result.revision.first_day, _preamble(result), credit, _csv_rows(result, names), None)
+            message = UNAVAILABLE_CSV[(result, "en" if locale == "en" else "ja")]
+            preamble = [] if revision is None else [_version_line(revision)]
+            return _csv_response(None if revision is None else revision.first_day, preamble, credit, [], message)
+        names = await _stop_names(conn, agency_id, sorted({s.stop_id for s in result.stops}))
+        preamble = [_version_line(result.revision), _typical_days_line(result)]
+        return _csv_response(result.revision.first_day, preamble, credit, _csv_rows(result, names), None)
 
     if isinstance(result, Unavailable):
         return RevisionDiffResponse(
@@ -329,9 +338,11 @@ async def revision_diff(
             reason="no_revision" if result is Unavailable.NO_REVISION else "no_calendar",
             revision=None if revision is None else _revision(revision),
         )
+    stops = [s for s in result.stops if day_type is None or s.day_type == day_type]
+    names = await _stop_names(conn, agency_id, sorted({s.stop_id for s in stops}))
     return RevisionDiffResponse(
         available=True,
         revision=_revision(result.revision),
         day_types=[_summary(s) for s in result.day_types],
-        stops=[_stop(s, names) for s in result.stops],
+        stops=[_stop(s, names) for s in stops],
     )

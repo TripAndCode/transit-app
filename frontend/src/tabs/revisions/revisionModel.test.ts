@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { RevisionStopChange, TimetableRevision } from "../../api/types";
-import { pickRevision, serviceClock, stopsOn } from "./revisionModel";
+import type { TimetableRevision } from "../../api/types";
+import { pickRevision, serviceClock } from "./revisionModel";
 
 function revision(first_day: string): TimetableRevision {
   const side = { version: "v", content: "abcd1234", first_day, last_day: first_day };
@@ -30,13 +30,5 @@ describe("pickRevision", () => {
     expect(pickRevision(list, null)?.first_day).toBe("2026-10-01");
     expect(pickRevision(list, "2025-01-01")?.first_day).toBe("2026-10-01");
     expect(pickRevision([], null)).toBeNull();
-  });
-});
-
-describe("stopsOn", () => {
-  it("keeps one day type's stops in the server's order", () => {
-    const stop = (stop_id: string, day_type: RevisionStopChange["day_type"]) => ({ stop_id, day_type }) as RevisionStopChange;
-    const stops = [stop("B", "weekday"), stop("A", "saturday"), stop("C", "weekday")];
-    expect(stopsOn(stops, "weekday").map((s) => s.stop_id)).toEqual(["B", "C"]);
   });
 });

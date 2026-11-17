@@ -1546,7 +1546,6 @@ export interface RevisionStopChange {
   last_after: number | null;
   last_shift_min: number | null;
   ended: boolean;
-  started: boolean;
   hours: RevisionHourChange[];
 }
 
@@ -1558,9 +1557,7 @@ export interface RevisionDayTypeSummary {
   departures_before: number | null;
   departures_after: number | null;
   stops_ended: number | null;
-  stops_started: number | null;
   last_earlier: number | null;
-  last_later: number | null;
 }
 
 export interface TimetableRevisionDiff {

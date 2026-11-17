@@ -13,13 +13,15 @@ from __future__ import annotations
 import csv
 import io
 import zipfile
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 import pytest
 from httpx import ASGITransport
 
+from api.routers.timetable_revisions import UNAVAILABLE_CSV
 from pipeline import static_archive
+from pipeline.reports.timetable_diff import Unavailable
 from pipeline.static_loader import load_static
 
 STOPS = ("S1", "S2", "S3", "S4")
@@ -39,8 +41,28 @@ def _clock(hhmm: str, stop: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
 
 
-def _zip(tmp_path, stem: str, first: date, last: date, trips: dict[str, tuple[str, str]]) -> str:
+def _dates_only(first: date, last: date) -> str:
+    """calendar_dates.txt alone, listing the dates each service runs: the weekday rule, holidays ignored."""
+    rows, day = [], first
+    while day <= last:
+        service = WEEKDAY if day.weekday() < 5 else SATURDAY if day.weekday() == 5 else SUNDAY
+        rows.append(f"{service},{day:%Y%m%d},1")
+        day += timedelta(days=1)
+    return "service_id,date,exception_type\n" + "\n".join(rows)
+
+
+def _zip(
+    tmp_path, stem: str, first: date, last: date, trips: dict[str, tuple[str, str]], *, dates_only: bool = False
+) -> str:
     flags = {WEEKDAY: "1,1,1,1,1,0,0", SATURDAY: "0,0,0,0,0,1,0", SUNDAY: "0,0,0,0,0,0,1"}
+    calendar = (
+        {"calendar_dates.txt": _dates_only(first, last)}
+        if dates_only
+        else {
+            "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
+            + "\n".join(f"{svc},{days},{first:%Y%m%d},{last:%Y%m%d}" for svc, days in flags.items())
+        }
+    )
     files = {
         "stops.txt": "stop_id,stop_name,stop_lat,stop_lon\n"
         + "\n".join(f"{s},{s}前,34.4{i},132.4{i}" for i, s in enumerate(STOPS)),
@@ -52,8 +74,7 @@ def _zip(tmp_path, stem: str, first: date, last: date, trips: dict[str, tuple[st
             for t, (_svc, departs) in trips.items()
             for i, stop in enumerate(STOPS)
         ),
-        "calendar.txt": "service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n"
-        + "\n".join(f"{svc},{days},{first:%Y%m%d},{last:%Y%m%d}" for svc, days in flags.items()),
+        **calendar,
         "feed_info.txt": "feed_publisher_name,feed_publisher_url,feed_lang,feed_start_date,feed_end_date\n"
         f"test,https://example.com,ja,{first:%Y%m%d},{last:%Y%m%d}",
     }
@@ -167,3 +188,71 @@ async def test_a_side_whose_calendar_is_not_kept_is_unavailable_not_all_cut(revi
     body = (await api.get(f"/api/{revised}/timetable-revisions/diff")).json()
     assert (body["available"], body["reason"]) == (False, "no_calendar")
     assert body["stops"] == []
+
+
+async def test_the_diff_lists_one_day_types_stops_when_asked_and_keeps_every_total(revised, api):
+    body = (await api.get(f"/api/{revised}/timetable-revisions/diff?day_type=saturday")).json()
+    assert {s["day_type"] for s in body["stops"]} == {"saturday"}
+    assert [s["day_type"] for s in body["day_types"]] == ["weekday", "saturday", "sunday_holiday"]
+
+
+async def test_lang_applies_only_to_the_csv(revised, api):
+    response = await api.get(f"/api/{revised}/timetable-revisions/diff?lang=en")
+    assert response.status_code == 400
+
+
+def _csv_rows(response) -> list[list[str]]:
+    return list(csv.reader(io.StringIO(response.text.lstrip("\ufeff"))))
+
+
+@pytest.mark.parametrize(
+    ("lang", "message"),
+    [
+        ("ja", "改正の前後どちらかの運行日カレンダーが保存されていないため、比べられません。"),
+        (
+            "en",
+            "The service calendar of the timetable before or after the revision is not kept, so it cannot be compared.",
+        ),
+    ],
+)
+async def test_a_csv_with_no_comparison_names_the_revision_and_says_why_in_the_readers_language(
+    revised, ch_client, api, lang, message
+):
+    assert UNAVAILABLE_CSV[(Unavailable.NO_CALENDAR, lang)] == message
+    ch_client.command(
+        f"ALTER TABLE {static_archive.CALENDAR} DELETE WHERE agency_id = {int(revised)} "
+        f"AND static_version_id = '{B}' SETTINGS mutations_sync = 1"
+    )
+    rows = _csv_rows(await api.get(f"/api/{revised}/timetable-revisions/diff?format=csv&lang={lang}"))
+    assert A in rows[0][0] and B in rows[0][0]
+    assert rows[-1] == [message]
+
+
+@pytest.mark.parametrize(
+    ("lang", "message"),
+    [
+        ("ja", "この事業者の時刻表には、比べられる改正がまだありません。"),
+        ("en", "This agency's timetables have no revision to compare yet."),
+    ],
+)
+async def test_a_csv_with_no_revision_says_so_in_the_readers_language(agency_id, ch_async_client, api, lang, message):
+    rows = _csv_rows(await api.get(f"/api/{agency_id}/timetable-revisions/diff?format=csv&lang={lang}"))
+    assert rows[-1] == [message]
+    assert rows[0][0] == "停留所ID"
+
+
+async def test_a_calendar_dates_only_timetable_that_drops_sunday_reads_as_a_known_empty_sunday(
+    pg_conn, ch_client, agency_id, tmp_path, api
+):
+    load_static(_zip(tmp_path, A, date(2026, 1, 1), date(2026, 12, 31), _A), agency_id, pg_conn, ch_client=ch_client)
+    no_sunday = {t: trip for t, trip in _B.items() if trip[0] != SUNDAY}
+    zip_b = _zip(tmp_path, B, REVISION, date(2026, 6, 30), no_sunday, dates_only=True)
+    load_static(zip_b, agency_id, pg_conn, ch_client=ch_client)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    pg_conn.commit()
+    # B's span ends 06-30, after which A is in force again: read the revision B starts.
+    body = (await api.get(f"/api/{agency_id}/timetable-revisions/diff?on={REVISION.isoformat()}")).json()
+    sunday = next(s for s in body["day_types"] if s["day_type"] == "sunday_holiday")
+    assert sunday["after_date"] == "2026-04-05"
+    assert (sunday["departures_before"], sunday["departures_after"]) == (3, 0)
+    assert sunday["stops_ended"] == 3

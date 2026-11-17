@@ -2638,7 +2638,8 @@
       "stop": "Stop",
       "lost_gained": "Lost / gained",
       "last": "Last departure",
-      "hours": "Change by hour"
+      "hours": "Change by hour",
+      "first": "First departure"
     },
     "lost_gained": "{{lost}} / {{gained}}",
     "minutes": "({{value}} min)",
@@ -2648,6 +2649,8 @@
     "no_change": "No stop changed on this day type.",
     "unknown_day_type": "A day type with a dash has no day of that type in force under one of the timetables, so it is not compared.",
     "show_all": "Show all {{count}} stops",
-    "note": "Each day type is compared on one typical day from each timetable, the dates nearest the revision. A trip's last stop is not a departure. Stop names are the current timetable's; a stop it no longer has shows its ID. See the methodology for the full definitions."
+    "note": "Each day type is compared on one typical day from each timetable: an ordinary day of that type near the revision. A trip's last stop is not a departure. Stop names are the current timetable's; a stop it no longer has shows its ID. See the methodology for the full definitions.",
+    "no_revision_title": "This revision is no longer listed",
+    "no_revision_hint": "The agency's timetable revisions changed after this page loaded. Reload the page to see the current list."
   }
 }

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+
+import pytest
 
 from pipeline.day_types import ServiceCalendar, WeeklyService
 from pipeline.reports.timetable_diff import (
@@ -12,6 +14,7 @@ from pipeline.reports.timetable_diff import (
     TypicalDay,
     compare,
     counts_of,
+    load_comparison,
     revisions,
     runs,
     service_calendar,
@@ -75,6 +78,20 @@ def test_a_reissue_that_only_changes_the_calendar_is_a_revision():
     assert [rev.first_day for rev in revisions(found)] == [date(2026, 4, 1)]
 
 
+def test_a_version_whose_calendar_is_not_kept_is_one_timetable_with_its_neighbour_of_one_content():
+    segments = [
+        (date(2026, 1, 1), date(2026, 3, 31), "v1", "same"),
+        (date(2026, 4, 1), date(2026, 9, 30), "v1-reissued", "same"),
+        (date(2026, 10, 1), date(2026, 12, 31), "v2", "other"),
+    ]
+    found = runs(segments, {("v1-reissued", "same"): "d1", ("v2", "other"): "d2"})
+    assert [(r.first, r.last, r.stem, r.calendar) for r in found] == [
+        (date(2026, 1, 1), date(2026, 9, 30), "v1-reissued", "d1"),
+        (date(2026, 10, 1), date(2026, 12, 31), "v2", "d2"),
+    ]
+    assert [rev.first_day for rev in revisions(found)] == [date(2026, 10, 1)]
+
+
 def test_one_timetable_on_both_sides_of_a_gap_is_no_revision():
     segments = [
         (date(2026, 1, 1), date(2026, 3, 31), "v1", "c1"),
@@ -93,6 +110,40 @@ def test_the_typical_day_is_the_service_set_most_dates_share_not_the_nearest_dat
     )
     dates = [date(2026, 3, 30), date(2026, 3, 27), date(2026, 3, 26)]
     assert typical_day(dates, calendar) == TypicalDay(date(2026, 3, 27), frozenset({"weekday"}))
+
+
+def test_the_year_end_break_does_not_stand_for_weekdays():
+    # 12-29 to 01-03 run the year-end timetable in place of the weekday one.
+    exceptions = []
+    day = date(2026, 12, 29)
+    while day <= date(2027, 1, 3):
+        exceptions += [("weekday", day, 2), ("yearend", day, 1)]
+        day += timedelta(days=1)
+    calendar = ServiceCalendar.of([WeeklyService("weekday", WEEKDAYS, date(2026, 4, 1), date(2027, 3, 31))], exceptions)
+    for last in (date(2027, 1, 3), date(2027, 1, 4), date(2027, 1, 5)):
+        run = Run(date(2026, 4, 1), last, "v", "c", "d")
+        assert typical_days(run, calendar, latest=True)["weekday"].services == frozenset({"weekday"}), last
+
+
+def test_a_calendar_dates_only_feed_reads_a_day_it_lists_nothing_for_as_known_and_empty():
+    # Lists the dates each service runs and nothing else; Sunday service is dropped.
+    days = [date(2026, 4, 1) + timedelta(days=i) for i in range(60)]
+    weekday = [("w", d, 1) for d in days if d.weekday() < 5]
+    calendar = ServiceCalendar.of([], weekday)
+    run = Run(date(2026, 4, 1), date(2026, 12, 31), "v", "c", "d")
+    found = typical_days(run, calendar, latest=False)
+    assert found["sunday_holiday"] == TypicalDay(date(2026, 4, 5), frozenset())
+    assert found["saturday"] == TypicalDay(date(2026, 4, 4), frozenset())
+    # 2026-04-29 (昭和の日) runs weekday service but is one Sunday-type date of five.
+    assert found["weekday"].services == frozenset({"w"})
+
+
+def test_a_day_past_the_calendars_last_listed_day_is_not_sampled():
+    calendar = ServiceCalendar.of([], [("w", date(2026, 4, 1), 1), ("w", date(2026, 4, 2), 1)])
+    run = Run(date(2026, 3, 1), date(2026, 4, 30), "v", "c", "d")
+    found = typical_days(run, calendar, latest=True)
+    assert found["weekday"] == TypicalDay(date(2026, 4, 2), frozenset({"w"}))
+    assert found["saturday"] is None
 
 
 def test_a_tie_goes_to_the_set_met_first():
@@ -203,7 +254,7 @@ def test_a_stop_with_no_departures_left_has_ended_and_no_shift():
     before = {"saturday": {"S1": _stop("09:00", "17:00")}}
     after: dict = {"saturday": {}}
     [change] = stop_changes(before, after, ["saturday"])
-    assert change.ended and not change.started
+    assert change.ended
     assert change.last_shift_min is None
 
 
@@ -274,13 +325,67 @@ def test_a_day_type_unknown_on_either_side_reports_no_changes_and_no_stop_counts
     after = {"weekday": {"S1": _stop("07:00")}, "saturday": {}}
     result = compare(_REVISION, before_days, after_days, before, after)
     saturday = next(s for s in result.day_types if s.day_type == "saturday")
-    assert not saturday.known
+    assert saturday.before is None
     assert (saturday.departures_before, saturday.departures_after, saturday.stops_ended) == (None, 0, None)
     assert result.stops == []
 
 
 def test_counts_are_read_by_day_type_in_their_order():
-    counts = counts_of([(1, "S1", 7, 2, 25200, 27000), (2, "S1", 9, 1, 32400, 32400)])
+    counts = counts_of([(1, "S1", [(7, 2, 25200, 27000)]), (2, "S1", [(9, 1, 32400, 32400)])])
     assert counts["weekday"]["S1"][7] == Cell(2, 25200, 27000)
     assert counts["saturday"]["S1"][9] == Cell(1, 32400, 32400)
     assert counts["sunday_holiday"] == {}
+
+
+# ── loading, with the comparison cached ─────────────────────────────────────
+
+
+class _Result:
+    def __init__(self, rows):
+        self.result_rows = rows
+
+
+class _FakeArchive:
+    """An async ClickHouse stand-in holding one stop's weekday departures per
+    content, and a calendar per (version, content) by its digest: "weekdays"
+    runs service w Monday to Friday, "none" runs nothing."""
+
+    def __init__(self):
+        self.departure_reads = 0
+
+    async def query(self, sql, parameters=None):
+        if "static_calendar_archive" in sql:
+            flags = WEEKDAYS if parameters["stem"].endswith("weekdays") else (False,) * 7
+            return _Result([("calendar", "w", *flags, START.isoformat(), END.isoformat(), None, None)])
+        self.departure_reads += 1
+        hours = [(7, 2, 25200, 27000)] if parameters["content"] == "c1" else [(7, 1, 25200, 25200)]
+        return _Result([(1, "S1", hours)] if parameters["services"][0] else [])
+
+
+def _revision_with(after_calendar: str) -> Revision:
+    return Revision(
+        Run(date(2026, 1, 1), date(2026, 3, 31), "v1-weekdays", "c1", "weekdays"),
+        Run(date(2026, 4, 1), date(2026, 9, 30), f"v2-{after_calendar}", "c2", after_calendar),
+    )
+
+
+async def test_a_comparison_is_cached_by_its_revision_calendars_included():
+    archive = _FakeArchive()
+    weekdays = await load_comparison(archive, 1, _revision_with("weekdays"))
+    again = await load_comparison(archive, 1, _revision_with("weekdays"))
+    assert again is weekdays
+    assert archive.departure_reads == 2
+    nothing = await load_comparison(archive, 1, _revision_with("none"))
+    # Read again for the before side; an after side running nothing reads no departures.
+    assert archive.departure_reads == 3
+    by_type = {s.day_type: s for s in nothing.day_types}
+    assert by_type["weekday"].departures_after == 0
+    assert {s.day_type: s for s in weekdays.day_types}["weekday"].departures_after == 1
+
+
+@pytest.mark.parametrize("missing", ["before", "after"])
+async def test_a_side_with_no_kept_calendar_is_unavailable(missing):
+    revision = _revision_with("weekdays")
+    run = getattr(revision, missing)._replace(calendar=None)
+    result = await load_comparison(_FakeArchive(), 1, revision._replace(**{missing: run}))
+    assert result.value == "no_calendar"

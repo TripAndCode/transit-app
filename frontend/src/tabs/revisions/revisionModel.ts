@@ -1,4 +1,4 @@
-import type { RevisionDayType, RevisionStopChange, TimetableRevision } from "../../api/types";
+import type { RevisionDayType, TimetableRevision } from "../../api/types";
 import { EM_DASH } from "../../utils/format";
 
 /** The day types a revision is compared on, in display order. */
@@ -11,11 +11,6 @@ export function serviceClock(sec: number | null): string {
   const hours = Math.floor(sec / 3600);
   const minutes = Math.floor((sec % 3600) / 60);
   return `${hours}:${String(minutes).padStart(2, "0")}`;
-}
-
-/** The changed stops of one day type, in the order the server ranks them. */
-export function stopsOn(stops: readonly RevisionStopChange[], dayType: RevisionDayType): RevisionStopChange[] {
-  return stops.filter((s) => s.day_type === dayType);
 }
 
 /** The revision a page shows: the one `on` names when the list has it, else

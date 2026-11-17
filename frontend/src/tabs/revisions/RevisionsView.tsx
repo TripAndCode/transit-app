@@ -11,7 +11,7 @@ import { SkeletonTable } from "../../components/Skeleton";
 import { CsvLink } from "../../components/analysis/CsvLink";
 import { SHARED_TABLE, td, th } from "../../components/tableStyles";
 import { EM_DASH, formatDate, formatNumber } from "../../utils/format";
-import { REVISION_DAY_TYPES, pickRevision, serviceClock, stopsOn } from "./revisionModel";
+import { REVISION_DAY_TYPES, pickRevision, serviceClock } from "./revisionModel";
 import "../../styles/focusedAnalysis.css";
 
 /** How many changed stops the table lists before "show all". */
@@ -32,8 +32,8 @@ export function RevisionsView() {
   const [params, setParams] = useSearchParams();
   const list = useTimetableRevisions(id);
   const revision = pickRevision(list.data?.revisions ?? [], params.get("on"));
-  const diff = useTimetableRevisionDiff(revision ? id : null, revision?.first_day ?? null);
   const [dayType, setDayType] = useState<RevisionDayType>("weekday");
+  const diff = useTimetableRevisionDiff(revision ? id : null, revision?.first_day ?? "", dayType);
   const [showAll, setShowAll] = useState(false);
 
   if (id == null) return null;
@@ -73,6 +73,8 @@ export function RevisionsView() {
         <ErrorBanner error={diff.error} onRetry={() => void diff.refetch()} />
       ) : diff.isPending ? (
         <SkeletonTable />
+      ) : diff.data.reason === "no_revision" ? (
+        <EmptyState title={t("revisions.no_revision_title")} hint={t("revisions.no_revision_hint")} />
       ) : !diff.data.available ? (
         <EmptyState title={t("revisions.no_calendar_title")} hint={t("revisions.no_calendar_hint")} />
       ) : (
@@ -96,7 +98,7 @@ export function RevisionsView() {
               ))}
             </div>
             <StopTable
-              stops={stopsOn(diff.data.stops, dayType)}
+              stops={diff.data.stops}
               known={diff.data.day_types.find((s) => s.day_type === dayType)}
               showAll={showAll}
               onShowAll={() => setShowAll(true)}
@@ -198,6 +200,7 @@ function StopTable({
               <th style={th()}>{t("revisions.col.stop")}</th>
               <th style={th({ align: "right" })}>{t("revisions.col.departures")}</th>
               <th style={th({ align: "right" })}>{t("revisions.col.lost_gained")}</th>
+              <th style={th({ align: "right" })}>{t("revisions.col.first")}</th>
               <th style={th({ align: "right" })}>{t("revisions.col.last")}</th>
               <th style={th()}>{t("revisions.col.hours")}</th>
             </tr>
@@ -214,6 +217,9 @@ function StopTable({
                 </td>
                 <td style={td({ align: "right" })}>
                   {t("revisions.lost_gained", { lost: formatNumber(s.lost), gained: formatNumber(s.gained) })}
+                </td>
+                <td style={td({ align: "right" })}>
+                  {serviceClock(s.first_before)} → {serviceClock(s.first_after)}
                 </td>
                 <td style={td({ align: "right" })}>
                   {serviceClock(s.last_before)} → {serviceClock(s.last_after)}

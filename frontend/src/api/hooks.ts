@@ -49,6 +49,7 @@ import type {
   ServiceHoursResponse,
   StopBounds,
   StopBoundsResponse,
+  RevisionDayType,
   TimetableRevisionDiff,
   TimetableRevisionsResponse,
   WeatherDelayResponse,
@@ -159,21 +160,17 @@ export function useTimetableRevisions(agencyId: number | null): UseQueryResult<T
   });
 }
 
-/** The query string of one revision's comparison: `on` is its first day, or
- *  null for the newest. */
-function revisionDiffQuery(on: string | null): string {
-  return on == null ? "" : `?on=${encodeURIComponent(on)}`;
-}
-
-/** What one revision changed at every stop. */
+/** What the revision starting on `on` changed at every stop, the changed
+ *  stops of `dayType` alone. */
 export function useTimetableRevisionDiff(
   agencyId: number | null,
-  on: string | null,
+  on: string,
+  dayType: RevisionDayType,
 ): UseQueryResult<TimetableRevisionDiff> {
+  const query = new URLSearchParams({ on, day_type: dayType }).toString();
   return useQuery({
-    queryKey: ["timetable-revision-diff", agencyId, on],
-    queryFn: ({ signal }) =>
-      apiGet<TimetableRevisionDiff>(`/api/${agencyId}/timetable-revisions/diff${revisionDiffQuery(on)}`, { signal }),
+    queryKey: ["timetable-revision-diff", agencyId, on, dayType],
+    queryFn: ({ signal }) => apiGet<TimetableRevisionDiff>(`/api/${agencyId}/timetable-revisions/diff?${query}`, { signal }),
     enabled: agencyId != null,
     staleTime: 5 * 60 * 1000,
   });

@@ -12,42 +12,45 @@ a cut all the same.
 Each side of a revision is read on one typical day per day type. Day types
 follow the weekday rule (pipeline.day_types.fallback_day_type), the same three
 for every feed, so the two sides always split alike whatever classes either
-calendar names. The typical day is, among the dates of that type nearest the
+calendar names. The typical day is, among the dates of that type near the
 revision, the one whose set of running services most of them share, so a
-holiday-timetable weekday or a one-off addition near the boundary does not
-stand for the type. A side with no date of a type in force, or none its
-calendar covers, has that type unknown, which is never read as zero.
+holiday-timetable weekday, the year-end break or a one-off addition near the
+boundary does not stand for the type. A side with no date of a type in force
+within its calendar's extent has that type unknown, which is never read as
+zero; a date within the extent that runs nothing is a known empty day.
 
 The definitions a reader sees are in docs/methodology.md (時刻表の改正の比較).
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from enum import Enum
 from itertools import pairwise
-from typing import NamedTuple
+from typing import Literal, NamedTuple, cast
 
 from pipeline import static_archive
+from pipeline.cache import async_lru_cache
 from pipeline.day_types import (
-    THREE_WAY,
-    DayType,
     ServiceCalendar,
     WeeklyService,
+    calendar_dates_day,
     fallback_day_type,
     public_holidays_between,
 )
-from pipeline.timetable_in_force import gtfs_date
 
-DAY_TYPES: tuple[DayType, ...] = THREE_WAY
-WEEKEND_DAY_TYPES: frozenset[DayType] = frozenset({"saturday", "sunday_holiday"})
+RevisionDayType = Literal["weekday", "saturday", "sunday_holiday"]
+DAY_TYPES: tuple[RevisionDayType, ...] = ("weekday", "saturday", "sunday_holiday")
 
-# How many dates of each day type nearest the revision the typical day is
-# chosen among: five weeks of each weekday, enough that a holiday or a one-off
-# addition is outvoted.
+# How many dates near the revision the typical day is chosen among: five of
+# each weekday Monday to Friday for the weekday type, five each for Saturday
+# and Sunday & holiday. Five weeks outvote a holiday, the year-end break (a
+# few weekdays) or a one-off addition.
 SAMPLE_DATES = 5
+_WEEKDAYS = range(5)
 # How far from the revision a side is walked for its sample dates, which
 # bounds the walk over a version whose span runs open-ended.
 _MAX_WALK_DAYS = 400
@@ -56,9 +59,9 @@ _MAX_WALK_DAYS = 400
 class Run(NamedTuple):
     """Consecutive service dates, both ends inclusive, over which one
     timetable is in force: one content under one calendar, whichever names it
-    was loaded under. *stem* is the first of those names in force, whose kept
-    calendar the run reads; *calendar* that calendar's digest, None when none
-    is kept."""
+    was loaded under. *stem* is a name in force in the run, one whose kept
+    calendar the run reads where any is kept; *calendar* that calendar's
+    digest, None when none is kept."""
 
     first: date
     last: date
@@ -67,11 +70,17 @@ class Run(NamedTuple):
     calendar: str | None
 
 
+def _one_timetable(content: str, calendar: str | None, other_content: str, other_calendar: str | None) -> bool:
+    """Whether two versions are one timetable: one content, and one calendar
+    unless either calendar is not kept, which tells no difference."""
+    return content == other_content and (calendar == other_calendar or calendar is None or other_calendar is None)
+
+
 def runs(segments: Iterable[tuple[date, date, str, str]], digests: Mapping[tuple[str, str], str]) -> list[Run]:
     """The runs of *segments*, ScheduleJoin.in_force's (first, last, version
     name, content) in date order, each with its calendar's digest from
-    *digests* by (name, content). Adjacent segments carrying one content under
-    one calendar are one run."""
+    *digests* by (name, content). Adjacent segments of one timetable
+    (_one_timetable) are one run, which keeps the name with a kept calendar."""
     out: list[Run] = []
     for first, last, stem, content in segments:
         calendar = digests.get((stem, content))
@@ -79,9 +88,11 @@ def runs(segments: Iterable[tuple[date, date, str, str]], digests: Mapping[tuple
         if (
             prev is not None
             and prev.last + timedelta(days=1) == first
-            and (prev.content, prev.calendar) == (content, calendar)
+            and _one_timetable(prev.content, prev.calendar, content, calendar)
         ):
             out[-1] = prev._replace(last=last)
+            if prev.calendar is None and calendar is not None:
+                out[-1] = out[-1]._replace(stem=stem, calendar=calendar)
         else:
             out.append(Run(first, last, stem, content, calendar))
     return out
@@ -100,12 +111,12 @@ class Revision(NamedTuple):
 
 def revisions(in_order: Sequence[Run]) -> list[Revision]:
     """Each change of timetable between consecutive runs, oldest first. Two
-    runs of one content and one calendar, apart because no version is in
-    force between them, are no revision."""
+    runs of one timetable, apart because no version is in force between them,
+    are no revision."""
     return [
         Revision(before, after)
         for before, after in pairwise(in_order)
-        if (before.content, before.calendar) != (after.content, after.calendar)
+        if not _one_timetable(before.content, before.calendar, after.content, after.calendar)
     ]
 
 
@@ -123,7 +134,7 @@ def service_calendar(archived: static_archive.ArchivedCalendar) -> ServiceCalend
     exceptions = [
         (service_id, day, exception)
         for service_id, raw, exception in archived.calendar_dates
-        if (day := gtfs_date(raw)) is not None and exception is not None
+        if (day := calendar_dates_day(raw)) is not None and exception is not None
     ]
     return ServiceCalendar.of(weekly, exceptions)
 
@@ -141,22 +152,33 @@ def typical_day(dates: Sequence[date], calendar: ServiceCalendar) -> TypicalDay 
     return next(TypicalDay(day, services) for day, services in running if counts[services] == best)
 
 
-def typical_days(run: Run, calendar: ServiceCalendar, *, latest: bool) -> dict[DayType, TypicalDay | None]:
-    """*run*'s typical day of each day type: chosen among up to SAMPLE_DATES
-    dates of that type that *calendar* covers, nearest the run's end when
-    *latest* (the side before a revision), else nearest its start."""
+def _quota(day_type: RevisionDayType, day: date) -> tuple[RevisionDayType, int | None]:
+    return (day_type, day.weekday()) if day_type == "weekday" else (day_type, None)
+
+
+def typical_days(run: Run, calendar: ServiceCalendar, *, latest: bool) -> dict[RevisionDayType, TypicalDay | None]:
+    """*run*'s typical day of each day type, chosen among the dates of that
+    type within *calendar*'s extent nearest the run's end when *latest* (the
+    side before a revision), else nearest its start: up to SAMPLE_DATES of
+    each weekday Monday to Friday for the weekday type, up to SAMPLE_DATES
+    for each other type."""
     if latest:
         lo, hi = max(run.first, run.last - timedelta(days=_MAX_WALK_DAYS)), run.last
     else:
         lo, hi = run.first, min(run.last, run.first + timedelta(days=_MAX_WALK_DAYS))
     holidays = frozenset(public_holidays_between(lo, hi))
-    picked: dict[DayType, list[date]] = {day_type: [] for day_type in DAY_TYPES}
+    left: dict[tuple[RevisionDayType, int | None], int] = {("weekday", weekday): SAMPLE_DATES for weekday in _WEEKDAYS}
+    left |= {("saturday", None): SAMPLE_DATES, ("sunday_holiday", None): SAMPLE_DATES}
+    picked: dict[RevisionDayType, list[date]] = {day_type: [] for day_type in DAY_TYPES}
     step = timedelta(days=-1 if latest else 1)
     day = hi if latest else lo
-    while lo <= day <= hi and any(len(dates) < SAMPLE_DATES for dates in picked.values()):
-        dates = picked[fallback_day_type(day, holidays)]
-        if len(dates) < SAMPLE_DATES and calendar.covers(day):
-            dates.append(day)
+    while lo <= day <= hi and any(left.values()):
+        # The weekday rule names only the three types this module reads.
+        day_type = cast(RevisionDayType, fallback_day_type(day, holidays))
+        quota = _quota(day_type, day)
+        if left[quota] and calendar.covers(day):
+            picked[day_type].append(day)
+            left[quota] -= 1
         day += step
     return {day_type: typical_day(dates, calendar) for day_type, dates in picked.items()}
 
@@ -171,7 +193,7 @@ class Cell(NamedTuple):
 
 
 # day type -> stop_id -> hour -> Cell
-Counts = Mapping[DayType, Mapping[str, Mapping[int, Cell]]]
+Counts = Mapping[RevisionDayType, Mapping[str, Mapping[int, Cell]]]
 
 
 class HourChange(NamedTuple):
@@ -187,7 +209,7 @@ class StopChange(NamedTuple):
     only the hours whose count changed."""
 
     stop_id: str
-    day_type: DayType
+    day_type: RevisionDayType
     before: int
     after: int
     lost: int
@@ -210,10 +232,6 @@ class StopChange(NamedTuple):
     def ended(self) -> bool:
         return self.before > 0 and self.after == 0
 
-    @property
-    def started(self) -> bool:
-        return self.before == 0 and self.after > 0
-
 
 def _bounds(cells: Mapping[int, Cell]) -> tuple[int | None, int | None]:
     return (
@@ -222,7 +240,7 @@ def _bounds(cells: Mapping[int, Cell]) -> tuple[int | None, int | None]:
     )
 
 
-def stop_changes(before: Counts, after: Counts, day_types: Iterable[DayType]) -> list[StopChange]:
+def stop_changes(before: Counts, after: Counts, day_types: Iterable[RevisionDayType]) -> list[StopChange]:
     """Every stop of *day_types* whose departures changed: an hour's count, or
     its first or last departure. *day_types* are those both sides know."""
     changes: list[StopChange] = []
@@ -259,24 +277,18 @@ def stop_changes(before: Counts, after: Counts, day_types: Iterable[DayType]) ->
 
 class DayTypeSummary(NamedTuple):
     """One day type's totals over every stop. A side whose typical day is
-    unknown has no totals; the stop counts need both."""
+    unknown has no departure total; the stop counts need both sides."""
 
-    day_type: DayType
+    day_type: RevisionDayType
     before: TypicalDay | None
     after: TypicalDay | None
     departures_before: int | None
     departures_after: int | None
     stops_ended: int | None
-    stops_started: int | None
     last_earlier: int | None
-    last_later: int | None
-
-    @property
-    def known(self) -> bool:
-        return self.before is not None and self.after is not None
 
 
-def _departures(counts: Counts, day_type: DayType) -> int:
+def _departures(counts: Counts, day_type: RevisionDayType) -> int:
     return sum(cell.departures for hours in counts.get(day_type, {}).values() for cell in hours.values())
 
 
@@ -288,20 +300,19 @@ class Comparison(NamedTuple):
 
 def compare(
     revision: Revision,
-    before_days: Mapping[DayType, TypicalDay | None],
-    after_days: Mapping[DayType, TypicalDay | None],
+    before_days: Mapping[RevisionDayType, TypicalDay | None],
+    after_days: Mapping[RevisionDayType, TypicalDay | None],
     before: Counts,
     after: Counts,
 ) -> Comparison:
     """The revision's comparison: each day type's totals, and every changed
     stop of the day types both sides know, those that lost the most first."""
-    known = [dt for dt in DAY_TYPES if before_days.get(dt) is not None and after_days.get(dt) is not None]
-    stops = stop_changes(before, after, known)
+    known = {dt for dt in DAY_TYPES if before_days.get(dt) is not None and after_days.get(dt) is not None}
+    stops = stop_changes(before, after, [dt for dt in DAY_TYPES if dt in known])
     summaries = []
     for day_type in DAY_TYPES:
         b, a = before_days.get(day_type), after_days.get(day_type)
         mine = [s for s in stops if s.day_type == day_type]
-        both = b is not None and a is not None
         summaries.append(
             DayTypeSummary(
                 day_type,
@@ -309,10 +320,8 @@ def compare(
                 a,
                 None if b is None else _departures(before, day_type),
                 None if a is None else _departures(after, day_type),
-                sum(s.ended for s in mine) if both else None,
-                sum(s.started for s in mine) if both else None,
-                sum((s.last_shift_min or 0) < 0 for s in mine) if both else None,
-                sum((s.last_shift_min or 0) > 0 for s in mine) if both else None,
+                sum(s.ended for s in mine) if day_type in known else None,
+                sum((s.last_shift_min or 0) < 0 for s in mine) if day_type in known else None,
             )
         )
     stops.sort(key=lambda s: (-s.lost, s.after - s.before, DAY_TYPES.index(s.day_type), s.stop_id))
@@ -323,38 +332,48 @@ def compare(
 # stop times (the stop) joined to the kept schedule (service and departure
 # second). A trip's last stop is where it arrives, so it departs nowhere; a
 # stop time with no departure time, an untimed stop, departs at no known hour.
-# {services} holds each day type's running services, in DAY_TYPES order.
+# {services} holds each day type's running services, in DAY_TYPES order. One
+# row per day type and stop, its hours in an array, so the result stays a few
+# times the stop count, within the API client's max_result_rows.
 _DEPARTURES_SQL = f"""
-    SELECT dt, stop_id, intDiv(sec, 3600) AS hour, toInt64(count()), min(sec), max(sec)
+    SELECT dt, stop_id, groupArray((hour, departures, first_sec, last_sec))
     FROM (
-        SELECT st.stop_id AS stop_id, assumeNotNull(s.service_type) AS service, assumeNotNull(s.scheduled_sec) AS sec
-        FROM {static_archive.SCHEDULE} AS s
-        INNER JOIN (
-            SELECT trip_id, stop_sequence, stop_id,
-                   max(stop_sequence) OVER (PARTITION BY trip_id) AS last_sequence
-            FROM {static_archive.ARCHIVE}
-            WHERE agency_id = {{agency:Int32}} AND content_hash = {{content:String}}
-        ) AS st ON st.trip_id = s.trip_id AND st.stop_sequence = s.stop_sequence
-        WHERE s.agency_id = {{agency:Int32}} AND s.content_hash = {{content:String}}
-          AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
-          AND st.stop_sequence < st.last_sequence
+        SELECT dt, stop_id, intDiv(sec, 3600) AS hour, toInt64(count()) AS departures,
+               min(sec) AS first_sec, max(sec) AS last_sec
+        FROM (
+            SELECT st.stop_id AS stop_id, assumeNotNull(s.service_type) AS service,
+                   assumeNotNull(s.scheduled_sec) AS sec
+            FROM {static_archive.SCHEDULE} AS s
+            INNER JOIN (
+                SELECT trip_id, stop_sequence, stop_id,
+                       max(stop_sequence) OVER (PARTITION BY trip_id) AS last_sequence
+                FROM {static_archive.ARCHIVE}
+                WHERE agency_id = {{agency:Int32}} AND content_hash = {{content:String}}
+            ) AS st ON st.trip_id = s.trip_id AND st.stop_sequence = s.stop_sequence
+            WHERE s.agency_id = {{agency:Int32}} AND s.content_hash = {{content:String}}
+              AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
+              AND st.stop_sequence < st.last_sequence
+        )
+        ARRAY JOIN arrayFilter(
+            i -> has({{services:Array(Array(String))}}[i], service), range(1, {len(DAY_TYPES) + 1})
+        ) AS dt
+        GROUP BY dt, stop_id, hour
     )
-    ARRAY JOIN arrayFilter(
-        i -> has({{services:Array(Array(String))}}[i], service), range(1, {len(DAY_TYPES) + 1})
-    ) AS dt
-    GROUP BY dt, stop_id, hour
+    GROUP BY dt, stop_id
 """
 
 
-def counts_of(rows: Iterable[tuple]) -> dict[DayType, dict[str, dict[int, Cell]]]:
+def counts_of(rows: Iterable[tuple]) -> dict[RevisionDayType, dict[str, dict[int, Cell]]]:
     """_DEPARTURES_SQL's rows as Counts."""
-    out: dict[DayType, dict[str, dict[int, Cell]]] = {day_type: {} for day_type in DAY_TYPES}
-    for index, stop_id, hour, departures, first, last in rows:
-        out[DAY_TYPES[index - 1]].setdefault(stop_id, {})[int(hour)] = Cell(int(departures), int(first), int(last))
+    out: dict[RevisionDayType, dict[str, dict[int, Cell]]] = {day_type: {} for day_type in DAY_TYPES}
+    for index, stop_id, hours in rows:
+        out[DAY_TYPES[index - 1]][stop_id] = {
+            int(hour): Cell(int(departures), int(first), int(last)) for hour, departures, first, last in hours
+        }
     return out
 
 
-async def _counts(ch, agency_id: int, content: str, days: Mapping[DayType, TypicalDay | None]) -> Counts:
+async def _counts(ch, agency_id: int, content: str, days: Mapping[RevisionDayType, TypicalDay | None]) -> Counts:
     services = [sorted(day.services) if (day := days.get(day_type)) is not None else [] for day_type in DAY_TYPES]
     if not any(services):
         return counts_of([])
@@ -362,8 +381,11 @@ async def _counts(ch, agency_id: int, content: str, days: Mapping[DayType, Typic
     return counts_of(result.result_rows)
 
 
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
 async def load_revisions(ch, agency_id: int) -> list[Revision]:
-    """The agency's revisions, oldest first, among the versions in force whose schedule the archive keeps."""
+    """The agency's revisions, oldest first, among the versions in force whose
+    schedule the archive keeps. Cached like the reports, and dropped when the
+    agency's analyze rebuilds, which is when a new version is kept."""
     join = await static_archive.schedule_join_async(ch, agency_id, None, by_service_date=True)
     digests = await static_archive.calendar_digests_async(ch, agency_id)
     return revisions(runs(join.in_force(), digests))
@@ -376,20 +398,31 @@ class Unavailable(str, Enum):
     NO_CALENDAR = "no_calendar"
 
 
+async def _calendar(ch, agency_id: int, run: Run) -> ServiceCalendar | None:
+    if run.calendar is None:
+        return None
+    kept = await static_archive.archived_calendar_async(ch, agency_id, run.stem, run.content)
+    return None if kept is None else service_calendar(kept)
+
+
+# A revision names both contents and both calendar digests, which together fix
+# its comparison, so an entry never goes stale: it is kept a day, through any
+# rebuild, and only the LRU bound evicts it sooner.
+@async_lru_cache(maxsize=16, ttl_seconds=24 * 3600, agency_arg="agency_id", rebuild="never")
 async def load_comparison(ch, agency_id: int, revision: Revision) -> Comparison | Unavailable:
     """*revision*'s comparison, or NO_CALENDAR when either side's calendar is
     not kept: without it no day can be told to run anything, and reading its
-    departures as none would report every stop cut."""
-    calendars = []
-    for run in (revision.before, revision.after):
-        kept = None
-        if run.calendar is not None:
-            kept = await static_archive.archived_calendar_async(ch, agency_id, run.stem, run.content)
-        if kept is None:
-            return Unavailable.NO_CALENDAR
-        calendars.append(service_calendar(kept))
-    before_days = typical_days(revision.before, calendars[0], latest=True)
-    after_days = typical_days(revision.after, calendars[1], latest=False)
-    before = await _counts(ch, agency_id, revision.before.content, before_days)
-    after = await _counts(ch, agency_id, revision.after.content, after_days)
+    departures as none would report every stop cut. The result is shared by
+    every caller and must not be modified."""
+    before_calendar, after_calendar = await asyncio.gather(
+        _calendar(ch, agency_id, revision.before), _calendar(ch, agency_id, revision.after)
+    )
+    if before_calendar is None or after_calendar is None:
+        return Unavailable.NO_CALENDAR
+    before_days = typical_days(revision.before, before_calendar, latest=True)
+    after_days = typical_days(revision.after, after_calendar, latest=False)
+    before, after = await asyncio.gather(
+        _counts(ch, agency_id, revision.before.content, before_days),
+        _counts(ch, agency_id, revision.after.content, after_days),
+    )
     return compare(revision, before_days, after_days, before, after)
