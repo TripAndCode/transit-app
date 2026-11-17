@@ -35,8 +35,7 @@
 .report-grade--large { font-size: var(--text-3xl); padding: 4px 16px; }
 
 @media print {
-  [data-print-scope="report-card"] .focus-page > :not(.report-card) { display: none !important; }
+  [data-print-scope="report-card"] .focus-page > :not(.report-card, .focus-header) { display: none !important; }
   .report-card { break-inside: avoid; border-color: #999; }
   .report-card__actions { display: none; }
-  .report-card .definition-meta { display: block; }
 }

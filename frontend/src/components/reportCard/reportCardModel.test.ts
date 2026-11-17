@@ -4,7 +4,9 @@ import { formatFigure, formatInterval, gradePoint, missingText, notGradedText, r
 
 const t = i18n.getFixedT("en");
 
-const card = {
+type Gated = Parameters<typeof notGradedText>[1];
+
+const card: Gated = {
   not_graded: null,
   observations: 50,
   floor: 100,
@@ -12,7 +14,7 @@ const card = {
   on_time_ci_low: 70.1,
   on_time_ci_high: 80.4,
   missing: [],
-} as const;
+};
 
 describe("reportCardModel", () => {
   it("prints rates in percent and excess wait in minutes, to a tenth", () => {

@@ -53,7 +53,6 @@ means, and the pooled sums it comes from cannot give its spread.
 
 from __future__ import annotations
 
-import dataclasses
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date
@@ -171,11 +170,6 @@ async def _frequency_classes(conn, agency_id: int, first: date, last: date) -> d
     return classes
 
 
-def _interval(count: float, samples: int, trips: int | None) -> tuple[float | None, float | None]:
-    low, high = trip_interval(count, samples, trips)
-    return low, high
-
-
 @perf.timed("reports.report_cards")
 @async_lru_cache(maxsize=64, ttl_seconds=3600, agency_arg="agency_id")
 async def compute_report_cards(agency_id: int, month: date, conn, ch=None) -> dict[str, RouteCard]:
@@ -196,7 +190,7 @@ async def compute_report_cards(agency_id: int, month: date, conn, ch=None) -> di
     observed = {row[0]: (float(row[2]), int(row[5]), float(row[6])) for row in table}
     delivered = await compute_service_delivered_by_route(conn, agency_id, first, last)
     zero_delay = await zero_delay_route_codes(conn, agency_id, ctx)
-    headways = await compute_headway_quality_report(agency_id, dataclasses.replace(ctx), conn)
+    headways = await compute_headway_quality_report(agency_id, ctx, conn)
     quality = {row["route_code"]: row for row in headways.rows}
     headway_gap = headways.unavailable.get("unavailable_reason")
     classes = await _frequency_classes(conn, agency_id, first, last)
@@ -307,15 +301,15 @@ def _subscores(
     delivered = figures["service_delivered_pct"]
     intervals: dict[Metric, tuple[float | None, float | None]] = {
         "on_time_pct": (gate.ci_low, gate.ci_high),
-        "early_pct": (None, None) if early is None else _interval(early, 100, trips),
+        "early_pct": (None, None) if early is None else trip_interval(early, 100, trips),
         "ewt_min": (None, None),
         "bunching_pct": (
-            _interval(headway["bunched"], headway["bunching_judged"], trips)
+            trip_interval(headway["bunched"], headway["bunching_judged"], trips)
             if headway is not None and headway["bunched"] is not None and headway["bunching_judged"]
             else (None, None)
         ),
         "service_delivered_pct": (
-            (None, None) if delivered is None or route is None else _interval(delivered, 100, route.planned_trips)
+            (None, None) if delivered is None or route is None else trip_interval(delivered, 100, route.planned_trips)
         ),
     }
     out = []
