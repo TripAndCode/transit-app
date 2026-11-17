@@ -261,3 +261,23 @@ async def test_a_calendar_dates_only_timetable_that_drops_sunday_reads_as_a_know
 async def test_day_type_applies_only_to_the_json(revised, api):
     response = await api.get(f"/api/{revised}/timetable-revisions/diff?day_type=saturday&format=csv")
     assert response.status_code == 400
+
+
+async def test_a_face_value_after_midnight_departure_is_the_nights_last_bus(
+    pg_conn, ch_client, agency_id, tmp_path, api
+):
+    # 00:30 and 00:10 written at face value are the same night's 24:30 and 24:10.
+    before = {"w1": (WEEKDAY, "07:00"), "n1": (WEEKDAY, "00:30")}
+    after = {"w1": (WEEKDAY, "07:00"), "n1": (WEEKDAY, "00:10")}
+    load_static(
+        _zip(tmp_path, A, date(2026, 1, 1), date(2026, 12, 31), before), agency_id, pg_conn, ch_client=ch_client
+    )
+    load_static(_zip(tmp_path, B, REVISION, date(2027, 3, 31), after), agency_id, pg_conn, ch_client=ch_client)
+    static_archive.archive_loaded(pg_conn, ch_client, agency_id)
+    pg_conn.commit()
+    body = (await api.get(f"/api/{agency_id}/timetable-revisions/diff")).json()
+    s1 = next(s for s in body["stops"] if s["stop_id"] == "S1" and s["day_type"] == "weekday")
+    assert (s1["first_before"], s1["first_after"]) == (7 * 3600, 7 * 3600)
+    assert (s1["last_before"], s1["last_after"]) == (24 * 3600 + 30 * 60, 24 * 3600 + 10 * 60)
+    assert s1["last_shift_min"] == -20
+    assert s1["hours"] == []

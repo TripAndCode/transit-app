@@ -9,15 +9,10 @@ content, or the same content under another calendar, since the content does
 not cover the calendar and a reissue that only drops a day type's services is
 a cut all the same.
 
-Each side of a revision is read on one typical day per day type. Day types
-follow the weekday rule (pipeline.day_types.fallback_day_type), the same three
-for every feed, so the two sides always split alike whatever classes either
-calendar names. The typical day is, among the dates of that type near the
-revision, the one whose set of running services most of them share, so a
-holiday-timetable weekday, the year-end break or a one-off addition near the
-boundary does not stand for the type. A side with no date of a type in force
-within its calendar's extent has that type unknown, which is never read as
-zero; a date within the extent that runs nothing is a known empty day.
+Each side of a revision is read on one typical day per day type
+(pipeline.timetable_sampling), chosen among the dates of that type nearest the
+revision, so the two sides always split alike whatever classes either
+calendar names.
 
 The definitions a reader sees are in docs/methodology.md (時刻表の改正の比較).
 """
@@ -25,33 +20,17 @@ The definitions a reader sees are in docs/methodology.md (時刻表の改正の�
 from __future__ import annotations
 
 import asyncio
-from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from enum import Enum
 from itertools import pairwise
-from typing import Literal, NamedTuple, cast
+from typing import NamedTuple
 
-from pipeline import static_archive
+from pipeline import static_archive, timetable_sampling
 from pipeline.cache import async_lru_cache, cache_briefly
-from pipeline.day_types import (
-    ServiceCalendar,
-    WeeklyService,
-    calendar_dates_day,
-    fallback_day_type,
-    public_holidays_between,
-)
-
-RevisionDayType = Literal["weekday", "saturday", "sunday_holiday"]
-DAY_TYPES: tuple[RevisionDayType, ...] = ("weekday", "saturday", "sunday_holiday")
-
-# Five weeks of a type outvote a holiday, the year-end break (a few weekdays)
-# or a one-off addition near the revision (typical_days).
-SAMPLE_DATES = 5
-_WEEKDAYS = range(5)
-# How far from the revision a side is walked for its sample dates, which
-# bounds the walk over a version whose span runs open-ended.
-_MAX_WALK_DAYS = 400
+from pipeline.day_types import ServiceCalendar
+from pipeline.timetable_sampling import DAY_TYPES, MAX_WALK_DAYS, TypicalDay, service_calendar
+from pipeline.timetable_sampling import DayType as RevisionDayType
 
 
 class Run(NamedTuple):
@@ -128,67 +107,18 @@ def revisions(in_order: Sequence[Run]) -> list[Revision]:
     ]
 
 
-class TypicalDay(NamedTuple):
-    day: date
-    services: frozenset[str]
-
-
-def service_calendar(archived: static_archive.ArchivedCalendar) -> ServiceCalendar:
-    """A kept calendar as the running rule reads it. A calendar_dates row
-    whose date is not a GTFS date names no day."""
-    weekly = [
-        WeeklyService(row[0], tuple(bool(flag) for flag in row[1:8]), row[8], row[9]) for row in archived.calendar
-    ]
-    exceptions = [
-        (service_id, day, exception)
-        for service_id, raw, exception in archived.calendar_dates
-        if (day := calendar_dates_day(raw)) is not None and exception is not None
-    ]
-    return ServiceCalendar.of(weekly, exceptions)
-
-
-def typical_day(dates: Sequence[date], calendar: ServiceCalendar) -> TypicalDay | None:
-    """The set of services most of *dates* run, on the first of *dates* that
-    runs it; None for no dates. Sets tied on count go to the one met first, so
-    *dates* come nearest the revision first. An empty set is a set like any
-    other: a type whose dates mostly run nothing plans no departure."""
-    if not dates:
-        return None
-    running = [(day, calendar.running(day)) for day in dates]
-    counts = Counter(services for _day, services in running)
-    best = max(counts.values())
-    return next(TypicalDay(day, services) for day, services in running if counts[services] == best)
-
-
-def _quota(day_type: RevisionDayType, day: date) -> tuple[RevisionDayType, int | None]:
-    return (day_type, day.weekday()) if day_type == "weekday" else (day_type, None)
-
-
 def typical_days(run: Run, calendar: ServiceCalendar, *, latest: bool) -> dict[RevisionDayType, TypicalDay | None]:
     """*run*'s typical day of each day type, chosen among the dates of that
     type within *calendar*'s extent nearest the run's end when *latest* (the
-    side before a revision), else nearest its start: up to SAMPLE_DATES of
-    each weekday Monday to Friday for the weekday type, up to SAMPLE_DATES
-    for each other type."""
+    side before a revision), else nearest its start, by
+    timetable_sampling.typical_days' quotas."""
     if latest:
-        lo, hi = max(run.first, run.last - timedelta(days=_MAX_WALK_DAYS)), run.last
+        lo, hi = max(run.first, run.last - timedelta(days=MAX_WALK_DAYS)), run.last
     else:
-        lo, hi = run.first, min(run.last, run.first + timedelta(days=_MAX_WALK_DAYS))
-    holidays = frozenset(public_holidays_between(lo, hi))
-    left: dict[tuple[RevisionDayType, int | None], int] = {("weekday", weekday): SAMPLE_DATES for weekday in _WEEKDAYS}
-    left |= {("saturday", None): SAMPLE_DATES, ("sunday_holiday", None): SAMPLE_DATES}
-    picked: dict[RevisionDayType, list[date]] = {day_type: [] for day_type in DAY_TYPES}
-    step = timedelta(days=-1 if latest else 1)
-    day = hi if latest else lo
-    while lo <= day <= hi and any(left.values()):
-        # The weekday rule names only the three types this module reads.
-        day_type = cast(RevisionDayType, fallback_day_type(day, holidays))
-        quota = _quota(day_type, day)
-        if left[quota] and calendar.covers(day):
-            picked[day_type].append(day)
-            left[quota] -= 1
-        day += step
-    return {day_type: typical_day(dates, calendar) for day_type, dates in picked.items()}
+        lo, hi = run.first, min(run.last, run.first + timedelta(days=MAX_WALK_DAYS))
+    span = (hi - lo).days
+    walk = (hi - timedelta(days=i) if latest else lo + timedelta(days=i) for i in range(span + 1))
+    return timetable_sampling.typical_days(walk, calendar, (lo, hi))
 
 
 class Cell(NamedTuple):
@@ -336,39 +266,8 @@ def compare(
     return Comparison(revision, tuple(summaries), tuple(stops))
 
 
-# A trip's last stop is where it arrives, so it departs nowhere; an untimed
-# stop time departs at no known hour. {services} holds each day type's
-# running services, in DAY_TYPES order.
-_DEPARTURES_SQL = f"""
-    SELECT dt, stop_id, groupArray((hour, departures, first_sec, last_sec))
-    FROM (
-        SELECT dt, stop_id, intDiv(sec, 3600) AS hour, toInt64(count()) AS departures,
-               min(sec) AS first_sec, max(sec) AS last_sec
-        FROM (
-            SELECT st.stop_id AS stop_id, assumeNotNull(s.service_type) AS service,
-                   assumeNotNull(s.scheduled_sec) AS sec
-            FROM {static_archive.SCHEDULE} AS s
-            INNER JOIN (
-                SELECT trip_id, stop_sequence, stop_id,
-                       max(stop_sequence) OVER (PARTITION BY trip_id) AS last_sequence
-                FROM {static_archive.ARCHIVE}
-                WHERE agency_id = {{agency:Int32}} AND content_hash = {{content:String}}
-            ) AS st ON st.trip_id = s.trip_id AND st.stop_sequence = s.stop_sequence
-            WHERE s.agency_id = {{agency:Int32}} AND s.content_hash = {{content:String}}
-              AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
-              AND st.stop_sequence < st.last_sequence
-        )
-        ARRAY JOIN arrayFilter(
-            i -> has({{services:Array(Array(String))}}[i], service), range(1, {len(DAY_TYPES) + 1})
-        ) AS dt
-        GROUP BY dt, stop_id, hour
-    )
-    GROUP BY dt, stop_id
-"""
-
-
 def counts_of(rows: Iterable[tuple]) -> dict[RevisionDayType, dict[str, dict[int, Cell]]]:
-    """_DEPARTURES_SQL's rows as Counts: one typical day's departures per
+    """timetable_sampling.DEPARTURE_HOURS_SQL's rows as Counts: one typical day's departures per
     day type, stop and hour, the stop from the kept stop times and the service
     and departure second from the kept schedule. A row holds one day type and
     stop with its hours in an array, so the result stays a few times the stop
@@ -382,10 +281,11 @@ def counts_of(rows: Iterable[tuple]) -> dict[RevisionDayType, dict[str, dict[int
 
 
 async def _counts(ch, agency_id: int, content: str, days: Mapping[RevisionDayType, TypicalDay | None]) -> Counts:
-    services = [sorted(day.services) if (day := days.get(day_type)) is not None else [] for day_type in DAY_TYPES]
+    services = timetable_sampling.services_by_day_type(days)
     if not any(services):
         return counts_of([])
-    result = await ch.query(_DEPARTURES_SQL, parameters={"agency": agency_id, "content": content, "services": services})
+    parameters = {"agency": agency_id, "content": content, "services": services}
+    result = await ch.query(timetable_sampling.DEPARTURE_HOURS_SQL, parameters=parameters)
     return counts_of(result.result_rows)
 
 

@@ -233,21 +233,39 @@ When a period spans a timetable revision, only the days of the timetable in forc
 
 The list is ordered by how many weeks a segment has stayed slow. It is not ranked by minutes lost, and no bus-priority (bus lane, transit signal priority) candidates are chosen from it, until the operator's predictions are validated. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)).
 
+### A timetable's typical day
+
+Both the timetable revision comparison and the planned departures at stops read a timetable on a typical day of each day type. They read the timetables alone, never the observations.
+
+- **Day type**: weekday, Saturday, and Sunday & holiday. Sundays and public holidays (substitute holidays included) are Sunday & holiday. Every operator is split the same way, by the date alone, so what is compared always lines up on the same day types. The day types elsewhere follow each operator's calendar and may merge Saturday with Sunday & holiday; these are fixed by the date alone.
+- **Typical day**: for each day type, days of the type on which the timetable is in force are taken: up to five of each weekday Monday to Friday (twenty-five) for weekdays, and up to five for Saturday and for Sunday & holiday. Where they are sought is given in each section. The typical day is the one running the same trips as most of them, the one taken first on a tie, so a holiday-timetable weekday, the year-end break or a one-off service day does not stand for the type.
+- A day outside the timetable calendar's extent (from the first day it names to the last) is never picked. A day inside it that runs no trip counts as a day with no departures: in a timetable that lists only the days its services run in `calendar_dates`, a day it does not list runs nothing.
+- A day type with no typical day (no day of that type within the calendar's extent while that timetable is in force), or any day type of a timetable whose calendar was not kept, is unknown, never zero.
+- **Departure**: one trip running on the typical day scheduled to leave one stop. A trip's last stop is not a departure, nor is a stop with no time given.
+- **Time**: the service day's time ([Service day and time](#service-day-and-time)). A departure written past 24:00 reads as written, and one written at face value between 00:00 and 03:59 reads as that night's 24:00 to 27:59: a 00:40 trip is the night's last, never the morning's first.
+
 ### Comparing timetable revisions
 
 Each timetable revision is compared stop by stop, the timetable before it against the one after (**Reports**, “Timetable revisions”). It reads the timetables alone, never the observations.
 
 - **Revision**: a day whose timetable in force ([Matching the timetable](#matching-the-timetable)) differs from the day before's. Either its content (content hash) or its service calendar differing makes a revision; two names with the same content and calendar do not. Only versions whose content and calendar the timetable archive keeps are compared, so a timetable just loaded is compared once the next analyze has kept it.
-- **Day type**: weekday, Saturday, and Sunday & holiday. Sundays and public holidays (substitute holidays included) are Sunday & holiday. Every operator is split the same way, so the two sides of a revision are always compared on the same day types. The day types elsewhere follow each operator's calendar and may merge Saturday with Sunday & holiday; these are fixed by the date alone.
-- **Typical day**: one day per day type from each timetable. Days of the type are read back from the day before the revision for the timetable before it, and on from the revision day for the one after: up to five of each weekday Monday to Friday (twenty-five) for weekdays, and up to five for Saturday and for Sunday & holiday. The typical day is the one running the same trips as most of them, the one nearest the revision on a tie, so a holiday or the year-end break does not stand for the type.
-- A day outside the timetable calendar's extent (from the first day it names to the last) is never picked. A day inside it that runs no trip counts as a day with no departures: in a timetable that lists only the days its services run in `calendar_dates`, a day it does not list runs nothing.
-- A day type with no typical day (no day of that type within the calendar's extent while that timetable is in force) is unknown, never zero.
-- **Departure**: one trip running on the typical day scheduled to leave one stop. A trip's last stop is not a departure, nor is a stop with no time given.
-- **Hour**: by scheduled departure. A departure after midnight falls in its service day's 24:00 or 25:00 hour.
+- **Typical day**: one day per day type from each timetable, as in [A timetable's typical day](#a-timetables-typical-day). Days are read back from the day before the revision for the timetable before it, and on from the revision day for the one after, so a tie goes to the day nearest the revision.
+- **Hour**: by the scheduled departure's service-day time. A departure written at face value as 00:40 falls in that night's 24:00 hour too.
 - **Departures lost and gained**: per stop and hour, the fall from before to after is lost, and the rise gained. A departure moved to another hour is one lost and one gained.
 - **Last departure**: the stop's latest departure on that day type. Its shift is given only for a stop with departures on both sides.
 - **Stops left with none**: stops with departures before and none after. On Saturday or Sunday & holiday, these are the stops that lost their weekend service.
 - Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under the old ID and gaining them under the new one. Stop names are the loaded timetable's, so a stop it no longer has shows its ID.
+
+### Planned departures at stops
+
+How much service each stop is planned to get, from the timetables alone, with no realtime data (from method `2026.11.19`).
+
+- **Timetable**: each operator's timetable version in force on the chosen date (today's service day by default). It is read from the kept timetables, so a version a later load replaced can still be read. An operator with no version in force that day is shown as such.
+- **Typical day**: as in [A timetable's typical day](#a-timetables-typical-day), taken on from the first day the version is in force, so a tie goes to the earliest day. A day type whose typical day runs nothing has no departures.
+- **Departures in a band and per hour**: the departures within a band of hours (for example 10:00 to 16:00), and that count divided by the band's hours.
+- **Longest gap**: the longest time in the band with no departure: between two consecutive departures within the band, from the band's start to its first departure, or from its last departure to the band's end, whichever is longest, and the whole band when there is no departure in it. Departures outside the band do not stretch a gap, so it never exceeds the band, and a gap that straddles the band's edge counts only its part inside the band.
+- **First and last departure**: the stop's first and last departure on the typical day. The last can be at 24:00 or later.
+- **Stops of several operators**: each operator's stops are shown on their own. The departures of different operators' stops at one place are not added together.
 
 ### What is not observed
 
@@ -429,10 +447,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.18`. Newest first, each version with the inputs it set.
+The current method is `2026.11.19`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.19` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
 | `2026.11.18` | `agg_route_daily_dwell_run` 5 → 6, `agg_route_segment_runtime` = 1 |
 | `2026.11.17` | `feed_quality_monthly` 8 → 9 |
 | `2026.11.16` | `feed_quality_monthly` 7 → 8 |

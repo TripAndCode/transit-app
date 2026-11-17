@@ -18,6 +18,7 @@ vi.mock("../routes/lazyTabs", () => ({
         </div>
       ),
     }),
+  loadSupplyMapView: () => Promise.resolve({ default: () => <div>supply-map</div> }),
   loadAnalysisTab: () =>
     Promise.resolve({
       default: ({ reportTypes }: { reportTypes: readonly string[] }) => <div>analysis-tab:{reportTypes.join(",")}</div>,
@@ -102,6 +103,13 @@ describe("destination screens", () => {
     const search = new URLSearchParams(router.state.location.search);
     expect(search.get("by")).toBe("periods");
     expect(search.get("from")).toBe("2026-09-01");
+  });
+
+  it("shows the planned departures map on Compare by supply", async () => {
+    open("/agencies/9/compare?by=supply", "agencies/:agencyId/compare", <CompareTab />);
+    expect(await screen.findByText("supply-map")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Planned departures" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 
   it.each(["", "?by=service", "?by=periods"])("shows the period comparison on Compare%s", async (search) => {
