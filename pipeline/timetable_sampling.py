@@ -116,6 +116,13 @@ def stop_departures(*, trips: bool = False) -> str:
     running services, in DAY_TYPES order."""
     outer = ", trip_id, route_id" if trips else ""
     inner = " s.trip_id AS trip_id, s.route_id AS route_id," if trips else ""
+    # Each day type's list is indexed by a constant. Indexed inside a lambda,
+    # ClickHouse copies the list onto every departure row, and a timetable
+    # running hundreds of services on one day type outgrows the server's memory.
+    day_types = ", ".join(
+        f"if(has({{services:Array(Array(String))}}[{index}], service), {index}, 0)"
+        for index in range(1, len(DAY_TYPES) + 1)
+    )
     return f"""
     SELECT dt, stop_id, sec{outer}
     FROM (
@@ -132,9 +139,7 @@ def stop_departures(*, trips: bool = False) -> str:
           AND s.service_type IS NOT NULL AND s.scheduled_sec IS NOT NULL
           AND st.stop_sequence < st.last_sequence
     )
-    ARRAY JOIN arrayFilter(
-        i -> has({{services:Array(Array(String))}}[i], service), range(1, {len(DAY_TYPES) + 1})
-    ) AS dt
+    ARRAY JOIN arrayFilter(i -> i > 0, [{day_types}]) AS dt
 """
 
 
