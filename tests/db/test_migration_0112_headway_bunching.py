@@ -15,7 +15,8 @@ _COLUMNS = {("agg_route_headway_daily", "bunched_count"), ("agg_route_headway_da
 def _columns(conn) -> set[tuple[str, str]]:
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT table_name, column_name FROM information_schema.columns WHERE table_name = 'agg_route_headway_daily'"
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_name = 'agg_route_headway_daily'"
         )
         return set(cur.fetchall()) & _COLUMNS
 

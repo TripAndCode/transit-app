@@ -96,7 +96,7 @@ def assess(
     """
     observed, planned = matched_trips(ingest_strategy, observed_trips, coverage_planned_trips)
     coverage = coverage_pct(observed, planned)
-    ci_low, ci_high = _on_time_interval(on_time_count, samples, observed)
+    ci_low, ci_high = trip_interval(on_time_count, samples, observed)
     reason = _first_failure(coverage_pct=coverage, ci_low=ci_low, ci_high=ci_high, clamp_pct=clamp_pct, samples=samples)
     return Assessment(
         observed_trips=observed,
@@ -165,10 +165,10 @@ def clamp_pct(clamp_count: int, raw_samples: int) -> float | None:
     return round(clamp_count / raw_samples * 100, 2) if raw_samples else None
 
 
-def _on_time_interval(
-    on_time_count: int, samples: int, observed_trips: int | None
-) -> tuple[float, float] | tuple[None, None]:
-    """The on-time percentage's 95% Wilson interval, in percent.
+def trip_interval(count: float, samples: int, observed_trips: int | None) -> tuple[float, float] | tuple[None, None]:
+    """The 95% Wilson interval of *count* of *samples*, in percent, counting
+    trips as the sample size: the on-time percentage's, and any other share
+    of stop events or headways a route's trips produce together.
 
     Stop events within one trip run late together, so they are not
     independent draws: the interval takes the stop-event share as the
@@ -183,7 +183,7 @@ def _on_time_interval(
     """
     if samples <= 0 or observed_trips is None or observed_trips <= 0:
         return (None, None)
-    successes = round(on_time_count / samples * observed_trips)
+    successes = round(count / samples * observed_trips)
     low, high = wilson_interval(successes, observed_trips)
     # The inner round drops float noise, so an exact tenth stays put.
     return (math.floor(round(low * 1000, 9)) / 10, math.ceil(round(high * 1000, 9)) / 10)
