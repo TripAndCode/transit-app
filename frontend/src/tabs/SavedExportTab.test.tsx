@@ -7,6 +7,7 @@ import { SavedExportTab } from "./SavedExportTab";
 
 vi.mock("../routes/lazyTabs", () => ({
   loadReportsHomeTab: () => Promise.resolve({ default: () => <div>reports-home</div> }),
+  loadRevisionsView: () => Promise.resolve({ default: () => <div>revisions-view</div> }),
   loadAnalysisTab: () =>
     Promise.resolve({
       default: ({ reportTypes, defaultReport }: { reportTypes: readonly string[]; defaultReport?: string }) => (
@@ -63,6 +64,14 @@ describe("SavedExportTab", () => {
     open("/agencies/9/reports?doc=saved");
     await screen.findByText("reports-home");
     expect(screen.getByRole("link", { name: "Saved analyses" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("shows the timetable revisions for doc=revisions, under a line saying what they hold", async () => {
+    open("/agencies/9/reports?doc=revisions");
+    expect(await screen.findByText("revisions-view")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Timetable revisions" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText(/What each timetable revision changed at every stop/)).toBeInTheDocument();
+    expect(href("Timetable revisions").get("doc")).toBe("revisions");
   });
 
   it("replaces a legacy view param with its document", async () => {

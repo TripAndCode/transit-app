@@ -49,6 +49,9 @@ import type {
   ServiceHoursResponse,
   StopBounds,
   StopBoundsResponse,
+  RevisionDayType,
+  TimetableRevisionDiff,
+  TimetableRevisionsResponse,
   WeatherDelayResponse,
 } from "./types";
 import { useSession } from "./auth";
@@ -144,6 +147,36 @@ export function useReplayWindow(
   toHour: number | null,
 ): UseQueryResult<ReplayResponse> {
   return useQuery(replayWindowQueryOptions(agencyId, date, fromHour, toHour));
+}
+
+/** The agency's timetable revisions, newest first. They change only when a
+ *  timetable is loaded and kept, so a few minutes' staleness is harmless. */
+export function useTimetableRevisions(agencyId: number | null): UseQueryResult<TimetableRevisionsResponse> {
+  return useQuery({
+    queryKey: ["timetable-revisions", agencyId],
+    queryFn: ({ signal }) => apiGet<TimetableRevisionsResponse>(`/api/${agencyId}/timetable-revisions`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** What the revision starting on `on` changed at every stop, the changed
+ *  stops of `dayType` alone. */
+export function useTimetableRevisionDiff(
+  agencyId: number | null,
+  on: string,
+  dayType: RevisionDayType,
+): UseQueryResult<TimetableRevisionDiff> {
+  const query = new URLSearchParams({ on, day_type: dayType }).toString();
+  return useQuery({
+    queryKey: ["timetable-revision-diff", agencyId, on, dayType],
+    queryFn: ({ signal }) => apiGet<TimetableRevisionDiff>(`/api/${agencyId}/timetable-revisions/diff?${query}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
+    // A day-type switch keeps the same revision's tabs and totals on screen
+    // while its stops load; another revision's would be wrong figures.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
+  });
 }
 
 export function useRoutes(agencyId: number | null): UseQueryResult<Route[]> {
