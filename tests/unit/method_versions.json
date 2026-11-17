@@ -93,6 +93,9 @@
   "2026.11.2": {
     "agg_feed_health": 2
   },
+  "2026.11.20": {
+    "agg_route_headway_daily": 7
+  },
   "2026.11.3": {
     "agg_daily_trend": 2,
     "agg_hour_daily": 3,

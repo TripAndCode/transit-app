@@ -1,5 +1,6 @@
 """Headway reconstruction, high-frequency route classification, and headway
-QUALITY metrics (Excess Waiting Time, coefficient of variation, long-gap rate).
+QUALITY metrics (Excess Waiting Time, coefficient of variation, long-gap rate,
+bunching).
 
 A route's "headway" is the time gap between two consecutive vehicles serving
 the same stop on the same route. This module has three independent pieces:
@@ -24,8 +25,8 @@ the same stop on the same route. This module has three independent pieces:
   (`pipeline.static_headways`), so a day is classified by the timetable in
   force on it.
 - Quality metrics computed FROM a headway distribution (actual or
-  scheduled) -- mean wait time, coefficient of variation, and long-gap
-  rate -- restricted to the days the second piece classifies a route
+  scheduled) -- mean wait time, coefficient of variation, long-gap rate
+  and bunching rate -- restricted to the days the second piece classifies a route
   high-frequency on (see `pipeline.reports.headway_quality`). Each has both
   a direct-from-samples form (for a single in-memory gap list, e.g. in a
   unit test) and a from-pooled-statistics form (for combining multiple
@@ -63,6 +64,12 @@ HIGH_FREQUENCY_HEADWAY_SEC = 12 * 60
 # Picks the middle of the commonly used 1.5x-2x band rather than either
 # edge.
 LONG_GAP_MULTIPLIER = 1.75
+
+# A gap shorter than this share of the scheduled headway is bunched: the
+# second vehicle arrives so close behind the first that it carries few of
+# the passengers who gathered for it. Bus Turnaround's report cards count a
+# bus arriving less than 25% of the scheduled headway after the one before.
+BUNCHING_HEADWAY_FRACTION = 0.25
 
 
 def dominant_service_ctes(agency: str) -> str:
@@ -258,6 +265,19 @@ def count_long_gaps(
     return sum(1 for g in gaps if g > threshold)
 
 
+def count_bunched(gaps: Sequence[float], scheduled_headway_sec: float | None) -> int | None:
+    """How many of *gaps* are strictly shorter than
+    :data:`BUNCHING_HEADWAY_FRACTION` of *scheduled_headway_sec*.
+
+    ``None`` when there is no scheduled headway to judge them against: an
+    unjudged count is unknown, never zero bunching.
+    """
+    if not scheduled_headway_sec or scheduled_headway_sec <= 0:
+        return None
+    threshold = BUNCHING_HEADWAY_FRACTION * scheduled_headway_sec
+    return sum(1 for g in gaps if g < threshold)
+
+
 def pool_daily_gaps(ch_rows: Iterable[tuple]) -> dict[tuple[object, object], list[float]]:
     """Each (route, service date)'s positive gaps, pooled across the stops it calls at.
 
@@ -350,15 +370,19 @@ def daily_headway_rows(
     """agg_route_headway_daily rows: per (route, date), the actual median, count, sum
     and sum of squares, the long gaps measured against *median_of(route, date)*,
     then the date's own timetable's scheduled median, high-frequency test, sum
-    and sum of squares (*schedule_of*). A route the schedule gives no median
-    counts no long gaps and is not high-frequency; a date whose timetable keeps
-    no scheduled headways has all four None, high-frequency included, as not
-    judged, even where its long gaps fell back to the loaded timetable's median."""
+    and sum of squares (*schedule_of*), then the gaps bunched against that same
+    median and how many gaps were judged for bunching. A route the schedule
+    gives no median counts no long gaps and is not high-frequency; a date whose
+    timetable keeps no scheduled headways has all four None, high-frequency
+    included, as not judged, even where its long gaps fell back to the loaded
+    timetable's median. Bunching never falls back: without its own
+    timetable's median a date's two bunching counts are None."""
     rows = []
     for (route_code, svc_date), gaps in pooled.items():
         if not gaps:
             continue
         schedule = schedule_of(route_code, svc_date)
+        bunched = count_bunched(gaps, None if schedule is None else schedule.median_sec)
         rows.append(
             (
                 agency_id,
@@ -379,6 +403,8 @@ def daily_headway_rows(
                         schedule.sumsq_sec2,
                     )
                 ),
+                bunched,
+                None if bunched is None else len(gaps),
             )
         )
     return rows

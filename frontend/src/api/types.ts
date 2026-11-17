@@ -716,6 +716,10 @@ type HeadwayQualityRow = {
   samples: number;
   /** The class of day pooled, its main timetable's; null when every day is. */
   day_type?: OverviewDayType | null;
+  /** Gaps under a quarter of the scheduled headway, of those judged; null when not measured. */
+  bunched?: number | null;
+  bunching_judged?: number | null;
+  bunching_rate?: number | null;
 };
 
 export type HeadwayQualityResponse = {

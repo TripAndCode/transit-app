@@ -32,8 +32,8 @@
     "version": 3
   },
   "agg_route_headway_daily": {
-    "hash": "157cdaaa73aa3afbb4920a74d417097c7feb90eb8e02a3e712e64d12251c82eb",
-    "version": 6
+    "hash": "eb85ac1f8c1ee328ee8187e005b2744f058fdddf3eaae4419416d6eba96542c6",
+    "version": 7
   },
   "agg_route_hour": {
     "hash": "6ff0188308995b10235e276272e5fa5257710561c22f05ba74f3181648bccb06",

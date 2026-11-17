@@ -106,6 +106,11 @@ method version ``2026.11.0``):
   headway is at most ``HIGH_FREQUENCY_MAX_HEADWAY_SEC``.
 - A long gap is an actual gap longer than ``LONG_GAP_FACTOR`` times the day's
   scheduled headway. A day the timetable gives no headway has no long gap.
+- A bunched gap is an actual gap shorter than ``BUNCHING_FACTOR`` times the
+  scheduled headway of the timetable in force that day, the one that judges
+  the day high-frequency. Every actual gap of a day with such a headway is
+  judged; a day without one judges none and counts no bunched gap, which is
+  unknown rather than zero.
 - The mean wait over a set of gaps is the average wait of a passenger who
   arrives at a uniformly random instant of the time they span: a gap of h
   seconds holds h of the span and an average wait of h/2 inside it, so the
@@ -118,7 +123,8 @@ method version ``2026.11.0``):
   standard deviation, the spread of the gaps observed rather than an
   estimate of a wider population's, over their mean, defined only for two
   gaps or more. The long-gap share is the pooled long gaps over the pooled
-  gaps. A route high-frequency on no such day is not listed.
+  gaps, and the bunching share the pooled bunched gaps over the pooled gaps
+  judged. A route high-frequency on no such day is not listed.
 
 The feed's health, per ``DELAY_ANALYSIS.md`` ("Feed-quality scorecard" and
 the stamp's clamp share under "Method versions") and the methodology's
@@ -303,6 +309,8 @@ MESSAGE_AGE_QUANTILES = (Fraction(1, 2), Fraction(19, 20))
 HIGH_FREQUENCY_MAX_HEADWAY_SEC = 12 * 60
 # "The share of gaps longer than 1.75 times the scheduled headway."
 LONG_GAP_FACTOR = Fraction(7, 4)
+# "A gap shorter than a quarter of the scheduled headway is bunched."
+BUNCHING_FACTOR = Fraction(1, 4)
 ON_TIME_MAX_LATE_SEC = 60
 OVER_FIVE_MIN_SEC = 300
 EARLY_SEC = 60
@@ -947,6 +955,12 @@ class HeadwayDay:
 
     gaps: tuple[int, ...]
     long_gaps: int
+    # None for a day whose timetable in force gives it no headway.
+    bunched: int | None = None
+
+    @property
+    def judged(self) -> int | None:
+        return None if self.bunched is None else len(self.gaps)
 
     @property
     def samples(self) -> int:
@@ -969,7 +983,8 @@ class HeadwayDay:
 
 def headway_days(found: Outcome) -> dict[tuple[str, date], HeadwayDay]:
     """Per (route, service date) with at least one actual gap, its headways,
-    long gaps judged by the day's plan."""
+    long gaps judged by the day's plan, and bunched gaps by the plan in force
+    that judges it high-frequency."""
     times: dict[tuple[str, date], dict[str, list[int]]] = defaultdict(lambda: defaultdict(list))
     for d in found.departures:
         if d.stop_id is not None and d.scheduled_sec is not None:
@@ -982,7 +997,10 @@ def headway_days(found: Outcome) -> dict[tuple[str, date], HeadwayDay]:
         plan = found.plans.get(key)
         headway = None if plan is None else plan.headway_sec
         long_gaps = 0 if headway is None else sum(1 for g in gaps if g > LONG_GAP_FACTOR * headway)
-        out[key] = HeadwayDay(gaps, long_gaps)
+        in_force = found.wait_plans.get(key)
+        edge = None if in_force is None or in_force.headway_sec is None else BUNCHING_FACTOR * in_force.headway_sec
+        bunched = None if edge is None else sum(1 for g in gaps if g < edge)
+        out[key] = HeadwayDay(gaps, long_gaps, bunched)
     return out
 
 
@@ -998,6 +1016,9 @@ class HeadwayQuality:
     long_gaps: int
     scheduled_sum_sec: int
     scheduled_sumsq_sec2: int
+    # None when a day pooled judged no bunching.
+    bunched: int | None = None
+    bunching_judged: int | None = None
 
     @property
     def actual_wait_sec(self) -> Fraction:
@@ -1028,6 +1049,12 @@ class HeadwayQuality:
     def long_gap_share(self) -> Fraction:
         return Fraction(self.long_gaps, self.samples)
 
+    @property
+    def bunching_share(self) -> Fraction | None:
+        if self.bunched is None or not self.bunching_judged:
+            return None
+        return Fraction(self.bunched, self.bunching_judged)
+
 
 def headway_quality(found: Outcome, first: date, last: date) -> dict[str, HeadwayQuality]:
     """Per route, its headway quality over the service days *first* to *last*."""
@@ -1044,9 +1071,16 @@ def headway_quality(found: Outcome, first: date, last: date) -> dict[str, Headwa
             long_gaps=sum(h.long_gaps for h, _plan in days),
             scheduled_sum_sec=sum(sum(plan.gaps) for _h, plan in days),
             scheduled_sumsq_sec2=sum(g * g for _h, plan in days for g in plan.gaps),
+            bunched=_sum_of_all([h.bunched for h, _plan in days]),
+            bunching_judged=_sum_of_all([h.judged for h, _plan in days]),
         )
         for route_id, days in pooled.items()
     }
+
+
+def _sum_of_all(counts: list[int | None]) -> int | None:
+    """The total, or None when any part is unknown."""
+    return None if any(c is None for c in counts) else sum(c for c in counts if c is not None)
 
 
 def no_high_frequency_route(found: Outcome, first: date, last: date) -> bool:

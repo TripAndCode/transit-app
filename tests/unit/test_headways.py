@@ -6,8 +6,10 @@ its ClickHouse/Postgres callers in `pipeline.analyze`).
 """
 
 from pipeline.headways import (
+    BUNCHING_HEADWAY_FRACTION,
     HIGH_FREQUENCY_HEADWAY_SEC,
     coefficient_of_variation,
+    count_bunched,
     coefficient_of_variation_from_pooled,
     count_long_gaps,
     excess_wait_time_sec,
@@ -250,3 +252,21 @@ def test_the_kept_headways_readers_are_the_daily_headways_and_not_every_archive_
     readers = kept_headway_readers()
     assert "agg_route_headway_daily" in readers
     assert set(readers) < set(archive_joined_tables())
+
+
+def test_bunching_is_bus_turnarounds_quarter_of_the_scheduled_headway():
+    assert BUNCHING_HEADWAY_FRACTION == 0.25
+
+
+def test_a_gap_exactly_a_quarter_of_the_scheduled_headway_is_not_bunched():
+    # Strictly shorter than 25% of 480 s = 120 s counts; 120 s itself does not.
+    assert count_bunched([60.0, 119.0, 120.0, 121.0, 480.0], 480.0) == 2
+
+
+def test_a_gap_between_a_quarter_and_a_half_of_the_headway_is_not_bunched():
+    assert count_bunched([150.0, 200.0, 239.0], 480.0) == 0
+
+
+def test_bunching_without_a_scheduled_headway_is_unknown_not_zero():
+    assert count_bunched([60.0, 900.0], None) is None
+    assert count_bunched([60.0, 900.0], 0.0) is None

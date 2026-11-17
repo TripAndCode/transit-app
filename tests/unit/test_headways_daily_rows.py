@@ -57,6 +57,8 @@ def test_each_row_carries_the_moments_and_the_long_gap_count():
             None,
             None,
             None,
+            None,
+            None,
         ),
     ]
 
@@ -149,9 +151,19 @@ def test_a_daily_row_carries_its_own_timetables_high_frequency_test_and_schedule
     rows = daily_headway_rows(9, pooled, lambda _route, _day: 600.0, lambda route, day: schedule[(route, day)])
 
     assert rows == [
-        (9, "R1", 1, 600.0, 2, 1200.0, 720000.0, 0, 720.0, True, 1440.0, 1036800.0),
-        # Not judged: its timetable keeps no scheduled headways.
-        (9, "R1", 2, 1050.0, 2, 2100.0, 2610000.0, 1, None, None, None, None),
-        # Judged, and not high-frequency: its timetable gives the route no gap.
-        (9, "R2", 1, 900.0, 2, 1800.0, 1620000.0, 0, None, False, None, None),
+        (9, "R1", 1, 600.0, 2, 1200.0, 720000.0, 0, 720.0, True, 1440.0, 1036800.0, 0, 2),
+        # Not judged: its timetable keeps no scheduled headways, so neither is bunching.
+        (9, "R1", 2, 1050.0, 2, 2100.0, 2610000.0, 1, None, None, None, None, None, None),
+        # Judged, and not high-frequency: its timetable gives the route no gap,
+        # so there is no headway to judge bunching against.
+        (9, "R2", 1, 900.0, 2, 1800.0, 1620000.0, 0, None, False, None, None, None, None),
     ]
+
+
+def test_bunching_is_judged_against_the_days_own_timetable_and_never_the_loaded_one():
+    pooled = {("R1", 1): [60.0, 179.0, 180.0, 600.0], ("R1", 2): [60.0, 600.0]}
+    schedule = {("R1", 1): ScheduledHeadways(720.0, None, None), ("R1", 2): None}
+    rows = daily_headway_rows(9, pooled, lambda _route, _day: 240.0, lambda route, day: schedule[(route, day)])
+
+    # A quarter of 720 s is 180 s: 60 and 179 are bunched, 180 is not.
+    assert [row[-2:] for row in rows] == [(2, 4), (None, None)]

@@ -447,10 +447,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.19`. Newest first, each version with the inputs it set.
+The current method is `2026.11.20`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.20` | `agg_route_headway_daily` 6 → 7 |
 | `2026.11.19` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
 | `2026.11.18` | `agg_route_daily_dwell_run` 5 → 6, `agg_route_segment_runtime` = 1 |
 | `2026.11.17` | `feed_quality_monthly` 8 → 9 |

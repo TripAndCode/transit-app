@@ -581,6 +581,12 @@ class HeadwayQualityRow(BaseModel):
     samples: int
     # The class of day pooled (the route's dominant timetable's), or None for every day.
     day_type: DayType | None = None
+    # Gaps shorter than a quarter of their day's scheduled headway, of the gaps
+    # judged, and their share: None when a pooled day was not measured (built
+    # before the counts were stored, or before the retention floor), never 0.
+    bunched: int | None = None
+    bunching_judged: int | None = None
+    bunching_rate: float | None = None
 
 
 class HeadwayQualityResponse(BaseModel):
