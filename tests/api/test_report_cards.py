@@ -19,6 +19,7 @@ from httpx import ASGITransport
 from pipeline.cache import clear_all
 from tests.conftest import _test_pool, confirm_rt_field_coverage
 from tests.fixtures.route_dist import seed_route_dist_day
+from tests.fixtures.users import seed_session
 
 DAY = date(2026, 6, 1)
 MONTH = "2026-06"
@@ -97,11 +98,15 @@ async def card_client(apply_schema):
             (aid, "OLDHF", DAY, 480.0, 10, 4800.0, 2534400.0, 0, *_EVERY_8_MIN, None, None),
         ],
     )
-    async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with pool.acquire() as conn:
+        admin = await seed_session(conn, role="admin")
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", cookies={"sid": admin.sid}
+    ) as client:
         yield client, aid, pool
     async with pool.acquire() as conn:
         await conn.execute(
-            "TRUNCATE agencies, agg_route_daily_dist, agg_route_daily, planned_trips_daily, "
+            "TRUNCATE users, agencies, agg_route_daily_dist, agg_route_daily, planned_trips_daily, "
             "agg_service_delivered_daily, agg_route_headway_daily CASCADE"
         )
     await pool.close()
@@ -232,3 +237,17 @@ async def test_the_list_downloads_as_csv_with_the_reports_preamble(card_client):
     by_route = {row[0]: row for row in rows[header + 1 :]}
     assert by_route["HF"][3] == "B"
     assert (by_route["LOWCOV"][3], by_route["LOWCOV"][4]) == ("", "coverage_low")
+
+
+async def test_only_an_admin_reads_a_grade(card_client):
+    """A grade waits on the publication process: a signed-in user who is not
+    an admin, or no one, gets none."""
+    from api.main import app
+
+    _client, aid, pool = card_client
+    async with pool.acquire() as conn:
+        user = await seed_session(conn, role="user")
+    for cookies in ({"sid": user.sid}, {}):
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test", cookies=cookies) as c:
+            for path in (f"/api/{aid}/report-cards?month={MONTH}", f"/api/{aid}/routes/HF/report-card?month={MONTH}"):
+                assert (await c.get(path)).status_code in (401, 403)

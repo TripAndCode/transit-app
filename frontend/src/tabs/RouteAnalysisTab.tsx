@@ -214,7 +214,9 @@ export function RouteAnalysisTab() {
     </div></header>
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
-    {route && <RouteReportCard agencyId={id} route={route} />}
+    {/* A grade is shown to admins only until operators have had notice and a
+        right of reply (docs/methodology.md, "Publication process"). */}
+    {route && isAdmin && <RouteReportCard agencyId={id} route={route} />}
     {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
     <ScopeSentence applied={scopeApplied} actions={false} />
     {!route ? <EmptyState title={t("choose")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}

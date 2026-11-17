@@ -7,6 +7,8 @@ import * as hooks from "../api/hooks";
 import { RoutesIndex } from "./RoutesIndex";
 
 vi.mock("./RouteTableScreen", () => ({ RouteTableScreen: () => <div>route-table</div> }));
+const admin = vi.hoisted(() => ({ is: true }));
+vi.mock("../api/useIsAdmin", () => ({ useIsAdmin: () => admin.is }));
 vi.mock("../routes/lazyTabs", () => ({
   loadReportCardsView: () => Promise.resolve({ default: () => <div>report-cards-view</div> }),
 }));
@@ -57,5 +59,16 @@ describe("RoutesIndex", () => {
     await userEvent.click(screen.getByRole("button", { name: "Table" }));
     expect(await screen.findByText("route-table")).toBeInTheDocument();
     expect(new URLSearchParams(router.state.location.search).get("by")).toBe("table");
+  });
+
+  it("keeps the report cards to admins, showing anyone else the table", async () => {
+    admin.is = false;
+    try {
+      open("/agencies/9/routes?by=report_cards");
+      expect(await screen.findByText("route-table")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Report cards" })).not.toBeInTheDocument();
+    } finally {
+      admin.is = true;
+    }
   });
 });

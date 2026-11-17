@@ -254,7 +254,7 @@ The figures are means along the chosen path. They show where delay builds up; th
 
 ### 5-7. Report cards
 
-A route’s page shows its **Report card**: one grade, A to F, for a calendar month, by default the newest month whose every day has closed. Pick another month above the card. **Routes → Report cards** lists every route’s grade for a month, with **Download CSV**.
+For admins, a route’s page shows its **Report card**: one grade, A to F, for a calendar month, by default the newest month whose every day has closed. Pick another month above the card. **Routes → Report cards** lists every route’s grade for a month, with **Download CSV**.
 
 - A route scheduled every 12 minutes or more often (high-frequency) is graded on “Excess wait” and “Bunching”, the share of gaps under a quarter of the planned headway, and takes the worse of the two. Any other route is graded on its on-time rate and its early departures, and takes the worse.
 - “Service delivered” under 95% holds the grade at D at best, and under 90% makes it F.

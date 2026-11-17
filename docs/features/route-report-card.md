@@ -6,6 +6,12 @@ The methodology states the rules for readers
 ([en](../methodology.en.md#route-report-card), [ja](../methodology.md#系統の成績表));
 this page holds the thresholds, their sources and where each piece lives.
 
+The card, the list and both endpoints are for admins only (`require_admin`,
+and `useIsAdmin` on screen): a grade waits, as the feed-quality grade does, for
+the methodology's publication process, operators' advance notice and right of
+reply. `tests/unit/test_agency_feed_quality.py` holds every response carrying a
+`grade` to that.
+
 ## Where it is
 
 - The card: the route's own page (`frontend/src/components/reportCard/RouteReportCard.tsx`,

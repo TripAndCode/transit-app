@@ -236,7 +236,7 @@ The list is ordered by how many weeks a segment has stayed slow. It is not ranke
 
 ### Route report card
 
-Each route gets one grade, A to F, per calendar month (**Routes** → "Report cards", and on the route's own page). It is computed when it is read, from the figures above over the month's days, and is not stored. The rules and their sources are in [docs/features/route-report-card.md](features/route-report-card.md).
+Each route gets one grade, A to F, per calendar month (**Routes** → "Report cards", and on the route's own page). It is shown to admins only, until operators have had the advance notice and right of reply of the [publication process](#publication-process). It is computed when it is read, from the figures above over the month's days, and is not stored. The rules and their sources are in [docs/features/route-report-card.md](features/route-report-card.md).
 
 - **Class**: a route is high-frequency for the month when it is high-frequency (headway metrics above) on at least half the days its timetable in force judges. A route with no such day takes the class of the timetable loaded now; a route the timetable gives no headway is low-frequency.
 - **High-frequency**: excess waiting time and bunching each get a letter, and the route takes the worse, so an F on either is an F.

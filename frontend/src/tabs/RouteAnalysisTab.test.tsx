@@ -79,6 +79,19 @@ describe("RouteAnalysisTab", () => {
     expect(new URLSearchParams(create.mock.calls[0][0].query).get("routes")).toBe("R1");
   });
 
+  it("shows the route's report card to an admin alone", () => {
+    mockSupportHooks();
+    vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);
+    const isAdmin = vi.spyOn(adminHook, "useIsAdmin").mockReturnValue(false);
+    const path = "/agencies/1/route-analysis?routes=R1&from=2026-09-24&to=2026-10-23";
+    renderTab(path);
+    expect(screen.queryByRole("region", { name: "Report card" })).toBeNull();
+    cleanup();
+    isAdmin.mockReturnValue(true);
+    renderTab(path);
+    expect(screen.getByRole("region", { name: "Report card" })).toBeInTheDocument();
+  });
+
   it("lets an admin freeze the route's page as it is asked for, and shows everyone else no new control", () => {
     mockSupportHooks();
     vi.spyOn(hooks, "useRouteShape").mockReturnValue({ data: shape([]), isPending: false, error: null, refetch: vi.fn() } as never);

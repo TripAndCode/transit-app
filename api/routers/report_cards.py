@@ -1,6 +1,10 @@
 """Route report cards (pipeline.reports.report_card): a route's monthly A to F
 grade with the figures behind it, and the agency's list of them.
 
+Admins only: a grade is shown to admins until operators have had the
+methodology's advance notice and right of reply (docs/methodology.md,
+"Publication process"), as the feed-quality grade is.
+
 A month is a calendar month every day of which has closed; the default is the
 newest such month. Every figure is a feed-based estimate, stated with the
 method stamp beside it (``definition``).
@@ -20,6 +24,7 @@ from pydantic import BaseModel
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, last_closed_jst_day
+from api.security import User, require_admin
 from pipeline.data_sources import credit_line
 from pipeline.reports.definition import DefinitionMeta, format_definition_csv_line
 from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC
@@ -220,6 +225,7 @@ async def route_report_card(
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
+    _admin: User = Depends(require_admin),
 ) -> RouteReportCardResponse:
     """One route's card for a closed calendar month, with its letter over the
     months before it."""
@@ -338,6 +344,7 @@ async def report_cards(
     agency_id: int = Depends(get_agency),
     conn: asyncpg.Connection = Depends(get_conn),
     ch: AsyncClient = Depends(get_ch),
+    _admin: User = Depends(require_admin),
 ) -> ReportCardListResponse | StreamingResponse:
     """Every route's card for a closed calendar month, one row per route: its
     letter or why it has none, and its figures. ``format=csv`` writes them with
