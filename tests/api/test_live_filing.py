@@ -724,26 +724,6 @@ async def test_an_ask_tool_scan_reads_the_timetable_in_force(refiled, aconn, ch_
     assert [(route, samples) for route, _dow, _avg, samples in rows] == [(ROUTE, 24)]
 
 
-async def test_a_stop_visit_scan_reads_the_timetable_in_force(refiled, aconn, ch_async_client):
-    from pipeline.reports.filters import _stop_visits_cte_ch, ctx_filing
-
-    ctx = RangeCtx(from_date=refiled.day, to_date=refiled.day, routes=(ROUTE,))
-    cte, params = _stop_visits_cte_ch(
-        ctx, await ctx_filing(aconn, ch_async_client, refiled.agency_id, ctx), include_scheduled_sec=True
-    )
-    result = await ch_async_client.query(
-        f"WITH {cte} SELECT trip_id, scheduled_sec FROM visits WHERE stop_sequence = 1 ORDER BY trip_id",
-        parameters={"agency_id": refiled.agency_id, **params},
-    )
-    assert result.result_rows == [
-        ("a", _sec("07:00")),
-        ("b", _sec("12:30")),
-        ("e", _sec("12:48")),
-        ("f", _sec("12:00")),
-        ("g", _sec("12:10")),
-    ]
-
-
 async def test_the_stamp_beside_a_live_scan_names_the_version_it_was_computed_under(refiled, ch_client, client):
     from pipeline import static_archive
     from pipeline.live_filing import invalidate_schedule_joins
@@ -827,7 +807,7 @@ async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(
     last stop at the delay predicted after the skip."""
     from api.range import updates_filter_ch
     from pipeline.db import build_dedup_ch_sql
-    from pipeline.reports.filters import _dedup_cte_ch, _stop_visits_cte_ch, ctx_filing
+    from pipeline.reports.filters import _dedup_cte_ch, ctx_filing
     from pipeline.reports.rankings import _route_wd_we_avg_ch, compute_hourly_heatmap
     from pipeline.reports.route_table import compute_route_table
 
@@ -862,14 +842,6 @@ async def test_a_departure_the_feed_withdrew_is_in_no_scan_of_a_refiled_day(
     assert {(c["hour"], c["samples"]) for c in from_aggregate} == {(7, 6), (12, 21), (15, 6)}
     scanned = RangeCtx(from_date=day, to_date=day, routes=(ROUTE, OTHER, FILED_ONLY))
     assert await compute_hourly_heatmap(agency_id, scanned, aconn, ch=ch_async_client) == from_aggregate
-
-    route_day = RangeCtx(from_date=day, to_date=day, routes=(ROUTE,))
-    cte, params = _stop_visits_cte_ch(route_day, await ctx_filing(aconn, ch_async_client, agency_id, route_day))
-    visits = await ch_async_client.query(
-        f"WITH {cte} SELECT trip_id, count() FROM visits GROUP BY trip_id ORDER BY trip_id",
-        parameters={"agency_id": agency_id, **params},
-    )
-    assert visits.result_rows == [("a", 6), ("b", 6), ("e", 6), ("f", 3)]
 
 
 async def test_the_map_leaves_out_a_departure_the_feed_withdrew(withdrawn, aconn, ch_async_client, client):

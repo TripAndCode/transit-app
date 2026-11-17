@@ -31,8 +31,10 @@ become Nullable.
   `agg_route_headway_daily` run their own ClickHouse SQL from `analyze.py`.
   `analyze()` streams the stop visits
   (`build_stop_visits_ch_sql`, arrivals paired with departures) in blocks into the
-  `_analyze_visits` TEMP table (`ON COMMIT DROP`) for dwell_run, its only reader,
-  and only for agencies that build it; never `.query()`, which buffers the whole
+  `_analyze_visits` TEMP table (`ON COMMIT DROP`) for its two readers,
+  `agg_route_daily_dwell_run` and `agg_route_segment_runtime`, and only for
+  agencies that build them; each builds with one server-side
+  `INSERT ... SELECT` over it, so a full rebuild's rows never pass through Python; never `.query()`, which buffers the whole
   result in memory, scaling with the agency's row count.
   Exception: `agg_stop_routes` is finalized in ClickHouse from `stop_route_days`,
   which reads every `updates` row rather than the dedup — the dedup is

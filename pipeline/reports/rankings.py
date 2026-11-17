@@ -107,6 +107,8 @@ def report_reads_aggregates(
         return aggregates_serve(ctx) if csv else hourly_aggregates_serve(ctx)
     if report_type == "dwell_run":
         return True  # never scanned live: a time band leaves it unavailable
+    if report_type == "segment_runtime":
+        return True  # never scanned live: its rows keep their time band
     if report_type == "delay_certificate":
         return False  # always scanned live: no aggregate keeps single trips
     raise ValueError(f"unknown report type {report_type!r}")

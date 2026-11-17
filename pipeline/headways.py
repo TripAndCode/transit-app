@@ -14,7 +14,7 @@ the same stop on the same route. This module has three independent pieces:
   `stop_id` (today: `static_join`; `aomori_regex` always leaves it NULL),
   which is necessary but not sufficient trust; `pipeline.reports.
   headway_quality` additionally gates on the per-agency confirmed-set check
-  (`pipeline.strategies.static_join.rt_field_coverage_confirmed`) before
+  (`pipeline.strategies.static_join.rt_field_coverage_gap`) before
   reading these rows -- see that module's docstring for why sharing the
   wire shape doesn't by itself confirm a given agency's feed populates
   `stop_id`.
