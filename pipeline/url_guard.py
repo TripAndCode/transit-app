@@ -245,6 +245,10 @@ def _read_capped(resp, max_bytes: int, deadline: float | None, url: str) -> byte
     while True:
         left = deadline - time.monotonic()
         _check_deadline(deadline, url)
+        if getattr(resp, "isclosed", lambda: False)():
+            # http.client closes a Content-Length response on its last byte,
+            # and with it the socket the next settimeout would touch.
+            return b"".join(chunks)
         if sock is not None:
             sock.settimeout(left if per_read is None else min(left, per_read))
         try:

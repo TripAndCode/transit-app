@@ -315,3 +315,27 @@ def test_a_deadline_keeps_the_size_cap(monkeypatch):
     monkeypatch.setattr(url_guard._opener, "open", lambda req, timeout=None: _FakeResponse(b"x" * 1000))
     with pytest.raises(FeedURLError, match="exceeded"):
         safe_urlopen("http://8.8.8.8/feed", max_bytes=500, deadline=time.monotonic() + 5)
+
+
+def test_a_deadline_reads_a_content_length_body_the_response_closes_itself_on(monkeypatch):
+    """http.client closes a Content-Length response's socket on its last byte,
+    so no read may touch that socket again."""
+    body = b"y" * 5000
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    def serve():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % len(body) + body)
+
+    threading.Thread(target=serve, daemon=True).start()
+    monkeypatch.setattr(url_guard, "validate_feed_url", lambda url: None)
+    try:
+        url = f"http://127.0.0.1:{server.getsockname()[1]}/feed"
+        with safe_urlopen(url, deadline=time.monotonic() + 5) as resp:
+            assert resp.read() == body
+    finally:
+        server.close()
