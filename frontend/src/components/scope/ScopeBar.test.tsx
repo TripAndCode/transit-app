@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import * as hooks from "../../api/hooks";
+import * as placeLabels from "../../api/usePlaceLabels";
 import i18n from "../../i18n";
 import { DataEndContext, ScopeRouteContext } from "../../api/scope";
 import { useTopmostEscape } from "../../hooks/useFocusTrap";
@@ -323,6 +324,12 @@ describe("ScopeBar", () => {
     fireEvent.click(screen.getByRole("button", { name: "reload" }));
     expect(labels()).not.toContain("Days");
     expect(labels()).toContain("Period");
+  });
+
+  it("asks for no stop names for a stop the bar leaves out on a screen without saved views", () => {
+    const spy = vi.spyOn(placeLabels, "usePlaceLabels");
+    mount("?from=2026-09-01&to=2026-09-30&stop=S1", { stop: false }, <ScopeBar applied={{ stop: false }} actions={false} />);
+    expect(spy.mock.calls.every((call) => !call[1])).toBe(true);
   });
 
   it("names a direction by its letter under its label", () => {

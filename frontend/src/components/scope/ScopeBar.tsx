@@ -219,10 +219,10 @@ export function ScopeBar({
   const { data: agencies } = useAgencies();
   const dataEnd = use(DataEndContext);
   const slot = useScopeActionsSlot();
-  // Route names are for the routes condition and the saved views' wording;
-  // a bar with neither never asks for the agency's routes.
+  // Route and stop names are for their conditions and the saved views'
+  // wording; a bar with neither never asks for the agency's routes or stops.
   const names = useRouteNames(conditionUsed("routes", applied) || showActions ? id : null);
-  const place = usePlaceLabels(id, scope.stop != null);
+  const place = usePlaceLabels(id, scope.stop != null && (conditionUsed("stop", applied) || showActions));
   const [openKey, setOpenKey] = useState<ConditionKey | null>(null);
   const [pinnedPref, setPinned] = useState(readScopePinned);
   const pinned = showActions && pinnedPref;

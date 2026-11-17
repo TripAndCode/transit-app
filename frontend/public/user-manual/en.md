@@ -92,13 +92,13 @@ On Pulse, Routes, Time, Why and Day types & agencies, a notice can appear above 
 
 ## 3. The scope bar: what a screen shows
 
-**Pulse**, **Routes**, **Time**, **Why** and **Day types & agencies** (weekdays and weekends/holidays), and the period summary and council report in **Reports**, open with a bar that shows the conditions the screen is counting under (the delay record for reference has none, since the date and route chosen on it are its conditions). With the default conditions it reads like this:
+**Pulse**, **Routes**, **Time**, **Why** and **Day types & agencies** (weekdays and weekends/holidays), and the period summary and council report in **Reports**, open with a bar that shows the conditions the screen is counting under (the delay record for reference has none, since the date and route chosen on it are its conditions). With the default conditions, Pulse’s bar reads like this:
 
-> Period [(period) 30 days ▾]  Days [All ▾]  Time [All day ▾]  Routes [All ▾]  On time [within 5 min ▾]
+> Period [(period) 30 days ▾]  Days [All ▾]  Time [All day ▾]  Routes [All ▾]
 
 ![The scope bar with its period open](./03-scope-bar.en.png)
 
-Each condition is a label followed by a button with a ▾ that shows its current value. Click the button to change it; the screen updates at once. A condition changed from its default shows in blue, and the period also shows how many days it covers. The bar shows only the conditions the screen uses (see below).
+Each condition is a label followed by a button with a ▾ that shows its current value. Click the button to change it; the screen updates at once. A condition changed from its default shows in blue, and the period also shows how many days it covers. The bar shows only the conditions the screen uses (see below): a screen that counts on-time departures, such as **Routes**, also shows **On time** [within 5 min ▾].
 
 | Condition | What you can choose |
 |---|---|
@@ -110,7 +110,7 @@ Each condition is a label followed by a button with a ▾ that shows its current
 
 The “Timetable type” choices follow the agency’s own timetable: weekdays, Saturdays, and Sundays & holidays, or weekdays and weekends & holidays for an agency whose Saturdays and Sundays share one timetable. Each day counts under the timetable the agency’s schedule ran that day, so a public holiday falls under the Sunday or weekend one.
 
-By default a screen covers the 30 days up to the latest complete day with data, and the period choices end on that day too. A timetable type, a stop, direction or early-departure allowance set by a link, and “Count early departures as on time” each add their own condition to the bar: **Timetable**, **Stop**, **Direction** and **Early**. A link or saved view that sets only one of the late and early tolerances takes the default for the other (5 min late, 1 min early). A screen that does not count on-time departures has no **On time** condition.
+By default a screen covers the 30 days up to the latest complete day with data, and the period choices end on that day too. A timetable type, a stop, direction or early-departure allowance set by a link, and “Count early departures as on time” each add their own condition to the bar: **Timetable**, **Stop**, **Direction** and **Early**. A link or saved view that sets only one of the late and early tolerances takes the default for the other (5 min late, 1 min early).
 
 Once you change a condition in the bar from its default, **Reset** appears at the end of the bar and returns the conditions in the bar to their defaults. A condition the screen leaves out keeps its value, and on a route’s page the route stays.
 
