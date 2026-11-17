@@ -23,7 +23,14 @@ _PRAGMA = re.compile(
     r"eslint|@ts-|prettier|biome-|v8 ignore|istanbul )",
 )
 
-_BANNER = re.compile(r"^[=\-*_#~]{4,}$")
+# A rule of four or more drawing characters, alone or around a title. Box-drawing
+# rules count too; a short run or an arrow inside prose does not.
+_RULE_CHARS = r"=\-*_#~─━═"
+_BANNER = re.compile(
+    rf"^[{_RULE_CHARS}]{{4,}}$"
+    rf"|^[{_RULE_CHARS}]{{2,}}\s.*[{_RULE_CHARS}]{{4,}}$"
+    rf"|^[{_RULE_CHARS}]{{4,}}\s"
+)
 
 # A pointer at another piece of prose. Pointing at a symbol is fine — that
 # survives a rename via grep; pointing at a comment breaks silently when the

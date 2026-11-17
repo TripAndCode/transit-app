@@ -77,6 +77,26 @@ def test_allows_short_rule_of_dashes():
     assert lint.find_violations("x.py", ["# --- ok ---", "x = 1"]) == []
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "# ── Migration status ─────────────────────",
+        "# ═══════ Step timing",
+        "# ━━━━━━━━━━━━━━━━━━",
+        "# ==== Section ====",
+        "// ── Section ──────────",
+    ],
+)
+def test_flags_a_titled_or_box_drawing_banner(line):
+    path = "x.ts" if line.startswith("//") else "x.py"
+    assert rules(lint.find_violations(path, [line, "x = 1"])) == [(1, "banner")]
+
+
+def test_allows_an_arrow_or_a_short_rule_in_prose():
+    lines = ["# before → after, a ── b", "# --- ok ---", "x = 1"]
+    assert lint.find_violations("x.py", lines) == []
+
+
 def test_flags_reference_to_another_comment():
     found = lint.find_violations("x.py", ["# see that cross-check's comment", "x = 1"])
     assert rules(found) == [(1, "comment-xref")]
