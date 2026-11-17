@@ -28,8 +28,8 @@ _LAMBDA_CALL = re.compile(r"\barray[A-Z]\w*\((?=\s*(?:\w+|\([\w\s,]+\))\s*->)")
 _ARRAY_PARAMETER = re.compile(r"\{\{?\w+:Array(?=\()")
 _CONSTANT_INDEX = re.compile(r"\}\}?\[\d+\]")
 # Parameter arrays that grow with an agency's timetable revisions rather than
-# with the rows read: one element per version in force over the read, or over
-# the agency's whole history for a read with no date bound
+# with the rows read: one element per run of dates a version is in force over
+# the read, or over the agency's whole history for a read with no date bound
 # (ScheduleJoin.force_params).
 ALLOWED = {
     ("pipeline/static_archive.py", "force_firsts:Array(Date32)"),
