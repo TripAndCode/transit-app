@@ -1,8 +1,9 @@
 """`make doctor`'s `.env` checks, run for real against a scratch checkout.
 
-The sign-in and ClickHouse lines count matching `.env` lines with `grep -c`,
-which prints no count at all when the file is absent, so they are exercised
-with and without a `.env` rather than read as text. Each run copies the
+The sign-in lines read what Make exported from `.env`, and the ClickHouse
+line counts matching `.env` lines with `grep -c`, which prints no count at
+all when the file is absent, so both are exercised with and without a `.env`
+rather than read as text. Each run copies the
 Makefile into `tmp_path`, so no real `.env` is ever read or written.
 """
 
@@ -15,11 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from api.sso import DEV_SIGNING_KEY, SIGNING_KEY_ENV, SSO_ENV
+from api.sso import DEV_SIGNING_KEY, LOCAL_ADMIN_ENV, SIGNING_KEY_ENV, SSO_ENV
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-LOCAL_ADMIN_VARS = ("DEFAULT_ADMIN_USERNAME", "DEFAULT_ADMIN_PASSWORD")
 CLICKHOUSE_VARS = ("CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABASE")
 
 
@@ -27,7 +27,7 @@ def _doctor(checkout: Path, env_file: str | None) -> list[str]:
     shutil.copy(REPO_ROOT / "Makefile", checkout / "Makefile")
     if env_file is not None:
         (checkout / ".env").write_text(env_file)
-    stripped = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_VARS, *CLICKHOUSE_VARS)
+    stripped = (*SSO_ENV, SIGNING_KEY_ENV, *LOCAL_ADMIN_ENV, *CLICKHOUSE_VARS)
     env = {k: v for k, v in os.environ.items() if k not in stripped}
     result = subprocess.run(["make", "-s", "doctor"], cwd=checkout, env=env, capture_output=True, text=True, check=True)
     return [line.strip() for line in result.stdout.splitlines()]
@@ -76,12 +76,12 @@ DEV_KEY = f"{SIGNING_KEY_ENV}={DEV_SIGNING_KEY}\n"
         ),
         pytest.param(REAL_KEY, NO_SSO, KEY_SET, NO_CLICKHOUSE, id="key-alone"),
         pytest.param(_assignments(SSO_ENV), ALL_SSO, KEY_MISSING, NO_CLICKHOUSE, id="oauth-without-key"),
-        pytest.param(_assignments(LOCAL_ADMIN_VARS), NO_SSO, KEY_MISSING, NO_CLICKHOUSE, id="local-admin-without-key"),
+        pytest.param(_assignments(LOCAL_ADMIN_ENV), NO_SSO, KEY_MISSING, NO_CLICKHOUSE, id="local-admin-without-key"),
         pytest.param(
-            _assignments(LOCAL_ADMIN_VARS) + DEV_KEY, NO_SSO, KEY_MISSING, NO_CLICKHOUSE, id="local-admin-dev-key"
+            _assignments(LOCAL_ADMIN_ENV) + DEV_KEY, NO_SSO, KEY_MISSING, NO_CLICKHOUSE, id="local-admin-dev-key"
         ),
         pytest.param(
-            _assignments(LOCAL_ADMIN_VARS) + REAL_KEY, NO_SSO, KEY_SET, NO_CLICKHOUSE, id="local-admin-real-key"
+            _assignments(LOCAL_ADMIN_ENV) + REAL_KEY, NO_SSO, KEY_SET, NO_CLICKHOUSE, id="local-admin-real-key"
         ),
         pytest.param(
             "".join(f"{name}=x\n" for name in (*SSO_ENV, SIGNING_KEY_ENV)),
@@ -89,6 +89,41 @@ DEV_KEY = f"{SIGNING_KEY_ENV}={DEV_SIGNING_KEY}\n"
             KEY_SET,
             NO_CLICKHOUSE,
             id="one-character-values-count-as-set",
+        ),
+        pytest.param(
+            _assignments(LOCAL_ADMIN_ENV) + f"{SIGNING_KEY_ENV}=   \t\n",
+            NO_SSO,
+            KEY_MISSING,
+            NO_CLICKHOUSE,
+            id="local-admin-whitespace-only-key",
+        ),
+        pytest.param(
+            _assignments(LOCAL_ADMIN_ENV) + f"{SIGNING_KEY_ENV}={DEV_SIGNING_KEY}\r\n",
+            NO_SSO,
+            KEY_MISSING,
+            NO_CLICKHOUSE,
+            id="local-admin-crlf-dev-key",
+        ),
+        pytest.param(
+            _assignments(LOCAL_ADMIN_ENV) + f"{SIGNING_KEY_ENV}={DEV_SIGNING_KEY} # placeholder\n",
+            NO_SSO,
+            KEY_MISSING,
+            NO_CLICKHOUSE,
+            id="local-admin-dev-key-with-inline-comment",
+        ),
+        pytest.param(
+            _assignments(LOCAL_ADMIN_ENV) + REAL_KEY + DEV_KEY,
+            NO_SSO,
+            KEY_MISSING,
+            NO_CLICKHOUSE,
+            id="local-admin-real-key-then-dev-key",
+        ),
+        pytest.param(
+            "DEFAULT_ADMIN_USERNAME=root@local\nDEFAULT_ADMIN_USERNAME=root@local\n",
+            NO_SSO,
+            KEY_UNNEEDED,
+            NO_CLICKHOUSE,
+            id="duplicated-username-without-password-is-not-sign-in",
         ),
     ],
 )

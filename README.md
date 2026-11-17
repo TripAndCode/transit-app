@@ -421,9 +421,9 @@ Every reader page works signed out, whether or not SSO is configured, and so
 does `POST /api/{agency_id}/delays/refresh`, under a per-caller rate limit
 (per address, or per account when signed in) and a per-agency cooldown. Admin routes need an admin session; the account
 routes (`/api/me/*`, saved conversations) need a signed-in caller. Leaving all
-OAuth variables unset runs the app
-in anonymous-only mode: nobody can sign in through SSO, only the break-glass
-account when it is set. Do not commit `.env`, API keys, OAuth secrets, database
+OAuth variables unset turns off SSO sign-in; only the break-glass account can
+sign in, and only when it and `SESSION_SIGNING_KEY` are set. With neither, the
+app runs in anonymous-only mode. Do not commit `.env`, API keys, OAuth secrets, database
 passwords, or private keys.
 
 ### Secret scanning

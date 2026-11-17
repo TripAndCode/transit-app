@@ -36,6 +36,12 @@ def test_get_signer_falls_back_to_dev_key_when_blank(monkeypatch):
     assert _get_signer().secret_keys == [b"dev-only-not-secret"]
 
 
+def test_get_signer_uses_the_key_without_its_surrounding_whitespace(monkeypatch):
+    """The startup guard and every signer see one normalised value."""
+    monkeypatch.setenv("SESSION_SIGNING_KEY", "  padded-key \r")
+    assert _get_signer().secret_keys == [b"padded-key"]
+
+
 def test_an_oauth_tx_cookie_forged_with_the_dev_key_is_rejected_under_a_real_key(monkeypatch):
     """The dev key is public, so anyone can sign with it; a deployment with a
     real key must not accept what it signed."""

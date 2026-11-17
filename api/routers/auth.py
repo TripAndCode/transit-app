@@ -44,7 +44,7 @@ from api.security import (
     token_hash,
     verify_local_login_password,
 )
-from api.sso import session_signing_key, sso_status
+from api.sso import local_admin_enabled, session_signing_key, sso_status
 from pipeline.audit import record_event
 
 _log = logging.getLogger(__name__)
@@ -57,12 +57,6 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000")
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 TX_COOKIE = "oauth_tx"
 TX_TTL_SEC = 5 * 60
-
-
-def local_admin_enabled() -> bool:
-    """True when both break-glass local-admin env vars are set. Read live
-    (not import-frozen) so tests can monkeypatch + reimport like the OAuth vars."""
-    return bool(os.environ.get("DEFAULT_ADMIN_USERNAME")) and bool(os.environ.get("DEFAULT_ADMIN_PASSWORD"))
 
 
 async def seed_local_admin(pool: asyncpg.Pool) -> None:
@@ -132,8 +126,8 @@ async def seed_local_admin(pool: asyncpg.Pool) -> None:
 def _get_signer() -> URLSafeTimedSerializer:
     """Build the oauth_tx signer on each use rather than at import time, so
     it reads ``SESSION_SIGNING_KEY`` after ``api.main``'s startup validation
-    has had a chance to reject a missing key in production, instead of
-    baking in the dev-only fallback key permanently at module import."""
+    has had a chance to reject a missing or dev key whenever a sign-in method
+    is on, instead of baking in the dev-only fallback key at module import."""
     return URLSafeTimedSerializer(session_signing_key(), salt="oauth-tx")
 
 

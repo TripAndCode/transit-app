@@ -7,8 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 import api.main
-from api.main import _DEV_SIGNING_KEY, _validate_cors_origins, _validate_session_signing_key
+from api.main import _validate_cors_origins, _validate_session_signing_key
 from api.middleware.forwarded import ForwardedClientMiddleware
+from api.sso import DEV_SIGNING_KEY, LOCAL_ADMIN_ENV, SIGNING_KEY_ENV, SSO_ENV
 
 
 def test_validate_cors_origins_rejects_wildcard_with_credentials():
@@ -43,22 +44,11 @@ def test_validate_cors_origins_rejects_mixed_list_with_wildcard_and_credentials(
         _validate_cors_origins(["http://localhost:5173", "*"], allow_credentials=True)
 
 
-_SIGN_IN_ENV = (*api.main._AUTH_ENV, "SESSION_SIGNING_KEY", "DEFAULT_ADMIN_USERNAME", "DEFAULT_ADMIN_PASSWORD")
-
-
-@pytest.fixture
-def no_sign_in_env(monkeypatch):
-    """Startup reads the OAuth, signing-key and local-admin variables live, so a
-    shell exporting any of them would change which boot these tests exercise."""
-    for var in _SIGN_IN_ENV:
-        monkeypatch.delenv(var, raising=False)
-
-
 def test_session_key_guard_rejects_dev_default_when_auth_enabled():
-    """Booting an auth-enabled deployment with the dev signing key would make
-    every session/OAuth cookie forgeable. Fail loud at startup instead."""
+    """Booting an auth-enabled deployment with the dev signing key would let
+    anyone compute every cookie signer and keyed digest. Fail loud at startup instead."""
     with pytest.raises(RuntimeError, match="SESSION_SIGNING_KEY"):
-        _validate_session_signing_key(enabled=True, signing_key=_DEV_SIGNING_KEY)
+        _validate_session_signing_key(enabled=True, signing_key=DEV_SIGNING_KEY)
 
 
 def test_session_key_guard_allows_real_key_when_auth_enabled():
@@ -74,7 +64,7 @@ def test_session_key_guard_rejects_a_missing_key_when_auth_enabled():
 def test_session_key_guard_ignores_dev_default_when_auth_disabled():
     """Anonymous-only mode never mints those cookies, so the dev default is
     harmless there — don't block local/anon boots."""
-    _validate_session_signing_key(enabled=False, signing_key=_DEV_SIGNING_KEY)
+    _validate_session_signing_key(enabled=False, signing_key=DEV_SIGNING_KEY)
 
 
 def test_openapi_docs_off_when_unset(monkeypatch):
@@ -143,7 +133,7 @@ def test_dockerfile_reads_the_client_address_from_its_one_edge_proxy():
     assert "--forwarded-allow-ips" not in dockerfile
 
 
-async def test_lifespan_closes_pool_when_post_pool_setup_fails(no_sign_in_env, monkeypatch):
+async def test_lifespan_closes_pool_when_post_pool_setup_fails(monkeypatch):
     """``lifespan``'s cleanup after ``yield`` only runs once ``yield`` is
     reached -- a failure in post-pool startup (here, seed_local_admin) raises
     before that point and must close what startup already opened itself
@@ -168,7 +158,7 @@ async def test_lifespan_closes_pool_when_post_pool_setup_fails(no_sign_in_env, m
     mock_ch_client.close.assert_awaited_once()
 
 
-async def test_lifespan_failure_reports_the_startup_error_not_a_cleanup_error(no_sign_in_env, monkeypatch):
+async def test_lifespan_failure_reports_the_startup_error_not_a_cleanup_error(monkeypatch):
     """A failing close() must not replace the error that caused the shutdown.
 
     The startup exception is the actionable one; surfacing a secondary
@@ -191,7 +181,7 @@ async def test_lifespan_failure_reports_the_startup_error_not_a_cleanup_error(no
             pass
 
 
-async def test_lifespan_opens_the_pool_with_its_session_settings_as_startup_parameters(no_sign_in_env, monkeypatch):
+async def test_lifespan_opens_the_pool_with_its_session_settings_as_startup_parameters(monkeypatch):
     """A SET in a connection init is undone by the RESET ALL the pool runs on
     every release; a startup parameter is what RESET ALL returns to. A failing
     seed_local_admin ends startup right after the pool opens."""
@@ -216,7 +206,7 @@ def test_the_forwarded_client_address_is_set_outside_every_other_middleware():
     assert api.main.app.user_middleware[0].cls is ForwardedClientMiddleware
 
 
-async def test_lifespan_boots_with_no_llm_provider_configured(no_sign_in_env, monkeypatch, caplog):
+async def test_lifespan_boots_with_no_llm_provider_configured(monkeypatch, caplog):
     """A deployment with no LLM key still serves the deterministic notebook, so
     an empty provider ladder must not stop startup. seed_local_admin failing
     marks the first step after the provider check was passed."""
@@ -239,15 +229,23 @@ async def test_lifespan_boots_with_no_llm_provider_configured(no_sign_in_env, mo
     assert "No LLM provider key configured" in caplog.text
 
 
-_OAUTH = {
-    "GOOGLE_CLIENT_ID": "g",
-    "GOOGLE_CLIENT_SECRET": "gs",
-    "GITHUB_CLIENT_ID": "h",
-    "GITHUB_CLIENT_SECRET": "hs",
-}
-_LOCAL_ADMIN = {"DEFAULT_ADMIN_USERNAME": "root@local", "DEFAULT_ADMIN_PASSWORD": "correct-horse-battery-staple"}
-_REAL_KEY = {"SESSION_SIGNING_KEY": "a-real-random-secret"}
-_DEV_KEY = {"SESSION_SIGNING_KEY": _DEV_SIGNING_KEY}
+async def _boot(monkeypatch, env: dict[str, str], expect: str = "booted") -> None:
+    """Run the real lifespan with the pool and ClickHouse mocked; seed_local_admin
+    raises "booted", so that message means every startup check passed."""
+    for var, value in env.items():
+        monkeypatch.setenv(var, value)
+    monkeypatch.setattr(api.main.asyncpg, "create_pool", AsyncMock(return_value=AsyncMock()))
+    monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=AsyncMock()))
+    monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("booted")))
+    with pytest.raises(RuntimeError, match=expect):
+        async with api.main.lifespan(SimpleNamespace(state=SimpleNamespace())):
+            pass
+
+
+_OAUTH = dict(zip(SSO_ENV, ("g", "gs", "h", "hs"), strict=True))
+_LOCAL_ADMIN = dict(zip(LOCAL_ADMIN_ENV, ("root@local", "correct-horse-battery-staple"), strict=True))
+_REAL_KEY = {SIGNING_KEY_ENV: "k" * 64}
+_DEV_KEY = {SIGNING_KEY_ENV: DEV_SIGNING_KEY}
 _KEY_MESSAGE = "SESSION_SIGNING_KEY is missing or the public dev default"
 _PARTIAL_MESSAGE = "Partial OAuth env"
 
@@ -264,7 +262,23 @@ def _first_n_oauth_vars(n: int) -> dict[str, str]:
         pytest.param(_REAL_KEY, None, id="key-alone-boots"),
         pytest.param(_LOCAL_ADMIN, _KEY_MESSAGE, id="local-admin-no-key-refused"),
         pytest.param({**_LOCAL_ADMIN, "SESSION_SIGNING_KEY": ""}, _KEY_MESSAGE, id="local-admin-blank-key-refused"),
+        pytest.param({**_LOCAL_ADMIN, SIGNING_KEY_ENV: " \t "}, _KEY_MESSAGE, id="local-admin-whitespace-key-refused"),
         pytest.param({**_LOCAL_ADMIN, **_DEV_KEY}, _KEY_MESSAGE, id="local-admin-dev-key-refused"),
+        pytest.param(
+            {**_LOCAL_ADMIN, SIGNING_KEY_ENV: f"{DEV_SIGNING_KEY} "},
+            _KEY_MESSAGE,
+            id="local-admin-dev-key-trailing-space-refused",
+        ),
+        pytest.param(
+            {**_LOCAL_ADMIN, SIGNING_KEY_ENV: f" {DEV_SIGNING_KEY}"},
+            _KEY_MESSAGE,
+            id="local-admin-dev-key-leading-space-refused",
+        ),
+        pytest.param(
+            {**_OAUTH, SIGNING_KEY_ENV: f"{DEV_SIGNING_KEY}\r"},
+            _KEY_MESSAGE,
+            id="oauth-dev-key-carriage-return-refused",
+        ),
         pytest.param({**_LOCAL_ADMIN, **_REAL_KEY}, None, id="local-admin-real-key-boots"),
         pytest.param({**_OAUTH, **_REAL_KEY}, None, id="oauth-real-key-boots"),
         pytest.param(_OAUTH, _KEY_MESSAGE, id="oauth-no-key-refused"),
@@ -283,16 +297,25 @@ def _first_n_oauth_vars(n: int) -> dict[str, str]:
         ),
     ],
 )
-async def test_lifespan_sign_in_configuration(no_sign_in_env, monkeypatch, env, refusal):
+async def test_lifespan_sign_in_configuration(monkeypatch, env, refusal):
     """Every sign-in method needs a real signing key; OAuth needs all four of its
-    client variables or none. seed_local_admin runs right after both checks, so
-    reaching it is what "boots" means here."""
-    for var, value in env.items():
-        monkeypatch.setenv(var, value)
-    monkeypatch.setattr(api.main.asyncpg, "create_pool", AsyncMock(return_value=AsyncMock()))
-    monkeypatch.setattr(api.main, "get_ch_client", AsyncMock(return_value=AsyncMock()))
-    monkeypatch.setattr(api.main, "seed_local_admin", AsyncMock(side_effect=RuntimeError("booted")))
+    client variables or none."""
+    await _boot(monkeypatch, env, expect=refusal or "booted")
 
-    with pytest.raises(RuntimeError, match=refusal or "booted"):
-        async with api.main.lifespan(SimpleNamespace(state=SimpleNamespace())):
-            pass
+
+_SHORT_KEY_WARNING = "SESSION_SIGNING_KEY is shorter than 32 characters"
+
+
+@pytest.mark.parametrize(
+    ("env", "warns"),
+    [
+        pytest.param({**_LOCAL_ADMIN, SIGNING_KEY_ENV: "x" * 31}, True, id="local-admin-short-key-warns-and-boots"),
+        pytest.param({**_OAUTH, SIGNING_KEY_ENV: "x" * 31}, True, id="oauth-short-key-warns-and-boots"),
+        pytest.param({**_LOCAL_ADMIN, SIGNING_KEY_ENV: "x" * 32}, False, id="local-admin-32-char-key-is-quiet"),
+        pytest.param({SIGNING_KEY_ENV: "x" * 8}, False, id="no-sign-in-short-key-is-quiet"),
+    ],
+)
+async def test_lifespan_warns_about_a_short_signing_key_without_refusing_it(monkeypatch, caplog, env, warns):
+    with caplog.at_level("WARNING", logger=api.main._log.name):
+        await _boot(monkeypatch, env)
+    assert (_SHORT_KEY_WARNING in caplog.text) is warns

@@ -44,8 +44,8 @@ from api.routers.admin_ask import router as admin_ask_router
 from api.routers.admin_flags import router as admin_flags_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
-from api.routers.auth import local_admin_enabled, seed_local_admin
 from api.routers.auth import router as auth_router
+from api.routers.auth import seed_local_admin
 from api.routers.conversations import router as conversations_router
 from api.routers.debug import router as debug_router
 from api.routers.internal import collector_router
@@ -64,7 +64,7 @@ from api.routers.static import router as static_router
 from api.security import cookie_secure
 from api.sso import DEV_SIGNING_KEY as _DEV_SIGNING_KEY
 from api.sso import SSO_ENV as _AUTH_ENV
-from api.sso import configured_signing_key, session_signing_key
+from api.sso import configured_signing_key, local_admin_enabled, session_signing_key, sign_in_enabled
 from api.sso import sso_status as auth_status
 from pipeline.db import DEFAULT_DATABASE_URL
 from pipeline.flags import aflag, flag
@@ -112,17 +112,30 @@ def _validate_cors_origins(origins: list[str], allow_credentials: bool) -> None:
         )
 
 
+# `openssl rand -hex 32` yields 64 characters; anything under 32 is a
+# hand-typed value worth a warning, though refusing it would strand
+# deployments that already run on one.
+_MIN_SIGNING_KEY_LENGTH = 32
+
+
 def _validate_session_signing_key(enabled: bool, signing_key: str | None) -> None:
     """Refuse to boot with any sign-in method on (OAuth or the break-glass local
     admin) unless SESSION_SIGNING_KEY is a real secret. A missing key falls back
-    to the public dev key, so the OAuth transaction cookie and the keyed
-    failed-login fingerprint would both be computable by anyone. No-op when no
-    sign-in method is on."""
-    if enabled and (signing_key is None or signing_key == _DEV_SIGNING_KEY):
+    to the public dev key, which every cookie signer and keyed digest would then
+    use, so anyone could compute them. Warns about a short key without refusing
+    it. No-op when no sign-in method is on."""
+    if not enabled:
+        return
+    if signing_key is None or signing_key == _DEV_SIGNING_KEY:
         raise RuntimeError(
             "SESSION_SIGNING_KEY is missing or the public dev default while a sign-in method "
             "(OAuth or DEFAULT_ADMIN_USERNAME/DEFAULT_ADMIN_PASSWORD) is enabled. "
             "Generate one with `openssl rand -hex 32` and set it."
+        )
+    if len(signing_key) < _MIN_SIGNING_KEY_LENGTH:
+        _log.warning(
+            "SESSION_SIGNING_KEY is shorter than %d characters; replace it with `openssl rand -hex 32`.",
+            _MIN_SIGNING_KEY_LENGTH,
         )
 
 
@@ -195,7 +208,7 @@ async def lifespan(app: FastAPI):
             f"Partial OAuth env: missing {', '.join(missing)}. "
             "Set all four OAuth client variables or none — half-wired OAuth is unsafe."
         )
-    _validate_session_signing_key(sso_enabled or local_admin_enabled(), configured_signing_key())
+    _validate_session_signing_key(sign_in_enabled(), configured_signing_key())
     # max_size=20 (asyncpg default 10): a cold overview request holds at most
     # OVERVIEW_FANOUT_LIMIT connections at once. It takes no request
     # connection; each fanned-out stage acquires its own under that bound, and

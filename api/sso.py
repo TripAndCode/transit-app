@@ -1,13 +1,16 @@
-"""Which sign-in configuration this process has, and the key that signs its cookies.
+"""Which sign-in methods this process has, and the key that signs its cookies.
 
 Read from the environment on every call, so a test's monkeypatch and a
-runtime config change both take effect without re-importing the app. All
-four OAuth client variables set means Google/GitHub sign-in is on; none set
-means it is off; a partial set is refused at startup by ``api.main.lifespan``.
+runtime config change both take effect without re-importing the app.
 
-``SESSION_SIGNING_KEY`` is not one of them: every sign-in method needs it,
-the break-glass local admin included, and startup refuses a missing or dev
-key whenever any sign-in method is on.
+- OAuth (Google/GitHub) is on when all four ``SSO_ENV`` client variables are
+  set and off when none is; a partial set is refused at startup by
+  ``api.main.lifespan``.
+- The break-glass local admin is on when both ``LOCAL_ADMIN_ENV`` variables
+  are set.
+
+``SESSION_SIGNING_KEY`` belongs to neither: every sign-in method needs it, and
+startup refuses a missing or dev key whenever any sign-in method is on.
 """
 
 import os
@@ -26,6 +29,8 @@ SSO_ENV = (
     "GITHUB_CLIENT_SECRET",
 )
 
+LOCAL_ADMIN_ENV = ("DEFAULT_ADMIN_USERNAME", "DEFAULT_ADMIN_PASSWORD")
+
 
 def sso_status() -> tuple[bool, list[str]]:
     """``(enabled, missing)``: enabled iff every OAuth client variable in ``SSO_ENV`` is set."""
@@ -33,13 +38,25 @@ def sso_status() -> tuple[bool, list[str]]:
     return (not missing, missing)
 
 
-def configured_signing_key() -> str | None:
-    """The operator's ``SESSION_SIGNING_KEY``, or None when it is unset or blank.
+def local_admin_enabled() -> bool:
+    """True when both break-glass local-admin variables are set."""
+    return all(os.environ.get(k) for k in LOCAL_ADMIN_ENV)
 
-    ``.env.example`` ships the variable empty, so a copied ``.env`` hands the
-    process an empty string rather than leaving it unset."""
-    key = os.environ.get(SIGNING_KEY_ENV, "")
-    return key if key.strip() else None
+
+def sign_in_enabled() -> bool:
+    """True when any sign-in method is on: OAuth or the break-glass local admin."""
+    return sso_status()[0] or local_admin_enabled()
+
+
+def configured_signing_key() -> str | None:
+    """The operator's ``SESSION_SIGNING_KEY`` with surrounding whitespace removed,
+    or None when nothing is left.
+
+    The guard and every signer see this one normalised value, so a padded dev
+    key (Make keeps the space before an inline ``# comment`` in ``.env``) is
+    still recognised as the dev key. ``.env.example`` ships the variable
+    empty, so a copied ``.env`` hands the process an empty string."""
+    return os.environ.get(SIGNING_KEY_ENV, "").strip() or None
 
 
 def session_signing_key() -> str:
