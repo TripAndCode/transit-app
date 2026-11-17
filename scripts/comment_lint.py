@@ -23,12 +23,14 @@ _PRAGMA = re.compile(
     r"eslint|@ts-|prettier|biome-|v8 ignore|istanbul )",
 )
 
-# A rule of four or more drawing characters, alone or around a title. Box-drawing
-# rules count too; a short run or an arrow inside prose does not.
+# A rule of drawing characters, box-drawing included: four or more alone, four or
+# more opening any text (`# ---- note` is a divider too), or a title closed by a
+# rule of four or more. A short run or an arrow inside prose is not one. The
+# trailing rule follows whitespace, which keeps the match linear on a long line.
 _RULE_CHARS = r"=\-*_#~─━═"
 _BANNER = re.compile(
     rf"^[{_RULE_CHARS}]{{4,}}$"
-    rf"|^[{_RULE_CHARS}]{{2,}}\s.*[{_RULE_CHARS}]{{4,}}$"
+    rf"|^[{_RULE_CHARS}]{{2,}}\s(?:.*\s)?[{_RULE_CHARS}]{{4,}}$"
     rf"|^[{_RULE_CHARS}]{{4,}}\s"
 )
 

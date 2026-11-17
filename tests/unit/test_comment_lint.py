@@ -85,6 +85,9 @@ def test_allows_short_rule_of_dashes():
         "# ━━━━━━━━━━━━━━━━━━",
         "# ==== Section ====",
         "// ── Section ──────────",
+        "# =====",
+        "# ---- note",
+        "//---- x",
     ],
 )
 def test_flags_a_titled_or_box_drawing_banner(line):
@@ -93,8 +96,17 @@ def test_flags_a_titled_or_box_drawing_banner(line):
 
 
 def test_allows_an_arrow_or_a_short_rule_in_prose():
-    lines = ["# before → after, a ── b", "# --- ok ---", "x = 1"]
+    lines = ["# before → after, a ── b", "# --- ok ---", "# ━━ x ━━", "x = 1"]
     assert lint.find_violations("x.py", lines) == []
+
+
+@pytest.mark.parametrize("line", ["# == " + "=" * 20000 + "x", "# ── a " + "─" * 20000 + " b"])
+def test_a_long_line_of_rule_characters_is_judged_in_linear_time(line):
+    import time
+
+    started = time.perf_counter()
+    lint.find_violations("x.py", [line, "x = 1"])
+    assert time.perf_counter() - started < 0.5
 
 
 def test_flags_reference_to_another_comment():
