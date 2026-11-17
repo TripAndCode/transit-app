@@ -69,6 +69,14 @@ def refresh_static(
             raise StaticFetchError("the source sent no timetable, though this agency has none loaded")
         return None
 
+    load_fetched(agency_id, conn, dest_dir, zip_path, strategy, ch_client=ch_client)
+    return zip_path
+
+
+def load_fetched(agency_id: int, conn, dest_dir: pathlib.Path, zip_path: pathlib.Path, strategy, *, ch_client) -> None:
+    """Load *zip_path*, which *strategy*'s ``fetch`` persisted under
+    *dest_dir*, as the agency's timetable, then drop the caches built from
+    the old one and let the strategy record what loaded."""
     load_static(str(zip_path), agency_id, conn, ch_client=ch_client)
     day_types.invalidate_day_types()
     route_catalog.invalidate_retired_routes()
@@ -84,7 +92,6 @@ def refresh_static(
     except Exception:
         logger.warning(f"[static_fetcher] agency={agency_id} loaded but could not record it", exc_info=True)
     logger.info(f"[static_fetcher] agency={agency_id} loaded {zip_path.name}")
-    return zip_path
 
 
 def refresh_static_recorded(
@@ -112,10 +119,24 @@ def refresh_static_recorded(
         if loaded is None:
             run.status = "unchanged"
         else:
-            with conn.cursor() as cur:
-                cur.execute("SELECT count(*) FROM static_routes WHERE agency_id = %s", (agency_id,))
-                run.rows = cur.fetchone()[0]
+            run.rows = _route_count(conn, agency_id)
     return loaded
+
+
+def load_fetched_recorded(
+    agency_id: int, conn, dest_dir: pathlib.Path, zip_path: pathlib.Path, strategy_name: str, *, ch_client
+) -> None:
+    """:func:`load_fetched`, recorded as a ``static`` run the way
+    :func:`refresh_static_recorded` records one that loaded."""
+    with pipeline_runs.record_run(conn, "static", agency_id=agency_id) as run:
+        load_fetched(agency_id, conn, dest_dir, zip_path, get_static_strategy(strategy_name), ch_client=ch_client)
+        run.rows = _route_count(conn, agency_id)
+
+
+def _route_count(conn, agency_id: int) -> int:
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM static_routes WHERE agency_id = %s", (agency_id,))
+        return cur.fetchone()[0]
 
 
 def refresh_all(conn, dest_dir: pathlib.Path, *, force: bool = False, ch_client) -> tuple[int, int, list[int]]:

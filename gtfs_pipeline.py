@@ -247,7 +247,16 @@ def _require_agency(args, conn) -> int:
 
 
 def cmd_add_agency(args):
-    """Insert a new agency row and print the assigned agency_id."""
+    """Add an agency. With ``--static-url``, probe the feed against the
+    timetable first (``pipeline.feed_probe``) and add it only when the probe
+    accepts it; without, insert the row as given, with no strategies."""
+    if args.static_url is None:
+        _add_agency_unprobed(args)
+        return
+    _add_agency_probed(args)
+
+
+def _add_agency_unprobed(args) -> None:
     conn = _get_conn()
     with conn.cursor() as cur:
         cur.execute(
@@ -257,7 +266,66 @@ def cmd_add_agency(args):
         aid = cur.fetchone()[0]
     conn.commit()
     logger.info(f"Added agency {aid}: {args.name}")
+    logger.warning(
+        "It has no ingest strategy, so its feed is read as aomori_regex. Pass --static-url to probe the feed "
+        "and choose the strategies instead."
+    )
     conn.close()
+
+
+def _add_agency_probed(args) -> None:
+    import pathlib
+
+    from pipeline import feed_probe
+    from pipeline.clickhouse import get_client
+    from pipeline.poller import configured_interval_sec
+    from pipeline.static_fetcher import DEFAULT_STATIC_DEST
+    from pipeline.url_guard import redact_url
+
+    seconds = feed_probe.DEFAULT_PROBE_SECONDS if args.probe_seconds is None else args.probe_seconds
+    interval = configured_interval_sec()
+    logger.info(f"add_agency: probing {redact_url(args.feed_url)} for {seconds:.0f}s, every {interval:.0f}s")
+    conn = _get_conn()
+    try:
+        result = feed_probe.onboard(
+            conn,
+            DATABASE_URL,
+            args.feed_url,
+            args.static_url,
+            dest_dir=pathlib.Path(DEFAULT_STATIC_DEST),
+            ch_client=get_client,
+            dry_run=args.dry_run,
+            name=args.name,
+            seconds=seconds,
+            interval=interval,
+            accept_empty=args.accept_empty,
+        )
+    finally:
+        conn.close()
+    sys.stdout.write("\n".join(feed_probe.report_lines(result.outcome)) + "\n")
+    accepted = result.outcome.decision.accepted
+    if args.dry_run:
+        logger.info("add_agency: dry run; nothing was written.")
+        sys.exit(0 if accepted else 1)
+    if result.store_error is not None:
+        logger.error(f"add_agency: nothing was added: the stores cannot take a timetable load ({result.store_error}).")
+        sys.exit(1)
+    if result.agency_id is None:
+        logger.error("add_agency: nothing was added.")
+        sys.exit(1)
+    if result.load_error is not None:
+        logger.error(
+            f"add_agency: agency {result.agency_id} was added, but its timetable did not load "
+            f"({result.load_error}). Until it does, ingest refuses the agency; load it with "
+            f"`refresh-static --agency-id {result.agency_id}`."
+        )
+        sys.exit(1)
+    sys.stdout.write(
+        f"agency_id: {result.agency_id}\n"
+        "Next: the poller picks the agency up on its next cycle and Pulse shows its polls as they arrive. "
+        "Each JST day reaches history at the following JST midnight, and the archive replaces it once the "
+        "UTC day has closed.\n"
+    )
 
 
 def cmd_seed_agencies(args):
@@ -775,9 +843,9 @@ def cmd_poll(args):
     import pathlib
     import threading
 
-    from pipeline.poller import DEFAULT_INTERVAL_SEC, Poller, install_stop_handlers
+    from pipeline.poller import Poller, configured_interval_sec, install_stop_handlers
 
-    interval = args.interval or float(os.environ.get("POLL_INTERVAL_SEC") or DEFAULT_INTERVAL_SEC)
+    interval = args.interval or configured_interval_sec()
     archive_dir = pathlib.Path(args.archive_dir or os.environ.get("POLLER_ARCHIVE_DIR") or "archive")
     if os.environ.get("OBJECT_STORE_BUCKET"):
         logger.warning("poll: OBJECT_STORE_BUCKET is set, but the poller keeps its tarballs on %s only", archive_dir)
@@ -1061,10 +1129,26 @@ def main():
     parser = argparse.ArgumentParser(description="GTFS pipeline CLI")
     sub = parser.add_subparsers(dest="command")
 
-    p_add = sub.add_parser("add_agency")
-    p_add.add_argument("--name", required=True)
+    p_add = sub.add_parser(
+        "add_agency",
+        help="Probe a GTFS-RT feed against its static zip and add it with the strategies the probe chooses",
+    )
     p_add.add_argument("--feed-url", required=True)
-    p_add.add_argument("--static-url", default=None)
+    p_add.add_argument(
+        "--static-url",
+        default=None,
+        help="GTFS static zip; given, the feed is probed first. Without it, --name is required and the row is "
+        "added with no strategies",
+    )
+    p_add.add_argument("--name", default=None, help="default: the static zip's agency.txt name")
+    p_add.add_argument(
+        "--probe-seconds",
+        type=float,
+        default=None,
+        help="how long to poll the feed (default 120), once every $POLL_INTERVAL_SEC, else 60, seconds",
+    )
+    p_add.add_argument("--accept-empty", action="store_true", help="add a feed that sent nothing during the probe")
+    p_add.add_argument("--dry-run", action="store_true", help="probe and report; write nothing")
 
     p_seed = sub.add_parser("seed_agencies", help="Upsert agencies from a CSV (idempotent)")
     p_seed.add_argument("csv", help="Path to agencies CSV (default: ./agencies.csv)", nargs="?", default="agencies.csv")
@@ -1196,6 +1280,13 @@ def main():
 
     args = parser.parse_args()
     if args.command == "add_agency":
+        if args.static_url is None:
+            if not args.name:
+                p_add.error("--name is required without --static-url")
+            if args.dry_run or args.accept_empty or args.probe_seconds is not None:
+                p_add.error("--probe-seconds, --accept-empty and --dry-run need --static-url")
+        if args.probe_seconds is not None and args.probe_seconds < 0:
+            p_add.error("--probe-seconds must be >= 0")
         cmd_add_agency(args)
     elif args.command == "seed_agencies":
         cmd_seed_agencies(args)

@@ -37,6 +37,7 @@ import pathlib
 import re
 import zipfile
 from collections import defaultdict
+from collections.abc import Iterator
 from datetime import date, datetime
 
 from psycopg2.extras import execute_values
@@ -104,15 +105,21 @@ def resolve_static_zip(path: str) -> pathlib.Path:
     return p
 
 
-def read_static_rows(zf: zipfile.ZipFile, filename: str) -> list[list]:
-    """*filename*'s rows as the loader reads them: the columns
+def iter_static_rows(zf: zipfile.ZipFile, filename: str) -> Iterator[list]:
+    """*filename*'s rows as the loader reads them, one at a time: the columns
     ``_STATIC_FILE_MAP`` lists for it, in that order, each the file's raw text
     or None where the file has no such column. The caller checks that the zip
-    holds the file."""
+    holds the file. Raises ``UnicodeDecodeError`` for a file that is not
+    UTF-8."""
     csv_cols = next(cols for name, _table, cols in _STATIC_FILE_MAP if name == filename)
     with zf.open(filename) as f:
-        reader = csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig"))
-        return [[row.get(c) for c in csv_cols] for row in reader]
+        for row in csv.DictReader(io.TextIOWrapper(f, encoding="utf-8-sig")):
+            yield [row.get(c) for c in csv_cols]
+
+
+def read_static_rows(zf: zipfile.ZipFile, filename: str) -> list[list]:
+    """:func:`iter_static_rows`, as a list."""
+    return list(iter_static_rows(zf, filename))
 
 
 def _calendar_rows(raw_rows: list[list]) -> list[list]:
