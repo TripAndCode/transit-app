@@ -119,8 +119,10 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   and never install an environment: no `poetry install` or `npm ci`, and no bare
   `poetry run` in a worktree, which creates an empty virtualenv there. `AGENTS.md`
   says how to route `poetry run` and link `frontend/node_modules` to the main
-  checkout's. Containers, the shared test databases and environments on this host
-  belong to every session on it. A question that needs one of them is an unconfirmed
-  finding, reported like an unconfirmed absence: at `confidence: low`, its failure
-  statement naming the check that would confirm it.
+  checkout's; a branch that changes its dependencies can't be checked that way.
+  Containers, the shared test databases and environments on this host belong to
+  every session on it. A question that needs a database test, a container started or
+  removed, or an environment installed is an unconfirmed finding, reported like an
+  unconfirmed absence: at `confidence: low`, its failure statement naming the check
+  that would confirm it.
 - Do not edit, commit, or push.
