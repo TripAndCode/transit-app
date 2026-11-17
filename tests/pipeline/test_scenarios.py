@@ -2191,7 +2191,7 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
         pytest.skip("requires `make ch-test` (RUN_CH_INTEGRATION=1)")
     from api.main import app
     from api.middleware.ratelimit import limiter
-    from api.sso import SSO_ENV
+    from api.sso import LOCAL_ADMIN_ENV, SIGNING_KEY_ENV, SSO_ENV
     from pipeline.cache import clear_all
     from tests.conftest import _CH_TEST, _ch_test_client, _database_url, _test_pool, confirm_rt_field_coverage
 
@@ -2209,7 +2209,7 @@ async def observed(request, reset_sql, _ch_schema, tmp_path_factory) -> Observed
             stack.callback(_restore_app_state, app, {n: getattr(app.state, n, _ABSENT) for n in ("pool", "ch_client")})
             stack.callback(_empty_stores, pg_conn, ch_client, reset_sql)
             mp = stack.enter_context(pytest.MonkeyPatch.context())
-            for var in SSO_ENV:
+            for var in (*SSO_ENV, *LOCAL_ADMIN_ENV, SIGNING_KEY_ENV):
                 mp.delenv(var, raising=False)
             mp.setenv("COLLECTOR_INGEST_SECRET", _COLLECTOR_SECRET)
 
