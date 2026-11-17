@@ -21,9 +21,8 @@ async def test_two_flushes_of_the_same_key_add_up(aconn):
             assert await flush(buf, pool) == 1
     finally:
         await pool.close()
-    row = await aconn.fetchrow("SELECT requests, errors, via_api_key FROM user_activity_daily WHERE user_id = $1", uid)
+    row = await aconn.fetchrow("SELECT requests, errors FROM user_activity_daily WHERE user_id = $1", uid)
     assert (row["requests"], row["errors"]) == (4, 2)
-    assert row["via_api_key"] is False
 
 
 @pytest.mark.asyncio

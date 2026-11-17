@@ -16,8 +16,8 @@ async def test_rows_past_retention_go_and_recent_rows_stay(aconn):
     old_day, new_day = date.today() - timedelta(days=800), date.today() - timedelta(days=30)
     for day in (old_day, new_day):
         await aconn.execute(
-            "INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)"
-            " VALUES ($1, $2, '/api/me', 'GET', NULL, false, 1, 0)",
+            "INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, requests, errors)"
+            " VALUES ($1, $2, '/api/me', 'GET', NULL, 1, 0)",
             uid,
             day,
         )

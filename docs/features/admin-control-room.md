@@ -232,10 +232,8 @@ Endpoints:
   active sessions, identified by a display-safe hash prefix.
 
 Tables read/written: `users`, `sessions` (revoked on suspend and delete,
-and one at a time), `oauth_identities`, `api_keys` (revoked and
-reattributed on delete; no route issues or lists them any more),
-`ask_conversations` (deleted on delete). Every mutation records an
-`admin_audit` entry.
+and one at a time), `oauth_identities`, `ask_conversations` (deleted on
+delete). Every mutation records an `admin_audit` entry.
 
 Sign-in is for administrators only, and there is no invite. An admin is an
 address listed in `ADMIN_EMAILS`, created or promoted at its first OAuth
@@ -245,8 +243,7 @@ too. Any other OAuth identity is refused with `not_admin` before anything is
 written.
 
 `DELETE /api/admin/users/{uid}` is a soft-delete. It anonymizes the row,
-sets `users.deleted_at`, revokes the user's API keys and replaces the owner
-address recorded on them, and deletes the user's `ask_conversations` (their
+sets `users.deleted_at`, and deletes the user's `ask_conversations` (their
 Notebook investigations), cascading to `ask_conversation_messages`. A deleted
 user is terminal. A single or bulk PATCH that includes one, or a second DELETE,
 each get a 409.

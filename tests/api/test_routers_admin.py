@@ -4,7 +4,6 @@ the self-guard, last-admin guard, suspend kills sessions, and soft-delete anonym
 
 import asyncio
 import json
-import secrets
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -592,10 +591,10 @@ async def test_user_activity_sums_the_window_per_route(admin_client, aconn):
     _, uid, _ = await _seed(aconn, email="usage@x")
     await aconn.execute(
         """
-        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
-        VALUES ($1, current_date,      '/api/{agency_id}/overview/summary', 'GET', 1, false, 3, 1),
-               ($1, current_date - 1,  '/api/{agency_id}/overview/summary', 'GET', 1, false, 2, 0),
-               ($1, current_date - 40, '/api/{agency_id}/overview/summary', 'GET', 1, false, 9, 9)
+        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, requests, errors)
+        VALUES ($1, current_date,      '/api/{agency_id}/overview/summary', 'GET', 1, 3, 1),
+               ($1, current_date - 1,  '/api/{agency_id}/overview/summary', 'GET', 1, 2, 0),
+               ($1, current_date - 40, '/api/{agency_id}/overview/summary', 'GET', 1, 9, 9)
         """,
         uid,
     )
@@ -632,15 +631,12 @@ async def test_usage_refuses_an_agency_id_postgres_cannot_hold(admin_client, aco
 
 @pytest.mark.asyncio
 async def test_usage_splits_signed_in_and_signed_out_and_zero_fills_days(admin_client, aconn):
-    """signed_in sums every user_activity_daily row regardless of
-    via_api_key -- that column is no longer a distinction this app draws."""
     sid_admin, uid, _ = await _seed(aconn, role="admin")
     day = today_jst()
     await aconn.execute(
         """
-        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, via_api_key, requests, errors)
-        VALUES ($1, $2, '/api/agencies', 'GET', NULL, false, 2, 1),
-               ($1, $2, '/api/agencies', 'GET', NULL, true,  5, 0)
+        INSERT INTO user_activity_daily (user_id, day, route, method, agency_id, requests, errors)
+        VALUES ($1, $2, '/api/agencies', 'GET', NULL, 7, 1)
         """,
         uid,
         day,
@@ -787,55 +783,20 @@ async def test_suspension_transitions_still_stamp_and_clear_suspended_at(admin_c
 _HEADERS = {"Origin": "http://test"}
 
 
-async def _seed_key(conn, *, owner_user_id, owner_email, revoked_at=None):
-    return await conn.fetchval(
-        "INSERT INTO api_keys (key_hash, owner_user_id, owner_email, revoked_at) VALUES ($1, $2, $3, $4) RETURNING id",
-        token_hash(f"sk_{secrets.token_urlsafe(16)}"),
-        owner_user_id,
-        owner_email,
-        revoked_at,
-    )
-
-
 async def _delete(client, sid, uid):
     return await client.delete(f"/api/admin/users/{uid}", cookies={"sid": sid}, headers=_HEADERS)
 
 
 @pytest.mark.asyncio
-async def test_soft_delete_masks_and_revokes_every_key_the_user_owns(admin_client, aconn):
-    """Ownership is what the admin soft-delete uses: a key issued to the
-    account, or a legacy ownerless key recorded under its address in any
-    case. An already-revoked key keeps the time it was revoked."""
-    sid_admin, _, _ = await _seed(aconn, role="admin")
-    _, uid, _ = await _seed(aconn, email="keyed@x")
-    _, uid_other, _ = await _seed(aconn, email="other@x")
-    live_id = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x")
-    revoked_id = await _seed_key(aconn, owner_user_id=uid, owner_email="keyed@x", revoked_at=_ORIGINAL_SUSPENSION)
-    legacy_id = await _seed_key(aconn, owner_user_id=None, owner_email="Keyed@X")
-    other_id = await _seed_key(aconn, owner_user_id=uid_other, owner_email="other@x")
-
-    assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
-
-    keys = {r["id"]: r for r in await aconn.fetch("SELECT id, owner_email, revoked_at FROM api_keys")}
-    for key_id in (live_id, revoked_id, legacy_id):
-        assert keys[key_id]["owner_email"] == f"deleted-{uid}@local"
-        assert keys[key_id]["revoked_at"] is not None
-    assert keys[revoked_id]["revoked_at"] == _ORIGINAL_SUSPENSION
-    assert keys[other_id]["owner_email"] == "other@x"
-    assert keys[other_id]["revoked_at"] is None
-
-
-@pytest.mark.asyncio
-async def test_soft_delete_marks_the_row_deleted_and_audits_the_revoked_keys(admin_client, aconn):
+async def test_soft_delete_marks_the_row_deleted_and_audits_it(admin_client, aconn):
     sid_admin, _, _ = await _seed(aconn, role="admin")
     _, uid, _ = await _seed(aconn, email="marked@x")
-    key_id = await _seed_key(aconn, owner_user_id=uid, owner_email="marked@x")
     assert (await _delete(admin_client, sid_admin, uid)).status_code == 204
     assert await aconn.fetchval("SELECT deleted_at FROM users WHERE user_id=$1", uid) is not None
     after = await aconn.fetchval(
         "SELECT after::text FROM admin_audit WHERE action = 'user.deleted' AND target_id = $1", str(uid)
     )
-    assert json.loads(after)["api_keys_revoked"] == [key_id]
+    assert json.loads(after)["email"] == f"deleted-{uid}@local"
     assert "marked@x" not in after
 
 

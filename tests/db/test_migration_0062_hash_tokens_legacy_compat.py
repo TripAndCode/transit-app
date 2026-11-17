@@ -3,8 +3,8 @@
 `migrate up` runs while the previous release is still serving, and rolling the
 app back does not roll the schema back, so that release's SQL runs against
 0053's schema. The statements below are that release's, verbatim: it writes
-sessions with only the raw `sid`, and looks sessions and API keys up by the raw
-credential alone.
+sessions with only the raw `sid`, and looks sessions up by the raw credential
+alone.
 """
 
 import os
@@ -42,15 +42,10 @@ LEGACY_FIND_SESSION_BY_PREFIX = "SELECT sid FROM sessions WHERE user_id=$1 AND s
 LEGACY_DELETE_OWN_SESSION = "DELETE FROM sessions WHERE sid=$1 AND user_id=$2"
 # Admin suspend and soft-delete.
 LEGACY_DELETE_USER_SESSIONS = "DELETE FROM sessions WHERE user_id=$1"
-LEGACY_API_KEY_TIER = "SELECT tier FROM api_keys WHERE key = $1"
-# That release has no code path that writes api_keys: an operator provisions a
-# key by hand with the raw key and an owner email.
-LEGACY_PROVISION_API_KEY = "INSERT INTO api_keys (key, owner_email) VALUES ($1, $2)"
 
 HASH_ONLY_CREATE_SESSION = (
     "INSERT INTO sessions (sid_hash, user_id, expires_at, user_agent, ip) VALUES ($1, $2, $3, $4, $5::inet)"
 )
-HASH_ONLY_CREATE_API_KEY = "INSERT INTO api_keys (key_hash, owner_email) VALUES ($1, $2)"
 
 # The first has the shape `secrets.token_urlsafe(32)` mints. A backslash and a
 # non-ASCII character pin the digest to the UTF-8 bytes of the text as stored,
@@ -79,24 +74,11 @@ async def test_a_raw_only_session_gets_the_token_hash(aconn, uid, raw):
     assert await aconn.fetchval("SELECT sid_hash FROM sessions WHERE sid = $1", raw) == token_hash(raw)
 
 
-@RAW_CREDENTIALS
-async def test_a_raw_only_api_key_gets_the_token_hash(aconn, raw):
-    await aconn.execute(LEGACY_PROVISION_API_KEY, raw, "owner@test")
-    assert await aconn.fetchval("SELECT key_hash FROM api_keys WHERE key = $1", raw) == token_hash(raw)
-
-
 async def test_a_hash_only_session_is_left_alone(aconn, uid):
     digest = token_hash(secrets.token_urlsafe(32))
     await aconn.execute(HASH_ONLY_CREATE_SESSION, digest, uid, _expiry(), None, None)
     row = await aconn.fetchrow("SELECT sid, sid_hash FROM sessions WHERE user_id = $1", uid)
     assert (row["sid"], row["sid_hash"]) == (None, digest)
-
-
-async def test_a_hash_only_api_key_is_left_alone(aconn):
-    digest = token_hash(secrets.token_urlsafe(32))
-    await aconn.execute(HASH_ONLY_CREATE_API_KEY, digest, "owner@test")
-    row = await aconn.fetchrow("SELECT key, key_hash FROM api_keys WHERE owner_email = 'owner@test'")
-    assert (row["key"], row["key_hash"]) == (None, digest)
 
 
 async def test_a_supplied_session_hash_is_never_replaced(aconn, uid):
@@ -108,16 +90,6 @@ async def test_a_supplied_session_hash_is_never_replaced(aconn, uid):
         _expiry(),
     )
     assert await aconn.fetchval("SELECT sid_hash FROM sessions WHERE sid = 'raw-sid'") == "supplied-digest"
-
-
-async def test_a_supplied_api_key_hash_is_never_replaced(aconn):
-    await aconn.execute(
-        "INSERT INTO api_keys (key, key_hash, owner_email) VALUES ($1, $2, $3)",
-        "raw-key",
-        "supplied-digest",
-        "owner@test",
-    )
-    assert await aconn.fetchval("SELECT key_hash FROM api_keys WHERE key = 'raw-key'") == "supplied-digest"
 
 
 async def test_every_legacy_session_statement_works(aconn, uid):
@@ -144,28 +116,21 @@ async def test_a_legacy_session_is_found_by_its_hash(aconn, uid):
     assert await aconn.fetchval("SELECT user_id FROM sessions WHERE sid_hash = $1", token_hash(raw)) == uid
 
 
-async def test_the_legacy_api_key_lookup_works(aconn):
-    raw = secrets.token_urlsafe(32)
-    await aconn.execute(LEGACY_PROVISION_API_KEY, raw, "owner@test")
-    assert await aconn.fetchval(LEGACY_API_KEY_TIER, raw) == "pro"
-
-
 @pytest.mark.parametrize(
     "statement, index",
     [
         (LEGACY_LOAD_SESSION, "idx_sessions_sid"),
         (LEGACY_TOUCH_SESSION, "idx_sessions_sid"),
         (LEGACY_DELETE_EXPIRED_SESSION, "idx_sessions_sid"),
-        (LEGACY_API_KEY_TIER, "idx_api_keys_key"),
     ],
-    ids=["load-session", "touch-session", "delete-session", "api-key-tier"],
+    ids=["load-session", "touch-session", "delete-session"],
 )
 def test_raw_lookups_can_use_the_raw_index(pg_conn, statement, index):
     """The partial index is usable for a bound parameter, which is how the
     release issues these (asyncpg prepares every statement). A generic plan
     is the case that proves it: a custom plan sees the literal value.
 
-    The tables are filled and analyzed first. Nearly empty, every index costs
+    The table is filled and analyzed first. Nearly empty, every index costs
     about the same, so the planner's pick would depend on whatever statistics
     earlier tests left behind rather than on this index being usable."""
     with pg_conn.cursor() as cur:
@@ -176,11 +141,7 @@ def test_raw_lookups_can_use_the_raw_index(pg_conn, statement, index):
             "SELECT 'sid-' || g, %s, now() + interval '1 day' FROM generate_series(1, 2000) g",
             (user_id,),
         )
-        cur.execute(
-            "INSERT INTO api_keys (key, owner_email) SELECT 'key-' || g, 'plan@test' FROM generate_series(1, 2000) g"
-        )
         cur.execute("ANALYZE sessions")
-        cur.execute("ANALYZE api_keys")
         cur.execute("SET enable_seqscan = off")
         cur.execute("SET plan_cache_mode = force_generic_plan")
         cur.execute(f"PREPARE legacy_lookup(text) AS {statement}")
@@ -191,22 +152,19 @@ def test_raw_lookups_can_use_the_raw_index(pg_conn, statement, index):
 
 _COMPAT_OBJECTS_SQL = """
 SELECT 'trigger:' || tgname FROM pg_trigger
- WHERE tgrelid IN ('sessions'::regclass, 'api_keys'::regclass) AND NOT tgisinternal
+ WHERE tgrelid = 'sessions'::regclass AND NOT tgisinternal
 UNION ALL
 SELECT 'function:' || proname FROM pg_proc
- WHERE proname IN ('sessions_fill_sid_hash', 'api_keys_fill_key_hash')
+ WHERE proname = 'sessions_fill_sid_hash'
 UNION ALL
 SELECT 'index:' || indexname FROM pg_indexes
- WHERE indexname IN ('idx_sessions_sid', 'idx_api_keys_key')
+ WHERE indexname = 'idx_sessions_sid'
 """
 
 _COMPAT_OBJECTS = {
     "trigger:sessions_fill_sid_hash",
-    "trigger:api_keys_fill_key_hash",
     "function:sessions_fill_sid_hash",
-    "function:api_keys_fill_key_hash",
     "index:idx_sessions_sid",
-    "index:idx_api_keys_key",
 }
 
 
