@@ -1,0 +1,244 @@
+"""The transfer-pair reads: the pairs an agency takes part in, and a pair's
+reliability from the loaded timetables and both operators' predictions in
+ClickHouse, each connection filed under its service day."""
+
+import csv
+import io
+from datetime import timedelta
+
+import pytest
+
+from api.range import jst_today
+from pipeline.day_types import fallback_day_type
+from pipeline.reports.definition import METHODOLOGY_URLS
+from pipeline.reports.transfers import days_of_type
+from pipeline.service_day import service_day_moment_utc
+
+DAY = jst_today() - timedelta(days=7)
+DAY_TYPE = fallback_day_type(DAY)
+RUNS_FROM = DAY
+
+
+def _agency(pg_conn, name: str, feed_url: str) -> int:
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO agencies (agency_name, feed_url) VALUES (%s, %s) RETURNING agency_id", (name, feed_url)
+        )
+        agency_id = cur.fetchone()[0]
+    pg_conn.commit()
+    return agency_id
+
+
+def _trip(pg_conn, agency_id: int, route_id: str, trip_id: str, stop_id: str, clock: str, *, arriving: bool):
+    """One trip of the loaded timetable calling at ``stop_id`` (sequence 4) at
+    ``clock``, under a service running every day from RUNS_FROM."""
+    service_id = f"SVC-{trip_id}"
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday,"
+            " saturday, sunday, start_date, end_date)"
+            " VALUES (%s, %s, true, true, true, true, true, true, true, %s, %s)",
+            (agency_id, service_id, RUNS_FROM, RUNS_FROM + timedelta(days=60)),
+        )
+        cur.execute(
+            "INSERT INTO static_routes (agency_id, route_id, route_short_name) VALUES (%s, %s, %s)"
+            " ON CONFLICT DO NOTHING",
+            (agency_id, route_id, route_id),
+        )
+        cur.execute(
+            "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
+            (agency_id, trip_id, route_id, service_id),
+        )
+        cur.execute(
+            "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, %s, '温品四丁目')"
+            " ON CONFLICT DO NOTHING",
+            (agency_id, stop_id),
+        )
+        cur.execute(
+            "INSERT INTO static_stop_times (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time)"
+            " VALUES (%s, %s, 4, %s, %s, %s)",
+            (agency_id, trip_id, stop_id, clock if arriving else None, None if arriving else clock),
+        )
+    pg_conn.commit()
+
+
+def _sec(clock: str) -> int:
+    h, m, s = (int(x) for x in clock.split(":"))
+    return h * 3600 + m * 60 + s
+
+
+def _reading(route: str, trip_id: str, stop_id: str, clock: str, *, dep=None, arr=None, day=DAY):
+    """One poll, five minutes before the stop's scheduled time on service day
+    ``day``; a clock past 24:00 is captured after midnight, on the next
+    calendar day, as the feed sends it."""
+    sec = _sec(clock)
+    captured = service_day_moment_utc(day, sec) - timedelta(minutes=5)
+    return (
+        f"test/{route}/{trip_id}/{clock}/{'a' if arr is not None else 'd'}.pb",
+        captured,
+        trip_id,
+        "",
+        None if sec >= 86400 else clock,
+        route,
+        4,
+        dep,
+        stop_id,
+        arr,
+        None,
+        None,
+        None,
+        sec,
+    )
+
+
+@pytest.fixture
+def transfer_app(ch_async_client):
+    from api.main import app
+
+    app.state.ch_client = ch_async_client
+    return app
+
+
+@pytest.fixture
+def hub(pg_conn, ch_client):
+    from pipeline.clickhouse import insert_updates
+
+    bus = _agency(pg_conn, "広島バス", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/9/trip_updates.bin")
+    tram = _agency(pg_conn, "広島電鉄", "https://ajt-mobusta-gtfs.mcapps.jp/realtime/8/trip_updates.bin")
+    for trip, clock in [("a1", "10:00:00"), ("a2", "11:00:00"), ("a4", "12:00:00"), ("a3", "24:20:00")]:
+        _trip(pg_conn, bus, "29", trip, "H-A", clock, arriving=True)
+    for trip, clock in [
+        ("b1", "10:05:00"),
+        ("b2", "10:20:00"),
+        ("b3", "11:05:00"),
+        ("b4", "12:05:00"),
+        ("b5", "24:35:00"),
+    ]:
+        _trip(pg_conn, tram, "2", trip, "H-B", clock, arriving=False)
+    insert_updates(
+        ch_client,
+        bus,
+        [
+            _reading("29", "a1", "H-A", "10:00:00", arr=60),
+            _reading("29", "a2", "H-A", "11:00:00", arr=300),
+            _reading("29", "a3", "H-A", "24:20:00", arr=0),
+            # Another route's poll at the hub is not route 29's arrival.
+            _reading("99", "a4", "H-A", "12:00:00", arr=0),
+        ],
+    )
+    insert_updates(
+        ch_client,
+        tram,
+        [
+            _reading("2", "b1", "H-B", "10:05:00", dep=0),
+            _reading("2", "b2", "H-B", "10:20:00", dep=0),
+            _reading("2", "b3", "H-B", "11:05:00", dep=0),
+            _reading("2", "b4", "H-B", "12:05:00", dep=0),
+            _reading("2", "b5", "H-B", "24:35:00", dep=0),
+        ],
+    )
+    with pg_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO transfer_pairs (name, from_agency_id, from_route_code, from_stop_ids, to_agency_id,"
+            " to_route_code, to_stop_ids, walk_sec)"
+            " VALUES ('温品四丁目 29→2', %s, '29', '{H-A}', %s, '2', '{H-B}', 120)"
+            " RETURNING id",
+            (bus, tram),
+        )
+        pair_id = cur.fetchone()[0]
+    pg_conn.commit()
+    return bus, tram, pair_id
+
+
+def _url(agency: int, pair_id: int, **params) -> str:
+    query = {"from": DAY.isoformat(), "to": DAY.isoformat(), "day_type": DAY_TYPE, **params}
+    return f"/api/{agency}/transfer-pairs/{pair_id}/reliability?" + "&".join(f"{k}={v}" for k, v in query.items())
+
+
+@pytest.mark.asyncio
+async def test_a_pair_reads_held_missed_and_unobserved_on_its_service_day(client, hub, transfer_app):
+    _bus, tram, pair_id = hub
+    resp = await client.get(_url(tram, pair_id))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    total = body["total"]
+    assert (total["planned"], total["held"], total["missed"], total["unobserved"]) == (4, 2, 1, 1)
+    assert total["stranded"] == 0
+    assert body["no_onward"] == 0
+    assert [d["day"] for d in body["by_day"]] == [DAY.isoformat()]
+    hours = {h["hour"]: (h["held"], h["missed"], h["unobserved"]) for h in body["by_hour"]}
+    assert hours == {10: (1, 0, 0), 11: (0, 1, 0), 12: (0, 0, 1), 24: (1, 0, 0)}
+    assert [d["day"] for d in body["worst_days"]] == [DAY.isoformat()]
+    assert body["waits"] == 3
+    # Below the sample floor, no share, percentile or buffer is given.
+    assert body["held_share"] is None and body["buffer_min"] is None and body["wait_p50_sec"] is None
+    assert body["definition"]["value_basis"] == "feed_prediction"
+    assert body["pair"]["arriving"]["stop_names"] == ["温品四丁目"]
+
+
+@pytest.mark.asyncio
+async def test_an_after_midnight_connection_files_under_the_evening_it_belongs_to(client, hub, transfer_app):
+    bus, _tram, pair_id = hub
+    body = (await client.get(_url(bus, pair_id))).json()
+    (hour24,) = [h for h in body["by_hour"] if h["hour"] == 24]
+    assert (hour24["planned"], hour24["held"], hour24["unobserved"]) == (1, 1, 0)
+
+
+@pytest.mark.asyncio
+async def test_days_the_loaded_timetable_does_not_plan_are_listed_not_counted(client, hub, transfer_app):
+    bus, _tram, pair_id = hub
+    start = DAY - timedelta(days=13)
+    body = (await client.get(_url(bus, pair_id, **{"from": start.isoformat()}))).json()
+    assert body["no_plan_days"] == [d.isoformat() for d in days_of_type(start, DAY - timedelta(days=1), DAY_TYPE)]
+    assert body["total"]["planned"] == 4
+
+
+@pytest.mark.asyncio
+async def test_the_csv_carries_the_report_preamble_and_a_row_per_day(client, hub, transfer_app):
+    bus, _tram, pair_id = hub
+    resp = await client.get(_url(bus, pair_id, format="csv", lang="en"))
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    rows = list(csv.reader(io.StringIO(resp.text.lstrip("﻿"))))
+    definition = rows[0][0]
+    assert "値の根拠=" in definition and METHODOLOGY_URLS["ja"] in definition and "算出方法=" in definition
+    header = [r[0] for r in rows].index("日付")
+    assert rows[header + 1][:5] == [DAY.isoformat(), "4", "2", "1", "1"]
+
+
+@pytest.mark.asyncio
+async def test_pairs_are_listed_for_either_agency_while_both_are_live_and_active(client, hub, pg_conn, transfer_app):
+    bus, tram, pair_id = hub
+    for agency in (bus, tram):
+        listed = (await client.get(f"/api/{agency}/transfer-pairs")).json()["pairs"]
+        assert [p["id"] for p in listed] == [pair_id]
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = %s", (tram,))
+    pg_conn.commit()
+    assert (await client.get(f"/api/{bus}/transfer-pairs")).json()["pairs"] == []
+    assert (await client.get(_url(bus, pair_id))).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_an_inactive_pair_or_another_agencys_pair_is_not_read(client, hub, pg_conn, transfer_app):
+    bus, _tram, pair_id = hub
+    other = _agency(pg_conn, "other", "http://other/rt")
+    assert (await client.get(_url(other, pair_id))).status_code == 404
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE transfer_pairs SET active = false WHERE id = %s", (pair_id,))
+    pg_conn.commit()
+    assert (await client.get(_url(bus, pair_id))).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_day_type_outside_the_pairs_scope_and_bad_windows_are_refused(client, hub, pg_conn, transfer_app):
+    bus, _tram, pair_id = hub
+    other_type = next(t for t in ("weekday", "saturday", "sunday_holiday") if t != DAY_TYPE)
+    with pg_conn.cursor() as cur:
+        cur.execute("UPDATE transfer_pairs SET day_types = %s WHERE id = %s", ([DAY_TYPE], pair_id))
+    pg_conn.commit()
+    assert (await client.get(_url(bus, pair_id, day_type=other_type))).status_code == 422
+    assert (await client.get(_url(bus, pair_id, to=jst_today().isoformat()))).status_code == 422
+    assert (await client.get(_url(bus, pair_id, **{"from": (DAY + timedelta(days=1)).isoformat()}))).status_code == 422
+    far = (DAY - timedelta(days=200)).isoformat()
+    assert (await client.get(_url(bus, pair_id, **{"from": far}))).status_code == 422

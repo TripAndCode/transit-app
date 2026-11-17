@@ -180,7 +180,7 @@ def _values(body: TransferPairIn) -> tuple:
     )
 
 
-@router.put("/{pair_id}", response_model=TransferPairOut)
+@router.patch("/{pair_id}", response_model=TransferPairOut)
 async def replace_pair(
     pair_id: int,
     body: TransferPairIn,
@@ -188,7 +188,7 @@ async def replace_pair(
     admin: User = Depends(require_admin),
     conn: asyncpg.Connection = Depends(get_conn),
 ) -> dict[str, Any]:
-    """Replace a pair's whole definition."""
+    """Replace a pair's whole definition: the body is the full definition, as for a create."""
     csrf_guard(request)
     await _validate(conn, body)
     async with conn.transaction():

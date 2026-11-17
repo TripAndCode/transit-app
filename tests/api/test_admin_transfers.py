@@ -105,7 +105,7 @@ async def test_create_update_delete_each_write_an_audit_row(client, aconn, agenc
     assert pair["day_types"] == ["weekday", "saturday", "sunday_holiday"]
     assert pair["from_direction"] is None
 
-    updated = await client.put(
+    updated = await client.patch(
         f"/api/admin/transfer-pairs/{pair['id']}",
         json=_body(*agencies, walk_sec=180, day_types=["sunday_holiday", "weekday"]),
         cookies={"sid": sid},
@@ -191,7 +191,7 @@ async def test_the_number_of_pairs_is_capped(client, aconn, agencies, monkeypatc
 @pytest.mark.asyncio
 async def test_missing_pairs_are_404_and_unaudited(client, aconn, agencies):
     sid = (await seed_session(aconn, role="admin")).sid
-    put = await client.put(
+    put = await client.patch(
         "/api/admin/transfer-pairs/999", json=_body(*agencies), cookies={"sid": sid}, headers=_ORIGIN
     )
     delete = await client.delete("/api/admin/transfer-pairs/999", cookies={"sid": sid}, headers=_ORIGIN)
