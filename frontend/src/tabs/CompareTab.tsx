@@ -4,13 +4,16 @@ import { ByModeSwitch } from "../components/ByModeSwitch";
 import { ScopeHeaderProvider, ScopePageHeader } from "../components/scope/ScopePageHeader";
 import { useByMode } from "../hooks/useByMode";
 import { COMPARE_MODES, COMPARE_REPORT, compareMode } from "../routes/destinations";
-import { loadSingleReportScreen, loadNetworkTab, loadSupplyMapView } from "../routes/lazyTabs";
+import { loadSingleReportScreen, loadNetworkTab, loadSupplyMapView, loadTransfersView } from "../routes/lazyTabs";
 
 const SingleReportScreen = lazy(loadSingleReportScreen);
 const NetworkTab = lazy(loadNetworkTab);
 const SupplyMapView = lazy(loadSupplyMapView);
+const TransfersView = lazy(loadTransfersView);
 
-/** Compare: the board `compareMode` picks from `by`. */
+/** Compare: the board `compareMode` picks from `by`. Transfers sit here
+ *  because a pair sets two routes, usually two operators', side by side at
+ *  one hub; the Transfers board reads the pairs this agency is either side of. */
 export function CompareTab() {
   const { t } = useTranslation();
   const [mode, setMode] = useByMode(compareMode);
@@ -26,6 +29,8 @@ export function CompareTab() {
             <NetworkTab />
           ) : mode === "supply" ? (
             <SupplyMapView />
+          ) : mode === "transfers" ? (
+            <TransfersView />
           ) : (
             <SingleReportScreen reportType={COMPARE_REPORT} />
           )}

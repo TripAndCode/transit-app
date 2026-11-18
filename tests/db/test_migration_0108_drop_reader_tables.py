@@ -133,10 +133,11 @@ def _seed_usage(cur, uid):
 
 
 def test_up_removes_the_reader_platform_and_keeps_admin_attribution(pg_conn):
-    """Rolling back to 0107 rolls back 0108 alone; its down loses nothing, so
-    it needs no force."""
+    """0108's own down loses nothing. Rolling back to 0107 also rolls back
+    every later migration, some of which are destructive, so it is forced."""
+    assert not migrate.is_destructive_down((migrate._MIGRATIONS_DIR / "0108_drop_reader_tables.down.sql").read_text())
     try:
-        migrate.migrate_down(_BELOW, pg_conn)
+        migrate.migrate_down(_BELOW, pg_conn, force_destructive=True)
         assert _tables(pg_conn) == _DROPPED_TABLES
         with pg_conn.cursor() as cur:
             cur.execute(
@@ -198,7 +199,7 @@ def test_up_removes_the_reader_platform_and_keeps_admin_attribution(pg_conn):
 
 def test_down_restores_the_schema_empty_and_up_removes_it_again(pg_conn):
     try:
-        migrate.migrate_down(_BELOW, pg_conn)
+        migrate.migrate_down(_BELOW, pg_conn, force_destructive=True)
         assert _tables(pg_conn) == _DROPPED_TABLES
         assert _has_via_api_key(pg_conn)
         assert _has_fill_function(pg_conn)

@@ -495,7 +495,12 @@ describe("Sidebar", () => {
       renderSidebar("/agencies/8/compare");
       await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
       const stops = within(screen.getByRole("group", { name: "Day types & agencies views" })).getAllByRole("link");
-      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual(["Weekdays and weekends/holidays", "Agencies", "Planned departures"]);
+      expect(stops.map((link) => link.getAttribute("aria-label"))).toEqual([
+        "Weekdays and weekends/holidays",
+        "Agencies",
+        "Planned departures",
+        "Transfers",
+      ]);
     });
 
     it("marks each station with its screen's own icon rather than a station code, the link carrying the name", async () => {

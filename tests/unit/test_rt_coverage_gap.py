@@ -82,3 +82,11 @@ def test_payload_spells_the_reason_and_an_iso_day(reason):
         "last_checked": "2026-09-11",
     }
     assert CoverageGap(reason, None).payload()["last_checked"] is None
+
+
+def test_a_gate_on_one_field_reads_only_that_fields_verdict():
+    rows = _rows(fields=("arr_delay",)) + _rows(confirmed=False, fields=("stop_id",))
+    assert coverage_gap("static_join", rows, NOW).reason == "probe_refuted"
+    assert coverage_gap("static_join", rows, NOW, ("arr_delay",)) is None
+    assert coverage_gap("static_join", rows, NOW, ("stop_id",)).reason == "probe_refuted"
+    assert coverage_gap("static_join", _rows(fields=("stop_id",)), NOW, ("arr_delay",)).reason == "never_probed"

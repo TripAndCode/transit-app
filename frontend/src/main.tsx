@@ -80,6 +80,9 @@ const AdminOpsPage = lazy(() =>
 const AdminFlagsPage = lazy(() =>
   import("./pages/admin/AdminFlagsPage").then((m) => ({ default: m.AdminFlagsPage }))
 );
+const AdminTransfersPage = lazy(() =>
+  import("./pages/admin/AdminTransfersPage").then((m) => ({ default: m.AdminTransfersPage }))
+);
 const AdminArchitecturePage = lazy(() =>
   import("./pages/admin/AdminArchitecturePage").then((m) => ({ default: m.AdminArchitecturePage }))
 );
@@ -184,6 +187,7 @@ const router = createBrowserRouter([
           { path: "architecture", element: <AdminArchitecturePage /> },
           { path: "audit", element: <AdminAuditPage /> },
           { path: "flags", element: <AdminFlagsPage /> },
+          { path: "transfers", element: <AdminTransfersPage /> },
         ],
       },
       { path: "*", element: <Navigate to="/" replace /> },

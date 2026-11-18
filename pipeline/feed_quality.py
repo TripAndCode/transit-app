@@ -309,31 +309,36 @@ POLL_INSTANTS_CH_SQL = f"""
 # Per outage of a batch (poll_outages.peer_batches), by its index, the
 # stretches longer than the floor no other listed agency was polled in, each
 # bounded by such polls, live or archived, at the instants message age reads.
+# The outages are joined as rows: an array of every outage on each poll would
+# hold polls times outages in memory, and one batch can merge a month of a
+# flaky feed's outages.
 PEER_STRETCHES_CH_SQL = f"""
     SELECT outage,
            arrayFilter((x, y) -> y - x > {{floor:UInt32}}, arrayPopBack(xs), arrayPopFront(xs)) AS starts,
            arrayFilter((y, x) -> y - x > {{floor:UInt32}}, arrayPopFront(xs), arrayPopBack(xs)) AS ends
     FROM (
-        SELECT outage, arraySort(groupArray(instant)) AS xs
+        SELECT span.outage AS outage, arraySort(groupArray(poll.instant)) AS xs
         FROM (
-            SELECT instant,
-                   arrayJoin(arrayFilter(
-                       i -> instant >= {{los:Array(Int64)}}[i] AND instant <= {{his:Array(Int64)}}[i],
-                       arrayEnumerate({{los:Array(Int64)}})
-                   )) - 1 AS outage
+            SELECT DISTINCT assumeNotNull(ifNull(captured, toInt64(toUnixTimestamp({ARCHIVE_POLL_INSTANT_CH}))))
+                AS instant
             FROM (
-                SELECT DISTINCT assumeNotNull(ifNull(captured, toInt64(toUnixTimestamp({ARCHIVE_POLL_INSTANT_CH}))))
-                    AS instant
-                FROM (
-                    SELECT DISTINCT u.file_name AS file_name,
-                           if({LIVE_SOURCED}, toInt64(toUnixTimestamp(u.captured_at)), NULL) AS captured
-                    FROM {UPDATES_TABLE} AS u
-                    WHERE u.agency_id IN {{peers:Array(UInt16)}}
-                      AND u.captured_at >= {{scan_from:DateTime64}} AND u.captured_at < {{scan_to:DateTime64}}
-                )
-                WHERE captured IS NOT NULL OR {ARCHIVE_POLL_INSTANT_CH} IS NOT NULL
+                SELECT DISTINCT u.file_name AS file_name,
+                       if({LIVE_SOURCED}, toInt64(toUnixTimestamp(u.captured_at)), NULL) AS captured
+                FROM {UPDATES_TABLE} AS u
+                WHERE u.agency_id IN {{peers:Array(UInt16)}}
+                  AND u.captured_at >= {{scan_from:DateTime64}} AND u.captured_at < {{scan_to:DateTime64}}
             )
-        )
+            WHERE captured IS NOT NULL OR {ARCHIVE_POLL_INSTANT_CH} IS NOT NULL
+        ) AS poll
+        CROSS JOIN (
+            SELECT bounds.1 - 1 AS outage, bounds.2 AS lo, bounds.3 AS hi
+            FROM (
+                SELECT arrayJoin(arrayZip(
+                    arrayEnumerate({{los:Array(Int64)}}), {{los:Array(Int64)}}, {{his:Array(Int64)}}
+                )) AS bounds
+            )
+        ) AS span
+        WHERE poll.instant >= span.lo AND poll.instant <= span.hi
         GROUP BY outage
     )
 """

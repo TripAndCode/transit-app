@@ -105,19 +105,21 @@ export function routesMode(by: string | null): RoutesMode {
   return by === "report_cards" ? "report_cards" : "table";
 }
 
-/** Compare's three views, picked by `by`: the two boards, and every
- *  operator's stops by planned departures. */
+/** Compare's four views, picked by `by`: the two boards, every operator's
+ *  stops by planned departures, and the hub transfers defined for the agency. */
 export const COMPARE_MODES = [
   { mode: "periods", labelKey: "compare.mode_periods" },
   { mode: "agencies", labelKey: "compare.mode_agencies" },
   { mode: "supply", labelKey: "compare.mode_supply" },
+  { mode: "transfers", labelKey: "compare.mode_transfers" },
 ] as const;
 export type CompareMode = (typeof COMPARE_MODES)[number]["mode"];
 
 /** `by=agencies` is the agencies board, `by=supply` the planned departures
- *  map; every other `by` compares periods. */
+ *  map, `by=transfers` the hub transfers board; every other `by` compares
+ *  periods. */
 export function compareMode(by: string | null): CompareMode {
-  return by === "agencies" || by === "supply" ? by : "periods";
+  return by === "agencies" || by === "supply" || by === "transfers" ? by : "periods";
 }
 
 /** Reports' four views, and the `doc` each opens with. */
