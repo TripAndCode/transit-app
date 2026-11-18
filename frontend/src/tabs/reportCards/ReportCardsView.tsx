@@ -49,7 +49,9 @@ export function ReportCardsView() {
       {data && data.cards.length === 0 && <EmptyState title={t("report_card.list_empty", { month: formatMonth(data.month) })} />}
       {data && data.cards.length > 0 && (
         <div style={{ width: "100%", overflowX: "auto", marginTop: 12 }}>
-          <table style={SHARED_TABLE}>
+          {/* While another month loads, the last month's rows stand in, dimmed,
+              so they never pass for the month the picker names. */}
+          <table style={SHARED_TABLE} className={query.isPlaceholderData ? "report-card__stale" : undefined} aria-busy={query.isPlaceholderData}>
             <thead>
               <tr>
                 <th style={th({ align: "left" })}>{t("common.route")}</th>

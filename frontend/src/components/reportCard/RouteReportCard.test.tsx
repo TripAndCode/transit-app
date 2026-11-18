@@ -10,8 +10,9 @@ import { RouteReportCard, RouteReportCardView } from "./RouteReportCard";
 const sub = (metric: RouteCard["subscores"][number]["metric"], value: number | null, letter: RouteCard["grade"], graded: boolean) => ({
   metric,
   value,
-  ci_low: value == null || metric === "ewt_min" ? null : value - 1,
-  ci_high: value == null || metric === "ewt_min" ? null : value + 1,
+  // Excess wait and bunching carry no interval.
+  ci_low: value == null || metric === "ewt_min" || metric === "bunching_pct" ? null : value - 1,
+  ci_high: value == null || metric === "ewt_min" || metric === "bunching_pct" ? null : value + 1,
   letter,
   graded,
   missing: value == null ? "not_measured" : null,
@@ -92,7 +93,8 @@ describe("RouteReportCardView", () => {
     expect(screen.getByText(/For the next grade:/)).toHaveTextContent("Bunching 9.0% → 5.0%");
     const bunching = screen.getByRole("row", { name: /Bunching/ });
     expect(bunching).toHaveTextContent("9.0%");
-    expect(bunching).toHaveTextContent("8.0–10.0");
+    expect(bunching).toHaveTextContent("none");
+    expect(screen.getByRole("row", { name: /On-time rate/ })).toHaveTextContent("94.0–96.0");
     expect(screen.getByRole("row", { name: /Excess wait/ })).toHaveTextContent("none");
     expect(screen.getByRole("row", { name: /Service delivered/ })).toHaveTextContent("D at best");
     expect(screen.getByRole("row", { name: /On-time rate/ })).toHaveTextContent("(shown, not graded)");
@@ -107,8 +109,20 @@ describe("RouteReportCardView", () => {
   });
 
   it("never shows a grade for a route the gate failed, only why", () => {
-    render(response({ card: { ...card, grade: null, not_graded: "coverage_low", coverage_pct: 41, raise_to: [] } }));
+    const gated: RouteCard = {
+      ...card,
+      grade: null,
+      not_graded: "coverage_low",
+      coverage_pct: 41,
+      raise_to: [],
+      subscores: card.subscores.map((s) => ({ ...s, letter: null })),
+    };
+    render(response({ card: gated }));
     expect(screen.getByText("N/A: observation coverage 41.0%")).toBeInTheDocument();
+    // No letter beside any figure: the gate stops them all.
+    const rows = screen.getAllByRole("row").slice(1);
+    for (const row of rows) expect(row.lastElementChild).toBeEmptyDOMElement();
+    expect(screen.queryByText("D at best")).not.toBeInTheDocument();
     expect(screen.queryByText(/For the next grade:/)).not.toBeInTheDocument();
   });
 

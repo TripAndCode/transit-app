@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet } from "../../api/client";
 import type { DefinitionMeta } from "../../api/types";
 import type { ScopeApplied } from "../scope/scopePhrases";
@@ -22,7 +22,7 @@ export type NotGradedReason =
 /** One figure on a card: rates in percent, excess wait in minutes, to a tenth
  *  as judged. `letter` is its band, or for the service-delivered rate the best
  *  letter it allows; `graded` whether the route's class is graded on it. */
-export interface SubScore {
+interface SubScore {
   metric: ReportCardMetric;
   value: number | null;
   ci_low: number | null;
@@ -50,7 +50,7 @@ export interface RouteCard {
   raise_to: { metric: ReportCardMetric; value: number; target: number }[];
 }
 
-export interface GradingRules {
+interface GradingRules {
   ewt_min_edges: number[];
   bunching_pct_edges: number[];
   on_time_pct_edges: number[];
@@ -117,13 +117,15 @@ export function useRouteReportCard(
   });
 }
 
-/** Every route's card for *month*, the newest closed month when null. */
+/** Every route's card for *month*, the newest closed month when null. While
+ *  another month of the same agency loads, its last list stands in (the view
+ *  dims it); another agency's never does. */
 export function useReportCards(agencyId: number | null, month: string | null): UseQueryResult<ReportCardListResponse> {
   return useQuery({
     queryKey: ["report-cards", agencyId, month],
     queryFn: ({ signal }) => apiGet<ReportCardListResponse>(reportCardListPath(agencyId as number, month), { signal }),
     enabled: agencyId != null,
     staleTime: 5 * 60 * 1000,
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === agencyId ? previous : undefined),
   });
 }

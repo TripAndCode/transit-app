@@ -67,8 +67,8 @@ class SubScoreOut(BaseModel):
     a tenth as judged. ``value`` is None exactly when ``missing`` says why.
     The interval is a 95% Wilson interval over the route's trips; excess wait
     and bunching have none. ``letter`` is the figure's band, or for the service-delivered
-    rate the best letter it allows; ``graded`` whether the route's class is
-    graded on it."""
+    rate the best letter it allows, and None on every figure of a route a gate
+    stops; ``graded`` whether the route's class is graded on it."""
 
     metric: Metric
     value: float | None

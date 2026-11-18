@@ -234,9 +234,12 @@ async def compute_report_cards(agency_id: int, month: date, conn) -> dict[str, R
         else:
             not_graded = None
         verdict = grade_route(frequency, figures, reasons)
-        subscores = _subscores(frequency, figures, reasons, verdict.letters, gate, trips, route)
         if not_graded is None and verdict.grade is None:
             not_graded = "not_judged"
+        # A route a gate stops has no letter anywhere on its card: a letter
+        # beside its figures would grade what the gate says cannot be graded.
+        letters = verdict.letters if not_graded in (None, "not_judged") else {}
+        subscores = _subscores(frequency, figures, reasons, letters, gate, trips, route)
         graded = not_graded is None
         cards[code] = RouteCard(
             route_code=code,

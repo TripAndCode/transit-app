@@ -172,7 +172,11 @@ async def test_a_route_failing_the_gate_shows_no_grade_and_says_why(card_client)
     assert low["not_graded"] == "coverage_low"
     assert low["coverage_pct"] == 50.0
     assert low["raise_to"] == []
+    # A gate stops the grade and every letter beside the figures.
+    assert [sub["letter"] for sub in low["subscores"]] == [None] * len(low["subscores"])
     thin = cards["THIN"]
+    assert [sub["letter"] for sub in thin["subscores"]] == [None] * len(thin["subscores"])
+    assert _figure(thin, "on_time_pct")["value"] == 80.0
     assert (thin["grade"], thin["not_graded"], thin["observations"], thin["floor"]) == (
         None,
         "too_few_observations",

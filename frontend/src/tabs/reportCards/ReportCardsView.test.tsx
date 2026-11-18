@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import * as client from "../../api/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import * as api from "../../components/reportCard/reportCardApi";
@@ -27,10 +28,11 @@ const base: RouteCard = {
   raise_to: [],
 };
 
-function open(cards: RouteCard[]) {
+function open(cards: RouteCard[], isPlaceholderData = false) {
   vi.spyOn(api, "useReportCards").mockReturnValue({
     data: { month: "2026-09", latest_month: "2026-10", cards, rules: {} as never, definition: { value_basis: "feed_prediction" } as never },
     error: null,
+    isPlaceholderData,
     refetch: vi.fn(),
   } as never);
   const router = createMemoryRouter([{ path: "agencies/:agencyId/routes", element: <ReportCardsView /> }], {
@@ -57,5 +59,31 @@ describe("ReportCardsView", () => {
   it("says when no route has a card that month", async () => {
     open([]);
     expect(await screen.findByText(/No route was observed or planned/)).toBeInTheDocument();
+  });
+
+  it("dims the last month's rows while the picked month loads", async () => {
+    open([base], true);
+    expect(await screen.findByRole("table")).toHaveClass("report-card__stale");
+  });
+});
+
+function AgencyCards({ agencyId }: { agencyId: number }) {
+  const { data } = api.useReportCards(agencyId, null);
+  return <p>{data ? `cards:${data.cards.map((c) => c.route_code).join(",")}` : "loading"}</p>;
+}
+
+describe("useReportCards", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("never shows one agency's cards while another agency's load", async () => {
+    vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path.startsWith("/api/1/")
+        ? Promise.resolve({ month: "2026-09", latest_month: "2026-10", cards: [base] } as never)
+        : new Promise(() => {}),
+    );
+    const { rerender } = renderWithProviders(<AgencyCards agencyId={1} />);
+    expect(await screen.findByText("cards:50")).toBeInTheDocument();
+    rerender(<AgencyCards agencyId={2} />);
+    await waitFor(() => expect(screen.getByText("loading")).toBeInTheDocument());
   });
 });
