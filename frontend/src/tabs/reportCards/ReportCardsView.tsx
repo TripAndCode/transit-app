@@ -35,14 +35,14 @@ export function ReportCardsView() {
           {data && (
             <label>
               <span className="report-card__muted">{t("report_card.month")} </span>
-              <select value={data.month} onChange={(e) => setMonth(e.target.value)}>
+              <select value={month || data.month} onChange={(e) => setMonth(e.target.value)}>
                 {recentMonths(data.latest_month).map((m) => (
                   <option key={m} value={m}>{formatMonth(m)}</option>
                 ))}
               </select>
             </label>
           )}
-          {data && <CsvLink href={apiUrl(reportCardListPath(id, data.month, true))} />}
+          {data && <CsvLink href={apiUrl(reportCardListPath(id, month || data.month, true))} />}
         </div>
       </div>
       {query.error && <ErrorBanner error={query.error} onRetry={() => void query.refetch()} />}

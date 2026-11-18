@@ -117,3 +117,10 @@ def test_the_newest_closed_month_is_the_last_one_whose_every_day_has_closed():
 def test_a_cards_history_is_its_month_and_the_two_before_it():
     assert history_months(date(2026, 2, 1)) == [date(2025, 12, 1), date(2026, 1, 1), date(2026, 2, 1)]
     assert month_bounds(date(2028, 2, 1)) == (date(2028, 2, 1), date(2028, 2, 29))
+
+
+def test_every_figure_given_gets_its_letter_graded_on_or_not():
+    verdict = grade_route("high", {**_high(0.4, 9.0), "on_time_pct": 85.0, "early_pct": None}, {})
+    assert verdict.letters == {"ewt_min": "A", "bunching_pct": "B", "service_delivered_pct": "A", "on_time_pct": "B"}
+    # The on-time letter is shown, not graded on.
+    assert verdict.grade == "B"

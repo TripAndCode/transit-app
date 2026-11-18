@@ -16,8 +16,8 @@ reply. `tests/unit/test_agency_feed_quality.py` holds every response carrying a
 
 - The card: the route's own page (`frontend/src/components/reportCard/RouteReportCard.tsx`,
   rendered by `RouteAnalysisTab`). It picks a closed month (`card_month`, the
-  newest closed month when unset), shows the grade, every figure with its 95%
-  interval and letter, the last three months, what would raise the grade and
+  newest closed month when unset), shows the grade, every figure with its
+  letter and its 95% interval (excess wait and bunching have none), the last three months, what would raise the grade and
   the definition stamp. "Print card" prints the card alone on one page.
 - The list: **Routes** → "Report cards" (`by=report_cards`, the lazy
   `frontend/src/tabs/reportCards/ReportCardsView.tsx`), one row per route with
@@ -62,6 +62,12 @@ median. A day without that median, a row built before the columns, and a day
 before the retention floor (never rebuilt) keep NULL counts, and a month with
 one such pooled day shows bunching as not measured.
 
+Bunching carries no interval. It pools only the days the route is
+high-frequency on and of its dominant day type, and the trips behind those days
+are not counted apart from the month's, so counting the month's trips would
+print an interval narrower than the figure supports. Excess wait has none
+because the pooled sums it comes from cannot give its spread.
+
 ## Thresholds and sources
 
 All in `pipeline/route_grade.py`. Every edge is inclusive, and each figure is
@@ -73,7 +79,7 @@ judged as printed, to a tenth.
 | Bunching (high-frequency) | ≤ 5% | ≤ 10% | ≤ 15% | ≤ 20% | > 20% | A: the Bus Turnaround target of 5% on frequent routes |
 | On-time rate, `standard_m1_p5` (low-frequency) | ≥ 90% | ≥ 80% | ≥ 70% | ≥ 60% | < 60% | Bus Turnaround's 75% target falls in C, TfL's 86% in B |
 | Early-departure rate (low-frequency) | ≤ 1% | ≤ 2% | ≤ 5% | ≤ 10% | > 10% | this app's own; no public scheme grades it separately |
-| Service delivered (any class) | ≥ 95%: no cap | | | < 95%: D at best | < 90% | Bus Turnaround's dropped-trips ("truancy") rule |
+| Service delivered (any class) | ≥ 95%: no cap | | | < 95%: D at best | < 90% | adapted from Bus Turnaround's dropped-trips ("truancy") fail |
 
 The B, C and D edges of excess wait, bunching and on-time split the span
 between the A and F edges evenly. A high-frequency route takes the worse of its

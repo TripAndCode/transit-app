@@ -15,17 +15,17 @@ A route is judged by its frequency class, the existing high-frequency rule
 - High-frequency: passengers turn up without a timetable, so what matters is
   the wait. Excess waiting time (:data:`EWT_MIN_EDGES`) and bunching
   (:data:`BUNCHING_PCT_EDGES`) are each given a letter and the route takes the
-  worse, so an F on either is an F. The A and F edges are Bus Turnaround's
-  (busturnaround.nyc/report-cards: bunching of 5% or less is the target on a
-  frequent route, and a bus is bunched when it arrives less than a quarter of
-  the scheduled headway after the one before). TfL's high-frequency target of
-  1.1 minutes of excess wait falls in band C (tfl.gov.uk, buses performance
-  data). The B, C and D edges split the A to F span evenly.
+  worse, so an F on either is an F. Bus Turnaround (busturnaround.nyc/
+  report-cards) gives the bunching definition, a bus arriving less than a
+  quarter of the scheduled headway after the one before, and its A edge, 5% or
+  less on a frequent route. The excess-wait edges are this app's defaults;
+  TfL's high-frequency target of 1.1 minutes (tfl.gov.uk, buses performance
+  data) falls in band C. The B, C and D edges split the A to F span evenly.
 - Low-frequency: passengers time their arrival to the timetable, so what
   matters is keeping it. The on-time rate under the industry preset
   ``standard_m1_p5`` (:data:`ON_TIME_PCT_EDGES`) and the early-departure rate
   (:data:`EARLY_PCT_EDGES`) are each given a letter and the route takes the
-  worse. The A and F edges are the issue's defaults; Bus Turnaround's target of
+  worse. The A and F edges are this app's defaults; Bus Turnaround's target of
   75% on time falls in band C and TfL's 86% in band B. The early-departure rate
   is graded on its own as well as inside the on-time rate, on purpose: a bus
   that leaves early makes a passenger who arrived on time wait a whole headway,
@@ -33,8 +33,9 @@ A route is judged by its frequency class, the existing high-frequency rule
   counts it as one more miss beside lateness. Its edges are this app's own; no
   public scheme grades the rate separately.
 
-Truancy, the service-delivered rate, then caps the letter whatever the class
-(Bus Turnaround's dropped-trips rule): below :data:`TRUANCY_CAP_PCT` the
+Truancy, the service-delivered rate, then caps the letter whatever the class,
+adapted from Bus Turnaround's rule that fails a route dropping too many trips:
+below :data:`TRUANCY_CAP_PCT` the
 letter is at best D, and below :data:`TRUANCY_FAIL_PCT` it is F.
 
 A route without a figure a criterion needs has no letter, as the feed-quality
@@ -125,8 +126,9 @@ class Target:
 @dataclass(frozen=True)
 class RouteGrade:
     """``grade`` is None exactly when ``missing`` names a criterion, each with
-    the reason its figure is missing. ``letters`` gives each criterion with a
-    figure its own letter (for truancy, the best letter it allows). ``raise_to``
+    the reason its figure is missing. ``letters`` gives every figure given its
+    own letter, graded on or not (for truancy, the best letter it allows): the
+    one source of the letters a card shows. ``raise_to``
     lists, for a letter below A, every figure that must move for the next
     letter up, and how far."""
 
@@ -148,23 +150,22 @@ def grade_route(
     figures: dict[Metric, float | None],
     missing_reasons: dict[Metric, str],
 ) -> RouteGrade:
-    """The grade of one route-month from *figures*, each of its class's
-    criteria and ``service_delivered_pct``: a figure, or None with its reason
-    in *missing_reasons* (``not_measured`` when none is given)."""
+    """The grade of one route-month from *figures*: its class's criteria and
+    ``service_delivered_pct``, each a figure or None with its reason in
+    *missing_reasons* (``not_measured`` when none is given), and any other
+    figure the card shows, lettered but not graded on."""
     criteria: tuple[Metric, ...] = (*CLASS_METRICS[frequency], "service_delivered_pct")
-    letters: dict[Metric, Grade] = {}
-    missing: list[tuple[Metric, str]] = []
-    for metric in criteria:
-        value = figures.get(metric)
-        if value is None:
-            missing.append((metric, missing_reasons.get(metric, "not_measured")))
-        elif metric == "service_delivered_pct":
-            letters[metric] = truancy_cap(value)
-        else:
-            letters[metric] = band(metric, value)
+    letters: dict[Metric, Grade] = {
+        metric: truancy_cap(value) if metric == "service_delivered_pct" else band(metric, value)
+        for metric, value in figures.items()
+        if value is not None
+    }
+    missing = [
+        (metric, missing_reasons.get(metric, "not_measured")) for metric in criteria if figures.get(metric) is None
+    ]
     if missing:
         return RouteGrade(frequency, None, letters, tuple(missing), ())
-    grade = worse(*letters.values())
+    grade = worse(*(letters[metric] for metric in criteria))
     raise_to: tuple[Target, ...] = ()
     if grade != "A":
         better = GRADES[GRADES.index(grade) - 1]

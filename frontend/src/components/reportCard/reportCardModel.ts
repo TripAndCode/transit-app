@@ -53,7 +53,9 @@ export function notGradedText(t: TFunction, card: Pick<RouteCard, "not_graded" |
       return t("report_card.na.ci_wide", { interval: formatInterval(card.on_time_ci_low, card.on_time_ci_high) ?? EM_DASH });
     case "not_judged":
       return t("report_card.na.not_judged", {
-        figures: card.missing.map((m) => t(`report_card.metric.${m.metric}`)).join(t("common.list_separator")),
+        figures: card.missing
+          .map((m) => t("report_card.missing_figure", { metric: t(`report_card.metric.${m.metric}`), reason: missingText(t, m.reason) }))
+          .join(t("common.list_separator")),
       });
     case null:
       return "";

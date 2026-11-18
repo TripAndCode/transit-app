@@ -2923,7 +2923,7 @@
       "coverage_unknown": "N/A: observation coverage cannot be measured",
       "coverage_low": "N/A: observation coverage {{pct}}%",
       "ci_wide": "N/A: on-time interval too wide ({{interval}})",
-      "not_judged": "N/A: not measured: {{figures}}"
+      "not_judged": "N/A: missing {{figures}}"
     },
     "missing": {
       "not_measured": "not measured",
@@ -2942,6 +2942,7 @@
       "probe_expired": "feed check expired",
       "never_probed": "feed not yet checked",
       "no_high_frequency_routes": "no high-frequency timetable"
-    }
+    },
+    "missing_figure": "{{metric}} ({{reason}})"
   }
 }

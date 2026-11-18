@@ -95,7 +95,9 @@ export function reportCardListPath(agencyId: number, month: string | null, csv =
   return `/api/${agencyId}/report-cards${query ? `?${query}` : ""}`;
 }
 
-/** One route's card for *month*, the newest closed month when null. */
+/** One route's card for *month*, the newest closed month when null. While
+ *  another month of the same route loads, its last card stands in; another
+ *  route's never does, so no route is shown under another's grade. */
 export function useRouteReportCard(
   agencyId: number | null,
   route: string | null,
@@ -110,7 +112,8 @@ export function useRouteReportCard(
       ),
     enabled: agencyId != null && route != null,
     staleTime: 5 * 60 * 1000,
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === agencyId && previousQuery?.queryKey[2] === route ? previous : undefined,
   });
 }
 

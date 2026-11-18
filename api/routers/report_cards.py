@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from api.csv_cells import inert
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import RangeCtx, last_closed_jst_day
@@ -53,7 +54,9 @@ from pipeline.route_grade import (
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["report_cards"])
 
-_MONTH_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+# Years 1900 to 2999: a card reads its month and the two before it, which
+# must all be calendar dates.
+_MONTH_PATTERN = r"^(19|2\d)\d{2}-(0[1-9]|1[0-2])$"
 
 
 _NO_SCOPE = scope_applied()
@@ -63,7 +66,7 @@ class SubScoreOut(BaseModel):
     """One figure on a card: rates in percent, excess wait in minutes, each to
     a tenth as judged. ``value`` is None exactly when ``missing`` says why.
     The interval is a 95% Wilson interval over the route's trips; excess wait
-    has none. ``letter`` is the figure's band, or for the service-delivered
+    and bunching have none. ``letter`` is the figure's band, or for the service-delivered
     rate the best letter it allows; ``graded`` whether the route's class is
     graded on it."""
 
@@ -113,8 +116,9 @@ class RouteCardOut(BaseModel):
 
 
 class MonthGradeOut(BaseModel):
-    """A month of a card's trend: its letter, or why it has none (``no_data``
-    for a month the route was neither observed nor planned in)."""
+    """A month of a card's trend: its letter, or why it has none. ``no_data``
+    covers a month the feed did not observe the route in, whether or not its
+    timetable planned it."""
 
     month: str
     grade: Grade | None
@@ -134,31 +138,29 @@ class GradingRules(BaseModel):
     min_observations: int
 
 
-class RouteReportCardResponse(BaseModel):
+class _ReportCardsMonth(BaseModel):
+    """What both report-card responses state about the month they read."""
+
+    month: str
+    latest_month: str
+    rules: GradingRules
+    definition: DefinitionMeta
+    # A card reads its own month, none of the shared scope, so the scope bar
+    # offers none of its conditions beside it.
+    scope_applied: dict[str, bool] = _NO_SCOPE
+
+
+class RouteReportCardResponse(_ReportCardsMonth):
     """``card`` is None when the feed observed the route on no day of the
     month and its timetable planned none. ``history`` is the month and the
     ones before it, oldest first."""
 
-    month: str
-    latest_month: str
     card: RouteCardOut | None
     history: list[MonthGradeOut]
-    rules: GradingRules
-    definition: DefinitionMeta
-    # A card reads its own month, none of the shared scope, so the scope bar
-    # offers none of its conditions beside it.
-    scope_applied: dict[str, bool] = _NO_SCOPE
 
 
-class ReportCardListResponse(BaseModel):
-    month: str
-    latest_month: str
+class ReportCardListResponse(_ReportCardsMonth):
     cards: list[RouteCardOut]
-    rules: GradingRules
-    definition: DefinitionMeta
-    # A card reads its own month, none of the shared scope, so the scope bar
-    # offers none of its conditions beside it.
-    scope_applied: dict[str, bool] = _NO_SCOPE
 
 
 _RULES = GradingRules(
@@ -246,7 +248,7 @@ async def route_report_card(
     history = []
     card = None
     for each in history_months(asked):
-        cards = await compute_report_cards(agency_id, each, conn, ch=ch)
+        cards = await compute_report_cards(agency_id, each, conn)
         found = cards.get(route)
         history.append(
             MonthGradeOut(
@@ -279,7 +281,7 @@ _CSV_COLUMNS = [
     "早発率(%)",
     "超過待ち時間(分)",
     "団子運転率(%)",
-    "運行実施率(%)",
+    "運行率(%)",
     "観測数",
     "観測便数",
     "計画便数",
@@ -297,7 +299,7 @@ def _cell(value: float | int | None) -> str | float | int:
 def _csv_row(card: RouteCardOut) -> list:
     figures = {s.metric: s.value for s in card.subscores}
     return [
-        card.route_code,
+        inert(card.route_code),
         card.month,
         _FREQUENCY_CSV[card.frequency],
         card.grade or "",
@@ -313,14 +315,14 @@ def _csv_row(card: RouteCardOut) -> list:
         _cell(card.trips_observed),
         _cell(card.planned_trips),
         _cell(card.coverage_pct),
-        "; ".join(f"{m.metric}={m.reason}" for m in card.missing),
+        inert("; ".join(f"{m.metric}={m.reason}" for m in card.missing)),
     ]
 
 
 def _grading_line() -> str:
     return (
         "評価基準: 高頻度系統は超過待ち時間と団子運転率の悪い方、低頻度系統は定時率（業界標準）と早発率の悪い方。"
-        f"運行実施率{TRUANCY_CAP_PCT:g}%未満はD以下、{TRUANCY_FAIL_PCT:g}%未満はF。"
+        f"運行率{TRUANCY_CAP_PCT:g}%未満はD以下、{TRUANCY_FAIL_PCT:g}%未満はF。"
         f"観測{MIN_OBSERVATIONS}件未満と比較可能性の条件を満たさない系統は評価なし"
     )
 
@@ -363,7 +365,7 @@ async def report_cards(
         raise HTTPException(status_code=400, detail="lang only applies to format=csv")
     asked, latest = _resolve_month(month)
     definition = await _definition(conn, ch, agency_id, asked)
-    cards = await compute_report_cards(agency_id, asked, conn, ch=ch)
+    cards = await compute_report_cards(agency_id, asked, conn)
     response = ReportCardListResponse(
         month=_label(asked),
         latest_month=_label(latest),

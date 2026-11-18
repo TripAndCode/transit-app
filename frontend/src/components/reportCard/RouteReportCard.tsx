@@ -59,7 +59,9 @@ export function RouteReportCardView({
   onMonth: (month: string) => void;
 }) {
   const { t } = useTranslation();
-  const shown = data?.month ?? month;
+  // The month the URL asks for wins over a placeholder's, so the picker does
+  // not jump back while the new month loads.
+  const shown = month || data?.month || "";
   return (
     <section className="report-card" aria-labelledby="report-card-title">
       <div className="report-card__head">

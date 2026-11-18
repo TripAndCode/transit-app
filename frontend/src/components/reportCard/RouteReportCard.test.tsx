@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import * as client from "../../api/client";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import type { RouteCard, RouteReportCardResponse } from "./reportCardApi";
-import { RouteReportCardView } from "./RouteReportCard";
+import { RouteReportCard, RouteReportCardView } from "./RouteReportCard";
 
 const sub = (metric: RouteCard["subscores"][number]["metric"], value: number | null, letter: RouteCard["grade"], graded: boolean) => ({
   metric,
@@ -129,5 +131,34 @@ describe("RouteReportCardView", () => {
     expect(document.documentElement.dataset.printScope).toBe("report-card");
     window.dispatchEvent(new Event("afterprint"));
     expect(document.documentElement.dataset.printScope).toBeUndefined();
+  });
+
+  it("keeps the month the reader picked in the picker while that month loads", () => {
+    renderWithProviders(<RouteReportCardView data={response()} error={null} onRetry={() => {}} month="2026-08" onMonth={vi.fn()} />);
+    expect(screen.getByRole("combobox")).toHaveValue("2026-08");
+  });
+});
+
+describe("RouteReportCard", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("never shows one route's grade under another's while the other loads", async () => {
+    const get = vi.spyOn(client, "apiGet").mockImplementation((path: string) =>
+      path.includes("/routes/A/") ? Promise.resolve(response({ card: { ...card, route_code: "A" } })) : new Promise(() => {}),
+    );
+    const { rerender } = renderWithProviders(
+      <MemoryRouter>
+        <RouteReportCard agencyId={9} route="A" />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/For the next grade:/)).toBeInTheDocument();
+    rerender(
+      <MemoryRouter>
+        <RouteReportCard agencyId={9} route="B" />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(get).toHaveBeenCalledWith(expect.stringContaining("/routes/B/"), expect.anything()));
+    expect(screen.queryByText(/For the next grade:/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: /Bunching/ })).not.toBeInTheDocument();
   });
 });

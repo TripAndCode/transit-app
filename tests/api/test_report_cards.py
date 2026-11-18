@@ -70,7 +70,9 @@ async def card_client(apply_schema):
         "trips_observed, samples, last_seen_at) VALUES ($1, $2, $3, '', 30, 30, $4, $5, NOW())",
         [(aid, DAY, route, trips, samples) for route, (trips, samples) in observed.items()],
     )
-    by_route = {route: TRIPS for route in _DELAYS} | {"THIN": 25}
+    # "=SUM(1)" is a feed's route code that opens like a spreadsheet formula,
+    # planned but never observed.
+    by_route = {route: TRIPS for route in _DELAYS} | {"THIN": 25, "=SUM(1)": 5}
     await pool.execute(
         "INSERT INTO planned_trips_daily (agency_id, service_date, planned_trips, planned_trips_by_route) "
         "VALUES ($1, $2, $3, $4::jsonb)",
@@ -144,6 +146,8 @@ async def test_a_high_frequency_route_is_graded_on_its_wait_and_bunching(card_cl
     assert hf["frequency"] == "high"
     assert _figure(hf, "ewt_min")["value"] == pytest.approx(0.4)
     assert _figure(hf, "ewt_min")["ci_low"] is None
+    # Bunching pools fewer days than the month's trips cover, so it claims no interval.
+    assert (_figure(hf, "bunching_pct")["ci_low"], _figure(hf, "bunching_pct")["ci_high"]) == (None, None)
     assert (_figure(hf, "bunching_pct")["value"], _figure(hf, "bunching_pct")["letter"]) == (10.0, "B")
     assert hf["grade"] == "B"
     assert hf["raise_to"] == [{"metric": "bunching_pct", "value": 10.0, "target": 5.0}]
@@ -228,6 +232,13 @@ async def test_a_month_not_yet_closed_is_refused(card_client):
     assert (await client.get(f"/api/{aid}/report-cards?month=2026-13")).status_code == 422
 
 
+@pytest.mark.parametrize("month", ["0000-01", "0000-12", "0001-01", "0001-02", "1899-12"])
+async def test_a_year_no_calendar_date_can_hold_is_refused_not_a_server_error(card_client, month):
+    client, aid, _pool = card_client
+    for path in (f"/api/{aid}/report-cards?month={month}", f"/api/{aid}/routes/HF/report-card?month={month}"):
+        assert (await client.get(path)).status_code == 422, path
+
+
 async def test_the_list_downloads_as_csv_with_the_reports_preamble(card_client):
     client, aid, _pool = card_client
     r = await client.get(f"/api/{aid}/report-cards?month={MONTH}&format=csv&lang=ja")
@@ -238,6 +249,8 @@ async def test_the_list_downloads_as_csv_with_the_reports_preamble(card_client):
     header = next(i for i, row in enumerate(rows) if row and row[0] == "系統コード")
     by_route = {row[0]: row for row in rows[header + 1 :]}
     assert by_route["HF"][3] == "B"
+    # A feed-written code that opens like a formula is written as text.
+    assert "'=SUM(1)" in by_route and "=SUM(1)" not in by_route
     assert (by_route["LOWCOV"][3], by_route["LOWCOV"][4]) == ("", "coverage_low")
 
 

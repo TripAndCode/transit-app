@@ -244,8 +244,8 @@ Each route gets one grade, A to F, per calendar month (**Routes** → "Report ca
 - **Service delivered** caps the letter: under 95% it is at best D, under 90% it is F.
 - Each figure is judged as printed, to a tenth, and every edge is inclusive.
 - **No grade (N/A)**, with its reason, in this order: no observation in the month; a feed that reports only zero delay for the route; fewer than 100 observations (the floor the performance standards judge at); then the [comparability conditions](#comparability-conditions) on the route's own trips: coverage unknown, under 70% of its planned trips observed, or an on-time interval wider than 3.0 points either side. The implausible-readings condition is the whole operator's, so it does not decide a route.
-- A route that passes those but lacks a figure its grade needs, such as bunching not measured or a feed that has never reported a trip not run, gets no grade either and names the figure. A missing figure is never taken as a pass.
-- **Intervals**: 95% Wilson intervals, counting the route's trips as the sample size, since the stops of one trip, and the headways between the same two buses, move together. Excess waiting time has no interval.
+- A route that passes those but lacks a figure its grade needs, such as bunching not measured, a feed that has never reported a trip not run, or fewer than 100 planned trips (service delivered is judged, as the performance standards judge it, only on at least 100 planned trips and 100 observations), gets no grade either and names the figure. A missing figure is never taken as a pass.
+- **Intervals**: 95% Wilson intervals, counting the route's trips as the sample size, since the stops of one trip move together. Excess waiting time and bunching have no interval: bunching pools only the days the route is high-frequency on and of its dominant day type, whose trips are not counted apart, so the month's trips would give too narrow an interval.
 - **What would raise it**: for each figure below the next letter, the value it must reach.
 
 Changing a rule changes no aggregate, so it is not a new method version; a change is announced by amending this section.

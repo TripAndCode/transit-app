@@ -2923,7 +2923,7 @@
       "coverage_unknown": "評価なし：観測率を測れません",
       "coverage_low": "評価なし：観測率{{pct}}%",
       "ci_wide": "評価なし：定時率の信頼区間が広すぎます（{{interval}}）",
-      "not_judged": "評価なし：未測定の値があります（{{figures}}）"
+      "not_judged": "評価なし：評価に必要な値がありません（{{figures}}）"
     },
     "missing": {
       "not_measured": "未測定",
@@ -2942,6 +2942,7 @@
       "probe_expired": "フィードの確認が期限切れです",
       "never_probed": "フィードが未確認です",
       "no_high_frequency_routes": "高頻度の時刻表がありません"
-    }
+    },
+    "missing_figure": "{{metric}}：{{reason}}"
   }
 }

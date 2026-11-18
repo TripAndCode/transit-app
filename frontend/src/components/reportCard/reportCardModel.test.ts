@@ -45,7 +45,7 @@ describe("reportCardModel", () => {
     expect(notGradedText(t, { ...card, not_graded: "ci_wide" })).toBe("N/A: on-time interval too wide (70.1–80.4)");
     expect(
       notGradedText(t, { ...card, not_graded: "not_judged", missing: [{ metric: "bunching_pct", reason: "not_measured" }] }),
-    ).toBe("N/A: not measured: Bunching");
+    ).toBe("N/A: missing Bunching (not measured)");
     expect(notGradedText(t, { ...card, not_graded: "no_data" })).toBe("N/A: not observed this month");
     expect(notGradedText(t, card)).toBe("");
   });

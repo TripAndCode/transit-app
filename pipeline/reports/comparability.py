@@ -165,10 +165,12 @@ def clamp_pct(clamp_count: int, raw_samples: int) -> float | None:
     return round(clamp_count / raw_samples * 100, 2) if raw_samples else None
 
 
-def trip_interval(count: float, samples: int, observed_trips: int | None) -> tuple[float, float] | tuple[None, None]:
+def trip_interval(count: float, samples: int, trips: int | None) -> tuple[float, float] | tuple[None, None]:
     """The 95% Wilson interval of *count* of *samples*, in percent, counting
     trips as the sample size: the on-time percentage's, and any other share
-    of stop events or headways a route's trips produce together.
+    of stop events a route's trips produce together. A share that is already
+    one of trips, such as trips delivered of trips planned, passes 100 as
+    *samples* with its percentage as *count*.
 
     Stop events within one trip run late together, so they are not
     independent draws: the interval takes the stop-event share as the
@@ -181,10 +183,10 @@ def trip_interval(count: float, samples: int, observed_trips: int | None) -> tup
     stop-event count would print exactly the overconfident interval this
     avoids.
     """
-    if samples <= 0 or observed_trips is None or observed_trips <= 0:
+    if samples <= 0 or trips is None or trips <= 0:
         return (None, None)
-    successes = round(count / samples * observed_trips)
-    low, high = wilson_interval(successes, observed_trips)
+    successes = round(count / samples * trips)
+    low, high = wilson_interval(successes, trips)
     # The inner round drops float noise, so an exact tenth stays put.
     return (math.floor(round(low * 1000, 9)) / 10, math.ceil(round(high * 1000, 9)) / 10)
 

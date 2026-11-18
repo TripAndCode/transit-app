@@ -44,11 +44,14 @@ so a high-frequency route whose feed cannot give them is not judged rather
 than graded on punctuality.
 
 Intervals are 95% Wilson intervals with the route's trips as the sample size
-(:func:`pipeline.reports.comparability.trip_interval`): stop events, and the
-headways at successive stops between the same two buses, move together within
-a trip, so counting them would claim an interval several times too narrow.
-Excess waiting time has no interval: it is a difference of two length-biased
-means, and the pooled sums it comes from cannot give its spread.
+(:func:`pipeline.reports.comparability.trip_interval`): stop events move
+together within a trip, so counting them would claim an interval several times
+too narrow. Excess waiting time has no interval: it is a difference of two
+length-biased means, and the pooled sums it comes from cannot give its spread.
+Bunching has none either: it pools only the days the route is high-frequency
+on and of its dominant day type, and the trips behind those days are not
+counted apart from the month's, so the month's trips would claim an interval
+narrower than the figure supports.
 """
 
 from __future__ import annotations
@@ -68,7 +71,7 @@ from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_
 from pipeline.reports.route_table import compute_route_table
 from pipeline.reports.service_delivered import RouteDelivered, compute_service_delivered_by_route
 from pipeline.route_catalog import zero_delay_route_codes
-from pipeline.route_grade import CLASS_METRICS, FrequencyClass, Grade, Metric, band, grade_route, judged, truancy_cap
+from pipeline.route_grade import CLASS_METRICS, FrequencyClass, Grade, Metric, grade_route, judged
 
 #: The fewest observations behind a graded route.
 MIN_OBSERVATIONS = RANKING_MIN_SAMPLES
@@ -171,8 +174,8 @@ async def _frequency_classes(conn, agency_id: int, first: date, last: date) -> d
 
 
 @perf.timed("reports.report_cards")
-@async_lru_cache(maxsize=64, ttl_seconds=3600, agency_arg="agency_id")
-async def compute_report_cards(agency_id: int, month: date, conn, ch=None) -> dict[str, RouteCard]:
+@async_lru_cache(maxsize=64, ttl_seconds=300, agency_arg="agency_id")
+async def compute_report_cards(agency_id: int, month: date, conn) -> dict[str, RouteCard]:
     """Every route's card for the calendar month holding *month*: each route
     the feed observed that month or the timetable planned for it."""
     first, last = month_bounds(month)
@@ -182,7 +185,6 @@ async def compute_report_cards(agency_id: int, month: date, conn, ch=None) -> di
         agency_id,
         ctx,
         conn,
-        ch=ch,
         min_samples=1,
         early_tolerance_sec=DEFAULT_EARLY_TOLERANCE_SEC,
         late_tolerance_sec=DEFAULT_LATE_TOLERANCE_SEC,
@@ -219,7 +221,6 @@ async def compute_report_cards(agency_id: int, month: date, conn, ch=None) -> di
         figures, reasons = _figures(
             on_time_pct, early_pct, quality.get(code), headway_gap, delivered_pct, delivered_why
         )
-        subscores = _subscores(frequency, figures, reasons, gate, trips, quality.get(code), route)
 
         not_graded: NotGradedReason | None
         if samples == 0:
@@ -233,6 +234,7 @@ async def compute_report_cards(agency_id: int, month: date, conn, ch=None) -> di
         else:
             not_graded = None
         verdict = grade_route(frequency, figures, reasons)
+        subscores = _subscores(frequency, figures, reasons, verdict.letters, gate, trips, route)
         if not_graded is None and verdict.grade is None:
             not_graded = "not_judged"
         graded = not_graded is None
@@ -289,13 +291,14 @@ def _subscores(
     frequency: FrequencyClass,
     figures: dict[Metric, float | None],
     reasons: dict[Metric, str],
+    letters: dict[Metric, Grade],
     gate: Assessment,
     trips: int | None,
-    headway: dict[str, Any] | None,
     route: RouteDelivered | None,
 ) -> tuple[SubScore, ...]:
-    """Every figure on the card, with its interval and letter, whether or not
-    the route's class is graded on it."""
+    """Every figure on the card, with its interval and its letter from
+    *letters* (:func:`pipeline.route_grade.grade_route`), whether or not the
+    route's class is graded on it."""
     graded = {*CLASS_METRICS[frequency], "service_delivered_pct"}
     early = figures["early_pct"]
     delivered = figures["service_delivered_pct"]
@@ -303,11 +306,7 @@ def _subscores(
         "on_time_pct": (gate.ci_low, gate.ci_high),
         "early_pct": (None, None) if early is None else trip_interval(early, 100, trips),
         "ewt_min": (None, None),
-        "bunching_pct": (
-            trip_interval(headway["bunched"], headway["bunching_judged"], trips)
-            if headway is not None and headway["bunched"] is not None and headway["bunching_judged"]
-            else (None, None)
-        ),
+        "bunching_pct": (None, None),
         "service_delivered_pct": (
             (None, None) if delivered is None or route is None else trip_interval(delivered, 100, route.planned_trips)
         ),
@@ -315,13 +314,6 @@ def _subscores(
     out = []
     for metric in SUBSCORE_ORDER:
         value = figures[metric]
-        letter: Grade | None
-        if value is None:
-            letter = None
-        elif metric == "service_delivered_pct":
-            letter = truancy_cap(value)
-        else:
-            letter = band(metric, value)
         low, high = intervals[metric]
         out.append(
             SubScore(
@@ -329,7 +321,7 @@ def _subscores(
                 value=None if value is None else judged(value),
                 ci_low=low,
                 ci_high=high,
-                letter=letter,
+                letter=letters.get(metric),
                 graded=metric in graded,
                 missing=None if value is not None else reasons[metric],
             )
