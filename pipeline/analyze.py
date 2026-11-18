@@ -1979,6 +1979,8 @@ def _analyze_locked(agency_id: int, conn, ch_client, db_url: str | None) -> dict
                     "is_high_frequency",
                     "scheduled_headway_sum_sec",
                     "scheduled_headway_sumsq_sec2",
+                    "bunched_count",
+                    "bunching_judged",
                 ],
                 headway_rows,
                 conn,

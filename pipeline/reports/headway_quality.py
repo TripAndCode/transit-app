@@ -1,5 +1,5 @@
-"""Excess Waiting Time / coefficient of variation / long-gap rate for
-high-frequency routes, built on `agg_route_headway_daily`.
+"""Excess Waiting Time / coefficient of variation / long-gap rate / bunching
+rate for high-frequency routes, built on `agg_route_headway_daily`.
 
 Each day is judged by the timetable in force on it: `agg_route_headway_daily`
 carries, per (route, date), that timetable's scheduled median, high-frequency
@@ -205,6 +205,13 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
     and its gaps count, but the scheduled wait would be missing its part.
     `days_scheduled_wait_not_kept` counts such days, by their date.
 
+    The bunching rate pools each pooled day's bunched gaps over the gaps it
+    judged (`bunched_count` / `bunching_judged`), exact counts summed. One
+    pooled day without them, built before they were stored or before the
+    retention floor, leaves the route's rate, and both its counts, None: not
+    measured over the range, never a rate over fewer days than its excess
+    wait.
+
     The scheduled side is the route's dominant service alone (see
     `pipeline.headways.dominant_service_ctes`), so a day running another
     service -- a weekday route's weekends and holidays -- would read as late
@@ -243,7 +250,7 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
         f"""
         SELECT d.route_code, d.date, d.is_high_frequency, d.actual_samples, d.actual_headway_sum_sec,
                d.actual_headway_sumsq_sec2, d.long_gap_count, d.scheduled_headway_sum_sec,
-               d.scheduled_headway_sumsq_sec2
+               d.scheduled_headway_sumsq_sec2, d.bunched_count, d.bunching_judged
         FROM agg_route_headway_daily d
         WHERE d.agency_id = $1 AND d.is_high_frequency IS NOT FALSE AND {frag}
         ORDER BY d.route_code, d.date
@@ -286,12 +293,18 @@ async def compute_headway_quality_report(agency_id: int, ctx: RangeCtx, conn) ->
         cov = coefficient_of_variation_from_pooled(n, sum_sec, sumsq_sec2)
         long_gap_count = _sum([d["long_gap_count"] for d in days])
         long_gap_rate = None if not n or long_gap_count is None else long_gap_count / n
+        bunched = _sum_of_all([d["bunched_count"] for d in days])
+        bunching_judged = _sum_of_all([d["bunching_judged"] for d in days])
+        bunching_rate = None if bunched is None or not bunching_judged else bunched / bunching_judged
         out.append(
             {
                 "route_code": route_code,
                 "ewt_sec": ewt_sec,
                 "cov": cov,
                 "long_gap_rate": long_gap_rate,
+                "bunched": bunched,
+                "bunching_judged": bunching_judged,
+                "bunching_rate": bunching_rate,
                 "samples": n,
                 "day_type": classes.get(route_code),
             }

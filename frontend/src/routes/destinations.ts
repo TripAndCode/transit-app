@@ -92,6 +92,19 @@ export function pickReport(
   return requested != null && reportTypes.includes(requested) ? requested : fallback;
 }
 
+/** Routes' two views, picked by `by`: the sortable table, and every
+ *  route's monthly report card. */
+export const ROUTES_MODES = [
+  { mode: "table", labelKey: "report_card.mode_table" },
+  { mode: "report_cards", labelKey: "report_card.mode_cards" },
+] as const;
+export type RoutesMode = (typeof ROUTES_MODES)[number]["mode"];
+
+/** `by=report_cards` is the report card list; every other `by` is the table. */
+export function routesMode(by: string | null): RoutesMode {
+  return by === "report_cards" ? "report_cards" : "table";
+}
+
 /** Compare's four views, picked by `by`: the two boards, every operator's
  *  stops by planned departures, and the hub transfers defined for the agency. */
 export const COMPARE_MODES = [

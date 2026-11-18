@@ -11,6 +11,7 @@ import {
   destHref,
   compareMode,
   whyMode,
+  routesMode,
   mergeSearch,
   pickReport,
   reportDestination,
@@ -172,5 +173,11 @@ describe("the view a screen opens", () => {
     expect(reportsView("saved", null)).toBe("saved");
     expect(reportsView("revisions", null)).toBe("revisions");
     expect(reportsView(null, "ranking")).toBe("summary");
+  });
+
+  it("opens the report cards on Routes by report_cards and the table otherwise", () => {
+    expect(routesMode("report_cards")).toBe("report_cards");
+    expect(routesMode(null)).toBe("table");
+    expect(routesMode("segments")).toBe("table");
   });
 });

@@ -203,6 +203,7 @@ A route's service delivered is the same ratio on the route's own trips. A trip n
 - Excess Waiting Time (EWT): actual mean wait − scheduled mean wait, the scheduled side taken from each pooled day's own timetable;
 - the coefficient of variation of headways;
 - the long-gap rate: the share of gaps longer than 1.75 times the scheduled headway of that day's timetable.
+- bunching: the share of gaps shorter than a quarter of the scheduled headway of that day's timetable (from method `2026.11.20`), the definition of the Bus Turnaround report cards: the second bus arrives so close behind the first that it carries few of the passengers who gathered for it. Each day stores how many gaps were bunched and how many were judged, and a period adds them up. A day whose timetable keeps no scheduled headway judges none. A day built before `2026.11.20`, or before the retention floor, which is never rebuilt, has no count; a period that includes one shows bunching as not measured, never as 0.
 
 A headway median is taken the same way for scheduled and actual gaps: for an even count of gaps, it is the mean of the two middle gaps (from method `2026.11.9`).
 
@@ -232,6 +233,22 @@ When a period spans a timetable revision, only the days of the timetable in forc
 - Distance and speed: the distance is the straight line between the two stops of the timetable loaded now. It is shorter than the road, so the speed (distance ÷ median running time) reads low on a winding road. A road distance from the timetable's shapes would need one shape picked per stop pair, and a loop route leaves the stops' places on it ambiguous, so the straight line is used. The slow-segment rule does not read the distance.
 
 The list is ordered by how many weeks a segment has stayed slow. It is not ranked by minutes lost, and no bus-priority (bus lane, transit signal priority) candidates are chosen from it, until the operator's predictions are validated. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)).
+
+### Route report card
+
+Each route gets one grade, A to F, per calendar month (**Routes** → "Report cards", and on the route's own page). It is shown to admins only, until operators have had the advance notice and right of reply of the [publication process](#publication-process). It is computed when it is read, from the figures above over the month's days, and is not stored. The rules and their sources are in [docs/features/route-report-card.md](features/route-report-card.md).
+
+- **Class**: a route is high-frequency for the month when it is high-frequency (headway metrics above) on at least half the days its timetable in force judges. A route with no such day takes the class of the timetable loaded now; a route the timetable gives no headway is low-frequency.
+- **High-frequency**: excess waiting time and bunching each get a letter, and the route takes the worse, so an F on either is an F.
+- **Low-frequency**: the on-time rate under the industry standard (`standard_m1_p5`) and the early-departure rate each get a letter, and the route takes the worse. An early departure counts in the on-time rate too: it is graded twice on purpose, as on a route that runs rarely it makes a passenger who came on time wait a whole headway.
+- **Service delivered** caps the letter: under 95% it is at best D, under 90% it is F.
+- Each figure is judged as printed, to a tenth, and every edge is inclusive.
+- **No grade (N/A)**, with its reason, in this order: no observation in the month; a feed that reports only zero delay for the route; fewer than 100 observations (the floor the performance standards judge at); then the [comparability conditions](#comparability-conditions) on the route's own trips: coverage unknown, under 70% of its planned trips observed, or an on-time interval wider than 3.0 points either side. The implausible-readings condition is the whole operator's, so it does not decide a route.
+- A route that passes those but lacks a figure its grade needs, such as bunching not measured, a feed that has never reported a trip not run, or fewer than 100 planned trips (service delivered is judged, as the performance standards judge it, only on at least 100 planned trips and 100 observations), gets no grade either and names the figure. A missing figure is never taken as a pass.
+- **Intervals**: 95% Wilson intervals, counting the route's trips as the sample size, since the stops of one trip move together. Excess waiting time and bunching have no interval: bunching pools only the days the route is high-frequency on and of its dominant day type, whose trips are not counted apart, so the month's trips would give too narrow an interval.
+- **What would raise it**: for each figure below the next letter, the value it must reach.
+
+Changing a rule changes no aggregate, so it is not a new method version; a change is announced by amending this section.
 
 ### A timetable's typical day
 
@@ -476,10 +493,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.19`. Newest first, each version with the inputs it set.
+The current method is `2026.11.20`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.20` | `agg_route_headway_daily` 6 → 7 |
 | `2026.11.19` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
 | `2026.11.18` | `agg_route_daily_dwell_run` 5 → 6, `agg_route_segment_runtime` = 1 |
 | `2026.11.17` | `feed_quality_monthly` 8 → 9 |

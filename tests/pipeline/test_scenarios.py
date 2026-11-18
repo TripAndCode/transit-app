@@ -962,7 +962,7 @@ _TABLE_COLUMNS = {
     "agg_service_delivered_daily": "date, route_code, non_executed_trips",
     "agg_route_headway_daily": (
         "route_code, date, actual_headway_median_sec, actual_samples, actual_headway_sum_sec, "
-        "actual_headway_sumsq_sec2, long_gap_count"
+        "actual_headway_sumsq_sec2, long_gap_count, bunched_count, bunching_judged"
     ),
     "agg_feed_health": "date, raw_samples, clamp_count, total_rows, archive_rows, live_rows",
     "feed_quality_monthly": (
@@ -1371,7 +1371,8 @@ def _service_actual(observed: Observed) -> Cells:
 
 def _headway_daily_expected(observed: Observed, found: oracle.Outcome) -> Cells:
     """Each route's actual headways on each service day: their median,
-    count, sum and sum of squares, and how many are long."""
+    count, sum and sum of squares, how many are long, and how many are
+    bunched of how many judged."""
     return _cells(
         "agg_route_headway_daily",
         {
@@ -1381,6 +1382,8 @@ def _headway_daily_expected(observed: Observed, found: oracle.Outcome) -> Cells:
                 "actual_headway_sum_sec": Single(Fraction(day.sum_sec)),
                 "actual_headway_sumsq_sec2": Single(Fraction(day.sumsq_sec2)),
                 "long_gap_count": day.long_gaps,
+                "bunched_count": day.bunched,
+                "bunching_judged": day.judged,
             }
             for key, day in oracle.headway_days(found).items()
         },
@@ -1397,7 +1400,7 @@ def _headway_label(window: tuple[date, date]) -> str:
 
 # The headway quality columns compared, and the reason the panel gives for
 # being empty when no route is high-frequency.
-_HEADWAY_COLUMNS = ("ewt_sec", "cov", "long_gap_rate", "samples")
+_HEADWAY_COLUMNS = ("ewt_sec", "cov", "long_gap_rate", "bunching_rate", "samples")
 _NO_HIGH_FREQUENCY_ROUTES = "no_high_frequency_routes"
 
 
@@ -1416,6 +1419,7 @@ def _headway_quality_expected(observed: Observed, found: oracle.Outcome) -> Cell
                     "ewt_sec": Rounded(quality.excess_wait_sec, 2),
                     "cov": None if quality.cov is None else Rounded(Fraction(quality.cov), 4),
                     "long_gap_rate": Rounded(quality.long_gap_share, 4),
+                    "bunching_rate": None if quality.bunching_share is None else Rounded(quality.bunching_share, 4),
                     "samples": quality.samples,
                 }
                 for route, quality in oracle.headway_quality(found, *window).items()

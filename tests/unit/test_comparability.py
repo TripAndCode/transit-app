@@ -7,7 +7,6 @@ from pipeline.reports.comparability import (
     MAX_CLAMP_PCT,
     MIN_COVERAGE_PCT,
     _first_failure,
-    _on_time_interval,
     assess,
     ci_half_width_as_printed,
     clamp_is_high,
@@ -16,6 +15,7 @@ from pipeline.reports.comparability import (
     coverage_pct,
     matched_trips,
     tenth_as_printed,
+    trip_interval,
     trips_matchable,
 )
 
@@ -168,23 +168,23 @@ def test_the_interval_counts_trips_not_stop_events():
     """18,000 of 20,000 stop events on time is 90%; over 900 trips the 95%
     Wilson interval is about ±2 points, where 20,000 independent events
     would claim about ±0.4."""
-    low, high = _on_time_interval(18_000, 20_000, 900)
+    low, high = trip_interval(18_000, 20_000, 900)
     assert (low, high) == (87.8, 91.8)
 
 
 def test_the_interval_rounds_outward_so_it_never_reads_narrower_than_computed():
     from pipeline.stats import wilson_interval
 
-    low, high = _on_time_interval(450, 900, 45)
+    low, high = trip_interval(450, 900, 45)
     exact_low, exact_high = wilson_interval(round(0.5 * 45), 45)
     assert low <= exact_low * 100 and high >= exact_high * 100
     assert high - low < (exact_high - exact_low) * 100 + 0.2
 
 
 def test_no_interval_without_samples_or_a_trip_count():
-    assert _on_time_interval(0, 0, 900) == (None, None)
-    assert _on_time_interval(18_000, 20_000, None) == (None, None)
-    assert _on_time_interval(18_000, 20_000, 0) == (None, None)
+    assert trip_interval(0, 0, 900) == (None, None)
+    assert trip_interval(18_000, 20_000, None) == (None, None)
+    assert trip_interval(18_000, 20_000, 0) == (None, None)
 
 
 def _assess(**over):

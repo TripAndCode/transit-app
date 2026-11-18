@@ -133,8 +133,9 @@ def _requires_admin(route: APIRoute) -> bool:
 
 
 def test_only_the_admin_api_returns_a_grade():
-    """The grade is shown to admins only until operators have had notice and
-    a right of reply (docs/methodology.md, "Publication process")."""
+    """A grade, the feed-quality scorecard's or a route report card's, is shown
+    to admins only until operators have had notice and a right of reply
+    (docs/methodology.md, "Publication process")."""
     from api.main import app
 
     graded = [
@@ -142,5 +143,9 @@ def test_only_the_admin_api_returns_a_grade():
         for route in api_routes(app.routes)
         if route.response_model is not None and _has_grade(TypeAdapter(route.response_model).json_schema())
     ]
-    assert [route.path for route in graded] == ["/api/admin/agencies/{agency_id}/diagnostics"]
+    assert sorted(route.path for route in graded) == [
+        "/api/admin/agencies/{agency_id}/diagnostics",
+        "/api/{agency_id}/report-cards",
+        "/api/{agency_id}/routes/{route}/report-card",
+    ]
     assert all(_requires_admin(route) for route in graded)

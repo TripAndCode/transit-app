@@ -252,6 +252,20 @@ Clicking a route’s name — in a report, in **Routes to check** on Pulse, or i
 
 The figures are means along the chosen path. They show where delay builds up; they do not by themselves establish its cause.
 
+### 5-7. Report cards
+
+For admins, a route’s page shows its **Report card**: one grade, A to F, for a calendar month, by default the newest month whose every day has closed. Pick another month above the card. **Routes → Report cards** lists every route’s grade for a month, with **Download CSV**.
+
+- A route scheduled every 12 minutes or more often (high-frequency) is graded on “Excess wait” and “Bunching”, the share of gaps under a quarter of the planned headway, and takes the worse of the two. Any other route is graded on its on-time rate and its early departures, and takes the worse.
+- “Service delivered” under 95% holds the grade at D at best, and under 90% makes it F.
+- Each figure has its own letter and a 95% interval (excess wait and bunching have none). A figure the route is not graded on is shown in grey.
+- “For the next grade” names each figure that must improve, and to what (such as “Bunching 9.0% → 5.0%”).
+- The last three months’ grades sit beside it.
+- “N/A” comes with its reason: the route was not observed that month, was observed fewer than 100 times, too few of its planned trips were observed, its on-time interval is too wide, or a figure its grade needs is missing (bunching before it was recorded, a feed that reports no cancelled trips, or fewer than 100 planned trips, under which service delivered is not judged). A missing figure never counts as a pass.
+- **Print card** prints the card alone on one page, with how its figures were calculated.
+
+The thresholds and their sources are in the methodology. The figures are computed from the operator feed’s predictions.
+
 ---
 
 ## 6. Time — when delay happens

@@ -509,12 +509,12 @@ def test_the_oracle_takes_each_stops_gaps_in_departure_order_and_pools_them_over
     first at 07:14:40, the fourth skipping it: one gap of 40. Stop 3 sees
     07:22:30, 07:22:40 and 07:33:10: gaps 10 and 630. The timetable plans
     360 s at every stop, the missing trip included, so 630 = 1.75 x 360 is
-    not long and 720 is."""
+    not long and 720 is. A quarter of 360 is 90, so 10 and 40 are bunched."""
     found = oracle.outcome(_bunched())
     assert found.plans == {("R", DAY): oracle.Plan(gaps=(360,) * 9, headway_sec=Fraction(360))}
     assert found.wait_plans == found.plans
     day = oracle.headway_days(found)[("R", DAY)]
-    assert day == oracle.HeadwayDay(gaps=(10, 40, 360, 630, 720), long_gaps=1)
+    assert day == oracle.HeadwayDay(gaps=(10, 40, 360, 630, 720), long_gaps=1, bunched=2)
     assert (day.samples, day.median_sec, day.sum_sec, day.sumsq_sec2) == (5, 360, 1760, 1046600)
 
     quality = oracle.headway_quality(found, DAY, DAY)
@@ -526,6 +526,7 @@ def test_the_oracle_takes_each_stops_gaps_in_departure_order_and_pools_them_over
     # Mean 352, mean square 209320: variance 85416.
     assert quality["R"].cov_squared == Fraction(85416, 352**2)
     assert quality["R"].long_gap_share == Fraction(1, 5)
+    assert quality["R"].bunching_share == Fraction(2, 5)
     assert quality["R"].samples == 5
     assert not oracle.no_high_frequency_route(found, DAY, DAY)
 
@@ -534,18 +535,20 @@ def test_the_oracle_pools_a_periods_days_by_their_sums_not_by_averaging_each_day
     """A second day running every trip on time adds nine gaps of 360 s."""
     on_time = tuple(TripRun.from_delays(t, NEXT, (0, 0, 0)) for t in _SIX_MINUTES)
     found = oracle.outcome(_bunched(next_day=on_time))
-    assert oracle.headway_days(found)[("R", NEXT)] == oracle.HeadwayDay(gaps=(360,) * 9, long_gaps=0)
+    assert oracle.headway_days(found)[("R", NEXT)] == oracle.HeadwayDay(gaps=(360,) * 9, long_gaps=0, bunched=0)
     pooled = oracle.headway_quality(found, DAY, NEXT)["R"]
     assert (pooled.samples, pooled.sum_sec, pooled.sumsq_sec2, pooled.long_gaps) == (14, 5000, 2213000, 1)
     assert pooled.excess_wait_sec == Fraction(413, 10)
     assert pooled.long_gap_share == Fraction(1, 14)
+    assert (pooled.bunched, pooled.bunching_judged) == (2, 14)
 
 
 def test_each_day_is_judged_by_the_timetable_in_force_that_day():
     """From the second day the trips run fourteen minutes apart, not
     high-frequency, so a period pools the first day alone. The second day's
     long gaps are judged against 1.75 x 840 = 1470 s: 1480 is long, the
-    840 s gaps are not, as they would be against the first day's 630."""
+    840 s gaps are not, as they would be against the first day's 630. Its
+    bunching is judged against a quarter of 840, 210 s: 200 is bunched."""
     revised = _every("07:00:00", 3, 840, "S_")
     revision = TimetableVersion("fourteen_minutes", NEXT, revised)
     runs = tuple(
@@ -554,7 +557,7 @@ def test_each_day_is_judged_by_the_timetable_in_force_that_day():
     found = oracle.outcome(_bunched(next_day=runs, revisions=(revision,)))
     assert found.plans[("R", NEXT)] == oracle.Plan(gaps=(840,) * 6, headway_sec=Fraction(840))
     assert oracle.headway_days(found)[("R", NEXT)] == oracle.HeadwayDay(
-        gaps=(200, 840, 840, 840, 840, 1480), long_gaps=1
+        gaps=(200, 840, 840, 840, 840, 1480), long_gaps=1, bunched=1
     )
     assert oracle.headway_quality(found, DAY, NEXT) == oracle.headway_quality(found, DAY, DAY)
     assert oracle.headway_quality(found, NEXT, NEXT) == {}

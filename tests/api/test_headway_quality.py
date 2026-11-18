@@ -583,3 +583,33 @@ async def test_a_range_the_timetables_in_force_leave_partly_uncovered_falls_back
 
     assert r.json()["rows"] == []
     assert r.json()["unavailable_reason"] is None
+
+
+async def test_bunching_pools_exact_counts_and_one_unmeasured_day_leaves_it_unknown(headway_client):
+    from api.main import app
+
+    client, aid = headway_client
+    pool = app.state.pool
+    await pool.executemany(
+        "INSERT INTO agg_route_headway_daily (agency_id, route_code, date, actual_headway_median_sec, "
+        " actual_samples, actual_headway_sum_sec, actual_headway_sumsq_sec2, long_gap_count, "
+        " scheduled_headway_median_sec, is_high_frequency, scheduled_headway_sum_sec, "
+        " scheduled_headway_sumsq_sec2, bunched_count, bunching_judged) "
+        "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+        [
+            (aid, "R_PAIRS", date(2026, 6, 1), 480.0, 4, 1920.0, 921600.0, 0, *_EVERY_8_MIN, 1, 4),
+            (aid, "R_PAIRS", date(2026, 6, 2), 480.0, 6, 2880.0, 1382400.0, 0, *_EVERY_8_MIN, 2, 6),
+            (aid, "R_OLD", date(2026, 6, 1), 480.0, 4, 1920.0, 921600.0, 0, *_EVERY_8_MIN, 1, 4),
+            # Built before the counts were stored: unknown, not zero bunching.
+            (aid, "R_OLD", date(2026, 6, 2), 480.0, 4, 1920.0, 921600.0, 0, *_EVERY_8_MIN, None, None),
+        ],
+    )
+    r = await client.get(f"/api/{aid}/headway_quality?from=2026-06-01&to=2026-06-02")
+    by_route = {row["route_code"]: row for row in r.json()["rows"]}
+
+    assert (by_route["R_PAIRS"]["bunched"], by_route["R_PAIRS"]["bunching_judged"]) == (3, 10)
+    assert by_route["R_PAIRS"]["bunching_rate"] == pytest.approx(0.3)
+    assert by_route["R_OLD"]["bunching_rate"] is None
+    assert by_route["R_OLD"]["bunched"] is None
+    # The excess wait still pools both days.
+    assert by_route["R_OLD"]["samples"] == 8

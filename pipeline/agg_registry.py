@@ -141,8 +141,10 @@ def _headway_daily() -> list[str]:
         inspect.getsource(static_headways.route_headways),
         inspect.getsource(headways.daily_headway_rows),
         inspect.getsource(headways.count_long_gaps),
+        inspect.getsource(headways.count_bunched),
         inspect.getsource(headways.is_high_frequency),
         f"LONG_GAP_MULTIPLIER={headways.LONG_GAP_MULTIPLIER!r}",
+        f"BUNCHING_HEADWAY_FRACTION={headways.BUNCHING_HEADWAY_FRACTION!r}",
         f"HIGH_FREQUENCY_HEADWAY_SEC={headways.HIGH_FREQUENCY_HEADWAY_SEC!r}",
     ]
 
@@ -201,7 +203,7 @@ def _entries() -> list[AggTable]:
         ),
         AggTable(
             "agg_route_headway_daily",
-            6,
+            7,
             Kind.DATED,
             Timetable.ARCHIVED,
             _headway_daily,
@@ -446,6 +448,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.17", {"feed_quality_monthly": 9}),
     MethodVersion("2026.11.18", {"agg_route_daily_dwell_run": 6, "agg_route_segment_runtime": 1}),
     MethodVersion("2026.11.19", {"agg_stop_supply_days": 1, "agg_stop_supply_hourly": 1}),
+    MethodVersion("2026.11.20", {"agg_route_headway_daily": 7}),
 )
 
 # The method every report, CSV and council document names beside its figures

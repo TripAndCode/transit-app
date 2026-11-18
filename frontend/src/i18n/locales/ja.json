@@ -2867,5 +2867,82 @@
       "probe_expired": "到着の遅延は使っていません。配信が到着の遅延を伝えるかの確認（{{date}}）が期限切れのため、到着は発車の遅延から判定し、拠点が終点の路線は「観測なし」になります。",
       "never_probed": "到着の遅延は使っていません。この事業者の配信が到着の遅延を伝えるかはまだ確認していないため、到着は発車の遅延から判定し、拠点が終点の路線は「観測なし」になります。"
     }
+  },
+  "report_card": {
+    "title": "系統の成績表",
+    "list_title": "系統ごとの成績表",
+    "list_empty": "{{month}}に観測も計画もある系統はありません。",
+    "mode_table": "一覧表",
+    "mode_cards": "成績表",
+    "month": "月",
+    "print": "成績表を印刷",
+    "na_short": "評価なし",
+    "no_card": "この系統は{{month}}に観測も計画もありません。",
+    "verdict": "{{month}}、{{frequency}}の系統として評価",
+    "frequency": {
+      "high": "高頻度",
+      "low": "低頻度"
+    },
+    "raise_to": "次の評価に上がるには：",
+    "raise_item": "{{metric}} {{value}} → {{target}}",
+    "trend": "直近3か月",
+    "minutes": "{{value}}分",
+    "col": {
+      "figure": "指標",
+      "value": "値",
+      "interval": "95%信頼区間",
+      "letter": "評価",
+      "frequency": "運行頻度",
+      "grade": "評価"
+    },
+    "not_graded_on": "（参考、評価に使わない）",
+    "no_interval": "なし",
+    "metric": {
+      "on_time_pct": "定時率",
+      "early_pct": "早発率",
+      "ewt_min": "超過待ち時間",
+      "bunching_pct": "団子運転率",
+      "service_delivered_pct": "運行率"
+    },
+    "cap": {
+      "none": "上限なし",
+      "D": "D以下",
+      "F": "F"
+    },
+    "rules": {
+      "high": "高頻度の系統は、超過待ち時間と団子運転率のうち悪い方の評価になります。",
+      "low": "低頻度の系統は、定時率（業界標準）と早発率のうち悪い方の評価になります。",
+      "truancy": "運行率が{{cap}}%未満なら評価はD以下、{{fail}}%未満ならFです。",
+      "list": "高頻度の系統は超過待ち時間と団子運転率、低頻度の系統は定時率と早発率で評価し、悪い方の評価を取ります。運行率は評価の上限を決めます。薄い字の値は参考で、評価には使いません。"
+    },
+    "stamp": "算出方法 {{version}}。すべての値は事業者フィードの予測値から算出しています。",
+    "na": {
+      "no_data": "評価なし：この月の観測がありません",
+      "zero_delay_feed": "評価なし：フィードが常に遅延0を配信しています",
+      "too_few_observations": "評価なし：観測数{{observations}}件（{{floor}}件未満）",
+      "coverage_unknown": "評価なし：観測率を測れません",
+      "coverage_low": "評価なし：観測率{{pct}}%",
+      "ci_wide": "評価なし：定時率の信頼区間が広すぎます（{{interval}}）",
+      "not_judged": "評価なし：評価に必要な値がありません（{{figures}}）"
+    },
+    "missing": {
+      "not_measured": "未測定",
+      "no_data": "データなし",
+      "feed_reports_no_cancellations": "フィードが運休を配信していません",
+      "feed_cannot_report": "フィードが運休を配信できません",
+      "feed_unverified": "フィードが未確認です",
+      "no_plan": "時刻表の計画がありません",
+      "unreadable": "読み取れませんでした",
+      "route_plan_unknown": "系統ごとの便数が記録されていません",
+      "too_few_planned_trips": "計画便数が少なすぎます",
+      "too_few_observations": "観測数が少なすぎます",
+      "zero_delay_feed": "フィードが遅延0のみを配信しています",
+      "feed_unsupported": "フィードに停留所の情報がありません",
+      "probe_refuted": "フィードに停留所の情報がありません",
+      "probe_expired": "フィードの確認が期限切れです",
+      "never_probed": "フィードが未確認です",
+      "no_high_frequency_routes": "高頻度の時刻表がありません"
+    },
+    "missing_figure": "{{metric}}：{{reason}}"
   }
 }

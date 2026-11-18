@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from api.csv_cells import inert
 from api.deps import get_agency, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import DAY_TYPE_SERVICE, last_closed_jst_day
@@ -229,17 +230,6 @@ def _pct(share: float | None) -> str:
     return "" if share is None else f"{share * 100:.1f}"
 
 
-# A spreadsheet runs a cell that starts with one of these as a formula.
-_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
-
-
-def _inert(text: str) -> str:
-    """A cell as a spreadsheet shows it rather than runs it: names an admin
-    or a feed wrote reach the file, and a leading quote keeps a cell that
-    opens like a formula a string."""
-    return f"'{text}" if text.startswith(_FORMULA_LEADS) else text
-
-
 # Why the arriving agency's arrival delays were not read, in the file's
 # Japanese, as the board says it in the reader's language
 # (transfers.arrivals_unread.*).
@@ -292,7 +282,7 @@ def csv_text(preamble: list[str], rows: list[list]) -> str:
     buf.write("﻿")
     w = csv.writer(buf)
     for line in preamble:
-        w.writerow([_inert(line)])
+        w.writerow([inert(line)])
     w.writerow(_CSV_COLUMNS)
     w.writerows(rows)
     return buf.getvalue()

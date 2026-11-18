@@ -2867,5 +2867,82 @@
       "probe_expired": "Arrival delays are not read: the check that this operator's feed sends them ({{date}}) has lapsed, so arrivals are judged by departure delays, and a route ending at the hub reads not observed.",
       "never_probed": "Arrival delays are not read: whether this operator's feed sends them has not been checked yet, so arrivals are judged by departure delays, and a route ending at the hub reads not observed."
     }
+  },
+  "report_card": {
+    "title": "Report card",
+    "list_title": "Report cards by route",
+    "list_empty": "No route was observed or planned in {{month}}.",
+    "mode_table": "Table",
+    "mode_cards": "Report cards",
+    "month": "Month",
+    "print": "Print card",
+    "na_short": "N/A",
+    "no_card": "This route was neither observed nor planned in {{month}}.",
+    "verdict": "{{month}}, graded as a {{frequency}} route",
+    "frequency": {
+      "high": "high-frequency",
+      "low": "low-frequency"
+    },
+    "raise_to": "For the next grade:",
+    "raise_item": "{{metric}} {{value}} → {{target}}",
+    "trend": "Last three months",
+    "minutes": "{{value}} min",
+    "col": {
+      "figure": "Figure",
+      "value": "Value",
+      "interval": "95% interval",
+      "letter": "Grade",
+      "frequency": "Frequency",
+      "grade": "Grade"
+    },
+    "not_graded_on": "(shown, not graded)",
+    "no_interval": "none",
+    "metric": {
+      "on_time_pct": "On-time rate",
+      "early_pct": "Early departures",
+      "ewt_min": "Excess wait",
+      "bunching_pct": "Bunching",
+      "service_delivered_pct": "Service delivered"
+    },
+    "cap": {
+      "none": "no cap",
+      "D": "D at best",
+      "F": "F"
+    },
+    "rules": {
+      "high": "A high-frequency route takes the worse grade of its excess wait and its bunching.",
+      "low": "A low-frequency route takes the worse grade of its on-time rate (industry standard) and its early departures.",
+      "truancy": "Service delivered under {{cap}}% caps the grade at D, and under {{fail}}% makes it F.",
+      "list": "High-frequency routes are graded on excess wait and bunching, low-frequency routes on the on-time rate and early departures, each taking the worse; service delivered caps the grade. A greyed figure is shown but not graded."
+    },
+    "stamp": "Method version {{version}}. Every figure is computed from the operator feed's predictions.",
+    "na": {
+      "no_data": "N/A: not observed this month",
+      "zero_delay_feed": "N/A: the feed always reports zero delay",
+      "too_few_observations": "N/A: {{observations}} observations, under {{floor}}",
+      "coverage_unknown": "N/A: observation coverage cannot be measured",
+      "coverage_low": "N/A: observation coverage {{pct}}%",
+      "ci_wide": "N/A: on-time interval too wide ({{interval}})",
+      "not_judged": "N/A: missing {{figures}}"
+    },
+    "missing": {
+      "not_measured": "not measured",
+      "no_data": "no data",
+      "feed_reports_no_cancellations": "feed reports no cancellations",
+      "feed_cannot_report": "feed cannot report cancellations",
+      "feed_unverified": "feed not yet verified",
+      "no_plan": "no timetable plan",
+      "unreadable": "could not be read",
+      "route_plan_unknown": "trips by route not recorded",
+      "too_few_planned_trips": "too few planned trips",
+      "too_few_observations": "too few observations",
+      "zero_delay_feed": "feed reports zero delay only",
+      "feed_unsupported": "feed lacks stop data",
+      "probe_refuted": "feed lacks stop data",
+      "probe_expired": "feed check expired",
+      "never_probed": "feed not yet checked",
+      "no_high_frequency_routes": "no high-frequency timetable"
+    },
+    "missing_figure": "{{metric}} ({{reason}})"
   }
 }

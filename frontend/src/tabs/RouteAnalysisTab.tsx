@@ -22,6 +22,7 @@ import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries
 import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
 import { useAgencyOnTime } from "../components/analysis/agencyOnTime";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
+import { RouteReportCard } from "../components/reportCard/RouteReportCard";
 import { RouteVariantPicker } from "../components/analysis/RouteVariantPicker";
 import { initialStop, largestRises, pickableVariants, previousWindow, windowDays } from "../components/analysis/routeDossier";
 import { MareyDiagram } from "../components/charts/MareyDiagram";
@@ -208,6 +209,9 @@ export function RouteAnalysisTab() {
     </div></header>
     {notice && <span role="status">{notice}</span>}
     {route && <RouteSummaryStrip agencyId={id} route={route} ctx={ctx} />}
+    {/* A grade is shown to admins only until operators have had notice and a
+        right of reply (docs/methodology.md, "Publication process"). */}
+    {route && isAdmin && <RouteReportCard agencyId={id} route={route} />}
     {route && <PerformanceStandardPanel aid={id} ctx={ctx} route={route} />}
     <ScopeBar applied={scopeApplied} actions={false} />
     {!route ? <EmptyState title={t("choose")} /> : <AsyncSection loading={query.isPending} error={query.error} onRetry={() => void query.refetch()} data={query.data} hasContent={(d) => d.stops.length > 0} empty={<EmptyState title={t("empty")}

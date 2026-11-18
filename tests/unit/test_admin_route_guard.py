@@ -25,6 +25,9 @@ ADMIN_ROUTES_OUTSIDE_THE_ADMIN_NAMESPACE = {
     ("POST", "/api/agencies/{agency_id}/restore"),
     ("POST", "/api/debug/perf/reset"),
     ("GET", "/api/ml/evaluations"),
+    # Route report cards: a grade is for admins until the publication process.
+    ("GET", "/api/{agency_id}/report-cards"),
+    ("GET", "/api/{agency_id}/routes/{route}/report-card"),
 }
 
 
