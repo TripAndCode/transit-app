@@ -3,13 +3,15 @@ import json
 from argparse import Namespace
 from datetime import date, timedelta
 
-import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 import gtfs_pipeline
 from pipeline import ml_forecast_ingest
 from pipeline.ml_forecast_ingest import ingest_forecast
+from tests.unit.ml.ml_group import require
+
+pd = require("pandas")
 
 # The ingest prunes rows whose service_date has aged past its retention
 # window, so every fixture date follows the clock rather than a fixed day.

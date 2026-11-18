@@ -499,14 +499,38 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
     assert checked >= 1, "expected at least one `| tee` step (nightly-extended.yml); the probe found none"
 
 
-def test_the_test_job_installs_the_ml_group_and_requires_its_tests() -> None:
-    """The model tests skip where the optional `ml` group is absent. In CI's test
-    job a missing group must fail them, or they would pass by never running."""
-    steps = _workflow_yaml()["jobs"]["test"]["steps"]
-    setup = next(step for step in steps if step.get("uses") == "./.github/actions/setup-backend")
-    assert "ml" in str(setup["with"].get("groups", "")).split()
-    run_tests = next(step for step in steps if step.get("name") == "Run tests")
-    assert str(run_tests["env"].get("ML_DEPS_REQUIRED")) == "1"
+_RUNS_PYTEST = re.compile(r"(?<![\w.-])pytest(?![\w.-])")
+
+
+def test_every_job_that_runs_the_suite_installs_the_ml_group_and_requires_its_tests() -> None:
+    """The model tests skip where the optional `ml` group is absent. In a CI job
+    a missing group must fail them, or they would pass by never running.
+
+    The check covers every job in every workflow that runs pytest, not one named
+    job, because a job that sets up its own toolchain drifts from the shared
+    action without anything noticing. A test module that imports an `ml`
+    package directly then fails collection, and with it the whole run."""
+    checked = set()
+    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+        for job_name, job in doc["jobs"].items():
+            steps = job.get("steps", [])
+            for step in steps:
+                if not _RUNS_PYTEST.search(step.get("run", "")):
+                    continue
+                where = f"{workflow.name} / {job_name}"
+                checked.add(where)
+                setup = next((s for s in steps if s.get("uses") == "./.github/actions/setup-backend"), None)
+                assert setup is not None, f"{where} runs pytest without setting up through the shared action"
+                assert "ml" in str(setup.get("with", {}).get("groups", "")).split(), (
+                    f"{where} runs pytest without the ml group"
+                )
+                assert str((step.get("env") or {}).get("ML_DEPS_REQUIRED")) == "1", (
+                    f"{where} runs pytest without ML_DEPS_REQUIRED=1, so the model tests may skip instead of run"
+                )
+    assert {"ci.yml / test", "nightly-extended.yml / python-extended"} <= checked, (
+        f"the probe no longer finds the known pytest jobs; it found {sorted(checked)}"
+    )
 
 
 def test_the_shared_action_installs_the_groups_it_is_given_and_caches_them_apart() -> None:

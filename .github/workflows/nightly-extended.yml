@@ -53,15 +53,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      # The same toolchain as CI's test job, `ml` group included, so the suite
+      # this job runs is the one the test job runs.
+      - uses: ./.github/actions/setup-backend
         with:
           python-version: "3.15"
-
-      - name: Install Poetry
-        run: pip install poetry==2.5.1
-
-      - name: Install dependencies
-        run: poetry install
+          groups: ml
 
       # RUN_I18N_SCAN and RUN_DASHBOARD_E2E_SCAN drive a real Chromium
       # against the built SPA (see those tests' own module docstrings) —
@@ -131,6 +128,7 @@ jobs:
           CLICKHOUSE_PASSWORD: transit
           CLICKHOUSE_DATABASE: transit_test
           RUN_CH_INTEGRATION: 1
+          ML_DEPS_REQUIRED: 1
           RUN_I18N_SCAN: 1
           RUN_DASHBOARD_E2E_SCAN: 1
 
