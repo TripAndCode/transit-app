@@ -15,10 +15,11 @@ populate them, as recorded in the ``rt_field_coverage_probes`` registry.
 ``ingest_strategy == 'static_join'`` alone means a feed's wire shape
 matches an already-verified agency's; it does NOT mean the feed populates
 these optional fields the same way (see ``field_coverage``'s docstring).
-Every reader that trusts these fields calls ``rt_field_coverage_gap`` below,
-or ``rt_field_coverage_confirmed_agencies`` to gate a list of agencies at
-once, rather than re-deriving the check inline, so a newly added reader
-can't silently skip half the gate.
+Every reader that trusts these fields calls ``rt_field_coverage_gap`` below
+(the full gate), ``rt_field_coverage_confirmed_agencies`` to gate a list of
+agencies at once, or ``rt_field_gap`` when it reads one of the fields alone,
+rather than re-deriving the check inline, so a newly added reader can't
+silently skip half the gate.
 
 Verifying a feed is an operational act, not a code change: run
 ``scripts/probe_rt_field_coverage.py --url <realtime_url> --agency-id <id>

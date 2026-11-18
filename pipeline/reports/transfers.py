@@ -18,9 +18,9 @@ delay reports read them: refiling rewrites a row's schedule and route, never
 its delay, and the plan this joins to is the loaded timetable's, so a row
 refiled under another version would be judged against two timetables at once.
 A's arrival reads the visit's arrival delay where the agency's feed is
-confirmed to send arrivals, else its departure delay; a bus leaves no earlier
-than it arrives, so the fallback can only make A look later and a connection
-look less safe. B reads the departure delay only.
+confirmed to send arrivals and the visit has one, else its departure delay
+plus the stop's scheduled dwell (:func:`delays`). B reads the departure delay
+only, and a B departure the feed withdrew counts as missed (:func:`connections`).
 
 The definitions a reader sees are in docs/methodology.md (乗継ぎ拠点での接続).
 """
@@ -32,21 +32,23 @@ import json
 import math
 from bisect import bisect_left
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal, NamedTuple
 
 from clickhouse_connect.driver.external import ExternalData
 
+from pipeline import static_archive
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import fallback_day_type, public_holidays_between
-from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_stop_visits_ch_sql
+from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, build_stop_visits_ch_sql, stop_event_filter_ch, withdrawn_ch
 from pipeline.live_filing import require_retained
 from pipeline.planned_trips import plan_ctes
 from pipeline.reports.rankings import MIN_GROUP_SAMPLES
 from pipeline.route_catalog import route_code_sql
 from pipeline.service_day import clock_to_sec, filed_between_ch
+from pipeline.static_archive import Stamp
 from pipeline.strategies.static_join import CoverageGap, rt_field_gap
 from pipeline.timetable_sampling import DayType
 
@@ -76,12 +78,15 @@ class PairSpec(NamedTuple):
 
 class StopEvent(NamedTuple):
     """One planned call at a hub stop: a trip's stop on one service day, at
-    ``sec`` seconds of that day."""
+    ``sec`` seconds of that day. For an arrival, ``dwell`` is the scheduled
+    departure minus the scheduled arrival there: how long the timetable
+    holds the bus at the stop after it arrives."""
 
     day: date
     trip_id: str
     stop_sequence: int
     sec: int
+    dwell: int = 0
 
 
 Key = tuple[date, str, int]
@@ -111,22 +116,30 @@ class Connection(NamedTuple):
 
 class _DayDepartures(NamedTuple):
     """One service day's B departures in scheduled order, with each one's
-    scheduled second and predicted second (None where unobserved)."""
+    scheduled second, predicted second (None where unobserved or withdrawn)
+    and whether the feed withdrew it (its trip cancelled or the stop skipped)."""
 
     events: list[StopEvent]
     secs: list[int]
     predicted: list[int | None]
+    withdrawn: list[bool]
 
 
-def _departures_by_day(departures: Sequence[StopEvent], dep_delay: Mapping[Key, int]) -> dict[date, _DayDepartures]:
+def _departures_by_day(
+    departures: Sequence[StopEvent], dep_delay: Mapping[Key, int], withdrawn: Collection[Key]
+) -> dict[date, _DayDepartures]:
     grouped: dict[date, list[StopEvent]] = defaultdict(list)
     for d in departures:
         grouped[d.day].append(d)
     out = {}
     for day, events in grouped.items():
         events.sort(key=lambda e: (e.sec, e.trip_id, e.stop_sequence))
-        predicted = [None if (delay := dep_delay.get(_key(e))) is None else e.sec + delay for e in events]
-        out[day] = _DayDepartures(events, [e.sec for e in events], predicted)
+        gone = [_key(e) in withdrawn for e in events]
+        predicted = [
+            None if g or (delay := dep_delay.get(_key(e))) is None else e.sec + delay
+            for e, g in zip(events, gone, strict=True)
+        ]
+        out[day] = _DayDepartures(events, [e.sec for e in events], predicted, gone)
     return out
 
 
@@ -136,6 +149,7 @@ def connections(
     arr_delay: Mapping[Key, int],
     dep_delay: Mapping[Key, int],
     walk_sec: int,
+    withdrawn: Collection[Key] = frozenset(),
 ) -> tuple[list[Connection], int]:
     """Every planned connection, and how many of A's arrivals had none.
 
@@ -143,22 +157,25 @@ def connections(
     after ``a + walk``; one with no such departure that day has no connection.
     It held when B's predicted departure is at or after A's predicted arrival
     plus the walk, and missed otherwise; without a prediction for either side
-    it is unobserved, never held or missed.
+    it is unobserved, never held or missed. A planned B departure the feed
+    withdrew (its trip cancelled or the stop skipped) missed, whatever A did;
+    it has no delay, so it adds no buffer need.
 
     The realised wait runs from A's predicted arrival to the first B
     departure a rider could still catch, the walk included. B's trips are
     read in scheduled order from the planned one; an unobserved trip met
     before a catchable one leaves the wait unknown, since it may have been
     the one caught. An earlier trip predicted to leave late enough to catch
-    counts too: a rider would take it, even when no later trip runs.
+    counts too: a rider would take it, even when no later trip runs. A
+    withdrawn trip is no trip to catch, so the scan passes over it.
 
     Predicted delays lie within ``MAX_PLAUSIBLE_DELAY_SEC`` of the schedule
     (pipeline.db.plausible_delay_ch), so only the earlier trips scheduled
     within that reach of the catchable moment are looked at, and the forward
     scan ends at the first observed trip scheduled that far past it.
     """
-    by_day_b = _departures_by_day(departures, dep_delay)
-    empty = _DayDepartures([], [], [])
+    by_day_b = _departures_by_day(departures, dep_delay, withdrawn)
+    empty = _DayDepartures([], [], [], [])
     out: list[Connection] = []
     no_onward = 0
     for a in sorted(arrivals, key=lambda e: (e.day, e.sec, e.trip_id, e.stop_sequence)):
@@ -176,33 +193,36 @@ def _connection(
 ) -> Connection:
     hour = a.sec // 3600
     a_delay = arr_delay.get(_key(a))
+    b_withdrawn = day_b.withdrawn[planned]
     b_predicted = day_b.predicted[planned]
-    if a_delay is None or b_predicted is None:
+    if a_delay is None:
+        return Connection(a.day, hour, "missed" if b_withdrawn else "unobserved", None, None, False)
+    if b_predicted is None and not b_withdrawn:
         return Connection(a.day, hour, "unobserved", None, None, False)
     alighted = a.sec + a_delay
     catchable_from = alighted + walk_sec
-    b_delay = b_predicted - day_b.secs[planned]
     reach = bisect_left(day_b.secs, catchable_from - MAX_PLAUSIBLE_DELAY_SEC, hi=planned)
     earlier = [p for p in day_b.predicted[reach:planned] if p is not None and p >= catchable_from]
-    caught, stranded = _first_catchable(day_b.predicted, planned, catchable_from)
+    caught, stranded = _first_catchable(day_b, planned, catchable_from)
     if earlier and (caught is not None or stranded):
         caught = min(earlier) if caught is None else min(caught, *earlier)
         stranded = False
+    held = b_predicted is not None and b_predicted >= catchable_from
+    need = None if b_predicted is None else a_delay - (b_predicted - day_b.secs[planned]) + walk_sec
     return Connection(
-        a.day,
-        hour,
-        "held" if b_predicted >= catchable_from else "missed",
-        None if caught is None else caught - alighted,
-        a_delay - b_delay + walk_sec,
-        stranded,
+        a.day, hour, "held" if held else "missed", None if caught is None else caught - alighted, need, stranded
     )
 
 
-def _first_catchable(predicted: Sequence[int | None], planned: int, catchable_from: int) -> tuple[int | None, bool]:
+def _first_catchable(day_b: _DayDepartures, planned: int, catchable_from: int) -> tuple[int | None, bool]:
     """The first predicted departure from ``planned`` on, in scheduled order,
-    at or after ``catchable_from``: (its second, False); (None, False) when an
-    unobserved trip comes first; (None, True) when none is left that day."""
+    at or after ``catchable_from``, passing over withdrawn trips: (its
+    second, False); (None, False) when an unobserved trip comes first; (None,
+    True) when none is left that day."""
+    predicted, withdrawn = day_b.predicted, day_b.withdrawn
     for i in range(planned, len(predicted)):
+        if withdrawn[i]:
+            continue
         p = predicted[i]
         if p is None:
             return None, False
@@ -396,10 +416,14 @@ async def _plan(
     rows = await conn.fetch(_PLAN_SQL, agency_id, days[0], days[-1], route_code, direction, list(stops), days, arriving)
     events = []
     for r in rows:
-        first, second = (r["arrival_time"], r["departure_time"])
-        sec = clock_to_sec(first if arriving else second) or clock_to_sec(second if arriving else first)
-        if sec is not None:
-            events.append(StopEvent(r["day"], r["trip_id"], r["stop_sequence"], sec))
+        arrives, departs = clock_to_sec(r["arrival_time"]), clock_to_sec(r["departure_time"])
+        sec = (
+            (arrives if arrives is not None else departs) if arriving else (departs if departs is not None else arrives)
+        )
+        if sec is None:
+            continue
+        dwell = max(departs - arrives, 0) if arriving and arrives is not None and departs is not None else 0
+        events.append(StopEvent(r["day"], r["trip_id"], r["stop_sequence"], sec, dwell))
     return events
 
 
@@ -419,8 +443,32 @@ def visits_sql() -> str:
     return f"SELECT trip_id, date, stop_sequence, dep_delay, arr_delay FROM ({visits})"
 
 
+def withdrawn_sql() -> str:
+    """The planned stop events whose latest departure report withdraws the
+    departure: its trip CANCELED or its stop SKIPPED. The same pick as the
+    departure in pipeline.db.build_stop_visits_ch_sql (the latest timely
+    report among the departures and the withdrawals), which leaves such a
+    stop event no departure delay and, without an arrival, no row."""
+    filed = static_archive.filed_date_sql(Stamp.INGESTED)
+    where = "(u.trip_id, u.stop_sequence) IN (SELECT trip_id, stop_sequence FROM planned) AND " + filed_between_ch(
+        "{from_date:Date}", "{to_date:Date}"
+    )
+    return (
+        f"SELECT u.trip_id, {filed} AS date, u.stop_sequence "
+        + static_archive.observation_rows(stop_event_filter_ch(where), Stamp.INGESTED)
+        + f" GROUP BY u.trip_id, {filed}, u.stop_sequence"
+        + f" HAVING argMax(toUInt8({withdrawn_ch()}), (u.captured_at, u.file_name)) = 1"
+    )
+
+
+# The external table's stop_sequence is UInt16, the column `updates` stores;
+# a planned stop outside it can have no report, so it is left out rather than
+# failing the read.
+_MAX_STOP_SEQUENCE = 65535
+
+
 def _planned_table(events: Iterable[StopEvent]) -> ExternalData:
-    pairs = sorted({(e.trip_id, e.stop_sequence) for e in events})
+    pairs = sorted({(e.trip_id, e.stop_sequence) for e in events if 0 <= e.stop_sequence <= _MAX_STOP_SEQUENCE})
     rows = "\n".join(json.dumps({"trip_id": t, "stop_sequence": q}, ensure_ascii=False) for t, q in pairs)
     return ExternalData(
         file_name="planned",
@@ -444,17 +492,40 @@ async def _observed(ch, agency_id: int, events: Sequence[StopEvent], days: list[
     return [(str(t), d, int(s), dep, arr) for t, d, s, dep, arr in result.result_rows]
 
 
-def delays(rows: Iterable[Visit], wanted: set[date], *, arriving: bool, arrivals_confirmed: bool) -> dict[Key, int]:
-    """Each observed visit's delay on the wanted days. For A, the arrival's
-    where the agency's feed is confirmed to send arrivals, else the
-    departure's; for B, the departure's."""
+async def _withdrawn(ch, agency_id: int, events: Sequence[StopEvent], days: list[date]) -> set[Key]:
+    if not events:
+        return set()
+    result = await ch.query(
+        withdrawn_sql(),
+        parameters={"agency_id": agency_id, "from_date": days[0], "to_date": days[-1]},
+        external_data=_planned_table(events),
+    )
+    return {(d, str(t), int(s)) for t, d, s in result.result_rows}
+
+
+def delays(
+    rows: Iterable[Visit],
+    wanted: set[date],
+    *,
+    arriving: bool,
+    arrivals_confirmed: bool,
+    dwell: Mapping[Key, int] | None = None,
+) -> dict[Key, int]:
+    """Each observed visit's delay on the wanted days. For B, the
+    departure's. For A, the arrival's where the agency's feed is confirmed to
+    send arrivals and the visit has one; else the departure's plus the
+    scheduled *dwell* at the stop. A bus arrives no later than it leaves, so
+    that is the latest it can have arrived: the fallback can only make A look
+    later, and a connection less safe."""
     out: dict[Key, int] = {}
     for trip_id, day, seq, dep, arr in rows:
         if day not in wanted:
             continue
-        value = arr if arriving and arrivals_confirmed and arr is not None else dep
-        if value is not None:
-            out[(day, trip_id, seq)] = int(value)
+        key = (day, trip_id, seq)
+        if arriving and arrivals_confirmed and arr is not None:
+            out[key] = int(arr)
+        elif dep is not None:
+            out[key] = int(dep) + ((dwell or {}).get(key, 0) if arriving else 0)
     return out
 
 
@@ -495,8 +566,9 @@ async def compute_reliability(
         arriving=False,
     )
     # Arrival delays are an optional realtime field, read only from a feed
-    # confirmed to send them (pipeline.strategies.static_join); the other
-    # optional fields are not read here, so their verdicts do not matter.
+    # confirmed to send them (pipeline.strategies.static_join). The stop id
+    # is not read; the schedule relationships are read ungated by the
+    # withdrawals, as the delay reports' dedup reads them.
     arrivals_gap = await rt_field_gap(pair.from_agency_id, conn, "arr_delay")
     arrivals_confirmed = arrivals_gap is None
     if len(agencies) == 1:
@@ -506,9 +578,13 @@ async def compute_reliability(
         a_rows = await _observed(ch, pair.from_agency_id, arrivals, planned_days)
         b_rows = await _observed(ch, pair.to_agency_id, departures, planned_days)
     wanted = set(planned_days)
-    arr = delays(a_rows, wanted, arriving=True, arrivals_confirmed=arrivals_confirmed)
+    dwell = {_key(e): e.dwell for e in arrivals if e.dwell}
+    arr = delays(a_rows, wanted, arriving=True, arrivals_confirmed=arrivals_confirmed, dwell=dwell)
     dep = delays(b_rows, wanted, arriving=False, arrivals_confirmed=arrivals_confirmed)
-    result = await asyncio.to_thread(_reliability, arrivals, departures, arr, dep, pair.walk_sec, planned_days, no_plan)
+    withdrawn = await _withdrawn(ch, pair.to_agency_id, departures, planned_days)
+    result = await asyncio.to_thread(
+        _reliability, arrivals, departures, arr, dep, withdrawn, pair.walk_sec, planned_days, no_plan
+    )
     result.arrivals_gap = arrivals_gap
     return result
 
@@ -525,9 +601,10 @@ def _reliability(
     departures: list[StopEvent],
     arr: dict[Key, int],
     dep: dict[Key, int],
+    withdrawn: set[Key],
     walk_sec: int,
     days: list[date],
     no_plan: list[date],
 ) -> Reliability:
-    found, no_onward = connections(arrivals, departures, arr, dep, walk_sec)
+    found, no_onward = connections(arrivals, departures, arr, dep, walk_sec, withdrawn)
     return summarise(found, no_onward, walk_sec, days, no_plan)

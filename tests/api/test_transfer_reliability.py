@@ -47,17 +47,21 @@ def _shift(clock: str, minutes: int) -> str:
     return f"{sec // 3600:02d}:{sec % 3600 // 60:02d}:00"
 
 
-def _trip(pg_conn, agency_id: int, route_id: str, trip_id: str, stop_id: str, clock: str, *, shape: str):
-    """One trip of the loaded timetable calling at ``stop_id`` as sequence 4
-    at ``clock``, under a service running every day from RUNS_FROM. *shape*
-    places the hub on the trip: ``through`` with a stop before and after it,
-    ``ends`` as its last stop, ``starts`` as its first."""
+def _trip(
+    pg_conn, agency_id: int, route_id: str, trip_id: str, stop_id: str, clock: str, *, shape: str, hold_min: int = 0
+):
+    """One trip of the loaded timetable arriving at ``stop_id`` as sequence 4
+    at ``clock`` and leaving *hold_min* later, under a service running every
+    day from RUNS_FROM. *shape* places the hub on the trip: ``through`` with
+    a stop before and after it, ``ends`` as its last stop, ``starts`` as its
+    first."""
     service_id = f"SVC-{trip_id}"
-    stops = [(4, stop_id, clock)]
+    leaves = _shift(clock, hold_min)
+    stops = [(4, stop_id, clock, leaves)]
     if shape in ("through", "ends"):
-        stops.insert(0, (3, f"{stop_id}-up", _shift(clock, -5)))
+        stops.insert(0, (3, f"{stop_id}-up", _shift(clock, -5), _shift(clock, -5)))
     if shape in ("through", "starts"):
-        stops.append((5, f"{stop_id}-down", _shift(clock, 5)))
+        stops.append((5, f"{stop_id}-down", _shift(leaves, 5), _shift(leaves, 5)))
     with pg_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO static_calendar (agency_id, service_id, monday, tuesday, wednesday, thursday, friday,"
@@ -74,7 +78,7 @@ def _trip(pg_conn, agency_id: int, route_id: str, trip_id: str, stop_id: str, cl
             "INSERT INTO static_trips (agency_id, trip_id, route_id, service_id) VALUES (%s, %s, %s, %s)",
             (agency_id, trip_id, route_id, service_id),
         )
-        for seq, stop, at in stops:
+        for seq, stop, arrives, departs in stops:
             cur.execute(
                 "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES (%s, %s, '温品四丁目')"
                 " ON CONFLICT DO NOTHING",
@@ -84,7 +88,7 @@ def _trip(pg_conn, agency_id: int, route_id: str, trip_id: str, stop_id: str, cl
                 "INSERT INTO static_stop_times"
                 " (agency_id, trip_id, stop_sequence, stop_id, arrival_time, departure_time)"
                 " VALUES (%s, %s, %s, %s, %s, %s)",
-                (agency_id, trip_id, seq, stop, at, at),
+                (agency_id, trip_id, seq, stop, arrives, departs),
             )
     pg_conn.commit()
 
@@ -94,14 +98,18 @@ def _sec(clock: str) -> int:
     return h * 3600 + m * 60 + s
 
 
-def _reading(route: str, trip_id: str, stop_id: str | None, clock: str, *, dep=None, arr=None, day=DAY):
+def _reading(route: str, trip_id: str, stop_id: str | None, clock: str, *, dep=None, arr=None, day=DAY, canceled=False):
     """One poll of a trip's stop sequence 4, five minutes before its
     scheduled time on service day ``day``; a clock past 24:00 is captured
-    after midnight, on the next calendar day, as the feed sends it."""
+    after midnight, on the next calendar day, as the feed sends it. A
+    *canceled* poll comes two minutes later and reports the trip CANCELED."""
+    from pipeline.clickhouse import TRIP_CANCELED
+
     sec = _sec(clock)
-    captured = service_day_moment_utc(day, sec) - timedelta(minutes=5)
+    captured = service_day_moment_utc(day, sec) - timedelta(minutes=2 if canceled else 5)
+    kind = "c" if canceled else "a" if arr is not None else "d"
     return (
-        f"test/{route}/{trip_id}/{clock}/{'a' if arr is not None else 'd'}.pb",
+        f"test/{route}/{trip_id}/{clock}/{kind}.pb",
         captured,
         trip_id,
         "",
@@ -111,7 +119,7 @@ def _reading(route: str, trip_id: str, stop_id: str | None, clock: str, *, dep=N
         dep,
         stop_id,
         arr,
-        None,
+        TRIP_CANCELED if canceled else None,
         None,
         None,
         sec,
@@ -274,6 +282,38 @@ async def test_unconfirmed_arrivals_leave_a_route_ending_at_the_hub_unobserved_a
     assert body["arrivals_last_checked"] is None
     text = (await client.get(_url(bus, pair_id, format="csv"))).text
     assert "到着の遅延は使っていません" in text
+
+
+@pytest.mark.asyncio
+async def test_a_departure_standing_in_for_an_arrival_allows_for_the_scheduled_hold(
+    client, hub, pg_conn, ch_client, transfer_app
+):
+    from pipeline.clickhouse import insert_updates
+
+    bus, tram, pair_id = hub
+    # Scheduled to arrive 14:00 and leave 14:05; it leaves on time with no
+    # arrival reported, so it may have arrived at 14:05, after a 14:04 tram
+    # less the walk had gone.
+    _trip(pg_conn, bus, "29", "a-hold", "H-A", "14:00:00", shape="through", hold_min=5)
+    _trip(pg_conn, tram, "2", "b-hold", "H-B", "14:04:00", shape="through")
+    insert_updates(ch_client, bus, [_reading("29", "a-hold", "H-A", "14:05:00", dep=0)])
+    insert_updates(ch_client, tram, [_reading("2", "b-hold", "H-B", "14:04:00", dep=0)])
+    body = (await client.get(_url(bus, pair_id))).json()
+    (two,) = [h for h in body["by_hour"] if h["hour"] == 14]
+    assert (two["planned"], two["held"], two["missed"]) == (1, 0, 1)
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_planned_departure_is_missed_not_unobserved(client, hub, ch_client, transfer_app):
+    from pipeline.clickhouse import insert_updates
+
+    bus, tram, pair_id = hub
+    insert_updates(ch_client, tram, [_reading("2", "b1", "H-B", "10:05:00", canceled=True)])
+    body = (await client.get(_url(bus, pair_id))).json()
+    (ten,) = [h for h in body["by_hour"] if h["hour"] == 10]
+    assert (ten["held"], ten["missed"], ten["unobserved"]) == (0, 1, 0)
+    total = body["total"]
+    assert (total["planned"], total["held"], total["missed"], total["unobserved"]) == (4, 1, 2, 1)
 
 
 @pytest.mark.asyncio

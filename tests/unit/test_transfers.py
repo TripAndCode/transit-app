@@ -143,6 +143,61 @@ def test_arrival_delay_falls_back_to_departure_and_b_reads_departures_only():
     assert departing == {(D, "a1", 5): 30, (D, "a2", 5): 30}
 
 
+def test_a_departure_standing_in_for_an_arrival_carries_the_scheduled_hold():
+    # Scheduled to arrive 10:00 and leave 10:05; it leaves on time, having
+    # arrived as late as 10:05, so a 10:04 departure across the hub is missed.
+    arrival = StopEvent(D, "a1", 5, 36000, dwell=300)
+    planned = b(36240, "b1")
+    rows = [("a1", D, 5, 0, None), ("b1", D, 3, 0, None)]
+    arr = delays(rows, {D}, arriving=True, arrivals_confirmed=True, dwell={k(arrival): arrival.dwell})
+    assert arr[k(arrival)] == 300
+    c = one(arrival, [planned], arr, delays(rows, {D}, arriving=False, arrivals_confirmed=True))
+    assert c.outcome == "missed"
+    assert c.need_sec == 300 + WALK
+
+
+def test_a_reported_arrival_needs_no_hold():
+    arrival = StopEvent(D, "a1", 5, 36000, dwell=300)
+    rows = [("a1", D, 5, 0, 60)]
+    assert delays(rows, {D}, arriving=True, arrivals_confirmed=True, dwell={k(arrival): 300}) == {k(arrival): 60}
+
+
+def test_a_withdrawn_planned_departure_is_missed_and_the_rider_waits_for_the_next():
+    arrival, cancelled, later = a(36000), b(36300, "b1"), b(37200, "b2")
+    found, _ = connections([arrival], [cancelled, later], {k(arrival): 0}, {k(later): 0}, WALK, {k(cancelled)})
+    (c,) = found
+    assert (c.outcome, c.wait_sec, c.need_sec, c.stranded) == ("missed", 1200, None, False)
+
+
+def test_a_withdrawn_planned_departure_is_missed_even_when_the_arrival_is_unobserved():
+    arrival, cancelled = a(36000), b(36300, "b1")
+    found, _ = connections([arrival], [cancelled], {}, {}, WALK, {k(cancelled)})
+    (c,) = found
+    assert (c.outcome, c.wait_sec) == ("missed", None)
+
+
+def test_withdrawn_trips_are_never_the_one_caught():
+    arrival, late_earlier, planned, cancelled, last = (
+        a(36000),
+        b(35900, "b0"),
+        b(36300, "b1"),
+        b(36600, "b2"),
+        b(37200, "b3"),
+    )
+    dep = {k(late_earlier): 1200, k(planned): 0, k(last): 0}
+    found, _ = connections(
+        [arrival],
+        [late_earlier, planned, cancelled, last],
+        {k(arrival): 600},
+        dep,
+        WALK,
+        {k(late_earlier), k(cancelled)},
+    )
+    (c,) = found
+    # The late earlier trip and the 10:10 were withdrawn: the 10:20 is the one caught.
+    assert (c.outcome, c.wait_sec, c.stranded) == ("missed", 37200 - 36600, False)
+
+
 def test_arrival_delays_are_ignored_unless_the_feed_is_confirmed_to_send_them():
     assert delays(ROWS, {D}, arriving=True, arrivals_confirmed=False) == {(D, "a1", 5): 30, (D, "a2", 5): 30}
 
@@ -192,7 +247,7 @@ def test_an_arrival_reads_departures_within_the_delay_clamp_only():
     events = [StopEvent(D, f"b{i}", 3, 18000 + i * spacing) for i in range(1600)]
     secs = [e.sec for e in events]
     predicted = _Counted(e.sec for e in events)
-    day_b = _DayDepartures(events, secs, predicted)
+    day_b = _DayDepartures(events, secs, predicted, [False] * len(events))
     arrival = a(18000 + 800 * spacing)
     planned = bisect_left(secs, arrival.sec + WALK)
     _Counted.reads = 0
@@ -267,3 +322,13 @@ def test_day_types_follow_the_weekday_rule_with_holidays():
         date(2026, 10, 11),
         date(2026, 10, 12),
     ]
+
+
+def test_the_planned_table_leaves_out_a_stop_sequence_updates_cannot_hold():
+    import json
+
+    from pipeline.reports.transfers import _planned_table
+
+    table = _planned_table([b(36000, "ok"), StopEvent(D, "neg", -1, 0), StopEvent(D, "big", 65536, 0)])
+    rows = [json.loads(line) for line in table.files[0].data.decode().splitlines()]
+    assert rows == [{"trip_id": "ok", "stop_sequence": 3}]
