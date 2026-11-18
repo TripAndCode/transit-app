@@ -76,11 +76,11 @@
     "version": 1
   },
   "agg_stop_supply_hourly": {
-    "hash": "fd74a73bacc9c344b2baba7734ee98b826afeda1affd1b9b4b663f597da64ba3",
+    "hash": "a7aa90f4f7282ca9cd8d1de30fcbc0ef4306ededd5c0b5fee63fed74b0732289",
     "version": 1
   },
   "feed_quality_monthly": {
-    "hash": "239f19e630d755119d7eb566d4b84f20f720ccf2997e81dc79f5836c0f9ee903",
+    "hash": "f05ca42f9fea24198bbd91c25c3dd47ad2f4f2649f159b60c58a9fc965ac9088",
     "version": 9
   },
   "route_delay_counts": {
