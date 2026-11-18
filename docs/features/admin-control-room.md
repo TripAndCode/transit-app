@@ -336,6 +336,29 @@ carries its own `require_admin` dependency, and
 `tests/unit/test_admin_route_guard.py` keeps every `/api/admin/*` route behind
 it.
 
+## Transfer pairs
+
+Route: `/admin/transfers`, backed by `AdminTransfersPage`.
+
+Endpoints:
+- `GET /api/admin/transfer-pairs` — every pair, inactive ones included.
+- `POST /api/admin/transfer-pairs` — create a pair; refused with 409 past
+  `MAX_TRANSFER_PAIRS`.
+- `PATCH /api/admin/transfer-pairs/{id}` — replace a pair's whole definition.
+- `DELETE /api/admin/transfer-pairs/{id}` — delete a pair.
+
+A pair names, for each side, an agency, a route code, an optional direction and
+that operator's own stop ids, plus the walk between them and the day types it
+is read on. A write is refused with 422 unless both agencies are live and the
+loaded timetables have both routes and every stop id. Nothing matches a place
+across operators.
+
+Tables: reads and writes `transfer_pairs`. Every write records an `admin_audit`
+entry in its own transaction (`transfer_pair.create`, `.update`, `.delete`,
+with the row before and after). The Transfers board under Compare reads the
+active pairs through `/api/{agency_id}/transfer-pairs`
+(`api/routers/transfers.py`, `pipeline/reports/transfers.py`).
+
 ## Snapshots
 
 No page of its own: an admin takes a snapshot from the Export menu of the

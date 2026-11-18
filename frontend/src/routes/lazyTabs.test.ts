@@ -68,12 +68,18 @@ describe("ROUTE_CHUNK_LOADERS", () => {
     expect(loaded).toEqual([{ default: SavedExportTab }, { default: ReportsHomeTab }]);
   });
 
-  it("warms the agencies board and the report along with the Compare host", async () => {
+  it("warms the agencies and transfers boards and the report along with the Compare host", async () => {
     const { CompareTab } = await import("../tabs/CompareTab");
     const { SingleReportScreen } = await import("../tabs/AnalysisTab");
     const { NetworkTab } = await import("../tabs/NetworkTab");
+    const { TransfersView } = await import("../tabs/transfers/TransfersView");
     const loaded = await ROUTE_CHUNK_LOADERS.compare();
-    expect(loaded).toEqual([{ default: CompareTab }, { default: SingleReportScreen }, { default: NetworkTab }]);
+    expect(loaded).toEqual([
+      { default: CompareTab },
+      { default: SingleReportScreen },
+      { default: NetworkTab },
+      { default: TransfersView },
+    ]);
   });
 
   it("is the only place the routed tabs are dynamically imported", () => {

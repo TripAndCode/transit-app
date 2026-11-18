@@ -23,6 +23,7 @@ vi.mock("../routes/lazyTabs", () => ({
     Promise.resolve({
       default: ({ reportTypes }: { reportTypes: readonly string[] }) => <div>analysis-tab:{reportTypes.join(",")}</div>,
     }),
+  loadTransfersView: () => Promise.resolve({ default: () => <div>transfers-view</div> }),
   loadSingleReportScreen: () =>
     Promise.resolve({
       default: ({ reportType }: { reportType: string }) => <div>single-report:{reportType}</div>,
@@ -72,6 +73,7 @@ describe("destination screens", () => {
   it.each([
     ["?by=periods", /^single-report/, "Day types & agencies"],
     ["?by=agencies", /network-tab/, "Day types & agencies"],
+    ["?by=transfers", /transfers-view/, "Day types & agencies"],
   ])("has exactly one level-1 heading on Compare%s", async (search, content, title) => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
     await screen.findByText(content);
@@ -83,6 +85,7 @@ describe("destination screens", () => {
   it.each([
     ["?by=periods", /^single-report/],
     ["?by=agencies", /network-tab/],
+    ["?by=transfers", /transfers-view/],
   ])("keeps the same title directly above the mode toggle on Compare%s, so switching modes does not move it", async (search, content) => {
     open(`/agencies/9/compare${search}`, "agencies/:agencyId/compare", <CompareTab />);
     await screen.findByText(content);
@@ -109,6 +112,13 @@ describe("destination screens", () => {
     open("/agencies/9/compare?by=supply", "agencies/:agencyId/compare", <CompareTab />);
     expect(await screen.findByText("supply-map")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Planned departures" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  });
+
+  it("shows the transfers board on Compare by transfers", async () => {
+    open("/agencies/9/compare?by=transfers", "agencies/:agencyId/compare", <CompareTab />);
+    expect(await screen.findByText("transfers-view")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Transfers" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   });
 

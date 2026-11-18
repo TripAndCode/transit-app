@@ -316,7 +316,7 @@ Choose **Slow segments** in the switch at the top to see, on a map, how far the 
 
 ## 8. Day types & agencies — side by side
 
-Three buttons at the top switch between **Weekdays and weekends/holidays**, **Agencies** and **Planned departures**.
+Four buttons at the top switch between **Weekdays and weekends/holidays**, **Agencies**, **Planned departures** and **Transfers**.
 
 ### 8-1. Weekdays and weekends/holidays
 
@@ -343,6 +343,18 @@ A map of every operator’s stops by the departures their timetables plan, for a
 - Hours after midnight read 24:00 and later, so a band can run into the night. Click a stop for its departures, longest gap and first and last departure of the day.
 - An operator whose timetable cannot be read for the date and day type is listed under **Operators not shown** with the reason, never drawn as a stop without service. A stop the current timetable gives no position is counted below the map.
 - A trip’s last stop is not counted as a departure. Each operator’s stops are shown on their own: two operators’ stops at one place are not added together.
+
+### 8-4. Transfers
+
+For a transfer at a hub, riders leaving one route and boarding another, often of another operator, **Transfers** shows how often the planned connection held. Admins define the transfers under **Transfers** in the admin pages; the list shows those this agency arrives or departs in. **Transfer** picks one, and the day-type buttons switch between the day types it is read on. The period is the last 28 closed days. The board has no scope bar (chapter 3): the transfer, its day type and that period are its conditions.
+
+- **Connections** counts the connections planned, held, missed and not observed. A connection is held when the second bus was predicted to leave after the first was predicted to arrive, plus the walk between the stops. One with no prediction for either bus is not observed, never held or missed.
+- With enough observed connections, a line such as “A planned buffer of 7 min would have held 95% of observed weekday connections” gives the time to plan between the two buses. It is feed-based: computed from the operators' predicted times, not observed passings.
+- **Held and missed by hour of arrival** draws, for each hour, the connections planned: held, then missed, then not observed. Hours past 24 are after midnight on the same service day.
+- **Realised wait** gives the median and 90th-percentile wait, from stepping off to the departure caught, and the share within 5, 10 and 20 minutes, the waits riders said they would tolerate.
+- **Days with the most missed connections** lists the worst days.
+- **Download CSV** saves each day's counts, with the definition and the data source in its notes: a monitoring list.
+- Below 21 observed connections, the share and the buffer are not given; below 21 known waits, neither are the waits. Days a timetable does not plan are left out and counted under the figures. The definitions are in the methodology.
 
 ---
 

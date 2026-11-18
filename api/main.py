@@ -43,6 +43,7 @@ from api.routers.admin import router as admin_router
 from api.routers.admin_agencies import router as admin_agencies_router
 from api.routers.admin_ask import router as admin_ask_router
 from api.routers.admin_flags import router as admin_flags_router
+from api.routers.admin_transfers import router as admin_transfers_router
 from api.routers.agencies import router as agencies_router
 from api.routers.ask import router as ask_router
 from api.routers.auth import router as auth_router
@@ -64,6 +65,7 @@ from api.routers.snapshots import admin_router as admin_snapshots_router
 from api.routers.snapshots import router as snapshots_router
 from api.routers.static import router as static_router
 from api.routers.timetable_revisions import router as timetable_revisions_router
+from api.routers.transfers import router as transfers_router
 from api.security import cookie_secure
 from api.sso import DEV_SIGNING_KEY as _DEV_SIGNING_KEY
 from api.sso import SSO_ENV as _AUTH_ENV
@@ -381,6 +383,7 @@ app.include_router(admin_router)
 app.include_router(admin_agencies_router)
 app.include_router(admin_ask_router)
 app.include_router(admin_flags_router)
+app.include_router(admin_transfers_router)
 app.include_router(admin_snapshots_router)
 app.include_router(agencies_router)
 app.include_router(ask_router)
@@ -398,6 +401,7 @@ app.include_router(scope_summary_router)
 app.include_router(snapshots_router)
 app.include_router(static_router)
 app.include_router(timetable_revisions_router)
+app.include_router(transfers_router)
 app.include_router(segments_router)
 app.include_router(internal_router)
 app.include_router(collector_router)

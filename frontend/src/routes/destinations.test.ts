@@ -158,9 +158,10 @@ describe("the view a screen opens", () => {
     expect(whyMode("agencies")).toBe("dwell_run");
   });
 
-  it("compares agencies only for by=agencies", () => {
+  it("opens the agencies, supply and transfers boards by their `by`, else periods", () => {
     expect(compareMode("agencies")).toBe("agencies");
     expect(compareMode("supply")).toBe("supply");
+    expect(compareMode("transfers")).toBe("transfers");
     expect(compareMode("periods")).toBe("periods");
     expect(compareMode(null)).toBe("periods");
   });
