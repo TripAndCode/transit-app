@@ -244,6 +244,9 @@ function Table({
             {schema.map((c) => (
               <th
                 key={c.labelKey}
+                // Names the column independently of its position and language,
+                // which shift with the reader's settings and the report.
+                data-col={c.labelKey}
                 className={c === basis ? "report-col--basis" : undefined}
                 aria-sort={c === basis ? sortDirection : undefined}
                 // A header names its column on one line; a wrapped one

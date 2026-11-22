@@ -49,19 +49,10 @@ check target here:
   — so `_headline_stats` (`SUM(avg_min*samples)/SUM(samples)` over
   `agg_daily_trend`) reduces to that agency's one route's own `avg_min`.
 
-Why the Analysis ranking table's median/p90 columns are NOT checked here:
-`pipeline/reports/rankings.py`'s `compute_ranking` fast path reads
-`agg_route_daily_dist`'s per-day delay HISTOGRAM and interpolates p50/p90
-from it (`percentile_from_hist`) — a different algorithm from
-`agg_route_stats`'s `PERCENTILE_DISC()`-based formula the aggregate e2e
-test hand-verifies (see that function's own docstring). An
-interpolating histogram estimate and an exact discrete percentile over the
-same underlying data are not guaranteed to agree bucket-for-bucket —
-asserting the fixture's `p50_min`/`p90_min` against the ranking table's columns
-would be checking a real, intentional methodological difference, not a
-rendering bug. Only `avg_min` (plain `SUM(sum_delay_sec)/SUM(samples)`,
-identical math on both tables) and `samples` (an exact count, identical on
-both tables) are checked.
+The ranking table is checked on `avg_min` (plain `SUM(sum_delay_sec)/SUM(samples)`,
+the same math as `agg_route_stats`) and `samples` (an exact count). Its columns
+are found by their `data-col` key rather than position: the report, its filters
+and the reader's statistics setting all change which columns show and where.
 
 Skips by default (needs `RUN_CH_INTEGRATION=1`, a built SPA, and a real
 Chromium — the same tier as `tests/i18n_coverage_test.py`, whose
@@ -201,12 +192,13 @@ def test_overview_headline_matches_synthetic_ground_truth(seeded_agencies, app_s
 
 def test_analysis_ranking_table_matches_synthetic_ground_truth(seeded_agencies, app_server, browser):
     """Analysis tab's `ranking` report table — each pattern's dedicated
-    agency has exactly one route, so the single body row's avg (td index 3)
-    and samples (td index 6) columns must match `agg_route_stats` exactly
-    (see module docstring for why median/p90, td indices 4/5, are
-    deliberately NOT checked here)."""
+    agency has exactly one route, so the single body row's avg and samples
+    columns must match `agg_route_stats` exactly."""
     base = app_server
     page = browser.new_page()
+    # `samples` is a statistics-only column, shown once the reader turns
+    # statistics on (`frontend/src/api/statisticsPref.ts`).
+    page.add_init_script("window.localStorage.setItem('transit.showStatistics', '1')")
     try:
         for name, (agency_id, pattern) in seeded_agencies.items():
             # Each pattern has a few dozen observations, under the ranking's
@@ -220,9 +212,14 @@ def test_analysis_ranking_table_matches_synthetic_ground_truth(seeded_agencies, 
                 f"got {rows.count()} — either the route was filtered out (e.g. by the ranking's "
                 f"observation floor) or a stale/leftover row leaked in"
             )
+            columns = [th.get_attribute("data-col") for th in page.locator("table thead th").all()]
             cells = rows.first.locator("td").all_inner_texts()
             exp = pattern.expected["agg_route_stats"]
-            assert_avg_min_matches(cells[3], exp["avg_min"], label=f"analysis ranking avg / {name}")
-            assert_samples_matches(cells[6], exp["samples"], label=f"analysis ranking samples / {name}")
+            assert_avg_min_matches(
+                cells[columns.index("reports.col.avg")], exp["avg_min"], label=f"analysis ranking avg / {name}"
+            )
+            assert_samples_matches(
+                cells[columns.index("reports.col.samples")], exp["samples"], label=f"analysis ranking samples / {name}"
+            )
     finally:
         page.close()
