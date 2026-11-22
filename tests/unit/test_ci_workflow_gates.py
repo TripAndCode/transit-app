@@ -11,10 +11,12 @@ GitHub-hosted runner this repo doesn't use.
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 import shlex
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -58,7 +60,7 @@ def _workflow_yaml() -> dict:
     return yaml.load(_workflow_text(), _NoDuplicateKeys)
 
 
-def _all_workflows() -> list[tuple[Path, dict]]:
+def _all_workflows() -> list[tuple[Path, Any]]:
     return [
         (workflow, yaml.load(workflow.read_text(), _NoDuplicateKeys))
         for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
@@ -504,13 +506,43 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
     assert checked >= 1, "expected at least one `| tee` step (nightly-extended.yml); the probe found none"
 
 
+_SUITE_RUNNERS = {"pytest", "run_integration_tests.sh", "run_full_ci.sh"}
+_SUITE_MAKE_TARGETS = {"test", "check"}
+
+
 def _runs_pytest(script: str) -> bool:
-    """Whether the script names pytest as a word of its own, as `pytest`,
-    `poetry run pytest` and `python -m pytest` do. A wrapper script that
-    runs pytest inside it is not seen, so its job is not checked."""
+    """Whether the script runs pytest: named as a word of its own (`pytest`,
+    `poetry run pytest`, `python -m pytest`), through one of the repository's
+    wrapper scripts, or through the Make targets that call them. Any other
+    indirection is not seen, so its job is not checked."""
     lexer = shlex.shlex(script, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
-    return "pytest" in lexer
+    tokens = list(lexer)
+    if any(Path(token).name in _SUITE_RUNNERS for token in tokens):
+        return True
+    for i, token in enumerate(tokens):
+        if token == "make":
+            arguments = itertools.takewhile(lambda t: not set(t) <= set(lexer.punctuation_chars), tokens[i + 1 :])
+            if _SUITE_MAKE_TARGETS & set(arguments):
+                return True
+    return False
+
+
+@pytest.mark.parametrize(
+    ("script", "runs"),
+    [
+        ("poetry run pytest -q tests/", True),
+        ("python -m pytest", True),
+        ("scripts/run_integration_tests.sh tests/api", True),
+        ("make test", True),
+        ("make -C . check && echo done", True),
+        ("make build && test -f out", False),
+        ("grep -c SKIPPED pytest.log", False),
+        ("pip install pytest-xdist", False),
+    ],
+)
+def test_the_pytest_probe_sees_direct_and_wrapped_runs(script: str, runs: bool) -> None:
+    assert _runs_pytest(script) is runs
 
 
 def test_every_job_that_runs_the_suite_installs_the_ml_group_and_requires_its_tests() -> None:
@@ -532,6 +564,7 @@ def test_every_job_that_runs_the_suite_installs_the_ml_group_and_requires_its_te
                 checked.add(where)
                 setup = next((s for s in steps if s.get("uses") == "./.github/actions/setup-backend"), None)
                 assert setup is not None, f"{where} runs pytest without setting up through the shared action"
+                assert steps.index(setup) < steps.index(step), f"{where} sets up the backend only after running pytest"
                 assert "ml" in str(setup.get("with", {}).get("groups", "")).split(), (
                     f"{where} runs pytest without the ml group"
                 )
