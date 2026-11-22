@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,13 @@ _NoDuplicateKeys.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
 
 def _workflow_yaml() -> dict:
     return yaml.load(_workflow_text(), _NoDuplicateKeys)
+
+
+def _all_workflows() -> list[tuple[Path, dict]]:
+    return [
+        (workflow, yaml.load(workflow.read_text(), _NoDuplicateKeys))
+        for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    ]
 
 
 def test_workflow_has_no_duplicate_keys() -> None:
@@ -406,8 +414,7 @@ def test_no_workflow_names_a_self_hosted_runner_outright() -> None:
     way back is `vars.CI_BACKEND_RUNNER`, set by a maintainer after
     registering one, so no workflow may name a self-hosted label itself."""
     offenders = []
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+    for workflow, doc in _all_workflows():
         for job_name, job in doc["jobs"].items():
             if _names_self_hosted(job.get("runs-on", "")):
                 offenders.append(f"{workflow.name} / {job_name}: {job['runs-on']}")
@@ -423,8 +430,7 @@ def test_no_pull_request_target_workflow_checks_out_code() -> None:
     steps to a reusable workflow (job-level `uses:`) fails too, because its steps
     would go unchecked."""
     offenders = []
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+    for workflow, doc in _all_workflows():
         # YAML 1.1 reads a bare `on` key as the boolean True.
         triggers = doc.get("on", doc.get(True))
         if isinstance(triggers, str):
@@ -484,8 +490,7 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
     accepted. An inline `set -o pipefail` would work as well, but recognising it
     means reading the script as shell, which this check deliberately does not."""
     checked = 0
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+    for workflow, doc in _all_workflows():
         for job_name, job in doc["jobs"].items():
             for step in job.get("steps", []):
                 if "| tee" not in step.get("run", ""):
@@ -499,7 +504,13 @@ def test_every_step_that_pipes_through_tee_declares_bash_so_the_pipe_fails_loud(
     assert checked >= 1, "expected at least one `| tee` step (nightly-extended.yml); the probe found none"
 
 
-_RUNS_PYTEST = re.compile(r"(?<![\w.-])pytest(?![\w.-])")
+def _runs_pytest(script: str) -> bool:
+    """Whether the script names pytest as a word of its own, as `pytest`,
+    `poetry run pytest` and `python -m pytest` do. A wrapper script that
+    runs pytest inside it is not seen, so its job is not checked."""
+    lexer = shlex.shlex(script, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    return "pytest" in lexer
 
 
 def test_every_job_that_runs_the_suite_installs_the_ml_group_and_requires_its_tests() -> None:
@@ -511,12 +522,11 @@ def test_every_job_that_runs_the_suite_installs_the_ml_group_and_requires_its_te
     action without anything noticing. A test module that imports an `ml`
     package directly then fails collection, and with it the whole run."""
     checked = set()
-    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
-        doc = yaml.load(workflow.read_text(), _NoDuplicateKeys)
+    for workflow, doc in _all_workflows():
         for job_name, job in doc["jobs"].items():
             steps = job.get("steps", [])
             for step in steps:
-                if not _RUNS_PYTEST.search(step.get("run", "")):
+                if not _runs_pytest(step.get("run", "")):
                     continue
                 where = f"{workflow.name} / {job_name}"
                 checked.add(where)

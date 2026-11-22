@@ -53,8 +53,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The same toolchain as CI's test job, `ml` group included, so the suite
-      # this job runs is the one the test job runs.
+      # Set up like CI's test job, `ml` group included, so a test module that
+      # imports an `ml` package collects here as it does there.
       - uses: ./.github/actions/setup-backend
         with:
           python-version: "3.15"
