@@ -4,8 +4,10 @@ A lambda's call works on one array per row. A parameter array read inside it,
 other than one element picked by a constant index, is copied per row, or per
 element of each row's array, so the query's memory grows with its rows times
 the parameter's length. A parameter array rows are matched against is joined
-as rows instead (feed_quality.PEER_STRETCHES_CH_SQL); one read at known
-positions is indexed by constants (timetable_sampling.stop_departures).
+as rows instead (feed_quality.PEER_STRETCHES_CH_SQL); one a value is placed
+among goes to `roundDown` and `transform`, which take it as a constant
+(static_archive._force_at); one read at known positions is indexed by
+constants (timetable_sampling.stop_departures).
 
 The scan reads each source file's own text, so it misses a lambda that only
 meets the parameter through Python, such as a constant spliced into an
@@ -27,14 +29,6 @@ ROOT = Path(__file__).resolve().parents[2]
 _LAMBDA_CALL = re.compile(r"\barray[A-Z]\w*\((?=\s*(?:\w+|\([\w\s,]+\))\s*->)")
 _ARRAY_PARAMETER = re.compile(r"\{\{?\w+:Array(?=\()")
 _CONSTANT_INDEX = re.compile(r"\}\}?\[\d+\]")
-# Parameter arrays that grow with an agency's timetable revisions rather than
-# with the rows read: one element per run of dates a version is in force over
-# the read, or over the agency's whole history for a read with no date bound
-# (ScheduleJoin.force_params).
-ALLOWED = {
-    ("pipeline/static_archive.py", "force_firsts:Array(Date32)"),
-    ("pipeline/static_archive.py", "force_lasts:Array(Date32)"),
-}
 
 
 def _closing(text: str, opening: int) -> int:
@@ -95,10 +89,4 @@ def test_no_source_reads_a_parameter_array_inside_a_lambda_call():
     found = [
         (name, offender) for name in _sources() for offender in offenders((ROOT / name).read_text(encoding="utf-8"))
     ]
-    assert [hit for hit in found if hit not in ALLOWED] == []
-
-
-def test_every_allowed_parameter_is_still_read_inside_a_lambda_call():
-    assert {
-        (path, offender) for path, _ in ALLOWED for offender in offenders((ROOT / path).read_text(encoding="utf-8"))
-    } >= ALLOWED
+    assert found == []

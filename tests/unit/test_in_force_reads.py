@@ -14,6 +14,7 @@ _FORCE = (
     Segment(date(2026, 3, 16), date(2026, 12, 31), "v3"),
 )
 JOIN = ScheduleJoin(["v1", "v2", "v3"], ["c1", "c2", "c3"], "c3", _FORCE)
+_EPOCH = date(1970, 1, 1)
 
 
 def _force(params: dict) -> dict:
@@ -23,8 +24,8 @@ def _force(params: dict) -> dict:
 def test_a_month_binds_only_the_versions_in_force_in_it():
     _, february = ch_aggregates.select_sql("agg_route_daily", 202602, join=JOIN, stamp=Stamp.REFIT)
     assert _force(february) == {
-        "force_firsts": [date(2026, 2, 1)],
-        "force_lasts": [date(2026, 3, 15)],
+        "force_steps": [-(2**31), (date(2026, 2, 1) - _EPOCH).days, (date(2026, 3, 16) - _EPOCH).days],
+        "force_step_at": [0, 1, 0],
         "force_stems": ["v2"],
         "force_contents": ["c2"],
     }
@@ -41,8 +42,8 @@ def test_some_days_bind_only_the_versions_in_force_on_them():
 
 def test_a_join_narrowed_to_no_version_binds_empty_lists():
     assert _force(JOIN.params(between=(date(2025, 1, 1), date(2025, 12, 31)))) == {
-        "force_firsts": [],
-        "force_lasts": [],
+        "force_steps": [-(2**31)],
+        "force_step_at": [0],
         "force_stems": [],
         "force_contents": [],
     }

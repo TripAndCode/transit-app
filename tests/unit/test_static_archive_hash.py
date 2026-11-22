@@ -26,20 +26,43 @@ def test_a_join_binds_every_mapped_content_and_the_loaded_one():
         "join_hashes": ["h0", "h1"],
         "join_current": "hc",
         "join_contents": ["h0", "h1", "hc"],
-        "force_firsts": [],
-        "force_lasts": [],
+        "force_steps": [-(2**31)],
+        "force_step_at": [0],
         "force_stems": [],
         "force_contents": [],
     }
 
 
+def _day(year: int, month: int, day: int) -> int:
+    return (date(year, month, day) - date(1970, 1, 1)).days
+
+
 def test_a_join_binds_the_versions_in_force_with_their_contents():
     force = (Segment(date(2026, 1, 1), date(2026, 1, 31), "s1"), Segment(date(2026, 2, 1), date(2026, 3, 31), "s0"))
     params = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc", force).params()
-    assert params["force_firsts"] == [date(2026, 1, 1), date(2026, 2, 1)]
-    assert params["force_lasts"] == [date(2026, 1, 31), date(2026, 3, 31)]
+    assert params["force_steps"] == [-(2**31), _day(2026, 1, 1), _day(2026, 2, 1), _day(2026, 4, 1)]
+    assert params["force_step_at"] == [0, 1, 2, 0]
     assert params["force_stems"] == ["s1", "s0"]
     assert params["force_contents"] == ["h1", "h0"]
+
+
+def test_a_day_no_segment_covers_steps_back_to_none():
+    force = (
+        Segment(date(1900, 1, 1), date(2026, 1, 31), "s0"),
+        Segment(date(2026, 2, 1), date(2026, 2, 3), "s1"),
+        Segment(date(2026, 2, 5), date(2026, 2, 5), "s0"),
+        Segment(date(2026, 2, 6), date(2299, 12, 31), "s1"),
+    )
+    params = ScheduleJoin(["s0", "s1"], ["h0", "h1"], "hc", force).force_params()
+    assert list(zip(params["force_steps"], params["force_step_at"], strict=True)) == [
+        (-(2**31), 0),
+        (_day(1900, 1, 1), 1),
+        (_day(2026, 2, 1), 2),
+        (_day(2026, 2, 4), 0),
+        (_day(2026, 2, 5), 3),
+        (_day(2026, 2, 6), 4),
+        (_day(2300, 1, 1), 0),
+    ]
 
 
 def test_a_month_binds_only_the_contents_its_stems_join():

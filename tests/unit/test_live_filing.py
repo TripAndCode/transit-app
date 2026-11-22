@@ -26,8 +26,12 @@ def test_a_filing_binds_only_the_versions_in_force_over_its_dates():
     assert params == {
         "join_stems": ["v1", "v2"],
         "join_hashes": ["c1", "c2"],
-        "force_firsts": [date(2026, 10, 1)],
-        "force_lasts": [date(2026, 12, 31)],
+        "force_steps": [
+            -(2**31),
+            (date(2026, 10, 1) - date(1970, 1, 1)).days,
+            (date(2027, 1, 1) - date(1970, 1, 1)).days,
+        ],
+        "force_step_at": [0, 1, 0],
         "force_stems": ["v2"],
         "force_contents": ["c2"],
     }
