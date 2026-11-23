@@ -4,6 +4,7 @@ schedule's own rules are in test_poller_schedule.py."""
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import signal
@@ -14,8 +15,10 @@ import time
 from collections import Counter
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
+from email.message import Message
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError, URLError
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -478,7 +481,7 @@ def test_sigterm_stops_the_loop():
 # --- running the steps the schedule decides -----------------------------------
 
 
-def _wired(tmp_path, outcomes, agencies=(1, 2)):
+def _wired(tmp_path, outcomes, agencies=(1, 2), **kwargs):
     for aid in agencies:
         (tmp_path / str(aid) / "rt").mkdir(parents=True, exist_ok=True)
     plans: list[dict] = []
@@ -487,7 +490,7 @@ def _wired(tmp_path, outcomes, agencies=(1, 2)):
         plans.append({aid: set(stages) for aid, stages in plan.items()})
         return outcomes.pop(0) if outcomes else {}
 
-    p = _poller(tmp_path, daily_step=daily)
+    p = _poller(tmp_path, daily_step=daily, **kwargs)
     return p, p._clock, plans
 
 
@@ -559,6 +562,81 @@ def test_a_step_that_raises_leaves_every_stage_pending(tmp_path):
     p = _poller(tmp_path, daily_step=broken)
     _step(p)
     assert set(p.schedule_state.pending) == {("utc", 1, s) for s in ("promote", "ingest", "analyze")}
+
+
+# --- the heartbeat ------------------------------------------------------------
+
+
+def test_each_settled_step_reports_ok_once_no_stage_is_failing(tmp_path):
+    beats = []
+    p, clock, _ = _wired(tmp_path, [{2: {"ingest"}}, {}], heartbeat=lambda *beat: beats.append(beat))
+    _step(p)
+    assert beats == []
+    clock.now += schedule.RETRY_AFTER
+    _step(p)
+    assert beats == [("ok", "")]
+
+
+def test_a_stage_that_spends_its_retries_reports_fail_naming_it(tmp_path):
+    beats = []
+    outcomes = [{2: {"ingest"}}] * (schedule.MAX_RETRIES + 1)
+    p, clock, _ = _wired(tmp_path, outcomes, heartbeat=lambda *beat: beats.append(beat))
+    _step(p)
+    for _ in range(schedule.MAX_RETRIES):
+        clock.now += schedule.RETRY_AFTER
+        _step(p)
+    assert beats == [("fail", "used every retry: [('utc', 2, 'ingest')]")]
+
+
+def test_a_failing_pack_holds_the_ok(tmp_path):
+    beats = []
+    p, _, _ = _wired(tmp_path, [], heartbeat=lambda *beat: beats.append(beat))
+    with patch("pipeline.poller.pack_closed_days", side_effect=OSError("disk full")):
+        _step(p)
+    assert beats == []
+
+
+class _Response:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+@pytest.mark.parametrize(("outcome", "path"), [("ok", "/ping/abc"), ("fail", "/ping/abc/fail")])
+def test_the_heartbeat_posts_to_the_check_or_its_fail_url(outcome, path):
+    with patch("pipeline.poller.urllib.request.urlopen", return_value=_Response()) as urlopen:
+        poller.send_heartbeat("https://hc.example/ping/abc/", outcome, "body")
+    request = urlopen.call_args.args[0]
+    assert (request.full_url, request.get_method(), request.data) == (f"https://hc.example{path}", "POST", b"body")
+    assert urlopen.call_args.kwargs["timeout"] == poller.HEARTBEAT_TIMEOUT_SEC
+
+
+@pytest.mark.parametrize(
+    ("error", "logged"),
+    [
+        (HTTPError("https://hc.example/ping/SECRET", 404, "Not Found", Message(), None), "HTTP 404"),
+        (URLError("hc.example/ping/SECRET unreachable"), "URLError"),
+        (TimeoutError("timed out"), "TimeoutError"),
+    ],
+)
+def test_a_failed_heartbeat_is_logged_without_its_url(caplog, error, logged):
+    with patch("pipeline.poller.urllib.request.urlopen", side_effect=error):
+        poller.send_heartbeat("https://hc.example/ping/SECRET", "ok", "")
+    assert logged in caplog.text
+    assert "SECRET" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("value", "configured"), [("", False), ("file:///etc/passwd", False), ("https://hc.example/x", True)]
+)
+def test_the_heartbeat_reads_only_an_http_url(monkeypatch, caplog, value, configured):
+    caplog.set_level(logging.INFO, logger="pipeline.poller")
+    monkeypatch.setenv(poller.HEARTBEAT_ENV, value)
+    beat = poller.configured_heartbeat()
+    assert (beat is not None) == configured
+    assert "passwd" not in caplog.text and "hc.example" not in caplog.text
 
 
 # --- the coverage re-probe ---------------------------------------------------

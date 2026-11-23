@@ -104,6 +104,16 @@ docker compose --profile standalone up -d --build app poller
 
 The schema step (`gtfs_pipeline.py schema-up`) runs before the app and poller restart, so migrations apply themselves. Back up first when a release changes the schema. A migration that would delete stored data on a database that has already discarded old history makes the schema step refuse: `up` then reports the failure and `app` does not start, because it waits for that step. Read the reason in `docker compose --profile standalone logs migrate`. After a backup, name the migration version in `MIGRATE_ALLOW_DESTRUCTIVE_UP` in `.env` and run the `up` command again.
 
+## 8. Monitor the daily step
+
+The poller can report its daily step to a [healthchecks.io](https://healthchecks.io) check, or to any service that takes the same pings. That step moves each closed day into history and the reports, so when it stops, the reports stop advancing.
+
+1. Create a check with a period of 1 day and a grace time of 2 hours.
+2. Put its ping URL in `.env` as `POLLER_PING_URL=<url>`, then restart the poller: `docker compose --profile standalone up -d poller`.
+3. The poller runs a step as soon as it starts, and the check records a ping when that step ends. If none arrives, the poller's log says why. The log never prints the URL.
+
+The poller pings the URL each time a step ends with no stage failing: normally once after JST midnight and once after UTC midnight (09:00 JST). When a stage has failed every retry, about two hours of them, it pings `<url>/fail` and the check alerts at once. When the poller stops, or a step never ends, the pings stop and the check alerts 26 hours after the last one. After a failure, the check comes back up once a later day's step ends with no stage failing.
+
 ## What is not automated
 
 - A timetable the agency republishes: run `docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static` again.

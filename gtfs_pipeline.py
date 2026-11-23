@@ -843,7 +843,7 @@ def cmd_poll(args):
     import pathlib
     import threading
 
-    from pipeline.poller import Poller, configured_interval_sec, install_stop_handlers
+    from pipeline.poller import Poller, configured_heartbeat, configured_interval_sec, install_stop_handlers
 
     interval = args.interval or configured_interval_sec()
     archive_dir = pathlib.Path(args.archive_dir or os.environ.get("POLLER_ARCHIVE_DIR") or "archive")
@@ -851,7 +851,7 @@ def cmd_poll(args):
         logger.warning("poll: OBJECT_STORE_BUCKET is set, but the poller keeps its tarballs on %s only", archive_dir)
     stop = threading.Event()
     install_stop_handlers(stop)
-    Poller(archive_dir, interval_sec=interval, stop=stop).run()
+    Poller(archive_dir, interval_sec=interval, heartbeat=configured_heartbeat(), stop=stop).run()
 
 
 def cmd_migrate(args):

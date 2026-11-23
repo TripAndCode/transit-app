@@ -7,7 +7,16 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from pipeline.poller_schedule import MAX_RETRIES, RETRY_AFTER, State, decide, exhausted, settle
+from pipeline.poller_schedule import (
+    MAX_RETRIES,
+    RETRY_AFTER,
+    Pending,
+    State,
+    decide,
+    exhausted,
+    heartbeat,
+    settle,
+)
 
 T0 = datetime(2026, 4, 2, 10, 0, tzinfo=timezone.utc)  # 19:00 JST
 UTC_PLAN = {(a, s) for a in (1, 2) for s in ("pack", "promote", "ingest", "analyze")}
@@ -131,3 +140,57 @@ def test_no_agency_starts_nothing_but_still_marks_the_day():
     kind, keys, state = decide(T0, [], State())
     assert (kind, keys) == ("utc", frozenset())
     assert decide(T0, [], state)[:2] == (None, frozenset())
+
+
+# --- the heartbeat -----------------------------------------------------------
+
+
+class _Beats(_Run):
+    """A _Run that records what each settled step reports."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.beats: list[str | None] = []
+
+    def step(self, failed=(), *, at: datetime | None = None):
+        before = self.state
+        out = super().step(failed, at=at)
+        if out[1]:
+            self.beats.append(heartbeat(before, self.state))
+        return out
+
+
+def test_a_clean_step_reports_ok_and_a_failing_one_reports_nothing_until_it_clears():
+    run = _Beats()
+    run.step()
+    run.step(failed={(1, "promote")}, at=datetime(2026, 4, 2, 15, 0, 1, tzinfo=timezone.utc))
+    run.later(RETRY_AFTER)
+    assert run.beats == ["ok", None, "ok"]
+
+
+def test_a_stage_that_spends_its_retries_reports_fail_once():
+    run = _Beats()
+    run.step(failed={(1, "promote")})
+    for _ in range(MAX_RETRIES):
+        run.later(RETRY_AFTER, failed={(1, "promote")})
+    assert run.beats == [None] * MAX_RETRIES + ["fail"]
+
+
+def test_after_a_fail_ok_waits_for_the_spent_stages_next_day():
+    run = _Beats()
+    run.step(failed={(1, "promote")})
+    for _ in range(MAX_RETRIES):
+        run.later(RETRY_AFTER, failed={(1, "promote")})
+    run.state = settle(run.now, run.state, [("utc", 2, "ingest")], {(2, "ingest")})
+    run.later(RETRY_AFTER)
+    run.step(at=datetime(2026, 4, 2, 15, 0, 1, tzinfo=timezone.utc))
+    assert run.beats[-2:] == [None, None]
+    run.step(at=datetime(2026, 4, 3, 0, 0, 1, tzinfo=timezone.utc))
+    assert run.beats[-1] == "ok"
+
+
+def test_a_second_stage_spending_its_retries_reports_fail_again():
+    spent = {("utc", 1, "promote"): Pending(MAX_RETRIES, T0)}
+    before = State(pending={**spent, ("utc", 2, "ingest"): Pending(MAX_RETRIES - 1, T0)})
+    after = settle(T0, before, [("utc", 2, "ingest")], {(2, "ingest")})
+    assert heartbeat(before, after) == "fail"

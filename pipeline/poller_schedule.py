@@ -9,8 +9,9 @@ Three kinds of step:
 Every (kind, agency, stage) that fails keeps its own retry budget, which its
 kind's next day resets: one agency's failures never spend another's, and a
 JST step that fails after the UTC step used its budget is still retried.
-:func:`decide` picks the step to start and :func:`settle` folds its result
-in; neither reads a clock or touches a thread, so a table test covers them.
+:func:`decide` picks the step to start, :func:`settle` folds its result in,
+and :func:`heartbeat` says what that result tells a dead-man's switch; none
+reads a clock or touches a thread, so a table test covers them.
 """
 
 from __future__ import annotations
@@ -99,3 +100,17 @@ def settle(now: datetime, state: State, ran: Iterable[Key], failed: Iterable[tup
 
 def exhausted(state: State) -> list[Key]:
     return sorted(k for k, p in state.pending.items() if p.retries >= MAX_RETRIES)
+
+
+def newly_exhausted(before: State, after: State) -> list[Key]:
+    return sorted(set(exhausted(after)) - set(exhausted(before)))
+
+
+def heartbeat(before: State, after: State) -> str | None:
+    """What a settled step reports: ``"fail"`` when a stage has just spent its
+    last retry, ``"ok"`` once no stage is failing, else nothing. A spent stage
+    stays pending until its kind's next day, so no ``"ok"`` follows a
+    ``"fail"`` until that day's step settles clean."""
+    if newly_exhausted(before, after):
+        return "fail"
+    return None if after.pending else "ok"
