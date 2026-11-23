@@ -9,6 +9,10 @@ from scripts import record_prediction_validation as record
 from scripts import validate_vp_predictions as vv
 
 
+def _day(service_date, *, timetable="gtfs_static_20261101.zip", missing=()):
+    return {"service_date": service_date, "timetable": timetable, "missing_archives": list(missing)}
+
+
 def _summary(**over):
     summary = {
         "schema": vv.SCHEMA,
@@ -27,7 +31,7 @@ def _summary(**over):
                 },
             }
         },
-        "days": [{"missing_archives": []}, {"missing_archives": []}],
+        "days": [_day("2026-11-13"), _day("2026-11-14")],
     }
     return {**summary, **over}
 
@@ -70,7 +74,11 @@ def test_a_window_open_on_the_early_side_is_kept_as_none():
     ("over", "why"),
     [
         ({"schema": vv.SCHEMA - 1}, f"made under schema {vv.SCHEMA - 1}"),
-        ({"days": [{"missing_archives": ["vp/8/2026/11/13.tar"]}]}, "1 archive(s) missing"),
+        ({"days": [_day("2026-11-13", missing=["vp/8/20261113.tar.gz"])]}, "1 archive(s) missing"),
+        (
+            {"days": [_day("2026-11-13"), _day("2026-11-14", timetable=None)]},
+            "1 service date(s) had no timetable, first 2026-11-14",
+        ),
         ({"figures": {"on_time": {"n": 0, "kept_to_observed": {}}}}, "no stop event had an observed passage"),
     ],
 )

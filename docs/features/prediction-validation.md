@@ -57,8 +57,10 @@ kept stop events there were and how many had an observed passage, and how
 many of those were on time by the kept delay and by the observed one. The
 counts are kept rather than percentages, so every reader computes the rates
 and their difference from one source. A report is refused when it was made
-under another `SCHEMA` than the checkout's, when an archive it needed was
-missing, or when no stop event had an observed passage.
+under another `SCHEMA` than the checkout's, when an archive or a timetable
+it needed was missing, or when no stop event had an observed passage. Two
+reports for the same agency and dates refuse the run, since only one of them
+could be recorded.
 
     poetry run python scripts/record_prediction_validation.py \
         ~/.cache/transit-app/vp-validation/<id>/<FROM>_<TO>.json [...] [--apply]

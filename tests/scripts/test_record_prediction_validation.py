@@ -25,7 +25,7 @@ def _report(tmp_path, agency_id, *, kept_on_time=600, name="report.json"):
                 },
             }
         },
-        "days": [{"missing_archives": []}],
+        "days": [{"service_date": "2026-11-13", "timetable": "gtfs_static_20261101.zip", "missing_archives": []}],
     }
     path = tmp_path / name
     path.write_text(json.dumps(summary))
@@ -83,4 +83,14 @@ def test_a_report_that_cannot_be_recorded_refuses_the_whole_run(pg_conn, agency_
     bad.write_text(json.dumps({"schema": vv.SCHEMA - 1}))
     assert record.main([str(_report(tmp_path, agency_id)), str(bad), "--apply"]) == 1
     assert f"refused: {bad}: made under schema" in capsys.readouterr().err
+    assert _recorded(pg_conn, agency_id) == []
+
+
+def test_two_reports_for_the_same_agency_and_dates_refuse_the_run(pg_conn, agency_id, tmp_path, capsys):
+    first = str(_report(tmp_path, agency_id))
+    second = str(_report(tmp_path, agency_id, kept_on_time=500, name="rerun.json"))
+    assert record.main([first, second, "--apply"]) == 1
+    assert f"refused: {first} and {second} are both for agency {agency_id} 2026-11-13..2026-11-21" in (
+        capsys.readouterr().err
+    )
     assert _recorded(pg_conn, agency_id) == []

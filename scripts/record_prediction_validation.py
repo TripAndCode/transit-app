@@ -5,9 +5,10 @@ agency and range of service dates. Its row keeps the counts the report's
 on-time figures were made from (db/migrations/0113_prediction_validations),
 so a record states what the validation measured without being read from the
 report again. A report is refused, and nothing is written, when it was made
-under another SCHEMA than this checkout's, when an archive it needed was
-missing, so the range holds days it did not see, or when no stop event had an
-observed passage.
+under another SCHEMA than this checkout's, when an archive or a timetable it
+needed was missing, so the range holds days it did not see, or when no stop
+event had an observed passage. Two reports for the same agency and dates
+refuse the run, since only one of them could be recorded.
 
 The target is the environment's DATABASE_URL; nothing loads .env, so export
 it first. The dry run (the default) only reads: it prints each row and whether
@@ -71,6 +72,11 @@ def validation(summary: dict[str, Any]) -> Validation:
     missing = vv.missing_archives(summary)
     if missing:
         raise ValueError(f"{len(missing)} archive(s) missing, first {missing[0]}; fetch them and run it again")
+    unread = [day["service_date"] for day in summary["days"] if day["timetable"] is None]
+    if unread:
+        raise ValueError(
+            f"{len(unread)} service date(s) had no timetable, first {unread[0]}; fetch it or narrow the range"
+        )
     on_time = summary["figures"]["on_time"]
     if not on_time["n"]:
         raise ValueError("no stop event had an observed passage")
@@ -109,12 +115,23 @@ def main(argv: list[str] | None = None) -> int:
         print("refused: DATABASE_URL is not set", file=sys.stderr)
         return 1
     rows = []
+    read_from: dict[tuple[int, date, date], Path] = {}
     for path in args.reports:
         try:
-            rows.append(validation(json.loads(path.read_text(encoding="utf-8"))))
+            row = validation(json.loads(path.read_text(encoding="utf-8")))
         except ValueError as why:
             print(f"refused: {path}: {why}", file=sys.stderr)
             return 1
+        key = (row.agency_id, row.from_date, row.to_date)
+        if key in read_from:
+            print(
+                f"refused: {read_from[key]} and {path} are both for agency {row.agency_id} "
+                f"{row.from_date}..{row.to_date}",
+                file=sys.stderr,
+            )
+            return 1
+        read_from[key] = path
+        rows.append(row)
     conn = psycopg2.connect(url)
     try:
         if not args.apply:

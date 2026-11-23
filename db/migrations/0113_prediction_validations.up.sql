@@ -8,7 +8,7 @@
 -- stop_events are the kept stop events of the range and compared those with an
 -- observed passage. kept_on_time and observed_on_time count the compared events
 -- on time by their kept and by their observed delay, under the on-time window
--- the tolerances name (early_tolerance_sec NULL: any early departure).
+-- the tolerances name (early_tolerance_sec NULL: on time however early).
 -- report_schema is the report's SCHEMA, which changes when the method does.
 -- A second record of the same agency and dates replaces the first.
 CREATE TABLE IF NOT EXISTS prediction_validations (
