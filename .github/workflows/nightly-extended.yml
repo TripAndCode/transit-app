@@ -174,3 +174,12 @@ jobs:
         run: npx vitest run src/routes/legacyRedirects.test.tsx -t "has not passed"
         env:
           RUN_DEADLINES: 1
+
+  # Its needs, if and permissions are fixed, and the condition explained, by
+  # tests/unit/test_ci_workflow_gates.py's SCHEDULED_RUN_FAILED gate.
+  report-failure:
+    needs: [oracle-bash-tests, python-extended, removal-deadlines]
+    if: github.event_name == 'schedule' && !cancelled() && (failure() || contains(needs.*.result, 'cancelled'))
+    permissions:
+      issues: write
+    uses: ./.github/workflows/report-scheduled-failure.yml

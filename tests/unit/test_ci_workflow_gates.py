@@ -67,6 +67,12 @@ def _all_workflows() -> list[tuple[Path, Any]]:
     ]
 
 
+def _triggers(doc: dict) -> list | dict:
+    # YAML 1.1 reads a bare `on` key as the boolean True.
+    triggers = doc.get("on", doc.get(True))
+    return [triggers] if isinstance(triggers, str) else triggers
+
+
 def test_workflow_has_no_duplicate_keys() -> None:
     """A duplicated key makes the whole workflow invalid to GitHub, so nothing
     runs — a worse outcome than any single gate being wrong. Asserted on its
@@ -433,11 +439,7 @@ def test_no_pull_request_target_workflow_checks_out_code() -> None:
     would go unchecked."""
     offenders = []
     for workflow, doc in _all_workflows():
-        # YAML 1.1 reads a bare `on` key as the boolean True.
-        triggers = doc.get("on", doc.get(True))
-        if isinstance(triggers, str):
-            triggers = [triggers]
-        if "pull_request_target" not in triggers:
+        if "pull_request_target" not in _triggers(doc):
             continue
         for job_name, job in doc["jobs"].items():
             if "uses" in job:
@@ -446,6 +448,48 @@ def test_no_pull_request_target_workflow_checks_out_code() -> None:
                 if str(step.get("uses", "")).startswith("actions/checkout"):
                     offenders.append(f"{workflow.name} / {job_name}: {step['uses']}")
     assert not offenders, "pull_request_target jobs that check out code: " + "; ".join(offenders)
+
+
+REPORT_SCHEDULED_FAILURE = "./.github/workflows/report-scheduled-failure.yml"
+# A job past its timeout-minutes ends `cancelled`, which failure() does not see,
+# while cancelled() stays false for the jobs that need it; cancelled() turns true
+# only for a run a person cancelled, which someone is already watching.
+SCHEDULED_RUN_FAILED = (
+    "github.event_name == 'schedule' && !cancelled() && (failure() || contains(needs.*.result, 'cancelled'))"
+)
+
+
+def test_every_scheduled_workflow_reports_a_failed_scheduled_run_in_an_issue() -> None:
+    """GitHub tells only the account that last edited a cron line about a
+    failed scheduled run, so every scheduled workflow ends in one job that
+    calls the reporting workflow. It waits on every other job, so a failure or
+    timeout in any of them reaches it, and runs only for a scheduled run, since
+    a person who dispatched one is already watching it. It is also the only
+    job that may hold any write scope."""
+    scheduled = []
+    for workflow, doc in _all_workflows():
+        if "schedule" not in _triggers(doc):
+            continue
+        scheduled.append(workflow.name)
+        jobs = doc["jobs"]
+        reporters = [name for name, job in jobs.items() if job.get("uses") == REPORT_SCHEDULED_FAILURE]
+        assert len(reporters) == 1, f"{workflow.name} has {len(reporters)} jobs calling {REPORT_SCHEDULED_FAILURE}"
+        name = reporters[0]
+        reporter = jobs[name]
+        needs = reporter.get("needs", [])
+        assert set([needs] if isinstance(needs, str) else needs) == set(jobs) - {name}, (
+            f"{workflow.name} / {name} does not wait on every other job, so a failure there would go unreported"
+        )
+        assert reporter.get("if") == SCHEDULED_RUN_FAILED, (
+            f"{workflow.name} / {name} must run for a failed or timed-out scheduled run and only then"
+        )
+        assert reporter.get("permissions") == {"issues": "write"}
+        assert "write" not in str(doc.get("permissions")), f"{workflow.name} grants a write scope to every job"
+        writers = [other for other, job in jobs.items() if other != name and "write" in str(job.get("permissions"))]
+        assert not writers, f"{workflow.name}: only {name} may hold a write scope, not {writers}"
+    assert {"nightly-extended.yml", "secrets-scan-full-history.yml"} <= set(scheduled), (
+        f"the probe no longer finds the known scheduled workflows; it found {scheduled}"
+    )
 
 
 def test_reaper_cutoff_clears_the_job_timeout_without_dawdling() -> None:
