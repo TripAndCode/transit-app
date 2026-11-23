@@ -661,14 +661,24 @@ def mirror(conn, mappings: Iterable[tuple[int, str, str, datetime]]) -> int:
     return len(written)
 
 
+# A step below the day number of any date, so every date has one at or before it.
+_BEFORE_EVERY_DAY = -(2**31)
+
+
+def _day_number(day: date) -> int:
+    """*day* as ClickHouse's toInt32 of a Date or Date32 gives it: days since 1970-01-01."""
+    return (day - date(1970, 1, 1)).days
+
+
 class ScheduleJoin(NamedTuple):
     """Which archived timetable each version name joins, and the loaded one every other row joins.
 
     *current* is the loaded timetable's key, or "" with none loaded: then only
     rows of a mapped name join anything. *force* is the versions in force over
-    the agency's service dates (pipeline.timetable_in_force), each a mapped
-    name whose content's schedule is kept, so a row of a date one covers is
-    filed under it (Stamp). *filed* is the dates whose refiled rows
+    the agency's service dates, disjoint and in date order
+    (pipeline.timetable_in_force), each a mapped name whose content's schedule
+    is kept, so a row of a date one covers is filed under it (Stamp). *filed*
+    is the dates whose refiled rows
     pipeline.refiled wrote, each with the build a read takes (Stamp.FILED).
     """
 
@@ -750,12 +760,20 @@ class ScheduleJoin(NamedTuple):
         outside it: a row there would be read as having none in force. The
         dates are those its rows are filed under (FILED_DATE_SQL), which for a
         read selecting rows by capture reach a day either side of theirs.
+
+        The segments bind as steps over day numbers (_force_at): a segment's
+        first day steps to its place, and the day after its last steps back to
+        0 unless the next segment starts there. Days before the first segment are 0.
         """
         mapped = dict(zip(self.stems, self.hashes, strict=True))
         force = [s for s in self.force if between is None or (s.first <= between[1] and between[0] <= s.last)]
+        steps = {_BEFORE_EVERY_DAY: 0}
+        for at, segment in enumerate(force, start=1):
+            steps[_day_number(segment.first)] = at
+            steps[_day_number(segment.last) + 1] = 0
         return {
-            "force_firsts": [s.first for s in force],
-            "force_lasts": [s.last for s in force],
+            "force_steps": list(steps),
+            "force_step_at": list(steps.values()),
             "force_stems": [s.stem for s in force],
             "force_contents": [mapped[s.stem] for s in force],
         }
@@ -895,13 +913,20 @@ class Stamp(str, Enum):
 # The service date a stored row is filed under (pipeline.service_day.filed_date_ch).
 FILED_DATE_SQL = filed_date_ch("u.")
 
-# The row's place in the bound segments in force (ScheduleJoin.params), 0 for
-# a service date none covers; element 0 of an array is its type's default, ''.
-_FORCE_AT = (
-    "arrayFirstIndex((a, b) -> "
-    + FILED_DATE_SQL
-    + " BETWEEN a AND b, {force_firsts:Array(Date32)}, {force_lasts:Array(Date32)})"
-)
+
+def _force_at(date_sql: str) -> str:
+    """The place of service date *date_sql* in the bound segments in force
+    (ScheduleJoin.force_params), 0 for a date none covers; element 0 of an
+    array is its type's default, ''. The date's day number rounds down to the
+    last step at or before it, which a function taking the steps as a constant
+    array finds without the per-row copy a lambda reading them would make."""
+    return (
+        f"transform(roundDown(toInt32({date_sql}), {{force_steps:Array(Int32)}}), "
+        "{force_steps:Array(Int32)}, {force_step_at:Array(UInt32)}, toUInt32(0))"
+    )
+
+
+_FORCE_AT = _force_at(FILED_DATE_SQL)
 
 # The version name a row is filed under: the one in force on its service date, else its own stamp ('' for none).
 IN_FORCE_STEM_SQL = f"if({_FORCE_AT} = 0, ifNull(u.static_version_id, ''), {{force_stems:Array(String)}}[{_FORCE_AT}])"
