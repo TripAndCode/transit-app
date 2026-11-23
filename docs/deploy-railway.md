@@ -51,7 +51,9 @@ deploys — pick this if you'd rather not manage a Linux box yourself.
   To let one through, set `MIGRATE_ALLOW_DESTRUCTIVE_UP=<version>[,<version>]`
   on the service for that release, and remove it afterwards (see
   `docs/ops-monitoring-deploy.md`, "The retention floor and the `updates`
-  prune").
+  prune"). The step then records the release for the admin Ops page, naming
+  the commit Railway sets in `RAILWAY_GIT_COMMIT_SHA` on a deploy from
+  GitHub.
 - Optional CLI: `npm i -g @railway/cli` then `railway login`. The steps
   below are dashboard-driven; the CLI is only needed for `railway run`
   one-offs (migrations from your Mac, ad-hoc psql).

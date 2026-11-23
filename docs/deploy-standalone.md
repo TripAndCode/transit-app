@@ -35,10 +35,12 @@ Oracle、R2、天気、LLM の設定は無視して構いません。`GEMINI_API
 空の状態ではなく既存の R2 アーカイブの履歴から始める場合は、この節と次の節の代わりに 9 節に従います。
 
 ```bash
-docker compose --profile standalone up -d --build app poller
+GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app poller
 ```
 
 `app poller` を指定すると、スタンドアロン用の構成だけが起動します。専用の Postgres と ClickHouse（ホストのポートなし、専用ボリューム）、スキーマ更新のステップ、アプリ、ポーラーです。`--profile standalone up` だけにしないでください。開発用の 2 つのデータベースまで起動します。初回のビルドには数分かかります。完了したら `PUBLIC_BASE_URL` が示す URL（既定は <http://localhost:8000>）を開きます。ページは表示されますが、事業者はまだ登録されていません。
+
+`GIT_SHA` は、チェックアウトしているコミットをイメージに書き込みます。スキーマ更新のステップがそれをリリースとして記録し、管理画面の Ops ページが、そのコミット以降に `main` へ入った変更へのリンクと一緒に表示します。付けずにビルドすると、コミット不明のリリースとして記録されます。
 
 ## 3. 事業者を追加する
 
@@ -139,7 +141,7 @@ docker volume rm "${P}_standalone_pgdata" "${P}_standalone_chdata"
 
 ```bash
 git pull
-docker compose --profile standalone up -d --build app poller
+GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app poller
 ```
 
 アプリとポーラーが再起動する前にスキーマ更新のステップ（`gtfs_pipeline.py schema-up`）が走るので、マイグレーションは自動で適用されます。すでに古い履歴を捨てたデータベースで、保存済みのデータを削除するマイグレーションがあると、スキーマ更新のステップが拒否します。`up` が失敗を報告し、`app` はそのステップを待つので起動しません。理由は `docker compose --profile standalone logs migrate` で読めます。バックアップを取ったうえで、そのマイグレーションのバージョンを `.env` の `MIGRATE_ALLOW_DESTRUCTIVE_UP` に書き、`up` をもう一度実行します。
@@ -183,7 +185,7 @@ docker compose --profile standalone logs migrate
 この節は、収集器がすでにフィードを R2 バケットに保存している運用者向けです（[deploy-railway.md](deploy-railway.md) の Oracle の収集器など）。それ以外の方は読み飛ばしてください。新しいデータベースを空から始めるのではなく、バケットにある直近の日々で埋めます。2 節と 3 節の代わりに、ポーラーを初めて起動する前に 1 回だけ行います。ポーラーは同じ日を自分のポーリングからも保存するので、そのあとでは日次のステップが同じ日をもう一度取り込んでしまいます。
 
 1. バケットの設定を `.env` に書きます: `OBJECT_STORE_ENDPOINT`、`OBJECT_STORE_BUCKET`、`OBJECT_STORE_ACCESS_KEY_ID`、`OBJECT_STORE_SECRET_ACCESS_KEY`。読み取り専用のキーで足ります。
-2. アプリだけを起動します: `docker compose --profile standalone up -d --build app`。
+2. アプリだけを起動します: `GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app`。
 3. 事業者を `seed_agencies`（3 節）で追加し、それぞれにバケットが保存に使っている `agency_id`（`rt/<agency_id>/`）を付けます。このプロジェクト自身のバケットなら、`agencies.csv` の行がそれです。`add_agency` も `refresh-static` も実行しないでください。追い上げは最初の日に有効だった時刻表を自分で読み込み、取り込みに時刻表を結合する事業者について、それより新しい時刻表がすでに読み込まれていると拒否します。
 4. 計画を読みます。何も書き込みません:
 
