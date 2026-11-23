@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from fractions import Fraction
@@ -349,7 +350,8 @@ def test_one_pass_by_a_place_two_stops_share_is_the_passage_of_only_one():
 def test_a_stop_the_track_misses_is_not_matched_to_a_later_lap():
     """The fixes stop at 180 s and resume at 600 s, so no usable segment comes
     near stop 3 at 1900 m. The track returns past that place 50 minutes on.
-    Stop 3 has no passage, and stop 4 is still matched."""
+    Stop 3 has no passage, put down to the gap the bus crossed it in rather
+    than to the later lap, and stop 4 is still matched."""
     out = [_fix(t, 10 * t) for t in range(0, 181, 20)]
     resumed = [_fix(t, 10 * (t - 400)) for t in range(600, 801, 20)]
     later_lap = [_fix(3000 + t, 1700 + 10 * t) for t in range(0, 41, 20)]
@@ -360,8 +362,70 @@ def test_a_stop_the_track_misses_is_not_matched_to_a_later_lap():
         _stop(3, 1900, at=190),
         _stop(4, 3400, at=740, final=True),
     ]
-    found = _secs(vv.passages(track, stops))
-    assert found == pytest.approx({1: 0.0, 2: 100.0, 4: 740.0})
+    found, why = vv.passages_explained(track, stops)
+    assert _secs(found) == pytest.approx({1: 0.0, 2: 100.0, 4: 740.0})
+    assert why == {3: "gap"}
+
+
+def test_a_gap_between_the_neighbours_outranks_a_later_lap_too_late_to_count():
+    """As above, but the later lap passes stop 3 over two hours behind its
+    schedule, so stop 3's own visits are all implausible. The bus still
+    crossed it in the gap between stops 2 and 4, and that is the reason."""
+    out = [_fix(t, 10 * t) for t in range(0, 181, 20)]
+    resumed = [_fix(t, 10 * (t - 400)) for t in range(600, 801, 20)]
+    later_lap = [_fix(8000 + t, 1700 + 10 * t) for t in range(0, 41, 20)]
+    stops = [
+        _stop(1, 0, at=0),
+        _stop(2, 1000, at=100),
+        _stop(3, 1900, at=190),
+        _stop(4, 3400, at=740, final=True),
+    ]
+    found, why = vv.passages_explained(out + resumed + later_lap, stops)
+    assert _secs(found) == pytest.approx({1: 0.0, 2: 100.0, 4: 740.0})
+    assert why == {3: "gap"}
+
+
+def test_a_gap_over_a_stop_after_the_next_stop_was_passed_is_not_the_reason():
+    """The bus detours 300 m north of stop 3, rejoins at stop 4, and only
+    afterwards loses its fixes across a stretch that runs back over stop 3.
+    That gap falls after stop 4's passage, so stop 3 was never visited."""
+    track = [
+        *(_fix(t, 10 * t) for t in range(0, 101, 20)),
+        *(_fix(t, 1200 + 10 * (t - 120), 300) for t in range(120, 271, 30)),
+        _fix(290, 3000),
+        _fix(310, 3200),
+        _fix(700, 1700),
+        _fix(720, 1500),
+    ]
+    stops = [
+        _stop(1, 0, at=0),
+        _stop(2, 1000, at=100),
+        _stop(3, 1900, at=190),
+        _stop(4, 3000, at=290, final=True),
+    ]
+    found, why = vv.passages_explained(track, stops)
+    assert set(found) == {1, 2, 4}
+    assert why == {3: "no_visit"}
+
+
+def test_a_gap_ending_at_the_stop_before_s_passage_is_not_the_reason():
+    """The fixes resume at 300 s with the bus at stop 2, so its departure is
+    timed on the fix that ends the gap. Stop 3 lies on that gap's line, but
+    the gap ends at stop 2's passage and stop 3 comes after it."""
+    track = [
+        *(_fix(t, 10 * t) for t in range(0, 101, 20)),
+        *(_fix(t, 2000 + 10 * (t - 300)) for t in range(300, 501, 20)),
+    ]
+    stops = [
+        _stop(1, 0, at=0),
+        _stop(2, 1995, at=300),
+        _stop(3, 1500, 30, at=350),
+        _stop(4, 3500, at=450, final=True),
+    ]
+    found, why = vv.passages_explained(track, stops)
+    assert _secs(found)[2] == pytest.approx(300.0)
+    assert set(found) == {1, 2, 4}
+    assert why == {3: "no_visit"}
 
 
 def test_a_revisit_far_from_the_expected_time_is_no_passage():
@@ -371,14 +435,44 @@ def test_a_revisit_far_from_the_expected_time_is_no_passage():
     late = 100 + vv.MAX_DELAY_CHANGE_SEC + 300
     track = [_fix(t, 10 * t) for t in range(0, 101, 20)] + [_fix(late + t, 1900 + 10 * t) for t in range(0, 41, 20)]
     stops = [_stop(1, 0, at=0), _stop(2, 900, at=90), _stop(3, 2000, at=200, final=True)]
-    assert set(vv.passages(track, stops)) == {1, 2}
+    found, why = vv.passages_explained(track, stops)
+    assert set(found) == {1, 2}
+    assert why == {3: "delay_jump"}
+
+
+def test_a_bus_held_at_the_second_stop_loses_the_first_to_the_delay_bound():
+    """The bus leaves stop 1 on time, then stands at stop 2 for twenty minutes
+    and runs the rest of the trip that late. The longer side of the jump is
+    taken; stop 1 falls in time before it, so only the delay bound kept it
+    out, which is stated apart from a stop out of order."""
+    hold = vv.MAX_DELAY_CHANGE_SEC + 300
+
+    def east(t: int) -> float:
+        if t <= 30:
+            return 10 * t
+        return 300 if t <= 30 + hold else 300 + 10 * (t - 30 - hold)
+
+    track = _line(0, 90 + hold, 10, east)
+    stops = [_stop(1, 0, at=0), _stop(2, 300, at=30), _stop(3, 600, at=60), _stop(4, 900, at=90, final=True)]
+    found, why = vv.passages_explained(track, stops)
+    assert _secs(found) == pytest.approx({2: 30.0 + hold, 3: 60.0 + hold, 4: 90.0 + hold})
+    assert why == {1: "delay_jump"}
 
 
 def test_no_passage_is_interpolated_across_a_gap_in_the_fixes():
     gap = vv.MAX_BRACKET_GAP_SEC + 20
     track = [_fix(0, 0), _fix(20, 200), _fix(20 + gap, 200 + 10 * gap), _fix(40 + gap, 400 + 10 * gap)]
     stops = [_stop(1, 0, at=0), _stop(2, 600, at=60), _stop(3, 400 + 10 * gap, at=40 + gap, final=True)]
-    assert set(vv.passages(track, stops)) == {1, 3}
+    found, why = vv.passages_explained(track, stops)
+    assert set(found) == {1, 3}
+    assert why == {2: "gap"}
+
+
+def test_a_passage_is_interpolated_across_a_gap_as_long_as_the_limit():
+    gap = vv.MAX_BRACKET_GAP_SEC
+    track = [_fix(0, 0), _fix(20, 200), _fix(20 + gap, 200 + 10 * gap), _fix(40 + gap, 400 + 10 * gap)]
+    stops = [_stop(1, 0, at=0), _stop(2, 600, at=60), _stop(3, 400 + 10 * gap, at=40 + gap, final=True)]
+    assert _secs(vv.passages(track, stops)) == pytest.approx({1: 0.0, 2: 60.0, 3: 40.0 + gap})
 
 
 def test_a_bus_last_seen_standing_at_a_stop_has_not_been_seen_leaving_it():
@@ -621,7 +715,44 @@ def test_figures_are_the_mae_and_bias_by_lead_hour_and_timepoint():
 
 
 def test_figures_over_no_event_state_none_rather_than_divide():
-    assert vv.figures([])["overall"] == {"n": 0, "mae_sec": None, "bias_sec": None, "p90_abs_error_sec": None}
+    figures = vv.figures([])
+    assert figures["overall"] == {"n": 0, "mae_sec": None, "bias_sec": None, "p90_abs_error_sec": None}
+    assert figures["on_time"]["agreement_pct"] is None
+    assert set(figures["on_time"]["kept_pct"].values()) == {None}
+
+
+def test_the_on_time_classes_hold_their_bounds_on_time_as_the_app_counts_them():
+    assert vv.ON_TIME_WINDOW == (60, 300)
+    early, late = 60, 300
+    classes = [vv.on_time_class(d) for d in (-early - 0.5, -early, 0, late, late + 0.5)]
+    assert classes == ["early", "on_time", "on_time", "on_time", "late"]
+
+
+def _classed(predicted: int, observed: float) -> vv.Event:
+    return vv.Event("T", date(2026, 11, 20), 1, 9 * 3600, None, predicted, observed, 0)
+
+
+def test_on_time_agreement_shows_each_direction_a_bias_moves_events():
+    """The kept delay reads half a minute early of the observed one: an event
+    observed just late is kept on time, and one kept just early is observed
+    on time. The net on-time share alone would hide both moves."""
+    events = [
+        _classed(290, 320),
+        _classed(-70, -40),
+        _classed(100, 130),
+        _classed(100, 130),
+        _classed(400, 430),
+    ]
+    on_time = vv.on_time_agreement(events)
+    assert on_time["n"] == 5
+    assert on_time["kept_pct"] == {"early": 20.0, "on_time": 60.0, "late": 20.0}
+    assert on_time["observed_pct"] == {"early": 0.0, "on_time": 60.0, "late": 40.0}
+    assert on_time["agreement_pct"] == 60.0
+    assert on_time["kept_to_observed"] == {
+        "early": {"early": 0, "on_time": 1, "late": 0},
+        "on_time": {"early": 0, "on_time": 2, "late": 1},
+        "late": {"early": 0, "on_time": 0, "late": 1},
+    }
 
 
 def _tar(path: Path, members: dict[str, bytes]) -> None:
@@ -703,8 +834,17 @@ def test_on_the_sampling_grid_the_figures_are_the_oracles(tmp_path):
         start: (e.departures, pytest.approx(float(e.mae_sec), abs=0.05), pytest.approx(float(e.bias_sec), abs=0.05))
         for start, e in _oracle_lead_groups(found).items()
     }
+    on_time = summary["figures"]["on_time"]
+    classed = Counter(
+        (vv.on_time_class(p.departure.delay_sec), vv.on_time_class(p.true_delay_sec)) for p in found.predictions
+    )
+    assert on_time["kept_to_observed"] == {
+        k: {o: classed[(k, o)] for o in vv.ON_TIME_CLASSES} for k in vv.ON_TIME_CLASSES
+    }
+    assert summary["thresholds"]["on_time_early_tolerance_sec"] == 60
     markdown = (tmp_path / "out" / "8" / f"{DAY:%Y%m%d}_{DAY:%Y%m%d}.md").read_text()
     assert "| overall | 10 |" in markdown
+    assert f"| on_time | {on_time['kept_pct']['on_time']} | {on_time['observed_pct']['on_time']} |" in markdown
 
 
 def test_off_the_grid_the_figures_stay_within_a_second_of_the_oracles(tmp_path):
