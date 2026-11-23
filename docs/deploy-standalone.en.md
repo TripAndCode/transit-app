@@ -110,9 +110,9 @@ The poller can report its daily step to a [healthchecks.io](https://healthchecks
 
 1. Create a check with a period of 1 day and a grace time of 2 hours.
 2. Put its ping URL in `.env` as `POLLER_PING_URL=<url>`, then restart the poller: `docker compose --profile standalone up -d poller`.
-3. The poller runs a step as soon as it starts, and the check records a ping when that step ends. If none arrives, the poller's log says why. The log never prints the URL.
+3. The poller runs a step as soon as it starts, and the check records a ping when that step ends with no stage failing. If none arrives, the poller's log says why: a failing stage, or a ping it could not send. The log never prints the URL.
 
-The poller pings the URL each time a step ends with no stage failing: normally once after JST midnight and once after UTC midnight (09:00 JST). When a stage has failed every retry, about two hours of them, it pings `<url>/fail` and the check alerts at once. When the poller stops, or a step never ends, the pings stop and the check alerts 26 hours after the last one. After a failure, the check comes back up once a later day's step ends with no stage failing.
+The poller pings the URL each time a step ends with no stage failing: normally once after JST midnight and once after UTC midnight (09:00 JST). When a stage has failed every retry, about two hours of them, it pings `<url>/fail` and the check alerts at once. An agency with no timetable loaded skips its ingest, which no retry heals, so that step pings `<url>/fail` at once: load the timetable with `refresh-static` (section 3). When the poller stops, or a step never ends, the pings stop and the check alerts 26 hours after the last one. After a failure, the check comes back up once a later day's step ends with no stage failing.
 
 ## What is not automated
 

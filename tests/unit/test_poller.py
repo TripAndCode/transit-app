@@ -501,7 +501,7 @@ def _step(p) -> str | None:
 
 
 def test_the_step_runs_what_the_schedule_decides_and_settles_its_failures(tmp_path):
-    p, clock, plans = _wired(tmp_path, [{2: {"ingest"}}, {}])
+    p, clock, plans = _wired(tmp_path, [{2: {"ingest": poller.FAILED}}, {}])
     assert _step(p) == "utc"
     full = {"promote", "ingest", "analyze"}
     assert plans == [{1: full, 2: full}]
@@ -569,7 +569,7 @@ def test_a_step_that_raises_leaves_every_stage_pending(tmp_path):
 
 def test_each_settled_step_reports_ok_once_no_stage_is_failing(tmp_path):
     beats = []
-    p, clock, _ = _wired(tmp_path, [{2: {"ingest"}}, {}], heartbeat=lambda *beat: beats.append(beat))
+    p, clock, _ = _wired(tmp_path, [{2: {"ingest": poller.FAILED}}, {}], heartbeat=lambda *beat: beats.append(beat))
     _step(p)
     assert beats == []
     clock.now += schedule.RETRY_AFTER
@@ -579,13 +579,22 @@ def test_each_settled_step_reports_ok_once_no_stage_is_failing(tmp_path):
 
 def test_a_stage_that_spends_its_retries_reports_fail_naming_it(tmp_path):
     beats = []
-    outcomes = [{2: {"ingest"}}] * (schedule.MAX_RETRIES + 1)
+    outcomes = [{2: {"ingest": poller.FAILED}}] * (schedule.MAX_RETRIES + 1)
     p, clock, _ = _wired(tmp_path, outcomes, heartbeat=lambda *beat: beats.append(beat))
     _step(p)
     for _ in range(schedule.MAX_RETRIES):
         clock.now += schedule.RETRY_AFTER
         _step(p)
-    assert beats == [("fail", "used every retry: [('utc', 2, 'ingest')]")]
+    assert beats == [("fail", "not retried before their next day: [('utc', 2, 'ingest')]")]
+
+
+def test_an_ingest_skipped_for_want_of_a_timetable_reports_fail_and_is_not_retried(tmp_path):
+    beats = []
+    p, clock, _ = _wired(tmp_path, [{2: {"ingest": poller.SKIPPED}}], heartbeat=lambda *beat: beats.append(beat))
+    _step(p)
+    assert beats == [("fail", "not retried before their next day: [('utc', 2, 'ingest')]")]
+    clock.now += schedule.RETRY_AFTER
+    assert _step(p) is None
 
 
 def test_a_failing_pack_holds_the_ok(tmp_path):
@@ -604,12 +613,19 @@ class _Response:
         return False
 
 
-@pytest.mark.parametrize(("outcome", "path"), [("ok", "/ping/abc"), ("fail", "/ping/abc/fail")])
-def test_the_heartbeat_posts_to_the_check_or_its_fail_url(outcome, path):
+@pytest.mark.parametrize(
+    ("url", "outcome", "sent"),
+    [
+        ("https://hc.example/ping/abc/", "ok", "https://hc.example/ping/abc"),
+        ("https://hc.example/ping/abc/", "fail", "https://hc.example/ping/abc/fail"),
+        ("https://hc.example/ping/key/job?create=1", "fail", "https://hc.example/ping/key/job/fail?create=1"),
+    ],
+)
+def test_the_heartbeat_posts_to_the_check_or_its_fail_url(url, outcome, sent):
     with patch("pipeline.poller.urllib.request.urlopen", return_value=_Response()) as urlopen:
-        poller.send_heartbeat("https://hc.example/ping/abc/", outcome, "body")
+        poller.send_heartbeat(url, outcome, "body")
     request = urlopen.call_args.args[0]
-    assert (request.full_url, request.get_method(), request.data) == (f"https://hc.example{path}", "POST", b"body")
+    assert (request.full_url, request.get_method(), request.data) == (sent, "POST", b"body")
     assert urlopen.call_args.kwargs["timeout"] == poller.HEARTBEAT_TIMEOUT_SEC
 
 

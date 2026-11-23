@@ -35,11 +35,12 @@ class _Run:
         self.state = State()
         self.now = T0
 
-    def step(self, failed=(), *, at: datetime | None = None):
+    def step(self, failed=(), *, skipped=(), at: datetime | None = None):
         self.now = at or self.now
         kind, keys, self.state = decide(self.now, [1, 2], self.state)
+        self.started = self.state
         if keys:
-            self.state = settle(self.now, self.state, keys, failed)
+            self.state = settle(self.now, self.state, keys, failed, skipped)
         return kind, _pairs(keys)
 
     def later(self, delta: timedelta, failed=()):
@@ -146,17 +147,17 @@ def test_no_agency_starts_nothing_but_still_marks_the_day():
 
 
 class _Beats(_Run):
-    """A _Run that records what each settled step reports."""
+    """A _Run that records what each settled step reports, against the state
+    the step started from, as the poller does."""
 
     def __init__(self) -> None:
         super().__init__()
         self.beats: list[str | None] = []
 
-    def step(self, failed=(), *, at: datetime | None = None):
-        before = self.state
-        out = super().step(failed, at=at)
+    def step(self, failed=(), *, skipped=(), at: datetime | None = None):
+        out = super().step(failed, skipped=skipped, at=at)
         if out[1]:
-            self.beats.append(heartbeat(before, self.state))
+            self.beats.append(heartbeat(self.started, self.state))
         return out
 
 
@@ -194,3 +195,13 @@ def test_a_second_stage_spending_its_retries_reports_fail_again():
     before = State(pending={**spent, ("utc", 2, "ingest"): Pending(MAX_RETRIES - 1, T0)})
     after = settle(T0, before, [("utc", 2, "ingest")], {(2, "ingest")})
     assert heartbeat(before, after) == "fail"
+
+
+def test_a_skipped_stage_reports_fail_at_once_each_day_until_it_runs():
+    run = _Beats()
+    run.step(skipped={(1, "ingest")})
+    assert run.later(RETRY_AFTER) == (None, set())
+    run.step(at=datetime(2026, 4, 2, 15, 0, 1, tzinfo=timezone.utc))
+    run.step(skipped={(1, "ingest")}, at=datetime(2026, 4, 3, 0, 0, 1, tzinfo=timezone.utc))
+    run.step(at=datetime(2026, 4, 4, 0, 0, 1, tzinfo=timezone.utc))
+    assert run.beats == ["fail", None, "fail", "ok"]

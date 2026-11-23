@@ -138,7 +138,7 @@ def test_an_insert_failure_holds_the_marker_before_its_tarball(pg_conn, ch_clien
 
     _archive(rt, recorded, _utc(d, 6))
     with patch("pipeline.ingest.insert_updates", side_effect=ConnectionResetError("clickhouse went away")):
-        assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {agency_id: {"ingest"}}
+        assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {agency_id: {"ingest": poller.FAILED}}
     assert poller.ingested_through(rt) == f"{d - _DAY:%Y%m%d}"
     assert not _file_names(ch_client, agency_id, d, live=False)
 
@@ -165,3 +165,15 @@ def test_a_parse_failure_does_not_hold_the_marker(pg_conn, ch_client, agency_id,
         assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {}
     assert poller.ingested_through(rt) == f"{d:%Y%m%d}"
     assert _file_names(ch_client, agency_id, d, live=False) == {member_name(good)}
+
+
+def test_an_agency_with_no_timetable_has_its_ingest_skipped(pg_conn, ch_client, agency_id, tmp_path):
+    from pipeline.ingest import StaticTimetableMissing
+
+    d = jst_today() - _DAY
+    rt = poller.rt_dir(tmp_path, agency_id)
+    _archive(rt, _RECORDED.read_bytes(), _utc(d, 6))
+    missing = StaticTimetableMissing(agency_id, "static_join")
+    with patch("pipeline.ingest.require_timetable", side_effect=missing):
+        assert poller.run_daily_step(tmp_path, {agency_id: {"ingest"}}) == {agency_id: {"ingest": poller.SKIPPED}}
+    assert poller.ingested_through(rt) is None

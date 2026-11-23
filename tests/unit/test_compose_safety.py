@@ -74,10 +74,11 @@ def test_env_example_has_no_bare_ipv4_literal():
 
 
 # A ping URL is read on whichever host runs its job, so `.env.example` lists
-# each one, commented where the app itself never reads it. `HC_PING_URL_` is
-# the prefix `deploy/vps/run-with-ping.sh` completes with a job's name.
+# each one, commented where the app itself never reads it. The example env
+# files only document names, so they are not readers. `HC_PING_URL_` is the
+# prefix `deploy/vps/run-with-ping.sh` completes with a job's name.
 _PING_URL = re.compile(r"\b[A-Z][A-Z0-9_]*PING_URL[A-Z0-9_]*\b")
-_NOT_A_PING_VARIABLE = {"HC_PING_URL_", "PING_URL_ENV_VAR"}
+_NOT_A_PING_VARIABLE = {"HC_PING_URL_"}
 
 
 def test_env_example_lists_every_ping_url_the_code_reads():
@@ -87,7 +88,9 @@ def test_env_example_lists_every_ping_url_the_code_reads():
     code = [
         p
         for p in tracked
-        if not p.startswith(("tests/", "docs/", "frontend/")) and "/tests/" not in p and not p.endswith(".md")
+        if not p.startswith(("tests/", "docs/", "frontend/"))
+        and "/tests/" not in p
+        and not p.endswith((".md", "example"))
     ]
     read = {
         name for p in code if (ROOT / p).is_file() for name in _PING_URL.findall((ROOT / p).read_text(errors="ignore"))

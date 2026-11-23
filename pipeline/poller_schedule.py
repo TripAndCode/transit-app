@@ -8,7 +8,9 @@ Three kinds of step:
 
 Every (kind, agency, stage) that fails keeps its own retry budget, which its
 kind's next day resets: one agency's failures never spend another's, and a
-JST step that fails after the UTC step used its budget is still retried.
+JST step that fails after the UTC step used its budget is still retried. A
+stage skipped for a cause no retry heals has no budget: it waits for its
+kind's next day at once.
 :func:`decide` picks the step to start, :func:`settle` folds its result in,
 and :func:`heartbeat` says what that result tells a dead-man's switch; none
 reads a clock or touches a thread, so a table test covers them.
@@ -83,14 +85,23 @@ def decide(now: datetime, agencies: Iterable[int], state: State) -> tuple[str | 
     return None, frozenset(), state
 
 
-def settle(now: datetime, state: State, ran: Iterable[Key], failed: Iterable[tuple[int, str]]) -> State:
+def settle(
+    now: datetime,
+    state: State,
+    ran: Iterable[Key],
+    failed: Iterable[tuple[int, str]],
+    skipped: Iterable[tuple[int, str]] = (),
+) -> State:
     """Fold a step's outcome in: each stage that ran and failed waits
     RETRY_AFTER with one more retry spent if it was already pending; each
-    that ran and succeeded is no longer pending."""
-    failed = set(failed)
+    that was skipped has spent every retry; each that ran and succeeded is
+    no longer pending."""
+    failed, skipped = set(failed), set(skipped)
     pending = dict(state.pending)
     for key in ran:
-        if (key[1], key[2]) in failed:
+        if (key[1], key[2]) in skipped:
+            pending[key] = Pending(retries=MAX_RETRIES, due=now)
+        elif (key[1], key[2]) in failed:
             before = pending.get(key)
             pending[key] = Pending(retries=before.retries + 1 if before else 0, due=now + RETRY_AFTER)
         else:
@@ -108,9 +119,9 @@ def newly_exhausted(before: State, after: State) -> list[Key]:
 
 def heartbeat(before: State, after: State) -> str | None:
     """What a settled step reports: ``"fail"`` when a stage has just spent its
-    last retry, ``"ok"`` once no stage is failing, else nothing. A spent stage
-    stays pending until its kind's next day, so no ``"ok"`` follows a
-    ``"fail"`` until that day's step settles clean."""
+    last retry or been skipped, ``"ok"`` once no stage is failing, else
+    nothing. A spent stage stays pending until its kind's next day, so no
+    ``"ok"`` follows a ``"fail"`` until that day's step settles clean."""
     if newly_exhausted(before, after):
         return "fail"
     return None if after.pending else "ok"
