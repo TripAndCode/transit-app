@@ -51,11 +51,11 @@ starts archiving VehiclePositions.
 
 ## What the board does with it
 
-The kept-versus-observed offset differs from feed to feed by as much as the
-on-time interval the agencies board's `ci_wide` check allows, so ranking
-agencies on predicted delays would order each feed's prediction bias rather
-than its service. The comparability gate therefore never ranks a figure whose
-value basis is in `PREDICTED_VALUE_BASES` (`pipeline/reports/comparability.py`),
+The kept-versus-observed offset differs from feed to feed, and no check on
+a feed's own data can see it, so ranking agencies on predicted delays would
+order each feed's prediction bias rather than its service. The comparability
+gate therefore never ranks a figure whose value basis is in
+`PREDICTED_VALUE_BASES` (`pipeline/reports/comparability.py`),
 and gives the reason `predicted_basis`
 ([network-tab.md](network-tab.md#comparability-gate)). The council report
 states the same verdict. The route report card grades a route against the

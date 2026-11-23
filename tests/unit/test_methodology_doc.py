@@ -9,6 +9,7 @@ comparability thresholds they state are the gate's own.
 
 import re
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
@@ -128,6 +129,14 @@ def test_a_longer_number_does_not_state_the_threshold(locale, stated, stale):
     section = _comparability_section(locale)
     assert stated in section
     assert _unstated(section.replace(stated, stale), locale, *_CURRENT)
+
+
+@pytest.mark.parametrize("locale", sorted(changelog.DOCS))
+def test_the_documents_list_one_condition_per_reason_the_gate_gives(locale):
+    """A reason the board can give that the documents' table lacks is a
+    condition no reader was told of."""
+    orders = re.findall(r"^\| (\d+) \|", _comparability_section(locale), flags=re.MULTILINE)
+    assert orders == [str(n) for n in range(1, len(get_args(comparability.ComparableReason)) + 1)]
 
 
 _GRADE_CURRENT = (

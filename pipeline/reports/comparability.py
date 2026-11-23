@@ -59,12 +59,10 @@ MAX_CLAMP_PCT = 5.0
 COMPARABLE_INGEST_STRATEGIES = frozenset({"static_join"})
 
 #: Value bases the board never ranks. A feed's predicted delays differ from
-#: the passages its vehicles were observed making, and by a different amount
-#: for each agency, by as much as the interval the ``ci_wide`` check allows,
-#: so ranking agencies on them would order each feed's prediction bias
-#: (docs/features/prediction-validation.md). A basis made from observed
-#: passages is ranked once the checks before this one pass; a new predicted
-#: basis must be named here.
+#: the passages its vehicles were observed making, by an amount that differs
+#: feed by feed and that no check on the data can see, so ranking agencies on
+#: them would order each feed's prediction bias
+#: (docs/features/prediction-validation.md). A new predicted basis is named here.
 PREDICTED_VALUE_BASES = frozenset({VALUE_BASIS})
 
 #: The on-time definition the board counts every agency by, and so the one

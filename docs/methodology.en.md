@@ -44,10 +44,10 @@ How far the predictions are from what the buses did is checked by reconstructing
 
 | Operator | Validation status |
 |---|---|
-| 広島電鉄, 広島バス, 広島交通 | Position collection has started. After 7 to 14 days of positions, the predictions are compared with them. The comparison is not done yet. |
+| 広島電鉄, 広島バス, 広島交通 | Compared. The predictions sit off the observed passages, and the on-time rate they give differs from the observed one by a different amount for each operator. Position collection continues. |
 | Every other operator | Not validated, and no positions collected. |
 
-An operator's result will be referenced from this document once its validation is done. Depending on the result, that operator's stamp and its treatment in comparisons may change. Until then, read every operator's figures as resting on feed predictions.
+Because that difference is not the same for every operator, and an operator's own data cannot show it, the agency comparison screen ranks no operator on predicted figures ([Comparability conditions](#comparability-conditions)). Read every operator's figures as resting on feed predictions. The comparison's procedure is in [docs/features/prediction-validation.md](features/prediction-validation.md).
 
 ### Feed quality
 
@@ -219,7 +219,7 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 - Held-for-schedule rate: of the trips reaching the first stop on time or early, the share that stayed more than 60 seconds beyond the scheduled dwell, counting only trips whose departure was reported after the arrival and whose next stop the feed reported.
 - Terminus early-arrival rate: the share of arrivals at a trip's last stop at least 60 seconds ahead of the timetable.
 
-When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them until the operator's predictions are validated.
+When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them while they rest on predictions.
 
 **Slow segments** (**Why**, "Slow segments"): the running time per segment above, taken per stop pair of the agency over every route through it. It is read per time band (of the scheduled departure from the first stop) and per day type (weekdays, or weekends and holidays, by the calendar).
 
@@ -232,7 +232,7 @@ When a period spans a timetable revision, only the days of the timetable in forc
 - Minutes lost per day: the excess (0 when negative) × runs per day ÷ 60.
 - Distance and speed: the distance is the straight line between the two stops of the timetable loaded now. It is shorter than the road, so the speed (distance ÷ median running time) reads low on a winding road. A road distance from the timetable's shapes would need one shape picked per stop pair, and a loop route leaves the stops' places on it ambiguous, so the straight line is used. The slow-segment rule does not read the distance.
 
-The list is ordered by how many weeks a segment has stayed slow. It is not ranked by minutes lost, and no bus-priority (bus lane, transit signal priority) candidates are chosen from it, until the operator's predictions are validated. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)).
+The list is ordered by how many weeks a segment has stayed slow. It is not ranked by minutes lost, and no bus-priority (bus lane, transit signal priority) candidates are chosen from it, while its values rest on predictions. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)).
 
 ### Route report card
 
@@ -335,7 +335,7 @@ A test ([tests/unit/test_never_computed.py](../tests/unit/test_never_computed.py
 **Raw archives**: the raw data collected is kept exactly as the operator published it.
 
 - The realtime archive can carry vehicle descriptors the operator included. The Service does not ingest them.
-- Positions are kept only to validate the predictions, for a bounded window (7 to 14 days of collection). They are not ingested into the app. The archive of them is kept for 180 days, much shorter than the realtime archive's 1,825.
+- Positions are collected only to check the predictions against observed passages. They are not ingested into the app. Each day of them is kept for 180 days, much shorter than the realtime archive's 1,825.
 - Any release of the archives as a public dataset strips the vehicle descriptors.
 
 ### The original fourteen gaps
@@ -350,7 +350,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | Passenger weighting | Partial | Only hand-entered relative weights per route, used only by the weighted on-time rate on the agency comparison screen. No ridership import |
 | Splitting running time from dwell time | Partial | The split exists. Whether a feed's arrival and departure delays are independent has not been checked feed by feed |
 | External factors and comparison design | Partial | Only rain against dry days (one weather station per operator, daily, off by default). No road traffic, events or school calendar |
-| Quality of the predictions | Partial | The stamp names the value basis. Validation against positions has just started. The monthly feed-quality scorecard and its A–F grade are on the admin pages and are not published |
+| Quality of the predictions | Partial | The stamp names the value basis. The operators whose positions are collected are validated against them, and no operator is ranked on predicted figures. The monthly feed-quality scorecard and its A–F grade are on the admin pages and are not published |
 | Stating the measurement point and definitions | Partial | "Download CSV" files, the council report, the delay record and the screens' "How this is calculated" block carry the definition stamp. CSVs a screen builds on the spot and chart images do not |
 | Transfers and total travel time | Partial | Connection reliability for the hub transfers an administrator defines, from feed predictions. Total travel time and origin-destination journeys are not computed: passengers are not the Service's primary users |
 | Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
@@ -370,8 +370,10 @@ The agency comparison screen ranks only the operators whose data supports a comp
 | 3 | Coverage low | under 70% of planned trips observed |
 | 4 | Interval wide | the on-time rate's 95% Wilson interval is more than 3.0 points either side |
 | 5 | Implausible readings high | over 5% of reports dropped as implausible |
+| 6 | Predicted values | the figures are the feeds' predicted delays, not observed passings, as every operator's are today ([Value basis and validation status](#value-basis-and-validation-status)) |
 
 - Each threshold is inclusive: a figure exactly at it passes.
+- The predicted-values condition is checked last, so an operator given it meets every condition on its own data.
 - Each check reads the figure rounded as it is printed, so a reader can confirm the verdict from the row itself.
 - The on-time rate is counted under the default definition (`standard_m1_p5`).
 - The council report states whether the operator is comparable under these conditions, with the figures behind the verdict.

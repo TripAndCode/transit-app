@@ -211,11 +211,12 @@ The privacy policy's periods for personal data and logs are in
   replica replays it, and it is the open dataset's source. A static zip
   outlives the realtime days it governs because a replay has to load each
   timetable version before those days.
-- **R2 VehiclePositions** are collected only to check predicted delays against
-  observed passages, over a short collection window. 180 days covers the
-  collection, the analysis and a rerun of it. Keeping them longer gains
-  nothing, and they carry vehicle descriptors, so they are kept no longer than
-  the validation needs.
+- **R2 VehiclePositions** are collected to check the feeds' predicted delays
+  against observed passages ([prediction validation](features/prediction-validation.md)).
+  180 days covers a validation and a rerun of it, and they carry vehicle
+  descriptors, so each day is kept no longer than that. A value basis built
+  from observed passages could reach back only that far, so building one is
+  when to revisit this horizon.
 - **Production `updates`** keeps 400 days once the prune is on, because a
   report's widest range is a year, plus a margin. Older days can be replayed
   from R2, and the aggregates built from them are kept indefinitely.

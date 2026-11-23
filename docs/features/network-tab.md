@@ -140,7 +140,7 @@ checks run in a fixed order:
 | 3 | `coverage_low` | observation coverage below `MIN_COVERAGE_PCT` (70%) | the feed's gaps could hide any delay pattern, and their bias differs feed by feed |
 | 4 | `ci_wide` | the on-time interval's half-width above `MAX_CI_HALF_WIDTH_PP` (3 points) | the interval then spans more than the gap between many neighbouring agencies' rates, so ranking them would order noise |
 | 5 | `clamp_high` | `clamp_pct`, to a tenth as printed, above `MAX_CLAMP_PCT` (5%) | a feed producing that many implausible readings makes the readings it kept suspect too |
-| 6 | `predicted_basis` | the figures' value basis is in `PREDICTED_VALUE_BASES`, which holds the definition stamp's `VALUE_BASIS` (`feed_prediction`) | a feed's predicted delays sit off the passages its vehicles were observed making by a different amount for each feed, as much as the interval `ci_wide` allows, so a ranking would order the feeds' prediction bias ([prediction validation](prediction-validation.md)) |
+| 6 | `predicted_basis` | the figures' value basis is in `PREDICTED_VALUE_BASES`, which holds the definition stamp's `VALUE_BASIS` (`feed_prediction`) | a feed's predicted delays sit off the passages its vehicles were observed making, by an amount that differs feed by feed and that no check on the data can see, so a ranking would order the feeds' prediction bias ([prediction validation](prediction-validation.md)) |
 
 `predicted_basis` comes last, so an agency that gives it passes every check
 on its own data. `PREDICTED_VALUE_BASES` is a list of the bases never

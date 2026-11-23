@@ -5,9 +5,8 @@
 #   vp/<id>/<YYYYMMDD>.tar.gz             (sync-r2.sh, from rotate-day.sh)
 #   static/<id>/gtfs_static_<YYYYMMDD>.zip (sync-r2.sh, from static-fetch.sh)
 # A vp/<id>/ object is expected for any agency in agencies.tsv, not only one
-# with a row in etc/vehicle_positions.tsv: VehiclePositions are collected for
-# a bounded window and the row is removed when it ends, while the archive it
-# produced is kept.
+# with a row in etc/vehicle_positions.tsv: a row is removed when its
+# collection stops, while the archive it produced is kept.
 # prune-r2.sh already bounds storage by AGE, but only for agency ids it reads
 # out of the CURRENT agencies.tsv: drop a row (an agency retired, its id
 # renumbered, a roster typo fixed) and prune-r2.sh stops looking at that

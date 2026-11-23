@@ -6,9 +6,9 @@
 # local prune.sh's cadence.
 #   RT tarballs:  delete rt/<id>/*.tar.gz objects older than R2_RT_RETENTION_DAYS.
 #   VP tarballs:  delete vp/<id>/*.tar.gz (VehiclePositions days) older than
-#                 R2_VP_RETENTION_DAYS, for every agency in agencies.tsv: a VP
-#                 row is removed from vehicle_positions.tsv when its window
-#                 ends, long before any of its archive is old enough to prune.
+#                 R2_VP_RETENTION_DAYS, for every agency in agencies.tsv: an
+#                 agency whose row in vehicle_positions.tsv is removed when
+#                 its collection stops still has an archive to age out.
 #   Static zips:  delete static/<id>/gtfs_static_*.zip objects older than
 #                 R2_STATIC_RETENTION_DAYS, EXCEPT the object matching each
 #                 agency's current local latest.zip target (mirrors local
