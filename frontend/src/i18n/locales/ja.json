@@ -502,7 +502,15 @@
     "pre_floor_agency": "{{agency}}：{{spans}}",
     "pre_floor_span": "{{range}}は算出方法 {{version}}",
     "pre_floor_span_unrecorded": "{{range}}は算出方法の記録なし",
-    "pre_floor_separator": "、"
+    "pre_floor_separator": "、",
+    "validation": "予測値の検証：{{check}}。",
+    "validation_heading": "予測値の検証",
+    "validation_agency": "{{agency}}：{{check}}",
+    "validation_above": "運行日{{range}}で、予測値で求めた定時率は観測した通過時刻で求めたものより{{points}}ポイント高い（定時：{{window}}）",
+    "validation_below": "運行日{{range}}で、予測値で求めた定時率は観測した通過時刻で求めたものより{{points}}ポイント低い（定時：{{window}}）",
+    "validation_equal": "運行日{{range}}で、予測値で求めた定時率は観測した通過時刻で求めたものと同じ（定時：{{window}}）",
+    "validation_window_late": "定刻から{{late}}以内の遅れ（早発を含む）",
+    "validation_window_late_early": "定刻から{{late}}以内の遅れと{{early}}以内の早発"
   },
   "app": {
     "data_stale": {

@@ -208,6 +208,25 @@ class PreFloorMethod(BaseModel):
     method_version: str | None
 
 
+class PredictionValidation(BaseModel):
+    """The newest validation recorded for an agency in prediction_validations
+    (scripts/record_prediction_validation.py): its feed's kept delays held
+    against the passages its vehicles were observed making on the service
+    dates ``from_date`` to ``to_date``. ``on_time_offset_pt`` is how many
+    points the on-time rate from the kept delays stood above the one from the
+    observed delays over the stop events compared, negative when below, under
+    the window ``early_tolerance_sec`` and ``late_tolerance_sec`` name
+    (``early_tolerance_sec`` None: any early departure). It is unrounded;
+    each surface rounds it once, as printed."""
+
+    agency_id: int
+    from_date: date
+    to_date: date
+    early_tolerance_sec: int | None
+    late_tolerance_sec: int
+    on_time_offset_pt: float
+
+
 class DefinitionMeta(BaseModel):
     """On-time/late definition actually used to produce a report or
     comparison view's numbers -- surfaced alongside any such view (and in
@@ -253,6 +272,12 @@ class DefinitionMeta(BaseModel):
     (:class:`PreFloorMethod`), whether or not it is the current one; ``None``
     when the range reaches no such date, for a live scan, which never does,
     and on a database not yet migrated to record the method.
+
+    ``prediction_validations`` holds, for each listed agency whose predictions
+    were validated, the newest validation (:class:`PredictionValidation`), for a
+    live scan too: how far its feed's predictions moved the on-time rate on
+    the dates checked, which need not be the request's. ``None`` when no listed
+    agency has one recorded, and on a database not yet migrated to record them.
     """
 
     preset: str | None
@@ -270,6 +295,7 @@ class DefinitionMeta(BaseModel):
     source_mix: list[SourceMix] | None = None
     feed_quality: list[FeedQuality] | None = None
     pre_floor_methods: list[PreFloorMethod] | None = None
+    prediction_validations: list[PredictionValidation] | None = None
 
 
 # Each agency's builds analyze had recorded, when this process last looked,
@@ -309,6 +335,18 @@ WHERE a.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)
 ORDER BY a.agency_id, h.date
 """
 
+# The newest validation recorded for each agency of the scope _SOURCE_DAYS_SQL
+# reads: the latest last service date, then the longest range ending on it.
+_VALIDATIONS_SQL = """
+SELECT DISTINCT ON (v.agency_id)
+       v.agency_id, v.from_date, v.to_date, v.early_tolerance_sec, v.late_tolerance_sec,
+       v.compared, v.kept_on_time, v.observed_on_time
+FROM prediction_validations v
+JOIN agencies a USING (agency_id)
+WHERE v.agency_id = $1::int OR ($1::int IS NULL AND a.deleted_at IS NULL)
+ORDER BY v.agency_id, v.to_date DESC, v.from_date
+"""
+
 
 async def stamp_build(
     conn,
@@ -327,7 +365,8 @@ async def stamp_build(
     *agency_id*, or for every agency the board lists when it is None.
     *schedule* is that scope's
     :func:`pipeline.reports.schedule_revision.read_schedule_days`. A live scan
-    gets its timetables and sources, and no build or pre-floor methods.
+    gets its timetables and sources, and no build or pre-floor methods. Either
+    gets the scope's prediction validations (:func:`_read_validations`).
     Nothing is read from ClickHouse.
 
     One agency's stamp also states its completeness and clamp share over the
@@ -357,6 +396,7 @@ async def stamp_build(
     update: dict[str, object] = {
         "timetable_versions": _with_contents(versions, contents),
         "source_mix": None if sources is None else _source_mix(sources, schedule.from_date, schedule.to_date),
+        "prediction_validations": await _read_validations(conn, agency_id),
     }
     if meta.source == "aggregates":
         rows = await conn.fetch(_BUILDS_SQL)
@@ -464,6 +504,26 @@ async def _read_source_days(conn, agency_id: int | None, from_date: date, to_dat
     return await _fetch_enrichment(
         conn, "source counts in agg_feed_health", _SOURCE_DAYS_SQL, agency_id, from_date, to_date
     )
+
+
+async def _read_validations(conn, agency_id: int | None) -> list[PredictionValidation] | None:
+    """The :data:`_VALIDATIONS_SQL` validations, the offset made from the
+    recorded counts; None when none is recorded or the database is not yet
+    migrated to record them."""
+    rows = await _fetch_enrichment(conn, "prediction_validations", _VALIDATIONS_SQL, agency_id)
+    if not rows:
+        return None
+    return [
+        PredictionValidation(
+            agency_id=agency,
+            from_date=first,
+            to_date=last,
+            early_tolerance_sec=early,
+            late_tolerance_sec=late,
+            on_time_offset_pt=100 * (kept_on_time - observed_on_time) / compared,
+        )
+        for agency, first, last, early, late, compared, kept_on_time, observed_on_time in rows
+    ]
 
 
 # The content the version map's Postgres mirror holds for each bound
@@ -660,9 +720,11 @@ def format_definition_csv_line(meta: DefinitionMeta) -> str:
         f"集計範囲={measurement_point}; 重複排除={dedup_rule}; "
         f"除外基準=|遅延|>{meta.exclusion_threshold_sec}秒を除外; "
         f"値の根拠={_VALUE_BASIS_TEXT[(meta.value_basis, 'ja')]}; "
-        f"算出方法の説明={METHODOLOGY_URLS['ja']}; "
-        f"算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     )
+    validation = _validation_text(meta, "ja")
+    if validation is not None:
+        line += f"{_VALIDATION_LABEL['ja']}={validation}; "
+    line += f"算出方法の説明={METHODOLOGY_URLS['ja']}; 算出方法={meta.method_version}; 集計日={_built_day(meta, 'ja')}"
     timetables = _timetable_text(meta, "ja")
     if timetables is not None:
         line = f"{line}; 時刻表={timetables}"
@@ -820,7 +882,13 @@ def _stamp_agencies(meta: DefinitionMeta) -> set[int]:
     """The agencies *meta*'s scope lists, as its per-agency parts name them:
     an agency's own stamp names that one, and the board's every agency it
     lists, in its timetables at least (:func:`stamp_build`)."""
-    parts = (meta.timetable_versions, meta.source_mix, meta.feed_quality, meta.pre_floor_methods)
+    parts = (
+        meta.timetable_versions,
+        meta.source_mix,
+        meta.feed_quality,
+        meta.pre_floor_methods,
+        meta.prediction_validations,
+    )
     return {item.agency_id for items in parts for item in items or []}
 
 
@@ -914,10 +982,49 @@ def _pre_floor_part(span: PreFloorMethod, locale: str) -> str:
     return f"{first}〜{last}は{method}"
 
 
+_VALIDATION_LABEL = {"ja": "予測値の検証", "en": "Prediction check"}
+
+
+def _validation_text(meta: DefinitionMeta, locale: str) -> str | None:
+    """How far each validated agency's predictions moved its on-time rate on
+    the dates checked, by agency (:func:`_by_agency`); None when no listed
+    agency has a validation recorded."""
+    if not meta.prediction_validations:
+        return None
+    return _by_agency(
+        meta, [(check.agency_id, _validation_part(check, locale)) for check in meta.prediction_validations], locale
+    )
+
+
+def _validation_part(check: PredictionValidation, locale: str) -> str:
+    # Imported here: the gate's module imports this one.
+    from pipeline.reports.comparability import tenth_as_printed
+
+    # The window is always named: it is the validation's, which a report's own
+    # on-time definition beside it need not share.
+    offset = tenth_as_printed(check.on_time_offset_pt)
+    first, last = check.from_date.isoformat(), check.to_date.isoformat()
+    late = duration_text(check.late_tolerance_sec, locale)
+    early = None if check.early_tolerance_sec is None else duration_text(check.early_tolerance_sec, locale)
+    if locale == "en":
+        window = f"up to {late} late, any early departure" if early is None else f"up to {late} late and {early} early"
+        moved = "equal to" if offset == 0 else f"{abs(offset):.1f} points {'above' if offset > 0 else 'below'}"
+        return (
+            f"on service days {first} to {last}, the on-time rate from the predictions was {moved} "
+            f"the one from observed passing times (on time: {window})"
+        )
+    window = (
+        f"定刻から{late}以内の遅れ（早発を含む）" if early is None else f"定刻から{late}以内の遅れと{early}以内の早発"
+    )
+    moved = "と同じ" if offset == 0 else f"より{abs(offset):.1f}ポイント{'高い' if offset > 0 else '低い'}"
+    return f"運行日{first}〜{last}で、予測値で求めた定時率は観測した通過時刻で求めたもの{moved}（定時：{window}）"
+
+
 def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     """The footnote lines that say where *meta*'s figures came from: what they
-    are made from, where the method is published, the method and build day
-    (:func:`format_method_stamp`), and the timetables in force, the source
+    are made from and, for a validated agency, how far that moved its on-time
+    rate (:func:`_validation_text`), where the method is published, the
+    method and build day (:func:`format_method_stamp`), and the timetables in force, the source
     of each day's observations and the period's completeness and clamp share
     when a router named them, and the method of any of its dates before a
     retention floor frozen under another (:func:`_pre_floor_text`).
@@ -925,11 +1032,11 @@ def format_stamp_lines(meta: DefinitionMeta, locale: str = "ja") -> list[str]:
     text is footnoted with them."""
     locale = "en" if locale == "en" else "ja"
     basis = _VALUE_BASIS_TEXT[(meta.value_basis, locale)]
-    lines = [
-        f"Value basis: {basis}" if locale == "en" else f"値の根拠: {basis}",
-        _methodology_line(locale),
-        format_method_stamp(meta, locale),
-    ]
+    lines = [f"Value basis: {basis}" if locale == "en" else f"値の根拠: {basis}"]
+    validation = _validation_text(meta, locale)
+    if validation is not None:
+        lines.append(f"{_VALIDATION_LABEL[locale]}: {validation}")
+    lines += [_methodology_line(locale), format_method_stamp(meta, locale)]
     timetables = _timetable_text(meta, locale)
     if timetables is not None:
         lines.append(f"Timetable: {timetables}" if locale == "en" else f"時刻表: {timetables}")

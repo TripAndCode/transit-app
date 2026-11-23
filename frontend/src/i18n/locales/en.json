@@ -502,7 +502,15 @@
     "pre_floor_agency": "{{agency}} — {{spans}}",
     "pre_floor_span": "{{range}} under method {{version}}",
     "pre_floor_span_unrecorded": "{{range}} under a method not recorded",
-    "pre_floor_separator": ", "
+    "pre_floor_separator": ", ",
+    "validation": "Prediction check: {{check}}.",
+    "validation_heading": "Prediction check",
+    "validation_agency": "{{agency}} — {{check}}",
+    "validation_above": "on service days {{range}}, the on-time rate from the predictions was {{points}} points above the one from observed passing times (on time: {{window}})",
+    "validation_below": "on service days {{range}}, the on-time rate from the predictions was {{points}} points below the one from observed passing times (on time: {{window}})",
+    "validation_equal": "on service days {{range}}, the on-time rate from the predictions was equal to the one from observed passing times (on time: {{window}})",
+    "validation_window_late": "up to {{late}} late, any early departure",
+    "validation_window_late_early": "up to {{late}} late and {{early}} early"
   },
   "app": {
     "data_stale": {
