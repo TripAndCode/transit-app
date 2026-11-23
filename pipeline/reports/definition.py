@@ -277,7 +277,7 @@ class DefinitionMeta(BaseModel):
     were validated, the newest validation (:class:`PredictionValidation`), for a
     live scan too: how far its feed's predictions moved the on-time rate on
     the dates checked, which need not be the request's. ``None`` when no listed
-    agency has one recorded.
+    agency has one recorded, and on a database not yet migrated to record them.
     """
 
     preset: str | None

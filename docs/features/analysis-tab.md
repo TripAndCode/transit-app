@@ -710,9 +710,10 @@ controls show without them.
   and on-time window it covered, and how many points the on-time rate from the
   predictions stood above or below the one from the observed passages
   (予測値の検証). It is the newest whatever the request's dates, a live scan
-  reads it too, and it is null when none is recorded. The CSV preamble, the
-  footnotes and `DefinitionMetaBlock` print it right after the value basis,
-  each rounding the offset once, and print nothing when it is null.
+  reads it too, and it is null when none is recorded. The CSV preamble and
+  the footnotes print it right after the value basis, `DefinitionMetaBlock`
+  after the paragraph that opens with it; each rounds the offset once and
+  prints nothing when it is null.
   `timetable_versions` lists, per agency, each timetable in force on a day, or
   for a day no recorded timetable covers, the one most of its observations
   were ingested against (`agg_schedule_revision_daily`), and how

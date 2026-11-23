@@ -36,7 +36,7 @@ type BlockProps = Props & {
  *  completeness and clamp share, and the method of any of its dates before a
  *  retention floor that was frozen under another. How far the feed's
  *  predictions moved the on-time rate, where a validation measured it, follows
- *  the value basis. A reader comparing two agencies or two exports can open it to see
+ *  the paragraph that opens with the value basis. A reader comparing two agencies or two exports can open it to see
  *  they share a definition. Every value comes from the API response's
  *  `definition` field (pipeline/reports/definition.py is the source of
  *  truth); an identifier this build has no words for is shown as the API
@@ -87,7 +87,8 @@ export function DefinitionMetaBlock({ definition, agencyNames, tiers }: BlockPro
 }
 
 /** The newest validation of each agency's predicted delays against its
- *  vehicles' observed passages, right after the value basis it qualifies:
+ *  vehicles' observed passages, after the paragraph that opens with the
+ *  value basis it qualifies:
  *  how far the on-time rate from the predictions stood from the one from the
  *  observed passages, over the validation's own dates and window, which need
  *  not be the figures'. One sentence for a stamp of one agency, and a list

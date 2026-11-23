@@ -71,8 +71,9 @@ same agency and dates; `--apply` writes them in one transaction.
 
 ## What the stamp says
 
-Every figure's definition stamp gives, for each agency of its scope with a
-validation recorded, the newest one: its service dates, its on-time window,
+A definition stamp that states its scope's timetables and sources
+(`stamp_build`) also gives, for each agency of that scope with a validation
+recorded, the newest one: its service dates, its on-time window,
 and how many points the on-time rate from the kept delays stood above or
 below the one from the observed passages. It is the newest whatever dates
 the figures cover, so the stamp always names the dates it was measured on,
