@@ -30,8 +30,8 @@
 # contract requires.
 #
 # VehiclePositions feeds (etc/vehicle_positions.tsv) are deliberately left
-# out. They are collected for a bounded validation window and nothing in the
-# app ingests them, so `rt_state` keeps describing the TripUpdates the app
+# out. They are collected to validate the feeds' predictions and nothing in
+# the app ingests them, so `rt_state` keeps describing the TripUpdates the app
 # does depend on; health-check.sh pages when a VP feed stops producing.
 set -uo pipefail
 

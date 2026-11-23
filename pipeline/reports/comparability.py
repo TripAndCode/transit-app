@@ -12,6 +12,12 @@ agency always gives the same reason:
 3. ``coverage_low``: the feed reported too few of the planned trips.
 4. ``ci_wide``: the on-time percentage is too uncertain to order.
 5. ``clamp_high``: too many readings were implausible.
+6. ``predicted_basis``: the figures are the feed's predicted delays, not
+   observed passages (:data:`PREDICTED_VALUE_BASES`).
+
+``predicted_basis`` comes last, so an agency that gives it passes every check
+on its data, and the reasons before it keep naming what a route's own figures
+fail (:mod:`pipeline.reports.report_card`).
 
 Each check reads the figure the board prints, rounded as printed, so a reader
 can work out the verdict from the row itself. :func:`assess` is the gate's
@@ -26,11 +32,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pipeline.reports.definition import resolve_definition_meta
+from pipeline.reports.definition import VALUE_BASIS, resolve_definition_meta
 from pipeline.reports.rankings import DEFAULT_PRESET, ON_TIME_PRESETS
 from pipeline.stats import wilson_interval
 
-ComparableReason = Literal["no_data", "coverage_unknown", "coverage_low", "ci_wide", "clamp_high"]
+ComparableReason = Literal["no_data", "coverage_unknown", "coverage_low", "ci_wide", "clamp_high", "predicted_basis"]
 
 #: Below this share of planned trips observed, the feed's gaps could hide any
 #: delay pattern, and their bias differs feed by feed.
@@ -51,6 +57,15 @@ MAX_CLAMP_PCT = 5.0
 #: is a claim about trip matching, separate from which strategies can carry
 #: cancellations, though both hold only for ``static_join`` today.
 COMPARABLE_INGEST_STRATEGIES = frozenset({"static_join"})
+
+#: Value bases the board never ranks. A feed's predicted delays differ from
+#: the passages its vehicles were observed making, and by a different amount
+#: for each agency, by as much as the interval the ``ci_wide`` check allows,
+#: so ranking agencies on them would order each feed's prediction bias
+#: (docs/features/prediction-validation.md). A basis made from observed
+#: passages is ranked once the checks before this one pass; a new predicted
+#: basis must be named here.
+PREDICTED_VALUE_BASES = frozenset({VALUE_BASIS})
 
 #: The on-time definition the board counts every agency by, and so the one
 #: the gate judges: the default preset's window, which analyze's exact
@@ -85,6 +100,7 @@ def assess(
     on_time_count: int,
     samples: int,
     clamp_pct: float | None,
+    value_basis: str = VALUE_BASIS,
 ) -> Assessment:
     """Whether the board may rank this agency, with every figure the verdict
     reads.
@@ -93,11 +109,20 @@ def assess(
     reported and the timetable planned over the same days
     (:func:`pipeline.reports.service_delivered.compute_service_delivered_by_agency`);
     ``on_time_count`` of ``samples`` the stop events on time and observed.
+    ``value_basis`` is what those counts are made from, the definition
+    stamp's :data:`pipeline.reports.definition.VALUE_BASIS` by default.
     """
     observed, planned = matched_trips(ingest_strategy, observed_trips, coverage_planned_trips)
     coverage = coverage_pct(observed, planned)
     ci_low, ci_high = trip_interval(on_time_count, samples, observed)
-    reason = _first_failure(coverage_pct=coverage, ci_low=ci_low, ci_high=ci_high, clamp_pct=clamp_pct, samples=samples)
+    reason = _first_failure(
+        coverage_pct=coverage,
+        ci_low=ci_low,
+        ci_high=ci_high,
+        clamp_pct=clamp_pct,
+        samples=samples,
+        value_basis=value_basis,
+    )
     return Assessment(
         observed_trips=observed,
         coverage_planned_trips=planned,
@@ -232,6 +257,7 @@ def _first_failure(
     ci_high: float | None,
     clamp_pct: float | None,
     samples: int,
+    value_basis: str,
 ) -> ComparableReason | None:
     """The first check the figures fail, in the module's order, or ``None``.
 
@@ -253,4 +279,6 @@ def _first_failure(
         return "ci_wide"
     if clamp_pct is not None and clamp_is_high(clamp_pct):
         return "clamp_high"
+    if value_basis in PREDICTED_VALUE_BASES:
+        return "predicted_basis"
     return None

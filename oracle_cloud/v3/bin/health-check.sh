@@ -29,9 +29,9 @@
 #                          curl -f cannot see that it is not a GTFS zip.
 # Per VehiclePositions feed in etc/vehicle_positions.tsv (no such file, no
 # check): the same two RT checks on its VehiclePosition_*.pb samples, against
-# interval * VP_STALE_FACTOR, so a VP poller that dies does not silently waste
-# its validation window. A row is removed when the window ends, and with it
-# the check.
+# interval * VP_STALE_FACTOR, so a VP poller that dies does not silently leave
+# a gap in its archive. A row is removed when its collection stops, and with
+# it the check.
 # Once globally:
 #   * R2 mirror fresh    — sync-r2.sh's .sync-r2.last-ok marker exists and is
 #                          younger than SYNC_R2_MAX_STALE_DAYS. Deliberately

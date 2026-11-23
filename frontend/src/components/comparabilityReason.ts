@@ -85,6 +85,8 @@ export function unrankedReasonParts(
           max: formatNumber(limits.max_clamp_pct),
         },
       };
+    case "predicted_basis":
+      return { key: "network.unranked_reason.predicted_basis", values: {} };
   }
 }
 

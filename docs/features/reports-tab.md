@@ -184,7 +184,10 @@ combined CSV always carries it.
     （観測カバー率 90.0%、定時率の95%信頼区間 87.8–91.8%）」. When the agency
     fails a check, it reads 「…条件を満たしません。観測カバー率 41.0%（70%未満）。
     この事業者の数字を他事業者と順位付けて比べないでください。」. The reasons use
-    the board's words and its printed rounding.
+    the board's words and its printed rounding. While every figure is the
+    feed's predicted delays, an agency whose data passes every check reads
+    「…条件を満たしません。値はフィードの予測遅延（観測した通過時刻とのずれが事業者ごとに異なる）。…」
+    (`predicted_basis`).
   - The CSV appends 他事業者と比較できる (はい/いいえ), 比較できない理由 (the reason
     code), 観測カバー率(%) and the interval's 下限/上限 after the six on-time and
     delivery columns (定時率 through 運行実績率). The Japanese footnote rows put

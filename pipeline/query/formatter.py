@@ -232,6 +232,13 @@ _LOCALES: dict[tuple[str, str], str] = {
     ("council_not_comparable_ci_wide", "en"): "On-time % interval ±{half} points (wider than ±{max})",
     ("council_not_comparable_clamp_high", "ja"): "異常値 {pct}%（{max}%超）",
     ("council_not_comparable_clamp_high", "en"): "Implausible readings {pct}% (above {max}%)",
+    ("council_not_comparable_predicted_basis", "ja"): (
+        "値はフィードの予測遅延（観測した通過時刻とのずれが事業者ごとに異なる）"
+    ),
+    ("council_not_comparable_predicted_basis", "en"): (
+        "Figures are the feed's predicted delays, which differ from observed passing times "
+        "by a different amount for each feed"
+    ),
     # The stamp's words for the same reasons, so a verdict and a footnote read alike.
     **{
         (f"council_coverage_unknown_{why}", locale): text

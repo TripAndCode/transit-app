@@ -628,6 +628,7 @@ describe("NetworkTab", () => {
           row({ agency_id: 6, agency_name: "Gamma", avg_delay_min: 7, ...unranked, comparable_reason: "clamp_high", clamp_pct: 7.1, coverage_pct: 95 }),
           row({ agency_id: 7, agency_name: "Delta", avg_delay_min: null, ...unranked, comparable_reason: "no_data", samples: 0, data_from: null, data_to: null }),
           row({ agency_id: 8, agency_name: "Planless", avg_delay_min: 3, ...unranked, comparable_reason: "coverage_unknown", planned_trips: 0, coverage_planned_trips: 0, observed_trips: null }),
+          row({ agency_id: 9, agency_name: "Predicted", avg_delay_min: 6, ...unranked, comparable_reason: "predicted_basis", ci_low: 84.9, ci_high: 87.5, coverage_pct: 90 }),
         ],
       },
       isPending: false, error: null, refetch: vi.fn(),
@@ -636,10 +637,10 @@ describe("NetworkTab", () => {
     const sequence = [...screen.getByTestId("network-card-list").children]
       .filter((el) => !el.classList.contains("network-row--head"))
       .map((el) => (el.getAttribute("data-testid") === "network-unranked" ? "|" : el.querySelector("a")?.textContent));
-    expect(sequence).toEqual(["Worst", "Mild", "|", "Alpha", "Beta", "Delta", "Gamma", "Planless", "Zeta"]);
-    expect(screen.getByRole("heading", { level: 3, name: "Not ranked: the data does not support a comparison" })).toBeInTheDocument();
+    expect(sequence).toEqual(["Worst", "Mild", "|", "Alpha", "Beta", "Delta", "Gamma", "Planless", "Predicted", "Zeta"]);
+    expect(screen.getByRole("heading", { level: 3, name: "Not ranked" })).toBeInTheDocument();
     expect(screen.getByTestId("network-unranked")).toHaveTextContent(
-      "Ranked only where observation coverage is at least 70%, the on-time % interval is within ±3 points and implausible readings are at most 5%.",
+      "Ranked only where the figures are made from observed passing times, observation coverage is at least 70%, the on-time % interval is within ±3 points and implausible readings are at most 5%.",
     );
     const card = (name: string) => screen.getByText(name).closest(".network-row");
     expect(card("Beta")).toHaveTextContent("Observation coverage 41.0% (below 70%)");
@@ -648,6 +649,9 @@ describe("NetworkTab", () => {
     expect(card("Alpha")).toHaveTextContent("Observation coverage can't be measured: this feed's trips can't be matched to the timetable");
     expect(card("Planless")).toHaveTextContent("Observation coverage can't be measured: no timetable plans this period");
     expect(card("Delta")).toHaveTextContent("No observations in the period");
+    expect(card("Predicted")).toHaveTextContent(
+      "Figures are the feed's predicted delays, which differ from observed passing times by a different amount for each feed",
+    );
     // A ranked row carries no reason.
     expect(card("Worst")).not.toHaveTextContent("Observation coverage can't");
     expect(card("Worst")).not.toHaveTextContent("(below");
@@ -663,6 +667,25 @@ describe("NetworkTab", () => {
     } as never);
     renderTab();
     expect(screen.queryByTestId("network-unranked")).not.toBeInTheDocument();
+  });
+
+  it("opens the list with the divider when no agency is ranked", () => {
+    const predicted = { comparable: false, comparable_reason: "predicted_basis" } as const;
+    vi.spyOn(hooks, "useNetworkSummary").mockReturnValue({
+      data: {
+        from: "2026-04-01", to: "2026-04-07", definition, comparability,
+        agencies: [
+          row({ agency_id: 1, agency_name: "Hiroden", avg_delay_min: 1, ...predicted }),
+          row({ agency_id: 2, agency_name: "HiroBus", avg_delay_min: 4, ...predicted }),
+        ],
+      },
+      isPending: false, error: null, refetch: vi.fn(),
+    } as never);
+    renderTab();
+    const sequence = [...screen.getByTestId("network-card-list").children]
+      .filter((el) => !el.classList.contains("network-row--head"))
+      .map((el) => (el.getAttribute("data-testid") === "network-unranked" ? "|" : el.querySelector("a")?.textContent));
+    expect(sequence).toEqual(["|", "HiroBus", "Hiroden"]);
   });
 
   it("shows every row's on-time % with its interval and its observation coverage, over 100% included", () => {
@@ -738,16 +761,18 @@ describe("NetworkTab", () => {
           row({ agency_id: 1, agency_name: "広島電鉄" }),
           row({ agency_id: 2, agency_name: "朝日交通", comparable: false, comparable_reason: "coverage_low", coverage_pct: 41 }),
           row({ agency_id: 3, agency_name: "ささき観光", comparable: false, comparable_reason: "ci_wide", ci_low: 53.8, ci_high: 60.3 }),
+          row({ agency_id: 4, agency_name: "広島バス", comparable: false, comparable_reason: "predicted_basis" }),
         ],
       },
       isPending: false, error: null, refetch: vi.fn(),
     } as never);
     await i18n.changeLanguage("ja");
     renderTab();
-    expect(screen.getByRole("heading", { level: 3, name: "順位を付けない事業者（データが比較に足りません）" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "順位を付けない事業者" })).toBeInTheDocument();
     const card = (name: string) => screen.getByText(name).closest(".network-row");
     expect(card("朝日交通")).toHaveTextContent("観測カバー率 41.0%（70%未満）");
     expect(card("ささき観光")).toHaveTextContent("定時率の95%信頼区間 ±3.3ポイント（±3ポイント超）");
+    expect(card("広島バス")).toHaveTextContent("値はフィードの予測遅延（観測した通過時刻とのずれが事業者ごとに異なる）");
     expect(card("広島電鉄")).toHaveTextContent("観測カバー率 91.7%（計画120便中110便）");
   });
 
