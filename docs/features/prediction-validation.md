@@ -69,6 +69,16 @@ The target is `DATABASE_URL`, which the script does not load from `.env`.
 The dry run prints each row and whether it replaces the one recorded for the
 same agency and dates; `--apply` writes them in one transaction.
 
+## What the stamp says
+
+Every figure's definition stamp gives, for each agency of its scope with a
+validation recorded, the newest one: its service dates, its on-time window,
+and how many points the on-time rate from the kept delays stood above or
+below the one from the observed passages. It is the newest whatever dates
+the figures cover, so the stamp always names the dates it was measured on,
+and an agency with none recorded gets no line. The stamp's fields are in
+[analysis-tab.md](analysis-tab.md).
+
 ## What the board does with it
 
 The kept-versus-observed offset differs from feed to feed, and no check on

@@ -388,6 +388,7 @@ Figures shown or exported in the places listed below carry:
 - the measurement scope: all stops, all observations;
 - the deduplication rule, and the threshold for implausible values;
 - the value basis: feed prediction;
+- the prediction check, for an operator with one recorded: the service dates and on-time window of its newest, and how many points the on-time rate from the predictions stood above or below the one from observed passages ([Value basis and validation status](#value-basis-and-validation-status)); nothing for an operator with none;
 - the method version, and the day the aggregates were built, or "live scan" for figures scanned directly from the observations;
 - the timetable versions in force over the period, with their days and content hashes;
 - where the observations came from: days from the archive and days from the live path;
