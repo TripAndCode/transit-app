@@ -37,7 +37,9 @@ backup_root=$(setting BACKUP_DIR "$HOME/transit-backup")
 keep=$(setting BACKUP_KEEP 7)
 ping_url=$(setting BACKUP_PING_URL "")
 bucket=$(env_file BACKUP_STORE_BUCKET)
-case $keep in '' | *[!0-9]* | 0) echo "backup: BACKUP_KEEP must be a positive whole number" >&2; exit 2 ;; esac
+# Read in base 10: the shell's arithmetic takes a leading zero for octal.
+case $keep in '' | *[!0-9]*) keep=0 ;; *) keep=$((10#$keep)) ;; esac
+[ "$keep" -gt 0 ] || { echo "backup: BACKUP_KEEP must be a positive whole number" >&2; exit 2; }
 # `.env` is read as text, so a `~` there is not the shell's; a relative path
 # would land inside the checkout.
 # shellcheck disable=SC2088
@@ -91,22 +93,25 @@ compose exec -T standalone-db pg_dump -U transit -d transit -Fc >"$dir/postgres.
 
 ch_query "BACKUP DATABASE transit TO File('$stamp.zip')" >/dev/null
 ch cat "$in_ch" >"$dir/clickhouse.zip"
-ch rm -f "$in_ch"
 kept=yes
+
+# From here a failure leaves the backup in place: the run still prunes, then
+# reports the failure.
+complete=yes
+ch rm -f "$in_ch" || { echo "backup: could not remove ClickHouse's copy at $in_ch" >&2; complete=no; }
 
 # The upload runs as this user, the only one who can read the backup; on a
 # Linux host the image's own user is another uid.
-uploaded=yes
 if [ -n "$bucket" ]; then
   compose run --rm --no-deps -T -u "$(id -u):$(id -g)" -v "$dir:/backup:ro" app \
-    python scripts/upload_backup.py /backup "$stamp" || uploaded=no
+    python scripts/upload_backup.py /backup "$stamp" || complete=no
 fi
 
 # Only directories this script names are pruned, newest kept. Pruning runs
 # whether or not the upload worked, so a broken upload cannot fill the disk.
 find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z' |
   sort -r | tail -n +"$((keep + 1))" | while IFS= read -r old; do rm -rf -- "$old"; done
-[ "$uploaded" = yes ] || exit 1
+[ "$complete" = yes ] || exit 1
 
 echo "backup: $dir"
 report ok "backup $stamp"

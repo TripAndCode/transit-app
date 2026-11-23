@@ -43,6 +43,7 @@ def stack(tmp_path):
         case "$*" in
           *"pg_dump"*) [ -n "$FAIL_PG" ] && exit 1; printf 'PGDMP' ;;
           *" cat /var/lib/clickhouse/backups/"*) printf 'PK-zip' ;;
+          *" rm -f /var/lib/clickhouse/backups/"*) [ -n "$FAIL_CH_RM" ] && exit 1 ;;
           *" run "*) [ -n "$FAIL_UPLOAD" ] && exit 1 ;;
         esac
         exit 0
@@ -128,6 +129,15 @@ def test_a_failed_upload_keeps_the_local_copy_and_still_prunes(stack):
     assert stack.pings() == ["https://hc.example/p/fail"]
 
 
+def test_a_copy_left_in_clickhouse_keeps_the_backup_and_reports_a_failure(stack):
+    (stack.backups / "20250101T000000Z").mkdir()
+    result = stack(env_file="BACKUP_PING_URL=https://hc.example/p\n", BACKUP_KEEP="1", FAIL_CH_RM="1")
+    assert result.returncode != 0
+    [stamp] = _stamps(stack.backups)
+    assert sorted(p.name for p in (stack.backups / stamp).iterdir()) == ["clickhouse.zip", "postgres.dump"]
+    assert stack.pings() == ["https://hc.example/p/fail"]
+
+
 def test_a_bucket_set_only_in_the_environment_uploads_nothing(stack):
     result = stack(BACKUP_STORE_BUCKET="b")
     assert result.returncode == 0, result.stderr
@@ -179,7 +189,16 @@ def test_a_backup_dir_that_is_not_absolute_is_refused(stack, backup_dir):
     assert stack.calls() == []
 
 
-@pytest.mark.parametrize("keep", ["0", "x", "-1"])
+@pytest.mark.parametrize(("keep", "kept"), [("010", 10), ("08", 8)])
+def test_a_keep_count_with_a_leading_zero_is_decimal(stack, keep, kept):
+    for day in range(1, 12):
+        (stack.backups / f"202501{day:02d}T000000Z").mkdir()
+    result = stack(BACKUP_KEEP=keep)
+    assert result.returncode == 0, result.stderr
+    assert len(_stamps(stack.backups)) == kept
+
+
+@pytest.mark.parametrize("keep", ["0", "00", "x", "-1"])
 def test_a_bad_keep_count_is_refused_before_anything_runs(stack, keep):
     result = stack(BACKUP_KEEP=keep)
     assert result.returncode == 2
