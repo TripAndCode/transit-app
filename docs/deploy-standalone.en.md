@@ -114,6 +114,23 @@ The poller can report its daily step to a [healthchecks.io](https://healthchecks
 
 The poller pings the URL each time a step ends with no stage failing: normally once after JST midnight and once after UTC midnight (09:00 JST). When a stage has failed every retry, about two hours of them, it pings `<url>/fail` and the check alerts at once. An agency with no timetable loaded skips its ingest, which no retry heals, so that step pings `<url>/fail` at once: load the timetable with `refresh-static` (section 3). When the poller stops, or a step never ends, the pings stop and the check alerts 26 hours after the last one. After a failure, the check comes back up once a later day's step ends with no stage failing.
 
+## 9. Watch the site from outside
+
+`/health/ready` answers 200 when the app can query both databases. When it cannot, it answers 503 and names the one that failed:
+
+```json
+{"status": "unavailable", "postgres": "ok", "clickhouse": "down"}
+```
+
+Each database gets 5 seconds to answer, so the endpoint answers even when one hangs. `/health` shows only that the app process responds, and `/api/config` keeps answering while Postgres is down, so neither shows that the site works.
+
+1. Point an HTTP uptime monitor that runs outside this machine, a hosted service or a check on another host, at `https://<your host>/health/ready`, through your reverse proxy.
+2. Have it check every minute and alert once the check has failed for 5 minutes. A monitor that checks less often alerts later.
+
+Because the monitor runs elsewhere, it also alerts when this machine, its network or the reverse proxy is down, which nothing on the machine can report.
+
+The app connects to ClickHouse only when it starts. If ClickHouse was unreachable then, `/health/ready` and the pages that read ClickHouse stay down after ClickHouse comes back, until the app restarts: `docker compose --profile standalone restart app`.
+
 ## What is not automated
 
 - A timetable the agency republishes: run `docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static` again.

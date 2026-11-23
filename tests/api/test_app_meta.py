@@ -1,6 +1,9 @@
-"""Shape of the two app-level endpoints the SPA reads before anything else."""
+"""Shape of the app-level endpoints: the two the SPA reads before anything
+else, and the readiness probe an uptime monitor reads."""
 
 import pytest
+
+from api.main import app
 
 
 @pytest.mark.asyncio
@@ -8,6 +11,14 @@ async def test_health_reports_ok(client):
     resp = await client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_ready_queries_both_databases(client, ch_async_client, monkeypatch):
+    monkeypatch.setattr(app.state, "ch_client", ch_async_client, raising=False)
+    resp = await client.get("/health/ready")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "postgres": "ok", "clickhouse": "ok"}
 
 
 @pytest.mark.asyncio
