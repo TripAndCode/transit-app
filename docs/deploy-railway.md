@@ -1,5 +1,12 @@
 # Deploy to Railway (tag-gated push-to-deploy)
 
+> **Production runs the `standalone` Compose profile on one host**
+> ([deploy-standalone.en.md](deploy-standalone.en.md), 日本語:
+> [deploy-standalone.md](deploy-standalone.md)), which also covers its
+> upgrades, their cadence, backups and starting from the R2 archive. This page
+> describes the Railway deployment production ran on before. It is the
+> fallback when a public URL is needed and no host is available.
+
 Lowest-effort path: Railway runs your **existing Docker images** — the app
 (`Dockerfile`, with the SPA baked in) and the custom PostGIS+pgvector DB
 (`db/Dockerfile`) — on private networking, with free TLS and a managed
@@ -146,7 +153,7 @@ deploys straight from the official image: no Dockerfile, no repo checkout.
 
 1. **+ New → GitHub Repo → the same `transit-app`**. Name it `app`.
 2. `app` → **Settings → Source → Branch**: change it from the default
-   (`main`) to **`production`** (see the note at the top of this guide).
+   (`main`) to **`production`** (see "Point every Railway service at the `production` branch" above).
 3. Railway auto-detects `railway.json` → Dockerfile builder + `/health`
    healthcheck + the pre-deploy command (applies Postgres migrations, then
    the ClickHouse schema from step 1b). Nothing to configure.
@@ -281,7 +288,7 @@ DB stays private (step 1). Add a third service that runs once a day and exits:
 
 1. **+ New → GitHub Repo → the same `transit-app`**. Name it `ingest`.
 2. `ingest` → **Settings → Source → Branch**: change it from the default
-   (`main`) to **`production`** (see the note at the top of this guide).
+   (`main`) to **`production`** (see "Point every Railway service at the `production` branch" above).
 3. `ingest` → **Settings → Build**: Dockerfile builder (same image as `app`).
 4. `ingest` → **Settings → Deploy → Cron Schedule**: `0 18 * * *`
    (daily; pick an hour after Oracle finishes its upload).

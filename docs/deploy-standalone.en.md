@@ -32,6 +32,8 @@ Ignore the Oracle, R2, weather and LLM settings. `GEMINI_API_KEY` and `OPENAI_AP
 
 ## 2. Start
 
+To start from an existing R2 archive's history rather than empty, follow section 9 instead of this section and the next.
+
 ```bash
 docker compose --profile standalone up -d --build app poller
 ```
@@ -140,7 +142,31 @@ git pull
 docker compose --profile standalone up -d --build app poller
 ```
 
-The schema step (`gtfs_pipeline.py schema-up`) runs before the app and poller restart, so migrations apply themselves. Back up first when a release changes the schema. A migration that would delete stored data on a database that has already discarded old history makes the schema step refuse: `up` then reports the failure and `app` does not start, because it waits for that step. Read the reason in `docker compose --profile standalone logs migrate`. After a backup, name the migration version in `MIGRATE_ALLOW_DESTRUCTIVE_UP` in `.env` and run the `up` command again.
+The schema step (`gtfs_pipeline.py schema-up`) runs before the app and poller restart, so migrations apply themselves. A migration that would delete stored data on a database that has already discarded old history makes the schema step refuse: `up` then reports the failure and `app` does not start, because it waits for that step. Read the reason in `docker compose --profile standalone logs migrate`. After a backup, name the migration version in `MIGRATE_ALLOW_DESTRUCTIVE_UP` in `.env` and run the `up` command again.
+
+Upgrade every two weeks or so, so that each upgrade stays small, and sooner for a fix you need. Before each one, see whether it changes the schema:
+
+```bash
+git fetch
+git diff --stat HEAD origin/main -- db/
+```
+
+When that lists files, run `scripts/standalone_backup.sh` (section 6), then rehearse the upgrade on that backup before running it here. A second checkout in another directory is its own Compose project, with its own volumes, and needs disk for a second copy of both databases:
+
+```bash
+git clone https://github.com/TripAndCode/transit-app.git ~/transit-rehearsal && cd ~/transit-rehearsal
+cp /path/to/transit-app/.env .env
+```
+
+In the copy's `.env`, set `STANDALONE_PORT=9000` and `PUBLIC_BASE_URL=http://localhost:9000`, and remove any `COMPOSE_PROJECT_NAME` line, which would make the copy this checkout's project. Restore the newest backup and start the app alone, never the poller:
+
+```bash
+scripts/standalone_restore.sh ~/transit-backup/<newest>
+docker compose --profile standalone up -d --build app
+docker compose --profile standalone logs migrate
+```
+
+When the schema step has succeeded and <http://localhost:9000> shows the history, upgrade this checkout. Then, in `~/transit-rehearsal` only, run `docker compose --profile standalone down -v`, which deletes that checkout's volumes, and delete the directory. In this checkout the same command deletes the data.
 
 ## 8. Monitor the daily step
 
@@ -151,6 +177,25 @@ The poller can report its daily step to a [healthchecks.io](https://healthchecks
 3. The poller runs a step right after its first poll cycle, and the check records a ping when that step ends with no stage failing. A first cycle that archives no poll at all (no agency yet, or every feed failing) runs no step, and the first one follows the next UTC midnight. If none arrives, the poller's log says why: a failing stage, or a ping it could not send. The log never prints the URL.
 
 The poller pings the URL each time a step ends with no stage failing: normally once after JST midnight and once after UTC midnight (09:00 JST). When a stage has failed every retry, about two hours of them, it pings `<url>/fail` and the check alerts at once. An agency whose aggregates still lag its newest closed day after analyze counts as a failed analyze. An agency with no timetable loaded skips its ingest, which no retry heals, so that step pings `<url>/fail` at once: load the timetable with `refresh-static` (section 3). When the poller stops, or a step never ends, the pings stop and the check alerts 26 hours after the last one. After a failure, the check comes back up once a later day's step ends with no stage failing.
+
+## 9. Start from an R2 archive
+
+This section is for an operator whose feeds a collector already archives into an R2 bucket, such as the Oracle collector in [deploy-railway.md](deploy-railway.md); everyone else skips it. It fills the new databases with the bucket's recent days instead of starting empty. Follow it instead of sections 2 and 3, once, before the poller first starts: the poller archives the same days from its own polls, and its daily step would ingest them a second time.
+
+1. Put the bucket's settings in `.env`: `OBJECT_STORE_ENDPOINT`, `OBJECT_STORE_BUCKET`, `OBJECT_STORE_ACCESS_KEY_ID` and `OBJECT_STORE_SECRET_ACCESS_KEY`. A read-only key is enough.
+2. Start the app alone: `docker compose --profile standalone up -d --build app`.
+3. Add the agencies with `seed_agencies` (section 3), giving each the `agency_id` the bucket files it under (`rt/<agency_id>/`); for this project's own bucket, those are the rows of `agencies.csv`. Run neither `add_agency` nor `refresh-static`: the catch-up loads the timetable in force on its first day itself, and refuses an agency whose ingest joins the timetable when a newer one is already loaded.
+4. Read the plan, which writes nothing:
+
+   ```bash
+   docker compose --profile standalone run --rm app python scripts/catch_up_from_r2.py --seed-days 7
+   ```
+
+   `--seed-days` is how many JST days back it starts. `--agency-id <id>`, which can repeat, limits it to those agencies. The plan stops an agency at the first day the bucket has no archive for; `--allow-gaps` passes such days.
+5. Run the same command with `--apply --analyze` added. It asks you to type the database name (`transit`), downloads into its own container, ingests each day joined to the timetable in force on it, then builds the aggregates. `--rm` removes the downloads with the container. When the plan said an agency's timetables are left to load by hand (one whose ingest reads none), run `refresh-static --agency-id <id>` for it now (section 3).
+6. Remove the four settings from `.env`, since nothing else on this profile reads them and the poller logs a warning while they are set. Then start the poller: `docker compose --profile standalone up -d app poller`.
+
+The first day holds only its hours from 09:00 JST, and the day the poller starts lacks the hours before its first poll.
 
 ## What is not automated
 
