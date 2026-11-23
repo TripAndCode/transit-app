@@ -204,8 +204,9 @@ describe("AdminAskOpsPage", () => {
 
   it("titles the usage table with the window the server reports, not a fixed length", () => {
     wrap(<AdminAskOpsPage />);
-    expect(screen.getByRole("heading", { name: /2026-10-17.*2026-11-15/ })).toBeTruthy();
-    expect(screen.queryByText(/30/)).toBeNull();
+    // Scoped to the heading: the rows' timestamps render in the host's zone,
+    // where a half-hour offset puts a 30 in them.
+    expect(screen.getByRole("heading", { name: /2026-10-17.*2026-11-15/ }).textContent).not.toMatch(/30/);
   });
 
   it("shows an error, not an empty usage table, when the usage query failed", () => {
