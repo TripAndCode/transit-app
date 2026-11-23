@@ -286,7 +286,7 @@ page shows that check as unknown rather than as healthy):
   records nothing; only `schema-up` does.
 
 The page shows a status strip for the migration and freshness checks, a line
-under it for the last deploy (when it went live, its commit linked to GitHub's
+under it for the last deploy (when its schema step ran, its commit linked to GitHub's
 compare view against `main`, which lists what has merged since, and how many
 migrations it applied), and a per-agency table (agency, last analyzed,
 freshness, data through, implausible %).

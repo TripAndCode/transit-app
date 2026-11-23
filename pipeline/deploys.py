@@ -1,14 +1,16 @@
-"""The release record: which commit is live, since when, and what it migrated.
+"""The release record: which commit each deployment brought up, when, and
+what it migrated.
 
 Every deployment runs `gtfs_pipeline.py schema-up` before the new code
 starts: the standalone stack's `migrate` service and Railway's
 preDeployCommand. That step is where a release records itself, so no
 promotion depends on someone remembering to tag it. The admin ops page reads
-the newest row.
+the newest row. Nothing stops two concurrent runs for one release from each
+adding a row; a deployment runs the step once, so that is left unguarded.
 
 A restart runs the step again. A run that applies no migration for the same
 commit as the newest row is the same release, so it adds no row, and
-`deployed_at` stays the time that release first went live.
+`deployed_at` stays the time that release's schema step first completed.
 
 Bookkeeping never breaks the deploy: by the time the row is written both
 schemas are up, and a failed insert costs the release its row and nothing
@@ -93,7 +95,7 @@ class Deploy:
 
 
 async def latest_deploy(conn: asyncpg.Connection) -> Deploy | None:
-    """The live release, or None when none has been recorded."""
+    """The newest recorded release, or None when none has been recorded."""
     row = await conn.fetchrow(
         "SELECT deployed_at, git_sha, migrations_applied FROM deploys ORDER BY deploy_id DESC LIMIT 1"
     )

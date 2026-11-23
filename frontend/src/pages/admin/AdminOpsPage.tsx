@@ -24,11 +24,12 @@ type OpsData = NonNullable<ReturnType<typeof useAdminOps>["data"]>;
 
 const COMMIT_RE = /^[0-9a-f]{7,40}$/;
 
-// What main holds that the running release does not: GitHub's compare view
-// from the recorded commit. Built only from a hex hash, so a stored value can
-// never become anything but a commit in this repository's URL.
-function compareUrl(sha: string): string {
-  return `https://github.com/TripAndCode/transit-app/compare/${sha}...main`;
+// GitHub's compare view from the recorded commit to main: what has merged
+// since that release. Null unless the value is a hex hash, so a stored value
+// can never become anything but a commit in this repository's URL.
+function commitLink(sha: string | null): { href: string; short: string } | null {
+  if (sha === null || !COMMIT_RE.test(sha)) return null;
+  return { href: `https://github.com/TripAndCode/transit-app/compare/${sha}...main`, short: sha.slice(0, 7) };
 }
 
 function LastDeploy({ data, failed, t }: { data: OpsData | undefined; failed: boolean; t: ReturnType<typeof useTranslation>["t"] }) {
@@ -36,16 +37,16 @@ function LastDeploy({ data, failed, t }: { data: OpsData | undefined; failed: bo
   if (!data.deploys_ok) return <>{t("admin.ops.deploy_unknown")}</>;
   const deploy = data.last_deploy;
   if (deploy === null) return <>{t("admin.ops.deploy_none")}</>;
-  const sha = deploy.git_sha !== null && COMMIT_RE.test(deploy.git_sha) ? deploy.git_sha : null;
+  const link = commitLink(deploy.git_sha);
   return (
     <>
       {t("admin.ops.deploy_at", { when: formatDateTime(deploy.deployed_at) })}
       {" · "}
-      {sha === null ? (
+      {link === null ? (
         t("admin.ops.deploy_commit_unknown")
       ) : (
-        <a href={compareUrl(sha)} target="_blank" rel="noopener noreferrer">
-          {t("admin.ops.deploy_compare", { sha: sha.slice(0, 7) })}
+        <a href={link.href} target="_blank" rel="noopener noreferrer">
+          {t("admin.ops.deploy_compare", { sha: link.short })}
         </a>
       )}
       {" · "}
