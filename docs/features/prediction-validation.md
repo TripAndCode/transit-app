@@ -44,10 +44,30 @@ first downloads what it lacks. The report lands in
 table beside it. R2 keeps `vp/` for `R2_VP_RETENTION_DAYS`
 (`oracle_cloud/v3/bin/prune-r2.sh`), so only that far back can be validated.
 
-The measured offsets are a dated finding, not a constant: they belong in the
-issue or pull request that acts on them, not in the code or this guide. Rerun
+The measured offsets are a dated finding, not a constant: they are recorded
+with their dates (below), never written into the code or this guide. Rerun
 the validation when a feed changes vendor or predictor, or when another feed
 starts archiving VehiclePositions.
+
+## Recording it
+
+`scripts/record_prediction_validation.py` writes a report's counts to
+`prediction_validations`: the service dates, the on-time window, how many
+kept stop events there were and how many had an observed passage, and how
+many of those were on time by the kept delay and by the observed one. The
+counts are kept rather than percentages, so every reader computes the rates
+and their difference from one source. A report is refused when it was made
+under another `SCHEMA` than the checkout's, when an archive or a timetable
+it needed was missing, or when no stop event had an observed passage. Two
+reports for the same agency and dates refuse the run, since only one of them
+could be recorded.
+
+    poetry run python scripts/record_prediction_validation.py \
+        ~/.cache/transit-app/vp-validation/<id>/<FROM>_<TO>.json [...] [--apply]
+
+The target is `DATABASE_URL`, which the script does not load from `.env`.
+The dry run prints each row and whether it replaces the one recorded for the
+same agency and dates; `--apply` writes them in one transaction.
 
 ## What the board does with it
 
