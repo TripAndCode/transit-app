@@ -80,7 +80,24 @@ Check progress with `docker compose --profile standalone logs -f poller`.
 
 ## 6. Back up
 
-Three named volumes hold everything: `standalone_pgdata` (agencies, timetables, aggregates), `standalone_chdata` (the polls as data) and `standalone_archive` (the raw polls, one tarball per agency per day). Compose prefixes each with the project name, which is the checkout's directory name. Keep backups outside the checkout, so they are never committed or built into an image:
+`scripts/standalone_backup.sh` backs up both databases while the stack runs: Postgres with `pg_dump`, and ClickHouse with its own `BACKUP`. Each run writes a new directory under `BACKUP_DIR`, named for the UTC time, and keeps the newest `BACKUP_KEEP`. Run it nightly from the host's crontab (`crontab -e`):
+
+```cron
+15 3 * * * cd /path/to/transit-app && PATH=/usr/local/bin:/usr/bin:/bin scripts/standalone_backup.sh >>"$HOME/transit-backup.log" 2>&1
+```
+
+cron's own `PATH` can lack Docker, so the `PATH=` there must include the directory that `command -v docker` prints.
+
+The script reads these settings from the environment, else from `.env`. Write the values there without quotes.
+
+| Setting | What it does |
+| --- | --- |
+| `BACKUP_DIR` | Where backups go, as an absolute path or one starting `~/`. Default `~/transit-backup`. Keep it outside the checkout, so backups are never committed or built into an image. |
+| `BACKUP_KEEP` | How many backups stay on this machine. Default 7. |
+| `BACKUP_PING_URL` | A [healthchecks.io](https://healthchecks.io)-style check with a period of 1 day and a grace time of 2 hours. It is pinged when a backup completes, and at `<url>/fail` when one fails, so a failed or missed night alerts. |
+| `BACKUP_STORE_ENDPOINT`, `BACKUP_STORE_BUCKET`, `BACKUP_STORE_ACCESS_KEY_ID`, `BACKUP_STORE_SECRET_ACCESS_KEY` | Also upload each backup to S3-compatible storage, such as Cloudflare R2, under `<BACKUP_STORE_PREFIX>/<time>/` (prefix default `backups`). The key needs write access to that bucket. Set the bucket's own lifecycle rule to delete old backups there. A failed upload keeps the local copy and pings `/fail`. |
+
+Each backup holds the whole of both databases, so it grows with the history. It leaves out the archive volume (the raw polls), whose content ClickHouse already holds once ingested. To keep the archive too, or to copy the whole machine, stop the stack and copy its three volumes:
 
 ```bash
 B=${BACKUP_DIR:-$HOME/transit-backup}
@@ -93,7 +110,18 @@ done
 docker compose --profile standalone up -d app poller
 ```
 
-`P` is this checkout's Compose project, so the loop reaches only its three volumes. The poller records nothing while stopped; a short stop is a gap of that length. Copy the backup directory off the machine. The archive volume is never pruned: it grows by one tarball per agency per day.
+`P` is this checkout's Compose project, so the loop reaches only its three volumes. The poller records nothing while stopped; a short stop is a gap of that length. The archive volume is never pruned: it grows by one tarball per agency per day.
+
+### Restore
+
+A backup restores only into empty databases: on a new machine, or after this checkout's standalone volumes are removed. The script refuses when either database already holds a table, so it never overwrites data. From the checkout:
+
+```bash
+scripts/standalone_restore.sh ~/transit-backup/20260101T031500Z
+docker compose --profile standalone up -d app poller
+```
+
+The script starts only the two databases and restores both. `up` then runs the schema step, which applies any migration newer than the backup, and starts the app and poller. To restore from the bucket, first download one `<prefix>/<time>/` folder into a local directory with your storage provider's tools. Polls between the backup and the restore are missing.
 
 ## 7. Upgrade
 
@@ -118,7 +146,7 @@ The poller pings the URL each time a step ends with no stage failing: normally o
 
 - A timetable the agency republishes: run `docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static` again.
 - The weather and forecast passes that the full deployment's scheduled jobs run.
-- Uploading tarballs or backups anywhere off the machine, and pruning the archive.
+- Copying the archive's tarballs off the machine, and pruning the archive.
 - TLS and a public hostname: the app listens on `127.0.0.1` only. Put your own reverse proxy in front, and set `PUBLIC_BASE_URL` to its public address and `FORWARDED_HOPS` to the number of proxies, in `.env`.
 
 ## Troubleshooting

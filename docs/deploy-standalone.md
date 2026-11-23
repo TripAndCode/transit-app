@@ -80,7 +80,24 @@ docker compose --profile standalone exec app python gtfs_pipeline.py add_agency 
 
 ## 6. バックアップ
 
-すべては 3 つの名前付きボリュームにあります。`standalone_pgdata`（事業者、時刻表、集計）、`standalone_chdata`（データとしてのポーリング結果）、`standalone_archive`（生のポーリング結果。事業者ごと・日ごとに tarball 1 つ）です。Compose はプロジェクト名（チェックアウトのディレクトリ名）を各ボリュームの前に付けます。コミットやイメージのビルドに紛れ込まないよう、バックアップはチェックアウトの外に置きます。
+`scripts/standalone_backup.sh` は、スタックを動かしたまま 2 つのデータベースをバックアップします。Postgres は `pg_dump` で、ClickHouse はそれ自身の `BACKUP` で取ります。実行のたびに `BACKUP_DIR` の下に UTC 時刻を名前にしたディレクトリを作り、新しいものから `BACKUP_KEEP` 個を残します。ホストの crontab（`crontab -e`）から毎晩実行します。
+
+```cron
+15 3 * * * cd /path/to/transit-app && PATH=/usr/local/bin:/usr/bin:/bin scripts/standalone_backup.sh >>"$HOME/transit-backup.log" 2>&1
+```
+
+cron の `PATH` には Docker が入っていないことがあるので、`PATH=` には `command -v docker` が表示するディレクトリを含めてください。
+
+スクリプトは次の設定を環境変数から、なければ `.env` から読みます。`.env` では値を引用符で囲まずに書きます。
+
+| 設定 | 役割 |
+| --- | --- |
+| `BACKUP_DIR` | バックアップの置き場所。絶対パスか `~/` で始まるパスで書きます。既定は `~/transit-backup`。コミットやイメージのビルドに紛れ込まないよう、チェックアウトの外に置きます。 |
+| `BACKUP_KEEP` | このマシンに残すバックアップの数。既定は 7。 |
+| `BACKUP_PING_URL` | 期間 1 日、猶予 2 時間の [healthchecks.io](https://healthchecks.io) 形式のチェック。バックアップが終わると ping し、失敗すると `<URL>/fail` に ping するので、失敗した夜や実行されなかった夜は通知されます。 |
+| `BACKUP_STORE_ENDPOINT`、`BACKUP_STORE_BUCKET`、`BACKUP_STORE_ACCESS_KEY_ID`、`BACKUP_STORE_SECRET_ACCESS_KEY` | 各バックアップを Cloudflare R2 などの S3 互換ストレージの `<BACKUP_STORE_PREFIX>/<時刻>/` にもアップロードします（プレフィックスの既定は `backups`）。キーにはそのバケットへの書き込み権限が要ります。古いバックアップは、バケット自身のライフサイクルルールで削除するよう設定してください。アップロードに失敗してもローカルのコピーは残り、`/fail` に ping します。 |
+
+各バックアップは 2 つのデータベースの全体を含むので、履歴とともに大きくなります。アーカイブのボリューム（生のポーリング結果）は含みません。取り込み済みの内容は ClickHouse が持っています。アーカイブも残したいとき、またはマシン全体をコピーするときは、スタックを止めて 3 つのボリュームをコピーします。
 
 ```bash
 B=${BACKUP_DIR:-$HOME/transit-backup}
@@ -93,7 +110,18 @@ done
 docker compose --profile standalone up -d app poller
 ```
 
-`P` はこのチェックアウトの Compose プロジェクトなので、ループが触れるのはその 3 つのボリュームだけです。停止中のポーラーは何も記録しません。短い停止は、その長さの欠測になります。バックアップのディレクトリはマシンの外にコピーしてください。アーカイブのボリュームは削除されず、事業者ごと・日ごとに tarball 1 つずつ増えます。
+`P` はこのチェックアウトの Compose プロジェクトなので、ループが触れるのはその 3 つのボリュームだけです。停止中のポーラーは何も記録しません。短い停止は、その長さの欠測になります。アーカイブのボリュームは削除されず、事業者ごと・日ごとに tarball 1 つずつ増えます。
+
+### 復元
+
+バックアップは空のデータベースにだけ復元できます。新しいマシンか、このチェックアウトの standalone ボリュームを削除した後です。どちらかのデータベースにすでにテーブルがあるとスクリプトは拒否するので、データを上書きすることはありません。チェックアウトで次を実行します。
+
+```bash
+scripts/standalone_restore.sh ~/transit-backup/20260101T031500Z
+docker compose --profile standalone up -d app poller
+```
+
+スクリプトは 2 つのデータベースだけを起動し、両方を復元します。続く `up` がスキーマ更新のステップを実行してバックアップより新しいマイグレーションを適用し、アプリとポーラーを起動します。バケットから復元するときは、まず `<プレフィックス>/<時刻>/` のフォルダ 1 つを、ストレージ事業者のツールでローカルのディレクトリにダウンロードしてください。バックアップから復元までの間のポーリング結果は欠けます。
 
 ## 7. アップグレード
 
@@ -118,7 +146,7 @@ docker compose --profile standalone up -d --build app poller
 
 - 事業者が再公開した時刻表: `docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static` を再実行します。
 - フルデプロイの定期ジョブが行う天気と予測の処理。
-- tarball やバックアップをマシンの外へアップロードすること、およびアーカイブの整理。
+- アーカイブの tarball をマシンの外へコピーすること、およびアーカイブの整理。
 - TLS と公開ホスト名: アプリは `127.0.0.1` だけで待ち受けます。自前のリバースプロキシを前段に置き、`.env` の `PUBLIC_BASE_URL` をその公開アドレスに、`FORWARDED_HOPS` をプロキシの段数に設定してください。
 
 ## トラブルシューティング
