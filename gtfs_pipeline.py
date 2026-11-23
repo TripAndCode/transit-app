@@ -854,8 +854,8 @@ def cmd_poll(args):
     Poller(archive_dir, interval_sec=interval, heartbeat=configured_heartbeat(), stop=stop).run()
 
 
-def cmd_migrate(args):
-    """Apply or roll back schema migrations."""
+def cmd_migrate(args) -> list[str]:
+    """Apply or roll back schema migrations. Returns the versions an `up` applied."""
     from db.migrate import DestructiveMigrationError, allowed_destructive_ups, migrate_down, migrate_up
 
     # The one command whose whole purpose is a database that does not have the
@@ -863,9 +863,9 @@ def cmd_migrate(args):
     conn = _get_conn(require_schema=False)
     try:
         if args.direction == "up":
-            migrate_up(conn, allow_destructive=allowed_destructive_ups(args.allow_destructive_up))
-        else:
-            migrate_down(args.target, conn, force_destructive=args.force_destructive)
+            return migrate_up(conn, allow_destructive=allowed_destructive_ups(args.allow_destructive_up))
+        migrate_down(args.target, conn, force_destructive=args.force_destructive)
+        return []
     except DestructiveMigrationError as refused:
         sys.exit(f"migrate {args.direction}: {refused}")
     finally:
@@ -874,17 +874,19 @@ def cmd_migrate(args):
 
 def cmd_schema_up(args):
     """Bring both stores' schemas up to date: `migrate up` for Postgres, then
-    the ClickHouse schema (db.clickhouse.bootstrap). What a deployment runs
-    before it starts."""
+    the ClickHouse schema (db.clickhouse.bootstrap), then record the release
+    (pipeline.deploys). What a deployment runs before it starts."""
     from db.clickhouse.bootstrap import apply_schema
     from pipeline.clickhouse import get_client
+    from pipeline.deploys import record_deploy, release_sha
 
-    cmd_migrate(argparse.Namespace(direction="up", allow_destructive_up=args.allow_destructive_up))
+    applied = cmd_migrate(argparse.Namespace(direction="up", allow_destructive_up=args.allow_destructive_up))
     client = get_client()
     try:
         apply_schema(client)
     finally:
         client.close()
+    record_deploy(lambda: _get_conn(require_schema=False), release_sha(), applied)
 
 
 def cmd_prune_query_log(args):

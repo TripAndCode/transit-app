@@ -400,8 +400,9 @@ def _run_down(version: str, conn, *, force_destructive: bool) -> None:
     logger.info(f"  Rolled back: {path.name}")
 
 
-def migrate_up(conn, *, allow_destructive: Collection[str] = ()) -> None:
-    """Apply every migration on disk that is not yet in schema_migrations.
+def migrate_up(conn, *, allow_destructive: Collection[str] = ()) -> list[str]:
+    """Apply every migration on disk that is not yet in schema_migrations, and
+    return their versions in the order applied (empty when none were pending).
 
     On a database with a retention floor, refuses (raises
     DestructiveMigrationError, applying nothing) while any pending up
@@ -418,7 +419,7 @@ def migrate_up(conn, *, allow_destructive: Collection[str] = ()) -> None:
     pending = [v for v in all_v if v not in applied]
     if not pending:
         logger.info("Already up to date.")
-        return
+        return []
     paths = {v: _up_migration_path(v) for v in pending}
     losing = _losing_on_a_floor(paths.values(), conn)
     refused = [
@@ -441,6 +442,7 @@ def migrate_up(conn, *, allow_destructive: Collection[str] = ()) -> None:
     for v in pending:
         _run_up(v, conn)
     logger.info(f"Applied {len(pending)} migration(s).")
+    return pending
 
 
 def migrate_down(target: str | None, conn, *, force_destructive: bool = False) -> None:

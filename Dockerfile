@@ -58,4 +58,10 @@ sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=
 # handling stays off, since trusting every peer makes it read the leftmost
 # entry, which a client can write.
 ENV FORWARDED_HOPS=1
+
+# The commit this image was built from, which `schema-up` records as the
+# release (pipeline/deploys.py). Declared last because a new value rebuilds
+# every layer after it.
+ARG GIT_SHA=
+ENV GIT_SHA=${GIT_SHA}
 CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --no-access-log --no-proxy-headers"]

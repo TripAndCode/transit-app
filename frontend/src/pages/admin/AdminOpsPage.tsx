@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useAdminOps, type AgencyFreshnessItem } from "../../api/admin";
 import { StatusChip } from "./adminControls";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { fixedTenth } from "../../utils/format";
+import { fixedTenth, formatDateTime } from "../../utils/format";
 
 function formatAge(t: ReturnType<typeof useTranslation>["t"], ageHours: number | null): string {
   if (ageHours === null) return t("admin.ops.unknown");
@@ -18,6 +18,40 @@ function FreshnessChip({ row, t }: { row: AgencyFreshnessItem; t: ReturnType<typ
     return <StatusChip tone="good">{t("admin.ops.fresh")}</StatusChip>;
   }
   return <StatusChip tone="warn">{t("admin.ops.behind", { days: row.agg_behind_days })}</StatusChip>;
+}
+
+type OpsData = NonNullable<ReturnType<typeof useAdminOps>["data"]>;
+
+const COMMIT_RE = /^[0-9a-f]{7,40}$/;
+
+// What main holds that the running release does not: GitHub's compare view
+// from the recorded commit. Built only from a hex hash, so a stored value can
+// never become anything but a commit in this repository's URL.
+function compareUrl(sha: string): string {
+  return `https://github.com/TripAndCode/transit-app/compare/${sha}...main`;
+}
+
+function LastDeploy({ data, failed, t }: { data: OpsData | undefined; failed: boolean; t: ReturnType<typeof useTranslation>["t"] }) {
+  if (data === undefined) return failed ? <>{t("admin.ops.deploy_unknown")}</> : <>{t("common.loading")}</>;
+  if (!data.deploys_ok) return <>{t("admin.ops.deploy_unknown")}</>;
+  const deploy = data.last_deploy;
+  if (deploy === null) return <>{t("admin.ops.deploy_none")}</>;
+  const sha = deploy.git_sha !== null && COMMIT_RE.test(deploy.git_sha) ? deploy.git_sha : null;
+  return (
+    <>
+      {t("admin.ops.deploy_at", { when: formatDateTime(deploy.deployed_at) })}
+      {" · "}
+      {sha === null ? (
+        t("admin.ops.deploy_commit_unknown")
+      ) : (
+        <a href={compareUrl(sha)} target="_blank" rel="noopener noreferrer">
+          {t("admin.ops.deploy_compare", { sha: sha.slice(0, 7) })}
+        </a>
+      )}
+      {" · "}
+      {t("admin.ops.deploy_migrations", { count: deploy.migrations_applied.length })}
+    </>
+  );
 }
 
 type StripStatus = "loading" | "ok" | "warn" | "unknown";
@@ -90,7 +124,7 @@ export function AdminOpsPage() {
       {/* Global status strip */}
       <div
         style={{
-          display: "flex", alignItems: "center", gap: 20, marginBottom: 24, padding: "12px 16px",
+          display: "flex", alignItems: "center", gap: 20, marginBottom: 8, padding: "12px 16px",
           background: "var(--surface-1)", borderRadius: "var(--radius-lg)",
           fontSize: 14,
         }}
@@ -105,6 +139,10 @@ export function AdminOpsPage() {
           {agenciesText[agenciesStatus]}
         </span>
       </div>
+
+      <p style={{ margin: "0 0 24px", padding: "0 16px", fontSize: 13, color: "var(--text-secondary)" }}>
+        <LastDeploy data={data} failed={Boolean(error)} t={t} />
+      </p>
 
       {/* Per-agency table */}
       <table className="admin-table">

@@ -263,7 +263,7 @@ only — never raw paths, query text, or finer timestamps.
 
 Route: `/admin/ops`, backed by `AdminOpsPage`.
 
-Endpoint: `GET /api/admin/ops` — a read-only health snapshot with two
+Endpoint: `GET /api/admin/ops` — a read-only health snapshot with three
 sub-checks, each degrading on its own (the response is still 200, and the
 page shows that check as unknown rather than as healthy):
 - migration status (`pipeline.health.migration_status`): the on-disk
@@ -274,10 +274,22 @@ page shows that check as unknown rather than as healthy):
   its last analyze time (`agg_meta`), the newest completed day in ClickHouse
   `updates`, how many days its newest `agg_route_daily` date trails that day
   and whether that makes it stale, and its recent clamp rate
-  (`agg_feed_health`).
+  (`agg_feed_health`);
+- the last deploy (`pipeline.deploys.latest_deploy`): the newest row of
+  `deploys`, which `gtfs_pipeline.py schema-up` writes once it has brought a
+  release's schema up. A row names the commit the image was built from
+  (`GIT_SHA`, else `RAILWAY_GIT_COMMIT_SHA`; NULL when neither holds a commit
+  hash) and the migrations that run applied. A rerun that applies nothing for
+  the same commit adds no row, so a restart doesn't count as a release.
+  `deploys_ok` separates "none recorded yet" (null, true) from a failed
+  lookup (null, false). `make migrate`, which `scripts/dev_upgrade.py` runs,
+  records nothing; only `schema-up` does.
 
-The page shows a status strip for the two checks and a per-agency table
-(agency, last analyzed, freshness, data through, implausible %).
+The page shows a status strip for the migration and freshness checks, a line
+under it for the last deploy (when it went live, its commit linked to GitHub's
+compare view against `main`, which lists what has merged since, and how many
+migrations it applied), and a per-agency table (agency, last analyzed,
+freshness, data through, implausible %).
 
 ## Architecture
 

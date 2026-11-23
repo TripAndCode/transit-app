@@ -23,7 +23,9 @@ async def ops_client(apply_schema, ch_async_client):
     # appears in the response.
     app.state.ch_client = ch_async_client
     async with pool.acquire() as conn:
-        await conn.execute("TRUNCATE agencies, sessions, users, agg_meta, agg_feed_health, agg_route_daily CASCADE")
+        await conn.execute(
+            "TRUNCATE agencies, sessions, users, agg_meta, agg_feed_health, agg_route_daily, deploys CASCADE"
+        )
         admin_sid = (await seed_session(conn, role="admin")).sid
     async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c, admin_sid, pool
@@ -98,3 +100,44 @@ async def test_ops_graceful_degradation(ops_client, monkeypatch):
     resp = await c.get("/api/admin/ops", cookies={"sid": sid})
     assert resp.status_code == 200
     assert resp.json()["migrations"] is None
+
+
+@pytest.mark.asyncio
+async def test_ops_reports_no_deploy_as_checked_and_empty(ops_client):
+    c, sid, _ = ops_client
+    body = (await c.get("/api/admin/ops", cookies={"sid": sid})).json()
+    assert body["last_deploy"] is None
+    assert body["deploys_ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_ops_reports_the_newest_deploy(ops_client):
+    c, sid, pool = ops_client
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO deploys (deployed_at, git_sha, migrations_applied) VALUES "
+            "('2026-11-01T00:00:00Z', 'aaaaaaa', '{0113}'), ('2026-11-15T00:00:00Z', 'bbbbbbb', '{0114,0115}')"
+        )
+    body = (await c.get("/api/admin/ops", cookies={"sid": sid})).json()
+    assert body["deploys_ok"] is True
+    deploy = body["last_deploy"]
+    assert deploy["git_sha"] == "bbbbbbb"
+    assert deploy["migrations_applied"] == ["0114", "0115"]
+    assert datetime.fromisoformat(deploy["deployed_at"]) == datetime(2026, 11, 15, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_ops_degrades_a_failed_deploy_read_on_its_own(ops_client, monkeypatch):
+    from pipeline import deploys as deploys_mod
+
+    async def boom(conn):
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(deploys_mod, "latest_deploy", boom)
+    c, sid, _ = ops_client
+    resp = await c.get("/api/admin/ops", cookies={"sid": sid})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["last_deploy"] is None
+    assert body["deploys_ok"] is False
+    assert body["migrations"] is not None

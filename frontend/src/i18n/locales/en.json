@@ -1831,7 +1831,14 @@
       "age_hours": "{{h}} h ago",
       "age_minutes": "{{m}} min ago",
       "unknown": "Unknown",
-      "network_link": "To compare delay across agencies, open Day types & agencies and choose Agencies."
+      "network_link": "To compare delay across agencies, open Day types & agencies and choose Agencies.",
+      "deploy_at": "Last deploy {{when}}",
+      "deploy_none": "No deploy recorded yet",
+      "deploy_unknown": "Deploy record unavailable",
+      "deploy_compare": "commit {{sha}}: compare with main",
+      "deploy_commit_unknown": "commit unknown",
+      "deploy_migrations_one": "{{count}} migration applied",
+      "deploy_migrations_other": "{{count}} migrations applied"
     },
     "agencies": {
       "title": "Agencies",

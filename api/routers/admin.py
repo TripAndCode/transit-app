@@ -878,6 +878,12 @@ class AgencyFreshnessOut(BaseModel):
     clamp_pct: Any  # float | None
 
 
+class DeployOut(BaseModel):
+    deployed_at: Any  # datetime
+    git_sha: str | None
+    migrations_applied: list[str]
+
+
 class OpsHealth(BaseModel):
     migrations: MigrationStatusOut | None
     agencies: list[AgencyFreshnessOut]
@@ -885,6 +891,10 @@ class OpsHealth(BaseModel):
     # tell "checked, zero agencies" apart from "check failed" (both would
     # otherwise be an indistinguishable empty `agencies` list).
     agencies_ok: bool
+    last_deploy: DeployOut | None
+    # The same distinction for the release record: a null `last_deploy` with
+    # this True means no release has been recorded yet.
+    deploys_ok: bool
 
 
 @router.get("/ops", response_model=OpsHealth)
@@ -894,6 +904,7 @@ async def admin_ops(
     ch: AsyncClient = Depends(get_ch),
 ) -> OpsHealth:
     """Read-only ops health snapshot. Graceful degradation: failing sub-checks return null."""
+    from pipeline.deploys import latest_deploy
     from pipeline.health import aggregate_freshness, migration_status
 
     mig: MigrationStatusOut | None = None
@@ -925,7 +936,27 @@ async def admin_ops(
         agencies_out = []
         agencies_ok = False
 
-    return OpsHealth(migrations=mig, agencies=agencies_out, agencies_ok=agencies_ok)
+    deploy_out: DeployOut | None = None
+    deploys_ok = True
+    try:
+        deploy = await latest_deploy(conn)
+        if deploy is not None:
+            deploy_out = DeployOut(
+                deployed_at=deploy.deployed_at.isoformat(),
+                git_sha=deploy.git_sha,
+                migrations_applied=deploy.migrations_applied,
+            )
+    except Exception:
+        _log.warning("admin_ops: latest_deploy failed — degrading to null", exc_info=True)
+        deploys_ok = False
+
+    return OpsHealth(
+        migrations=mig,
+        agencies=agencies_out,
+        agencies_ok=agencies_ok,
+        last_deploy=deploy_out,
+        deploys_ok=deploys_ok,
+    )
 
 
 @router.get("/agencies", response_model=list[AdminAgencyOut])
