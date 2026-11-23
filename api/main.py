@@ -477,13 +477,7 @@ async def _answers(name: str, probe: Awaitable[object] | None) -> bool:
     return True
 
 
-# HEAD too: some uptime monitors probe with it, and a 405 would read as down.
-@app.api_route(
-    "/health/ready",
-    methods=["GET", "HEAD"],
-    response_model=ReadyStatus,
-    responses={503: {"model": ReadyStatus}},
-)
+@app.get("/health/ready", response_model=ReadyStatus, responses={503: {"model": ReadyStatus}})
 async def ready(request: Request, response: Response) -> ReadyStatus:
     """Readiness, for an uptime monitor outside the machine: 200 when the app
     can query both databases, else 503 naming the one it cannot. `/health`
@@ -505,6 +499,12 @@ async def ready(request: Request, response: Response) -> ReadyStatus:
         postgres="ok" if pg_ok else "down",
         clickhouse="ok" if ch_ok else "down",
     )
+
+
+# HEAD too: some uptime monitors probe with it, and a 405 would read as down.
+# Its own route, left out of the schema, because one route for both methods
+# gives them the same operationId.
+app.head("/health/ready", response_model=ReadyStatus, include_in_schema=False)(ready)
 
 
 @app.get("/api/config", response_model=ClientConfig)

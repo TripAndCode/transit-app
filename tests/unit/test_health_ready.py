@@ -5,6 +5,7 @@ can alert on it."""
 import asyncio
 
 import pytest
+from fastapi.openapi.utils import get_openapi
 from fastapi.testclient import TestClient
 
 import api.main
@@ -70,6 +71,13 @@ def test_a_database_that_fails_or_hangs_is_named(stores, pg, ch, body):
 def test_a_head_probe_gets_the_same_status(stores, ch, status):
     response = stores(_answer, ch).head("/health/ready")
     assert response.status_code == status
+
+
+def test_the_schema_lists_only_the_get():
+    # Both methods in the schema would share one operationId, which OpenAPI
+    # requires to be unique.
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    assert list(schema["paths"]["/health/ready"]) == ["get"]
 
 
 def test_a_session_cookie_does_not_reach_the_database(stores):
