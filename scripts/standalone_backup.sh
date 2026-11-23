@@ -20,7 +20,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-env_file() { if [ -f .env ]; then sed -n "s/^$1=//p" .env | tail -n 1; fi; }
+# Read as Compose reads an unquoted value, since the stack reads the same file:
+# whitespace then `#` starts a comment.
+env_file() { if [ -f .env ]; then sed -n "s/^$1=//p" .env | tail -n 1 | sed 's/[[:space:]]#.*//; s/[[:space:]]*$//'; fi; }
 setting() {
   local value=${!1:-}
   [ -n "$value" ] || value=$(env_file "$1")
@@ -67,6 +69,8 @@ made=no
 kept=no
 finish() {
   [ "$succeeded" = yes ] && return
+  # errexit still holds inside a trap, and no cleanup step may stop the ping.
+  set +e
   if [ "$made" = yes ] && [ "$kept" = no ]; then
     rm -rf -- "$dir"
     ch rm -f "$in_ch" >/dev/null 2>&1 || true

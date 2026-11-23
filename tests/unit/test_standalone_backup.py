@@ -42,7 +42,11 @@ def stack(tmp_path):
         #!/usr/bin/env bash
         echo "$*" >> "{calls}"
         case "$*" in
-          *"pg_dump"*) [ -n "$TERM_PG" ] && kill -TERM "$PPID"; [ -n "$FAIL_PG" ] && exit 1; printf 'PGDMP' ;;
+          *"pg_dump"*)
+            [ -n "$TERM_PG" ] && kill -TERM "$PPID"
+            [ -n "$LOCK_BACKUPS" ] && chmod 500 "$BACKUP_DIR"
+            [ -n "$FAIL_PG" ] && exit 1
+            printf 'PGDMP' ;;
           *" cat /var/lib/clickhouse/backups/"*) printf 'PK-zip' ;;
           *" rm -f /var/lib/clickhouse/backups/"*) [ -n "$FAIL_CH_RM" ] && exit 1 ;;
           *" run "*) [ -n "$FAIL_UPLOAD" ] && exit 1 ;;
@@ -133,6 +137,26 @@ def test_a_failed_dump_keeps_nothing_and_pings_fail_with_the_query_kept(stack):
     assert _stamps(stack.backups) == []
     assert stack.pings() == ["https://hc.example/ping/key/job/fail?create=1"]
     assert "hc.example" not in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root removes a directory it cannot write to")
+def test_a_failed_cleanup_still_pings_fail(stack):
+    try:
+        result = stack(BACKUP_PING_URL="https://hc.example/p", FAIL_PG="1", LOCK_BACKUPS="1")
+    finally:
+        stack.backups.chmod(0o700)
+    assert result.returncode != 0
+    assert stack.pings() == ["https://hc.example/p/fail"]
+
+
+def test_a_comment_after_a_value_in_env_is_not_part_of_it(stack):
+    _earlier(stack.backups, "20250101T000000Z")
+    _earlier(stack.backups, "20250102T000000Z")
+    result = stack(env_file="BACKUP_PING_URL=https://hc.example/p  # nightly\nBACKUP_KEEP=2 # two\n")
+    assert result.returncode == 0, result.stderr
+    assert _stamps(stack.backups)[0] == "20250102T000000Z"
+    assert len(_stamps(stack.backups)) == 2
+    assert stack.pings() == ["https://hc.example/p"]
 
 
 def test_a_failed_upload_keeps_the_local_copy_and_still_prunes(stack):
