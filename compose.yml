@@ -18,7 +18,13 @@ x-standalone-env: &standalone-env
   POLLER_ARCHIVE_DIR: /app/archive
 
 x-standalone-app: &standalone-app
-  build: .
+  build:
+    context: .
+    # The commit `schema-up` records as the release; empty records it without
+    # one. docs/deploy-standalone.md's build commands pass
+    # `GIT_SHA=$(git rev-parse HEAD)`.
+    args:
+      GIT_SHA: ${GIT_SHA:-}
   # One image for every app-image service, named per project like the rest.
   image: ${COMPOSE_PROJECT_NAME}-standalone-app
   profiles: [standalone]

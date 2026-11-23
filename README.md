@@ -451,7 +451,7 @@ it from FastAPI.
 One machine with Docker runs the whole app for your own feeds, with no Oracle
 collector, R2, VPS or LLM key. [docs/deploy-standalone.en.md](docs/deploy-standalone.en.md) (日本語:
 [docs/deploy-standalone.md](docs/deploy-standalone.md)) is the one page for it:
-clone, `.env`, `docker compose --profile standalone up -d --build app poller`, adding an agency with `add_agency` and reading its verdicts, signing in as
+clone, `.env`, `GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app poller`, adding an agency with `add_agency` and reading its verdicts, signing in as
 administrator, backups, upgrades and their cadence, starting from an R2
 archive, and what is not automated. Its schema step applies the migrations and
 the ClickHouse schema on every start, so a deploy needs no manual schema step.

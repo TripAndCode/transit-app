@@ -1831,7 +1831,14 @@
       "age_hours": "{{h}} 時間前",
       "age_minutes": "{{m}} 分前",
       "unknown": "不明",
-      "network_link": "事業者どうしの遅延比較は「日種別・事業者の比較」→「事業者どうし」で確認できます。"
+      "network_link": "事業者どうしの遅延比較は「日種別・事業者の比較」→「事業者どうし」で確認できます。",
+      "deploy_at": "最終デプロイ {{when}}",
+      "deploy_none": "デプロイの記録はまだありません",
+      "deploy_unknown": "デプロイ記録を取得できません",
+      "deploy_compare": "コミット {{sha}}（main と比較）",
+      "deploy_commit_unknown": "コミット不明",
+      "deploy_migrations_one": "マイグレーション {{count}} 件を適用",
+      "deploy_migrations_other": "マイグレーション {{count}} 件を適用"
     },
     "agencies": {
       "title": "事業者管理",

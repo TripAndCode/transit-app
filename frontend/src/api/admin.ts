@@ -230,6 +230,10 @@ type OpsHealth = {
   // False only when the agencies sub-check itself failed — distinguishes
   // "checked, zero agencies" from "check failed" (both give an empty array).
   agencies_ok: boolean;
+  // The newest release `schema-up` recorded. Null with deploys_ok true means
+  // none recorded yet; deploys_ok false means the lookup itself failed.
+  last_deploy: { deployed_at: string; git_sha: string | null; migrations_applied: string[] } | null;
+  deploys_ok: boolean;
 };
 
 export function useAdminOps() {

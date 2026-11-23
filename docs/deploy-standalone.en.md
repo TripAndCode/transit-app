@@ -35,10 +35,12 @@ Ignore the Oracle, R2, weather and LLM settings. `GEMINI_API_KEY` and `OPENAI_AP
 To start from an existing R2 archive's history rather than empty, follow section 9 instead of this section and the next.
 
 ```bash
-docker compose --profile standalone up -d --build app poller
+GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app poller
 ```
 
 Naming `app poller` starts only the standalone stack: its own Postgres and ClickHouse (no host port, their own volumes), the schema step, the app and the poller. Do not use a bare `--profile standalone up`: it also starts the two development databases. The first build takes several minutes. Then open the URL `PUBLIC_BASE_URL` names (<http://localhost:8000> by default); the page loads but shows no agency yet.
+
+`GIT_SHA` writes the checked-out commit into the image. The schema step records it as the release, and the admin Ops page shows it with a link to what `main` has gained since. A build without it is recorded as a release of unknown commit.
 
 ## 3. Add an agency
 
@@ -139,7 +141,7 @@ docker volume rm "${P}_standalone_pgdata" "${P}_standalone_chdata"
 
 ```bash
 git pull
-docker compose --profile standalone up -d --build app poller
+GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app poller
 ```
 
 The schema step (`gtfs_pipeline.py schema-up`) runs before the app and poller restart, so migrations apply themselves. A migration that would delete stored data on a database that has already discarded old history makes the schema step refuse: `up` then reports the failure and `app` does not start, because it waits for that step. Read the reason in `docker compose --profile standalone logs migrate`. After a backup, name the migration version in `MIGRATE_ALLOW_DESTRUCTIVE_UP` in `.env` and run the `up` command again.
@@ -183,7 +185,7 @@ The poller pings the URL each time a step ends with no stage failing: normally o
 This section is for an operator whose feeds a collector already archives into an R2 bucket, such as the Oracle collector in [deploy-railway.md](deploy-railway.md); everyone else skips it. It fills the new databases with the bucket's recent days instead of starting empty. Follow it instead of sections 2 and 3, once, before the poller first starts: the poller archives the same days from its own polls, and its daily step would ingest them a second time.
 
 1. Put the bucket's settings in `.env`: `OBJECT_STORE_ENDPOINT`, `OBJECT_STORE_BUCKET`, `OBJECT_STORE_ACCESS_KEY_ID` and `OBJECT_STORE_SECRET_ACCESS_KEY`. A read-only key is enough.
-2. Start the app alone: `docker compose --profile standalone up -d --build app`.
+2. Start the app alone: `GIT_SHA=$(git rev-parse HEAD) docker compose --profile standalone up -d --build app`.
 3. Add the agencies with `seed_agencies` (section 3), giving each the `agency_id` the bucket files it under (`rt/<agency_id>/`); for this project's own bucket, those are the rows of `agencies.csv`. Run neither `add_agency` nor `refresh-static`: the catch-up loads the timetable in force on its first day itself, and refuses an agency whose ingest joins the timetable when a newer one is already loaded.
 4. Read the plan, which writes nothing:
 

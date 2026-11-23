@@ -111,6 +111,13 @@ def _services(text: str) -> dict:
     return yaml.safe_load(text)["services"]
 
 
+def _builds_the_app(svc: dict) -> bool:
+    """Whether *svc* runs the app image: `build` is the repository root, in
+    either its short or its long form."""
+    build = svc.get("build")
+    return (build.get("context") if isinstance(build, dict) else build) == "."
+
+
 def _standalone_violations(text: str) -> list[str]:
     """How any `standalone`-profile service could reach the dev stack: a
     database URL or ClickHouse host that is not the profile's own, the host's
@@ -121,7 +128,7 @@ def _standalone_violations(text: str) -> list[str]:
     for name in sorted(standalone):
         svc = services[name]
         env = svc.get("environment") or {}
-        if svc.get("build") == ".":
+        if _builds_the_app(svc):
             if urlsplit(str(env.get("DATABASE_URL", ""))).hostname != "standalone-db":
                 found.append(f"{name}: DATABASE_URL is not on standalone-db")
             if env.get("CLICKHOUSE_HOST") != "standalone-clickhouse":
@@ -149,6 +156,7 @@ def test_the_standalone_stack_never_reaches_the_dev_databases():
     assert {"app", "poller", "migrate", "standalone-db", "standalone-clickhouse"} <= {
         name for name, svc in services.items() if "standalone" in (svc.get("profiles") or [])
     }
+    assert all(_builds_the_app(services[name]) for name in ("app", "poller", "migrate"))
     assert _standalone_violations(_COMPOSE_TEXT) == []
 
 
