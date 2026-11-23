@@ -1,8 +1,8 @@
 """scripts/standalone_restore.sh, driven through a shimmed `docker`.
 
 The shim stands in for the stack: it answers the two table counts with
-whatever the test sets, records every call, and fails the ClickHouse RESTORE
-on request.
+whatever the test sets, records every call, and on request fails the
+ClickHouse RESTORE or sends the script SIGTERM during it.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def stack(tmp_path):
             case "$*" in
               *" psql "*) echo "${{PG_TABLES:-0}}" ;;
               *"system.tables"*) echo "${{CH_TABLES:-0}}" ;;
-              *"RESTORE DATABASE"*) [ -n "$FAIL_CH" ] && exit 1 ;;
+              *"RESTORE DATABASE"*) [ -n "$TERM_CH" ] && kill -TERM "$PPID"; [ -n "$FAIL_CH" ] && exit 1 ;;
               *" sh -c "*) cat >/dev/null ;;
             esac
             exit 0
@@ -69,6 +69,7 @@ def test_a_backup_restores_postgres_then_clickhouse_and_removes_the_copy(stack):
     assert result.returncode == 0, result.stderr
     calls = stack.calls()
     restore = calls[_index(calls, "RESTORE DATABASE")]
+    assert "--receive_timeout=86400" in restore
     copied = restore.split("File('")[1].split("'")[0]
     assert _index(calls, "pg_restore") < _index(calls, "RESTORE DATABASE")
     assert any(" rm -f " in call and call.endswith(copied) for call in calls[_index(calls, "RESTORE DATABASE") :])
@@ -82,8 +83,9 @@ def test_a_database_holding_a_table_is_refused_before_any_restore(stack, tables)
     assert not any("pg_restore" in call or "RESTORE DATABASE" in call for call in stack.calls())
 
 
-def test_a_failed_clickhouse_restore_says_how_to_start_again(stack):
-    result = stack(FAIL_CH="1")
+@pytest.mark.parametrize("cause", ["FAIL_CH", "TERM_CH"])
+def test_a_clickhouse_restore_that_does_not_finish_says_how_to_start_again(stack, cause):
+    result = stack(**{cause: "1"})
     assert result.returncode != 0
     assert "remove both database volumes" in result.stderr
     assert any(" rm -f /var/lib/clickhouse/backups/" in call for call in stack.calls())

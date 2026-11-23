@@ -93,7 +93,7 @@ cron の `PATH` には Docker が入っていないことがあるので、`PATH
 | 設定 | 役割 |
 | --- | --- |
 | `BACKUP_DIR` | バックアップの置き場所。絶対パスか `~/` で始まるパスで書きます。既定は `~/transit-backup`。コミットやイメージのビルドに紛れ込まないよう、チェックアウトの外に置きます。 |
-| `BACKUP_KEEP` | このマシンに残すバックアップの数。既定は 7。 |
+| `BACKUP_KEEP` | このマシンに残す完全なバックアップの数。既定は 7。クラッシュや停電で途中で止まった実行が残した不完全なディレクトリは数えず、残すものすべてより古くなった時点で削除します。 |
 | `BACKUP_PING_URL` | 期間 1 日、猶予 2 時間の [healthchecks.io](https://healthchecks.io) 形式のチェック。バックアップが終わると ping し、失敗すると `<URL>/fail` に ping するので、失敗した夜や実行されなかった夜は通知されます。 |
 | `BACKUP_STORE_ENDPOINT`、`BACKUP_STORE_BUCKET`、`BACKUP_STORE_ACCESS_KEY_ID`、`BACKUP_STORE_SECRET_ACCESS_KEY` | 各バックアップを Cloudflare R2 などの S3 互換ストレージの `<BACKUP_STORE_PREFIX>/<時刻>/` にもアップロードします（プレフィックスの既定は `backups`）。キーにはそのバケットへの書き込み権限が要ります。古いバックアップは、バケット自身のライフサイクルルールで削除するよう設定してください。アップロードに失敗してもローカルのコピーは残り、`/fail` に ping します。 |
 

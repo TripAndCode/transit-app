@@ -93,7 +93,7 @@ The script reads `BACKUP_DIR`, `BACKUP_KEEP` and `BACKUP_PING_URL` from the envi
 | Setting | What it does |
 | --- | --- |
 | `BACKUP_DIR` | Where backups go, as an absolute path or one starting `~/`. Default `~/transit-backup`. Keep it outside the checkout, so backups are never committed or built into an image. |
-| `BACKUP_KEEP` | How many backups stay on this machine. Default 7. |
+| `BACKUP_KEEP` | How many complete backups stay on this machine. Default 7. A directory a run left incomplete (cut off by a crash or power loss) does not count, and is removed once it is older than all of them. |
 | `BACKUP_PING_URL` | A [healthchecks.io](https://healthchecks.io)-style check with a period of 1 day and a grace time of 2 hours. It is pinged when a backup completes, and at `<url>/fail` when one fails, so a failed or missed night alerts. |
 | `BACKUP_STORE_ENDPOINT`, `BACKUP_STORE_BUCKET`, `BACKUP_STORE_ACCESS_KEY_ID`, `BACKUP_STORE_SECRET_ACCESS_KEY` | Also upload each backup to S3-compatible storage, such as Cloudflare R2, under `<BACKUP_STORE_PREFIX>/<time>/` (prefix default `backups`). The key needs write access to that bucket. Set the bucket's own lifecycle rule to delete old backups there. A failed upload keeps the local copy and pings `/fail`. |
 

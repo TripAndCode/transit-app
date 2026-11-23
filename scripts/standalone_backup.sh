@@ -7,7 +7,7 @@
 # Settings come from the environment, else from `.env` (unquoted values):
 #   BACKUP_DIR       where backups go (default ~/transit-backup), outside the
 #                    checkout so they are never committed or built into an image
-#   BACKUP_KEEP      how many local backups to keep (default 7)
+#   BACKUP_KEEP      how many complete local backups to keep (default 7)
 #   BACKUP_PING_URL  a healthchecks.io-style check: pinged when a backup
 #                    completes, and at its path plus /fail when one fails
 #   BACKUP_STORE_BUCKET, with BACKUP_STORE_ENDPOINT and its key pair: upload
@@ -30,30 +30,21 @@ setting() {
 compose() { docker compose --profile standalone "$@"; }
 ch() { compose exec -T -u clickhouse standalone-clickhouse "$@"; }
 # clickhouse-client takes the user and password from the environment the
-# stack gave the container, so the password is never an argument.
-ch_query() { ch clickhouse-client -q "$1"; }
+# stack gave the container, so the password is never an argument. BACKUP sends
+# nothing until it finishes, and the client gives up after receive_timeout
+# (300 s by default) while the server carries on.
+ch_query() { ch clickhouse-client --receive_timeout=86400 -q "$1"; }
 
 backup_root=$(setting BACKUP_DIR "$HOME/transit-backup")
 keep=$(setting BACKUP_KEEP 7)
 ping_url=$(setting BACKUP_PING_URL "")
 bucket=$(env_file BACKUP_STORE_BUCKET)
-# Read in base 10: the shell's arithmetic takes a leading zero for octal.
-case $keep in '' | *[!0-9]*) keep=0 ;; *) keep=$((10#$keep)) ;; esac
-[ "$keep" -gt 0 ] || { echo "backup: BACKUP_KEEP must be a positive whole number" >&2; exit 2; }
-# `.env` is read as text, so a `~` there is not the shell's; a relative path
-# would land inside the checkout.
-# shellcheck disable=SC2088
-case $backup_root in
-  "~/"*) backup_root="$HOME/${backup_root#"~/"}" ;;
-  /*) ;;
-  *) echo "backup: BACKUP_DIR must be an absolute path" >&2; exit 2 ;;
-esac
-
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
-dir="$backup_root/$stamp"
+stamp_glob='[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z'
 # ClickHouse's default config allows BACKUP to File() only under the server's
 # own backups directory, which lives on the database volume.
-in_ch="/var/lib/clickhouse/backups/$stamp.zip"
+ch_backups=/var/lib/clickhouse/backups
+in_ch="$ch_backups/$stamp.zip"
 
 # Never prints the URL: its path is the check's credential.
 report() {
@@ -66,14 +57,16 @@ report() {
     echo "backup: the ping could not be sent" >&2
 }
 
-# A backup that failed before both files were written is removed, so pruning
-# never counts it; one that failed only to upload stays. Only a directory this
-# run made is removed: a second run in the same second finds it taken.
+# The trap goes by `succeeded`, set on the last line, not by $?: a signal (the
+# host shutting down, say) leaves $? at 0 inside the trap. A run that fails
+# before both files are written removes its directory; one that fails only to
+# upload, or to remove ClickHouse's copy, keeps it. Only a directory this run
+# made is removed: a second run in the same second finds it taken.
+succeeded=no
 made=no
 kept=no
 finish() {
-  local status=$?
-  [ "$status" -eq 0 ] && return
+  [ "$succeeded" = yes ] && return
   if [ "$made" = yes ] && [ "$kept" = no ]; then
     rm -rf -- "$dir"
     ch rm -f "$in_ch" >/dev/null 2>&1 || true
@@ -83,16 +76,39 @@ finish() {
 }
 trap finish EXIT
 
+# Read in base 10: the shell's arithmetic takes a leading zero for octal.
+case $keep in '' | *[!0-9]*) keep=0 ;; *) keep=$((10#$keep)) ;; esac
+[ "$keep" -gt 0 ] || { echo "backup: BACKUP_KEEP must be a positive whole number" >&2; exit 2; }
+# `.env` is read as text, so a `~` there is not the shell's; a relative path
+# would land inside the checkout.
+# shellcheck disable=SC2088
+case $backup_root in
+  "~/"*) backup_root="$HOME/${backup_root#"~/"}" ;;
+  /*) ;;
+  *) echo "backup: BACKUP_DIR must be an absolute path" >&2; exit 2 ;;
+esac
+dir="$backup_root/$stamp"
+
 # The dumps hold every row, so only their owner can read them.
 umask 077
 mkdir -p "$backup_root"
 mkdir "$dir"
 made=yes
 
-compose exec -T standalone-db pg_dump -U transit -d transit -Fc >"$dir/postgres.dump"
+# Each file takes its real name only once both are written, so a run cut off
+# where no trap runs (SIGKILL, power loss) leaves nothing that pruning or a
+# restore takes for a backup.
+compose exec -T standalone-db pg_dump -U transit -d transit -Fc >"$dir/postgres.dump.part"
 
+# Such a run can also leave its copy in ClickHouse's backups directory, which
+# the next BACKUP needs the room of. One younger than half a day may belong to a
+# run still going.
+ch mkdir -p "$ch_backups"
+ch find "$ch_backups" -maxdepth 1 -type f -name "$stamp_glob.zip" -mmin +720 -delete
 ch_query "BACKUP DATABASE transit TO File('$stamp.zip')" >/dev/null
-ch cat "$in_ch" >"$dir/clickhouse.zip"
+ch cat "$in_ch" >"$dir/clickhouse.zip.part"
+mv -- "$dir/postgres.dump.part" "$dir/postgres.dump"
+mv -- "$dir/clickhouse.zip.part" "$dir/clickhouse.zip"
 kept=yes
 
 # From here a failure leaves the backup in place: the run still prunes, then
@@ -107,11 +123,23 @@ if [ -n "$bucket" ]; then
     python scripts/upload_backup.py /backup "$stamp" || complete=no
 fi
 
-# Only directories this script names are pruned, newest kept. Pruning runs
-# whether or not the upload worked, so a broken upload cannot fill the disk.
-find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z' |
-  sort -r | tail -n +"$((keep + 1))" | while IFS= read -r old; do rm -rf -- "$old"; done
+# Pruning keeps the newest $keep backups holding both files, and removes every
+# directory this script names that is older than the last of them. One without
+# both files does not count, and goes once it is older than every kept backup.
+# It runs whether or not the upload worked, so a broken upload cannot fill the
+# disk.
+find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name "$stamp_glob" | sort -r | {
+  counted=0
+  while IFS= read -r old; do
+    if [ "$counted" -ge "$keep" ]; then
+      rm -rf -- "$old"
+    elif [ -f "$old/postgres.dump" ] && [ -f "$old/clickhouse.zip" ]; then
+      counted=$((counted + 1))
+    fi
+  done
+}
 [ "$complete" = yes ] || exit 1
 
 echo "backup: $dir"
+succeeded=yes
 report ok "backup $stamp"

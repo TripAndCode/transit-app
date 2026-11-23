@@ -1,7 +1,8 @@
 """scripts/standalone_backup.sh, driven through shimmed `docker` and `curl`.
 
 The shims stand in for the stack: `docker compose exec` answers pg_dump and the
-ClickHouse calls with fixed bytes, and `curl` records where each ping went. A
+ClickHouse calls with fixed bytes (or, on request, fails them or sends the
+script SIGTERM during the dump), and `curl` records where each ping went. A
 copy of the script runs from a scratch checkout, so `.env` there is the
 test's own.
 """
@@ -41,7 +42,7 @@ def stack(tmp_path):
         #!/usr/bin/env bash
         echo "$*" >> "{calls}"
         case "$*" in
-          *"pg_dump"*) [ -n "$FAIL_PG" ] && exit 1; printf 'PGDMP' ;;
+          *"pg_dump"*) [ -n "$TERM_PG" ] && kill -TERM "$PPID"; [ -n "$FAIL_PG" ] && exit 1; printf 'PGDMP' ;;
           *" cat /var/lib/clickhouse/backups/"*) printf 'PK-zip' ;;
           *" rm -f /var/lib/clickhouse/backups/"*) [ -n "$FAIL_CH_RM" ] && exit 1 ;;
           *" run "*) [ -n "$FAIL_UPLOAD" ] && exit 1 ;;
@@ -92,6 +93,13 @@ def _stamps(backups: Path) -> list[str]:
     return sorted(p.name for p in backups.iterdir())
 
 
+def _earlier(backups: Path, name: str, *files: str) -> None:
+    """An earlier run's directory, holding both files unless `files` names others."""
+    (backups / name).mkdir()
+    for file in files or ("postgres.dump", "clickhouse.zip"):
+        (backups / name / file).write_bytes(b"earlier")
+
+
 def test_a_backup_writes_both_files_and_pings_the_check(stack):
     result = stack(env_file="BACKUP_PING_URL=https://hc.example/ping/key\n")
     assert result.returncode == 0, result.stderr
@@ -102,8 +110,21 @@ def test_a_backup_writes_both_files_and_pings_the_check(stack):
     assert modes == {"postgres.dump": 0o600, "clickhouse.zip": 0o600}
     assert stat.S_IMODE((stack.backups / stamp).stat().st_mode) == 0o700
     assert stack.pings() == ["https://hc.example/ping/key"]
-    assert not any(" run " in call for call in stack.calls())
+    calls = stack.calls()
+    assert not any(" run " in call for call in calls)
+    [backup] = [i for i, call in enumerate(calls) if "BACKUP DATABASE" in call]
+    assert "--receive_timeout=86400" in calls[backup]
+    [sweep] = [i for i, call in enumerate(calls) if " find /var/lib/clickhouse/backups " in call]
+    assert sweep < backup
+    assert "-name [0-9]" in calls[sweep] and "Z.zip -mmin +720 -delete" in calls[sweep]
     assert "hc.example" not in result.stdout + result.stderr
+
+
+def test_a_run_cut_off_by_a_signal_keeps_nothing_and_pings_fail(stack):
+    result = stack(env_file="BACKUP_PING_URL=https://hc.example/p\n", TERM_PG="1")
+    assert result.returncode != 0
+    assert _stamps(stack.backups) == []
+    assert stack.pings() == ["https://hc.example/p/fail"]
 
 
 def test_a_failed_dump_keeps_nothing_and_pings_fail_with_the_query_kept(stack):
@@ -116,7 +137,7 @@ def test_a_failed_dump_keeps_nothing_and_pings_fail_with_the_query_kept(stack):
 
 def test_a_failed_upload_keeps_the_local_copy_and_still_prunes(stack):
     for name in ("20250101T000000Z", "20250102T000000Z"):
-        (stack.backups / name).mkdir()
+        _earlier(stack.backups, name)
     result = stack(
         env_file="BACKUP_STORE_BUCKET=b\nBACKUP_PING_URL=https://hc.example/p\n", BACKUP_KEEP="1", FAIL_UPLOAD="1"
     )
@@ -130,7 +151,7 @@ def test_a_failed_upload_keeps_the_local_copy_and_still_prunes(stack):
 
 
 def test_a_copy_left_in_clickhouse_keeps_the_backup_and_reports_a_failure(stack):
-    (stack.backups / "20250101T000000Z").mkdir()
+    _earlier(stack.backups, "20250101T000000Z")
     result = stack(env_file="BACKUP_PING_URL=https://hc.example/p\n", BACKUP_KEEP="1", FAIL_CH_RM="1")
     assert result.returncode != 0
     [stamp] = _stamps(stack.backups)
@@ -157,7 +178,7 @@ def test_a_run_whose_directory_is_taken_fails_without_touching_it(stack):
 
 def test_only_the_newest_backups_are_kept_and_nothing_else_is_touched(stack):
     for name in ("20250101T000000Z", "20250102T000000Z", "20250103T000000Z", "keep-me"):
-        (stack.backups / name).mkdir()
+        _earlier(stack.backups, name)
     result = stack(BACKUP_KEEP="2")
     assert result.returncode == 0, result.stderr
     names = _stamps(stack.backups)
@@ -168,9 +189,20 @@ def test_only_the_newest_backups_are_kept_and_nothing_else_is_touched(stack):
     assert len(names) == 3
 
 
+def test_an_incomplete_backup_is_not_counted_and_goes_once_older_than_the_kept_ones(stack):
+    _earlier(stack.backups, "20250101T000000Z")
+    _earlier(stack.backups, "20250102T000000Z", "postgres.dump.part")
+    _earlier(stack.backups, "20250103T000000Z")
+    _earlier(stack.backups, "20250104T000000Z", "postgres.dump")
+    result = stack(BACKUP_KEEP="2")
+    assert result.returncode == 0, result.stderr
+    [new] = [name for name in _stamps(stack.backups) if name > "20250104T000000Z"]
+    assert _stamps(stack.backups) == ["20250103T000000Z", "20250104T000000Z", new]
+
+
 def test_the_environment_wins_over_env_file(stack):
     for name in ("20250101T000000Z", "20250102T000000Z"):
-        (stack.backups / name).mkdir()
+        _earlier(stack.backups, name)
     result = stack(env_file="BACKUP_KEEP=1\n", BACKUP_KEEP="5")
     assert result.returncode == 0, result.stderr
     assert len(_stamps(stack.backups)) == 3
@@ -184,15 +216,16 @@ def test_a_tilde_in_env_file_is_the_home_directory(stack, tmp_path):
 
 @pytest.mark.parametrize("backup_dir", ["relative/dir", "$HOME/x"])
 def test_a_backup_dir_that_is_not_absolute_is_refused(stack, backup_dir):
-    result = stack(env_file=f"BACKUP_DIR={backup_dir}\n", BACKUP_DIR="")
+    result = stack(env_file=f"BACKUP_DIR={backup_dir}\nBACKUP_PING_URL=https://hc.example/p\n", BACKUP_DIR="")
     assert result.returncode == 2
     assert stack.calls() == []
+    assert stack.pings() == ["https://hc.example/p/fail"]
 
 
 @pytest.mark.parametrize(("keep", "kept"), [("010", 10), ("08", 8)])
 def test_a_keep_count_with_a_leading_zero_is_decimal(stack, keep, kept):
     for day in range(1, 12):
-        (stack.backups / f"202501{day:02d}T000000Z").mkdir()
+        _earlier(stack.backups, f"202501{day:02d}T000000Z")
     result = stack(BACKUP_KEEP=keep)
     assert result.returncode == 0, result.stderr
     assert len(_stamps(stack.backups)) == kept
@@ -200,6 +233,7 @@ def test_a_keep_count_with_a_leading_zero_is_decimal(stack, keep, kept):
 
 @pytest.mark.parametrize("keep", ["0", "00", "x", "-1"])
 def test_a_bad_keep_count_is_refused_before_anything_runs(stack, keep):
-    result = stack(BACKUP_KEEP=keep)
+    result = stack(BACKUP_KEEP=keep, BACKUP_PING_URL="https://hc.example/p")
     assert result.returncode == 2
     assert stack.calls() == []
+    assert stack.pings() == ["https://hc.example/p/fail"]

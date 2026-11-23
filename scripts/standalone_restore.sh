@@ -22,8 +22,10 @@ compose() { docker compose --profile standalone "$@"; }
 # Run as the server's own user so the files it writes are ones it can read.
 ch() { compose exec -T -u clickhouse standalone-clickhouse "$@"; }
 # clickhouse-client takes the user and password from the environment the
-# stack gave the container, so the password is never an argument.
-ch_query() { ch clickhouse-client -q "$1"; }
+# stack gave the container, so the password is never an argument. RESTORE sends
+# nothing until it finishes, and the client gives up after receive_timeout
+# (300 s by default) while the server carries on.
+ch_query() { ch clickhouse-client --receive_timeout=86400 -q "$1"; }
 
 compose up -d --wait standalone-db standalone-clickhouse
 
@@ -41,11 +43,12 @@ fi
 compose exec -T standalone-db pg_restore -U transit -d transit --exit-on-error --single-transaction <"$dir/postgres.dump"
 
 in_ch="/var/lib/clickhouse/backups/restore-$(date -u +%Y%m%dT%H%M%SZ).zip"
-# Postgres is restored by now, so a retry would be refused.
+# Postgres is restored by now, so a retry would be refused. The trap goes by
+# `restored` rather than $?, which a signal leaves at 0.
+restored=no
 finish() {
-  local status=$?
   ch rm -f "$in_ch" >/dev/null 2>&1 || true
-  [ "$status" -eq 0 ] ||
+  [ "$restored" = yes ] ||
     echo "restore: failed after Postgres was restored; remove both database volumes before trying again" \
       "(docs/deploy-standalone.en.md, section 6)" >&2
 }
@@ -53,5 +56,6 @@ trap finish EXIT
 # shellcheck disable=SC2016
 ch sh -c 'mkdir -p "$(dirname "$0")" && cat >"$0"' "$in_ch" <"$dir/clickhouse.zip"
 ch_query "RESTORE DATABASE transit FROM File('$(basename "$in_ch")')" >/dev/null
+restored=yes
 
 echo "restore: done; start the app and poller with: docker compose --profile standalone up -d app poller"
