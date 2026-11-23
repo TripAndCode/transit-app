@@ -60,9 +60,10 @@ the scheduled time, between matched stops, as
 many stops as possible, ties broken towards the steadiest delay. A loop's
 return to its first stop, a deadhead past the stops, or the road out past a
 stop served on the way back each lose, since taking them forfeits the stops
-between. A stop with no passage is counted by why: no visit, no visit
-showing the bus leave (arrive), only implausible ones, or none the
-alignment could take.
+between. A stop with no passage is counted by why: the track comes near it
+only across a gap too long to time, no visit at all, no visit showing the
+bus leave (arrive), only implausible ones, one only the delay bound kept
+out, or none the alignment could take in order.
 
 **The comparison** per stop event with both: error = kept delay - observed
 delay, positive when the feed reported the bus later than it left; lead =
@@ -72,7 +73,10 @@ bias and the 90th percentile of the absolute error overall, by lead
 (LEAD_WIDTH_SEC groups, open beyond ±LEAD_CAP_SEC), by service-day hour of
 the scheduled departure and by timepoint ("unknown" where stop_times.txt has
 no timepoint column), plus coverage: how many kept stop events had a
-passage, and why the rest did not (``no_passage_*``).
+passage, and why the rest did not (``no_passage_*``). It also classes each
+measured stop event as early, on time or late under ON_TIME_WINDOW, once by
+its kept delay and once by its observed one, which shows what the error
+does to the on-time percentage the product reports.
 
 Output: ``<out>/<id>/<FROM>_<TO>.json`` and a Markdown table beside it as
 ``.md``. The run exits 1 when no stop event could be compared.
@@ -117,6 +121,7 @@ sys.path.insert(0, str(ROOT))
 from ml.r2 import default_capture, download_file, list_keys  # noqa: E402  (sys.path injection above)
 from pipeline.clickhouse import STOP_SKIPPED, TRIP_CANCELED  # noqa: E402
 from pipeline.db import MAX_PLAUSIBLE_DELAY_SEC, timely_reading  # noqa: E402
+from pipeline.reports.rankings import DEFAULT_PRESET, ON_TIME_PRESETS  # noqa: E402
 from pipeline.service_day import (  # noqa: E402
     FILING_REACH_HOURS,
     SERVICE_DAY_CUTOVER_HOURS,
@@ -133,7 +138,7 @@ from pipeline.strategies.static_join import (  # noqa: E402
     is_stopless_cancellation,
 )
 
-SCHEMA = 1
+SCHEMA = 2
 _JST = ZoneInfo("Asia/Tokyo")
 
 # Mean Earth radius times pi/180. Distances are taken on a flat map centred
@@ -151,8 +156,12 @@ PASSAGE_RADIUS_M = 50.0
 DWELL_TOLERANCE_M = 15.0
 # The longest gap between two fixes a passage is interpolated across. In a
 # longer one a bus can dwell, queue or detour between the two, so a straight
-# line between them no longer times when it passed.
-MAX_BRACKET_GAP_SEC = 90
+# line between them no longer times when it passed. Up to this length,
+# dropping every other fix of a densely polled track moves the passages it
+# times by a fraction of the on-time window's early side and in no steady
+# direction, while the feeds' polling leaves gaps this long often enough
+# that a shorter limit would leave a large share of stops untimed.
+MAX_BRACKET_GAP_SEC = 150
 # How far the observed delay may move from one matched stop to the next:
 # MAX_DELAY_CHANGE_SEC, plus DELAY_DRIFT_SHARE of the scheduled time between
 # them. A delay rarely moves by many minutes between neighbouring stops, but
@@ -181,6 +190,12 @@ TRACK_SPLIT_GAP_SEC = 3 * 3600
 # pooled, since few kept readings are that old.
 LEAD_WIDTH_SEC = 60
 LEAD_CAP_SEC = 600
+
+# The on-time window every figure whose request names none counts by, the
+# board's included: each measured stop event is classed by it twice, by its
+# kept delay and by its observed one.
+ON_TIME_WINDOW = ON_TIME_PRESETS[DEFAULT_PRESET]
+ON_TIME_CLASSES = ("early", "on_time", "late")
 
 _MEMBER = re.compile(r"^(?P<day>\d{8})/(?P<kind>TripUpdate|VehiclePosition)_(?P<clock>\d{6})\.pb$")
 _STATIC_NAME = re.compile(r"^gtfs_static_(?P<day>\d{8})\.zip$")
@@ -317,17 +332,26 @@ def _approach(track: Sequence[Fix], j: int, stop: StopPoint, min_fraction: float
     return _Approach(j, fraction, math.hypot(ax + fraction * dx, ay + fraction * dy))
 
 
-def _segments_near(track: Sequence[Fix], stops: Sequence[StopPoint]) -> list[list[int]]:
-    """For each stop, the usable segments that could come within
-    PASSAGE_RADIUS_M of it, in track order: those whose bounding box, widened
-    by the radius, covers the stop's grid cell. A coarse grid keeps the search
-    linear in the track and the stops rather than their product."""
+def _gap(track: Sequence[Fix], j: int) -> bool:
+    """Whether segment *j* spans more than MAX_BRACKET_GAP_SEC, too long to
+    time a passage on."""
+    return _seconds(track[j].at, track[j + 1].at) > MAX_BRACKET_GAP_SEC
+
+
+def _segments_near(
+    track: Sequence[Fix], stops: Sequence[StopPoint], kind: Callable[[Sequence[Fix], int], bool] = _usable
+) -> list[list[int]]:
+    """For each stop, the segments of *kind* (usable ones by default) that
+    could come within PASSAGE_RADIUS_M of it, in track order: those whose
+    bounding box, widened by the radius, covers the stop's grid cell. A
+    coarse grid keeps the search linear in the track and the stops rather
+    than their product."""
     origin = track[0]
     points = [_xy(f.lat, f.lon, origin.lat, origin.lon) for f in track]
     pad = PASSAGE_RADIUS_M + _GRID_SLACK_M
     grid: dict[tuple[int, int], list[int]] = defaultdict(list)
     for j in range(len(track) - 1):
-        if not _usable(track, j):
+        if not kind(track, j):
             continue
         (ax, ay), (bx, by) = points[j], points[j + 1]
         for cx in range(
@@ -412,15 +436,27 @@ class _Candidate:
     fraction: float
 
 
-def _candidates(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tuple[list[list[_Candidate]], dict[int, str]]:
+def _gaps_crossing(track: Sequence[Fix], stop: StopPoint, segments: Sequence[int]) -> list[int]:
+    return [j for j in segments if _approach(track, j, stop, 0.0).distance <= PASSAGE_RADIUS_M]
+
+
+def _candidates(
+    track: Sequence[Fix], stops: Sequence[StopPoint]
+) -> tuple[list[list[_Candidate]], list[list[int]], dict[int, str]]:
     """Each stop's candidate passages, one per visit the departure (arrival)
-    rules time, within MAX_PLAUSIBLE_DELAY_SEC of its schedule; and, for a
-    stop with none, why: ``no_visit``, ``unseen`` (no visit shows the bus
-    leaving, or arriving) or ``implausible``."""
+    rules time, within MAX_PLAUSIBLE_DELAY_SEC of its schedule; the gaps
+    between fixes too long to time that cross it; and, for a stop with no
+    candidate, why: ``gap`` (the track comes near it only across such a gap),
+    ``no_visit``, ``unseen`` (no visit shows the bus leaving, or arriving) or
+    ``implausible``. ``gap`` keeps sparse sampling apart from a track that
+    never came near the stop."""
     out: list[list[_Candidate]] = []
+    crossings: list[list[int]] = []
     why: dict[int, str] = {}
     near = _segments_near(track, stops)
+    gaps = _segments_near(track, stops, _gap)
     for i, stop in enumerate(stops):
+        crossings.append(_gaps_crossing(track, stop, gaps[i]))
         visits = _visits(track, stop, near[i])
         timed = [p for v in visits if (p := (_arrival if stop.final else _departure)(track, v, stop)) is not None]
         plausible = [
@@ -429,9 +465,14 @@ def _candidates(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tuple[list[
             if abs(_seconds(stop.scheduled, at)) <= MAX_PLAUSIBLE_DELAY_SEC
         ]
         out.append(plausible)
-        if not plausible:
-            why[stop.stop_sequence] = "implausible" if timed else ("unseen" if visits else "no_visit")
-    return out, why
+        if timed:
+            if not plausible:
+                why[stop.stop_sequence] = "implausible"
+        elif visits:
+            why[stop.stop_sequence] = "unseen"
+        else:
+            why[stop.stop_sequence] = "gap" if crossings[i] else "no_visit"
+    return out, crossings, why
 
 
 def _after(
@@ -451,8 +492,8 @@ def _after(
 def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tuple[dict[int, datetime], dict[int, str]]:
     """The observed passage of each of *stops* (in stop_sequence order) that
     the time-ordered *track* shows, by stop_sequence, and why each other stop
-    has none (see :func:`_candidates`; ``out_of_order`` for a stop whose
-    candidates no consistent sequence takes).
+    has none (see :func:`_candidates`, and :func:`_unaligned_why` for a stop
+    whose candidates the sequence leaves out).
 
     At most one candidate is taken per stop, with instants increasing along
     stop_sequence and the delay moving by at most MAX_DELAY_CHANGE_SEC plus
@@ -463,7 +504,7 @@ def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tupl
     forfeit the stops between."""
     if len(track) < 2:
         return {}, {stop.stop_sequence: "no_visit" for stop in stops}
-    candidates, why = _candidates(track, stops)
+    candidates, crossings, why = _candidates(track, stops)
     flat = [c for per_stop in candidates for c in per_stop]
     # (stops taken, cost, previous index in flat or -1, this stop's instant)
     best: list[tuple[int, float, int, datetime]] = []
@@ -474,7 +515,7 @@ def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tupl
             prev = flat[p]
             if prev.stop >= c.stop:
                 continue
-            taken, cost, _before, prev_at = best[p]
+            length, cost, _before, prev_at = best[p]
             at = _after(track, stop, c, prev, prev_at)
             if at is None:
                 continue
@@ -482,19 +523,47 @@ def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tupl
             stretch = _seconds(stops[prev.stop].scheduled, stop.scheduled)
             if change > MAX_DELAY_CHANGE_SEC + DELAY_DRIFT_SHARE * abs(stretch):
                 continue
-            option = (taken + 1, cost + change, p, at)
+            option = (length + 1, cost + change, p, at)
             if (option[0], -option[1]) > (choice[0], -choice[1]):
                 choice = option
         best.append(choice)
-    found: dict[int, datetime] = {}
+    taken: dict[int, datetime] = {}
     end = max(range(len(flat)), key=lambda k: (best[k][0], -best[k][1]), default=-1)
     while end >= 0:
-        found[stops[flat[end].stop].stop_sequence] = best[end][3]
+        taken[flat[end].stop] = best[end][3]
         end = best[end][2]
-    for stop in stops:
-        if stop.stop_sequence not in found and stop.stop_sequence not in why:
-            why[stop.stop_sequence] = "out_of_order"
-    return found, why
+    for i, stop in enumerate(stops):
+        if i not in taken and stop.stop_sequence not in why:
+            why[stop.stop_sequence] = _unaligned_why(track, candidates[i], crossings[i], i, taken)
+    return {stops[i].stop_sequence: at for i, at in sorted(taken.items())}, why
+
+
+def _unaligned_why(
+    track: Sequence[Fix],
+    candidates: Sequence[_Candidate],
+    crossings: Sequence[int],
+    i: int,
+    taken: Mapping[int, datetime],
+) -> str:
+    """Why the alignment took none of stop *i*'s *candidates*, given *taken*,
+    the instants of the stops it took, by index. Each reason asks what lies
+    in time between the taken stops either side. ``gap`` when one of the
+    stop's *crossings* does: the bus passed it there, unseen, and the
+    candidates are other visits. ``delay_jump`` when a candidate does, so
+    only the delay bound kept it out: a longest sequence would otherwise
+    have taken it. ``out_of_order`` when every candidate falls before a
+    taken stop it must follow or after one it must precede."""
+    before = max((at for k, at in taken.items() if k < i), default=None)
+    after = min((at for k, at in taken.items() if k > i), default=None)
+
+    def between(start: datetime, end: datetime) -> bool:
+        return (before is None or end > before) and (after is None or start < after)
+
+    if any(between(track[j].at, track[j + 1].at) for j in crossings):
+        return "gap"
+    if any(between(c.at, c.at) for c in candidates):
+        return "delay_jump"
+    return "out_of_order"
 
 
 def passages(track: Sequence[Fix], stops: Sequence[StopPoint]) -> dict[int, datetime]:
@@ -859,6 +928,35 @@ def _grouped(events: Sequence[Event], key: Callable[[Event], Any]) -> list[tuple
     return [(k, _stats(groups[k])) for k in sorted(groups)]
 
 
+def on_time_class(delay_sec: float) -> str:
+    """Which of ON_TIME_CLASSES *delay_sec* falls in under ON_TIME_WINDOW,
+    its bounds on time as the app counts them."""
+    early, late = ON_TIME_WINDOW
+    if early is not None and delay_sec < -early:
+        return "early"
+    return "late" if delay_sec > late else "on_time"
+
+
+def on_time_agreement(events: Sequence[Event]) -> dict[str, Any]:
+    """How the stop events split into ON_TIME_CLASSES by their kept delay and
+    by their observed one, in percent, and how many of each kept class fell
+    in each observed one. Each direction is shown apart, since a bias moves
+    events into on time from one side as it moves them out on the other."""
+    counts = Counter((on_time_class(e.predicted_delay_sec), on_time_class(e.observed_delay_sec)) for e in events)
+    n = len(events)
+
+    def pct(count: int) -> float | None:
+        return round(100 * count / n, 1) if n else None
+
+    return {
+        "n": n,
+        "kept_pct": {c: pct(sum(v for (k, _o), v in counts.items() if k == c)) for c in ON_TIME_CLASSES},
+        "observed_pct": {c: pct(sum(v for (_k, o), v in counts.items() if o == c)) for c in ON_TIME_CLASSES},
+        "agreement_pct": pct(sum(v for (k, o), v in counts.items() if k == o)),
+        "kept_to_observed": {k: {o: counts[(k, o)] for o in ON_TIME_CLASSES} for k in ON_TIME_CLASSES},
+    }
+
+
 def figures(events: Sequence[Event]) -> dict[str, Any]:
     def lead_range(start: int) -> dict[str, int | None]:
         return {
@@ -876,6 +974,7 @@ def figures(events: Sequence[Event]) -> dict[str, Any]:
             {"hour": k, **s} for k, s in _grouped(events, lambda e: service_day_offset(e.scheduled_sec) // 3600)
         ],
         "by_timepoint": [{"timepoint": k, **s} for k, s in _grouped(events, timepoint)],
+        "on_time": on_time_agreement(events),
     }
 
 
@@ -978,9 +1077,11 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
         "trip_without_track",
         "stop_without_geometry",
         "no_passage",
+        "no_passage_gap",
         "no_passage_no_visit",
         "no_passage_unseen",
         "no_passage_implausible",
+        "no_passage_delay_jump",
         "no_passage_out_of_order",
         "kept_after_passage",
         "withdrawn",
@@ -1002,6 +1103,8 @@ def validate(agency_id: int, first: date, last: date, root: Path) -> dict[str, A
             "track_split_gap_sec": TRACK_SPLIT_GAP_SEC,
             "lead_width_sec": LEAD_WIDTH_SEC,
             "lead_cap_sec": LEAD_CAP_SEC,
+            "on_time_early_tolerance_sec": ON_TIME_WINDOW[0],
+            "on_time_late_tolerance_sec": ON_TIME_WINDOW[1],
         },
         "coverage": {k: coverage[k] for k in coverage_keys},
         "tracks": dict(sorted(track_stats.items())),
@@ -1042,6 +1145,26 @@ def markdown(summary: dict[str, Any]) -> str:
         lines.append(row(f"lead [{lo}, {hi}) s", g))
     lines += [row(f"hour {g['hour']}", g) for g in f["by_hour"]]
     lines += [row(f"timepoint {g['timepoint']}", g) for g in f["by_timepoint"]]
+    on_time = f["on_time"]
+    thresholds = summary["thresholds"]
+    early, late = thresholds["on_time_early_tolerance_sec"], thresholds["on_time_late_tolerance_sec"]
+    window = f"no more than {late} s late" + ("" if early is None else f" and no more than {early} s early")
+    lines += [
+        "",
+        f"On time = {window}. Each measured stop event classed by its kept delay and by its observed one; "
+        f"the same class for both: {on_time['agreement_pct']}%.",
+        "",
+        "| class | kept % | observed % |",
+        "|---|---|---|",
+        *(f"| {k} | {on_time['kept_pct'][k]} | {on_time['observed_pct'][k]} |" for k in ON_TIME_CLASSES),
+        "",
+        "| kept \\ observed | " + " | ".join(ON_TIME_CLASSES) + " |",
+        "|---|" + "---|" * len(ON_TIME_CLASSES),
+        *(
+            f"| {k} | " + " | ".join(str(on_time["kept_to_observed"][k][o]) for o in ON_TIME_CLASSES) + " |"
+            for k in ON_TIME_CLASSES
+        ),
+    ]
     return "\n".join(lines) + "\n"
 
 
