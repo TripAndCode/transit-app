@@ -335,6 +335,26 @@ export type DefinitionMeta = {
    *  live scan, and absent from a definition saved before the stamp carried
    *  them. */
   pre_floor_methods?: PreFloorMethod[] | null;
+  /** The newest prediction validation recorded for each listed agency,
+   *  whatever the request's dates; null when none is recorded, and absent
+   *  from a definition saved before the stamp carried them. */
+  prediction_validations?: PredictionValidation[] | null;
+};
+
+/** An agency's feed's kept delays held against the passages its vehicles
+ *  were observed making on the service dates `from_date` to `to_date`:
+ *  `on_time_offset_pt` is how many points the on-time rate from the kept
+ *  delays stood above the one from the observed delays, negative when below,
+ *  unrounded, under the window the tolerances name (`early_tolerance_sec`
+ *  null: any early departure). See pipeline/reports/definition.py's
+ *  PredictionValidation. */
+export type PredictionValidation = {
+  agency_id: number;
+  from_date: string;
+  to_date: string;
+  early_tolerance_sec: number | null;
+  late_tolerance_sec: number;
+  on_time_offset_pt: number;
 };
 
 /** Dates of the period before an agency's retention floor, whose aggregates

@@ -1,6 +1,13 @@
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import type { DefinitionMeta, FeedQuality, PreFloorMethod, SourceMix, TimetableVersion } from "../api/types";
+import type {
+  DefinitionMeta,
+  FeedQuality,
+  PredictionValidation,
+  PreFloorMethod,
+  SourceMix,
+  TimetableVersion,
+} from "../api/types";
 import { PRESET_NAMES } from "../api/onTimeDefault";
 import { useCapabilityTierOf, type TierState } from "../api/useCapabilityTier";
 import { toJstISO } from "../api/scope";
@@ -27,7 +34,9 @@ type BlockProps = Props & {
  *  the method version, the day the aggregates were built, the timetables
  *  in force, where each day's observations came from, the period's
  *  completeness and clamp share, and the method of any of its dates before a
- *  retention floor that was frozen under another. A reader comparing two agencies or two exports can open it to see
+ *  retention floor that was frozen under another. How far the feed's
+ *  predictions moved the on-time rate, where a validation measured it, follows
+ *  the value basis. A reader comparing two agencies or two exports can open it to see
  *  they share a definition. Every value comes from the API response's
  *  `definition` field (pipeline/reports/definition.py is the source of
  *  truth); an identifier this build has no words for is shown as the API
@@ -53,6 +62,7 @@ export function DefinitionMetaBlock({ definition, agencyNames, tiers }: BlockPro
     <details data-testid="definition-meta" className="definition-meta" style={{ margin: "2px 0 14px" }}>
       <summary>{t("definitionMeta.summary")}</summary>
       <p>{sentences.join(t("definitionMeta.sentence_separator"))}</p>
+      <ValidationLines definition={definition} agencyNames={agencyNames} />
       <p>{methodSentence(definition, t)}</p>
       {definition.timetable_versions != null && definition.timetable_versions.length > 0 && (
         <Timetables versions={definition.timetable_versions} agencyNames={agencyNames} />
@@ -74,6 +84,53 @@ export function DefinitionMetaBlock({ definition, agencyNames, tiers }: BlockPro
       <PreFloorLines definition={definition} agencyNames={agencyNames} />
     </details>
   );
+}
+
+/** The newest validation of each agency's predicted delays against its
+ *  vehicles' observed passages, right after the value basis it qualifies:
+ *  how far the on-time rate from the predictions stood from the one from the
+ *  observed passages, over the validation's own dates and window, which need
+ *  not be the figures'. One sentence for a stamp of one agency, and a list
+ *  under each agency's name for a stamp that spans several. Nothing when none
+ *  is recorded. The printed stamp says the same
+ *  (pipeline/reports/definition.py's _validation_text). */
+function ValidationLines({ definition, agencyNames }: Props & { agencyNames?: ReadonlyMap<number, string> }) {
+  const { t } = useTranslation();
+  const checks = definition.prediction_validations ?? [];
+  if (checks.length === 0) return null;
+  if (stampAgencies(definition).size <= 1) {
+    return <p>{t("definitionMeta.validation", { check: validationPart(checks[0], t) })}</p>;
+  }
+  return (
+    <>
+      <p>{t("definitionMeta.validation_heading")}</p>
+      <ul>
+        {checks.map((check) => (
+          <li key={check.agency_id}>
+            {t("definitionMeta.validation_agency", {
+              agency: agencyNames?.get(check.agency_id) ?? String(check.agency_id),
+              check: validationPart(check, t),
+            })}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+function validationPart(check: PredictionValidation, t: TFunction): string {
+  const late = formatDuration(check.late_tolerance_sec);
+  const onTime =
+    check.early_tolerance_sec == null
+      ? t("definitionMeta.validation_window_late", { late })
+      : t("definitionMeta.validation_window_late_early", { late, early: formatDuration(check.early_tolerance_sec) });
+  const values = { range: formatDateRange(check.from_date, check.to_date), window: onTime };
+  // The direction follows the offset as printed, so one that rounds to 0.0 reads as equal.
+  const points = fixedTenth(Math.abs(check.on_time_offset_pt));
+  if (Number(points) === 0) return t("definitionMeta.validation_equal", values);
+  return check.on_time_offset_pt > 0
+    ? t("definitionMeta.validation_above", { ...values, points })
+    : t("definitionMeta.validation_below", { ...values, points });
 }
 
 /** The period's dates before a retention floor whose method is not the one
@@ -128,6 +185,7 @@ function stampAgencies(definition: DefinitionMeta): Set<number> {
     definition.source_mix,
     definition.feed_quality,
     definition.pre_floor_methods,
+    definition.prediction_validations,
   ];
   return new Set(parts.flatMap((items) => (items ?? []).map((item) => item.agency_id)));
 }

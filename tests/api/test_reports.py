@@ -4434,3 +4434,78 @@ async def test_each_kept_reason_adds_only_its_own_routes(reports_client):
         assert body["rows_total"] == total, toggles
         assert body["retired_rows"] == 2, toggles
         assert body["zero_delay_rows"] == 1, toggles
+
+
+# The definition stamp's prediction validations: the newest recorded for each
+# agency of the scope, whatever the report's own dates.
+
+
+async def _record_validation(pool, agency_id, from_date, to_date, kept_on_time, observed_on_time):
+    await pool.execute(
+        "INSERT INTO prediction_validations (agency_id, from_date, to_date, report_schema, early_tolerance_sec, "
+        "late_tolerance_sec, stop_events, compared, kept_on_time, observed_on_time) "
+        "VALUES ($1, $2, $3, 2, 60, 300, 1000, 800, $4, $5)",
+        agency_id,
+        date.fromisoformat(from_date),
+        date.fromisoformat(to_date),
+        kept_on_time,
+        observed_on_time,
+    )
+
+
+def _validation(agency_id, from_date, to_date, offset):
+    return {
+        "agency_id": agency_id,
+        "from_date": from_date,
+        "to_date": to_date,
+        "early_tolerance_sec": 60,
+        "late_tolerance_sec": 300,
+        "on_time_offset_pt": offset,
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_reports_stamp_states_its_agencys_newest_validation(reports_client):
+    """The newest ends latest, and of those is the longest; the report's own
+    dates need not fall in it. Another agency's validation is not this
+    report's."""
+    client, agency_id, pool = reports_client
+    other = await _add_agency(pool, "Other")
+    await _record_validation(pool, agency_id, "2026-11-01", "2026-11-07", 700, 600)
+    await _record_validation(pool, agency_id, "2026-11-15", "2026-11-21", 700, 600)
+    await _record_validation(pool, agency_id, "2026-11-13", "2026-11-21", 640, 600)
+    await _record_validation(pool, other, "2026-11-22", "2026-11-28", 700, 600)
+    url = f"/api/{agency_id}/reports/ranking?from=2026-05-18&to=2026-05-18"
+
+    definition = (await client.get(url)).json()["definition"]
+    assert definition["prediction_validations"] == [_validation(agency_id, "2026-11-13", "2026-11-21", 5.0)]
+    assert (
+        "; 予測値の検証=運行日2026-11-13〜2026-11-21で、予測値で求めた定時率は観測した通過時刻で求めたものより"
+        "5.0ポイント高い（定時：定刻から5分以内の遅れと1分以内の早発）; 算出方法の説明="
+    ) in _preamble(await client.get(f"{url}&format=csv"))
+
+
+@pytest.mark.asyncio
+async def test_the_boards_stamp_states_each_listed_agencys_validation(reports_client):
+    """A deleted agency is off the board, and so is its validation; its own
+    scope still reads it."""
+    from pipeline.reports.definition import _read_validations
+
+    client, agency_id, pool = reports_client
+    other = await _add_agency(pool, "Other")
+    await _record_validation(pool, agency_id, "2026-11-13", "2026-11-21", 640, 600)
+    await _record_validation(pool, other, "2026-11-13", "2026-11-21", 600, 640)
+    params = {"from": "2026-05-18", "to": "2026-05-18"}
+    invalidate_network_summary()
+    board = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert board["prediction_validations"] == [
+        _validation(agency_id, "2026-11-13", "2026-11-21", 5.0),
+        _validation(other, "2026-11-13", "2026-11-21", -5.0),
+    ]
+
+    await pool.execute("UPDATE agencies SET deleted_at = now() WHERE agency_id = $1", other)
+    invalidate_network_summary()
+    board = (await client.get("/api/network/summary", params=params)).json()["definition"]
+    assert [check["agency_id"] for check in board["prediction_validations"]] == [agency_id]
+    async with pool.acquire() as conn:
+        assert [check.agency_id for check in await _read_validations(conn, other)] == [other]

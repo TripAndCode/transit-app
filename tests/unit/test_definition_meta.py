@@ -28,6 +28,7 @@ from pipeline.reports.definition import (
     VALUE_BASIS,
     DefinitionMeta,
     FeedQuality,
+    PredictionValidation,
     PreFloorMethod,
     SourceMix,
     TimetableVersion,
@@ -1258,3 +1259,152 @@ async def test_the_board_reads_each_agencys_frozen_spans_apart():
         PreFloorMethod(agency_id=1, from_date=date(2025, 2, 1), to_date=date(2025, 3, 31), method_version="2026.11.15"),
         PreFloorMethod(agency_id=2, from_date=date(2025, 1, 1), to_date=date(2025, 1, 31), method_version=None),
     ]
+
+
+def _checked(*checks) -> DefinitionMeta:
+    return _DATED.model_copy(
+        update={
+            "prediction_validations": [
+                PredictionValidation(
+                    agency_id=agency,
+                    from_date=date(2026, 11, 13),
+                    to_date=date(2026, 11, 21),
+                    early_tolerance_sec=early,
+                    late_tolerance_sec=300,
+                    on_time_offset_pt=offset,
+                )
+                for agency, early, offset in checks
+            ]
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("locale", "line"),
+    [
+        (
+            "ja",
+            "予測値の検証: 運行日2026-11-13〜2026-11-21で、予測値で求めた定時率は観測した通過時刻で求めたものより"
+            "5.1ポイント高い（定時：定刻から5分以内の遅れと1分以内の早発）",
+        ),
+        (
+            "en",
+            "Prediction check: on service days 2026-11-13 to 2026-11-21, the on-time rate from the predictions was "
+            "5.1 points above the one from observed passing times (on time: up to 5 min late and 1 min early)",
+        ),
+    ],
+)
+def test_a_validated_agencys_stamp_says_how_far_its_predictions_moved_the_on_time_rate(locale, line):
+    """The line follows the value basis it qualifies, and names the
+    validation's window, which the report's own definition need not share."""
+    lines = format_stamp_lines(_checked((1, 60, 5.0625)), locale)
+    assert lines[:2] == [_VALUE_BASIS[locale], line]
+    assert lines[2:] == format_stamp_lines(_DATED, locale)[1:]
+
+
+def test_csv_line_states_the_validation_after_the_value_basis_in_one_cell():
+    line = format_definition_csv_line(_checked((1, 60, 5.0625)))
+    assert (
+        "（通過の観測値ではない）; 予測値の検証=運行日2026-11-13〜2026-11-21で、予測値で求めた定時率は"
+        "観測した通過時刻で求めたものより5.1ポイント高い（定時：定刻から5分以内の遅れと1分以内の早発）; "
+        f"算出方法の説明={METHODOLOGY_URLS['ja']}; "
+    ) in line
+    assert "," not in line
+
+
+@pytest.mark.parametrize(
+    ("offset", "ja", "en"),
+    [
+        (-3.24, "より3.2ポイント低い", "was 3.2 points below the one"),
+        (0.04, "で求めたものと同じ", "was equal to the one"),
+        (-0.04, "で求めたものと同じ", "was equal to the one"),
+    ],
+)
+def test_an_offset_below_or_printing_as_zero_is_said_in_words(offset, ja, en):
+    meta = _checked((1, 60, offset))
+    assert ja in format_stamp_lines(meta, "ja")[1]
+    assert en in format_stamp_lines(meta, "en")[1]
+
+
+def test_a_window_open_on_the_early_side_says_any_early_departure_counts():
+    meta = _checked((1, None, 5.0625))
+    assert format_stamp_lines(meta, "ja")[1].endswith("（定時：定刻から5分以内の遅れ（早発を含む））")
+    assert format_stamp_lines(meta, "en")[1].endswith("(on time: up to 5 min late, any early departure)")
+
+
+def test_several_agencies_validations_are_each_named_by_their_agency():
+    line = format_stamp_lines(_checked((1, 60, 5.0625), (2, 60, 7.7)), "en")[1]
+    assert line.startswith("Prediction check: agency 1: on service days 2026-11-13 to 2026-11-21, ")
+    assert "5.1 points above" in line
+    assert "; agency 2: on service days 2026-11-13 to 2026-11-21, " in line
+    assert "7.7 points above" in line
+
+
+def test_a_definition_without_a_validation_states_none():
+    """No validation recorded, and a stamp saved before validations were
+    stamped, read as they always did."""
+    assert format_stamp_lines(_checked(), "en") == format_stamp_lines(_DATED, "en")
+    assert format_definition_csv_line(_checked()) == format_definition_csv_line(_DATED)
+    assert (
+        DefinitionMeta.model_validate(_DATED.model_dump(exclude={"prediction_validations"})).prediction_validations
+        is None
+    )
+
+
+class _ValidationsConn:
+    """A database holding one validation per agency in *rows*, or lacking
+    prediction_validations when *error* is given; every other enrichment reads empty."""
+
+    def __init__(self, rows=(), error=None):
+        self.rows = list(rows)
+        self.error = error
+        self.reads: list[tuple] = []
+
+    def is_in_transaction(self):
+        return False
+
+    async def fetch(self, sql, *args):
+        if sql != definition._VALIDATIONS_SQL:
+            return []
+        self.reads.append(args)
+        if self.error is not None:
+            raise self.error('relation "prediction_validations" does not exist')
+        return self.rows
+
+
+@pytest.mark.asyncio
+async def test_the_offset_is_made_from_the_recorded_counts():
+    rows = [(8, date(2026, 11, 13), date(2026, 11, 21), 60, 300, 850, 670, 620)]
+    assert await definition._read_validations(_ValidationsConn(rows), 8) == [
+        PredictionValidation(
+            agency_id=8,
+            from_date=date(2026, 11, 13),
+            to_date=date(2026, 11, 21),
+            early_tolerance_sec=60,
+            late_tolerance_sec=300,
+            on_time_offset_pt=100 * (670 - 620) / 850,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "conn", [_ValidationsConn(), _ValidationsConn(error=asyncpg.exceptions.UndefinedTableError)], ids=["none", "behind"]
+)
+async def test_no_validation_recorded_or_no_table_reads_as_none(conn):
+    assert await definition._read_validations(conn, 8) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("live", [False, True])
+async def test_every_stamp_reads_its_scopes_validations_whatever_else_it_reads(monkeypatch, live):
+    """A live scan and a caller stating its own feed quality are stamped with
+    the validation too: it is the feed's, not the aggregates'."""
+    monkeypatch.setattr(definition, "clear_all", lambda: None)
+    monkeypatch.setattr(definition, "_seen_builds", definition._UNSEEN)
+    conn = _ValidationsConn([(1, date(2026, 11, 13), date(2026, 11, 21), 60, 300, 100, 60, 50)])
+    schedule = ScheduleDays(date(2026, 5, 1), date(2026, 5, 1), [(1, date(2026, 5, 1), "gtfs_static_20260401")])
+    meta = resolve_definition_meta("on_time", None, None, live=live)
+    stamped = await definition.stamp_build(conn, meta, 1, schedule, read_feed_quality=False)
+    assert conn.reads == [(1,)]
+    assert [(check.agency_id, check.on_time_offset_pt) for check in stamped.prediction_validations] == [(1, 10.0)]

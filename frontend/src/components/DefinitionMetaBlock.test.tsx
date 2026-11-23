@@ -4,7 +4,14 @@ import { renderWithProviders } from "../test/renderWithProviders";
 import i18n from "../i18n";
 import { DefinitionMetaBlock } from "./DefinitionMetaBlock";
 import * as hooks from "../api/hooks";
-import type { DefinitionMeta, FeedQuality, PreFloorMethod, SourceMix, TimetableVersion } from "../api/types";
+import type {
+  DefinitionMeta,
+  FeedQuality,
+  PredictionValidation,
+  PreFloorMethod,
+  SourceMix,
+  TimetableVersion,
+} from "../api/types";
 
 const LEGACY: DefinitionMeta = {
   preset: "legacy_60s",
@@ -474,5 +481,68 @@ describe("DefinitionMetaBlock", () => {
       "Hiroden — Jan 10 – Feb 28, 2025 under method 2026.10.0, Mar 1 – Mar 31, 2025 under a method not recorded",
     );
     expect(items.filter((item) => item?.startsWith("Hiroden — Jan"))).toHaveLength(1);
+  });
+
+  const checked = (offset: number, early: number | null = 60, agencyId = 1): PredictionValidation => ({
+    agency_id: agencyId,
+    from_date: "2026-11-13",
+    to_date: "2026-11-21",
+    early_tolerance_sec: early,
+    late_tolerance_sec: 300,
+    on_time_offset_pt: offset,
+  });
+
+  it("says how far the predictions moved the on-time rate, right after the value basis", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, prediction_validations: [checked(5.0625)] }} />);
+    const paragraphs = [...screen.getByTestId("definition-meta").querySelectorAll("p")].map((p) => p.textContent);
+    expect(paragraphs[1]).toBe(
+      "Prediction check: on service days Nov 13 – Nov 21, 2026, the on-time rate from the predictions was " +
+        "5.1 points above the one from observed passing times (on time: up to 5 min late and 1 min early).",
+    );
+    expect(paragraphs[2]).toMatch(/^Method version 2026\.11\.0/);
+  });
+
+  it("says how far the predictions moved the on-time rate the way a Japanese document does", async () => {
+    await i18n.changeLanguage("ja");
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, prediction_validations: [checked(5.0625)] }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(
+      "予測値の検証：運行日2026年11月13日〜11月21日で、予測値で求めた定時率は観測した通過時刻で求めたものより" +
+        "5.1ポイント高い（定時：定刻から5分以内の遅れと1分以内の早発）。",
+    );
+  });
+
+  it.each([
+    [-3.24, "was 3.2 points below the one"],
+    [0.04, "was equal to the one"],
+    [-0.04, "was equal to the one"],
+  ])("words an offset of %s by its direction as printed", (offset, words) => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, prediction_validations: [checked(offset)] }} />);
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent(words);
+  });
+
+  it("says any early departure counts when the validation's window is open on that side", () => {
+    renderWithProviders(
+      <DefinitionMetaBlock definition={{ ...LEGACY, prediction_validations: [checked(5.0625, null)] }} />,
+    );
+    expect(screen.getByTestId("definition-meta")).toHaveTextContent("(on time: up to 5 min late, any early departure).");
+  });
+
+  it("lists a board's validations under each agency's name", () => {
+    renderWithProviders(
+      <DefinitionMetaBlock
+        definition={{ ...LEGACY, prediction_validations: [checked(5.0625), checked(7.7, 60, 2)] }}
+        agencyNames={new Map([[1, "Hiroden"], [2, "HiroBus"]])}
+      />,
+    );
+    const items = screen.getAllByRole("listitem").map((item) => item.textContent);
+    expect(items).toEqual([
+      expect.stringMatching(/^Hiroden — on service days Nov 13 – Nov 21, 2026, .* 5\.1 points above /),
+      expect.stringMatching(/^HiroBus — on service days Nov 13 – Nov 21, 2026, .* 7\.7 points above /),
+    ]);
+  });
+
+  it("says nothing of a validation when none is recorded", () => {
+    renderWithProviders(<DefinitionMetaBlock definition={{ ...LEGACY, prediction_validations: null }} />);
+    expect(screen.getByTestId("definition-meta")).not.toHaveTextContent("Prediction check");
   });
 });
