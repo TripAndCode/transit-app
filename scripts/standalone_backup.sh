@@ -12,18 +12,18 @@
 #                    completes, and at its path plus /fail when one fails
 #   BACKUP_STORE_BUCKET, with BACKUP_STORE_ENDPOINT and its key pair: upload
 #                    each backup there (scripts/upload_backup.py, run in the
-#                    app image, which reads them from `.env` itself)
+#                    app image). These are read from `.env` alone, the only
+#                    place the upload container takes them from.
 #
 # Run from cron; docs/deploy-standalone.en.md section 6 has the line.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+env_file() { if [ -f .env ]; then sed -n "s/^$1=//p" .env | tail -n 1; fi; }
 setting() {
   local value=${!1:-}
-  if [ -z "$value" ] && [ -f .env ]; then
-    value=$(sed -n "s/^$1=//p" .env | tail -n 1)
-  fi
+  [ -n "$value" ] || value=$(env_file "$1")
   printf '%s' "${value:-$2}"
 }
 
@@ -36,7 +36,7 @@ ch_query() { ch clickhouse-client -q "$1"; }
 backup_root=$(setting BACKUP_DIR "$HOME/transit-backup")
 keep=$(setting BACKUP_KEEP 7)
 ping_url=$(setting BACKUP_PING_URL "")
-bucket=$(setting BACKUP_STORE_BUCKET "")
+bucket=$(env_file BACKUP_STORE_BUCKET)
 case $keep in '' | *[!0-9]* | 0) echo "backup: BACKUP_KEEP must be a positive whole number" >&2; exit 2 ;; esac
 # `.env` is read as text, so a `~` there is not the shell's; a relative path
 # would land inside the checkout.
@@ -65,12 +65,14 @@ report() {
 }
 
 # A backup that failed before both files were written is removed, so pruning
-# never counts it; one that failed only to upload stays.
+# never counts it; one that failed only to upload stays. Only a directory this
+# run made is removed: a second run in the same second finds it taken.
+made=no
 kept=no
 finish() {
   local status=$?
   [ "$status" -eq 0 ] && return
-  if [ "$kept" = no ]; then
+  if [ "$made" = yes ] && [ "$kept" = no ]; then
     rm -rf -- "$dir"
     ch rm -f "$in_ch" >/dev/null 2>&1 || true
   fi
@@ -81,7 +83,9 @@ trap finish EXIT
 
 # The dumps hold every row, so only their owner can read them.
 umask 077
-mkdir -p "$dir"
+mkdir -p "$backup_root"
+mkdir "$dir"
+made=yes
 
 compose exec -T standalone-db pg_dump -U transit -d transit -Fc >"$dir/postgres.dump"
 
@@ -92,14 +96,17 @@ kept=yes
 
 # The upload runs as this user, the only one who can read the backup; on a
 # Linux host the image's own user is another uid.
+uploaded=yes
 if [ -n "$bucket" ]; then
   compose run --rm --no-deps -T -u "$(id -u):$(id -g)" -v "$dir:/backup:ro" app \
-    python scripts/upload_backup.py /backup "$stamp"
+    python scripts/upload_backup.py /backup "$stamp" || uploaded=no
 fi
 
-# Only directories this script names are pruned, newest kept.
+# Only directories this script names are pruned, newest kept. Pruning runs
+# whether or not the upload worked, so a broken upload cannot fill the disk.
 find "$backup_root" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z' |
   sort -r | tail -n +"$((keep + 1))" | while IFS= read -r old; do rm -rf -- "$old"; done
+[ "$uploaded" = yes ] || exit 1
 
 echo "backup: $dir"
 report ok "backup $stamp"

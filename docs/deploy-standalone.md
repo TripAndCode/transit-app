@@ -88,7 +88,7 @@ docker compose --profile standalone exec app python gtfs_pipeline.py add_agency 
 
 cron の `PATH` には Docker が入っていないことがあるので、`PATH=` には `command -v docker` が表示するディレクトリを含めてください。
 
-スクリプトは次の設定を環境変数から、なければ `.env` から読みます。`.env` では値を引用符で囲まずに書きます。
+スクリプトは `BACKUP_DIR`、`BACKUP_KEEP`、`BACKUP_PING_URL` を環境変数から、なければ `.env` から読みます。`BACKUP_STORE_*` は `.env` 自体に書いてください。アップロードは `.env` だけを読むコンテナの中で実行されます。`.env` では値を引用符で囲まずに書きます。
 
 | 設定 | 役割 |
 | --- | --- |
@@ -96,6 +96,8 @@ cron の `PATH` には Docker が入っていないことがあるので、`PATH
 | `BACKUP_KEEP` | このマシンに残すバックアップの数。既定は 7。 |
 | `BACKUP_PING_URL` | 期間 1 日、猶予 2 時間の [healthchecks.io](https://healthchecks.io) 形式のチェック。バックアップが終わると ping し、失敗すると `<URL>/fail` に ping するので、失敗した夜や実行されなかった夜は通知されます。 |
 | `BACKUP_STORE_ENDPOINT`、`BACKUP_STORE_BUCKET`、`BACKUP_STORE_ACCESS_KEY_ID`、`BACKUP_STORE_SECRET_ACCESS_KEY` | 各バックアップを Cloudflare R2 などの S3 互換ストレージの `<BACKUP_STORE_PREFIX>/<時刻>/` にもアップロードします（プレフィックスの既定は `backups`）。キーにはそのバケットへの書き込み権限が要ります。古いバックアップは、バケット自身のライフサイクルルールで削除するよう設定してください。アップロードに失敗してもローカルのコピーは残り、`/fail` に ping します。 |
+
+ClickHouse はバックアップをいったん自身のボリュームに書き、スクリプトがそれを外へコピーします。そのため実行中は、そのディスクにバックアップ 1 つ分の空きが要ります。
 
 各バックアップは 2 つのデータベースの全体を含むので、履歴とともに大きくなります。アーカイブのボリューム（生のポーリング結果）は含みません。取り込み済みの内容は ClickHouse が持っています。アーカイブも残したいとき、またはマシン全体をコピーするときは、スタックを止めて 3 つのボリュームをコピーします。
 
@@ -122,6 +124,14 @@ docker compose --profile standalone up -d app poller
 ```
 
 スクリプトは 2 つのデータベースだけを起動し、両方を復元します。続く `up` がスキーマ更新のステップを実行してバックアップより新しいマイグレーションを適用し、アプリとポーラーを起動します。バケットから復元するときは、まず `<プレフィックス>/<時刻>/` のフォルダ 1 つを、ストレージ事業者のツールでローカルのディレクトリにダウンロードしてください。バックアップから復元までの間のポーリング結果は欠けます。
+
+復元が途中で失敗すると Postgres にはすでにバックアップが入っていることがあり、スクリプトは再実行を拒否します。アーカイブは残したまま 2 つのデータベースのボリュームを削除し、もう一度実行してください。
+
+```bash
+P=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' $(docker compose --profile standalone ps -a -q standalone-db))
+docker compose --profile standalone down
+docker volume rm "${P}_standalone_pgdata" "${P}_standalone_chdata"
+```
 
 ## 7. アップグレード
 

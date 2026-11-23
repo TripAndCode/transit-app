@@ -41,7 +41,15 @@ fi
 compose exec -T standalone-db pg_restore -U transit -d transit --exit-on-error --single-transaction <"$dir/postgres.dump"
 
 in_ch="/var/lib/clickhouse/backups/restore-$(date -u +%Y%m%dT%H%M%SZ).zip"
-trap 'ch rm -f "$in_ch" >/dev/null 2>&1 || true' EXIT
+# Postgres is restored by now, so a retry would be refused.
+finish() {
+  local status=$?
+  ch rm -f "$in_ch" >/dev/null 2>&1 || true
+  [ "$status" -eq 0 ] ||
+    echo "restore: failed after Postgres was restored; remove both database volumes before trying again" \
+      "(docs/deploy-standalone.en.md, section 6)" >&2
+}
+trap finish EXIT
 # shellcheck disable=SC2016
 ch sh -c 'mkdir -p "$(dirname "$0")" && cat >"$0"' "$in_ch" <"$dir/clickhouse.zip"
 ch_query "RESTORE DATABASE transit FROM File('$(basename "$in_ch")')" >/dev/null

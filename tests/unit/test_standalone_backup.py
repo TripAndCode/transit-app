@@ -55,6 +55,14 @@ def stack(tmp_path):
         echo "${{@: -1}}" >> "{pings}"
         """,
     )
+    _executable(
+        bin_dir / "date",
+        """\
+        #!/usr/bin/env bash
+        [ -n "$FIXED_STAMP" ] && { echo "$FIXED_STAMP"; exit 0; }
+        exec /bin/date "$@"
+        """,
+    )
     backups = tmp_path / "backups"
     backups.mkdir()
 
@@ -105,13 +113,35 @@ def test_a_failed_dump_keeps_nothing_and_pings_fail_with_the_query_kept(stack):
     assert "hc.example" not in result.stdout + result.stderr
 
 
-def test_an_upload_runs_only_with_a_bucket_and_a_failed_one_keeps_the_local_copy(stack):
-    result = stack(env_file="BACKUP_STORE_BUCKET=b\nBACKUP_PING_URL=https://hc.example/p\n", FAIL_UPLOAD="1")
+def test_a_failed_upload_keeps_the_local_copy_and_still_prunes(stack):
+    for name in ("20250101T000000Z", "20250102T000000Z"):
+        (stack.backups / name).mkdir()
+    result = stack(
+        env_file="BACKUP_STORE_BUCKET=b\nBACKUP_PING_URL=https://hc.example/p\n", BACKUP_KEEP="1", FAIL_UPLOAD="1"
+    )
     assert result.returncode != 0
-    assert len(_stamps(stack.backups)) == 1
+    [stamp] = _stamps(stack.backups)
+    assert stamp > "20250102T000000Z"
     [upload] = [call for call in stack.calls() if " run " in call]
     assert "scripts/upload_backup.py" in upload
     assert f" -u {os.getuid()}:{os.getgid()} " in upload
+    assert stack.pings() == ["https://hc.example/p/fail"]
+
+
+def test_a_bucket_set_only_in_the_environment_uploads_nothing(stack):
+    result = stack(BACKUP_STORE_BUCKET="b")
+    assert result.returncode == 0, result.stderr
+    assert not any(" run " in call for call in stack.calls())
+
+
+def test_a_run_whose_directory_is_taken_fails_without_touching_it(stack):
+    taken = stack.backups / "20260101T031500Z"
+    taken.mkdir()
+    (taken / "postgres.dump").write_bytes(b"earlier")
+    result = stack(env_file="BACKUP_PING_URL=https://hc.example/p\n", FIXED_STAMP="20260101T031500Z")
+    assert result.returncode != 0
+    assert (taken / "postgres.dump").read_bytes() == b"earlier"
+    assert not any("pg_dump" in call or " rm " in call for call in stack.calls())
     assert stack.pings() == ["https://hc.example/p/fail"]
 
 

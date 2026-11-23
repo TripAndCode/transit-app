@@ -88,7 +88,7 @@ Check progress with `docker compose --profile standalone logs -f poller`.
 
 cron's own `PATH` can lack Docker, so the `PATH=` there must include the directory that `command -v docker` prints.
 
-The script reads these settings from the environment, else from `.env`. Write the values there without quotes.
+The script reads `BACKUP_DIR`, `BACKUP_KEEP` and `BACKUP_PING_URL` from the environment, else from `.env`. The `BACKUP_STORE_*` settings go in `.env` itself, because the upload runs in a container that reads only that file. Write the values there without quotes.
 
 | Setting | What it does |
 | --- | --- |
@@ -96,6 +96,8 @@ The script reads these settings from the environment, else from `.env`. Write th
 | `BACKUP_KEEP` | How many backups stay on this machine. Default 7. |
 | `BACKUP_PING_URL` | A [healthchecks.io](https://healthchecks.io)-style check with a period of 1 day and a grace time of 2 hours. It is pinged when a backup completes, and at `<url>/fail` when one fails, so a failed or missed night alerts. |
 | `BACKUP_STORE_ENDPOINT`, `BACKUP_STORE_BUCKET`, `BACKUP_STORE_ACCESS_KEY_ID`, `BACKUP_STORE_SECRET_ACCESS_KEY` | Also upload each backup to S3-compatible storage, such as Cloudflare R2, under `<BACKUP_STORE_PREFIX>/<time>/` (prefix default `backups`). The key needs write access to that bucket. Set the bucket's own lifecycle rule to delete old backups there. A failed upload keeps the local copy and pings `/fail`. |
+
+ClickHouse writes its backup onto its own volume before the script copies it out, so while it runs that disk needs room for one more backup.
 
 Each backup holds the whole of both databases, so it grows with the history. It leaves out the archive volume (the raw polls), whose content ClickHouse already holds once ingested. To keep the archive too, or to copy the whole machine, stop the stack and copy its three volumes:
 
@@ -122,6 +124,14 @@ docker compose --profile standalone up -d app poller
 ```
 
 The script starts only the two databases and restores both. `up` then runs the schema step, which applies any migration newer than the backup, and starts the app and poller. To restore from the bucket, first download one `<prefix>/<time>/` folder into a local directory with your storage provider's tools. Polls between the backup and the restore are missing.
+
+If a restore fails partway, Postgres may already hold the backup, and the script then refuses to run again. Remove the two database volumes, which leaves the archive, and run it again:
+
+```bash
+P=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' $(docker compose --profile standalone ps -a -q standalone-db))
+docker compose --profile standalone down
+docker volume rm "${P}_standalone_pgdata" "${P}_standalone_chdata"
+```
 
 ## 7. Upgrade
 
