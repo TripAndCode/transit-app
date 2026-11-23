@@ -50,7 +50,8 @@ def test_rolling_back_drops_the_columns_and_migrating_up_restores_them(apply_sch
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         assert _columns(conn) == _COLUMNS
-        migrate.migrate_down(below, conn)
+        # Every later migration's down runs first, and one of those may lose data.
+        migrate.migrate_down(below, conn, force_destructive=True)
         assert _columns(conn) == set()
 
         migrate.migrate_up(conn)
