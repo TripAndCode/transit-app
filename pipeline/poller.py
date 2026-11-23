@@ -29,6 +29,10 @@ On a worker thread, so polls keep their pace, the steps
 - the first cycle of each JST day promotes and analyzes, so yesterday reaches
   history at JST midnight rather than at the UTC rollover nine hours later;
 - a stage that failed runs again on its own, within its own budget.
+With ``$POLLER_PING_URL`` set, each settled step reports to that
+healthchecks.io-style check as `pipeline.poller_schedule.heartbeat` decides, so
+a step that stops running, a stage that spends its retries, or an ingest
+skipped for want of a timetable, alerts.
 Once an hour another thread re-probes the RT field-coverage verdicts that are
 due (`pipeline.rt_coverage_reprobe`, which waits for each agency's service
 hours).
@@ -61,6 +65,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import urllib.request
 from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -69,6 +74,8 @@ from datetime import date, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
+from urllib.parse import urlsplit, urlunsplit
 
 from pipeline import poller_schedule as schedule
 from pipeline.collector_push import MAX_POLL_BYTES, UnknownAgency, ingest_pushed_poll, member_name
@@ -86,6 +93,8 @@ FETCH_WORKERS = 4
 # this long, rather than holding the cycle.
 POLL_CH_TIMEOUT_SEC = 15
 REPROBE_INTERVAL_SEC = 60 * 60
+HEARTBEAT_ENV = "POLLER_PING_URL"
+HEARTBEAT_TIMEOUT_SEC = 10
 INGESTED_MARKER = ".ingested-through"
 # Beside the marker: the day a transient failure holds it at, how many UTC
 # days' steps have held it there, and the last such day.
@@ -101,11 +110,15 @@ _ENABLED_AGENCIES_SQL = (
     "WHERE deleted_at IS NULL AND feed_url IS NOT NULL AND feed_url <> '' ORDER BY agency_id"
 )
 
-# Each agency's stages to run, or, returned, the stages that failed.
+# Each agency's stages to run.
 Plan = dict[int, set[str]]
+# Each agency's stages that did not succeed, each FAILED or SKIPPED.
+Outcomes = dict[int, dict[str, str]]
 Fetcher = Callable[[str], bytes]
 StoresFactory = Callable[[], AbstractContextManager[Stores]]
-DailyStep = Callable[[Path, Plan], Plan]
+# Takes the outcome `pipeline.poller_schedule.heartbeat` decided and a body.
+Heartbeat = Callable[[str, str], None]
+DailyStep = Callable[[Path, Plan], Outcomes]
 
 OK, SKIPPED, FAILED = "ok", "skipped", "failed"
 
@@ -114,6 +127,40 @@ def configured_interval_sec() -> float:
     """``$POLL_INTERVAL_SEC``, else ``DEFAULT_INTERVAL_SEC``: the pace of the
     poller and of ``add_agency``'s probe of a new feed."""
     return float(os.environ.get("POLL_INTERVAL_SEC") or DEFAULT_INTERVAL_SEC)
+
+
+def send_heartbeat(url: str, outcome: str, body: str) -> None:
+    """POST *body* to the check: its bare URL for ``"ok"``, its path plus
+    ``/fail`` for ``"fail"``, keeping any query. Best effort, and the URL is
+    never logged: its path is the check's credential."""
+    parts = urlsplit(url)
+    path = parts.path.rstrip("/") + ("/fail" if outcome == "fail" else "")
+    request = urllib.request.Request(urlunsplit(parts._replace(path=path)), data=body.encode(), method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=HEARTBEAT_TIMEOUT_SEC):
+            pass
+    except HTTPError as exc:
+        exc.close()
+        logger.warning("poller: the heartbeat check answered HTTP %s", exc.code)
+    except Exception as exc:
+        logger.warning("poller: the heartbeat could not be sent: %s", type(exc).__name__)
+
+
+def configured_heartbeat() -> Heartbeat | None:
+    """``$POLLER_PING_URL`` as a heartbeat, or None when it is unset or not an
+    http(s) URL."""
+    url = os.environ.get(HEARTBEAT_ENV, "").strip()
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        parts = None
+    if parts is None or parts.scheme not in ("https", "http") or not parts.netloc:
+        logger.error("poller: $%s is not an http(s) URL; no heartbeat is sent", HEARTBEAT_ENV)
+        return None
+    logger.info("poller: each settled step reports to $%s", HEARTBEAT_ENV)
+    return partial(send_heartbeat, url)
 
 
 def fetch_feed(url: str) -> bytes:
@@ -318,11 +365,11 @@ def _ingest_stage(conn, ch_client, archive_root: Path, agency_id: int, *, utc_to
         return FAILED
 
 
-def run_daily_step(archive_root: Path, plan: Plan) -> Plan:
+def run_daily_step(archive_root: Path, plan: Plan) -> Outcomes:
     """Run each agency's planned stages (promote, ingest, analyze, in that
     order) under the ingest/analyze lock the cron sweep takes, then check the
-    analyzed agencies' aggregates are fresh. Returns the stages that failed;
-    every planned one when the lock is busy."""
+    analyzed agencies' aggregates are fresh. Returns the stages that failed or
+    were skipped; every planned one failed when the lock is busy."""
     from pipeline import runs as pipeline_runs
     from pipeline.analyze import analyze
     from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC
@@ -340,7 +387,7 @@ def run_daily_step(archive_root: Path, plan: Plan) -> Plan:
         if not got_lock:
             logger.warning("poller: another ingest/analyze run holds the lock; the daily step waits")
             pipeline_runs.start_run(conn, "ingest", status="skipped", lock_wait_ms=lock_wait_ms)
-            return everything
+            return {aid: dict.fromkeys(stages, FAILED) for aid, stages in everything.items() if stages}
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT agency_id FROM agencies WHERE deleted_at IS NULL AND agency_id = ANY(%s) ORDER BY agency_id",
@@ -349,7 +396,7 @@ def run_daily_step(archive_root: Path, plan: Plan) -> Plan:
             agency_ids = [row[0] for row in cur.fetchall()]
         ch_client = stores.ch
         db_url = stores.db_url
-        failed: Plan = {}
+        outcomes: Outcomes = {}
         analyzed = []
         for aid in agency_ids:
             for stage in _STAGE_ORDER:
@@ -362,8 +409,8 @@ def run_daily_step(archive_root: Path, plan: Plan) -> Plan:
                 else:
                     outcome = _stage(conn, stage, aid, partial(analyze, aid, conn, ch_client, db_url=db_url))
                     analyzed.append(aid)
-                if outcome == FAILED:
-                    failed.setdefault(aid, set()).add(stage)
+                if outcome != OK:
+                    outcomes.setdefault(aid, {})[stage] = outcome
         if analyzed:
             try:
                 stale = check_agg_freshness(conn, ch_client, analyzed)
@@ -371,7 +418,7 @@ def run_daily_step(archive_root: Path, plan: Plan) -> Plan:
                     logger.error("poller: aggregates still stale after analyze: %s", [s.agency_id for s in stale])
             except Exception:
                 logger.exception("poller: the aggregate freshness check failed")
-        return failed
+        return outcomes
 
 
 def run_reprobe() -> None:
@@ -411,6 +458,7 @@ class Poller:
         stores: StoresFactory = open_poll_stores,
         daily_step: DailyStep = run_daily_step,
         reprobe: Callable[[], None] = run_reprobe,
+        heartbeat: Heartbeat | None = None,
         fetch_workers: int = FETCH_WORKERS,
         fetch_deadline_sec: float = FETCH_DEADLINE_SEC,
         stop: threading.Event | None = None,
@@ -424,6 +472,7 @@ class Poller:
         self._stores = stores
         self._daily_step = daily_step
         self._reprobe = reprobe
+        self._heartbeat = heartbeat
         self._fetch_workers = fetch_workers
         self._fetch_deadline_sec = fetch_deadline_sec
         self._pool: ThreadPoolExecutor | None = None
@@ -613,19 +662,23 @@ class Poller:
                 failed.add((aid, "pack"))
         work = {aid: stages - {"pack"} for aid, stages in plan.items()}
         try:
-            step_failed = self._daily_step(self.archive_root, work)
+            outcomes = self._daily_step(self.archive_root, work)
         except Exception:
             logger.exception("poller: daily step failed")
-            step_failed = work
-        failed |= {(aid, stage) for aid, stages in step_failed.items() for stage in stages}
+            outcomes = {aid: dict.fromkeys(stages, FAILED) for aid, stages in work.items()}
+        failed |= {(aid, stage) for aid, staged in outcomes.items() for stage, out in staged.items() if out == FAILED}
+        skipped = {(aid, stage) for aid, staged in outcomes.items() for stage, out in staged.items() if out == SKIPPED}
         with self._lock:
-            before = set(schedule.exhausted(self._schedule))
-            self._schedule = schedule.settle(self._clock(), self._schedule, keys, failed)
-            newly = sorted(set(schedule.exhausted(self._schedule)) - before)
+            before = self._schedule
+            self._schedule = after = schedule.settle(self._clock(), before, keys, failed, skipped)
+        newly = schedule.newly_exhausted(before, after)
         if failed:
             logger.warning("poller: failed stages %s are retried in %s", sorted(failed), schedule.RETRY_AFTER)
         if newly:
-            logger.error("poller: %s used every retry; they wait for their next day", newly)
+            logger.error("poller: %s are not retried before their next day", newly)
+        outcome = schedule.heartbeat(before, after)
+        if outcome is not None and self._heartbeat is not None:
+            self._heartbeat(outcome, f"not retried before their next day: {newly}" if newly else "")
 
     def maybe_start_reprobe(self) -> bool:
         if self._reprobe_thread is not None and self._reprobe_thread.is_alive():

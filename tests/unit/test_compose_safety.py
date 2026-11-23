@@ -18,6 +18,7 @@ parsing the whole document would be.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -70,6 +71,36 @@ def test_env_example_has_no_bare_ipv4_literal():
         if ipv4.search(code_part):
             offending.append((lineno, line))
     assert not offending, f".env.example must not carry a real IP literal in a value: {offending}"
+
+
+# A ping URL is read on whichever host runs its job, so `.env.example` lists
+# each one, commented where the app itself never reads it. The example env
+# files only document names, so they are not readers. `HC_PING_URL_` is the
+# prefix `deploy/vps/run-with-ping.sh` completes with the job name each unit's
+# ExecStart passes it.
+_PING_URL = re.compile(r"\b[A-Z][A-Z0-9_]*PING_URL[A-Z0-9_]*\b")
+_PING_JOB = re.compile(r"^ExecStart=\S*run-with-ping\.sh\s+([A-Z][A-Z0-9_]*)", re.M)
+_LISTED_PING_URL = re.compile(r"^#?\s*([A-Z][A-Z0-9_]*PING_URL[A-Z0-9_]*)=", re.M)
+_NOT_A_PING_VARIABLE = {"HC_PING_URL_"}
+
+
+def test_env_example_lists_every_ping_url_the_code_reads():
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+    code = [
+        p
+        for p in tracked
+        if not p.startswith(("tests/", "docs/", "frontend/"))
+        and "/tests/" not in p
+        and not p.endswith((".md", "example"))
+    ]
+    texts = [(ROOT / p).read_text(errors="ignore") for p in code if (ROOT / p).is_file()]
+    read = {name for text in texts for name in _PING_URL.findall(text)} - _NOT_A_PING_VARIABLE
+    read |= {"HC_PING_URL_" + job for text in texts for job in _PING_JOB.findall(text)}
+    listed = set(_LISTED_PING_URL.findall((ROOT / ".env.example").read_text()))
+    assert {"POLLER_PING_URL", "HC_PING_URL_SYNC"} <= read
+    assert read <= listed, f".env.example does not list {sorted(read - listed)}"
 
 
 _DEV_SERVICES = {"db", "clickhouse"}
