@@ -10,6 +10,7 @@
 # step cannot create tables first; `up -d app poller` afterwards applies any
 # migration newer than the backup.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 cd "$(dirname "$0")/.."
 

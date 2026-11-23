@@ -17,6 +17,7 @@
 #
 # Run from cron; docs/deploy-standalone.en.md section 6 has the line.
 set -euo pipefail
+case "${1:-}" in -h|--help) sed -n '2,/^set /{/^set /!p;}' "$0" | sed 's/^# \{0,1\}//'; exit 0;; esac
 
 cd "$(dirname "$0")/.."
 
