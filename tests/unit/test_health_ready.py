@@ -66,6 +66,19 @@ def test_a_database_that_fails_or_hangs_is_named(stores, pg, ch, body):
     assert response.json() == body
 
 
+@pytest.mark.parametrize(("ch", "status"), [(_answer, 200), (_refuse, 503)])
+def test_a_head_probe_gets_the_same_status(stores, ch, status):
+    response = stores(_answer, ch).head("/health/ready")
+    assert response.status_code == status
+
+
+def test_a_session_cookie_does_not_reach_the_database(stores):
+    # The stub pool has no fetchrow, so a session lookup would fail the request.
+    client = stores(_answer, _answer)
+    client.cookies.set("sid", "a-session")
+    assert client.get("/health/ready").status_code == 200
+
+
 def test_clickhouse_unreachable_at_startup_is_down(stores):
     # The app opens its ClickHouse client only at startup and keeps None when
     # that fails.

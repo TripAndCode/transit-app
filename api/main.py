@@ -477,7 +477,13 @@ async def _answers(name: str, probe: Awaitable[object] | None) -> bool:
     return True
 
 
-@app.get("/health/ready", response_model=ReadyStatus, responses={503: {"model": ReadyStatus}})
+# HEAD too: some uptime monitors probe with it, and a 405 would read as down.
+@app.api_route(
+    "/health/ready",
+    methods=["GET", "HEAD"],
+    response_model=ReadyStatus,
+    responses={503: {"model": ReadyStatus}},
+)
 async def ready(request: Request, response: Response) -> ReadyStatus:
     """Readiness, for an uptime monitor outside the machine: 200 when the app
     can query both databases, else 503 naming the one it cannot. `/health`
