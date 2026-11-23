@@ -275,14 +275,19 @@ def archived_agency_ids(archive_root: Path) -> list[int]:
     return sorted(int(p.name) for p in archive_root.iterdir() if p.name.isdigit() and (p / "rt").is_dir())
 
 
-def _stage(conn, stage: str, agency_id: int, work: Callable[[], Any]) -> str:
+def _stage(
+    conn, stage: str, agency_id: int, work: Callable[[], Any], verdict: Callable[[], str | None] | None = None
+) -> str:
     """Run one stage inside its run row, as the cron sweep records its own.
 
     Returns OK, FAILED, or SKIPPED for an agency with no timetable loaded,
-    which no retry heals: only an operator loading one does."""
+    which no retry heals: only an operator loading one does. *verdict* runs
+    once the work has returned; a reason it gives fails the stage, on its
+    row as well."""
     from pipeline import runs as pipeline_runs
     from pipeline.ingest import StaticTimetableMissing
 
+    failure = None
     try:
         with pipeline_runs.record_run(conn, stage, agency_id=agency_id) as run:
             result = work()
@@ -290,11 +295,17 @@ def _stage(conn, stage: str, agency_id: int, work: Callable[[], Any]) -> str:
                 run.rebuild_headline = result
             else:
                 run.rows = result
+            failure = verdict() if verdict else None
+            if failure:
+                run.status, run.error = "error", failure
     except StaticTimetableMissing as exc:
         logger.warning("poller: %s skipped: %s", stage, exc)
         return SKIPPED
     except Exception:
         logger.exception("poller: %s failed for agency %s", stage, agency_id)
+        return FAILED
+    if failure:
+        logger.error("poller: %s failed for agency %s: %s", stage, agency_id, failure)
         return FAILED
     return OK
 
@@ -367,13 +378,16 @@ def _ingest_stage(conn, ch_client, archive_root: Path, agency_id: int, *, utc_to
 
 def run_daily_step(archive_root: Path, plan: Plan) -> Outcomes:
     """Run each agency's planned stages (promote, ingest, analyze, in that
-    order) under the ingest/analyze lock the cron sweep takes, then check the
-    analyzed agencies' aggregates are fresh. Returns the stages that failed or
-    were skipped; every planned one failed when the lock is busy."""
+    order) under the ingest/analyze lock the cron sweep takes. Returns the
+    stages that failed or were skipped; every planned one failed when the
+    lock is busy. An analyze that leaves aggregates still lagging the newest
+    completed day fails, so the heartbeat cannot report the agency healthy;
+    only for an agency whose earlier stages succeeded, since one already
+    reporting a failure is reported through that stage."""
     from pipeline import runs as pipeline_runs
     from pipeline.analyze import analyze
     from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC
-    from pipeline.freshness import check_agg_freshness
+    from pipeline.freshness import stale_verdict
     from pipeline.locks import try_lock_ingest_analyze_timed
     from pipeline.promote import promote_closed_days
 
@@ -397,7 +411,6 @@ def run_daily_step(archive_root: Path, plan: Plan) -> Outcomes:
         ch_client = stores.ch
         db_url = stores.db_url
         outcomes: Outcomes = {}
-        analyzed = []
         for aid in agency_ids:
             for stage in _STAGE_ORDER:
                 if stage not in everything[aid]:
@@ -407,17 +420,10 @@ def run_daily_step(archive_root: Path, plan: Plan) -> Outcomes:
                 elif stage == "ingest":
                     outcome = _ingest_stage(conn, ch_client, archive_root, aid)
                 else:
-                    outcome = _stage(conn, stage, aid, partial(analyze, aid, conn, ch_client, db_url=db_url))
-                    analyzed.append(aid)
+                    verdict = partial(stale_verdict, conn, ch_client, aid) if aid not in outcomes else None
+                    outcome = _stage(conn, stage, aid, partial(analyze, aid, conn, ch_client, db_url=db_url), verdict)
                 if outcome != OK:
                     outcomes.setdefault(aid, {})[stage] = outcome
-        if analyzed:
-            try:
-                stale = check_agg_freshness(conn, ch_client, analyzed)
-                if stale:
-                    logger.error("poller: aggregates still stale after analyze: %s", [s.agency_id for s in stale])
-            except Exception:
-                logger.exception("poller: the aggregate freshness check failed")
         return outcomes
 
 

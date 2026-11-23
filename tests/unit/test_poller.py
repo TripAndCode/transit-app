@@ -26,6 +26,7 @@ import pytest
 from pipeline import poller
 from pipeline import poller_schedule as schedule
 from pipeline.collector_push import MAX_POLL_BYTES, PUSH_PREFIX, SOURCE_FILE_RE, member_name
+from pipeline.freshness import StaleAgency
 from pipeline.ingest import IngestReport
 from pipeline.url_guard import FeedURLError
 
@@ -564,6 +565,82 @@ def test_a_step_that_raises_leaves_every_stage_pending(tmp_path):
     assert set(p.schedule_state.pending) == {("utc", 1, s) for s in ("promote", "ingest", "analyze")}
 
 
+class _PlannedAgencies(_Cursor):
+    """Answers the step's agency query with the agencies it names."""
+
+    def __init__(self):
+        super().__init__(())
+
+    def execute(self, sql, params=None):
+        self._agencies = [(aid,) for aid in params[0]]
+
+
+@contextmanager
+def _daily_stores(**_):
+    stores = _FakeStores(())
+    stores.conn.cursor.side_effect = _PlannedAgencies
+    stores.db_url = None
+    yield stores
+
+
+@contextmanager
+def _stages(freshness, ingest=lambda aid: poller.OK):
+    """run_daily_step over stubbed stores, with promote and analyze stubbed
+    beneath the real stage and run-row code: *ingest* decides each agency's
+    ingest outcome, *freshness* stands in for check_agg_freshness. Yields the
+    run rows as they closed, by (stage, agency) to (status, error)."""
+    closed = {}
+    with (
+        patch("pipeline.poller.open_stores", _daily_stores),
+        patch("pipeline.locks.try_lock_ingest_analyze_timed", return_value=(True, 0)),
+        patch("pipeline.runs.start_run", side_effect=lambda conn, kind, agency_id=None, **_: (kind, agency_id)),
+        patch(
+            "pipeline.runs.finish_run",
+            side_effect=lambda conn, run_id, status, rows=None, error=None: closed.__setitem__(run_id, (status, error)),
+        ),
+        patch("pipeline.promote.promote_closed_days", return_value=0),
+        patch("pipeline.analyze.analyze", return_value=None),
+        patch("pipeline.poller._ingest_stage", side_effect=lambda conn, ch, root, aid: ingest(aid)),
+        patch("pipeline.freshness.check_agg_freshness", side_effect=freshness),
+    ):
+        yield closed
+
+
+def _stale(*agency_ids):
+    return lambda conn, ch, checked: [
+        StaleAgency(a, date(2026, 4, 1), date(2026, 4, 2)) for a in agency_ids if a in checked
+    ]
+
+
+_FULL = {1: {"promote", "ingest", "analyze"}, 2: {"promote", "ingest", "analyze"}}
+
+
+def test_aggregates_still_stale_after_a_clean_step_fail_that_agencys_analyze(tmp_path):
+    with _stages(_stale(2)) as closed:
+        assert poller.run_daily_step(tmp_path, _FULL) == {2: {"analyze": poller.FAILED}}
+    # The board reads the stage from its row, so the row says so too.
+    assert closed[("analyze", 2)] == (
+        "error",
+        "aggregates still stale: they end at 2026-04-01, the newest completed day is 2026-04-02",
+    )
+    assert closed[("analyze", 1)] == ("ok", None)
+
+
+def test_a_freshness_check_that_raises_fails_no_stage(tmp_path):
+    def broken(conn, ch, checked):
+        raise OSError("clickhouse went away")
+
+    with _stages(broken) as closed:
+        assert poller.run_daily_step(tmp_path, _FULL) == {}
+    assert closed[("analyze", 2)] == ("ok", None)
+
+
+def test_a_stale_agency_already_reporting_a_stage_is_left_as_it_is(tmp_path):
+    with _stages(_stale(2), ingest=lambda aid: poller.SKIPPED if aid == 2 else poller.OK) as closed:
+        assert poller.run_daily_step(tmp_path, _FULL) == {2: {"ingest": poller.SKIPPED}}
+    assert closed[("analyze", 2)] == ("ok", None)
+
+
 # --- the heartbeat ------------------------------------------------------------
 
 
@@ -603,6 +680,43 @@ def test_a_failing_pack_holds_the_ok(tmp_path):
     with patch("pipeline.poller.pack_closed_days", side_effect=OSError("disk full")):
         _step(p)
     assert beats == []
+
+
+def _really_stepping(tmp_path, beats):
+    for aid in (1, 2):
+        (tmp_path / str(aid) / "rt").mkdir(parents=True)
+    p = _poller(tmp_path, daily_step=poller.run_daily_step, heartbeat=lambda *beat: beats.append(beat))
+    return p, p._clock
+
+
+def test_aggregates_that_stay_stale_report_fail_once_the_retries_are_spent(tmp_path):
+    beats = []
+    p, clock = _really_stepping(tmp_path, beats)
+    with _stages(_stale(2)):
+        _step(p)
+        for _ in range(schedule.MAX_RETRIES):
+            assert beats == []
+            clock.now += schedule.RETRY_AFTER
+            _step(p)
+    assert beats == [("fail", "not retried before their next day: [('utc', 2, 'analyze')]")]
+
+
+def test_aggregates_fresh_on_the_retry_report_ok(tmp_path):
+    beats = []
+    checked = []
+
+    def stale_on_the_first_check(conn, ch, agency_ids):
+        first = 2 in agency_ids and 2 not in checked
+        checked.extend(agency_ids)
+        return _stale(2)(conn, ch, agency_ids) if first else []
+
+    p, clock = _really_stepping(tmp_path, beats)
+    with _stages(stale_on_the_first_check):
+        _step(p)
+        assert beats == []
+        clock.now += schedule.RETRY_AFTER
+        _step(p)
+    assert beats == [("ok", "")]
 
 
 class _Response:

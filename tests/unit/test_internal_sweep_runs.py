@@ -18,6 +18,7 @@ with a recorder.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from datetime import date
 
 import psycopg2
 import pytest
@@ -31,6 +32,7 @@ from api.routers import internal
 from pipeline import runs as pipeline_runs
 
 _DB_URL = "postgresql://stub/stub"
+_RECORD_RUN = pipeline_runs.record_run
 
 
 class _Cursor:
@@ -175,6 +177,62 @@ def test_a_sweep_whose_every_stage_failed_is_an_error_naming_each(sweep, monkeyp
         "failed: ingest agency 1, promote agency 1, analyze agency 1, "
         "ingest agency 2, promote agency 2, analyze agency 2"
     )
+
+
+def _stale(*agency_ids):
+    return lambda _conn, _ch, checked: [
+        pipeline.freshness.StaleAgency(a, date(2026, 4, 1), date(2026, 4, 2)) for a in agency_ids if a in checked
+    ]
+
+
+def _closing_rows(monkeypatch) -> dict:
+    """The real run-row bracket over recorders: the rows as they closed, by
+    (stage, agency) to (status, error)."""
+    closed: dict = {}
+
+    def _finish_run(_conn, run_id, status, rows=None, error=None):
+        closed[run_id] = (status, error)
+
+    monkeypatch.setattr(pipeline_runs, "record_run", _RECORD_RUN)
+    monkeypatch.setattr(pipeline_runs, "start_run", lambda _conn, kind, agency_id=None, **_k: (kind, agency_id))
+    monkeypatch.setattr(pipeline_runs, "finish_run", _finish_run)
+    return closed
+
+
+def test_aggregates_still_stale_after_a_clean_sweep_fail_that_agencys_analyze(sweep, monkeypatch):
+    closed = _closing_rows(monkeypatch)
+    monkeypatch.setattr(pipeline.freshness, "check_agg_freshness", _stale(2))
+    sweep.conn = _Conn([1, 2])
+    outcome = internal._ingest_and_analyze_sweep(_DB_URL, agency_ids=[1, 2])
+    assert outcome == internal.SweepOutcome("error", "failed: analyze agency 2 (aggregates still stale)")
+    # The board reads each step from its own row, so the analyze row says so too.
+    assert closed[("analyze", 2)] == (
+        "error",
+        "aggregates still stale: they end at 2026-04-01, the newest completed day is 2026-04-02",
+    )
+    assert closed[("analyze", 1)] == ("ok", None)
+
+
+def test_a_stale_agency_already_reporting_a_stage_is_named_once(sweep, monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("clickhouse down")
+
+    closed = _closing_rows(monkeypatch)
+    monkeypatch.setattr(pipeline.promote, "promote_closed_days", _boom)
+    monkeypatch.setattr(pipeline.freshness, "check_agg_freshness", _stale(1))
+    outcome = internal._ingest_and_analyze_sweep(_DB_URL)
+    assert outcome == internal.SweepOutcome("error", "failed: promote agency 1")
+    assert closed[("analyze", 1)] == ("ok", None)
+
+
+def test_a_freshness_check_that_raises_fails_no_stage(sweep, monkeypatch):
+    def _boom(*_a, **_k):
+        raise OSError("clickhouse went away")
+
+    closed = _closing_rows(monkeypatch)
+    monkeypatch.setattr(pipeline.freshness, "check_agg_freshness", _boom)
+    assert internal._ingest_and_analyze_sweep(_DB_URL) == internal.SweepOutcome("ok")
+    assert closed[("analyze", 1)] == ("ok", None)
 
 
 def test_a_scope_with_no_active_agency_is_skipped_work(sweep):
