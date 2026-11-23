@@ -225,6 +225,17 @@ def test_record_run_stores_the_headline_a_rebuild_reported_once_its_row_is_close
     ]
 
 
+def test_a_rebuild_whose_result_failed_its_check_closes_error_with_why_and_its_headline():
+    conn = _Conn(run_id=5)
+    with record_run(conn, "analyze", agency_id=1) as run:
+        run.rebuild_headline = _HEADLINE
+        run.status, run.error = "error", "aggregates still stale"
+    assert [params for _, params in conn.statements][1:] == [
+        ("error", None, "aggregates still stale", 5),
+        ('{"before": {"avg_delay_min": 1.5}, "after": {"avg_delay_min": 1.25}}', 5),
+    ]
+
+
 def test_a_rebuild_whose_headline_cannot_be_stored_still_closes_ok():
     conn = _Conn(run_id=5, fail_on="rebuild_headline")
     with record_run(conn, "analyze", agency_id=1) as run:

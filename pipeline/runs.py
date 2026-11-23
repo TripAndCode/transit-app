@@ -119,13 +119,16 @@ class RunHandle:
     column stays NULL, which the board reads as "this job kind has no row
     count", not as zero rows. ``status`` is what a block that exits normally
     closes with: ``ok``, or ``unchanged`` for a job that found nothing newer
-    to do. ``rebuild_headline`` is an analyze run's headline before and
-    after a rebuild (:mod:`pipeline.rebuild_headline`), when it made one.
+    to do, or ``error`` with ``error`` saying why, for a job whose work
+    returned but whose result failed a check. ``rebuild_headline`` is an
+    analyze run's headline before and after a rebuild
+    (:mod:`pipeline.rebuild_headline`), when it made one.
     """
 
     run_id: int | None
     rows: int | None = None
     status: str = "ok"
+    error: str | None = None
     rebuild_headline: dict | None = None
 
 
@@ -241,7 +244,7 @@ def record_run(
         _rollback(conn)
         finish_run(conn, handle.run_id, "error", rows=handle.rows, error=_describe(exc))
         raise
-    finish_run(conn, handle.run_id, handle.status, rows=handle.rows)
+    finish_run(conn, handle.run_id, handle.status, rows=handle.rows, error=handle.error)
     if handle.rebuild_headline is not None:
         record_rebuild_headline(conn, handle.run_id, handle.rebuild_headline)
 

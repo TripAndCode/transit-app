@@ -243,7 +243,10 @@ def _ingest_and_analyze_sweep(
     the whole run, so one broken agency or stage doesn't starve the others.
     Returns the outcome the umbrella row should record: ``skipped`` when the
     advisory lock turned this sweep away or no active agency was in scope,
-    ``error`` naming every stage that failed, ``ok`` otherwise.
+    ``error`` naming every stage that failed, ``ok`` otherwise. An analyze
+    that leaves aggregates still lagging the newest completed day fails, on
+    its own row too; only for an agency whose earlier stages succeeded, since
+    one already named is reported through that stage.
 
     ``kind="analyze"`` re-aggregates what is already stored without fetching —
     the one case where skipping the feed pull and the weather pass is what was
@@ -251,7 +254,7 @@ def _ingest_and_analyze_sweep(
 
     ``agency_ids`` narrows the run, which is what the admin drawer's
     per-agency re-analyze action uses: the same lock, the same JST session
-    pin, and the same post-run freshness check as a scheduled poke, rather
+    pin, and the same freshness check as a scheduled poke, rather
     than a second implementation of them. A scoped run skips the weather
     pass — observed weather is per station, not per agency, so one agency's
     re-analyze has no reason to re-drive a third-party fetch for the whole
@@ -277,7 +280,7 @@ def _ingest_and_analyze_sweep(
 
     from pipeline.analyze import analyze
     from pipeline.clickhouse import ANALYZE_SEND_RECEIVE_TIMEOUT_SEC, get_client
-    from pipeline.freshness import check_agg_freshness
+    from pipeline.freshness import stale_verdict
     from pipeline.ingest import StaticTimetableMissing, ingest_live
     from pipeline.promote import promote_closed_days
 
@@ -345,6 +348,7 @@ def _ingest_and_analyze_sweep(
             return pipeline_runs.record_run(conn, stage, agency_id=aid, requested_by=requested_by, parent_run_id=run_id)
 
         for aid in agency_ids:
+            failures_before = len(failed)
             stopped = False
             if kind == "ingest":
                 try:
@@ -367,31 +371,20 @@ def _ingest_and_analyze_sweep(
                         failed.append(f"promote agency {aid}")
                         stopped = stop_on_failure
             if not stopped:
+                clean = len(failed) == failures_before
+                stale = None
                 try:
                     with _stage("analyze", aid) as run:
                         run.rebuild_headline = analyze(aid, conn, ch_client, db_url=db_url)
+                        stale = stale_verdict(conn, ch_client, aid) if clean else None
+                        if stale:
+                            run.status, run.error = "error", stale
                 except Exception:
                     _log.exception("cron: analyze failed for agency %s", aid)
                     failed.append(f"analyze agency {aid}")
-
-        # Catch the mid-loop-crash hole: if any agency's aggs lag its newest
-        # completed day, surface it loudly. Read-only; never aborts the run.
-        # Isolated in its own try/except, like the per-agency loop above: a
-        # failure here (e.g. a transient ClickHouse error) must not also
-        # suppress the weather pass below, which has nothing to do with
-        # aggregate freshness.
-        try:
-            stale = check_agg_freshness(conn, ch_client, agency_ids)
-            if stale:
-                _log.error(
-                    "cron: %d agency(ies) have stale aggregates after analyze: %s",
-                    len(stale),
-                    [s.agency_id for s in stale],
-                )
-            else:
-                _log.info("cron: all %d agencies have fresh aggregates", len(agency_ids))
-        except Exception:
-            _log.exception("cron: check_agg_freshness failed")
+                if stale:
+                    _log.error("cron: analyze failed for agency %s: %s", aid, stale)
+                    failed.append(f"analyze agency {aid} (aggregates still stale)")
     finally:
         # No explicit pg_advisory_unlock call: conn.close() below ends the
         # session, and Postgres releases every session-level advisory lock

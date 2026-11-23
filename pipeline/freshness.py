@@ -33,6 +33,7 @@ surgery or from a stale interior date the ledger cannot see (see
 `pipeline.analyze._dates_needing_rebuild`).
 """
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -42,6 +43,8 @@ from pipeline.clickhouse import LIVE_SOURCED, jst_date, jst_midnight_utc, majori
 from pipeline.retention import retention_floors
 
 _JST = ZoneInfo("Asia/Tokyo")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,31 @@ def check_agg_freshness(conn, ch_client, agency_ids: Iterable[int]) -> list[Stal
             if is_stale(agg_max, live_max):
                 stale.append(StaleAgency(aid, agg_max, live_max))
     return stale
+
+
+def stale_verdict(conn, ch_client, agency_id: int) -> str | None:
+    """Why *agency_id*'s aggregates still lag its newest completed day, for
+    an analyze stage that has just returned to close its run row on, or None
+    when they don't.
+
+    A check that itself fails returns None: it is no evidence the aggregates
+    are behind. Its transaction is rolled back so the caller can still close
+    the row; analyze has committed by then, so nothing of its work is lost.
+    """
+    try:
+        stale = check_agg_freshness(conn, ch_client, [agency_id])
+    except Exception:
+        logger.exception("freshness: the check failed for agency %s", agency_id)
+        try:
+            conn.rollback()
+        except Exception:
+            logger.warning("freshness: could not roll back after the failed check", exc_info=True)
+        return None
+    if not stale:
+        return None
+    lag = stale[0]
+    built = "none are built yet" if lag.agg_max_day is None else f"they end at {lag.agg_max_day}"
+    return f"aggregates still stale: {built}, the newest completed day is {lag.live_max_completed_day}"
 
 
 @dataclass(frozen=True)
