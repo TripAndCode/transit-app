@@ -464,7 +464,7 @@ administrator, backups, upgrades and what is not automated.
 api/                    FastAPI app, auth, routers, middleware
 pipeline/               ingest, static loading, aggregation, reports, Ask
 db/                     Postgres/PostGIS and ClickHouse schemas
-deploy/                 systemd units and log rotation for ops monitoring and drift checks
+deploy/                 systemd units and log rotation for ops monitoring
 frontend/               React SPA and translations
 oracle_cloud/           Oracle VM collector agent (v3): archive fetch, R2 sync, health checks, alerting
 scripts/                operational tools and review helpers
