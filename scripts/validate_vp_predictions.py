@@ -60,10 +60,10 @@ the scheduled time, between matched stops, as
 many stops as possible, ties broken towards the steadiest delay. A loop's
 return to its first stop, a deadhead past the stops, or the road out past a
 stop served on the way back each lose, since taking them forfeits the stops
-between. A stop with no passage is counted by why: the track comes near it
-only across a gap too long to time, no visit at all, no visit showing the
-bus leave (arrive), only implausible ones, one only the delay bound kept
-out, or none the alignment could take in order.
+between. A stop with no passage is counted by why: the track crossed it,
+between the stops either side, only across a gap too long to time; no visit
+at all; no visit showing the bus leave (arrive); only implausible ones; one
+only the delay bound kept out; or none the alignment could take in order.
 
 **The comparison** per stop event with both: error = kept delay - observed
 delay, positive when the feed reported the bus later than it left; lead =
@@ -156,11 +156,8 @@ PASSAGE_RADIUS_M = 50.0
 DWELL_TOLERANCE_M = 15.0
 # The longest gap between two fixes a passage is interpolated across. In a
 # longer one a bus can dwell, queue or detour between the two, so a straight
-# line between them no longer times when it passed. Up to this length,
-# dropping every other fix of a densely polled track moves the passages it
-# times by a fraction of the on-time window's early side and in no steady
-# direction, while the feeds' polling leaves gaps this long often enough
-# that a shorter limit would leave a large share of stops untimed.
+# line between them no longer times when it passed; a shorter limit leaves
+# more stops untimed at the feeds' polling interval.
 MAX_BRACKET_GAP_SEC = 150
 # How far the observed delay may move from one matched stop to the next:
 # MAX_DELAY_CHANGE_SEC, plus DELAY_DRIFT_SHARE of the scheduled time between
@@ -338,20 +335,17 @@ def _gap(track: Sequence[Fix], j: int) -> bool:
     return _seconds(track[j].at, track[j + 1].at) > MAX_BRACKET_GAP_SEC
 
 
-def _segments_near(
-    track: Sequence[Fix], stops: Sequence[StopPoint], kind: Callable[[Sequence[Fix], int], bool] = _usable
-) -> list[list[int]]:
-    """For each stop, the segments of *kind* (usable ones by default) that
-    could come within PASSAGE_RADIUS_M of it, in track order: those whose
-    bounding box, widened by the radius, covers the stop's grid cell. A
-    coarse grid keeps the search linear in the track and the stops rather
-    than their product."""
+def _segments_near(track: Sequence[Fix], stops: Sequence[StopPoint]) -> list[list[int]]:
+    """For each stop, the usable segments that could come within
+    PASSAGE_RADIUS_M of it, in track order: those whose bounding box, widened
+    by the radius, covers the stop's grid cell. A coarse grid keeps the search
+    linear in the track and the stops rather than their product."""
     origin = track[0]
     points = [_xy(f.lat, f.lon, origin.lat, origin.lon) for f in track]
     pad = PASSAGE_RADIUS_M + _GRID_SLACK_M
     grid: dict[tuple[int, int], list[int]] = defaultdict(list)
     for j in range(len(track) - 1):
-        if not kind(track, j):
+        if not _usable(track, j):
             continue
         (ax, ay), (bx, by) = points[j], points[j + 1]
         for cx in range(
@@ -436,27 +430,25 @@ class _Candidate:
     fraction: float
 
 
-def _gaps_crossing(track: Sequence[Fix], stop: StopPoint, segments: Sequence[int]) -> list[int]:
-    return [j for j in segments if _approach(track, j, stop, 0.0).distance <= PASSAGE_RADIUS_M]
-
-
 def _candidates(
     track: Sequence[Fix], stops: Sequence[StopPoint]
 ) -> tuple[list[list[_Candidate]], list[list[int]], dict[int, str]]:
     """Each stop's candidate passages, one per visit the departure (arrival)
     rules time, within MAX_PLAUSIBLE_DELAY_SEC of its schedule; the gaps
-    between fixes too long to time that cross it; and, for a stop with no
-    candidate, why: ``gap`` (the track comes near it only across such a gap),
-    ``no_visit``, ``unseen`` (no visit shows the bus leaving, or arriving) or
-    ``implausible``. ``gap`` keeps sparse sampling apart from a track that
-    never came near the stop."""
+    between fixes too long to time that pass within PASSAGE_RADIUS_M of it;
+    and, by stop index, why a stop with no candidate has none by its own
+    visits: ``no_visit``, ``unseen`` (no visit shows the bus leaving, or
+    arriving) or ``implausible``.
+
+    Gaps are few on a track, and one can span many kilometres, so each is
+    tested against every stop rather than laid on the grid."""
     out: list[list[_Candidate]] = []
     crossings: list[list[int]] = []
-    why: dict[int, str] = {}
+    own: dict[int, str] = {}
     near = _segments_near(track, stops)
-    gaps = _segments_near(track, stops, _gap)
+    gaps = [j for j in range(len(track) - 1) if _gap(track, j)]
     for i, stop in enumerate(stops):
-        crossings.append(_gaps_crossing(track, stop, gaps[i]))
+        crossings.append([j for j in gaps if _approach(track, j, stop, 0.0).distance <= PASSAGE_RADIUS_M])
         visits = _visits(track, stop, near[i])
         timed = [p for v in visits if (p := (_arrival if stop.final else _departure)(track, v, stop)) is not None]
         plausible = [
@@ -467,12 +459,12 @@ def _candidates(
         out.append(plausible)
         if timed:
             if not plausible:
-                why[stop.stop_sequence] = "implausible"
+                own[i] = "implausible"
         elif visits:
-            why[stop.stop_sequence] = "unseen"
+            own[i] = "unseen"
         else:
-            why[stop.stop_sequence] = "gap" if crossings[i] else "no_visit"
-    return out, crossings, why
+            own[i] = "no_visit"
+    return out, crossings, own
 
 
 def _after(
@@ -492,8 +484,7 @@ def _after(
 def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tuple[dict[int, datetime], dict[int, str]]:
     """The observed passage of each of *stops* (in stop_sequence order) that
     the time-ordered *track* shows, by stop_sequence, and why each other stop
-    has none (see :func:`_candidates`, and :func:`_unaligned_why` for a stop
-    whose candidates the sequence leaves out).
+    has none (see :func:`_no_passage_why`).
 
     At most one candidate is taken per stop, with instants increasing along
     stop_sequence and the delay moving by at most MAX_DELAY_CHANGE_SEC plus
@@ -504,7 +495,7 @@ def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tupl
     forfeit the stops between."""
     if len(track) < 2:
         return {}, {stop.stop_sequence: "no_visit" for stop in stops}
-    candidates, crossings, why = _candidates(track, stops)
+    candidates, crossings, own = _candidates(track, stops)
     flat = [c for per_stop in candidates for c in per_stop]
     # (stops taken, cost, previous index in flat or -1, this stop's instant)
     best: list[tuple[int, float, int, datetime]] = []
@@ -532,35 +523,43 @@ def passages_explained(track: Sequence[Fix], stops: Sequence[StopPoint]) -> tupl
     while end >= 0:
         taken[flat[end].stop] = best[end][3]
         end = best[end][2]
-    for i, stop in enumerate(stops):
-        if i not in taken and stop.stop_sequence not in why:
-            why[stop.stop_sequence] = _unaligned_why(track, candidates[i], crossings[i], i, taken)
+    why = {
+        stop.stop_sequence: _no_passage_why(track, candidates[i], crossings[i], own.get(i), i, taken)
+        for i, stop in enumerate(stops)
+        if i not in taken
+    }
     return {stops[i].stop_sequence: at for i, at in sorted(taken.items())}, why
 
 
-def _unaligned_why(
+def _no_passage_why(
     track: Sequence[Fix],
     candidates: Sequence[_Candidate],
     crossings: Sequence[int],
+    own: str | None,
     i: int,
     taken: Mapping[int, datetime],
 ) -> str:
-    """Why the alignment took none of stop *i*'s *candidates*, given *taken*,
-    the instants of the stops it took, by index. Each reason asks what lies
-    in time between the taken stops either side. ``gap`` when one of the
-    stop's *crossings* does: the bus passed it there, unseen, and the
-    candidates are other visits. ``delay_jump`` when a candidate does, so
-    only the delay bound kept it out: a longest sequence would otherwise
-    have taken it. ``out_of_order`` when every candidate falls before a
-    taken stop it must follow or after one it must precede."""
+    """Why stop *i* has no passage, given *taken*, the instants of the stops
+    the alignment took, by index, and what lies in time between the taken
+    stops either side. ``gap`` when one of the stop's *crossings* does: the
+    bus passed it there, unseen, so whatever its visits show is another
+    pass. Otherwise *own*, the reason its visits give when it has no
+    candidate (:func:`_candidates`); ``delay_jump`` when a candidate falls
+    between, so only the delay bound kept it out: a longest sequence would
+    otherwise have taken it; and ``out_of_order`` when every candidate falls
+    before a taken stop it must follow or after one it must precede. The
+    bounds are inclusive, since a stop can share the instant of the one
+    before it (:func:`_after`)."""
     before = max((at for k, at in taken.items() if k < i), default=None)
     after = min((at for k, at in taken.items() if k > i), default=None)
 
     def between(start: datetime, end: datetime) -> bool:
-        return (before is None or end > before) and (after is None or start < after)
+        return (before is None or end >= before) and (after is None or start <= after)
 
     if any(between(track[j].at, track[j + 1].at) for j in crossings):
         return "gap"
+    if own is not None:
+        return own
     if any(between(c.at, c.at) for c in candidates):
         return "delay_jump"
     return "out_of_order"

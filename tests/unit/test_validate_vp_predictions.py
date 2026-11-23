@@ -367,6 +367,47 @@ def test_a_stop_the_track_misses_is_not_matched_to_a_later_lap():
     assert why == {3: "gap"}
 
 
+def test_a_gap_between_the_neighbours_outranks_a_later_lap_too_late_to_count():
+    """As above, but the later lap passes stop 3 over two hours behind its
+    schedule, so stop 3's own visits are all implausible. The bus still
+    crossed it in the gap between stops 2 and 4, and that is the reason."""
+    out = [_fix(t, 10 * t) for t in range(0, 181, 20)]
+    resumed = [_fix(t, 10 * (t - 400)) for t in range(600, 801, 20)]
+    later_lap = [_fix(8000 + t, 1700 + 10 * t) for t in range(0, 41, 20)]
+    stops = [
+        _stop(1, 0, at=0),
+        _stop(2, 1000, at=100),
+        _stop(3, 1900, at=190),
+        _stop(4, 3400, at=740, final=True),
+    ]
+    found, why = vv.passages_explained(out + resumed + later_lap, stops)
+    assert _secs(found) == pytest.approx({1: 0.0, 2: 100.0, 4: 740.0})
+    assert why == {3: "gap"}
+
+
+def test_a_gap_over_a_stop_after_the_next_stop_was_passed_is_not_the_reason():
+    """The bus detours 300 m north of stop 3, rejoins at stop 4, and only
+    afterwards loses its fixes across a stretch that runs back over stop 3.
+    That gap falls after stop 4's passage, so stop 3 was never visited."""
+    track = [
+        *(_fix(t, 10 * t) for t in range(0, 101, 20)),
+        *(_fix(t, 1200 + 10 * (t - 120), 300) for t in range(120, 271, 30)),
+        _fix(290, 3000),
+        _fix(310, 3200),
+        _fix(700, 1700),
+        _fix(720, 1500),
+    ]
+    stops = [
+        _stop(1, 0, at=0),
+        _stop(2, 1000, at=100),
+        _stop(3, 1900, at=190),
+        _stop(4, 3000, at=290, final=True),
+    ]
+    found, why = vv.passages_explained(track, stops)
+    assert set(found) == {1, 2, 4}
+    assert why == {3: "no_visit"}
+
+
 def test_a_revisit_far_from_the_expected_time_is_no_passage():
     """The bus passes stop 2 at 90 s, on time, and stop 3's place only 20
     minutes late, after a gap in which it ran elsewhere: further from the
