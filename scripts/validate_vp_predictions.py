@@ -440,6 +440,11 @@ def _candidates(
     visits: ``no_visit``, ``unseen`` (no visit shows the bus leaving, or
     arriving) or ``implausible``.
 
+    A gap crosses a stop when the straight line between its two fixes passes
+    within PASSAGE_RADIUS_M. The road between them can curve away from that
+    line, so a stop passed on a bend inside a gap is counted ``no_visit``
+    rather than ``gap``: the count of ``gap`` is a lower bound.
+
     Gaps are few on a track, and one can span many kilometres, so each is
     tested against every stop rather than laid on the grid."""
     out: list[list[_Candidate]] = []
@@ -547,20 +552,19 @@ def _no_passage_why(
     candidate (:func:`_candidates`); ``delay_jump`` when a candidate falls
     between, so only the delay bound kept it out: a longest sequence would
     otherwise have taken it; and ``out_of_order`` when every candidate falls
-    before a taken stop it must follow or after one it must precede. The
-    bounds are inclusive, since a stop can share the instant of the one
-    before it (:func:`_after`)."""
+    before a taken stop it must follow or after one it must precede. A
+    candidate's bounds are inclusive, since a stop can share the instant of
+    the one before it (:func:`_after`). A gap's are strict: no passage is
+    timed inside one, so a gap that only touches a neighbour's instant lies
+    wholly before or after it."""
     before = max((at for k, at in taken.items() if k < i), default=None)
     after = min((at for k, at in taken.items() if k > i), default=None)
 
-    def between(start: datetime, end: datetime) -> bool:
-        return (before is None or end >= before) and (after is None or start <= after)
-
-    if any(between(track[j].at, track[j + 1].at) for j in crossings):
+    if any((before is None or track[j + 1].at > before) and (after is None or track[j].at < after) for j in crossings):
         return "gap"
     if own is not None:
         return own
-    if any(between(c.at, c.at) for c in candidates):
+    if any((before is None or c.at >= before) and (after is None or c.at <= after) for c in candidates):
         return "delay_jump"
     return "out_of_order"
 

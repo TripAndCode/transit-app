@@ -408,6 +408,26 @@ def test_a_gap_over_a_stop_after_the_next_stop_was_passed_is_not_the_reason():
     assert why == {3: "no_visit"}
 
 
+def test_a_gap_ending_at_the_stop_before_s_passage_is_not_the_reason():
+    """The fixes resume at 300 s with the bus at stop 2, so its departure is
+    timed on the fix that ends the gap. Stop 3 lies on that gap's line, but
+    the gap ends at stop 2's passage and stop 3 comes after it."""
+    track = [
+        *(_fix(t, 10 * t) for t in range(0, 101, 20)),
+        *(_fix(t, 2000 + 10 * (t - 300)) for t in range(300, 501, 20)),
+    ]
+    stops = [
+        _stop(1, 0, at=0),
+        _stop(2, 1995, at=300),
+        _stop(3, 1500, 30, at=350),
+        _stop(4, 3500, at=450, final=True),
+    ]
+    found, why = vv.passages_explained(track, stops)
+    assert _secs(found)[2] == pytest.approx(300.0)
+    assert set(found) == {1, 2, 4}
+    assert why == {3: "no_visit"}
+
+
 def test_a_revisit_far_from_the_expected_time_is_no_passage():
     """The bus passes stop 2 at 90 s, on time, and stop 3's place only 20
     minutes late, after a gap in which it ran elsewhere: further from the
