@@ -6,6 +6,7 @@ from pipeline.reports.comparability import (
     MAX_CI_HALF_WIDTH_PP,
     MAX_CLAMP_PCT,
     MIN_COVERAGE_PCT,
+    PREDICTED_VALUE_BASES,
     _first_failure,
     assess,
     ci_half_width_as_printed,
@@ -18,6 +19,11 @@ from pipeline.reports.comparability import (
     trip_interval,
     trips_matchable,
 )
+from pipeline.reports.definition import VALUE_BASIS
+
+# A basis made from observed passages, which the board ranks once every check
+# on the data passes; every figure today is VALUE_BASIS, which it never ranks.
+_OBSERVED = "observed_passage"
 
 # Every check passes with these; each test changes one input.
 _PASS = {
@@ -26,6 +32,7 @@ _PASS = {
     "ci_high": 87.5,
     "clamp_pct": 0.2,
     "samples": 20_000,
+    "value_basis": _OBSERVED,
 }
 
 
@@ -46,7 +53,8 @@ def test_no_samples_is_no_data():
 
 
 def test_no_data_comes_before_every_other_reason():
-    assert _first_failure(coverage_pct=None, ci_low=None, ci_high=None, clamp_pct=50.0, samples=0) == "no_data"
+    worst = {"coverage_pct": None, "ci_low": None, "ci_high": None, "clamp_pct": 50.0, "value_basis": VALUE_BASIS}
+    assert _first_failure(**worst, samples=0) == "no_data"
 
 
 def test_no_coverage_figure_is_coverage_unknown():
@@ -111,6 +119,28 @@ def test_a_clamp_share_printed_over_the_ceiling_is_clamp_high(clamp):
 def test_no_clamp_share_passes():
     """No feed-health row is an aggregate gap, not evidence of implausible readings."""
     assert _verdict(clamp_pct=None) is None
+
+
+def test_the_feeds_predicted_delays_are_never_ranked():
+    assert VALUE_BASIS in PREDICTED_VALUE_BASES
+    assert _verdict(value_basis=VALUE_BASIS) == "predicted_basis"
+    assert _OBSERVED not in PREDICTED_VALUE_BASES
+
+
+@pytest.mark.parametrize(
+    ("over", "reason"),
+    [
+        ({"samples": 0}, "no_data"),
+        ({"coverage_pct": None}, "coverage_unknown"),
+        ({"coverage_pct": 41.0}, "coverage_low"),
+        ({"ci_low": 70.0, "ci_high": 90.0}, "ci_wide"),
+        ({"clamp_pct": 20.0}, "clamp_high"),
+    ],
+)
+def test_every_check_on_the_data_comes_before_the_value_basis(over, reason):
+    """A route's report card reads the reasons before ``predicted_basis``
+    as verdicts on its own figures, so the basis never hides one."""
+    assert _verdict(value_basis=VALUE_BASIS, **over) == reason
 
 
 @pytest.mark.parametrize(("coverage", "low"), [(69.9, True), (70.0, False), (104.0, False)])
@@ -195,6 +225,7 @@ def _assess(**over):
         "on_time_count": 18_000,
         "samples": 20_000,
         "clamp_pct": 0.2,
+        "value_basis": _OBSERVED,
     }
     return assess(**{**base, **over})
 
@@ -214,6 +245,20 @@ def test_a_strategy_whose_trips_cannot_be_matched_to_the_timetable_measures_noth
     assert (a.observed_trips, a.coverage_planned_trips, a.coverage_pct) == (None, None, None)
     assert (a.ci_low, a.ci_high) == (None, None)
     assert (a.comparable, a.comparable_reason) == (False, "coverage_unknown")
+
+
+def test_assess_judges_the_definition_stamps_basis_by_default():
+    args = {
+        "ingest_strategy": "static_join",
+        "observed_trips": 900,
+        "coverage_planned_trips": 1000,
+        "on_time_count": 18_000,
+        "samples": 20_000,
+        "clamp_pct": 0.2,
+    }
+    a = assess(**args)
+    assert (a.coverage_pct, a.ci_low, a.ci_high) == (90.0, 87.8, 91.8)
+    assert (a.comparable, a.comparable_reason) == (False, "predicted_basis")
 
 
 def test_assess_without_samples_is_no_data_whatever_the_strategy():

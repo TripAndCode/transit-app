@@ -26,7 +26,9 @@ it fewer than :data:`MIN_OBSERVATIONS` times (``too_few_observations``), or
 when the comparability gate's coverage and interval checks fail on the
 route's own trips (``coverage_unknown``, ``coverage_low``, ``ci_wide``,
 :func:`pipeline.reports.comparability.assess`). The gate's clamp check reads
-an agency-wide figure, so it is not a route's verdict and is left out. A route
+an agency-wide figure, so it is not a route's verdict and is left out. Its
+value-basis check (``predicted_basis``) judges whether agencies may be ordered
+against one another, not a route against the standard, so it is left out too. A route
 that passes all of these and still lacks a figure its grade needs is
 ``not_judged``, naming each missing figure with its reason.
 

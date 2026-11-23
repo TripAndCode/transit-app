@@ -281,13 +281,17 @@ structurally identical to the oracle_crawler channel's own
 `oracle-heartbeat-listener.yml`/`collect_oracle_status.py` but keyed on
 component `"r2"` and their own independent replay watermark.
 
-## 14. VehiclePositions validation window
+## 14. VehiclePositions archive
 Every delay figure in the app is a feed's TripUpdates *prediction*
 (`dep_delay`), never an observed departure. To measure how far those
-predictions are from what the buses did, the collector can archive GTFS-RT
-VehiclePositions for a bounded window (7–14 days), from which observed stop
-passages are later reconstructed from positions near each stop. The analysis
-is tracked in issue #1503. Nothing in the app ingests these samples: the
+predictions are from what the buses did, the collector archives GTFS-RT
+VehiclePositions, from which observed stop passages are reconstructed from
+positions near each stop (`scripts/validate_vp_predictions.py`,
+`docs/features/prediction-validation.md`). The archive also feeds a value
+basis built from observed passages, which the agencies board could rank
+where it ranks no feed's predictions, so collection continues: run the Stop
+steps below only once that basis is abandoned. Nothing in the app ingests
+these samples: the
 workstation's `make fetch` copies only `rt/` and `static/` from the VM, and
 `ml/sync.py` and `scripts/catch_up_from_r2.py` list only the `rt/` and
 `static/` prefixes in R2.
@@ -303,7 +307,7 @@ Where the samples land:
 What each job does with them:
 - `rotate-day.sh`, `sync-r2.sh`, `spool-cleanup.sh` and `prune.sh` act on
   every `data/*/vp` directory on disk, the way they act on `rt/`, so the
-  last day still reaches R2 after the window ends. A failed `vp/` upload fails
+  last day still reaches R2 after collection stops. A failed `vp/` upload fails
   `sync-r2.sh` like a failed `rt/` one, which withholds `.sync-r2.last-ok`
   and pauses `prune.sh` until a later run succeeds.
 - `health-check.sh` and `verify-r2.sh` check only the feeds listed in
@@ -312,7 +316,7 @@ What each job does with them:
   feed gets from `RT_STALE_FACTOR`), and a fresh, size-matched day in
   `vp/<id>/` on the RT thresholds.
 - `reconcile-r2.sh` and `prune-r2.sh` treat `vp/<id>/` as expected for any id
-  in `agencies.tsv`, so ending the window never turns the archive into
+  in `agencies.tsv`, so stopping collection never turns the archive into
   orphans. `prune-r2.sh` prunes it at `R2_VP_RETENTION_DAYS`, the VP row
   of the retention table in `docs/ops-monitoring-deploy.md`.
 - `storage-metrics.sh` reports `vp_object_count`/`vp_bytes` and counts them in
@@ -354,7 +358,7 @@ day exists yet for `verify-r2.sh`'s 09:15 run to find. The next morning,
 `cron.log` should show `rotated .../vp/<day>.tar.gz` and `[a8] vp synced`.
 
 ### Stop
-When the window ends, stop the pollers and delete the rows (or the whole
+To stop collecting, stop the pollers and delete the rows (or the whole
 `etc/vehicle_positions.tsv`) right away, before `health-check.sh` pages on
 the stopped feeds:
 

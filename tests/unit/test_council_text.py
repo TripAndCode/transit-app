@@ -295,6 +295,7 @@ def test_an_agency_the_board_would_not_rank_is_footnoted_not_to_be_ranked(locale
         ("ci_wide", {"ci_low": None, "ci_high": None}, {"half": "—", "max": "3"}),
         # 5.05 prints 5.1, as the board prints it.
         ("clamp_high", {"clamp_pct": 5.05}, {"pct": "5.1", "max": "5"}),
+        ("predicted_basis", {}, {}),
     ],
 )
 def test_a_not_comparable_footnote_gives_the_reason_in_the_agencies_board_words(locale, reason, figures, values):

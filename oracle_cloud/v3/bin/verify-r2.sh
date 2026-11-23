@@ -18,8 +18,8 @@
 #                thresholds, for each feed in etc/vehicle_positions.tsv. No
 #                such file means no VehiclePositions feed and no vp/ listing.
 #                Only listed feeds are checked: a row is removed when its
-#                validation window ends, so its archive stops being expected
-#                to stay fresh.
+#                collection stops, so its archive stops being expected to
+#                stay fresh.
 #   * static   — at least one static/<id>/gtfs_static_*.zip object exists,
 #                the one matching this agency's current local latest.zip
 #                target is actually present in R2, is at least

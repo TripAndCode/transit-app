@@ -4,7 +4,9 @@ Cross-agency health board over a date range: the agencies whose data
 supports a comparison ranked by average delay, and every other agency listed
 after them by name with the reason it is not ranked. A ranking is an action
 for the council that reads it, so the board ranks only what the data can
-defend; see [Comparability gate](#comparability-gate).
+defend; see [Comparability gate](#comparability-gate). Every figure is
+today the feeds' predicted delays, which the board never ranks, so it lists
+every agency unranked until a basis built from observed passages exists.
 
 ## How a user reaches it
 
@@ -43,14 +45,14 @@ What the user sees/does:
   (`comparable`) come first, sorted client-side worst-avg-delay first
   (`byDelayDescending`), agencies whose data stopped after the current ones
   and agencies with no data in range last (`dataRank`). Then, under a quiet
-  `h3` divider ("Not ranked: the data does not support a comparison" /
-  「順位を付けない事業者（データが比較に足りません）」) that states the
-  gate's thresholds once, the other agencies in name order (`byAgencyName`,
+  `h3` divider ("Not ranked" / 「順位を付けない事業者」) that states the
+  ranking conditions once (figures made from observed passing times, and the
+  gate's thresholds), the other agencies in name order (`byAgencyName`,
   the agency picker's Japanese collation; the API returns them in
   `agency_id` order and never by delay), each with its
   `comparable_reason` in words beside the figure and threshold it missed,
   such as "Observation coverage 41.0% (below 70%)". The divider is left out
-  when every agency is ranked. "Stopped" is the agency picker's rule
+  when every agency is ranked, and opens the list when none is. "Stopped" is the agency picker's rule
   (`hasStopped` in `components/agencyDirectory.ts`): the row's `data_to`
   trails the newest `data_to` on the board by three days or more, and the
   row then reads the picker's "No updates after <date>". Each card shows:
@@ -138,6 +140,15 @@ checks run in a fixed order:
 | 3 | `coverage_low` | observation coverage below `MIN_COVERAGE_PCT` (70%) | the feed's gaps could hide any delay pattern, and their bias differs feed by feed |
 | 4 | `ci_wide` | the on-time interval's half-width above `MAX_CI_HALF_WIDTH_PP` (3 points) | the interval then spans more than the gap between many neighbouring agencies' rates, so ranking them would order noise |
 | 5 | `clamp_high` | `clamp_pct`, to a tenth as printed, above `MAX_CLAMP_PCT` (5%) | a feed producing that many implausible readings makes the readings it kept suspect too |
+| 6 | `predicted_basis` | the figures' value basis is in `PREDICTED_VALUE_BASES`, which holds the definition stamp's `VALUE_BASIS` (`feed_prediction`) | a feed's predicted delays sit off the passages its vehicles were observed making, by an amount that differs feed by feed and that no check on the data can see, so a ranking would order the feeds' prediction bias ([prediction validation](prediction-validation.md)) |
+
+`predicted_basis` comes last, so an agency that gives it passes every check
+on its own data. `PREDICTED_VALUE_BASES` is a list of the bases never
+ranked rather than of those ranked, so a basis made from observed passages
+is ranked as soon as the checks before it pass, and a new predicted basis
+has to be named there. The route report card
+([route-report-card.md](route-report-card.md)) reads only the reasons about a
+route's own figures and grades a route whatever its basis.
 
 Each row also carries its agency's `capability_tier`
 (`pipeline/reports/capability.py`), derived from the same facts as the gates:
@@ -220,8 +231,11 @@ for:
   operation.
 - **Not corrected — the value itself** is the last delay the operator's
   feed reported for each stop, which can be the vendor system's prediction
-  rather than a recorded departure; the app does not observe vehicles
-  independently, so a predictor's bias carries into the figure.
+  rather than a recorded departure, so a predictor's bias carries into the
+  figure. That bias differs feed by feed, which is why the gate ranks no
+  agency on these figures (`predicted_basis`); the
+  [prediction validation](prediction-validation.md) measures it against the
+  passages archived VehiclePositions show.
 
 The gate does not group agencies by vendor platform or frequency, and the
 default order is still by delay among the comparable agencies.
@@ -279,11 +293,11 @@ default order is still by delay among the comparable agencies.
    just without a comparison.
 2. Click "Day types & agencies" in the rail, then its "Agencies" button → URL
    `/agencies/:agencyId/compare?by=agencies`.
-3. Expect the comparable agencies first, worst-avg-delay first, with the
-   current agency's card visually highlighted and tagged "Viewing"; then,
-   below "Not ranked: the data does not support a comparison", the rest in
-   name order, each with its reason. A short period (a few days) usually
-   leaves the smaller agencies unranked as `ci_wide`.
+3. Expect the "Not ranked" divider first and every agency below it in name
+   order, each with its reason, the current agency's card visually
+   highlighted and tagged "Viewing": an agency whose data passes every check
+   reads that its figures are the feed's predicted delays. A short period (a
+   few days) usually gives the smaller agencies `ci_wide` instead.
 4. Click another agency's name — expect navigation to that agency's
    Live view, carrying the same scope in the URL query string minus
    `routes` and `stop`.

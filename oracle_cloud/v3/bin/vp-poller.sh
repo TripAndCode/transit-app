@@ -7,11 +7,12 @@
 # mv), with the same fetch retries as rt-poller.sh. rotate-day.sh, sync-r2.sh
 # and spool-cleanup.sh archive vp/ the way they archive rt/.
 #
-# These samples are observed vehicle positions, collected for a bounded
-# validation window so the feeds' predicted delays can be checked against
-# where the buses actually were. Nothing in the app ingests them, so unlike
-# rt-poller.sh this never pushes to the app, and it sends no healthchecks.io
-# ping: health-check.sh pages on a VP feed that stops producing samples.
+# These samples are observed vehicle positions, collected so the feeds'
+# predicted delays can be checked against where the buses actually were
+# (scripts/validate_vp_predictions.py). Nothing in the app ingests them, so
+# unlike rt-poller.sh this never pushes to the app, and it sends no
+# healthchecks.io ping: health-check.sh pages on a VP feed that stops
+# producing samples.
 #
 # An agency without a row exits 64 before creating anything, so no empty vp/
 # directory appears for rotate-day.sh or sync-r2.sh to pick up.

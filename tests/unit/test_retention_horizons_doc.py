@@ -22,10 +22,10 @@ def _line(path: str, needle: str) -> str:
 
 def test_the_methodology_states_prune_r2s_vp_and_rt_horizons():
     vp, rt = _default("R2_VP_RETENTION_DAYS"), _default("R2_RT_RETENTION_DAYS")
-    en = _line("docs/methodology.en.md", "Positions are kept only to validate")
+    en = _line("docs/methodology.en.md", "Positions are collected only to check")
     assert f"kept for {vp} days" in en
     assert f"realtime archive's {rt:,}" in en
-    ja = _line("docs/methodology.md", "位置情報は、予測値の検証のためだけに")
+    ja = _line("docs/methodology.md", "位置情報は、予測値を観測した通過時刻と比べるためだけに")
     assert f"{vp}日間" in ja
     assert f"（{rt:,}日）" in ja
 

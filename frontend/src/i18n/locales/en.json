@@ -415,15 +415,16 @@
     "observed_coverage_missing": "Observation coverage —",
     "on_time_ci": "({{low}}–{{high}})",
     "col_ranking": "Ranking",
-    "help_ranking": "Only the agencies whose data supports a comparison are ranked: observation coverage of at least {{coverage}}%, an on-time % interval within ±{{ci}} points, and implausible readings of at most {{clamp}}%. The rest follow by name, each with the first check it fails. Every agency's on-time % uses the industry standard (no more than 1 min early or 5 min late). Neither how densely a feed reports nor where a timetable puts its slack is corrected for.",
-    "unranked_heading": "Not ranked: the data does not support a comparison",
-    "unranked_criteria": "Ranked only where observation coverage is at least {{coverage}}%, the on-time % interval is within ±{{ci}} points and implausible readings are at most {{clamp}}%. These are listed by name.",
+    "help_ranking": "Only the agencies whose data supports a comparison are ranked: observation coverage of at least {{coverage}}%, an on-time % interval within ±{{ci}} points, implausible readings of at most {{clamp}}%, and figures made from observed passing times. The rest follow by name, each with the first check it fails. A feed's predicted delays differ from observed passing times by a different amount for each agency, so agencies are not ranked on predicted delays. Every agency's on-time % uses the industry standard (no more than 1 min early or 5 min late). Neither how densely a feed reports nor where a timetable puts its slack is corrected for.",
+    "unranked_heading": "Not ranked",
+    "unranked_criteria": "Ranked only where the figures are made from observed passing times, observation coverage is at least {{coverage}}%, the on-time % interval is within ±{{ci}} points and implausible readings are at most {{clamp}}%. These are listed by name.",
     "unranked_reason": {
       "no_data": "No observations in the period",
       "coverage_unknown": "Observation coverage can't be measured: {{why}}",
       "coverage_low": "Observation coverage {{pct}}% (below {{min}}%)",
       "ci_wide": "On-time % interval ±{{half}} points (wider than ±{{max}})",
-      "clamp_high": "Implausible readings {{pct}}% (above {{max}}%)"
+      "clamp_high": "Implausible readings {{pct}}% (above {{max}}%)",
+      "predicted_basis": "Figures are the feed's predicted delays, which differ from observed passing times by a different amount for each feed"
     },
     "coverage_unknown_why": {
       "unmatched": "this feed's trips can't be matched to the timetable",

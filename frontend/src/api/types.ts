@@ -1319,7 +1319,7 @@ export type ReplayResponse = {
 
 /** Why the agencies board leaves an agency unranked: the first check of
  *  pipeline.reports.comparability it fails, in that module's order. */
-type ComparableReason = "no_data" | "coverage_unknown" | "coverage_low" | "ci_wide" | "clamp_high";
+type ComparableReason = "no_data" | "coverage_unknown" | "coverage_low" | "ci_wide" | "clamp_high" | "predicted_basis";
 
 export type NetworkAgencyRow = {
   agency_id: number;

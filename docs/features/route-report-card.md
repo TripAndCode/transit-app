@@ -108,7 +108,10 @@ The comparability check is the agencies board's (`comparability.assess`), read
 on the route's own trips: coverage of at least 70% of planned trips, and an
 on-time interval no wider than 3.0 points either side, counting trips. A route
 with a few hundred trips a month can fail the interval check and show N/A. The
-clamp check reads an agency-wide figure, so it does not decide a route.
+clamp check reads an agency-wide figure, so it does not decide a route. Nor
+does the value-basis check (`predicted_basis`): it judges whether agencies may
+be ordered against one another, not whether a route meets the standards, so
+a route on the feed's predicted delays is still graded.
 
 ## Not in this slice
 

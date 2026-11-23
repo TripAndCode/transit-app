@@ -7,6 +7,7 @@ import pytest
 from httpx import ASGITransport
 
 from pipeline.agg_registry import METHOD_VERSION
+from pipeline.reports import comparability
 from pipeline.reports.comparability import assess
 from pipeline.reports.network import compute_network_summary
 from tests.conftest import _test_pool, confirm_rt_field_coverage
@@ -15,6 +16,13 @@ _TRUNCATE_SQL = (
     "TRUNCATE agencies, agg_route_daily_dist, agg_feed_health, agg_service_delivered_daily, "
     "ridership_weights, updates CASCADE"
 )
+
+
+@pytest.fixture
+def observed_basis(monkeypatch):
+    """Judge the board's figures as though made from observed passages, so a
+    test reaches the ranked path the feed's predicted delays never take."""
+    monkeypatch.setattr(comparability, "PREDICTED_VALUE_BASES", frozenset())
 
 
 @pytest.fixture
@@ -697,6 +705,7 @@ async def test_the_board_counts_on_time_on_the_default_window(net_client):
     assert row["weighted_on_time_pct"] == 85.0
 
 
+@pytest.mark.usefixtures("observed_basis")
 async def test_the_gate_judges_the_interval_of_the_boards_own_on_time_figure(net_pool, ch_async_client):
     """The interval the gate reads is the board's on-time figure's. 600
     observed trips pin a share near 97% within +-3 points but not one near
@@ -1040,6 +1049,7 @@ async def test_the_board_shows_an_agency_edit_on_its_next_load(net_client, aconn
     assert next(row for row in after if row["agency_id"] == a)["has_ridership_weights"] is True
 
 
+@pytest.mark.usefixtures("observed_basis")
 async def test_the_board_ranks_only_the_agencies_the_data_can_compare(net_pool, ch_async_client):
     """A dense static_join agency is ranked; a sparse one (few trips, so a
     wide interval) and a thinly observed one (low coverage) are not. The
@@ -1101,6 +1111,36 @@ async def test_the_board_ranks_only_the_agencies_the_data_can_compare(net_pool, 
     assert [r["agency_id"] for r in rows] == [a, b, cc]
 
 
+async def test_the_board_ranks_no_agency_on_the_feeds_predicted_delays(net_pool, ch_async_client):
+    """Every figure is the feed's predicted delay, which differs from the
+    observed passages by a different amount for each agency. Data that passes
+    every other check leaves the agency unranked, and the unranked rows keep
+    agency_id order whatever their delay."""
+    pool, a, b, cc = net_pool
+    for aid, name, delay_min in ((a, "Dense", 1), (b, "Also dense", 9)):
+        await _seed_gated_agency(
+            pool,
+            aid,
+            name=name,
+            strategy="static_join",
+            planned=1000,
+            observed=900,
+            samples=20000,
+            on_time=18000,
+            delay_min=delay_min,
+        )
+
+    async with pool.acquire() as conn:
+        rows = await compute_network_summary(conn, ch_async_client, date(2026, 4, 1), date(2026, 4, 1))
+
+    by = {r["agency_id"]: r for r in rows}
+    for aid in (a, b):
+        assert (by[aid]["comparable"], by[aid]["comparable_reason"]) == (False, "predicted_basis")
+        assert (by[aid]["coverage_pct"], by[aid]["ci_low"], by[aid]["ci_high"]) == (90.0, 87.8, 91.8)
+    assert [r["agency_id"] for r in rows] == [a, b, cc]
+
+
+@pytest.mark.usefixtures("observed_basis")
 async def test_coverage_over_100_stays_visible_and_still_ranks(net_pool, ch_async_client):
     """More trips observed than planned means the feed reported trips the
     plan doesn't name. The figure is not capped, and it is not too little
@@ -1126,6 +1166,7 @@ async def test_coverage_over_100_stays_visible_and_still_ranks(net_pool, ch_asyn
     assert (row["comparable"], row["comparable_reason"]) == (True, None)
 
 
+@pytest.mark.usefixtures("observed_basis")
 async def test_a_feed_whose_trips_cannot_be_matched_to_the_timetable_is_unranked(net_pool, ch_async_client):
     """aomori_regex parses its trip_ids from the feed's text, so they don't
     match the timetable's and its coverage cannot be measured, however dense
@@ -1177,6 +1218,7 @@ async def _seed_two_day_agency(pool, aid, *, name, observed_days):
     await _seed(pool, aid, dist=[(d, 20000, 20000 * 60, 18000) for d in observed_days], feed=("2026-04-01", 1000, 0))
 
 
+@pytest.mark.usefixtures("observed_basis")
 async def test_a_day_no_agency_has_observations_for_yet_counts_against_none(net_client):
     """The period's last day has a plan, but no agency's aggregates have
     reached it: a lag they share, not trips each feed missed. Coverage stops
@@ -1198,6 +1240,7 @@ async def test_a_day_no_agency_has_observations_for_yet_counts_against_none(net_
         assert "coverage_through" not in by[aid]
 
 
+@pytest.mark.usefixtures("observed_basis")
 async def test_a_day_one_feed_missed_counts_against_that_feed(net_pool, ch_async_client):
     pool, a, b, _cc = net_pool
     await _seed_two_day_agency(pool, a, name="A", observed_days=["2026-04-01", "2026-04-02"])
@@ -1235,6 +1278,7 @@ async def test_a_high_implausible_share_is_unranked(net_pool, ch_async_client):
     assert (row["comparable"], row["comparable_reason"]) == (False, "clamp_high")
 
 
+@pytest.mark.usefixtures("observed_basis")
 async def test_network_summary_endpoint_carries_the_gate_and_its_thresholds(net_client):
     client, pool, a, b, cc = net_client
     await _seed_gated_agency(

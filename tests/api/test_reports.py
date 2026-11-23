@@ -21,6 +21,7 @@ from tests.api.test_network import (
     _seed_static_schedule,
     _seed_two_day_agency,
     _set_ingest_strategy,
+    observed_basis,  # noqa: F401 -- fixture
 )
 from tests.conftest import _test_pool, confirm_rt_field_coverage
 from tests.fixtures.observed_route import seed_observed_route
@@ -3183,6 +3184,7 @@ def _council_url(agency_id, day_from=_GATE_DAY, day_to=_GATE_DAY, extra=""):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
 async def test_council_summary_says_a_comparable_agency_meets_the_boards_conditions(reports_client):
     client, agency_id, pool = reports_client
     await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
@@ -3212,6 +3214,41 @@ async def test_council_summary_says_a_comparable_agency_meets_the_boards_conditi
             "thresholds": _THRESHOLDS,
         }
         assert line in body["text"].split("\n")
+
+
+@pytest.mark.asyncio
+async def test_council_summary_says_an_agency_is_not_ranked_on_its_feeds_predicted_delays(reports_client):
+    """Dense, well-covered data on the feed's predicted delays passes every
+    check on the data and still is not to be ranked."""
+    import csv
+    import io
+
+    client, agency_id, pool = reports_client
+    await _seed_gated_agency(pool, agency_id, name="Dense", strategy="static_join", delay_min=1, **_DENSE)
+
+    for locale, line in (
+        (
+            "ja",
+            "※他事業者との比較: 条件を満たしません。値はフィードの予測遅延"
+            "（観測した通過時刻とのずれが事業者ごとに異なる）。"
+            "この事業者の数字を他事業者と順位付けて比べないでください。",
+        ),
+        (
+            "en",
+            "* Comparison with other operators: does not meet the conditions. Figures are the feed's predicted "
+            "delays, which differ from observed passing times by a different amount for each feed. "
+            "Do not rank this operator's figures against other operators'.",
+        ),
+    ):
+        body = (await client.get(_council_url(agency_id), headers={"Accept-Language": locale})).json()
+        gate = body["comparability"]
+        assert (gate["comparable"], gate["reason"]) == (False, "predicted_basis")
+        assert (gate["coverage_pct"], gate["ci_low"], gate["ci_high"]) == (90.0, 87.8, 91.8)
+        assert line in body["text"].split("\n")
+
+    rows = list(csv.reader(io.StringIO((await client.get(_council_url(agency_id, extra="&format=csv"))).text)))
+    data_row = rows[rows.index(_COUNCIL_CSV_HEADER) + 1]
+    assert data_row[7:12] == ["いいえ", "predicted_basis", "90.0", "87.8", "91.8"]
 
 
 @pytest.mark.asyncio
@@ -3263,6 +3300,7 @@ async def test_council_summary_cannot_measure_coverage_for_a_feed_whose_trips_ar
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
 async def test_council_summary_counts_its_own_missing_last_day_once_another_agency_has_reached_it(reports_client):
     """Coverage stops where the agencies board stops it: the newest day ANY
     agency has observations for. A day no one has reached yet is a lag every
@@ -3292,6 +3330,7 @@ async def test_council_summary_counts_its_own_missing_last_day_once_another_agen
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
 async def test_council_summary_reads_the_boards_cached_verdict_so_the_two_never_disagree(reports_client):
     """The council report takes its agency's verdict from the agencies
     board's cached result for the same dates, so a change the board has not
@@ -3422,10 +3461,16 @@ async def test_council_summary_judges_an_agency_exactly_as_the_agencies_board_do
             **{k: row[k] for k in figures},
             "thresholds": board["comparability"],
         }
-    assert {rows[aid]["comparable_reason"] for aid in rows} == {None, "ci_wide", "coverage_low", "coverage_unknown"}
+    assert {rows[aid]["comparable_reason"] for aid in rows} == {
+        "predicted_basis",
+        "ci_wide",
+        "coverage_low",
+        "coverage_unknown",
+    }
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
 async def test_council_summary_judges_the_whole_agency_whatever_narrows_its_on_time_figures(reports_client):
     """The gate reads the board's figures: every route, every day of the
     period and the board's on-time definition. A route filter or another
@@ -3662,6 +3707,7 @@ async def test_a_council_report_with_a_verdict_reads_no_figures_of_its_own(repor
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("observed_basis")
 async def test_council_summary_csv_carries_the_comparability_columns(reports_client):
     import csv
     import io
