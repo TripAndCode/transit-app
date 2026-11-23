@@ -645,7 +645,14 @@ def test_a_failed_heartbeat_is_logged_without_its_url(caplog, error, logged):
 
 
 @pytest.mark.parametrize(
-    ("value", "configured"), [("", False), ("file:///etc/passwd", False), ("https://hc.example/x", True)]
+    ("value", "configured"),
+    [
+        ("", False),
+        ("file:///etc/passwd", False),
+        ("https://[hc.example/x", False),
+        ("https:///x", False),
+        ("https://hc.example/x", True),
+    ],
 )
 def test_the_heartbeat_reads_only_an_http_url(monkeypatch, caplog, value, configured):
     caplog.set_level(logging.INFO, logger="pipeline.poller")

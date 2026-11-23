@@ -152,7 +152,11 @@ def configured_heartbeat() -> Heartbeat | None:
     url = os.environ.get(HEARTBEAT_ENV, "").strip()
     if not url:
         return None
-    if not url.startswith(("https://", "http://")):
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        parts = None
+    if parts is None or parts.scheme not in ("https", "http") or not parts.netloc:
         logger.error("poller: $%s is not an http(s) URL; no heartbeat is sent", HEARTBEAT_ENV)
         return None
     logger.info("poller: each settled step reports to $%s", HEARTBEAT_ENV)

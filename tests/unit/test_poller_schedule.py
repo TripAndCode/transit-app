@@ -85,6 +85,12 @@ def test_a_pack_failure_retries_pack_ingest_and_analyze():
     assert run.later(RETRY_AFTER) == ("retry", {(1, "pack"), (1, "ingest"), (1, "analyze")})
 
 
+def test_a_pack_retry_leaves_out_an_ingest_that_was_skipped():
+    run = _Run()
+    run.step(failed={(1, "pack")}, skipped={(1, "ingest")})
+    assert run.later(RETRY_AFTER) == ("retry", {(1, "pack"), (1, "analyze")})
+
+
 def test_retries_stop_once_a_stage_spends_its_budget():
     run = _Run()
     run.step(failed={(1, "promote")})

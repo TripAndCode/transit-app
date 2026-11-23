@@ -81,7 +81,7 @@ def decide(now: datetime, agencies: Iterable[int], state: State) -> tuple[str | 
         return "jst", plan, replace(state, jst_day=jst_today, pending=MappingProxyType(pending))
     due = [k for k, p in state.pending.items() if p.retries < MAX_RETRIES and p.due <= now]
     if due:
-        return "retry", _followups(due), state
+        return "retry", _followups(due) - set(exhausted(state)), state
     return None, frozenset(), state
 
 
