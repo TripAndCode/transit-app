@@ -55,7 +55,7 @@ provide it either, even for a caller that already holds domain 1 for its own
 reasons: the two locks occupy separate advisory-lock spaces, so holding one
 never grants the other's exclusion.
 
-Best-effort, not job-level atomicity: production (scripts/fetch_and_ingest.sh,
+Best-effort, not job-level atomicity: a shell loop (scripts/fetch_and_ingest.sh,
 docs/deploy-railway.md's Railway sketch) invokes load_static/ingest/analyze
 as separate per-agency CLI processes, each independently acquiring and
 releasing this lock -- so a cron poke can still land *between* two of those

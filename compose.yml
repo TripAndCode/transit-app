@@ -168,9 +168,8 @@ services:
 
 # Without the profile this compose file is for LOCAL DEVELOPMENT only — it
 # brings up the PostGIS+pgvector database (`make db`) and ClickHouse that
-# `make serve` connects to. Production runs on Railway (app + separate DB
-# services built from the same `db/Dockerfile`), push-to-deploy — see
-# docs/deploy-railway.md.
+# `make serve` connects to. Production runs the standalone profile — see
+# docs/deploy-standalone.en.md.
 
 volumes:
   transit_pgdata:

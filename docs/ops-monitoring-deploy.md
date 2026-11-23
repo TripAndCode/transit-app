@@ -315,9 +315,11 @@ A run that drops a month records the new floors, then waits
 live report that checked the old floor nearly always finishes in that time,
 so the refusal above stays rare; the wait does not decide correctness. It holds
 the affected agencies' ingest locks for that wait, so an analyze or promotion
-that meets it is turned away rather than queued: the cron poke is recorded
-`skipped` and the CLIs exit. Schedule `prune-updates` clear of the 00:05 JST
-poke. A run that drops nothing does not wait.
+that meets it is turned away rather than queued: the standalone poller retries
+its daily step later, a cron poke is recorded `skipped`, and the CLIs exit.
+`prune-updates` likewise exits when the daily step holds the lock. Schedule it
+clear of that step: the poller's, soon after 00:00 and 09:00 JST, or Railway's
+00:05 JST poke. A run that drops nothing does not wait.
 
 `migrate up` reads whether a floor exists once, before it applies anything,
 so the first prune that ever records a floor must not overlap a deploy.
@@ -329,29 +331,39 @@ next run drops them under a new row. So an empty `dropped_at` means only that
 the run which wrote the row did not confirm the drop; ClickHouse's
 `system.parts` says whether `updates` still holds the month.
 
-To turn it on in production:
+To turn it on in production, which runs the `standalone` Compose profile
+(`docs/deploy-standalone.en.md`):
 
-1. Promote `main`, at or past the commit that adds `pipeline/retained_reads.py`,
-   to `production` (`docs/deploy-railway.md`, "Point every Railway service at
-   the `production` branch"). An older build already has the prune command
-   but not the re-check that keeps a live read from answering over a month it
-   is dropping.
-2. Check that Railway's deployed ingest job runs no `ALTER TABLE updates
-   DELETE`, such as one driven by `RETENTION_DAYS`. A delete like that sets no
-   floor, so the next analyze purges the aggregates of the rows it removed.
-3. Apply the migrations, and add `python gtfs_pipeline.py prune-updates` after
-   `analyze_all` in the daily ingest job (`docs/deploy-railway.md`, step 5).
-   The job leaves it out until this step adds it, so the switch alone never
-   arms a drop.
-4. Run `python gtfs_pipeline.py prune-updates --dry-run` against production. It
-   writes nothing, whatever the switch says. It lists each month past the
-   horizon: the ones it would drop, with the floor each sets, and the ones it
-   keeps, with the agency and date that keep each. Analyze any agency it names
-   first.
-5. Turn on `updates_prune_enabled` from `/admin/flags`, or set
-   `UPDATES_PRUNE_ENABLED=true` on the job that runs the command.
-6. After the first run, check its `retention` row on the board, and that the
+1. Upgrade to `main` at or past the commit that adds
+   `pipeline/retained_reads.py` (`docs/deploy-standalone.en.md`, section 7).
+   An older build already has the prune command but not the re-check that
+   keeps a live read from answering over a month it is dropping.
+2. Add `prune-updates` to the host's crontab, at an hour clear of the
+   poller's daily steps and of the nightly backup. cron reads the host's time
+   zone; on a host set to JST, for example:
+
+   ```cron
+   30 5 * * * cd /path/to/transit-app && PATH=/usr/local/bin:/usr/bin:/bin docker compose --profile standalone exec -T app python gtfs_pipeline.py prune-updates >>"$HOME/transit-prune.log" 2>&1
+   ```
+
+   The crontab leaves it out until this step adds it, so the switch alone
+   never arms a drop.
+3. Run `docker compose --profile standalone exec app python gtfs_pipeline.py
+   prune-updates --dry-run`. It writes nothing, whatever the switch says. It
+   lists each month past the horizon: the ones it would drop, with the floor
+   each sets, and the ones it keeps, with the agency and date that keep each.
+   Analyze any agency it names first.
+4. Turn on `updates_prune_enabled` from `/admin/flags`, or set
+   `UPDATES_PRUNE_ENABLED=true` in `.env` and run `docker compose --profile
+   standalone up -d app`.
+5. After the first run, check its `retention` row on the board, and that the
    run's rows in `updates_pruned_months` have `dropped_at` set.
+
+On Railway instead, promote that commit to `production`, check that the
+deployed ingest job runs no `ALTER TABLE updates DELETE` (a delete sets no
+floor, so the next analyze purges the aggregates of the rows it removed), and
+add `python gtfs_pipeline.py prune-updates` after `analyze_all` in that job
+(`docs/deploy-railway.md`, step 5); the dry run, switch and check are the same.
 
 A dropped month's rows come back only by a replay from R2. Its aggregates need
 none.

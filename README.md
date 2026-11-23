@@ -175,8 +175,9 @@ FastAPI + React SPA  <-------------------------------------------------+
   the same timetable's stops. It builds the rest in Postgres; of those, dwell
   and running time take each stop visit's scheduled times from the same
   archive, through the ClickHouse scan that pairs its arrival with its
-  departure. A ClickHouse that predates one of those tables needs
-  `make ch-bootstrap` before the next `analyze`.
+  departure. A ClickHouse that predates one of those tables needs its schema
+  applied (`make ch-bootstrap`; a deploy's schema step applies it) before the
+  next `analyze`.
 - Every timetable an agency loads is kept in ClickHouse under its content
   hash: its stop times in `static_stop_times_archive` and its schedule as
   ingest stamps it in `static_schedule_archive`. `static_version_map` records
@@ -192,7 +193,8 @@ FastAPI + React SPA  <-------------------------------------------------+
   version name and content (a calendar-only refetch under the same name keeps
   the first calendar), and `--calendars` keeps it, from the same zips, for
   timetables archived before it was. A ClickHouse that predates these
-  tables needs `make ch-bootstrap` before the next `load_static` or `analyze`.
+  tables needs its schema applied (`make ch-bootstrap`; a deploy's schema step
+  applies it) before the next `load_static` or `analyze`.
   Where the version in force on a date has other content than the one its
   rows were ingested against, `analyze` writes that date's rows filed under
   it to `updates_filed` (`pipeline/refiled.py`), and its own reads and the
@@ -222,7 +224,7 @@ FastAPI + React SPA  <-------------------------------------------------+
 - The Ask tab uses deterministic SQL tools first. Only the long-tail fallback
   calls an LLM, and optional LLM features have kill switches.
 
-See the [deployment guide](docs/deploy-railway.md) for production setup and
+See the [deployment guide](docs/deploy-standalone.en.md) for production setup and
 the [feature guides](docs/features/) for user-facing behavior.
 
 ## Commands
@@ -440,14 +442,9 @@ and CI's `secrets-scan.yml` runs it again on every pull request and push to
 
 ## Deployment
 
-Production uses Railway services for the app, Postgres, and the scheduled
-ingest job. The Docker image builds the React SPA and serves it from FastAPI.
-The database remains on Railway's private network, and migrations run through
-the deployment configuration.
-
-Read [docs/deploy-railway.md](docs/deploy-railway.md) before deploying. It
-covers service creation, variables, data loading, custom domains, backups, and
-the Oracle-to-R2 archive path.
+Production runs from the `standalone` Compose profile on one host, the same
+path anyone else deploys with. The Docker image builds the React SPA and serves
+it from FastAPI.
 
 ### Standalone
 
@@ -455,8 +452,17 @@ One machine with Docker runs the whole app for your own feeds, with no Oracle
 collector, R2, VPS or LLM key. [docs/deploy-standalone.en.md](docs/deploy-standalone.en.md) (日本語:
 [docs/deploy-standalone.md](docs/deploy-standalone.md)) is the one page for it:
 clone, `.env`, `docker compose --profile standalone up -d --build app poller`, adding an agency with `add_agency` and reading its verdicts, signing in as
-administrator, backups, upgrades and what is not automated.
+administrator, backups, upgrades and their cadence, starting from an R2
+archive, and what is not automated. Its schema step applies the migrations and
+the ClickHouse schema on every start, so a deploy needs no manual schema step.
 [`feeds/`](feeds/README.en.md) is the catalogue of known feeds.
+
+### Railway
+
+[docs/deploy-railway.md](docs/deploy-railway.md) covers the Railway deployment
+production ran on before: service creation, variables, data loading, custom
+domains, backups, and the Oracle-to-R2 archive path. It is the fallback when a
+public URL is needed and no host is available.
 
 ## Repository Map
 

@@ -32,6 +32,8 @@ Oracle、R2、天気、LLM の設定は無視して構いません。`GEMINI_API
 
 ## 2. 起動
 
+空の状態ではなく既存の R2 アーカイブの履歴から始める場合は、この節と次の節の代わりに 9 節に従います。
+
 ```bash
 docker compose --profile standalone up -d --build app poller
 ```
@@ -140,7 +142,31 @@ git pull
 docker compose --profile standalone up -d --build app poller
 ```
 
-アプリとポーラーが再起動する前にスキーマ更新のステップ（`gtfs_pipeline.py schema-up`）が走るので、マイグレーションは自動で適用されます。スキーマが変わるリリースの前にはバックアップを取ってください。すでに古い履歴を捨てたデータベースで、保存済みのデータを削除するマイグレーションがあると、スキーマ更新のステップが拒否します。`up` が失敗を報告し、`app` はそのステップを待つので起動しません。理由は `docker compose --profile standalone logs migrate` で読めます。バックアップを取ったうえで、そのマイグレーションのバージョンを `.env` の `MIGRATE_ALLOW_DESTRUCTIVE_UP` に書き、`up` をもう一度実行します。
+アプリとポーラーが再起動する前にスキーマ更新のステップ（`gtfs_pipeline.py schema-up`）が走るので、マイグレーションは自動で適用されます。すでに古い履歴を捨てたデータベースで、保存済みのデータを削除するマイグレーションがあると、スキーマ更新のステップが拒否します。`up` が失敗を報告し、`app` はそのステップを待つので起動しません。理由は `docker compose --profile standalone logs migrate` で読めます。バックアップを取ったうえで、そのマイグレーションのバージョンを `.env` の `MIGRATE_ALLOW_DESTRUCTIVE_UP` に書き、`up` をもう一度実行します。
+
+1 回ごとの変更を小さく保つため、アップグレードは 2 週間に 1 回ほど行い、必要な修正があればそれより早く行います。毎回、その前にスキーマが変わるかどうかを確認します:
+
+```bash
+git fetch
+git diff --stat HEAD origin/main -- db/
+```
+
+ファイルが表示された場合は、`scripts/standalone_backup.sh`（6 節）を実行し、そのバックアップでアップグレードをリハーサルしてから、ここで実行します。別のディレクトリにある 2 つ目のチェックアウトは独立した Compose プロジェクトになり、専用のボリュームを持ちます。両方のデータベースをもう 1 組置けるだけのディスクが必要です:
+
+```bash
+git clone https://github.com/TripAndCode/transit-app.git ~/transit-rehearsal && cd ~/transit-rehearsal
+cp /path/to/transit-app/.env .env
+```
+
+コピーした `.env` で `STANDALONE_PORT=9000` と `PUBLIC_BASE_URL=http://localhost:9000` を設定し、`COMPOSE_PROJECT_NAME` の行があれば消します。残っていると、コピーがこのチェックアウトと同じプロジェクトになります。最新のバックアップを復元し、アプリだけを起動します。ポーラーは起動しません:
+
+```bash
+scripts/standalone_restore.sh ~/transit-backup/<最新>
+docker compose --profile standalone up -d --build app
+docker compose --profile standalone logs migrate
+```
+
+スキーマ更新のステップが成功し、<http://localhost:9000> に履歴が表示されたら、このチェックアウトをアップグレードします。その後、`~/transit-rehearsal` でだけ `docker compose --profile standalone down -v` を実行してそのチェックアウトのボリュームを削除し、ディレクトリも削除します。このチェックアウトで同じコマンドを実行すると、データが消えます。
 
 ## 8. 日次のステップを監視する
 
@@ -151,6 +177,25 @@ docker compose --profile standalone up -d --build app poller
 3. ポーラーは最初のポーリングの直後にステップを 1 回実行し、それがどのステージも失敗せずに終わるとチェックに ping が記録されます。最初のポーリングで何も保存されなかったとき（機関がまだない、またはすべてのフィードが失敗した）はステップを実行せず、次の UTC 0 時の後に最初のステップが走ります。届かない場合は、ポーラーのログに理由（失敗したステージ、または送れなかった ping）が出ます。URL はログに出ません。
 
 ポーラーは、どのステージも失敗せずにステップが終わるたびに URL に ping します。通常は JST 0 時の後と UTC 0 時（JST 9 時）の後の 1 日 2 回です。あるステージが再試行（約 2 時間分）をすべて失敗すると `<URL>/fail` に ping し、チェックはすぐに通知します。analyze が終わってもその機関の集計が最新の締まった日に追いついていない場合も、analyze の失敗として扱います。時刻表が読み込まれていない機関は ingest をスキップし、これは再試行では直らないので、そのステップはすぐに `<URL>/fail` に ping します。`refresh-static`（3 節）で時刻表を読み込んでください。ポーラーが止まる、またはステップが終わらないと ping が途絶え、最後の ping から 26 時間後にチェックが通知します。失敗の後は、後日のステップがどのステージも失敗せずに終わると、チェックは正常に戻ります。
+
+## 9. R2 アーカイブから始める
+
+この節は、収集器がすでにフィードを R2 バケットに保存している運用者向けです（[deploy-railway.md](deploy-railway.md) の Oracle の収集器など）。それ以外の方は読み飛ばしてください。新しいデータベースを空から始めるのではなく、バケットにある直近の日々で埋めます。2 節と 3 節の代わりに、ポーラーを初めて起動する前に 1 回だけ行います。ポーラーは同じ日を自分のポーリングからも保存するので、そのあとでは日次のステップが同じ日をもう一度取り込んでしまいます。
+
+1. バケットの設定を `.env` に書きます: `OBJECT_STORE_ENDPOINT`、`OBJECT_STORE_BUCKET`、`OBJECT_STORE_ACCESS_KEY_ID`、`OBJECT_STORE_SECRET_ACCESS_KEY`。読み取り専用のキーで足ります。
+2. アプリだけを起動します: `docker compose --profile standalone up -d --build app`。
+3. 事業者を `seed_agencies`（3 節）で追加し、それぞれにバケットが保存に使っている `agency_id`（`rt/<agency_id>/`）を付けます。このプロジェクト自身のバケットなら、`agencies.csv` の行がそれです。`add_agency` も `refresh-static` も実行しないでください。追い上げは最初の日に有効だった時刻表を自分で読み込み、取り込みに時刻表を結合する事業者について、それより新しい時刻表がすでに読み込まれていると拒否します。
+4. 計画を読みます。何も書き込みません:
+
+   ```bash
+   docker compose --profile standalone run --rm app python scripts/catch_up_from_r2.py --seed-days 7
+   ```
+
+   `--seed-days` は何日前（JST）から始めるかです。`--agency-id <id>` を付けると（繰り返し可）、その事業者だけに絞ります。計画は、バケットにアーカイブがない最初の日でその事業者を止めます。`--allow-gaps` を付けると、そうした日を飛ばします。
+5. 同じコマンドに `--apply --analyze` を付けて実行します。データベース名（`transit`）の入力を求められます。コンテナ内にダウンロードし、各日をその日に有効だった時刻表と結合して取り込み、最後に集計を作ります。ダウンロードしたファイルは `--rm` によりコンテナごと消えます。計画が、ある事業者の時刻表は手で読み込むよう残すと示した場合（取り込みに時刻表を使わない事業者）は、ここでその事業者に `refresh-static --agency-id <id>` を実行します（3 節）。
+6. `.env` から 4 つの設定を消します。このプロファイルでほかに読むものはなく、設定されている間はポーラーがログに警告を出します。そのうえでポーラーを起動します: `docker compose --profile standalone up -d app poller`。
+
+最初の日は JST 9 時以降の分だけを持ちます。ポーラーを起動した日は、最初のポーリングより前の時間が欠けます。
 
 ## 自動化されていないこと
 
