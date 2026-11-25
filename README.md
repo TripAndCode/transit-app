@@ -20,7 +20,7 @@ of its figures before they are published.
 
 Screenshots use the Hiroshima GTFS and GTFS-Realtime feeds published by
 広島県バス協会 (CC0) and 地理院タイル (© 国土地理院). Operator and route
-names are blurred: the [publication policy](docs/methodology.en.md) gives an
+names are blurred: the [publication policy](docs/methodology.en.md#publication-process) gives an
 operator notice before its figures are made public.
 
 ## At a Glance
