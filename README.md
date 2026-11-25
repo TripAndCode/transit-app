@@ -12,6 +12,82 @@ says who it is for and what each screen answers. The
 says how every figure is computed, what is never computed, and how an operator hears
 of its figures before they are published.
 
+![Planned departures per hour at every stop in Hiroshima, from the operators' published timetables](docs/images/readme/supply.webp)
+
+| Pulse: the period at a glance | Routes: every route's punctuality |
+| --- | --- |
+| ![Pulse screen](docs/images/readme/pulse.webp) | ![Routes screen](docs/images/readme/routes.webp) |
+
+Screenshots use the Hiroshima GTFS and GTFS-Realtime feeds published by
+広島県バス協会 (CC0) and 地理院タイル (© 国土地理院). Operator and route
+names are blurred: the [publication policy](docs/methodology.en.md) gives an
+operator notice before its figures are made public.
+
+## At a Glance
+
+**What it answers.** Did the buses a council subsidises or contracts run as
+planned over the period, and where and when not? Every figure carries its
+definition, period, data source and the amount of data behind it, and results
+leave as CSV, chart images or a printable summary for the council paper.
+
+**What it does.**
+
+- Punctuality, delay and cancellations per route, stop, hour and day type,
+  from realtime feeds collected around the clock.
+- Planned supply from timetables: departures per hour at every stop, service
+  gaps, and what each timetable revision changed.
+- A monthly A–F report card per route, bunching from headways, and connection
+  reliability at transfer hubs.
+- Feed-quality monitoring, and a check of each feed's predicted times
+  against the stop passages its vehicles' positions record.
+- A live delay map, and a "play the day" replay of how delay moved across a
+  whole service day.
+- A notebook for questions in plain Japanese or English. Fixed rules answer
+  first; only what they cannot answer reaches an LLM, which works through
+  deterministic SQL tools and sits behind a kill switch.
+- Japanese and English throughout, and an admin control room for agencies,
+  users, feature flags and pipeline runs.
+
+**How it is built.**
+
+```mermaid
+flowchart LR
+  feeds["GTFS / GTFS-RT feeds"] --> collector["Collector VM"]
+  collector -- "daily archives" --> r2[("Cloudflare R2")]
+  collector -- "polls, via the API" --> live[("ClickHouse<br/>updates_live")]
+  live -- "closed days" --> updates[("ClickHouse<br/>updates")]
+  r2 -- "archive ingest" --> updates
+  updates --> analyze["analyze"]
+  analyze --> agg[("Postgres + PostGIS<br/>agg_* tables")]
+  agg --> api["FastAPI"]
+  updates -. "narrow filters" .-> api
+  api --> spa["React SPA<br/>(ja / en)"]
+```
+
+- Raw realtime observations, hundreds of millions of rows, live in
+  ClickHouse. The daily `analyze` step turns them into per-day aggregates, so
+  default reports read those rather than scanning the raw history.
+- Each observation is judged against the timetable in force on its service
+  day, kept in a schedule archive, so loading a new timetable does not
+  re-judge past days against it.
+- Postgres holds the aggregates, the static GTFS (PostGIS) and application
+  data. FastAPI serves the API and the built SPA from one origin.
+
+**Stack.** Python, FastAPI, asyncpg, ClickHouse, Postgres with PostGIS and
+pgvector, Cloudflare R2 · React 19 with the React Compiler, TanStack Query,
+React Router, MapLibre GL, i18next · Docker, GitHub Actions.
+
+**Engineering practices.**
+
+- Hundreds of backend and frontend test files. CI runs the backend suite in
+  parallel shards against real Postgres and ClickHouse, and gates frontend
+  coverage, i18n key parity, entry-chunk size and React Compiler coverage.
+- A written [methodology](docs/methodology.en.md) defines every figure, and
+  what the app refuses to compute.
+- Feature kill switches, an audit log of every admin action, and a record of
+  every pipeline run.
+- Secret scanning on every pull request, and across the full history.
+
 ## Start Here
 
 ### Requirements
