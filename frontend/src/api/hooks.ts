@@ -51,6 +51,7 @@ import type {
   StopBoundsResponse,
   RevisionDayType,
   TimetableRevisionDiff,
+  TimetableRevisionNewGaps,
   TimetableRevisionRoutes,
   TimetableRevisionsResponse,
   TransferPairsResponse,
@@ -178,6 +179,39 @@ export function useTimetableRevisionDiff(
     staleTime: 5 * 60 * 1000,
     // A day-type switch keeps the same revision's tabs and totals on screen
     // while its stops load; another revision's would be wrong figures.
+    placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
+  });
+}
+
+/** A band of service-day hours and the gap over it, in minutes, that the
+ *  new-gap list reads. */
+interface NewGapBand {
+  fromHour: number;
+  toHour: number;
+  gapMin: number;
+}
+
+/** The stops the revision starting on `on` left with a new gap over `band`,
+ *  those of `dayType` alone. */
+export function useTimetableRevisionNewGaps(
+  agencyId: number | null,
+  on: string,
+  dayType: RevisionDayType,
+  band: NewGapBand,
+): UseQueryResult<TimetableRevisionNewGaps> {
+  const query = new URLSearchParams({
+    on,
+    day_type: dayType,
+    from_hour: String(band.fromHour),
+    to_hour: String(band.toHour),
+    gap_min: String(band.gapMin),
+  }).toString();
+  return useQuery({
+    queryKey: ["timetable-revision-new-gaps", agencyId, on, dayType, band.fromHour, band.toHour, band.gapMin],
+    queryFn: ({ signal }) =>
+      apiGet<TimetableRevisionNewGaps>(`/api/${agencyId}/timetable-revisions/new-gaps?${query}`, { signal }),
+    enabled: agencyId != null,
+    staleTime: 5 * 60 * 1000,
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === on ? previous : undefined),
   });
 }

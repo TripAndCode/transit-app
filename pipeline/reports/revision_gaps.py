@@ -105,9 +105,10 @@ def new_gaps(
 
 
 class RevisionDepartures(NamedTuple):
-    """Both sides' typical days, the day types both know, and the departures
-    of each stop that changed on them (changed_departures)."""
+    """A revision's typical days on both sides, the day types both know, and
+    the departures of each stop that changed on them (changed_departures)."""
 
+    revision: Revision
     sides: Sides
     known: tuple[RevisionDayType, ...]
     changed: Changed
@@ -139,4 +140,4 @@ async def load_departures(ch, agency_id: int, revision: Revision) -> RevisionDep
         _departures(ch, agency_id, revision.before.content, sides.before),
         _departures(ch, agency_id, revision.after.content, sides.after),
     )
-    return RevisionDepartures(sides, known, changed_departures(before, after, known))
+    return RevisionDepartures(revision, sides, known, changed_departures(before, after, known))
