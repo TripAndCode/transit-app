@@ -394,6 +394,7 @@ The main endpoints are:
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /health` | Liveness check |
+| `GET /health/ready` | Readiness check: 200 when both databases answer, else 503 naming the one that does not |
 | `GET /api/agencies` | List agencies |
 | `GET /api/{agency_id}/delays/live` | Latest realtime delays |
 | `GET /api/{agency_id}/reports/{type}` | Report data or CSV |

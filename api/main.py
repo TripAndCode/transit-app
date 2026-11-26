@@ -11,11 +11,13 @@ import asyncio
 import logging
 import os
 import os.path
+from collections.abc import Awaitable
 from contextlib import asynccontextmanager
+from typing import Literal
 
 import asyncpg
 from clickhouse_connect.driver.exceptions import DatabaseError as ClickHouseDatabaseError
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, JSONResponse
@@ -451,6 +453,58 @@ def feedback_url() -> str | None:
 async def health():
     """Liveness probe. Returns ``{"status": "ok"}`` once the app is responding."""
     return {"status": "ok"}
+
+
+# Each database gets this long to answer, so a hung one still lets the probe
+# answer well inside an uptime monitor's own timeout.
+READY_PROBE_TIMEOUT_SECONDS = 5.0
+
+
+class ReadyStatus(BaseModel):
+    status: Literal["ok", "unavailable"]
+    postgres: Literal["ok", "down"]
+    clickhouse: Literal["ok", "down"]
+
+
+async def _answers(name: str, probe: Awaitable[object] | None) -> bool:
+    if probe is None:
+        return False
+    try:
+        await asyncio.wait_for(probe, READY_PROBE_TIMEOUT_SECONDS)
+    except Exception:
+        _log.warning("readiness: %s did not answer", name, exc_info=True)
+        return False
+    return True
+
+
+@app.get("/health/ready", response_model=ReadyStatus, responses={503: {"model": ReadyStatus}})
+async def ready(request: Request, response: Response) -> ReadyStatus:
+    """Readiness, for an uptime monitor outside the machine: 200 when the app
+    can query both databases, else 503 naming the one it cannot. `/health`
+    answers whatever the databases do, and so does `/api/config`, whose flags
+    keep their last value while Postgres is unreachable.
+
+    A ClickHouse that was down when the app started stays down here until the
+    app restarts, since the app opens its client only at startup.
+    """
+    ch = getattr(request.app.state, "ch_client", None)
+    pg_ok, ch_ok = await asyncio.gather(
+        _answers("Postgres", request.app.state.pool.fetchval("SELECT 1")),
+        _answers("ClickHouse", ch.command("SELECT 1") if ch is not None else None),
+    )
+    if not (pg_ok and ch_ok):
+        response.status_code = 503
+    return ReadyStatus(
+        status="ok" if pg_ok and ch_ok else "unavailable",
+        postgres="ok" if pg_ok else "down",
+        clickhouse="ok" if ch_ok else "down",
+    )
+
+
+# HEAD too: some uptime monitors probe with it, and a 405 would read as down.
+# Its own route, left out of the schema, because one route for both methods
+# gives them the same operationId.
+app.head("/health/ready", response_model=ReadyStatus, include_in_schema=False)(ready)
 
 
 @app.get("/api/config", response_model=ClientConfig)

@@ -199,6 +199,23 @@ docker compose --profile standalone logs migrate
 
 最初の日は JST 9 時以降の分だけを持ちます。ポーラーを起動した日は、最初のポーリングより前の時間が欠けます。
 
+## 9. サイトを外から監視する
+
+`/health/ready` は、アプリが両方のデータベースに問い合わせできるときに 200 を返します。できないときは 503 を返し、失敗した方を示します:
+
+```json
+{"status": "unavailable", "postgres": "ok", "clickhouse": "down"}
+```
+
+各データベースの応答は 5 秒まで待つので、どちらかが固まっていてもこのエンドポイントは応答します。`/health` はアプリのプロセスが応答することしか示さず、`/api/config` は Postgres が止まっていても応答し続けるので、どちらもサイトが動いていることを示しません。
+
+1. このマシンの外で動く HTTP の死活監視（ホスティングされたサービス、または別のホストからのチェック）を、リバースプロキシ経由で `https://<ホスト名>/health/ready` に向けます。
+2. 1 分ごとにチェックし、5 分間失敗が続いたら通知するように設定します。チェックの間隔が長いと、通知もその分遅れます。
+
+監視は別の場所で動くので、このマシン、そのネットワーク、リバースプロキシが止まったときにも通知します。これらはマシン上の何からも報告できません。
+
+アプリは起動時にだけ ClickHouse に接続します。そのとき ClickHouse に届かなかった場合、ClickHouse が戻った後も、アプリを再起動するまで `/health/ready` と ClickHouse を読むページは失敗し続けます: `docker compose --profile standalone restart app`。
+
 ## 自動化されていないこと
 
 - 事業者が再公開した時刻表: `docker compose --profile standalone exec app python gtfs_pipeline.py refresh-static` を再実行します。
