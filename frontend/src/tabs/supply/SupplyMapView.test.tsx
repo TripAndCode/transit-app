@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { renderWithProviders } from "../../test/renderWithProviders";
 import i18n from "../../i18n";
+import { formatDateRange } from "../../utils/format";
 import * as supplyApi from "./supplyApi";
 import type { SupplyMapResponse, SupplyStopDetail } from "./supplyApi";
 import { SupplyMapView } from "./SupplyMapView";
@@ -87,7 +88,8 @@ const observed: SupplyStopDetail = {
       observed: { departures: 0, per_day: 0, on_time: 0, on_time_pct: null, uncertain: false, avg_delay_min: null },
     },
   ],
-  observed_window: { first: "2026-03-30", last: "2026-03-31", days: 3 },
+  // Friday to Tuesday: three weekdays, the weekend between them in the span.
+  observed_window: { first: "2026-03-27", last: "2026-03-31", days: 3 },
   definition: null,
 };
 
@@ -185,7 +187,9 @@ describe("SupplyMapView", () => {
     ]);
     expect(screen.getByText("50.0%").closest("td")).toHaveAttribute("title", "6 observed over 3 days, 3 on time");
     expect(
-      screen.getByText(/^Observed on the 3 days of this day type on the same timetable between .+\. The definition below covers that whole period\.$/),
+      screen.getByText(
+        `Observed on the 3 days of this day type on the same timetable between ${formatDateRange("2026-03-27", "2026-03-31")}. The definition below covers that whole period.`,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/^On time counts the observed departures only/)).toBeInTheDocument();
   });

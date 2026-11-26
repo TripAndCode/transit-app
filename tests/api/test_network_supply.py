@@ -274,11 +274,12 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
     from pipeline.clickhouse import insert_updates
     from tests.pipeline.ch_agg_helpers import update_row
 
-    # Two weekdays under A, and a Saturday the weekday window leaves out.
+    # Three weekdays under A, Friday to Tuesday, and a Saturday the weekday window leaves out.
     insert_updates(
         ch_client,
         revised,
         [
+            update_row(datetime(2026, 2, 6, 7, 5), "w1", 0, scheduled_time="07:00:00"),
             update_row(datetime(2026, 2, 9, 7, 5), "w1", 30, scheduled_time="07:00:00"),
             update_row(datetime(2026, 2, 10, 7, 5), "w1", 400, scheduled_time="07:00:00"),
             update_row(datetime(2026, 2, 10, 7, 35), "w2", 0, scheduled_time="07:30:00"),
@@ -290,26 +291,27 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
 
     params = {"agency_id": revised, "stop_id": "S1", "date": "2026-02-10", "from_hour": 7, "to_hour": 10}
     stop = (await api.get("/api/network/supply/stop", params=params)).json()
-    assert stop["observed_window"] == {"first": "2026-02-09", "last": "2026-02-10", "days": 2}
+    assert stop["observed_window"] == {"first": "2026-02-06", "last": "2026-02-10", "days": 3}
     # Hours 8 and 9 have neither a planned weekday departure nor an observed one.
     assert stop["hours"] == [
         {
             "hour": 7,
             "departures": 2,
             "observed": {
-                "departures": 3,
-                "per_day": 1.5,
-                # 30 s and 0 s are on time, 400 s is over five minutes late.
-                "on_time": 2,
-                "on_time_pct": 66.7,
+                "departures": 4,
+                "per_day": 1.3,
+                # 0 s, 30 s and 0 s are on time, 400 s is over five minutes late.
+                "on_time": 3,
+                "on_time_pct": 75.0,
                 "uncertain": True,
-                "avg_delay_min": 2.4,
+                "avg_delay_min": 1.8,
             },
         }
     ]
     assert stop["definition"]["preset"] == "standard_m1_p5"
-    # The stamp reads the timetable each observation was ingested against; these rows carry none.
-    assert [(v["name"], v["days"]) for v in stop["definition"]["timetable_versions"]] == [(None, 2)]
+    # The stamp covers the window's whole span, the weekend inside it included, and reads the
+    # timetable each observation was ingested against; these rows carry none.
+    assert [(v["name"], v["days"]) for v in stop["definition"]["timetable_versions"]] == [(None, 5)]
 
 
 async def test_a_day_type_with_no_trip_is_zero_not_missing(revised, pg_conn, ch_client, api):
