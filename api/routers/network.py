@@ -220,7 +220,8 @@ class SupplyHourObserved(BaseModel):
     on_time_pct: float | None
     uncertain: bool
     avg_delay_min: float | None
-    # None when no day judged for the hour had a departure after the hour began.
+    # None when no day judged for the hour has its last departure, as run and as
+    # timetabled, after the hour began.
     wait: SupplyHourWait | None
 
 

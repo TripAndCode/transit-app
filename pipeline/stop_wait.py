@@ -8,9 +8,9 @@ from t - x1 to t - x0, weighted by its length x1 - x0. Pooling such spans
 over days gives a wait distribution whose CDF is piecewise linear, so its
 quantiles are found exactly by sweeping the span ends (wait_quantiles).
 
-A day's hour is judged only when the feed saw every departure that could
-serve it (judged); a missed one would merge two gaps into one and lengthen
-the waits. The timetabled side reads the same days' departures at their
+A day's hour is judged only when the feed saw at least the planned number
+of departures in each hour that could serve it (judged); a missed one would
+merge two gaps into one and lengthen the waits. The timetabled side reads the same days' departures at their
 scheduled times, so the two differ only by how the buses ran.
 """
 
