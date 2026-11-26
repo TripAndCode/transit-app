@@ -162,11 +162,21 @@ describe("TimetableFit", () => {
   it("counts the segments with no scheduled departure time apart, and says when none is timed", () => {
     stub({ ...RESPONSE, static_version_id: null, terminus_early_rate: null, segments: [segment({ time_band: null })] });
     open();
-    expect(screen.getByText("No segment of this route was observed in this period.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Segments of this route were observed, but none has a scheduled departure time to compare with."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No segment of this route was observed in this period.")).not.toBeInTheDocument();
     expect(screen.getByText("Segments without a scheduled departure time, not shown: 1")).toBeInTheDocument();
     expect(screen.getByText(/days read: 20\./)).not.toHaveTextContent("(");
     expect(screen.queryByText(/At the last stop/)).not.toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("says nothing was observed when no segment came back", () => {
+    stub({ ...RESPONSE, days: 0, segments: [] });
+    open();
+    expect(screen.getByText("No segment of this route was observed in this period.")).toBeInTheDocument();
+    expect(screen.queryByText(/not shown/)).not.toBeInTheDocument();
   });
 
   it("says the hour filter does not narrow it", () => {

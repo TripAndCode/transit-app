@@ -96,7 +96,7 @@ export function TimetableFit({ agencyId, ctx, route }: { agencyId: number; ctx: 
         <p style={MUTED}>{t("timetable_fit.hour_not_applied")}</p>
       )}
       {band == null ? (
-        <EmptyState title={t("timetable_fit.none")} />
+        <EmptyState title={t(untimed > 0 ? "timetable_fit.none_timed" : "timetable_fit.none")} />
       ) : (
         <>
           {bands.length > 1 ? (

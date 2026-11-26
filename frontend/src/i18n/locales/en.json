@@ -2998,6 +2998,7 @@
     "strip_legend": "Bar: median to 85th percentile running time. Tick: the timetable's running time.",
     "rule": "Padding is the timetable's running time minus the median: positive is slack, negative too tight. Held for schedule is the share of trips reaching the segment's first stop on time or early that stayed more than 60 s beyond the scheduled dwell.",
     "untimed": "Segments without a scheduled departure time, not shown: {{n}}",
-    "terminus": "At the last stop, {{rate}} of {{arrivals}} arrivals were 60 s or more ahead of the timetable."
+    "terminus": "At the last stop, {{rate}} of {{arrivals}} arrivals were 60 s or more ahead of the timetable.",
+    "none_timed": "Segments of this route were observed, but none has a scheduled departure time to compare with."
   }
 }
