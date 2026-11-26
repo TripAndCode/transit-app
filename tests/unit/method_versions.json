@@ -99,6 +99,9 @@
   "2026.11.21": {
     "agg_stop_hour_daily": 1
   },
+  "2026.11.22": {
+    "agg_stop_departures_daily": 1
+  },
   "2026.11.3": {
     "agg_daily_trend": 2,
     "agg_hour_daily": 3,

@@ -200,6 +200,17 @@ class SupplyMapResponse(BaseModel):
     agencies: list[SupplyAgency]
 
 
+class SupplyHourWait(BaseModel):
+    # How long riders arriving at a random moment of the hour waited for the
+    # next departure, pooled over the days judged for it: as run, and as the
+    # same departures were timetabled.
+    days: int
+    p50_min: float
+    p90_min: float
+    scheduled_p50_min: float
+    scheduled_p90_min: float
+
+
 class SupplyHourObserved(BaseModel):
     # Pooled over the observed window's days; on time and the average delay
     # are of the departures observed, None with none observed.
@@ -209,6 +220,9 @@ class SupplyHourObserved(BaseModel):
     on_time_pct: float | None
     uncertain: bool
     avg_delay_min: float | None
+    # None when no day judged for the hour has its last departure, as run and as
+    # timetabled, after the hour began.
+    wait: SupplyHourWait | None
 
 
 class SupplyHour(BaseModel):
@@ -285,7 +299,7 @@ async def network_supply_stop(
 ) -> SupplyStopResponse:
     """One stop of the supply map, opened: its name, its supply over the band,
     the day's first and last departure, and each hour's planned departures
-    beside the observed ones (read_supply_stop), stamped with the on-time
+    beside the observed ones and riders' waits (read_supply_stop), stamped with the on-time
     definition and the window's timetables when anything was observed. 404
     when the operator is not active, or its version in force has no such stop
     or cannot tell the day type."""

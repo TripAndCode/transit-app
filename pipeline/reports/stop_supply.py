@@ -10,7 +10,7 @@ The map carries every stop of every operator, so it sends each operator's
 stops as columns (one array per field, no repeated keys) with only what the
 map draws; a stop's name and its first and last departure come from the stop
 read (read_supply_stop) when one is opened, with each hour's observed
-departures beside its planned ones.
+departures and riders' waits beside its planned ones.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
+from fractions import Fraction
 from typing import Any, NamedTuple
 
 from pipeline import static_archive
@@ -30,6 +31,7 @@ from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_
 from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS
 from pipeline.stats import pct_is_uncertain
 from pipeline.stop_supply import DAY_TYPES, HourCell, SupplyDayType, band_supply
+from pipeline.stop_wait import HourWait, hour_waits
 
 # The service-day hours a band may span: from the cutover to the next one,
 # whose after-midnight hours are 24 and later.
@@ -242,6 +244,11 @@ _OBSERVED_SQL = """
     WHERE agency_id = $1 AND stop_id = $2 AND date = ANY($3::date[]) AND hour >= $4 AND hour < $5
     GROUP BY hour
 """
+_DEPARTURES_SQL = """
+    SELECT scheduled_secs, dep_delays
+    FROM agg_stop_departures_daily
+    WHERE agency_id = $1 AND stop_id = $2 AND date = ANY($3::date[])
+"""
 
 
 class ObservedHour(NamedTuple):
@@ -273,9 +280,26 @@ def _tenth(numerator: int, denominator: int) -> Decimal:
     return (Decimal(numerator) / denominator).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
 
 
+def _minutes(sec: Fraction) -> Decimal:
+    return _tenth(sec.numerator, 60 * sec.denominator)
+
+
+def _wait(wait: HourWait | None) -> dict[str, Any] | None:
+    if wait is None:
+        return None
+    return {
+        "days": wait.days,
+        "p50_min": _minutes(wait.p50_sec),
+        "p90_min": _minutes(wait.p90_sec),
+        "scheduled_p50_min": _minutes(wait.scheduled_p50_sec),
+        "scheduled_p90_min": _minutes(wait.scheduled_p90_sec),
+    }
+
+
 def hour_rows(
     planned: Mapping[int, HourCell],
     observed: Mapping[int, ObservedHour] | None,
+    waits: Mapping[int, HourWait],
     days: int,
     from_hour: int,
     to_hour: int,
@@ -286,7 +310,9 @@ def hour_rows(
     default window's, of the departures observed: one not observed is not
     counted late, since a feed that missed it says nothing of its running.
     The percentage comes however few departures back it, flagged uncertain
-    when its 95% interval is wider than five points either way."""
+    when its 95% interval is wider than five points either way. Beside them
+    stand the *waits* of riders arriving at a random moment of the hour, as
+    run and as timetabled (pipeline.stop_wait), None with no day counted."""
     rows = []
     for hour in range(from_hour, to_hour):
         cell = planned.get(hour)
@@ -312,22 +338,47 @@ def hour_rows(
                 "on_time_pct": _pct1(on_time, n) if n else None,
                 "uncertain": pct_is_uncertain(on_time, n),
                 "avg_delay_min": _tenth(seen.sum_delay_sec, 60 * n) if n else None,
+                "wait": _wait(waits.get(hour)),
             }
         rows.append(row)
     return rows
 
 
+class Observed(NamedTuple):
+    """An opened stop's observed window: its days, the pooled departures of
+    each hour and the waits of each hour with a day counted for it."""
+
+    days: list[date]
+    by_hour: dict[int, ObservedHour]
+    waits: dict[int, HourWait]
+
+
 async def _observed(
-    conn, agency_id: int, stop_id: str, day: date, segments, version: tuple[str, str], day_type: str, hours: range
-) -> tuple[list[date], dict[int, ObservedHour]] | None:
-    """The days an opened stop's observed departures are pooled over and the
-    pooled departures of each hour of *hours*, or None with no such day."""
+    conn,
+    agency_id: int,
+    stop_id: str,
+    day: date,
+    segments,
+    version: tuple[str, str],
+    day_type: str,
+    cells: Mapping[int, HourCell],
+    hours: range,
+) -> Observed | None:
+    """The days an opened stop's observed departures are pooled over and, in
+    each hour of *hours*, the departures and waits over them, set against the
+    typical day's *cells*; None with no such day."""
     dates = [r[0] for r in await conn.fetch(_OBSERVED_DATES_SQL, agency_id, day, OBSERVED_DAYS)]
     days = matching_days(dates, segments, version, day_type)
     if not days:
         return None
     rows = await conn.fetch(_OBSERVED_SQL, agency_id, stop_id, days, hours.start, hours.stop)
-    return days, {r[0]: ObservedHour(*r[1:]) for r in rows}
+    departures = await conn.fetch(_DEPARTURES_SQL, agency_id, stop_id, days)
+    planned = {hour: cell.departures for hour, cell in cells.items()}
+    # A hub's weeks of departures take a while to sweep, off the event loop.
+    waits = await asyncio.to_thread(
+        hour_waits, [(r["scheduled_secs"], r["dep_delays"]) for r in departures], planned, hours
+    )
+    return Observed(days, {r[0]: ObservedHour(*r[1:]) for r in rows}, waits)
 
 
 async def read_supply_stop(
@@ -356,8 +407,14 @@ async def read_supply_stop(
     hours = await conn.fetch(_STOP_SQL, *args)
     cells = {r["hour"]: HourCell(r["departures"], r["first_sec"], r["last_sec"], r["max_gap_sec"]) for r in hours}
     supply = band_supply(cells, from_hour, to_hour)
-    observed = await _observed(conn, agency_id, stop_id, day, segments, version, day_type, range(from_hour, to_hour))
-    days, by_hour = (None, None) if observed is None else observed
+    observed = await _observed(
+        conn, agency_id, stop_id, day, segments, version, day_type, cells, range(from_hour, to_hour)
+    )
+    if observed is None:
+        rows, window = hour_rows(cells, None, {}, 0, from_hour, to_hour), None
+    else:
+        rows = hour_rows(cells, observed.by_hour, observed.waits, len(observed.days), from_hour, to_hour)
+        window = {"first": observed.days[0], "last": observed.days[-1], "days": len(observed.days)}
     return {
         "agency_id": agency_id,
         "stop_id": stop_id,
@@ -367,6 +424,6 @@ async def read_supply_stop(
         "longest_gap_min": round(supply.longest_gap_sec / 60, 1),
         "first_sec": min((c.first_sec for c in cells.values()), default=None),
         "last_sec": max((c.last_sec for c in cells.values()), default=None),
-        "hours": hour_rows(cells, by_hour, 0 if days is None else len(days), from_hour, to_hour),
-        "observed_window": None if days is None else {"first": days[0], "last": days[-1], "days": len(days)},
+        "hours": rows,
+        "observed_window": window,
     }

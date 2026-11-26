@@ -450,6 +450,7 @@ METHOD_VERSIONS: tuple[MethodVersion, ...] = (
     MethodVersion("2026.11.19", {"agg_stop_supply_days": 1, "agg_stop_supply_hourly": 1}),
     MethodVersion("2026.11.20", {"agg_route_headway_daily": 7}),
     MethodVersion("2026.11.21", {"agg_stop_hour_daily": 1}),
+    MethodVersion("2026.11.22", {"agg_stop_departures_daily": 1}),
 )
 
 # The method every report, CSV and council document names beside its figures

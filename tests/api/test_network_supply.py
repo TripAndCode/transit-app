@@ -305,6 +305,8 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
                 "on_time_pct": 75.0,
                 "uncertain": True,
                 "avg_delay_min": 1.8,
+                # No day saw both of 7's departures and both of the night's, the next ones.
+                "wait": None,
             },
         }
     ]
@@ -312,6 +314,43 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
     # The stamp covers the window's whole span, the weekend inside it included, and reads the
     # timetable each observation was ingested against; these rows carry none.
     assert [(v["name"], v["days"]) for v in stop["definition"]["timetable_versions"]] == [(None, 5)]
+
+
+async def test_an_opened_stop_sets_riders_waits_as_run_beside_the_timetabled_ones(revised, pg_conn, ch_client, api):
+    from datetime import datetime
+
+    from pipeline.analyze import analyze
+    from pipeline.clickhouse import insert_updates
+    from tests.pipeline.ch_agg_helpers import update_row
+
+    def ingested_against_a(row: tuple) -> tuple:
+        # Only A's kept timetable has the night's trips; B, the loaded one, does not.
+        return (*row, *[None] * 6, A)
+
+    # Monday night's two departures, past midnight on Monday's service day.
+    insert_updates(
+        ch_client,
+        revised,
+        [
+            ingested_against_a(update_row(datetime(2026, 2, 10, 0, 25), "w3", 240, scheduled_time="24:20:00")),
+            ingested_against_a(update_row(datetime(2026, 2, 10, 0, 35), "w4", 0, scheduled_time="00:30:00")),
+        ],
+    )
+    analyze(revised, pg_conn, ch_client)
+    pg_conn.commit()
+
+    params = {"agency_id": revised, "stop_id": "S1", "date": "2026-02-10", "from_hour": 24, "to_hour": 25}
+    (hour,) = (await api.get("/api/network/supply/stop", params=params)).json()["hours"]
+    assert (hour["hour"], hour["observed"]["departures"]) == (24, 2)
+    # Monday is judged for the night: riders from 24:00 wait for 24:24 as run (24:20 as
+    # timetabled), then for 24:30, until the 24:30 departure.
+    assert hour["observed"]["wait"] == {
+        "days": 1,
+        "p50_min": 9.0,
+        "p90_min": 21.0,
+        "scheduled_p50_min": 7.5,
+        "scheduled_p90_min": 17.0,
+    }
 
 
 async def test_a_day_type_with_no_trip_is_zero_not_missing(revised, pg_conn, ch_client, api):

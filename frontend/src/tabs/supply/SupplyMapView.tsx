@@ -19,6 +19,7 @@ import {
   useSupplyStop,
   type SupplyDayType,
   type SupplyHour,
+  type SupplyHourWait,
   type SupplyQuery,
   type SupplyStopDetail,
 } from "./supplyApi";
@@ -334,7 +335,12 @@ function StopDetail({ stop }: { stop: SupplyStopDetail }) {
           ? t("supply.hours.no_window")
           : t("supply.hours.window", { days: observedWindow.days, range: formatDateRange(observedWindow.first, observedWindow.last) })}
       </p>
-      {observedWindow != null && <p style={MUTED}>{t("supply.hours.note")}</p>}
+      {observedWindow != null && (
+        <>
+          <p style={MUTED}>{t("supply.hours.note")}</p>
+          <p style={MUTED}>{t("supply.hours.wait_note")}</p>
+        </>
+      )}
       {stop.definition && <DefinitionMetaBlock definition={stop.definition} />}
     </div>
   );
@@ -355,6 +361,7 @@ function HourTable({ hours, days }: { hours: SupplyHour[]; days: number }) {
           <th style={th({ align: "right" })}>{t("supply.hours.col_observed")}</th>
           <th style={th({ align: "right" })}>{t("supply.hours.col_on_time")}</th>
           <th style={th({ align: "right" })}>{t("supply.hours.col_delay")}</th>
+          <th style={th({ align: "right" })}>{t("supply.hours.col_wait")}</th>
         </tr>
       </thead>
       <tbody>
@@ -381,10 +388,33 @@ function HourTable({ hours, days }: { hours: SupplyHour[]; days: number }) {
               )}
             </td>
             <td style={td({ align: "right" })}>{formatMinutes(observed?.avg_delay_min)}</td>
+            <WaitCell wait={observed?.wait ?? null} />
           </tr>
         ))}
       </tbody>
     </table>
+  );
+}
+
+/** The median and 90th-percentile wait as run, the timetable's beside them
+ *  in muted brackets: how the buses ran is read against what they planned. */
+function WaitCell({ wait }: { wait: SupplyHourWait | null }) {
+  const { t } = useTranslation();
+  if (wait == null) return <td style={td({ align: "right" })}>{EM_DASH}</td>;
+  const [p50, p90, scheduledP50, scheduledP90] = [
+    wait.p50_min,
+    wait.p90_min,
+    wait.scheduled_p50_min,
+    wait.scheduled_p90_min,
+  ].map(fixedTenth);
+  return (
+    <td
+      style={td({ align: "right" })}
+      title={t("supply.hours.wait_title", { days: wait.days, p50, p90, scheduledP50, scheduledP90 })}
+    >
+      {`${p50} / ${p90}`}
+      <span className="focus-muted">{` (${scheduledP50} / ${scheduledP90})`}</span>
+    </td>
   );
 }
 

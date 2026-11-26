@@ -3,6 +3,7 @@ typical day each day type is read on."""
 
 from datetime import date, timedelta
 from decimal import Decimal
+from fractions import Fraction
 
 import pytest
 
@@ -17,6 +18,7 @@ from pipeline.stop_supply import (
     typical_days,
     versions_in_force,
 )
+from pipeline.stop_wait import HourWait
 
 H = 3600
 M = 60
@@ -265,7 +267,9 @@ def test_an_hour_sets_its_observed_departures_beside_the_planned_ones():
     # over a minute early, 2,232 s late in all. None at 9; 2 at 10, which the
     # timetable does not plan.
     observed = {8: ObservedHour(12, 2232, 7, 3, 1), 10: ObservedHour(2, -30, 2, 0, 0)}
-    rows = hour_rows(planned, observed, 4, 7, 11)
+    # Riders in 8 waited 7 minutes at the median as run on the 3 days judged for it.
+    waits = {8: HourWait(3, Fraction(420), Fraction(1501, 2), Fraction(300), Fraction(540))}
+    rows = hour_rows(planned, observed, waits, 4, 7, 11)
     assert rows == [
         {
             "hour": 8,
@@ -277,6 +281,13 @@ def test_an_hour_sets_its_observed_departures_beside_the_planned_ones():
                 "on_time_pct": Decimal("66.7"),
                 "uncertain": True,
                 "avg_delay_min": Decimal("3.1"),
+                "wait": {
+                    "days": 3,
+                    "p50_min": Decimal("7.0"),
+                    "p90_min": Decimal("12.5"),
+                    "scheduled_p50_min": Decimal("5.0"),
+                    "scheduled_p90_min": Decimal("9.0"),
+                },
             },
         },
         {
@@ -289,6 +300,7 @@ def test_an_hour_sets_its_observed_departures_beside_the_planned_ones():
                 "on_time_pct": None,
                 "uncertain": True,
                 "avg_delay_min": None,
+                "wait": None,
             },
         },
         {
@@ -301,6 +313,7 @@ def test_an_hour_sets_its_observed_departures_beside_the_planned_ones():
                 "on_time_pct": Decimal("100.0"),
                 "uncertain": True,
                 "avg_delay_min": Decimal("-0.3"),
+                "wait": None,
             },
         },
     ]
@@ -308,14 +321,14 @@ def test_an_hour_sets_its_observed_departures_beside_the_planned_ones():
 
 def test_without_an_observed_window_an_hour_carries_only_its_plan():
     planned = {8: HourCell(4, hm(8, 5), hm(8, 50), hm(0, 15)), 12: HourCell(1, hm(12), hm(12), None)}
-    assert hour_rows(planned, None, 0, 7, 12) == [{"hour": 8, "departures": 4, "observed": None}]
+    assert hour_rows(planned, None, {}, 0, 7, 12) == [{"hour": 8, "departures": 4, "observed": None}]
 
 
 def test_a_well_backed_percentage_is_not_uncertain_and_halves_round_up():
     # 1,000 departures, 100 over five minutes late and 25 over a minute
     # early, so 875 on time: 87.5 %. A mean of 0.25 min rounds up to 0.3.
     observed = {8: ObservedHour(1000, 15000, 700, 100, 25)}
-    (row,) = hour_rows({}, observed, 8, 8, 9)
+    (row,) = hour_rows({}, observed, {}, 8, 8, 9)
     assert row["observed"]["on_time_pct"] == Decimal("87.5")
     assert row["observed"]["uncertain"] is False
     assert row["observed"]["avg_delay_min"] == Decimal("0.3")

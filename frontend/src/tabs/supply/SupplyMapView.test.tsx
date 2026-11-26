@@ -80,12 +80,28 @@ const observed: SupplyStopDetail = {
     {
       hour: 10,
       departures: 4,
-      observed: { departures: 6, per_day: 2, on_time: 3, on_time_pct: 50, uncertain: true, avg_delay_min: 3.1 },
+      observed: {
+        departures: 6,
+        per_day: 2,
+        on_time: 3,
+        on_time_pct: 50,
+        uncertain: true,
+        avg_delay_min: 3.1,
+        wait: { days: 2, p50_min: 7, p90_min: 12.5, scheduled_p50_min: 5, scheduled_p90_min: 9 },
+      },
     },
     {
       hour: 11,
       departures: 4,
-      observed: { departures: 0, per_day: 0, on_time: 0, on_time_pct: null, uncertain: false, avg_delay_min: null },
+      observed: {
+        departures: 0,
+        per_day: 0,
+        on_time: 0,
+        on_time_pct: null,
+        uncertain: false,
+        avg_delay_min: null,
+        wait: null,
+      },
     },
   ],
   // Friday to Tuesday: three weekdays, the weekend between them in the span.
@@ -167,25 +183,31 @@ describe("SupplyMapView", () => {
     renderWithProviders(<SupplyMapView />);
     act(() => maps[0].handlers.click[0]({ features: [{ properties: { key: "1:S1" } }] }));
     expect(screen.getAllByRole("row").map((row) => row.textContent)).toEqual([
-      "HourPlannedObserved a dayOn timeMean delay",
-      "10:004———",
-      "11:004———",
+      "HourPlannedObserved a dayOn timeMean delayWait (min)",
+      "10:004————",
+      "11:004————",
     ]);
     expect(screen.getByText(/^Nothing observed:/)).toBeInTheDocument();
     expect(screen.queryByText(/^On time counts the observed departures only/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Wait is how long/)).not.toBeInTheDocument();
   });
 
-  it("sets each hour's observed departures and on-time beside its planned ones", () => {
+  it("sets each hour's observed departures, on-time and waits beside its planned ones", () => {
     stubSupply(response, observed);
     renderWithProviders(<SupplyMapView />);
     act(() => maps[0].handlers.click[0]({ features: [{ properties: { key: "1:S1" } }] }));
     const rows = screen.getAllByRole("row").map((row) => row.textContent);
     expect(rows).toEqual([
-      "HourPlannedObserved a dayOn timeMean delay",
-      "10:0042.050.0% (wide margin)3.1 min",
-      "11:0040.0——",
+      "HourPlannedObserved a dayOn timeMean delayWait (min)",
+      "10:0042.050.0% (wide margin)3.1 min7.0 / 12.5 (5.0 / 9.0)",
+      "11:0040.0———",
     ]);
     expect(screen.getByText("50.0%").closest("td")).toHaveAttribute("title", "6 observed over 3 days, 3 on time");
+    expect(screen.getByText("7.0 / 12.5").closest("td")).toHaveAttribute(
+      "title",
+      "As run on 2 days: half of riders waited 7.0 min or less, 9 in 10 waited 12.5 min or less. As timetabled: 5.0 and 9.0 min.",
+    );
+    expect(screen.getByText(/^Wait is how long a rider arriving at a random moment/)).toBeInTheDocument();
     expect(
       screen.getByText(
         `Observed on the 3 days of this day type on the same timetable between ${formatDateRange("2026-03-27", "2026-03-31")}. The definition below covers that whole period.`,

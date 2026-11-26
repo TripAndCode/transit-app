@@ -396,6 +396,26 @@ def _stop_hour_daily(source: str) -> str:
     """
 
 
+# Each departure as (scheduled time on the service day's clock, delay), the clock
+# _SERVICE_DAY_HOUR reads its hour from; sorted, so a rebuild writes the same arrays.
+_DEPARTURE = f"tuple(toInt32(assumeNotNull({service_day_offset_ch(_SEC)})), toInt32(assumeNotNull(d.dep_delay)))"
+
+
+def _stop_departures_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id, date,
+               arrayMap(x -> tupleElement(x, 1), deps) AS scheduled_secs,
+               arrayMap(x -> tupleElement(x, 2), deps) AS dep_delays
+        FROM (
+            SELECT st.stop_id AS stop_id, d.date AS date, arraySort(groupArray({_DEPARTURE})) AS deps
+            FROM ({_with_join_content(source)}) AS d
+            {_STATIC_JOIN}
+            WHERE {_SEC} IS NOT NULL
+            GROUP BY stop_id, date
+        )
+    """
+
+
 def _route_stop_daily(source: str) -> str:
     return f"""
         SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, stop_id, date, service_type, time_band,
@@ -627,6 +647,15 @@ _SPECS: dict[str, _Spec] = {
         _stop_hour_daily,
         scheduled_sec=True,
     ),
+    "agg_stop_departures_daily": _Spec(
+        ("agency_id", "stop_id", "date", "scheduled_secs", "dep_delays"),
+        _stop_departures_daily,
+        (
+            ("sum(length(scheduled_secs))", "sum(cardinality(scheduled_secs))"),
+            ("sum(arraySum(dep_delays))", "sum((SELECT sum(v) FROM unnest(dep_delays) AS v))"),
+        ),
+        scheduled_sec=True,
+    ),
     "route_delay_counts": _Spec(
         (
             "agency_id",
@@ -652,7 +681,14 @@ TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name not in INTERNAL_
 MONTHLY_TABLES: tuple[str, ...] = (*TABLES, *INTERNAL_TABLES)
 # The tables whose rows join the timetable archive by each row's version, so a build of one needs a ScheduleJoin.
 STATIC_JOINED_TABLES: frozenset[str] = frozenset(
-    {"agg_stop_daily", "agg_route_stop_daily", "agg_stop_hour_daily", ROUTE_STOP_DAYS, "agg_stop_routes"}
+    {
+        "agg_stop_daily",
+        "agg_route_stop_daily",
+        "agg_stop_hour_daily",
+        "agg_stop_departures_daily",
+        ROUTE_STOP_DAYS,
+        "agg_stop_routes",
+    }
 )
 
 # Whole-history tables, finalized from their internal table by `build_whole_history`. Build and swap order.

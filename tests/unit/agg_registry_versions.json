@@ -67,6 +67,10 @@
     "hash": "c00c5ea432d8b61f7c1dc9adc61bc2a05595a74f9b0a8b7873de0414d5589f1b",
     "version": 6
   },
+  "agg_stop_departures_daily": {
+    "hash": "3307f3380ad9427b594bb16b56f6e822c58f55d073b2dd6a2a65dbab0dfd9675",
+    "version": 1
+  },
   "agg_stop_hour_daily": {
     "hash": "f640714d1deb250d19b4c4472f19b4efc67256487c0fdc159b66624afe789ab9",
     "version": 1
