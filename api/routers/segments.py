@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
 from api.range import DAY_TYPE_SERVICE, TIME_BAND_RANGES, RangeCtx, last_closed_jst_day
-from api.scope_applied import ALL_SIX, scope_applied
+from api.scope_applied import scope_applied
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.data_sources import credit_line
 from pipeline.reports.definition import METHODOLOGY_URLS, DefinitionMeta, value_basis_text
@@ -335,6 +335,10 @@ class TimetableFitResponse(BaseModel):
     scope_applied: dict[str, bool]
 
 
+# The route is named by ``route``; the scope's routes filter does not narrow it.
+_TIMETABLE_FIT_SCOPE = scope_applied("from", "to", "dow", "time_band", "service")
+
+
 @router.get("/segments/timetable-fit", response_model=TimetableFitResponse)
 @limiter.limit(DEFAULT_LIMIT)
 async def timetable_fit(
@@ -374,6 +378,6 @@ async def timetable_fit(
             )
             for seg in fit["segments"]
         ],
-        definition=definition.read_under(fit["static_version_id"]) if fit["available"] else definition,
-        scope_applied=scope_applied(*ALL_SIX),
+        definition=definition.read_under(fit["static_version_id"]) if fit["days"] else definition,
+        scope_applied=_TIMETABLE_FIT_SCOPE,
     )

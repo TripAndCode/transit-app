@@ -39,20 +39,26 @@ export function bandRuns(segments: TimetableFitSegment[], band: Band): Timetable
   for (;;) {
     const left = rows.filter((s) => !visited.has(s));
     if (left.length === 0) return runs;
-    const entered = new Set(left.map((s) => s.to_stop_id));
     const run: TimetableFitSegment[] = [];
-    let next: TimetableFitSegment | undefined = left.find((s) => !entered.has(s.from_stop_id)) ?? left[0];
+    let next: TimetableFitSegment | undefined =
+      left.find((s) => !left.some((before) => continues(before, s))) ?? left[0];
     while (next) {
       visited.add(next);
       run.push(next);
       const last: TimetableFitSegment = next;
-      const cameFrom = last.from_stop_name ?? last.from_stop_id;
-      next = left.find(
-        (s) => !visited.has(s) && s.from_stop_id === last.to_stop_id && (s.to_stop_name ?? s.to_stop_id) !== cameFrom,
-      );
+      next = left.find((s) => !visited.has(s) && continues(last, s));
     }
     runs.push(run);
   }
+}
+
+/** Whether *next* carries on from *last* within one run: it starts where
+ *  *last* ends, without turning straight back to where *last* came from. */
+function continues(last: TimetableFitSegment, next: TimetableFitSegment): boolean {
+  return (
+    next.from_stop_id === last.to_stop_id &&
+    (next.to_stop_name ?? next.to_stop_id) !== (last.from_stop_name ?? last.from_stop_id)
+  );
 }
 
 /** One scale for every strip of a band, so the bars compare down the table:

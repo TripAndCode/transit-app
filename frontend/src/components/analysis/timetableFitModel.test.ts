@@ -77,6 +77,19 @@ describe("timetableFitModel", () => {
     expect(bandRuns([there, back], "morning")).toEqual([[there], [back]]);
   });
 
+  it("finds a direction's head past the turn back, wherever the sequence sorts it", () => {
+    const named = (from: string, to: string, seq: number, fromName: string, toName: string) =>
+      segment({ ...hop(from, to, seq), from_stop_name: fromName, to_stop_name: toName });
+    const out1 = named("P9", "P5", 2, "Depot", "Mill");
+    const out2 = named("P5", "T", 2, "Mill", "Terminus");
+    const back1 = named("T", "Q5", 2, "Terminus", "Mill");
+    const back2 = named("Q5", "P9", 3, "Mill", "Depot");
+    expect(bandRuns([out2, out1, back1, back2], "morning")).toEqual([
+      [out1, out2],
+      [back1, back2],
+    ]);
+  });
+
   it("starts a run where no segment leads in, not at a sequence a mid-route start lowered", () => {
     const head = hop("Z1", "A2", 2);
     const middle = hop("A2", "A3", 3);

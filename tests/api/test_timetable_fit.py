@@ -1,5 +1,7 @@
 """The route page's timetable fit: GET /segments/timetable-fit."""
 
+from datetime import timedelta
+
 import pytest
 
 from tests.api.test_segment_runtime_report import D1, D2, _segment, _trusted
@@ -43,8 +45,8 @@ async def test_the_route_segments_come_rounded_with_their_definition(client, aco
     assert segment["hold_rate"] == pytest.approx(1 / 3)
     assert body["definition"]["value_basis"] == "feed_prediction"
     applied = body["scope_applied"]
-    assert all(applied[field] for field in ("from", "to", "dow", "time_band", "service", "routes"))
-    assert not any(applied[field] for field in ("hour", "stop", "dir", "late", "early"))
+    assert all(applied[field] for field in ("from", "to", "dow", "time_band", "service"))
+    assert not any(applied[field] for field in ("routes", "hour", "stop", "dir", "late", "early"))
 
 
 @pytest.mark.asyncio
@@ -68,6 +70,27 @@ async def test_the_definition_names_only_the_timetable_read(client, aconn, aagen
     body = r.json()
     assert (body["static_version_id"], body["days"]) == ("v2", 1)
     assert [(v["name"], v["days"]) for v in body["definition"]["timetable_versions"]] == [("v2", 1)]
+
+
+@pytest.mark.asyncio
+async def test_a_range_no_timetable_was_recorded_in_keeps_the_ranges_stamp(client, aconn, aagency_id):
+    """The version in force then comes from before the range and no day is
+    read under it, so the stamp names no timetable it would contradict."""
+    await _trusted(aconn, aagency_id)
+    await aconn.execute(
+        "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) VALUES ($1, $2, 'v0')",
+        aagency_id,
+        D1 - timedelta(days=1),
+    )
+    await _segment(aconn, aagency_id, D1, "S2", "S3", "forenoon", [240])
+    await _segment(aconn, aagency_id, D2, "S2", "S3", "forenoon", [300])
+
+    r = await client.get(f"/api/{aagency_id}/segments/timetable-fit?{RANGE}&route=R9")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["static_version_id"], body["days"], body["segments"]) == ("v0", 0, [])
+    assert [(v["name"], v["days"]) for v in body["definition"]["timetable_versions"]] == [(None, 2)]
 
 
 @pytest.mark.asyncio
