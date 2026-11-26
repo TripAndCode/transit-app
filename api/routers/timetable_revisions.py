@@ -2,12 +2,14 @@
 and what one changed at every stop (pipeline.reports.timetable_diff).
 
 Reader-facing, like the reports: it is drawn from the published timetables
-alone, and its list of stops that lost service is meant for the councils and
-monitoring lists outside the operator.
+alone, and its lists of stops that lost service or were left with a new gap
+are meant for the councils and monitoring lists outside the operator.
 """
 
 import csv
 import io
+from collections import Counter
+from collections.abc import Iterable, Sequence
 from datetime import date
 from typing import Literal
 
@@ -37,8 +39,11 @@ from pipeline.reports.revision_effects import (
     load_route_timetables,
     plan,
 )
+from pipeline.reports.revision_gaps import NewGap, load_departures, new_gaps
 from pipeline.reports.schedule_revision import read_schedule_days
+from pipeline.reports.stop_supply import FIRST_HOUR, LAST_HOUR
 from pipeline.reports.timetable_diff import (
+    DAY_TYPES,
     Comparison,
     DayTypeSummary,
     Revision,
@@ -50,6 +55,7 @@ from pipeline.reports.timetable_diff import (
     load_revisions,
 )
 from pipeline.stats import pct_is_uncertain
+from pipeline.timetable_sampling import TypicalDay
 
 router = APIRouter(prefix="/api/{agency_id}", tags=["timetable-revisions"])
 
@@ -206,6 +212,7 @@ async def _stop_names(conn: asyncpg.Connection, agency_id: int, stop_ids: list[s
     return {r["stop_id"]: r["stop_name"] for r in rows}
 
 
+_CSV_NAME = "timetable_revision"
 _CSV_COLUMNS = [
     "停留所ID",
     "停留所名",
@@ -275,17 +282,23 @@ def _version_line(revision: Revision) -> str:
     )
 
 
-def _typical_days_line(comparison: Comparison) -> str:
-    days = " / ".join(
-        f"{DAY_TYPE_SERVICE[s.day_type]} "
-        f"{s.before.day.isoformat() if s.before else '不明'} → {s.after.day.isoformat() if s.after else '不明'}"
-        for s in comparison.day_types
+def _typical_days_line(days: Iterable[tuple[RevisionDayType, TypicalDay | None, TypicalDay | None]]) -> str:
+    line = " / ".join(
+        f"{DAY_TYPE_SERVICE[day_type]} "
+        f"{before.day.isoformat() if before else '不明'} → {after.day.isoformat() if after else '不明'}"
+        for day_type, before, after in days
     )
-    return f"代表日（改正前 → 改正後）：{days}"
+    return f"代表日（改正前 → 改正後）：{line}"
 
 
 def _csv_response(
-    first_day: date | None, preamble: list[str], credit: str | None, rows: list[list], message: str | None
+    name: str,
+    columns: Sequence[str],
+    first_day: date | None,
+    preamble: list[str],
+    credit: str | None,
+    rows: list[list],
+    message: str | None,
 ) -> StreamingResponse:
     buf = io.StringIO()
     buf.write("﻿")  # BOM, so Excel reads the file as UTF-8
@@ -294,16 +307,36 @@ def _csv_response(
         w.writerow([line])
     if credit is not None:
         w.writerow([credit])
-    w.writerow(_CSV_COLUMNS)
+    w.writerow(columns)
     if message is not None:
         w.writerow([message])
     w.writerows(rows)
-    fname = f"timetable_revision_{first_day.isoformat() if first_day else 'none'}.csv"
+    fname = f"{name}_{first_day.isoformat() if first_day else 'none'}.csv"
     return StreamingResponse(
         iter([buf.getvalue()]),
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+def _check_format(format: str | None, lang: str | None, day_type: RevisionDayType | None) -> None:
+    if lang is not None and format != "csv":
+        raise HTTPException(status_code=400, detail="lang only applies to format=csv")
+    if day_type is not None and format == "csv":
+        raise HTTPException(
+            status_code=400, detail="day_type does not apply to format=csv, which covers every day type"
+        )
+
+
+async def _csv_credit(
+    request: Request, conn: asyncpg.Connection, agency_id: int, lang: str | None
+) -> tuple[str, str | None]:
+    """The file reader's locale and the data-source credit in it. A direct
+    read, not Depends(get_locale): the JSON these routes return holds no
+    localized text, so its client caches it whatever the language."""
+    locale = lang or get_locale(request)
+    credit = credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), locale)
+    return locale, credit
 
 
 @router.get("/timetable-revisions/diff", response_model=RevisionDiffResponse)
@@ -337,27 +370,22 @@ async def revision_diff(
     and gained per hour, the first and last departure, and the stops left with
     none. ``format=csv`` writes the changed stops as a monitoring list. A
     day ``on`` that starts no revision is a 404."""
-    if lang is not None and format != "csv":
-        raise HTTPException(status_code=400, detail="lang only applies to format=csv")
-    if day_type is not None and format == "csv":
-        raise HTTPException(
-            status_code=400, detail="day_type does not apply to format=csv, which covers every day type"
-        )
+    _check_format(format, lang, day_type)
     revision = _revision_on(await load_revisions(ch, agency_id), on)
     result = Unavailable.NO_REVISION if revision is None else await load_comparison(ch, agency_id, revision)
 
     if format == "csv":
-        # A direct read, not Depends(get_locale): the JSON this route returns
-        # holds no localized text, so its client caches it whatever the language.
-        locale = lang or get_locale(request)
-        credit = credit_line(await conn.fetchval("SELECT feed_url FROM agencies WHERE agency_id=$1", agency_id), locale)
+        locale, credit = await _csv_credit(request, conn, agency_id, lang)
         if isinstance(result, Unavailable):
             message = UNAVAILABLE_CSV[(result, "en" if locale == "en" else "ja")]
             preamble = [] if revision is None else [_version_line(revision)]
-            return _csv_response(None if revision is None else revision.first_day, preamble, credit, [], message)
+            first_day = None if revision is None else revision.first_day
+            return _csv_response(_CSV_NAME, _CSV_COLUMNS, first_day, preamble, credit, [], message)
         names = await _stop_names(conn, agency_id, sorted({s.stop_id for s in result.stops}))
-        preamble = [_version_line(result.revision), _typical_days_line(result)]
-        return _csv_response(result.revision.first_day, preamble, credit, _csv_rows(result, names), None)
+        days = _typical_days_line((s.day_type, s.before, s.after) for s in result.day_types)
+        preamble = [_version_line(result.revision), days]
+        rows = _csv_rows(result, names)
+        return _csv_response(_CSV_NAME, _CSV_COLUMNS, result.revision.first_day, preamble, credit, rows, None)
 
     if isinstance(result, Unavailable):
         return RevisionDiffResponse(
@@ -372,6 +400,188 @@ async def revision_diff(
         revision=_revision(result.revision),
         day_types=[_summary(s) for s in result.day_types],
         stops=[_stop(s, names) for s in stops],
+    )
+
+
+class NewGapOut(BaseModel):
+    """A stop whose longest stretch without a departure over the band exceeds
+    ``gap_min`` on the typical day after the revision, and did not on the one
+    before. Departures are those within the band; gaps are seconds.
+    ``stop_name`` is the loaded timetable's, None for a stop it no longer has."""
+
+    stop_id: str
+    stop_name: str | None
+    day_type: RevisionDayType
+    departures_before: int
+    departures_after: int
+    longest_gap_before: int
+    longest_gap_after: int
+
+
+class NewGapDayTypeOut(BaseModel):
+    """How many stops a day type has new gaps at, None when either side has
+    no typical day of it."""
+
+    day_type: RevisionDayType
+    stops: int | None
+
+
+class RevisionNewGapsResponse(BaseModel):
+    """``stops`` holds the new gaps of the requested day type, or of every day
+    type when none is requested, the longest after the revision first;
+    ``day_types`` counts them on all three whenever the comparison is
+    available."""
+
+    available: bool
+    reason: Literal["no_revision", "no_calendar"] | None = None
+    revision: RevisionOut | None = None
+    from_hour: int
+    to_hour: int
+    gap_min: int
+    day_types: list[NewGapDayTypeOut] = []
+    stops: list[NewGapOut] = []
+
+
+_NEW_GAPS_CSV_NAME = "timetable_revision_new_gaps"
+_NEW_GAPS_CSV_COLUMNS = [
+    "停留所ID",
+    "停留所名",
+    "曜日区分",
+    "改正前の最も長い間隔(分)",
+    "改正後の最も長い間隔(分)",
+    "改正前の発車数(時間帯内)",
+    "改正後の発車数(時間帯内)",
+]
+
+
+def _minutes(sec: int) -> int | float:
+    minutes = round(sec / 60, 1)
+    return int(minutes) if minutes.is_integer() else minutes
+
+
+def _criterion_line(from_hour: int, to_hour: int, gap_min: int) -> str:
+    return (
+        f"新たな運行空白：{from_hour}:00〜{to_hour}:00 の発車のない最も長い間隔が、"
+        f"改正前は{gap_min}分以下で、改正後は{gap_min}分を超えた停留所"
+    )
+
+
+def _new_gap_rows(gaps: list[NewGap], names: dict[str, str | None]) -> list[list]:
+    return [
+        [
+            g.stop_id,
+            names.get(g.stop_id) or "",
+            DAY_TYPE_SERVICE[g.day_type],
+            _minutes(g.gap_before),
+            _minutes(g.gap_after),
+            g.departures_before,
+            g.departures_after,
+        ]
+        for g in gaps
+    ]
+
+
+def _new_gap(g: NewGap, names: dict[str, str | None]) -> NewGapOut:
+    return NewGapOut(
+        stop_id=g.stop_id,
+        stop_name=names.get(g.stop_id),
+        day_type=g.day_type,
+        departures_before=g.departures_before,
+        departures_after=g.departures_after,
+        longest_gap_before=g.gap_before,
+        longest_gap_after=g.gap_after,
+    )
+
+
+@router.get("/timetable-revisions/new-gaps", response_model=RevisionNewGapsResponse)
+@limiter.limit(DEFAULT_LIMIT)
+async def revision_new_gaps(
+    request: Request,
+    on: date | None = Query(
+        default=None,
+        description="The revision's first day, as the revisions list gives it. Unset, the newest revision.",
+    ),
+    day_type: RevisionDayType | None = Query(
+        default=None,
+        description="JSON only (400 with format=csv, which covers all three): list the new gaps of this day "
+        "type alone. The day-type counts always cover all three.",
+    ),
+    from_hour: int = Query(10, ge=FIRST_HOUR, lt=LAST_HOUR, description="The band's first service-day hour."),
+    to_hour: int = Query(
+        16, gt=FIRST_HOUR, le=LAST_HOUR, description="The service-day hour the band ends at, exclusive."
+    ),
+    gap_min: int = Query(
+        60,
+        ge=1,
+        description="The threshold in minutes, shorter than the band (422 otherwise): a gap exactly at it is "
+        "not over it.",
+    ),
+    format: str | None = Query(default=None, pattern="^(json|csv)$"),
+    lang: str | None = Query(
+        default=None,
+        pattern="^(ja|en)$",
+        description="format=csv only, as on /timetable-revisions/diff.",
+    ),
+    agency_id: int = Depends(get_agency),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> RevisionNewGapsResponse | StreamingResponse:
+    """The stops a revision left with a new gap
+    (pipeline.reports.revision_gaps): on each day type's typical day, the
+    longest stretch of [from_hour, to_hour) with no departure was at most
+    ``gap_min`` before the revision and exceeds it after. The band's hours
+    are service-day hours, 24 the night's midnight, as on the supply map.
+    ``format=csv`` writes them as a monitoring list. A day ``on`` that starts
+    no revision is a 404."""
+    _check_format(format, lang, day_type)
+    if to_hour <= from_hour:
+        raise HTTPException(status_code=422, detail="to_hour must be after from_hour")
+    # No gap exceeds the band, so a threshold the band does not exceed lists nothing.
+    if gap_min * 60 >= (to_hour - from_hour) * 3600:
+        raise HTTPException(status_code=422, detail="gap_min must be shorter than the band")
+    revision = _revision_on(await load_revisions(ch, agency_id), on)
+    result = Unavailable.NO_REVISION if revision is None else await load_departures(ch, agency_id, revision)
+    gaps = (
+        []
+        if isinstance(result, Unavailable)
+        else new_gaps(result.changed, result.known, from_hour, to_hour, gap_min * 60)
+    )
+
+    if format == "csv":
+        locale, credit = await _csv_credit(request, conn, agency_id, lang)
+        criterion = _criterion_line(from_hour, to_hour, gap_min)
+        first_day = None if revision is None else revision.first_day
+        if isinstance(result, Unavailable):
+            message = UNAVAILABLE_CSV[(result, "en" if locale == "en" else "ja")]
+            preamble = [criterion] if revision is None else [_version_line(revision), criterion]
+            return _csv_response(_NEW_GAPS_CSV_NAME, _NEW_GAPS_CSV_COLUMNS, first_day, preamble, credit, [], message)
+        names = await _stop_names(conn, agency_id, sorted({g.stop_id for g in gaps}))
+        before, after = result.sides
+        days = _typical_days_line((dt, before.get(dt), after.get(dt)) for dt in DAY_TYPES)
+        preamble = [_version_line(result.revision), days, criterion]
+        rows = _new_gap_rows(gaps, names)
+        return _csv_response(_NEW_GAPS_CSV_NAME, _NEW_GAPS_CSV_COLUMNS, first_day, preamble, credit, rows, None)
+
+    if isinstance(result, Unavailable):
+        return RevisionNewGapsResponse(
+            available=False,
+            reason="no_revision" if result is Unavailable.NO_REVISION else "no_calendar",
+            revision=None if revision is None else _revision(revision),
+            from_hour=from_hour,
+            to_hour=to_hour,
+            gap_min=gap_min,
+        )
+    counts = Counter(g.day_type for g in gaps)
+    shown = [g for g in gaps if day_type is None or g.day_type == day_type]
+    names = await _stop_names(conn, agency_id, sorted({g.stop_id for g in shown}))
+    return RevisionNewGapsResponse(
+        available=True,
+        revision=_revision(result.revision),
+        from_hour=from_hour,
+        to_hour=to_hour,
+        gap_min=gap_min,
+        day_types=[NewGapDayTypeOut(day_type=dt, stops=counts[dt] if dt in result.known else None) for dt in DAY_TYPES],
+        stops=[_new_gap(g, names) for g in shown],
     )
 
 

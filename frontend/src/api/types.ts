@@ -1592,6 +1592,37 @@ export interface TimetableRevisionDiff {
   stops: RevisionStopChange[];
 }
 
+/** A stop whose longest gap over the band exceeds the threshold on the
+ *  typical day after a revision and did not before. Departures are those
+ *  within the band; gaps are seconds. */
+export interface RevisionNewGap {
+  stop_id: string;
+  stop_name: string | null;
+  day_type: RevisionDayType;
+  departures_before: number;
+  departures_after: number;
+  longest_gap_before: number;
+  longest_gap_after: number;
+}
+
+/** How many stops a day type has new gaps at; null when either timetable
+ *  has no typical day of it. */
+interface RevisionNewGapDayType {
+  day_type: RevisionDayType;
+  stops: number | null;
+}
+
+export interface TimetableRevisionNewGaps {
+  available: boolean;
+  reason: "no_revision" | "no_calendar" | null;
+  revision: TimetableRevision | null;
+  from_hour: number;
+  to_hour: number;
+  gap_min: number;
+  day_types: RevisionNewGapDayType[];
+  stops: RevisionNewGap[];
+}
+
 /** One side of a transfer pair: the arriving route's stops, or the
  *  departing one's. Each side is its own operator's stop ids. */
 export interface TransferPairSide {
