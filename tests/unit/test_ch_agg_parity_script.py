@@ -231,7 +231,12 @@ def test_parity_leaves_agg_stop_routes_until_the_timetable_is_archived(monkeypat
     ch = _ClickHouse()
     parity(ch, _Conn([(day, 5, 5)]), 1)
     assert [sql for sql in ch.queries if _joins_the_archive(sql)] == []
-    assert len([sql for sql in ch.queries if "GROUP BY" in sql]) > len(ch_aggregates.TABLES)
+    compared = [
+        table
+        for table in (*ch_aggregates.TABLES, *ch_aggregates.WHOLE_HISTORY_TABLES)
+        if table not in ch_aggregates.STATIC_JOINED_TABLES
+    ]
+    assert len([sql for sql in ch.queries if "GROUP BY" in sql]) == len(compared)
 
 
 class _OnePerTable:

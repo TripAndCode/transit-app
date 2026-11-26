@@ -94,6 +94,20 @@ CREATE TABLE IF NOT EXISTS agg_route_band_daily (
 PARTITION BY (agency_id, toYYYYMM(date))
 ORDER BY (agency_id, date, route_code, time_band);
 
+CREATE TABLE IF NOT EXISTS agg_stop_hour_daily (
+    agency_id     Int32,
+    stop_id       String,
+    date          Date,
+    hour          Int16,
+    samples       Int32,
+    sum_delay_sec Int64,
+    on_time_count Int32,
+    late5_count   Int32,
+    early_count   Int32
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, stop_id, date, hour);
+
 CREATE TABLE IF NOT EXISTS agg_stop_daily (
     agency_id    Int32,
     stop_id      String,

@@ -2844,7 +2844,19 @@
     "note": "Planned departures from each operator's timetable, read on a typical day of the day type. A trip's last stop is not a departure, and the stops of different operators are not added together.",
     "empty": "No operator's stops can be read for this date and day type.",
     "unplaced_one": "{{count}} stop has no position in the current timetable and is not drawn.",
-    "unplaced_other": "{{count}} stops have no position in the current timetable and are not drawn."
+    "unplaced_other": "{{count}} stops have no position in the current timetable and are not drawn.",
+    "hours": {
+      "caption": "Each hour: planned departures on the typical day, beside those observed",
+      "col_hour": "Hour",
+      "col_planned": "Planned",
+      "col_observed": "Observed a day",
+      "col_on_time": "On time",
+      "col_delay": "Mean delay",
+      "window": "Observed on the {{days}} days of this day type on the same timetable between {{range}}. The definition below covers that whole period.",
+      "no_window": "Nothing observed: the last 30 days with this operator's data hold no day of this day type on the same timetable.",
+      "pooled": "{{observed}} observed over {{days}} days, {{onTime}} on time",
+      "note": "On time counts the observed departures only: one the feed did not report is counted neither on time nor late."
+    }
   },
   "transfers": {
     "pick": "Transfer",

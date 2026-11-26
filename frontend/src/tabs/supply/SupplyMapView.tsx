@@ -9,12 +9,16 @@ import { useThemeSignal } from "../../styles/theme";
 import { createSafeMap } from "../map/createSafeMap";
 import { whenStyleReady } from "../map/styleReady";
 import { repaintLayer } from "../map/repaintLayer";
+import { DefinitionMetaBlock } from "../../components/DefinitionMetaBlock";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { SHARED_TABLE, td, th } from "../../components/tableStyles";
+import { EM_DASH, fixedTenth, formatDateRange, formatMinutes } from "../../utils/format";
 import {
   SUPPLY_DAY_TYPES,
   useNetworkSupply,
   useSupplyStop,
   type SupplyDayType,
+  type SupplyHour,
   type SupplyQuery,
   type SupplyStopDetail,
 } from "./supplyApi";
@@ -311,17 +315,76 @@ export function SupplyMapView() {
 function StopDetail({ stop }: { stop: SupplyStopDetail }) {
   const { t } = useTranslation();
   const none = t("supply.no_departure_day");
+  const observedWindow = stop.observed_window;
   return (
-    <p style={{ fontSize: "var(--text-sm)" }}>
-      {t("supply.stop_detail", {
-        name: stop.stop_name ?? stop.stop_id,
-        departures: stop.departures,
-        perHour: stop.per_hour,
-        gap: stop.longest_gap_min,
-        first: stop.first_sec == null ? none : serviceClock(stop.first_sec),
-        last: stop.last_sec == null ? none : serviceClock(stop.last_sec),
-      })}
-    </p>
+    <div>
+      <p style={{ fontSize: "var(--text-sm)" }}>
+        {t("supply.stop_detail", {
+          name: stop.stop_name ?? stop.stop_id,
+          departures: stop.departures,
+          perHour: stop.per_hour,
+          gap: stop.longest_gap_min,
+          first: stop.first_sec == null ? none : serviceClock(stop.first_sec),
+          last: stop.last_sec == null ? none : serviceClock(stop.last_sec),
+        })}
+      </p>
+      {stop.hours.length > 0 && <HourTable hours={stop.hours} days={observedWindow?.days ?? 0} />}
+      <p style={MUTED}>
+        {observedWindow == null
+          ? t("supply.hours.no_window")
+          : t("supply.hours.window", { days: observedWindow.days, range: formatDateRange(observedWindow.first, observedWindow.last) })}
+      </p>
+      {observedWindow != null && <p style={MUTED}>{t("supply.hours.note")}</p>}
+      {stop.definition && <DefinitionMetaBlock definition={stop.definition} />}
+    </div>
+  );
+}
+
+/** Each hour's planned departures beside the observed ones. The pooled
+ *  counts behind a percentage are its tooltip, so a figure from a handful
+ *  of departures shows how few it rests on. */
+function HourTable({ hours, days }: { hours: SupplyHour[]; days: number }) {
+  const { t } = useTranslation();
+  return (
+    <table style={SHARED_TABLE}>
+      <caption style={{ ...MUTED, textAlign: "left", paddingBottom: 4 }}>{t("supply.hours.caption")}</caption>
+      <thead>
+        <tr>
+          <th style={th()}>{t("supply.hours.col_hour")}</th>
+          <th style={th({ align: "right" })}>{t("supply.hours.col_planned")}</th>
+          <th style={th({ align: "right" })}>{t("supply.hours.col_observed")}</th>
+          <th style={th({ align: "right" })}>{t("supply.hours.col_on_time")}</th>
+          <th style={th({ align: "right" })}>{t("supply.hours.col_delay")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {hours.map(({ hour, departures, observed }) => (
+          <tr key={hour}>
+            <td style={td()}>{hourLabel(hour)}</td>
+            <td style={td({ align: "right" })}>{departures}</td>
+            <td style={td({ align: "right" })}>{observed == null ? EM_DASH : fixedTenth(observed.per_day)}</td>
+            <td
+              style={td({ align: "right" })}
+              title={
+                observed == null
+                  ? undefined
+                  : t("supply.hours.pooled", { observed: observed.departures, days, onTime: observed.on_time })
+              }
+            >
+              {observed?.on_time_pct == null ? (
+                EM_DASH
+              ) : (
+                <>
+                  {`${fixedTenth(observed.on_time_pct)}%`}
+                  {observed.uncertain && <span className="focus-muted"> ({t("reports.wide_margin_mark")})</span>}
+                </>
+              )}
+            </td>
+            <td style={td({ align: "right" })}>{formatMinutes(observed?.avg_delay_min)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

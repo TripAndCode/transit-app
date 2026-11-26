@@ -71,3 +71,9 @@ def test_work_tables_are_named_per_agency_and_only_for_registered_tables():
     assert ch_aggregates.work_table("agg_hour_daily", 8) == "agg_hour_daily__work_a8"
     with pytest.raises(ValueError, match="Not a ClickHouse aggregate"):
         ch_aggregates.work_table("agg_nope", 8)
+
+
+def test_agg_stop_hour_dailys_early_edge_is_the_default_windows():
+    from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, early_departure_sec
+
+    assert ch_aggregates.STOP_HOUR_EARLY_SEC == early_departure_sec(DEFAULT_EARLY_TOLERANCE_SEC)

@@ -1,18 +1,19 @@
 """Parity oracle: the Postgres builders the ClickHouse-computed aggregates replaced.
 
 Each SQL below is the builder pipeline/analyze.py ran for that table before it
-moved to ClickHouse, copied verbatim, but for agg_route_band_daily, which was
-built in ClickHouse from the start: its SQL states the same rows in the legacy
-builders' terms. Never edit one to make a parity test pass: a parity test asks
+moved to ClickHouse, copied verbatim, but for agg_route_band_daily and
+agg_stop_hour_daily, which were built in ClickHouse from the start: their SQL
+states the same rows in the legacy builders' terms. Never edit one to make a parity test pass: a parity test asks
 whether the ClickHouse build reproduces exactly this.
 
 These builders take the hour and band from a TIME `scheduled_time`, which holds
 no time past 24:00, so they leave every departure at 24:00 or later out of
-agg_hour_daily, agg_route_hour, agg_route_hour_dow and the hour-keyed rows of
-route_delay_counts, and band it 'none' in agg_stop_daily and
+agg_hour_daily, agg_route_hour, agg_route_hour_dow, agg_stop_hour_daily and the
+hour-keyed rows of route_delay_counts, and band it 'none' in agg_stop_daily and
 agg_route_stop_daily. The ClickHouse build files it under its hour and band on
-purpose (method version 2026.11.1), so a parity fixture holding such a
-departure is expected to differ there; do not edit an oracle to match.
+purpose (method version 2026.11.1, and agg_stop_hour_daily from its first), so a
+parity fixture holding such a departure is expected to differ there; do not edit
+an oracle to match.
 """
 
 import psycopg2.extras
@@ -50,6 +51,10 @@ _RAW_KEYS_SQL = (
 _RAW_KEYS_COLUMNS = "route_code text, trip_id text, stop_sequence int"
 # agg_stop_daily's and agg_route_stop_daily's builders read their band CASE through this name.
 band_case = time_band_case_sql("d.scheduled_time")
+# agg_stop_hour_daily's hour: before the 04:00 cutover a time is the service day's hour 24 to 27.
+service_day_hour = (
+    "(EXTRACT(HOUR FROM d.scheduled_time)::int + CASE WHEN EXTRACT(HOUR FROM d.scheduled_time) < 4 THEN 24 ELSE 0 END)"
+)
 # agg_route_stats's builder read its two thresholds through these names.
 on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
 late_thr = LEGACY_SEVERE_LATE_TOLERANCE_SEC
@@ -242,6 +247,21 @@ LEGACY_SQL = {
                     COUNT(*), SUM(d.dep_delay)::bigint, SUM(GREATEST(d.dep_delay, 0))::bigint
                 FROM deduped d
                 GROUP BY d.date, COALESCE(d.route_code, ''), {band_case}
+            """,
+    "agg_stop_hour_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE scheduled_time IS NOT NULL)
+                SELECT
+                    %(agency_id)s, sst.stop_id, d.date, {service_day_hour} AS hour,
+                    COUNT(*), SUM(d.dep_delay)::bigint,
+                    COUNT(*) FILTER (WHERE d.dep_delay <= {on_time_thr}),
+                    COUNT(*) FILTER (WHERE d.dep_delay > {late_thr}),
+                    COUNT(*) FILTER (WHERE d.dep_delay < -{ch_aggregates.STOP_HOUR_EARLY_SEC})
+                FROM deduped d
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY sst.stop_id, d.date, {service_day_hour}
             """,
     "agg_route_hour_dow": """
             WITH deduped AS (

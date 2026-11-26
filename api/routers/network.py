@@ -20,8 +20,9 @@ from pipeline.reports.comparability import (
     MIN_COVERAGE_PCT,
     ComparableReason,
 )
-from pipeline.reports.definition import DefinitionMeta, forget_stale_builds, stamp_build
+from pipeline.reports.definition import DefinitionMeta, forget_stale_builds, resolve_definition_meta, stamp_build
 from pipeline.reports.network import board_feed_quality, compute_network_summary, coverage_through
+from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC
 from pipeline.reports.schedule_revision import read_schedule_days
 from pipeline.reports.service_delivered import DeliveredMissing
 from pipeline.reports.stop_supply import FIRST_HOUR, LAST_HOUR, AgencyStatus, read_supply_map, read_supply_stop
@@ -199,6 +200,31 @@ class SupplyMapResponse(BaseModel):
     agencies: list[SupplyAgency]
 
 
+class SupplyHourObserved(BaseModel):
+    # Pooled over the observed window's days; on time and the average delay
+    # are of the departures observed, None with none observed.
+    departures: int
+    per_day: float
+    on_time: int
+    on_time_pct: float | None
+    uncertain: bool
+    avg_delay_min: float | None
+
+
+class SupplyHour(BaseModel):
+    hour: int
+    # Planned on the typical day of the day type.
+    departures: int
+    # None without an observed window.
+    observed: SupplyHourObserved | None
+
+
+class SupplyObservedWindow(BaseModel):
+    first: date
+    last: date
+    days: int
+
+
 class SupplyStopResponse(BaseModel):
     agency_id: int
     stop_id: str
@@ -210,6 +236,9 @@ class SupplyStopResponse(BaseModel):
     # 88200); None with no departure on the day type.
     first_sec: int | None
     last_sec: int | None
+    hours: list[SupplyHour]
+    observed_window: SupplyObservedWindow | None
+    definition: DefinitionMeta | None = None
 
 
 @router.get("/supply", response_model=SupplyMapResponse)
@@ -254,10 +283,12 @@ async def network_supply_stop(
     from_hour: int = Query(10, ge=FIRST_HOUR, lt=LAST_HOUR),
     to_hour: int = Query(16, gt=FIRST_HOUR, le=LAST_HOUR),
 ) -> SupplyStopResponse:
-    """One stop of the supply map, opened: its name, its supply over the band
-    and the day's first and last departure (read_supply_stop). 404 when the
-    operator is not active, or its version in force has no such stop or
-    cannot tell the day type."""
+    """One stop of the supply map, opened: its name, its supply over the band,
+    the day's first and last departure, and each hour's planned departures
+    beside the observed ones (read_supply_stop), stamped with the on-time
+    definition and the window's timetables when anything was observed. 404
+    when the operator is not active, or its version in force has no such stop
+    or cannot tell the day type."""
     if to_hour <= from_hour:
         raise HTTPException(status_code=422, detail="to_hour must be after from_hour")
     day = day or service_date_of(datetime.now(timezone.utc))
@@ -265,4 +296,9 @@ async def network_supply_stop(
     stop = await read_supply_stop(conn, ch, agency_id, stop_id, day, day_type, from_hour, to_hour)
     if stop is None:
         raise HTTPException(status_code=404, detail="stop not readable for this date and day type")
+    window = stop["observed_window"]
+    if window is not None:
+        meta = resolve_definition_meta("on_time", DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC)
+        schedule = await read_schedule_days(conn, agency_id, window["first"], window["last"])
+        stop["definition"] = await stamp_build(conn, meta, agency_id, schedule)
     return SupplyStopResponse(**stop)

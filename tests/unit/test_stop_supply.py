@@ -2,11 +2,12 @@
 typical day each day type is read on."""
 
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 
 from pipeline.day_types import ServiceCalendar, WeeklyService
-from pipeline.reports.stop_supply import version_on
+from pipeline.reports.stop_supply import ObservedHour, hour_rows, matching_days, version_on
 from pipeline.stop_supply import (
     BandSupply,
     HourCell,
@@ -242,3 +243,80 @@ def test_a_versions_dates_in_force_read_as_one_digest():
     assert segments_digest([(MON, MON + timedelta(days=9)), (MON + timedelta(days=20), MON + timedelta(days=30))]) == (
         "2026-06-01/2026-06-10,2026-06-21/2026-07-01"
     )
+
+
+_A, _B = ("a", "ha"), ("b", "hb")
+_SEGMENTS = [(date(2026, 11, 1), date(2026, 11, 16), *_A), (date(2026, 11, 17), date(2026, 12, 31), *_B)]
+
+
+def test_observed_days_are_the_versions_dates_of_the_day_type():
+    # 11/23 is a Monday and a public holiday; 11/16 runs the other version.
+    dates = [date(2026, 11, d) for d in (14, 15, 16, 17, 18, 21, 22, 23, 24)]
+    assert matching_days(dates, _SEGMENTS, _B, "weekday") == [date(2026, 11, d) for d in (17, 18, 24)]
+    assert matching_days(dates, _SEGMENTS, _B, "saturday") == [date(2026, 11, 21)]
+    assert matching_days(dates, _SEGMENTS, _B, "sunday_holiday") == [date(2026, 11, 22), date(2026, 11, 23)]
+    assert matching_days(dates, _SEGMENTS, _A, "weekday") == [date(2026, 11, 16)]
+    assert matching_days([], _SEGMENTS, _B, "weekday") == []
+
+
+def test_an_hour_sets_its_observed_departures_beside_the_planned_ones():
+    planned = {8: HourCell(4, hm(8, 5), hm(8, 50), hm(0, 15)), 9: HourCell(2, hm(9, 10), hm(9, 40), hm(0, 30))}
+    # Over 4 days: 12 departures observed at 8, 3 over five minutes late and 1
+    # over a minute early, 2,232 s late in all. None at 9; 2 at 10, which the
+    # timetable does not plan.
+    observed = {8: ObservedHour(12, 2232, 7, 3, 1), 10: ObservedHour(2, -30, 2, 0, 0)}
+    rows = hour_rows(planned, observed, 4, 7, 11)
+    assert rows == [
+        {
+            "hour": 8,
+            "departures": 4,
+            "observed": {
+                "departures": 12,
+                "per_day": Decimal("3.0"),
+                "on_time": 8,
+                "on_time_pct": Decimal("66.7"),
+                "uncertain": True,
+                "avg_delay_min": Decimal("3.1"),
+            },
+        },
+        {
+            "hour": 9,
+            "departures": 2,
+            "observed": {
+                "departures": 0,
+                "per_day": Decimal("0.0"),
+                "on_time": 0,
+                "on_time_pct": None,
+                "uncertain": True,
+                "avg_delay_min": None,
+            },
+        },
+        {
+            "hour": 10,
+            "departures": 0,
+            "observed": {
+                "departures": 2,
+                "per_day": Decimal("0.5"),
+                "on_time": 2,
+                "on_time_pct": Decimal("100.0"),
+                "uncertain": True,
+                "avg_delay_min": Decimal("-0.3"),
+            },
+        },
+    ]
+
+
+def test_without_an_observed_window_an_hour_carries_only_its_plan():
+    planned = {8: HourCell(4, hm(8, 5), hm(8, 50), hm(0, 15)), 12: HourCell(1, hm(12), hm(12), None)}
+    assert hour_rows(planned, None, 0, 7, 12) == [{"hour": 8, "departures": 4, "observed": None}]
+
+
+def test_a_well_backed_percentage_is_not_uncertain_and_halves_round_up():
+    # 1,000 departures, 100 over five minutes late and 25 over a minute
+    # early, so 875 on time: 87.5 %. A mean of 0.25 min rounds up to 0.3.
+    observed = {8: ObservedHour(1000, 15000, 700, 100, 25)}
+    (row,) = hour_rows({}, observed, 8, 8, 9)
+    assert row["observed"]["on_time_pct"] == Decimal("87.5")
+    assert row["observed"]["uncertain"] is False
+    assert row["observed"]["avg_delay_min"] == Decimal("0.3")
+    assert row["observed"]["per_day"] == Decimal("125.0")
