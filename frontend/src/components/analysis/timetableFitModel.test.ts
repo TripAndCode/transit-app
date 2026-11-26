@@ -61,6 +61,22 @@ describe("timetableFitModel", () => {
     ]);
   });
 
+  it("parts the directions at a terminus they share, where the route turns back", () => {
+    const named = (from: string, to: string, seq: number, fromName: string, toName: string) =>
+      segment({ ...hop(from, to, seq), from_stop_name: fromName, to_stop_name: toName });
+    const out1 = named("A1", "A2", 2, "Depot", "Mill");
+    const out2 = named("A2", "T", 3, "Mill", "Terminus");
+    const back1 = named("T", "B2", 2, "Terminus", "Mill");
+    const back2 = named("B2", "A1", 3, "Mill", "Depot");
+    expect(bandRuns([out1, back1, out2, back2], "morning")).toEqual([
+      [out1, out2],
+      [back1, back2],
+    ]);
+    const there = hop("X", "Y", 2);
+    const back = hop("Y", "X", 2);
+    expect(bandRuns([there, back], "morning")).toEqual([[there], [back]]);
+  });
+
   it("starts a run where no segment leads in, not at a sequence a mid-route start lowered", () => {
     const head = hop("Z1", "A2", 2);
     const middle = hop("A2", "A3", 3);

@@ -25,25 +25,31 @@ export function defaultBand(segments: TimetableFitSegment[]): Band | null {
  *  branch of the route in stop order. A segment is keyed by its stop pair
  *  alone, and opposite directions stop at different poles, so following each
  *  segment's last stop to the next segment's first keeps a direction together
- *  where the stop sequence would interleave them. A run starts at a segment
- *  no other leads into, rather than at the lowest sequence, which a trip
- *  starting mid-route lowers. A loop, which has no such segment, starts at its
- *  lowest sequence; at a branch the lower sequence continues the run. */
+ *  where the stop sequence would interleave them. A terminus both directions
+ *  share would still join them, so a run also ends where the next segment
+ *  turns straight back to the stop it came from: the same stop, or its other
+ *  pole, which carries its name. A run starts at a segment no segment left
+ *  leads into, rather than at the lowest sequence, which a trip starting
+ *  mid-route lowers. A loop, which has no such segment, starts at its lowest
+ *  sequence; at a branch the lower sequence continues the run. */
 export function bandRuns(segments: TimetableFitSegment[], band: Band): TimetableFitSegment[][] {
   const rows = segments.filter((s) => s.time_band === band);
-  const entered = new Set(rows.map((s) => s.to_stop_id));
   const visited = new Set<TimetableFitSegment>();
   const runs: TimetableFitSegment[][] = [];
   for (;;) {
     const left = rows.filter((s) => !visited.has(s));
     if (left.length === 0) return runs;
+    const entered = new Set(left.map((s) => s.to_stop_id));
     const run: TimetableFitSegment[] = [];
     let next: TimetableFitSegment | undefined = left.find((s) => !entered.has(s.from_stop_id)) ?? left[0];
     while (next) {
       visited.add(next);
       run.push(next);
-      const stop: string = next.to_stop_id;
-      next = rows.find((s) => !visited.has(s) && s.from_stop_id === stop);
+      const last: TimetableFitSegment = next;
+      const cameFrom = last.from_stop_name ?? last.from_stop_id;
+      next = left.find(
+        (s) => !visited.has(s) && s.from_stop_id === last.to_stop_id && (s.to_stop_name ?? s.to_stop_id) !== cameFrom,
+      );
     }
     runs.push(run);
   }
