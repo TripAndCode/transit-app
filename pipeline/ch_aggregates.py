@@ -50,7 +50,7 @@ from pipeline.histogram import (
     N_BUCKETS,
     WIDTH,
 )
-from pipeline.service_day import filed_capture_span, service_date_ch
+from pipeline.service_day import filed_capture_span, service_date_ch, service_day_offset_ch
 from pipeline.static_archive import ScheduleJoin, Stamp, observation_rows
 
 logger = logging.getLogger(__name__)
@@ -365,6 +365,37 @@ def _stop_daily(source: str) -> str:
     """
 
 
+# The hour of the departure on the service day's clock, 4 to 27: a time written
+# at face value before the cutover (00:40) is the same night's hour 24, as the
+# planned departures it is set beside count it (pipeline.timetable_sampling).
+_SERVICE_DAY_HOUR = f"toInt16(intDiv(assumeNotNull({service_day_offset_ch(_SEC)}), 3600))"
+# agg_stop_hour_daily's early_count counts departures more than this many
+# seconds early: the default on-time window's early edge
+# (pipeline.reports.rankings), which a read takes from the stored counts with
+# pipeline.histogram.on_time_from_columns. pipeline.reports imports this module,
+# so the edge is restated here rather than read from there.
+STOP_HOUR_EARLY_SEC = 60
+
+
+def _stop_hour_daily(source: str) -> str:
+    return f"""
+        SELECT toInt32({{agency_id:UInt16}}) AS agency_id, stop_id, date, hour,
+               toInt32(n) AS samples, s AS sum_delay_sec, toInt32(on_time) AS on_time_count,
+               toInt32(late5) AS late5_count, toInt32(early) AS early_count
+        FROM (
+            SELECT st.stop_id AS stop_id, d.date AS date, {_SERVICE_DAY_HOUR} AS hour,
+                   sum(assumeNotNull(d.dep_delay)) AS s, count() AS n,
+                   countIf(assumeNotNull(d.dep_delay) <= {LEGACY_ON_TIME_LATE_TOLERANCE_SEC}) AS on_time,
+                   countIf(assumeNotNull(d.dep_delay) > {LEGACY_SEVERE_LATE_TOLERANCE_SEC}) AS late5,
+                   countIf(assumeNotNull(d.dep_delay) < -{STOP_HOUR_EARLY_SEC}) AS early
+            FROM ({_with_join_content(source)}) AS d
+            {_STATIC_JOIN}
+            WHERE {_SEC} IS NOT NULL
+            GROUP BY stop_id, date, hour
+        )
+    """
+
+
 def _route_stop_daily(source: str) -> str:
     return f"""
         SELECT toInt32({{agency_id:UInt16}}) AS agency_id, route_code, stop_id, date, service_type, time_band,
@@ -581,6 +612,21 @@ _SPECS: dict[str, _Spec] = {
         _DELAY_SUM_FIGURES,
         scheduled_sec=True,
     ),
+    "agg_stop_hour_daily": _Spec(
+        (
+            "agency_id",
+            "stop_id",
+            "date",
+            "hour",
+            "samples",
+            "sum_delay_sec",
+            "on_time_count",
+            "late5_count",
+            "early_count",
+        ),
+        _stop_hour_daily,
+        scheduled_sec=True,
+    ),
     "route_delay_counts": _Spec(
         (
             "agency_id",
@@ -606,7 +652,7 @@ TABLES: tuple[str, ...] = tuple(name for name in _SPECS if name not in INTERNAL_
 MONTHLY_TABLES: tuple[str, ...] = (*TABLES, *INTERNAL_TABLES)
 # The tables whose rows join the timetable archive by each row's version, so a build of one needs a ScheduleJoin.
 STATIC_JOINED_TABLES: frozenset[str] = frozenset(
-    {"agg_stop_daily", "agg_route_stop_daily", ROUTE_STOP_DAYS, "agg_stop_routes"}
+    {"agg_stop_daily", "agg_route_stop_daily", "agg_stop_hour_daily", ROUTE_STOP_DAYS, "agg_stop_routes"}
 )
 
 # Whole-history tables, finalized from their internal table by `build_whole_history`. Build and swap order.

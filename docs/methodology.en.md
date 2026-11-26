@@ -301,7 +301,7 @@ For each timetable revision, each route's timetable change is set beside how its
 
 ### Planned departures at stops
 
-How much service each stop is planned to get, from the timetables alone, with no realtime data (from method `2026.11.19`).
+How much service each stop is planned to get, from the timetables alone (from method `2026.11.19`). An opened stop sets each hour's planned departures beside the departures observed in it (from method `2026.11.21`).
 
 - **Timetable**: each operator's timetable version in force on the chosen date (today's service day by default). It is read from the kept timetables, so a version a later load replaced can still be read. An operator with no version in force that day is shown as such.
 - **Typical day**: as in [A timetable's typical day](#a-timetables-typical-day), taken on from the first day the version is in force, so a tie goes to the earliest day. A day type whose typical day runs nothing has no departures.
@@ -309,6 +309,11 @@ How much service each stop is planned to get, from the timetables alone, with no
 - **Longest gap**: the longest time in the band with no departure: between two consecutive departures within the band, from the band's start to its first departure, or from its last departure to the band's end, whichever is longest, and the whole band when there is no departure in it. Departures outside the band do not stretch a gap, so it never exceeds the band, and a gap that straddles the band's edge counts only its part inside the band.
 - **First and last departure**: the stop's first and last departure on the typical day. The last can be at 24:00 or later.
 - **Stops of several operators**: each operator's stops are shown on their own. The departures of different operators' stops at one place are not added together.
+- **Observed departures**: for each hour of the band (on the service day's clock, so 24:00 and later included), the stop's departures the feed reported a delay for. A departure counts in the hour of its scheduled time, matched against the timetable in force that day ([Matching the timetable](#matching-the-timetable)), so it lines up on the same clock as the planned departures.
+- **Days observed**: of the 30 days up to the newest day with the operator's aggregates on or before the chosen date, those of the day type shown on which the same timetable version as on the chosen date was in force. The day type follows the date alone, as in [A timetable's typical day](#a-timetables-typical-day). A day with no aggregates (the feed did not arrive) is not counted as a day, so it never reads as one with no departures. Departures per day are the observed departures over those days divided by their number.
+- **On-time rate and mean delay**: the share of the observed departures that were on time, and their mean delay. On time always follows the industry standard (`standard_m1_p5`). A planned departure that was not observed counts neither as on time nor as late ([What is not observed](#what-is-not-observed)): a feed that did not report it says nothing of whether it ran. So when fewer departures are observed than planned, the on-time rate covers the observed ones alone.
+- The on-time rate is shown however few departures are observed, and carries “wide margin” when its 95% Wilson interval is more than 5 points either side. The observations at one stop in one hour are different trips or a trip on different days, so the sample size is the number of observations. An hour with no observation shows a dash.
+- A terminal stop shows no observed departures, since feeds report no departure from the last stop.
 
 ### Connections at transfer hubs
 
@@ -508,10 +513,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.20`. Newest first, each version with the inputs it set.
+The current method is `2026.11.21`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.21` | `agg_stop_hour_daily` = 1 |
 | `2026.11.20` | `agg_route_headway_daily` 6 → 7 |
 | `2026.11.19` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |
 | `2026.11.18` | `agg_route_daily_dwell_run` 5 → 6, `agg_route_segment_runtime` = 1 |

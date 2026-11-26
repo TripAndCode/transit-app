@@ -65,11 +65,32 @@ const detail: SupplyStopDetail = {
   longest_gap_min: 25,
   first_sec: 6 * 3600,
   last_sec: 24 * 3600 + 20 * 60,
+  hours: [],
+  observed_window: null,
+  definition: null,
 };
 
-function stubSupply(data: SupplyMapResponse | undefined) {
+const observed: SupplyStopDetail = {
+  ...detail,
+  hours: [
+    {
+      hour: 10,
+      departures: 4,
+      observed: { departures: 6, per_day: 2, on_time: 3, on_time_pct: 50, uncertain: true, avg_delay_min: 3.1 },
+    },
+    {
+      hour: 11,
+      departures: 4,
+      observed: { departures: 0, per_day: 0, on_time: 0, on_time_pct: null, uncertain: false, avg_delay_min: null },
+    },
+  ],
+  observed_window: { first: "2026-03-30", last: "2026-03-31", days: 3 },
+  definition: null,
+};
+
+function stubSupply(data: SupplyMapResponse | undefined, opened: SupplyStopDetail = detail) {
   vi.spyOn(supplyApi, "useSupplyStop").mockImplementation(
-    (_query, stop) => ({ data: stop?.stopId === "S1" ? detail : undefined }) as unknown as UseQueryResult<SupplyStopDetail>,
+    (_query, stop) => ({ data: stop?.stopId === "S1" ? opened : undefined }) as unknown as UseQueryResult<SupplyStopDetail>,
   );
   return vi.spyOn(supplyApi, "useNetworkSupply").mockReturnValue({
     data,
@@ -134,6 +155,29 @@ describe("SupplyMapView", () => {
       { date: "", dayType: "weekday", fromHour: 10, toHour: 16 },
       { agencyId: 1, stopId: "S1" },
     );
+  });
+
+  it("says an opened stop has nothing observed when no day of its day type ran on the same timetable", () => {
+    stubSupply(response);
+    renderWithProviders(<SupplyMapView />);
+    act(() => maps[0].handlers.click[0]({ features: [{ properties: { key: "1:S1" } }] }));
+    expect(screen.getByText(/^Nothing observed:/)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("sets each hour's observed departures and on-time beside its planned ones", () => {
+    stubSupply(response, observed);
+    renderWithProviders(<SupplyMapView />);
+    act(() => maps[0].handlers.click[0]({ features: [{ properties: { key: "1:S1" } }] }));
+    const rows = screen.getAllByRole("row").map((row) => row.textContent);
+    expect(rows).toEqual([
+      "HourPlannedObserved a dayOn timeMean delay",
+      "10:0042.050.0% (wide margin)3.1 min",
+      "11:0040.0——",
+    ]);
+    expect(screen.getByText("50.0%").closest("td")).toHaveAttribute("title", "6 observed over 3 days, 3 on time");
+    expect(screen.getByText(/^Observed over 3 days of this day type/)).toBeInTheDocument();
+    expect(screen.getByText(/^On time counts the observed departures only/)).toBeInTheDocument();
   });
 
   it("repaints rather than reloading the stops when the mode changes, and switches the legend", async () => {

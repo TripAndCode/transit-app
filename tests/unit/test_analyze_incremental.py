@@ -542,12 +542,14 @@ def test_a_changed_run_recomputes_only_the_changed_date_and_carries_its_month_ov
     assert filled == [{"agency_id": AGENCY_ID, **day}]
     assert carried == [{"agency_id": AGENCY_ID, "month": 202601, "days": [LEDGER_DATE]}] * tables
     # The stop tables also bind the schedule join: with no timetable loaded, one with nothing to join.
+    # stop_route_days reads every `updates` row of the date itself, not the dedup.
+    monthly = set(ch_aggregates.MONTHLY_TABLES) - {ch_aggregates.ROUTE_STOP_DAYS}
+    stop_tables = ch_aggregates.STATIC_JOINED_TABLES & monthly
     no_join = static_archive.ScheduleJoin([], [], "").params()
     joined = [params for params in recomputed if no_join.keys() <= params.keys()]
-    assert joined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE], **no_join}] * 2
-    # stop_route_days reads every `updates` row of the date itself, not the dedup.
+    assert joined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE], **no_join}] * len(stop_tables)
     unjoined = [params for params in recomputed if params not in joined]
-    assert unjoined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * (tables - 3)
+    assert unjoined == [{"agency_id": AGENCY_ID, "days": [LEDGER_DATE]}] * (tables - len(stop_tables) - 1)
     raw = f"INSERT INTO {ch_aggregates.ROUTE_STOP_DAYS}__"
     fresh = [params for sql, params in ch.ch_agg_builds if sql.startswith(raw) and "FROM updates" in sql]
     assert fresh == [{"agency_id": AGENCY_ID, **day, **no_join}]

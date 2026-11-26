@@ -36,6 +36,8 @@ Aggregation tables produced:
 - agg_stop_daily       — per-stop, per-day delay (powers the heatmap)
 - agg_stop_routes      — routes serving each stop (heatmap labels)
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
+- agg_stop_hour_daily  — per-stop, per-day, per-service-day-hour departures and on-time counts
+  (the supply map's stop panel)
 - agg_feed_health      — per-day row counts (every row, those with a delay, and every row by ingest
   source) and implausible-delay count; doubles as the incremental ledger
 - agg_service_delivered_daily — per-day, per-route non-executed trip count (executed-vs-planned rate;
@@ -75,8 +77,8 @@ re-weighting the already-rounded avg_min/avg_delay_sec (SUM(avg_min *
 samples) / SUM(samples)) — the latter pools a mean of ROUNDED per-row
 values, which is not the same as the true pooled mean over the underlying
 raw observations. The same rule covers these six tables,
-agg_route_daily_dist and agg_route_band_daily, which carry `sum_delay_sec`
-with no rounded mean beside it.
+agg_route_daily_dist, agg_route_band_daily and agg_stop_hour_daily, which carry
+`sum_delay_sec` with no rounded mean beside it.
 
 agg_daily_trend and agg_route_band_daily additionally carry `sum_late_sec`, the exact
 SUM(GREATEST(dep_delay, 0)) behind each row — a clamped TOTAL, not a mean, so
@@ -193,6 +195,7 @@ _AGG_TABLES_ORDERED = (
     "agg_stop_daily",
     "agg_stop_routes",
     "agg_route_stop_daily",
+    "agg_stop_hour_daily",
     "agg_feed_health",
     "agg_service_delivered_daily",
     "agg_route_headway",
@@ -238,6 +241,7 @@ _INCREMENTAL_AGG_TABLES = frozenset(
         "agg_schedule_revision_daily",
         "agg_service_delivered_daily",
         "agg_stop_daily",
+        "agg_stop_hour_daily",
     }
 )
 # agg_static_version_summary is NOT in _AGG_TABLES_ORDERED: it is UPSERTed

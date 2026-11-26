@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet } from "../../api/client";
+import type { DefinitionMeta } from "../../api/types";
 
 export type SupplyDayType = "weekday" | "saturday" | "sunday_holiday";
 export const SUPPLY_DAY_TYPES: readonly SupplyDayType[] = ["weekday", "saturday", "sunday_holiday"];
@@ -44,6 +45,31 @@ export interface SupplyStopDetail {
   /** Service-day seconds: 24:30 is 88200. Null with no departure that day. */
   first_sec: number | null;
   last_sec: number | null;
+  /** Each hour of the band with a planned or an observed departure. */
+  hours: SupplyHour[];
+  /** The days the observed departures are pooled over; null with none. */
+  observed_window: { first: string; last: string; days: number } | null;
+  /** Stamped whenever there is an observed window. */
+  definition: DefinitionMeta | null;
+}
+
+export interface SupplyHour {
+  hour: number;
+  /** Planned on the typical day. */
+  departures: number;
+  /** Null without an observed window. */
+  observed: SupplyHourObserved | null;
+}
+
+/** Pooled over the observed window's days. On time and the mean delay are of
+ *  the departures observed, null with none observed. */
+interface SupplyHourObserved {
+  departures: number;
+  per_day: number;
+  on_time: number;
+  on_time_pct: number | null;
+  uncertain: boolean;
+  avg_delay_min: number | null;
 }
 
 export interface SupplyQuery {
