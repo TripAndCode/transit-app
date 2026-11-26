@@ -2743,7 +2743,22 @@
     },
     "routes_none": "No route runs on this day type under either timetable.",
     "routes_title": "Routes",
-    "show_all_routes": "Show all {{count}} routes"
+    "show_all_routes": "Show all {{count}} routes",
+    "new_gaps": {
+      "title": "New service gaps",
+      "from": "Band from",
+      "to": "Band to",
+      "threshold": "Gap over",
+      "minutes": "{{count}} min",
+      "band_invalid": "The end must be after the start.",
+      "gap_too_long": "The gap must be shorter than the band.",
+      "lead": "Stops where the longest stretch from {{from}} to {{to}} with no departure was {{gap}} min or less before the revision and is over {{gap}} min after it.",
+      "count": "{{value}} stops on this day type.",
+      "none": "There are none on this day type.",
+      "col_gap": "Longest gap",
+      "col_departures": "Departures in the band",
+      "note": "Hours are service-day hours, 24:00 being midnight. The CSV lists all three day types."
+    }
   },
   "why": {
     "mode_segments": "Slow segments"

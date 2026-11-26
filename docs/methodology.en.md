@@ -275,6 +275,16 @@ Each timetable revision is compared stop by stop, the timetable before it agains
 - **Stops left with none**: stops with departures before and none after. On Saturday or Sunday & holiday, these are the stops that lost their weekend service.
 - Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under the old ID and gaining them under the new one. Stop names are the loaded timetable's, so a stop it no longer has shows its ID.
 
+### New service gaps
+
+The stops a timetable revision left with a long stretch without service in a band of hours (**Reports**, “Timetable revisions”, “New service gaps”). The list also downloads as CSV, for monitoring gaps in local transport. Day types and typical days are those of [Comparing timetable revisions](#comparing-timetable-revisions).
+
+- **Band and gap**: a band of hours (10:00 to 16:00 by default) and a gap (60 minutes by default). Hours are service-day hours, 24:00 being midnight. The gap must be shorter than the band.
+- **New gap**: a stop whose [longest gap](#planned-departures-at-stops) over the band was at most the gap on the typical day before the revision and exceeds it on the one after. A gap exactly equal to it does not exceed it. A stop left with no departure in the band has the whole band as its gap. A stop with no departure in the band before the revision already exceeded the gap, so it is not listed.
+- **Order**: the longest gap after the revision first, then the gap that grew most.
+- **CSV**: every day type's stops, after lines naming the versions, the typical days, the band and the gap. Gaps are in minutes, and departures are those within the band. A day type without a typical day under either timetable is not compared.
+- Stops are compared by the timetable's stop ID. A stop whose ID a revision changed reads as losing every departure under its old ID, so it can be listed with the whole band as its gap.
+
 ### Routes before and after a revision
 
 For each timetable revision, each route's timetable change is set beside how its trips ran before and after (**Reports**, “Timetable revisions”, **Routes**). Day types and typical days are those of [Comparing timetable revisions](#comparing-timetable-revisions).

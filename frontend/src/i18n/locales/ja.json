@@ -2743,7 +2743,22 @@
     },
     "routes_none": "どちらの時刻表でも、この曜日区分に運行する路線はありません。",
     "routes_title": "路線ごとの変化",
-    "show_all_routes": "{{count}}路線すべて表示"
+    "show_all_routes": "{{count}}路線すべて表示",
+    "new_gaps": {
+      "title": "新たな運行空白",
+      "from": "時間帯の開始",
+      "to": "時間帯の終了",
+      "threshold": "間隔",
+      "minutes": "{{count}}分",
+      "band_invalid": "終了は開始より後にしてください。",
+      "gap_too_long": "間隔は時間帯より短くしてください。",
+      "lead": "{{from}}〜{{to}} の発車のない最も長い間隔が、改正前は{{gap}}分以下で、改正後は{{gap}}分を超えた停留所です。",
+      "count": "この曜日区分では{{value}}か所です。",
+      "none": "この曜日区分にはありません。",
+      "col_gap": "発車のない最も長い間隔",
+      "col_departures": "時間帯内の発車数",
+      "note": "時刻は運行日の時刻で、24:00は深夜0時です。CSVには3つの曜日区分すべてが入ります。"
+    }
   },
   "why": {
     "mode_segments": "遅い区間"

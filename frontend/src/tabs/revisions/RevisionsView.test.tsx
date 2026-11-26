@@ -86,7 +86,8 @@ describe("RevisionsView", () => {
     expect(within(table).getByRole("row", { name: /Sunday/ })).toHaveTextContent("— → 3");
     expect(screen.getByText(/has no day of that type in force/)).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/diff?on=2026-04-01&day_type=weekday"))).toBe(true);
-    expect(screen.getByRole("link", { name: /CSV/ }).getAttribute("href")).toContain("on=2026-04-01&format=csv");
+    const csv = screen.getAllByRole("link", { name: /CSV/ }).map((a) => a.getAttribute("href"));
+    expect(csv.find((href) => href?.includes("/diff?"))).toContain("on=2026-04-01&format=csv");
   });
 
   it("lists a day type's changed stops with their lost and gained hours and the first and last bus", async () => {
