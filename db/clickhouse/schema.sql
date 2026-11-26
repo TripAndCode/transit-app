@@ -108,6 +108,16 @@ CREATE TABLE IF NOT EXISTS agg_stop_hour_daily (
 PARTITION BY (agency_id, toYYYYMM(date))
 ORDER BY (agency_id, stop_id, date, hour);
 
+CREATE TABLE IF NOT EXISTS agg_stop_departures_daily (
+    agency_id      Int32,
+    stop_id        String,
+    date           Date,
+    scheduled_secs Array(Int32),
+    dep_delays     Array(Int32)
+) ENGINE = MergeTree
+PARTITION BY (agency_id, toYYYYMM(date))
+ORDER BY (agency_id, stop_id, date);
+
 CREATE TABLE IF NOT EXISTS agg_stop_daily (
     agency_id    Int32,
     stop_id      String,

@@ -519,6 +519,11 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
             "(%s, 'GHOST_STOP', '2099-01-01', 8, 100, 999, 1, 1, 1)",
         ),
         (
+            "agg_stop_departures_daily",
+            "(agency_id, stop_id, date, scheduled_secs, dep_delays)",
+            "(%s, 'GHOST_STOP', '2099-01-01', '{1}', '{0}')",
+        ),
+        (
             "agg_stop_routes",
             "(agency_id, stop_id, route_codes)",
             "(%s, 'GHOST_STOP', 'GHOST_ROUTE')",
@@ -533,7 +538,7 @@ def test_analyze_purges_stale_rows(pg_conn, agency_id, ch_client):
 
     # Tables keyed by route_code use GHOST; stop tables use GHOST_STOP;
     # agg_hour_daily has neither, so its ghost is the 2099 date.
-    _stop_ghost_tables = {"agg_stop_daily", "agg_stop_hour_daily", "agg_stop_routes"}
+    _stop_ghost_tables = {"agg_stop_daily", "agg_stop_hour_daily", "agg_stop_departures_daily", "agg_stop_routes"}
     _date_ghost_tables = {"agg_hour_daily"}
     with pg_conn.cursor() as cur:
         for table, _cols, _values in ghosts:

@@ -38,6 +38,8 @@ Aggregation tables produced:
 - agg_route_stop_daily — per-route-per-stop, per-day delay (route-filtered heatmap)
 - agg_stop_hour_daily  — per-stop, per-day, per-service-day-hour departures and on-time counts
   (the supply map's stop panel)
+- agg_stop_departures_daily — per-stop, per-day departures in time order with their delays
+  (the supply map's stop panel's waits)
 - agg_feed_health      — per-day row counts (every row, those with a delay, and every row by ingest
   source) and implausible-delay count; doubles as the incremental ledger
 - agg_service_delivered_daily — per-day, per-route non-executed trip count (executed-vs-planned rate;
@@ -196,6 +198,7 @@ _AGG_TABLES_ORDERED = (
     "agg_stop_routes",
     "agg_route_stop_daily",
     "agg_stop_hour_daily",
+    "agg_stop_departures_daily",
     "agg_feed_health",
     "agg_service_delivered_daily",
     "agg_route_headway",
@@ -241,6 +244,7 @@ _INCREMENTAL_AGG_TABLES = frozenset(
         "agg_schedule_revision_daily",
         "agg_service_delivered_daily",
         "agg_stop_daily",
+        "agg_stop_departures_daily",
         "agg_stop_hour_daily",
     }
 )

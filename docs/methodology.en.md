@@ -301,7 +301,7 @@ For each timetable revision, each route's timetable change is set beside how its
 
 ### Planned departures at stops
 
-How much service each stop is planned to get, from the timetables alone (from method `2026.11.19`). An opened stop sets each hour's planned departures beside the departures observed in it (from method `2026.11.21`).
+How much service each stop is planned to get, from the timetables alone (from method `2026.11.19`). An opened stop sets each hour's planned departures beside the departures observed in it (from method `2026.11.21`) and how long riders waited (from method `2026.11.22`).
 
 - **Timetable**: each operator's timetable version in force on the chosen date (today's service day by default). It is read from the kept timetables, so a version a later load replaced can still be read. An operator with no version in force that day is shown as such.
 - **Typical day**: as in [A timetable's typical day](#a-timetables-typical-day), taken on from the first day the version is in force, so a tie goes to the earliest day. A day type whose typical day runs nothing has no departures.
@@ -313,6 +313,9 @@ How much service each stop is planned to get, from the timetables alone (from me
 - **Days observed**: of the 30 days up to the newest day with the operator's aggregates on or before the chosen date, those of the day type shown on which the same timetable version as on the chosen date was in force. The day type follows the date alone, as in [A timetable's typical day](#a-timetables-typical-day). A day with no aggregates (the feed did not arrive) is not counted as a day, so it never reads as one with no departures. Departures per day are the observed departures over those days divided by their number. The definition shown beside them (timetables, sources, completeness) covers the whole period from the first of those days to the last, the other days in it included.
 - **On-time rate and mean delay**: the share of the observed departures that were on time, and their mean delay. On time always follows the industry standard (`standard_m1_p5`). A planned departure that was not observed counts neither as on time nor as late ([What is not observed](#what-is-not-observed)): a feed that did not report it says nothing of whether it ran. So when fewer departures are observed than planned, the on-time rate covers the observed ones alone.
 - The on-time rate is shown however few departures are observed, and carries “wide margin” when its 95% Wilson interval is more than 5 points either side. The observations at one stop in one hour are different trips or a trip on different days, so the sample size is the number of observations. An hour with no observation shows a dash.
+- **Waits**: how long a rider who reaches the stop at a random moment of the hour waits for the next departure of any route there, as run and as timetabled. As run, a departure leaves at its scheduled time plus the delay the feed last reported for it; as timetabled, the same departures leave at their scheduled times, so the two differ only by how they ran. Each day's riders arrive evenly through the hour, up to the earlier of that day's last departure as run and as timetabled, so both sides count the same riders, and a rider after the last departure, who has none to wait for, counts on neither. The waits of every day judged are pooled, and their median and 90th percentile are taken exactly, rounded to a tenth of a minute.
+- **Days judged for an hour**: a day counts for an hour only when the feed observed at least the typical day's planned departures in the hour, in the hour before (a late departure can serve its riders) and in the next hour with a planned departure. A departure the feed missed would merge two gaps into one and make the wait look longer than it was. An hour with no day judged shows a dash. A departure the operator cancelled is never observed, so a day with a cancellation in those hours is not judged rather than counted as a longer wait: the waits describe the departures that ran.
+- **Random arrival**: the waits assume riders arrive without checking the times, as they do for frequent service. Riders of infrequent service time their arrival, so there the figures describe the gaps between departures rather than what riders wait. The waits carry no grade: Excess Waiting Time's bands describe frequent service (a median scheduled headway of 12 minutes or less), and a stop's waits pool every route there.
 - A terminal stop shows no observed departures, since feeds report no departure from the last stop.
 
 ### Connections at transfer hubs
@@ -513,10 +516,11 @@ What each version changed is described in [DELAY_ANALYSIS.md's "Method versions"
 <!-- method-changelog:start -->
 <!-- Written by poetry run python scripts/render_method_changelog.py from METHOD_VERSIONS. Do not edit by hand. -->
 
-The current method is `2026.11.21`. Newest first, each version with the inputs it set.
+The current method is `2026.11.22`. Newest first, each version with the inputs it set.
 
 | Version | Inputs set |
 |---|---|
+| `2026.11.22` | `agg_stop_departures_daily` = 1 |
 | `2026.11.21` | `agg_stop_hour_daily` = 1 |
 | `2026.11.20` | `agg_route_headway_daily` 6 → 7 |
 | `2026.11.19` | `agg_stop_supply_days` = 1, `agg_stop_supply_hourly` = 1 |

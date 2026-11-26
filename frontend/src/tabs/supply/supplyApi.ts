@@ -70,6 +70,19 @@ interface SupplyHourObserved {
   on_time_pct: number | null;
   uncertain: boolean;
   avg_delay_min: number | null;
+  /** Null with no day on which every departure that could serve the hour was observed. */
+  wait: SupplyHourWait | null;
+}
+
+/** How long riders arriving at a random moment of the hour waited for the
+ *  next departure of any route, pooled over the days judged for it: as run,
+ *  and as the same departures were timetabled. */
+export interface SupplyHourWait {
+  days: number;
+  p50_min: number;
+  p90_min: number;
+  scheduled_p50_min: number;
+  scheduled_p90_min: number;
 }
 
 export interface SupplyQuery {

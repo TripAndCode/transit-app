@@ -164,7 +164,8 @@ class FakeConn:
             self._purged.add(sql.split()[2])
         # A Postgres copy's totals: what it held, until its own purge emptied it.
         if sql.startswith("SELECT count(*), coalesce(") and "::bigint FROM " in sql:
-            table = sql.split(" FROM ")[1].split()[0]
+            # A figure can read its array through a subquery with its own FROM.
+            table = sql.split("::bigint FROM ")[1].split()[0]
             return ((0, 0, 0) if table in self._purged else self._pg_totals), []
         # A reference table's figure, as an internal table's store check reads it.
         for reference, _, expression in ch_aggregates.REFERENCES.values():

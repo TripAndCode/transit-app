@@ -275,6 +275,7 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
     from tests.pipeline.ch_agg_helpers import update_row
 
     # Three weekdays under A, Friday to Tuesday, and a Saturday the weekday window leaves out.
+    # Monday night's two departures run past midnight, on Monday's service day.
     insert_updates(
         ch_client,
         revised,
@@ -283,6 +284,8 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
             update_row(datetime(2026, 2, 9, 7, 5), "w1", 30, scheduled_time="07:00:00"),
             update_row(datetime(2026, 2, 10, 7, 5), "w1", 400, scheduled_time="07:00:00"),
             update_row(datetime(2026, 2, 10, 7, 35), "w2", 0, scheduled_time="07:30:00"),
+            update_row(datetime(2026, 2, 10, 0, 25), "w3", 240, scheduled_time="24:20:00"),
+            update_row(datetime(2026, 2, 10, 0, 35), "w4", 0, scheduled_time="00:30:00"),
             update_row(datetime(2026, 2, 7, 9, 5), "s1", 0, scheduled_time="09:00:00", service_type="土曜"),
         ],
     )
@@ -305,6 +308,8 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
                 "on_time_pct": 75.0,
                 "uncertain": True,
                 "avg_delay_min": 1.8,
+                # No day saw both of 7's departures and both of the night's, the next ones.
+                "wait": None,
             },
         }
     ]
@@ -312,6 +317,19 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
     # The stamp covers the window's whole span, the weekend inside it included, and reads the
     # timetable each observation was ingested against; these rows carry none.
     assert [(v["name"], v["days"]) for v in stop["definition"]["timetable_versions"]] == [(None, 5)]
+
+    # Monday is judged for the night: riders from 24:00 wait for 24:24 as run (24:20 as
+    # timetabled), then for 24:30, until the 24:30 departure.
+    night = (await api.get("/api/network/supply/stop", params={**params, "from_hour": 24, "to_hour": 25})).json()
+    (hour,) = night["hours"]
+    assert (hour["hour"], hour["observed"]["departures"]) == (24, 2)
+    assert hour["observed"]["wait"] == {
+        "days": 1,
+        "p50_min": 9.0,
+        "p90_min": 21.0,
+        "scheduled_p50_min": 7.5,
+        "scheduled_p90_min": 17.0,
+    }
 
 
 async def test_a_day_type_with_no_trip_is_zero_not_missing(revised, pg_conn, ch_client, api):

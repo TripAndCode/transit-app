@@ -1,17 +1,19 @@
 """Parity oracle: the Postgres builders the ClickHouse-computed aggregates replaced.
 
 Each SQL below is the builder pipeline/analyze.py ran for that table before it
-moved to ClickHouse, copied verbatim, but for agg_route_band_daily and
-agg_stop_hour_daily, which were built in ClickHouse from the start: their SQL
-states the same rows in the legacy builders' terms. Never edit one to make a parity test pass: a parity test asks
-whether the ClickHouse build reproduces exactly this.
+moved to ClickHouse, copied verbatim, but for agg_route_band_daily,
+agg_stop_hour_daily and agg_stop_departures_daily, which were built in ClickHouse
+from the start: their SQL states the same rows in the legacy builders' terms.
+Never edit one to make a parity test pass: a parity test asks whether the
+ClickHouse build reproduces exactly this.
 
 These builders take the hour and band from a TIME `scheduled_time`, which holds
 no time past 24:00, so they leave every departure at 24:00 or later out of
-agg_hour_daily, agg_route_hour, agg_route_hour_dow, agg_stop_hour_daily and the
-hour-keyed rows of route_delay_counts, and band it 'none' in agg_stop_daily and
-agg_route_stop_daily. The ClickHouse build files it under its hour and band on
-purpose (method version 2026.11.1, and agg_stop_hour_daily from its first), so a
+agg_hour_daily, agg_route_hour, agg_route_hour_dow, agg_stop_hour_daily,
+agg_stop_departures_daily and the hour-keyed rows of route_delay_counts, and band
+it 'none' in agg_stop_daily and agg_route_stop_daily. The ClickHouse build files
+it under its hour and band on purpose (method version 2026.11.1, and
+agg_stop_hour_daily and agg_stop_departures_daily from their first), so a
 parity fixture holding such a departure is expected to differ there; do not edit
 an oracle to match.
 """
@@ -54,6 +56,11 @@ band_case = time_band_case_sql("d.scheduled_time")
 # agg_stop_hour_daily's hour: before the 04:00 cutover a time is the service day's hour 24 to 27.
 service_day_hour = (
     "(EXTRACT(HOUR FROM d.scheduled_time)::int + CASE WHEN EXTRACT(HOUR FROM d.scheduled_time) < 4 THEN 24 ELSE 0 END)"
+)
+# agg_stop_departures_daily's clock: before the 04:00 cutover a time is a day later.
+service_day_sec = (
+    "(EXTRACT(EPOCH FROM d.scheduled_time)::int"
+    " + CASE WHEN EXTRACT(HOUR FROM d.scheduled_time) < 4 THEN 86400 ELSE 0 END)"
 )
 # agg_route_stats's builder read its two thresholds through these names.
 on_time_thr = LEGACY_ON_TIME_LATE_TOLERANCE_SEC
@@ -262,6 +269,19 @@ LEGACY_SQL = {
                  AND sst.trip_id = d.trip_id
                  AND sst.stop_sequence = d.stop_sequence
                 GROUP BY sst.stop_id, d.date, {service_day_hour}
+            """,
+    "agg_stop_departures_daily": f"""
+                WITH deduped AS (SELECT * FROM _analyze_deduped WHERE scheduled_time IS NOT NULL)
+                SELECT
+                    %(agency_id)s, sst.stop_id, d.date,
+                    array_agg({service_day_sec} ORDER BY {service_day_sec}, d.dep_delay),
+                    array_agg(d.dep_delay ORDER BY {service_day_sec}, d.dep_delay)
+                FROM deduped d
+                JOIN static_stop_times sst
+                  ON sst.agency_id = %(agency_id)s
+                 AND sst.trip_id = d.trip_id
+                 AND sst.stop_sequence = d.stop_sequence
+                GROUP BY sst.stop_id, d.date
             """,
     "agg_route_hour_dow": """
             WITH deduped AS (

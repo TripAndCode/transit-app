@@ -2855,7 +2855,10 @@
       "window": "Observed on the {{days}} days of this day type on the same timetable between {{range}}. The definition below covers that whole period.",
       "no_window": "Nothing observed: the last 30 days with this operator's data hold no day of this day type on the same timetable.",
       "pooled": "{{observed}} observed over {{days}} days, {{onTime}} on time",
-      "note": "On time counts the observed departures only: one the feed did not report is counted neither on time nor late."
+      "note": "On time counts the observed departures only: one the feed did not report is counted neither on time nor late.",
+      "col_wait": "Wait (min)",
+      "wait_title": "As run on {{days}} days: half of riders waited {{p50}} min or less, 9 in 10 waited {{p90}} min or less. As timetabled: {{scheduledP50}} and {{scheduledP90}} min.",
+      "wait_note": "Wait is how long a rider arriving at a random moment of the hour waits for the next departure of any route here: half wait no longer than the first figure, 9 in 10 no longer than the second, with the same departures as timetabled in brackets. It describes frequent service, which riders use without checking the times. An hour counts only the days the feed saw every departure that could serve it."
     }
   },
   "transfers": {
