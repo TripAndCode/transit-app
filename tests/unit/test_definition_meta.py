@@ -477,6 +477,16 @@ def test_csv_line_says_what_each_value_is_before_the_method_and_ends_with_the_ti
     assert "," not in line
 
 
+@pytest.mark.parametrize(
+    ("version", "kept"),
+    [("gtfs_static_20260401", [_TIMETABLES[0]]), (None, [_TIMETABLES[1]]), ("gtfs_static_20260301", [])],
+)
+def test_a_stamp_read_under_one_timetable_names_that_ones_days_alone(version, kept):
+    meta = _DATED.model_copy(update={"timetable_versions": _TIMETABLES})
+    assert meta.read_under(version).timetable_versions == kept
+    assert _DATED.read_under(version).timetable_versions is None
+
+
 def test_csv_line_without_timetables_ends_with_the_build_day():
     """A definition no router stamped names no timetables, rather than none recorded."""
     assert format_definition_csv_line(_DATED).endswith("; 集計日=2026-11-06")

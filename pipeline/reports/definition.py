@@ -257,7 +257,9 @@ class DefinitionMeta(BaseModel):
     ``value_basis`` says what the figures are made from (:data:`VALUE_BASIS`).
     ``timetable_versions`` names the timetables in force over the request's
     days, each listed agency's adding up to the range (:class:`TimetableVersion`),
-    for a live scan too; ``None`` until :func:`stamp_build` fills it in.
+    for a live scan too, or for figures read under one timetable alone, only
+    that timetable's days (:meth:`read_under`); ``None`` until
+    :func:`stamp_build` fills it in.
     ``source_mix`` says, the same way, which ingest source each of those days'
     observations came from (:class:`SourceMix`), counted in days rather than
     observations because a live day holds far fewer of them; it stays ``None``
@@ -296,6 +298,16 @@ class DefinitionMeta(BaseModel):
     feed_quality: list[FeedQuality] | None = None
     pre_floor_methods: list[PreFloorMethod] | None = None
     prediction_validations: list[PredictionValidation] | None = None
+
+    def read_under(self, version: str | None) -> DefinitionMeta:
+        """This stamp with its timetables narrowed to *version*'s days, for
+        figures read under that one timetable alone
+        (:func:`pipeline.reports.segment_runtime.runtime_ctes`). *version*
+        None keeps the days no timetable was recorded on, which such figures
+        read when the ingest stamps none."""
+        if self.timetable_versions is None:
+            return self
+        return self.model_copy(update={"timetable_versions": [v for v in self.timetable_versions if v.name == version]})
 
 
 # Each agency's builds analyze had recorded, when this process last looked,

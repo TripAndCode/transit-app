@@ -1,10 +1,14 @@
 """Segment speed and slow zones (pipeline.reports.slow_zones): every timetable
 segment of an agency by its running time over the timetable, week by week,
-and the segments that stayed slow.
+and the segments that stayed slow. And one route's timetable fit
+(pipeline.reports.segment_runtime): each of its segments' running time beside
+the scheduled one, over the scope's dates.
 
 Every figure is a feed-based estimate (``value_basis``). The list is ordered
 by how long a segment has stayed slow, never by minutes lost: ranking
 segments for bus priority waits for the agency's predictions to be validated.
+For the same reason the timetable fit keeps the route's order and derives no
+recommended running time.
 """
 
 import csv
@@ -13,16 +17,20 @@ from datetime import date
 from typing import Literal
 
 import asyncpg
+from clickhouse_connect.driver.asyncclient import AsyncClient
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from api.deps import get_agency, get_conn, get_locale
+from api.deps import get_agency, get_agency_range_ctx, get_ch, get_conn, get_locale
 from api.middleware.ratelimit import DEFAULT_LIMIT, limiter
-from api.range import DAY_TYPE_SERVICE, TIME_BAND_RANGES, last_closed_jst_day
+from api.range import DAY_TYPE_SERVICE, TIME_BAND_RANGES, RangeCtx, last_closed_jst_day
+from api.scope_applied import scope_applied
 from pipeline.agg_registry import METHOD_VERSION
 from pipeline.data_sources import credit_line
-from pipeline.reports.definition import METHODOLOGY_URLS, value_basis_text
+from pipeline.reports.definition import METHODOLOGY_URLS, DefinitionMeta, value_basis_text
+from pipeline.reports.report_stamp import report_definition
+from pipeline.reports.segment_runtime import compute_segment_runtime
 from pipeline.reports.slow_zones import (
     MIN_SCHEDULED_SEC,
     MIN_SLOW_WEEKS,
@@ -283,4 +291,93 @@ async def slow_zones(
         ),
         segments=[_segment(s, result.weeks) for s in result.segments],
         slow_zones=[(s.from_stop_id, s.to_stop_id) for s in result.slow_zones],
+    )
+
+
+class TimetableFitSegment(BaseModel):
+    """One segment of the route in one time band. ``padding_sec`` is the
+    scheduled running time minus the median: positive is slack, negative too
+    tight. ``time_band`` is None for a segment the timetable gives no
+    departure time; a segment with no observed run in range has no
+    percentiles and no padding."""
+
+    from_stop_id: str
+    from_stop_name: str | None
+    to_stop_id: str
+    to_stop_name: str | None
+    time_band: TimeBand | None
+    to_stop_sequence: int
+    samples: int
+    run_p50_sec: float | None
+    run_p85_sec: float | None
+    scheduled_run_sec: float | None
+    padding_sec: float | None
+    hold_eligible: int
+    hold_rate: float | None
+
+
+class TimetableFitResponse(BaseModel):
+    """``segments`` in the route's order, then by band. ``static_version_id``
+    is the timetable read: the one in force on the range's last day, whose
+    dates alone are read (``days`` of them). ``terminus_early_rate`` is over
+    the ``terminus_arrivals`` at a trip's last stop, None without one."""
+
+    available: bool
+    unavailable_reason: str | None
+    last_checked: str | None
+    value_basis: str
+    static_version_id: str | None
+    days: int
+    terminus_arrivals: int
+    terminus_early_rate: float | None
+    segments: list[TimetableFitSegment]
+    definition: DefinitionMeta
+    scope_applied: dict[str, bool]
+
+
+# The route is named by ``route``; the scope's routes filter does not narrow it.
+_TIMETABLE_FIT_SCOPE = scope_applied("from", "to", "dow", "time_band", "service")
+
+
+@router.get("/segments/timetable-fit", response_model=TimetableFitResponse)
+@limiter.limit(DEFAULT_LIMIT)
+async def timetable_fit(
+    request: Request,
+    route: str = Query(
+        ...,
+        min_length=1,
+        description="The route whose segments are read. The scope's routes filter does not narrow it.",
+    ),
+    agency_id: int = Depends(get_agency),
+    ctx: RangeCtx = Depends(get_agency_range_ctx),
+    conn: asyncpg.Connection = Depends(get_conn),
+    ch: AsyncClient = Depends(get_ch),
+) -> TimetableFitResponse:
+    """The route's running time per timetable segment and time band over the
+    scope's dates, beside the scheduled running time, for its own page."""
+    definition, _ = await report_definition(conn, ch, agency_id, ctx, "segment_runtime")
+    fit = await compute_segment_runtime(agency_id, ctx, conn, route=route)
+    return TimetableFitResponse(
+        available=fit["available"],
+        unavailable_reason=fit["unavailable_reason"],
+        last_checked=fit["last_checked"],
+        value_basis=fit["value_basis"],
+        static_version_id=fit["static_version_id"],
+        days=fit["days"],
+        terminus_arrivals=fit["terminus_arrivals"],
+        terminus_early_rate=fit["terminus_early_rate"],
+        segments=[
+            TimetableFitSegment(
+                **{
+                    **seg,
+                    "run_p50_sec": _round(seg["run_p50_sec"]),
+                    "run_p85_sec": _round(seg["run_p85_sec"]),
+                    "scheduled_run_sec": _round(seg["scheduled_run_sec"]),
+                    "padding_sec": _round(seg["padding_sec"]),
+                }
+            )
+            for seg in fit["segments"]
+        ],
+        definition=definition.read_under(fit["static_version_id"]) if fit["days"] else definition,
+        scope_applied=_TIMETABLE_FIT_SCOPE,
     )

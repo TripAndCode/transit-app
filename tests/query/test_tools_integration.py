@@ -692,9 +692,13 @@ async def test_dispatch_schedule_realism_reads_the_segment_aggregate_for_a_confi
         "INSERT INTO static_stops (agency_id, stop_id, stop_name) VALUES ($1, 'S2', '紙屋町'), ($1, 'S3', '広島駅')",
         aagency_id,
     )
+    # The day before ran another timetable, which the figures and their stamp leave out.
+    before = date(2026, 3, 31)
     await aconn.execute(
-        "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) VALUES ($1, $2, 'v1')",
+        "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) "
+        "VALUES ($1, $2, 'v0'), ($1, $3, 'v1')",
         aagency_id,
+        before,
         day,
     )
     await aconn.execute(
@@ -706,7 +710,7 @@ async def test_dispatch_schedule_realism_reads_the_segment_aggregate_for_a_confi
         day,
     )
 
-    ctx = RangeCtx(from_date=day, to_date=day)
+    ctx = RangeCtx(from_date=before, to_date=day)
     result = await dispatch("schedule_realism", {"route": "R1"}, ctx, aconn, aagency_id, locale="ja", ch=None)
 
     assert result.kind == "table"
@@ -728,6 +732,7 @@ async def test_dispatch_schedule_realism_reads_the_segment_aggregate_for_a_confi
     )
     assert result.definition is not None
     assert (result.definition.method_version, result.definition.value_basis) == (METHOD_VERSION, "feed_prediction")
+    assert [(v.name, v.days) for v in result.definition.timetable_versions or []] == [("v1", 1)]
 
 
 @pytest.mark.asyncio

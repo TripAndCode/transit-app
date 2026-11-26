@@ -20,6 +20,7 @@ import { ScopeBar } from "../components/scope/ScopeBar";
 import { RiseHeadline, SelectedStopAside, StopDelayTable, StopDelayTrend } from "../components/analysis/RouteStopDelay";
 import { orderedStops, matchedPrevious } from "../components/analysis/stopSeries";
 import { RouteSummaryStrip } from "../components/analysis/RouteSummaryStrip";
+import { TimetableFit } from "../components/analysis/TimetableFit";
 import { useAgencyOnTime } from "../components/analysis/agencyOnTime";
 import { PerformanceStandardPanel } from "../components/PerformanceStandardPanel";
 import { RouteReportCard } from "../components/reportCard/RouteReportCard";
@@ -49,7 +50,7 @@ const AnalysisMap = lazy(() =>
 
 /** Sub-tabs in the order they are rendered — also the order the arrow keys
  *  walk, and the closed set `sub_tab` may hold. */
-const SUB_TABS = ["trend", "marey", "map", "byStop"] as const;
+const SUB_TABS = ["trend", "marey", "map", "byStop", "timetableFit"] as const;
 const NO_MAP_POSITIONS: ScrubMapPosition[] = [];
 type SubTab = (typeof SUB_TABS)[number];
 
@@ -58,6 +59,7 @@ const SUB_TAB_LABEL_KEYS: Record<SubTab, string> = {
   marey: "tabMarey",
   map: "tabMap",
   byStop: "tabByStop",
+  timetableFit: "tabTimetableFit",
 };
 
 const tabId = (sub: SubTab) => `route-analysis-tab-${sub}`;
@@ -269,7 +271,11 @@ export function RouteAnalysisTab() {
             {activeTab === "byStop" && <div className="focus-tab-panel" role="tabpanel" id={panelId("byStop")} aria-labelledby={tabId("byStop")}>
               <StopDelayTable stops={stops} />
             </div>}
-            <p className="focus-muted">{t("caveat")}</p>
+            {activeTab === "timetableFit" && <div className="focus-tab-panel" role="tabpanel" id={panelId("timetableFit")} aria-labelledby={tabId("timetableFit")}>
+              <TimetableFit agencyId={id} ctx={ctx} route={route} />
+            </div>}
+            {/* The caveat reads the delay line; the timetable fit carries its own. */}
+            {activeTab !== "timetableFit" && <p className="focus-muted">{t("caveat")}</p>}
             {/* A list names a route without its route_id; its own page keeps
                 it, for anyone matching the page against the feed. */}
             <p className="focus-muted focus-route-id">{t("routeId", { id: names.parts.get(route)?.id ?? route })}</p>
