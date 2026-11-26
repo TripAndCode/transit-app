@@ -275,7 +275,6 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
     from tests.pipeline.ch_agg_helpers import update_row
 
     # Three weekdays under A, Friday to Tuesday, and a Saturday the weekday window leaves out.
-    # Monday night's two departures run past midnight, on Monday's service day.
     insert_updates(
         ch_client,
         revised,
@@ -284,8 +283,6 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
             update_row(datetime(2026, 2, 9, 7, 5), "w1", 30, scheduled_time="07:00:00"),
             update_row(datetime(2026, 2, 10, 7, 5), "w1", 400, scheduled_time="07:00:00"),
             update_row(datetime(2026, 2, 10, 7, 35), "w2", 0, scheduled_time="07:30:00"),
-            update_row(datetime(2026, 2, 10, 0, 25), "w3", 240, scheduled_time="24:20:00"),
-            update_row(datetime(2026, 2, 10, 0, 35), "w4", 0, scheduled_time="00:30:00"),
             update_row(datetime(2026, 2, 7, 9, 5), "s1", 0, scheduled_time="09:00:00", service_type="土曜"),
         ],
     )
@@ -318,11 +315,35 @@ async def test_an_opened_stop_sets_each_hours_observed_departures_beside_its_pla
     # timetable each observation was ingested against; these rows carry none.
     assert [(v["name"], v["days"]) for v in stop["definition"]["timetable_versions"]] == [(None, 5)]
 
+
+async def test_an_opened_stop_sets_riders_waits_as_run_beside_the_timetabled_ones(revised, pg_conn, ch_client, api):
+    from datetime import datetime
+
+    from pipeline.analyze import analyze
+    from pipeline.clickhouse import insert_updates
+    from tests.pipeline.ch_agg_helpers import update_row
+
+    def ingested_against_a(row: tuple) -> tuple:
+        # Only A's kept timetable has the night's trips; B, the loaded one, does not.
+        return (*row, *[None] * 6, A)
+
+    # Monday night's two departures, past midnight on Monday's service day.
+    insert_updates(
+        ch_client,
+        revised,
+        [
+            ingested_against_a(update_row(datetime(2026, 2, 10, 0, 25), "w3", 240, scheduled_time="24:20:00")),
+            ingested_against_a(update_row(datetime(2026, 2, 10, 0, 35), "w4", 0, scheduled_time="00:30:00")),
+        ],
+    )
+    analyze(revised, pg_conn, ch_client)
+    pg_conn.commit()
+
+    params = {"agency_id": revised, "stop_id": "S1", "date": "2026-02-10", "from_hour": 24, "to_hour": 25}
+    (hour,) = (await api.get("/api/network/supply/stop", params=params)).json()["hours"]
+    assert (hour["hour"], hour["observed"]["departures"]) == (24, 2)
     # Monday is judged for the night: riders from 24:00 wait for 24:24 as run (24:20 as
     # timetabled), then for 24:30, until the 24:30 departure.
-    night = (await api.get("/api/network/supply/stop", params={**params, "from_hour": 24, "to_hour": 25})).json()
-    (hour,) = night["hours"]
-    assert (hour["hour"], hour["observed"]["departures"]) == (24, 2)
     assert hour["observed"]["wait"] == {
         "days": 1,
         "p50_min": 9.0,

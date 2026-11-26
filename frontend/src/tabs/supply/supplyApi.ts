@@ -70,7 +70,8 @@ interface SupplyHourObserved {
   on_time_pct: number | null;
   uncertain: boolean;
   avg_delay_min: number | null;
-  /** Null with no day on which every departure that could serve the hour was observed. */
+  /** Null with no day on which every departure that could serve the hour was observed
+   *  and one still left after the hour began. */
   wait: SupplyHourWait | null;
 }
 

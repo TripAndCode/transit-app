@@ -312,7 +312,7 @@ def hour_rows(
     The percentage comes however few departures back it, flagged uncertain
     when its 95% interval is wider than five points either way. Beside them
     stand the *waits* of riders arriving at a random moment of the hour, as
-    run and as timetabled (pipeline.stop_wait), None with no day judged."""
+    run and as timetabled (pipeline.stop_wait), None with no day counted."""
     rows = []
     for hour in range(from_hour, to_hour):
         cell = planned.get(hour)
@@ -346,7 +346,7 @@ def hour_rows(
 
 class Observed(NamedTuple):
     """An opened stop's observed window: its days, the pooled departures of
-    each hour and the waits of each hour with a day judged for it."""
+    each hour and the waits of each hour with a day counted for it."""
 
     days: list[date]
     by_hour: dict[int, ObservedHour]
@@ -374,11 +374,11 @@ async def _observed(
     rows = await conn.fetch(_OBSERVED_SQL, agency_id, stop_id, days, hours.start, hours.stop)
     departures = await conn.fetch(_DEPARTURES_SQL, agency_id, stop_id, days)
     planned = {hour: cell.departures for hour, cell in cells.items()}
-    return Observed(
-        days,
-        {r[0]: ObservedHour(*r[1:]) for r in rows},
-        hour_waits(((r["scheduled_secs"], r["dep_delays"]) for r in departures), planned, hours),
+    # A hub's weeks of departures take a while to sweep, off the event loop.
+    waits = await asyncio.to_thread(
+        hour_waits, [(r["scheduled_secs"], r["dep_delays"]) for r in departures], planned, hours
     )
+    return Observed(days, {r[0]: ObservedHour(*r[1:]) for r in rows}, waits)
 
 
 async def read_supply_stop(
