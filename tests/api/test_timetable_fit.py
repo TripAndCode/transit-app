@@ -48,6 +48,29 @@ async def test_the_route_segments_come_rounded_with_their_definition(client, aco
 
 
 @pytest.mark.asyncio
+async def test_the_definition_names_only_the_timetable_read(client, aconn, aagency_id):
+    """Over a range two timetables ran in, the figures read the later one
+    alone, and so does the stamp beside them."""
+    await _trusted(aconn, aagency_id)
+    await aconn.execute(
+        "INSERT INTO agg_schedule_revision_daily (agency_id, date, static_version_id) "
+        "VALUES ($1, $2, 'v1'), ($1, $3, 'v2')",
+        aagency_id,
+        D1,
+        D2,
+    )
+    await _segment(aconn, aagency_id, D1, "S2", "S3", "forenoon", [240])
+    await _segment(aconn, aagency_id, D2, "S2", "S3", "forenoon", [300])
+
+    r = await client.get(f"/api/{aagency_id}/segments/timetable-fit?{RANGE}&route=R9")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert (body["static_version_id"], body["days"]) == ("v2", 1)
+    assert [(v["name"], v["days"]) for v in body["definition"]["timetable_versions"]] == [("v2", 1)]
+
+
+@pytest.mark.asyncio
 async def test_an_untrusted_feed_says_why_it_shows_nothing(client, aagency_id):
     r = await client.get(f"/api/{aagency_id}/segments/timetable-fit?{RANGE}&route=R9")
 

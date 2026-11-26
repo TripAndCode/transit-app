@@ -1457,7 +1457,7 @@ async def _tool_schedule_realism(args: dict, ctx: RangeCtx, conn, agency_id: int
                 "padding_min",
                 "time_adjustment_rate",
             ],
-            definition=definition,
+            definition=None if definition is None else definition.read_under(fit["static_version_id"]),
         )
 
     rows = await schedule_realism_segments(agency_id, ctx, conn, ch, route=str(route))

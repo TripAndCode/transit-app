@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { apiGet } from "../../api/client";
 import { scopeToQueryString, type Scope } from "../../api/scope";
 import type { Band } from "../../api/timeBands";
@@ -49,6 +49,9 @@ export function useTimetableFit(agencyId: number, ctx: Scope, route: string): Us
     queryKey: ["timetable-fit", agencyId, scopeToQueryString(ctx), route],
     queryFn: ({ signal }) => apiGet<TimetableFitResponse>(timetableFitPath(agencyId, ctx, route), { signal }),
     staleTime: 5 * 60 * 1000,
-    placeholderData: keepPreviousData,
+    // A scope change keeps the route's last answer up while the next loads;
+    // another agency's or route's segments are never shown as this one's.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === agencyId && previousQuery.queryKey[3] === route ? previous : undefined,
   });
 }

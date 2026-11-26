@@ -124,6 +124,34 @@ describe("TimetableFit", () => {
     expect(rows[1]).toHaveTextContent("-30");
   });
 
+  it("falls back to the busiest band once the picked one leaves the answer", async () => {
+    const hook = stub(RESPONSE);
+    const { rerender } = renderWithProviders(<TimetableFit agencyId={9} ctx={SCOPE} route="R1" />);
+    await userEvent.selectOptions(screen.getByLabelText("Departure time band"), "evening");
+    hook.mockReturnValue({
+      data: { ...RESPONSE, segments: [segment({})] },
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as UseQueryResult<TimetableFitResponse>);
+    rerender(<TimetableFit agencyId={9} ctx={SCOPE} route="R1" />);
+    expect(screen.getByText("Departure time band: Morning (05–09)")).toBeInTheDocument();
+  });
+
+  it("heads each run of consecutive stops with its ends when a band has more than one", () => {
+    const back = segment({ from_stop_id: "T1", from_stop_name: null, to_stop_id: "T2", to_stop_name: null });
+    stub({ ...RESPONSE, segments: [RESPONSE.segments[0], back, RESPONSE.segments[2]] });
+    open();
+    const rows = within(screen.getByRole("table")).getAllByRole("row");
+    expect(rows.map((row) => row.firstElementChild?.textContent)).toEqual([
+      "Segment",
+      "Kamiyacho → S3",
+      "Kamiyacho → Hatchobori",
+      "Hatchobori → S3",
+      "T1 → T2",
+      "T1 → T2",
+    ]);
+  });
+
   it("names a lone band rather than offering a choice of one", () => {
     stub({ ...RESPONSE, segments: [segment({})] });
     open();
@@ -142,7 +170,7 @@ describe("TimetableFit", () => {
   });
 
   it("says the hour filter does not narrow it", () => {
-    stub(RESPONSE);
+    stub({ ...RESPONSE, scope_applied: { hour: false } });
     open({ ...SCOPE, hour: [7, 9] });
     expect(screen.getByText("The hour filter does not apply here: segments are read by time band.")).toBeInTheDocument();
   });

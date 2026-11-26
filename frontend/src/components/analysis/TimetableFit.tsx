@@ -13,10 +13,11 @@ import { SHARED_TABLE, td, th } from "../tableStyles";
 import { buildTimeBandOptions } from "../timeBandOptions";
 import { segmentRuntimeNotShown } from "./notShown";
 import { useTimetableFit, type TimetableFitSegment } from "./timetableFitApi";
-import { bandRows, defaultBand, fitBands, stripScale } from "./timetableFitModel";
+import { bandRuns, defaultBand, fitBands, stripScale } from "./timetableFitModel";
 
 const STRIP_WIDTH = 120;
 const STRIP_HEIGHT = 12;
+const COLUMNS = 8;
 const SECTION: CSSProperties = { display: "flex", flexDirection: "column", gap: 8 };
 const FIELD: CSSProperties = { display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-sm)" };
 const MUTED: CSSProperties = { color: "var(--text-secondary)", fontSize: "var(--text-sm)", margin: 0 };
@@ -29,8 +30,8 @@ function signedSeconds(value: number | null): string {
   return value == null ? EM_DASH : formatNumber(Math.round(value), { signDisplay: "exceptZero" });
 }
 
-function stopPair(s: TimetableFitSegment): string {
-  return `${s.from_stop_name ?? s.from_stop_id} → ${s.to_stop_name ?? s.to_stop_id}`;
+function stopPair(first: TimetableFitSegment, last: TimetableFitSegment = first): string {
+  return `${first.from_stop_name ?? first.from_stop_id} → ${last.to_stop_name ?? last.to_stop_id}`;
 }
 
 /** The observed spread, median to 85th percentile, as a bar, and the
@@ -76,8 +77,8 @@ export function TimetableFit({ agencyId, ctx, route }: { agencyId: number; ctx: 
   const bands = fitBands(data.segments);
   // A band the scope no longer returns falls back rather than showing nothing.
   const band = chosen != null && bands.includes(chosen) ? chosen : defaultBand(data.segments);
-  const rows = band == null ? [] : bandRows(data.segments, band);
-  const scale = stripScale(rows);
+  const runs = band == null ? [] : bandRuns(data.segments, band);
+  const scale = stripScale(runs.flat());
   const untimed = data.segments.filter((s) => s.time_band == null).length;
   const bandLabels = buildTimeBandOptions(t);
   const bandLabel = (b: Band) => bandLabels.find((o) => o.value === b)?.label ?? b;
@@ -91,7 +92,9 @@ export function TimetableFit({ agencyId, ctx, route }: { agencyId: number; ctx: 
           {t(data.static_version_id == null ? "timetable_fit.summary_unversioned" : "timetable_fit.summary", summary)}
         </p>
       )}
-      {ctx.hour != null && <p style={MUTED}>{t("timetable_fit.hour_not_applied")}</p>}
+      {ctx.hour != null && data.scope_applied.hour === false && (
+        <p style={MUTED}>{t("timetable_fit.hour_not_applied")}</p>
+      )}
       {band == null ? (
         <EmptyState title={t("timetable_fit.none")} />
       ) : (
@@ -124,22 +127,31 @@ export function TimetableFit({ agencyId, ctx, route }: { agencyId: number; ctx: 
                   <th style={th({ align: "right" })}>{t("timetable_fit.col.runs")}</th>
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((s) => (
-                  <tr key={`${s.from_stop_id}\u0000${s.to_stop_id}`}>
-                    <td style={td()}>{stopPair(s)}</td>
-                    <td style={td()}>
-                      <Strip segment={s} scale={scale} />
-                    </td>
-                    <td style={td({ align: "right" })}>{seconds(s.scheduled_run_sec)}</td>
-                    <td style={td({ align: "right" })}>{seconds(s.run_p50_sec)}</td>
-                    <td style={td({ align: "right" })}>{seconds(s.run_p85_sec)}</td>
-                    <td style={td({ align: "right" })}>{signedSeconds(s.padding_sec)}</td>
-                    <td style={td({ align: "right" })}>{fmtRatioPct(s.hold_rate)}</td>
-                    <td style={td({ align: "right" })}>{formatNumber(s.samples)}</td>
-                  </tr>
-                ))}
-              </tbody>
+              {runs.map((run) => (
+                <tbody key={`${run[0].from_stop_id}\u0000${run[0].to_stop_id}`}>
+                  {runs.length > 1 && (
+                    <tr>
+                      <th colSpan={COLUMNS} scope="colgroup" style={th()}>
+                        {stopPair(run[0], run[run.length - 1])}
+                      </th>
+                    </tr>
+                  )}
+                  {run.map((s) => (
+                    <tr key={`${s.from_stop_id}\u0000${s.to_stop_id}`}>
+                      <td style={td()}>{stopPair(s)}</td>
+                      <td style={td()}>
+                        <Strip segment={s} scale={scale} />
+                      </td>
+                      <td style={td({ align: "right" })}>{seconds(s.scheduled_run_sec)}</td>
+                      <td style={td({ align: "right" })}>{seconds(s.run_p50_sec)}</td>
+                      <td style={td({ align: "right" })}>{seconds(s.run_p85_sec)}</td>
+                      <td style={td({ align: "right" })}>{signedSeconds(s.padding_sec)}</td>
+                      <td style={td({ align: "right" })}>{fmtRatioPct(s.hold_rate)}</td>
+                      <td style={td({ align: "right" })}>{formatNumber(s.samples)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
           <p style={MUTED}>{t("timetable_fit.strip_legend")}</p>

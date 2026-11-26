@@ -351,6 +351,7 @@ describe("RouteAnalysisTab sub-tab state", () => {
     renderWithSubTab("&sub_tab=garbage");
     expect(tab("Along the route")).toHaveAttribute("aria-selected", "true");
     expect(tab("Map")).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByText(/The line is each stop's mean/)).toBeInTheDocument();
   });
 
   it("restores the map sub-tab from the URL without a click", async () => {
@@ -396,6 +397,8 @@ describe("RouteAnalysisTab sub-tab state", () => {
     renderWithSubTab("&sub_tab=timetableFit");
     expect(tab("Timetable fit")).toHaveAttribute("aria-selected", "true");
     expect(fit).toHaveBeenCalledWith(1, expect.objectContaining({ routes: ["R1"] }), "R1");
+    // The delay line's caveat stays with the delay line.
+    expect(screen.queryByText(/The line is each stop's mean/)).not.toBeInTheDocument();
   });
 });
 

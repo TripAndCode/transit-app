@@ -374,6 +374,6 @@ async def timetable_fit(
             )
             for seg in fit["segments"]
         ],
-        definition=definition,
+        definition=definition.read_under(fit["static_version_id"]) if fit["available"] else definition,
         scope_applied=scope_applied(*ALL_SIX),
     )

@@ -221,7 +221,7 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 
 When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them while they rest on predictions.
 
-A route's page shows these in its "Timetable fit" tab, one time band at a time, with the segments in the route's order rather than ranked.
+A route's page shows these in its "Timetable fit" tab, one time band at a time, with the segments in the route's order rather than ranked. Each run of consecutive stops, such as one direction or one branch, is listed apart from the others.
 
 **Slow segments** (**Why**, "Slow segments"): the running time per segment above, taken per stop pair of the agency over every route through it. It is read per time band (of the scheduled departure from the first stop) and per day type (weekdays, or weekends and holidays, by the calendar).
 
@@ -367,7 +367,7 @@ Early in development, the perspectives a cross-operator delay analysis was missi
 | Transfers and total travel time | Partial | Connection reliability for the hub transfers an administrator defines, from feed predictions. Total travel time and origin-destination journeys are not computed: passengers are not the Service's primary users |
 | Policy KPIs and report formats | Done | The council report and the delay record. No Excel or PowerPoint formats yet |
 | Data coverage | Partial | The Hiroshima Bus Association's thirteen operators and Aomori City Bus. 中国バス and 井笠バスカンパニー, on the association's list, are not ingested |
-| Timetable slack and holding | Partial | Only an analysis on the Notebook screen, against the current timetable. No aggregate and no route-page panel |
+| Timetable slack and holding | Partial | Padding, the held-for-schedule rate and the terminus early-arrival rate per segment are aggregated daily and shown in the route page's "Timetable fit" tab and on the Notebook screen. They are feed-based estimates, and no timetable recommendation is made from them |
 | Supply: planned trips, vehicle-km, timetable changes | Partial | Planned trips and vehicle-km per timetable version, and the change dates, exist. Only the current version is shown, with no comparison of which routes lost trips between versions. Vehicle-km delivered is approximated from the trip ratio |
 | Contracts and incentives | Partial | Per-route standards (on-time rate, EWT, service delivered, vehicle-km delivered) with an achievement and bonus/deduction simulation. Service-delivered and vehicle-km standards are judged on the route's own service delivered |
 
