@@ -26,7 +26,7 @@ from pipeline import static_archive
 from pipeline.cache import async_lru_cache
 from pipeline.day_types import fallback_day_type, public_holidays_between
 from pipeline.histogram import on_time_from_columns
-from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC
+from pipeline.reports.rankings import DEFAULT_EARLY_TOLERANCE_SEC, DEFAULT_LATE_TOLERANCE_SEC, _pct1
 from pipeline.service_day import SERVICE_DAY_CUTOVER_HOURS
 from pipeline.stats import pct_is_uncertain
 from pipeline.stop_supply import DAY_TYPES, HourCell, SupplyDayType, band_supply
@@ -309,7 +309,7 @@ def hour_rows(
                 "departures": n,
                 "per_day": _tenth(n, days),
                 "on_time": on_time,
-                "on_time_pct": _tenth(100 * on_time, n) if n else None,
+                "on_time_pct": _pct1(on_time, n) if n else None,
                 "uncertain": pct_is_uncertain(on_time, n),
                 "avg_delay_min": _tenth(seen.sum_delay_sec, 60 * n) if n else None,
             }

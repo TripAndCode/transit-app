@@ -2852,7 +2852,7 @@
       "col_observed": "Observed a day",
       "col_on_time": "On time",
       "col_delay": "Mean delay",
-      "window": "Observed over {{days}} days of this day type on the same timetable, {{range}}.",
+      "window": "Observed on the {{days}} days of this day type on the same timetable between {{range}}. The definition below covers that whole period.",
       "no_window": "Nothing observed: the last 30 days with this operator's data hold no day of this day type on the same timetable.",
       "pooled": "{{observed}} observed over {{days}} days, {{onTime}} on time",
       "note": "On time counts the observed departures only: one the feed did not report is counted neither on time nor late."

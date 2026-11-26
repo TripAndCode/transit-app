@@ -65,7 +65,10 @@ const detail: SupplyStopDetail = {
   longest_gap_min: 25,
   first_sec: 6 * 3600,
   last_sec: 24 * 3600 + 20 * 60,
-  hours: [],
+  hours: [
+    { hour: 10, departures: 4, observed: null },
+    { hour: 11, departures: 4, observed: null },
+  ],
   observed_window: null,
   definition: null,
 };
@@ -157,12 +160,17 @@ describe("SupplyMapView", () => {
     );
   });
 
-  it("says an opened stop has nothing observed when no day of its day type ran on the same timetable", () => {
+  it("sets dashes beside each hour's planned departures when no day of its day type ran on the same timetable", () => {
     stubSupply(response);
     renderWithProviders(<SupplyMapView />);
     act(() => maps[0].handlers.click[0]({ features: [{ properties: { key: "1:S1" } }] }));
+    expect(screen.getAllByRole("row").map((row) => row.textContent)).toEqual([
+      "HourPlannedObserved a dayOn timeMean delay",
+      "10:004———",
+      "11:004———",
+    ]);
     expect(screen.getByText(/^Nothing observed:/)).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByText(/^On time counts the observed departures only/)).not.toBeInTheDocument();
   });
 
   it("sets each hour's observed departures and on-time beside its planned ones", () => {
@@ -176,7 +184,9 @@ describe("SupplyMapView", () => {
       "11:0040.0——",
     ]);
     expect(screen.getByText("50.0%").closest("td")).toHaveAttribute("title", "6 observed over 3 days, 3 on time");
-    expect(screen.getByText(/^Observed over 3 days of this day type/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/^Observed on the 3 days of this day type on the same timetable between .+\. The definition below covers that whole period\.$/),
+    ).toBeInTheDocument();
     expect(screen.getByText(/^On time counts the observed departures only/)).toBeInTheDocument();
   });
 
