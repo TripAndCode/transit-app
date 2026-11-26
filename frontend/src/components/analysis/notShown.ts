@@ -118,9 +118,10 @@ export function weatherNotShown(t: TFunction, data: WeatherDelayResponse): NotSh
   return { status: t("reports.status.not_set"), text: t("reports.weather_delay.no_station") };
 }
 
-/** The slow segments can't be shown when the agency's arrivals aren't
- *  trusted; an unavailable answer naming no reason reads as never checked. */
-export function slowZonesNotShown(
+/** The running time per segment (the slow segments, a route's timetable
+ *  fit) can't be shown when the agency's arrivals aren't trusted; an
+ *  unavailable answer naming no reason reads as never checked. */
+export function segmentRuntimeNotShown(
   t: TFunction,
   data: { available: boolean; unavailable_reason: CoverageGapReason | null; last_checked: string | null },
   tier: TierState,

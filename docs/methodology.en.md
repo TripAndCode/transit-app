@@ -221,6 +221,8 @@ Each day is judged by the timetable in force that day, not by the one loaded now
 
 When a period spans a timetable revision, only the days of the timetable in force on its last day are read, and that timetable is named. The values are feed-based estimates ([Value basis and validation status](#value-basis-and-validation-status)); no timetable recommendation is made from them while they rest on predictions.
 
+A route's page shows these in its "Timetable fit" tab, one time band at a time, with the segments in the route's order rather than ranked.
+
 **Slow segments** (**Why**, "Slow segments"): the running time per segment above, taken per stop pair of the agency over every route through it. It is read per time band (of the scheduled departure from the first stop) and per day type (weekdays, or weekends and holidays, by the calendar).
 
 - The period is the newest 8 complete weeks (Monday to Sunday). A week is complete once the Monday after it has closed too: a Sunday service day's runs after midnight arrive with Monday's. A week not yet over is not read.

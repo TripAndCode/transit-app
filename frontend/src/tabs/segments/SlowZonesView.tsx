@@ -8,7 +8,7 @@ import { useAgencyId } from "../../api/useAgencyId";
 import { useCapabilityTier } from "../../api/useCapabilityTier";
 import { useIsAdmin } from "../../api/useIsAdmin";
 import { CsvLink } from "../../components/analysis/CsvLink";
-import { slowZonesNotShown } from "../../components/analysis/notShown";
+import { segmentRuntimeNotShown } from "../../components/analysis/notShown";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { InlineSparkline } from "../../components/InlineSparkline";
@@ -113,7 +113,7 @@ export function SlowZonesView() {
   const segments = data?.segments ?? [];
   const zones = slowZoneSegments(data);
   const selected = segments.find((s) => segmentKey(s) === selectedKey);
-  const gap = data ? slowZonesNotShown(t, data, tier, isAdmin) : null;
+  const gap = data ? segmentRuntimeNotShown(t, data, tier, isAdmin) : null;
 
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);

@@ -2960,5 +2960,29 @@
       "no_high_frequency_routes": "no high-frequency timetable"
     },
     "missing_figure": "{{metric}} ({{reason}})"
+  },
+  "timetable_fit": {
+    "estimate_note": "These are estimates from the delays the operator's feed predicted, not observed passages. Until the predictions are validated, no timetable change is recommended from them.",
+    "summary": "Under the timetable in force on {{date}} ({{version}}); days read: {{days}}.",
+    "summary_unversioned": "Under the timetable in force on {{date}}; days read: {{days}}.",
+    "hour_not_applied": "The hour filter does not apply here: segments are read by time band.",
+    "none": "No segment of this route was observed in this period.",
+    "band_label": "Departure time band",
+    "band_only": "Departure time band: {{band}}",
+    "table_label": "Running time per segment, {{band}}",
+    "col": {
+      "segment": "Segment",
+      "strip": "Observed vs timetable",
+      "scheduled": "Timetable (s)",
+      "p50": "Median (s)",
+      "p85": "85th percentile (s)",
+      "padding": "Padding (s)",
+      "held": "Held for schedule",
+      "runs": "Runs"
+    },
+    "strip_legend": "Bar: median to 85th percentile running time. Tick: the timetable's running time.",
+    "rule": "Padding is the timetable's running time minus the median: positive is slack, negative too tight. Held for schedule is the share of trips reaching the segment's first stop on time or early that stayed more than 60 s beyond the scheduled dwell.",
+    "untimed": "Segments without a scheduled departure time, not shown: {{n}}",
+    "terminus": "At the last stop, {{rate}} of {{arrivals}} arrivals were 60 s or more ahead of the timetable."
   }
 }

@@ -10,6 +10,7 @@ import * as hooks from "../api/hooks";
 import * as useRouteNamesModule from "../api/useRouteNames";
 import * as snapshots from "../api/snapshots";
 import * as adminHook from "../api/useIsAdmin";
+import * as timetableFitApi from "../components/analysis/timetableFitApi";
 import { ScopeRouteContext } from "../api/scope";
 import { RouteAnalysisTab } from "./RouteAnalysisTab";
 import { readAnalyses } from "../components/analysis/savedAnalyses";
@@ -383,7 +384,18 @@ describe("RouteAnalysisTab sub-tab state", () => {
 
     // Wraps rather than dead-ending at the edge, per the tabs pattern.
     fireEvent.keyDown(tab("Along the route"), { key: "ArrowLeft" });
-    expect(tab("Stop table")).toHaveFocus();
+    expect(tab("Timetable fit")).toHaveFocus();
+  });
+
+  it("restores the timetable fit sub-tab from the URL, for the page's route", () => {
+    const fit = vi.spyOn(timetableFitApi, "useTimetableFit").mockReturnValue({
+      data: undefined,
+      error: null,
+      refetch: vi.fn(),
+    } as never);
+    renderWithSubTab("&sub_tab=timetableFit");
+    expect(tab("Timetable fit")).toHaveAttribute("aria-selected", "true");
+    expect(fit).toHaveBeenCalledWith(1, expect.objectContaining({ routes: ["R1"] }), "R1");
   });
 });
 
