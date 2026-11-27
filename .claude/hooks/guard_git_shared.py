@@ -24,16 +24,21 @@ is refused, as the dev-store guard does.
 Decisions are made on shlex-tokenized statements, so a `git` reached through `-C`, a
 global option, a wrapper (`time`, `env`), `&&`/`;`/`|` or a newline, a backtick
 substitution, a shell `-c` script or `eval` is read the same way, and a statement
-continued over a backslash-newline is read whole, while the words inside a commit message, a grep
-pattern or an echo are prose and pass. A command shlex cannot tokenize (an unbalanced
+continued over a backslash-newline is read whole, while the words inside a commit
+message, a grep pattern, an echo or a `#` comment are prose and pass. A comment
+opens only at a `#` that starts a word and ends at its newline, a backslash before
+it notwithstanding, as in the shell. A command shlex cannot tokenize (an unbalanced
 quote, usually an apostrophe) is read line by line for the same shapes instead, each
-line cut at its first separator or `#`.
+push's arguments cut at the next separator or `#`.
 
 Known gaps, still allowed: a destination that is computed (`git push origin
 "$BRANCH"`) or written as `heads/main` rather than `main` or `refs/heads/main`, a
 script runner outside sh/bash/zsh/dash/ksh `-c` and `eval`, a `cd` whose target is
 computed, bare or `-` (home and the previous directory), or inside a subshell, and
-a git alias. A heredoc body line is read as a statement
+a git alias, and a command substitution inside double quotes
+(`echo "$(git push origin main)"`), which is left unread because a commit message
+built with `"$(cat <<'EOF' ...)"` names forbidden commands as prose. A heredoc body
+line is read as a statement
 like any other, so prose there can block instead; put such text in a file. A crash
 inside this module blocks rather than allows, since an unchecked command is the
 failure this hook exists to prevent.
@@ -103,17 +108,20 @@ _STATEMENT_END = set(";|&()`\n")
 # not itself the subcommand), then the subcommand.
 _RAW_GIT = r"\bgit\b(?:\s+-\S+(?:\s+(?!push\b|stash\b)[^-\s]\S*)?)*"
 RAW_STASH = re.compile(_RAW_GIT + r"\s+stash\s+(?:-\S+\s+)*(pop|drop|clear)\b")
-RAW_PUSH = re.compile(_RAW_GIT + r"\s+push\b(.*)")
-# Where a push's own arguments end on an unlexed line: the next statement or a comment.
-RAW_ARGUMENTS_END = re.compile(r"\s*(?:;|&&|\|\||\||`|#).*$")
+# A push's own arguments on an unlexed line end at the next statement or a comment.
+RAW_PUSH = re.compile(_RAW_GIT + r"\s+push\b(.*?)(?=\s*(?:;|&&|\|\||\||`|#)|$)")
+# Characters after which a `#` starts a word, and so a comment.
+_WORD_BOUNDARY = " \t\n;&|()<>`"
 
 
-def join_continued_lines(text: str) -> str:
-    """Drop each backslash-newline the shell reads as a line continuation, which
-    continues a statement rather than ending one: outside quotes and inside double
-    quotes, not inside single quotes, where a backslash is literal."""
+def logical_text(text: str) -> str:
+    """The text as the shell reads its statements: each backslash-newline line
+    continuation dropped (outside quotes and inside double quotes; a backslash is
+    literal inside single quotes) and each `#` comment removed up to, not including,
+    its newline."""
     out: list[str] = []
     quote: str | None = None
+    word_start = True
     i = 0
     while i < len(text):
         ch = text[i]
@@ -124,7 +132,12 @@ def join_continued_lines(text: str) -> str:
         elif ch == "\\" and i + 1 < len(text):
             if text[i + 1] != "\n":
                 out.append(text[i : i + 2])
+                word_start = False
             i += 2
+            continue
+        elif ch == "#" and quote is None and word_start:
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
             continue
         else:
             out.append(ch)
@@ -132,16 +145,18 @@ def join_continued_lines(text: str) -> str:
                 quote = ch
             elif ch == quote:
                 quote = None
+            word_start = quote is None and ch in _WORD_BOUNDARY
         i += 1
     return "".join(out)
 
 
 def shell_tokens(text: str) -> list[str]:
-    """Shell words and operator runs. A newline ends a statement like `;` (shlex
-    treats it as whitespace), so it is an operator here; one inside quotes stays
-    content. `#` starts a comment, as in the shell, so a remark naming a forbidden
-    command does not block."""
+    """Shell words and operator runs of `logical_text` output. A newline ends a
+    statement like `;` (shlex treats it as whitespace), so it is an operator here;
+    one inside quotes stays content. Comments are already gone, and shlex's own
+    commenter would also cut a word at a `#` inside it, so it is off."""
     lexer = shlex.shlex(text, posix=True, punctuation_chars=OPERATOR_CHARS)
+    lexer.commenters = ""
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     return list(lexer)
@@ -347,9 +362,8 @@ def raw_verdict(command: str, cwd: str) -> str | None:
         stash = RAW_STASH.search(line)
         if stash:
             return stash_verdict([stash.group(1)])
-        push = RAW_PUSH.search(line)
-        if push:
-            reason = push_verdict(RAW_ARGUMENTS_END.sub("", push.group(1)).split(), cwd)
+        for push in RAW_PUSH.finditer(line):
+            reason = push_verdict(push.group(1).split(), cwd)
             if reason:
                 return reason
     return None
@@ -358,7 +372,7 @@ def raw_verdict(command: str, cwd: str) -> str | None:
 def verdict(command: str, cwd: str) -> str | None:
     """The reason to block `command`, or None. `cwd` is where it runs; a `cd` in an
     earlier statement moves it for the statements after."""
-    command = join_continued_lines(command)
+    command = logical_text(command)
     try:
         tokens = shell_tokens(command)
     except ValueError:

@@ -12,8 +12,6 @@ same source. This section only maps them onto Claude Code tooling.
   analyze, an aggregate, a report metric, or date and service-day handling. Load
   `postgres-perf` when optimizing queries or aggregates, and `maplibre-map` when
   editing the Map tab, basemaps, or map layers.
-- Read `docs/features/audience.md` before proposing, building or reviewing anything a
-  user sees (`AGENTS.md`, Product direction).
 - The review pass is `/review-branch`.
   - Normal changes get one pass with two merged reviewers. Extra review is only for
     enforcement, high-risk paths, or material fixes.
@@ -31,8 +29,7 @@ same source. This section only maps them onto Claude Code tooling.
   - `.claude/hooks/guard-dev-db.sh`, a wrapper around `guard_dev_db.py`, enforces
     the dev-database rule.
   - `.claude/hooks/guard-git-shared.sh`, a wrapper around `guard_git_shared.py`,
-    enforces the shared-clone git rule: no push that lands on `main`, no force-push
-    spelled `--force`, `-f` or `+refspec`, no `stash pop`/`drop`/`clear`.
+    enforces the shared-clone git rule.
   - `.claude/hooks/guard-push-quality.sh` enforces the pre-push verification rule.
 
 ## Compact instructions

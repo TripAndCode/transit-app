@@ -79,6 +79,16 @@ BLOCKED = [
     pytest.param("`git stash pop`", id="stash-pop-in-backticks"),
     # Unlexable text (an apostrophe) is read line by line for the same shapes.
     pytest.param("echo don't; git stash pop", id="stash-pop-after-unbalanced-quote"),
+    pytest.param("echo don't; git push origin feature && git push origin main", id="second-push-unlexable"),
+    # A comment ends at its newline, a backslash before it notwithstanding.
+    pytest.param("echo a # note \\\ngit push origin main", id="push-main-after-comment-backslash"),
+    pytest.param("ls #\\\ngit stash pop", id="stash-pop-after-comment-backslash"),
+    # A `#` inside a word is part of it, not a comment.
+    pytest.param("git push origin topic#2 main", id="push-main-after-hash-in-word"),
+    pytest.param("git push origin a\\ #b main", id="push-main-after-escaped-space-hash"),
+    pytest.param('echo "a #b" ${#x} $# && git stash pop', id="stash-pop-after-hash-expansions"),
+    # A comment holding an apostrophe leaves the rest lexable.
+    pytest.param("echo hi # don't\ngit push origin main", id="push-main-after-comment-apostrophe"),
     pytest.param("echo don't && git push origin main", id="push-main-after-unbalanced-quote"),
 ]
 
@@ -129,6 +139,8 @@ ALLOWED = [
     pytest.param("echo 'git push \\\n origin main'", id="single-quoted-continuation-prose"),
     pytest.param('git commit -m "never \\`git push origin main\\`"', id="escaped-backticks-in-message"),
     pytest.param("git push \\\n  origin feature", id="push-branch-line-continuation"),
+    pytest.param("echo a # git push origin main \\\necho b", id="comment-backslash-prose"),
+    pytest.param("git push origin feature # not main", id="trailing-comment-prose"),
     pytest.param("echo don't && git status", id="unbalanced-quote-no-git-write"),
     pytest.param("git push origin feature && echo it's main", id="unbalanced-quote-prose-after-push"),
     pytest.param("echo don't; git push origin feature # main", id="unbalanced-quote-comment-after-push"),

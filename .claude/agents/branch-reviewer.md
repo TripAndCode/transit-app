@@ -21,8 +21,8 @@ rule under `## Rules`, which applies to a brief and a dimension alike.
   degradation when one optional sub-check fails.
 - **logic** — whether the implementation actually satisfies the stated objective, and,
   when the objective changes what a user sees, whether it serves the audience job the
-  caller names from `docs/features/audience.md`. An objective that serves none of the
-  jobs there is a Major finding, not a style note.
+  caller names from `docs/features/audience.md`. An objective that does not serve it
+  is a Major finding, not a style note.
 - **consistency** — renamed or changed contracts reach every consumer: API/Pydantic
   fields and frontend types, aggregate columns and queries, both locale files, and
   exact-string tests.

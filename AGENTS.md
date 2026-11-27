@@ -65,13 +65,12 @@ tier routing, the high-risk overlay and the fix cap.
   地域公共交通協議会 material), the one job the app does for them, what each screen
   answers, and who is deliberately not served. Read it before proposing, building or
   reviewing anything a user sees. A user-facing change names the audience job it
-  serves on the PR template's **Serves:** line; a change that serves none of them is
-  a question for the user before it is a branch.
+  serves on the PR template's **Serves:** line; a change that does not serve it is a
+  question for the user before it is a branch.
 - A figure shown or exported carries its basis: definition, period and how much data
   it rests on, through `DefinitionMeta` and the scope sentence, never a bare value.
   What an observation is and the invariants every figure rests on are in
-  `gtfs-rt-semantics`; read it before changing ingest, analyze, an aggregate, a
-  report metric or date handling.
+  `gtfs-rt-semantics`.
 
 ## Architecture pointers
 
